@@ -19,6 +19,16 @@ import { ProviderModelBackoffTracker } from './provider-quota-daemon.model-backo
 
 const ERROR_PRIORITY_WINDOW_MS = readPositiveNumberFromEnv('ROUTECODEX_QUOTA_ERROR_PRIORITY_WINDOW_MS', 10 * 60_000);
 
+function logQuotaDaemonNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  const reason = error instanceof Error ? (error.stack || `${error.name}: ${error.message}`) : String(error);
+  const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[provider-quota-daemon] ${stage} failed (non-blocking): ${reason}${detailSuffix}`);
+}
+
 export class ProviderQuotaDaemonModule implements ManagerModule {
   readonly id = 'provider-quota';
 
@@ -47,7 +57,8 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
 
     try {
       await this.loadSnapshotIntoMemory();
-    } catch {
+    } catch (error) {
+      logQuotaDaemonNonBlocking('init.load_snapshot', error);
       this.quotaStates = new Map();
     }
   }
@@ -73,8 +84,8 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     if (persisted) {
       try {
         await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date(nowMs));
-      } catch {
-        // ignore persistence failure
+      } catch (error) {
+        logQuotaDaemonNonBlocking('reset.persist_snapshot', error, { nowMs });
       }
     }
     return { resetAt: nowMs, persisted };
@@ -92,8 +103,8 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     this.quotaStates.set(key, next);
     try {
       await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date(nowMs));
-    } catch {
-      // ignore persistence failure
+    } catch (error) {
+      logQuotaDaemonNonBlocking('reset_provider.persist_snapshot', error, { providerKey: key, nowMs });
     }
     return { providerKey: key, state: next };
   }
@@ -123,8 +134,8 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     this.quotaStates.set(key, next);
     try {
       await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date(nowMs));
-    } catch {
-      // ignore persistence failure
+    } catch (error) {
+      logQuotaDaemonNonBlocking('recover_provider.persist_snapshot', error, { providerKey: key, nowMs });
     }
     return { providerKey: key, state: next };
   }
@@ -168,8 +179,12 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     this.quotaStates.set(key, next);
     try {
       await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date(nowMs));
-    } catch {
-      // ignore persistence failure
+    } catch (error) {
+      logQuotaDaemonNonBlocking('disable_provider.persist_snapshot', error, {
+        providerKey: key,
+        mode,
+        nowMs
+      });
     }
     return { providerKey: key, state: next };
   }
@@ -189,14 +204,17 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       | undefined = null;
     try {
       center = await getProviderErrorCenter();
-    } catch {
+    } catch (error) {
+      logQuotaDaemonNonBlocking('start.get_provider_error_center', error);
       center = null;
     }
 
     if (center && typeof center.subscribe === 'function') {
       this.unsubscribe = center.subscribe((event: ProviderErrorEvent) => {
-        void this.handleProviderErrorEvent(event).catch(() => {
-          // swallow handler errors; quota updates are best-effort
+        void this.handleProviderErrorEvent(event).catch((error) => {
+          logQuotaDaemonNonBlocking('start.handle_provider_error_event', error, {
+            providerKey: event?.runtime?.providerKey ?? null
+          });
         });
       });
     }
@@ -204,14 +222,14 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     const intervalMs = readPositiveNumberFromEnv('ROUTECODEX_QUOTA_DAEMON_INTERVAL_MS', 60_000);
     if (intervalMs > 0) {
       this.maintenanceTimer = setInterval(() => {
-        void this.runMaintenanceTick().catch(() => {
-          // ignore maintenance failures
+        void this.runMaintenanceTick().catch((error) => {
+          logQuotaDaemonNonBlocking('maintenance.interval_tick', error);
         });
       }, intervalMs);
     }
 
-    void this.runMaintenanceTick().catch(() => {
-      // ignore immediate tick failures
+    void this.runMaintenanceTick().catch((error) => {
+      logQuotaDaemonNonBlocking('maintenance.initial_tick', error);
     });
   }
 
@@ -219,8 +237,8 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     if (this.unsubscribe) {
       try {
         this.unsubscribe();
-      } catch {
-        // ignore unsubscribe failures
+      } catch (error) {
+        logQuotaDaemonNonBlocking('stop.unsubscribe', error);
       }
       this.unsubscribe = null;
     }
@@ -237,8 +255,8 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     }
     try {
       await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date());
-    } catch {
-      // best-effort persistence
+    } catch (error) {
+      logQuotaDaemonNonBlocking('stop.persist_snapshot', error);
     }
   }
 
@@ -384,8 +402,8 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     this.quotaStates = updated;
     try {
       await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date(nowMs));
-    } catch {
-      // ignore persistence errors
+    } catch (error) {
+      logQuotaDaemonNonBlocking('maintenance.persist_snapshot', error, { nowMs });
     }
   }
 

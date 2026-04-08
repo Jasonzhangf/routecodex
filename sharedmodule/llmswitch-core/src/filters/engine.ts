@@ -196,6 +196,8 @@ export class FilterEngine {
         if (!cur[p] || typeof cur[p] !== 'object') cur[p] = {};
         cur = cur[p];
       }
-    } catch { /* ignore */ }
+    } catch (error) {
+      logFilterEngineNonBlockingError('set_by_path', error, { path });
+    }
   }
 }

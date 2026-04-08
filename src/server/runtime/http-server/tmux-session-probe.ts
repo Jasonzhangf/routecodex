@@ -2,7 +2,69 @@ import { spawnSync } from 'node:child_process';
 import { logProcessLifecycle } from '../../../utils/process-lifecycle-logger.js';
 
 let tmuxAvailableCache: boolean | null = null;
+const DEFAULT_TMUX_PROBE_CACHE_TTL_MS = 1200;
+const DEFAULT_TMUX_PROBE_CACHE_MAX_ENTRIES = 256;
+const TMUX_PROBE_ERROR_LOG_THROTTLE_MS = 10_000;
 const MANAGED_TMUX_SESSION_PREFIXES = ['rcc-', 'rcc_'] as const;
+type TmuxAliveCacheEntry = { alive: boolean; expiresAt: number };
+type TmuxWorkdirCacheEntry = { workdir?: string; expiresAt: number };
+type TmuxIdleCacheEntry = { idle: boolean; expiresAt: number };
+const tmuxAliveCache = new Map<string, TmuxAliveCacheEntry>();
+const tmuxWorkdirCache = new Map<string, TmuxWorkdirCacheEntry>();
+const tmuxIdleCache = new Map<string, TmuxIdleCacheEntry>();
+const tmuxProbeErrorLogAt = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error ?? 'unknown');
+}
+
+function logTmuxProbeNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const key = `${stage}:${typeof details?.target === 'string' ? details.target : ''}`;
+    const now = Date.now();
+    const lastAt = tmuxProbeErrorLogAt.get(key) ?? 0;
+    if (now - lastAt < TMUX_PROBE_ERROR_LOG_THROTTLE_MS) {
+      return;
+    }
+    tmuxProbeErrorLogAt.set(key, now);
+    const detailSuffix = details && Object.keys(details).length
+      ? ` details=${JSON.stringify(details)}`
+      : '';
+    console.warn(`[tmux-session-probe] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking warnings.
+  }
+}
+
+function resolveTmuxProbeCacheMaxEntries(): number {
+  const raw = String(
+    process.env.ROUTECODEX_TMUX_PROBE_CACHE_MAX_ENTRIES
+      ?? process.env.RCC_TMUX_PROBE_CACHE_MAX_ENTRIES
+      ?? ''
+  ).trim();
+  if (!raw) {
+    return DEFAULT_TMUX_PROBE_CACHE_MAX_ENTRIES;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return DEFAULT_TMUX_PROBE_CACHE_MAX_ENTRIES;
+  }
+  return Math.floor(parsed);
+}
+
+function enforceCacheBudget<T>(map: Map<string, T>): void {
+  const maxEntries = resolveTmuxProbeCacheMaxEntries();
+  while (map.size > maxEntries) {
+    const oldestKey = map.keys().next().value as string | undefined;
+    if (!oldestKey) {
+      break;
+    }
+    map.delete(oldestKey);
+  }
+}
 
 function normalizeTmuxSessionTarget(tmuxSessionId: string): string {
   const target = String(tmuxSessionId || '').trim();
@@ -57,10 +119,115 @@ function isTmuxAvailable(): boolean {
   try {
     const result = spawnSync('tmux', ['-V'], { encoding: 'utf8' });
     tmuxAvailableCache = result.status === 0;
-  } catch {
+  } catch (error) {
+    logTmuxProbeNonBlockingError('tmux_available_check', error);
     tmuxAvailableCache = false;
   }
   return tmuxAvailableCache;
+}
+
+function resolveTmuxProbeCacheTtlMs(): number {
+  const raw = String(
+    process.env.ROUTECODEX_TMUX_PROBE_CACHE_TTL_MS
+      ?? process.env.RCC_TMUX_PROBE_CACHE_TTL_MS
+      ?? ''
+  ).trim();
+  if (!raw) {
+    return DEFAULT_TMUX_PROBE_CACHE_TTL_MS;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_TMUX_PROBE_CACHE_TTL_MS;
+  }
+  return Math.floor(parsed);
+}
+
+function readAliveCache(target: string, at: number): boolean | undefined {
+  const cached = tmuxAliveCache.get(target);
+  if (!cached) {
+    return undefined;
+  }
+  if (cached.expiresAt <= at) {
+    tmuxAliveCache.delete(target);
+    return undefined;
+  }
+  return cached.alive;
+}
+
+function writeAliveCache(target: string, alive: boolean, at: number): void {
+  const ttlMs = resolveTmuxProbeCacheTtlMs();
+  if (ttlMs <= 0) {
+    tmuxAliveCache.delete(target);
+    return;
+  }
+  tmuxAliveCache.set(target, {
+    alive,
+    expiresAt: at + ttlMs
+  });
+  enforceCacheBudget(tmuxAliveCache);
+  if (!alive) {
+    tmuxWorkdirCache.delete(target);
+    tmuxIdleCache.delete(target);
+  }
+}
+
+function readWorkdirCache(target: string, at: number): string | undefined | null {
+  const cached = tmuxWorkdirCache.get(target);
+  if (!cached) {
+    return null;
+  }
+  if (cached.expiresAt <= at) {
+    tmuxWorkdirCache.delete(target);
+    return null;
+  }
+  return cached.workdir;
+}
+
+function writeWorkdirCache(target: string, workdir: string | undefined, at: number): void {
+  const ttlMs = resolveTmuxProbeCacheTtlMs();
+  if (ttlMs <= 0) {
+    tmuxWorkdirCache.delete(target);
+    return;
+  }
+  tmuxWorkdirCache.set(target, {
+    workdir,
+    expiresAt: at + ttlMs
+  });
+  enforceCacheBudget(tmuxWorkdirCache);
+}
+
+function readIdleCache(target: string, at: number): boolean | undefined {
+  const cached = tmuxIdleCache.get(target);
+  if (!cached) {
+    return undefined;
+  }
+  if (cached.expiresAt <= at) {
+    tmuxIdleCache.delete(target);
+    return undefined;
+  }
+  return cached.idle;
+}
+
+function writeIdleCache(target: string, idle: boolean, at: number): void {
+  const ttlMs = resolveTmuxProbeCacheTtlMs();
+  if (ttlMs <= 0) {
+    tmuxIdleCache.delete(target);
+    return;
+  }
+  tmuxIdleCache.set(target, {
+    idle,
+    expiresAt: at + ttlMs
+  });
+  enforceCacheBudget(tmuxIdleCache);
+}
+
+function clearSessionProbeCache(target: string): void {
+  if (!target) {
+    return;
+  }
+  tmuxAliveCache.delete(target);
+  tmuxWorkdirCache.delete(target);
+  tmuxIdleCache.delete(target);
 }
 
 export function isManagedClockTmuxSession(tmuxSessionId: string): boolean {
@@ -68,7 +235,10 @@ export function isManagedClockTmuxSession(tmuxSessionId: string): boolean {
   return MANAGED_TMUX_SESSION_PREFIXES.some((prefix) => sessionName.startsWith(prefix));
 }
 
-export function isTmuxSessionAlive(tmuxSessionId: string): boolean {
+export function isTmuxSessionAlive(
+  tmuxSessionId: string,
+  options?: { forceRefresh?: boolean }
+): boolean {
   const target = normalizeTmuxSessionTarget(tmuxSessionId);
   if (!target) {
     return false;
@@ -76,10 +246,23 @@ export function isTmuxSessionAlive(tmuxSessionId: string): boolean {
   if (!isTmuxAvailable()) {
     return true;
   }
+  const now = Date.now();
+  if (!options?.forceRefresh) {
+    const cached = readAliveCache(target, now);
+    if (typeof cached === 'boolean') {
+      return cached;
+    }
+  }
   try {
     const result = spawnSync('tmux', ['has-session', '-t', target], { encoding: 'utf8' });
-    return result.status === 0;
-  } catch {
+    const alive = result.status === 0;
+    writeAliveCache(target, alive, now);
+    if (!alive) {
+      writeWorkdirCache(target, undefined, now);
+    }
+    return alive;
+  } catch (error) {
+    logTmuxProbeNonBlockingError('has_session', error, { target });
     return true;
   }
 }
@@ -92,17 +275,26 @@ export function resolveTmuxSessionWorkingDirectory(tmuxSessionId: string): strin
   if (!isTmuxAvailable()) {
     return undefined;
   }
+  const now = Date.now();
+  const cached = readWorkdirCache(target, now);
+  if (cached !== null) {
+    return cached;
+  }
   try {
     const result = spawnSync('tmux', ['display-message', '-p', '-t', target, '#{pane_current_path}'], { encoding: 'utf8' });
     if (result.status !== 0) {
+      writeWorkdirCache(target, undefined, now);
       return undefined;
     }
     const candidate = String(result.stdout || '').trim();
     if (!candidate || !candidate.startsWith('/')) {
+      writeWorkdirCache(target, undefined, now);
       return undefined;
     }
+    writeWorkdirCache(target, candidate, now);
     return candidate;
-  } catch {
+  } catch (error) {
+    logTmuxProbeNonBlockingError('resolve_workdir', error, { target });
     return undefined;
   }
 }
@@ -125,6 +317,7 @@ export function killManagedTmuxSession(tmuxSessionId: string): boolean {
   try {
     const hasSession = spawnSync('tmux', ['has-session', '-t', target], { encoding: 'utf8' });
     if (hasSession.status !== 0) {
+      writeAliveCache(target, false, Date.now());
       logTmuxKillEvent({ tmuxSessionId: target, result: 'success', reason: 'session_not_found' });
       return true;
     }
@@ -132,6 +325,7 @@ export function killManagedTmuxSession(tmuxSessionId: string): boolean {
     logTmuxKillEvent({ tmuxSessionId: target, result: 'attempt', reason: 'kill_session' });
     const result = spawnSync('tmux', ['kill-session', '-t', target], { encoding: 'utf8' });
     if (result.status === 0) {
+      writeAliveCache(target, false, Date.now());
       logTmuxKillEvent({ tmuxSessionId: target, result: 'success', reason: 'session_killed' });
       return true;
     }
@@ -143,7 +337,8 @@ export function killManagedTmuxSession(tmuxSessionId: string): boolean {
       reason: errorText ? `kill_failed:${errorText.slice(0, 120)}` : 'kill_failed'
     });
     return false;
-  } catch {
+  } catch (error) {
+    logTmuxProbeNonBlockingError('kill_managed_session', error, { target });
     logTmuxKillEvent({ tmuxSessionId: target, result: 'failed', reason: 'kill_exception' });
     return false;
   }
@@ -213,6 +408,11 @@ export function isTmuxSessionIdleForInject(tmuxSessionId: string): boolean | und
   if (!isTmuxAvailable()) {
     return undefined;
   }
+  const now = Date.now();
+  const cachedIdle = readIdleCache(resolvedTarget.sessionName, now);
+  if (typeof cachedIdle === 'boolean') {
+    return cachedIdle;
+  }
   if (!isTmuxSessionAlive(resolvedTarget.sessionName)) {
     return undefined;
   }
@@ -236,20 +436,26 @@ export function isTmuxSessionIdleForInject(tmuxSessionId: string): boolean | und
     const paneCommand = String(paneCommandRaw || '').trim();
     const paneInMode = String(paneInModeRaw || '').trim() === '1';
     if (paneInMode) {
+      writeIdleCache(resolvedTarget.sessionName, false, now);
       return false;
     }
     if (isReusableIdlePaneCommand(paneCommand)) {
+      writeIdleCache(resolvedTarget.sessionName, true, now);
       return true;
     }
     if (!isAgentPaneCommand(paneCommand)) {
+      writeIdleCache(resolvedTarget.sessionName, false, now);
       return false;
     }
     const capture = spawnSync('tmux', ['capture-pane', '-p', '-t', resolvedTarget.target, '-S', '-80'], { encoding: 'utf8' });
     if (capture.status !== 0) {
       return undefined;
     }
-    return captureLooksIdleForAgent(paneCommand, String(capture.stdout || ''));
-  } catch {
+    const idle = captureLooksIdleForAgent(paneCommand, String(capture.stdout || ''));
+    writeIdleCache(resolvedTarget.sessionName, idle, now);
+    return idle;
+  } catch (error) {
+    logTmuxProbeNonBlockingError('probe_idle', error, { target: resolvedTarget.target });
     return undefined;
   }
 }
@@ -313,9 +519,11 @@ export async function injectTmuxSessionText(input: {
   if (!isTmuxAvailable()) {
     return { ok: false, reason: 'tmux_unavailable' };
   }
-  if (!isTmuxSessionAlive(resolvedTarget.sessionName)) {
+  if (!isTmuxSessionAlive(resolvedTarget.sessionName, { forceRefresh: true })) {
+    writeAliveCache(resolvedTarget.sessionName, false, Date.now());
     return { ok: false, reason: 'tmux_session_not_found' };
   }
+  clearSessionProbeCache(resolvedTarget.sessionName);
   try {
     // Ensure target pane is in normal mode so Enter can be delivered reliably.
     spawnSync('tmux', ['send-keys', '-t', resolvedTarget.target, '-X', 'cancel'], { encoding: 'utf8' });
@@ -332,5 +540,7 @@ export async function injectTmuxSessionText(input: {
   if (!submit.ok) {
     return submit;
   }
+  writeAliveCache(resolvedTarget.sessionName, true, Date.now());
+  tmuxIdleCache.delete(resolvedTarget.sessionName);
   return { ok: true };
 }

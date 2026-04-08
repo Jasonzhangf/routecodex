@@ -137,6 +137,11 @@
         "supportsStreaming": true,
         "maxContextTokens": 148000
       }
+    },
+    "concurrency": {
+      "maxInFlight": 2,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
     }
   }
 }

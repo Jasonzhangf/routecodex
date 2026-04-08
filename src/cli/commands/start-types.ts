@@ -30,6 +30,7 @@ export type StartCommandOptions = {
   claude?: boolean;
   ua?: string;
   snap?: boolean;
+  snapStages?: string;
   snapOff?: boolean;
   verboseErrors?: boolean;
   quietErrors?: boolean;

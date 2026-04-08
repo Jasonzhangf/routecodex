@@ -16,6 +16,30 @@ export type AntigravityLeasePersistenceState = {
   flushTimer: ReturnType<typeof setTimeout> | null;
 };
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logAliasLeaseNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[alias-lease] ${stage} failed (non-blocking): ${formatUnknownError(error)}${suffix}`);
+  } catch {
+    void 0;
+  }
+}
+
 export function resolveAntigravityAliasReuseCooldownMs(config: VirtualRouterConfig): number {
   const cfg = (config.loadBalancing as any)?.aliasSelection?.sessionLeaseCooldownMs;
   if (typeof cfg === 'number' && Number.isFinite(cfg)) {
@@ -32,7 +56,8 @@ function resolveAntigravityLeaseScope(providerRegistry: ProviderRegistry, provid
       return 'gemini';
     }
     return null;
-  } catch {
+  } catch (resolveScopeError) {
+    logAliasLeaseNonBlockingError('resolveAntigravityLeaseScope', resolveScopeError, { providerKey });
     return null;
   }
 }
@@ -68,7 +93,8 @@ function resolveAntigravityAliasLeasePersistWritePath(): string | null {
       return null;
     }
     return resolveRccPath('state', 'antigravity-alias-leases.json');
-  } catch {
+  } catch (resolveWritePathError) {
+    logAliasLeaseNonBlockingError('resolveAntigravityAliasLeasePersistWritePath', resolveWritePathError);
     return null;
   }
 }
@@ -81,7 +107,8 @@ function resolveAntigravityAliasLeasePersistReadPath(): string | null {
     }
     const resolved = resolveRccPathForRead('state', 'antigravity-alias-leases.json');
     return fs.existsSync(resolved) ? resolved : writePath;
-  } catch {
+  } catch (resolveReadPathError) {
+    logAliasLeaseNonBlockingError('resolveAntigravityAliasLeasePersistReadPath', resolveReadPathError);
     return null;
   }
 }
@@ -100,7 +127,8 @@ export function hydrateAntigravityAliasLeaseStoreIfNeeded(options: {
   let stat: fs.Stats | null = null;
   try {
     stat = fs.statSync(filePath);
-  } catch {
+  } catch (statError) {
+    logAliasLeaseNonBlockingError('hydrateAntigravityAliasLeaseStoreIfNeeded.statSync', statError, { filePath });
     options.persistence.loadedOnce = true;
     options.persistence.loadedMtimeMs = null;
     return;
@@ -114,7 +142,8 @@ export function hydrateAntigravityAliasLeaseStoreIfNeeded(options: {
   let parsed: unknown;
   try {
     parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch {
+  } catch (readError) {
+    logAliasLeaseNonBlockingError('hydrateAntigravityAliasLeaseStoreIfNeeded.readParse', readError, { filePath });
     options.persistence.loadedOnce = true;
     options.persistence.loadedMtimeMs = mtimeMs;
     return;
@@ -175,8 +204,8 @@ function flushAntigravityAliasLeaseStoreSync(options: {
   }
   try {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  } catch {
-    // ignore
+  } catch (mkdirError) {
+    logAliasLeaseNonBlockingError('flushAntigravityAliasLeaseStoreSync.mkdirSync', mkdirError, { filePath });
   }
   const now = Date.now();
   const cooldownMs = options.aliasReuseCooldownMs;
@@ -197,11 +226,11 @@ function flushAntigravityAliasLeaseStoreSync(options: {
         typeof stat.mtimeMs === 'number' && Number.isFinite(stat.mtimeMs) ? stat.mtimeMs : stat.mtime.getTime();
       options.persistence.loadedOnce = true;
       options.persistence.loadedMtimeMs = mtimeMs;
-    } catch {
-      // ignore
+    } catch (statError) {
+      logAliasLeaseNonBlockingError('flushAntigravityAliasLeaseStoreSync.statSync', statError, { filePath });
     }
-  } catch {
-    // best-effort persistence: must not affect routing
+  } catch (flushError) {
+    logAliasLeaseNonBlockingError('flushAntigravityAliasLeaseStoreSync.writeRename', flushError, { filePath });
   }
 }
 
@@ -246,8 +275,8 @@ export function recordAntigravitySessionLease(options: {
         return;
       }
     }
-  } catch {
-    // ignore metadata parse errors
+  } catch (metadataError) {
+    logAliasLeaseNonBlockingError('recordAntigravitySessionLease.metadataOverrideParse', metadataError);
   }
   const sessionKey = options.sessionKey;
   if (!sessionKey) {
@@ -288,7 +317,9 @@ export function recordAntigravitySessionLease(options: {
       runtimeKey,
       prev: existing?.sessionKey ?? null
     });
-  } catch {
-    // ignore
+  } catch (debugLogError) {
+    logAliasLeaseNonBlockingError('recordAntigravitySessionLease.debugLog', debugLogError, {
+      runtimeKey
+    });
   }
 }

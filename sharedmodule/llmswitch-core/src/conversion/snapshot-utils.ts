@@ -24,6 +24,109 @@ interface SnapshotPayload {
   groupRequestId?: string;
 }
 
+const DEFAULT_SNAPSHOT_ALLOWED_STAGES = Object.freeze([
+  'client-request',
+  'http-request',
+  'provider-request',
+  'provider-response',
+  'provider-error',
+  'provider-request.retry',
+  'provider-response.retry'
+]);
+
+type SnapshotStagePolicy = {
+  allowAll: boolean;
+  exact: Set<string>;
+  prefixes: string[];
+};
+
+let cachedSnapshotStageSelector = '';
+let cachedSnapshotStagePolicy: SnapshotStagePolicy | null = null;
+
+function normalizeStageToken(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function splitStageTokens(raw: string): string[] {
+  return raw
+    .split(/[,\s]+/)
+    .map((token) => normalizeStageToken(token))
+    .filter((token) => token.length > 0);
+}
+
+function readSnapshotStageSelector(): string {
+  return String(
+    process.env.ROUTECODEX_SNAPSHOT_STAGES
+    ?? process.env.RCC_SNAPSHOT_STAGES
+    ?? ''
+  ).trim();
+}
+
+function compileSnapshotStagePolicy(selectorRaw: string): SnapshotStagePolicy {
+  const selector = selectorRaw.trim();
+  if (!selector) {
+    return {
+      allowAll: false,
+      exact: new Set(DEFAULT_SNAPSHOT_ALLOWED_STAGES),
+      prefixes: []
+    };
+  }
+  const tokens = splitStageTokens(selector);
+  if (!tokens.length) {
+    return {
+      allowAll: false,
+      exact: new Set(DEFAULT_SNAPSHOT_ALLOWED_STAGES),
+      prefixes: []
+    };
+  }
+  if (tokens.some((token) => token === '*' || token === 'all')) {
+    return {
+      allowAll: true,
+      exact: new Set(),
+      prefixes: []
+    };
+  }
+  const exact = new Set<string>();
+  const prefixes: string[] = [];
+  for (const token of tokens) {
+    if (token.endsWith('*') && token.length > 1) {
+      prefixes.push(token.slice(0, -1));
+      continue;
+    }
+    exact.add(token);
+  }
+  return {
+    allowAll: false,
+    exact,
+    prefixes
+  };
+}
+
+function resolveSnapshotStagePolicy(): SnapshotStagePolicy {
+  const selector = readSnapshotStageSelector();
+  if (cachedSnapshotStagePolicy && cachedSnapshotStageSelector === selector) {
+    return cachedSnapshotStagePolicy;
+  }
+  cachedSnapshotStageSelector = selector;
+  cachedSnapshotStagePolicy = compileSnapshotStagePolicy(selector);
+  return cachedSnapshotStagePolicy;
+}
+
+function shouldCaptureSnapshotStage(stage: string): boolean {
+  const normalized = normalizeStageToken(stage || '');
+  if (!normalized) {
+    return false;
+  }
+  const policy = resolveSnapshotStagePolicy();
+  if (policy.allowAll) {
+    return true;
+  }
+  if (policy.exact.has(normalized)) {
+    return true;
+  }
+  return policy.prefixes.some((prefix) => normalized.startsWith(prefix));
+}
+
 export function shouldRecordSnapshots(): boolean {
   return shouldRecordSnapshotsWithNative();
 }
@@ -43,6 +146,7 @@ export async function writeSnapshotViaHooks(options: SnapshotHookOptions): Promi
 
 export async function recordSnapshot(options: SnapshotPayload): Promise<void> {
   if (!shouldRecordSnapshots()) return;
+  if (!shouldCaptureSnapshotStage(options.stage)) return;
   const endpoint = options.endpoint || '/v1/chat/completions';
   const prepared = coerceSnapshotPayloadForWrite(options.stage, options.data);
   void writeSnapshotViaHooks({
@@ -285,6 +389,9 @@ export function createSnapshotWriter(opts: {
   }
   const endpoint = opts.endpoint || '/v1/chat/completions';
   return (stage: string, payload: unknown) => {
+    if (!shouldCaptureSnapshotStage(stage)) {
+      return;
+    }
     const prepared = coerceSnapshotPayloadForWrite(stage, payload);
     enqueueSnapshotTask(() => {
       void recordSnapshot({

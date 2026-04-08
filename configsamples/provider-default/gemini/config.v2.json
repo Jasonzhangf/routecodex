@@ -38,6 +38,11 @@
       "models/gemini-2.5-pro": {
         "supportsStreaming": true
       }
+    },
+    "concurrency": {
+      "maxInFlight": 2,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
     }
   }
 }

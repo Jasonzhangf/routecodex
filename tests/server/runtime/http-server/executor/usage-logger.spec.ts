@@ -3,7 +3,13 @@ import { jest } from '@jest/globals';
 describe('usage logger timing summary', () => {
   const originalEnv = { ...process.env };
 
-  afterEach(() => {
+  afterEach(async () => {
+    try {
+      const { __resetLogRollupForTest } = await import('../../../../../src/server/runtime/http-server/executor/log-rollup.js');
+      __resetLogRollupForTest();
+    } catch {
+      // ignore dynamic import failures during module reset
+    }
     process.env = { ...originalEnv };
     jest.resetModules();
     jest.restoreAllMocks();
@@ -26,12 +32,12 @@ describe('usage logger timing summary', () => {
     logUsageSummary('req_usage_timing', {
       providerKey: 'demo.key1',
       model: 'demo-model',
+      finishReason: 'stop',
       latencyMs: 120,
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
     });
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[usage] request req_usage_timing'));
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('t+120ms Δ120ms'));
   });
 
   it('prints breakdown in dev usage summary when summary mode is enabled and scoped timings exist', async () => {
@@ -55,6 +61,7 @@ describe('usage logger timing summary', () => {
     logUsageSummary('req_dev_breakdown', {
       providerKey: 'demo.key1',
       model: 'demo-model',
+      finishReason: 'stop',
       latencyMs: 1100,
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
     });
@@ -88,6 +95,7 @@ describe('usage logger timing summary', () => {
     logUsageSummary('req_release_no_timing', {
       providerKey: 'demo.key1',
       model: 'demo-model',
+      finishReason: 'stop',
       latencyMs: 720,
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       hubStageTop: [
@@ -124,6 +132,7 @@ describe('usage logger timing summary', () => {
     logUsageSummary('req_release_usage', {
       providerKey: 'demo.key1',
       model: 'demo-model',
+      finishReason: 'stop',
       latencyMs: 1025,
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
     });
@@ -166,6 +175,7 @@ describe('usage logger timing summary', () => {
     logUsageSummary('req_release_retry', {
       providerKey: 'demo.key1',
       model: 'demo-model',
+      finishReason: 'stop',
       latencyMs: 1000,
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
     });
@@ -201,6 +211,7 @@ describe('usage logger timing summary', () => {
     logUsageSummary('req_final', {
       providerKey: 'demo.key1',
       model: 'demo-model',
+      finishReason: 'stop',
       latencyMs: 1000,
       timingRequestIds: ['req_base', 'req_final'],
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
@@ -246,6 +257,7 @@ describe('usage logger timing summary', () => {
     logUsageSummary('req_release_preserve', {
       providerKey: 'demo.key1',
       model: 'demo-model',
+      finishReason: 'stop',
       latencyMs: 1000,
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
     });
@@ -291,18 +303,17 @@ describe('usage logger timing summary', () => {
     logUsageSummary('req_release_host_internal', {
       providerKey: 'demo.key1',
       model: 'demo-model',
+      finishReason: 'stop',
       latencyMs: 1500,
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
     });
 
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(rendered).toContain('request.internal=120ms');
-    expect(rendered).toContain('host.internal=260ms');
-    expect(rendered).toContain('request.snapshot=120ms');
-    expect(rendered).toContain('provider.runtime_resolve=40ms');
-    expect(rendered).toContain('provider.context_resolve=25ms');
-    expect(rendered).toContain('provider.metadata_attach=15ms');
-    expect(rendered).toContain('provider.response_normalize=60ms');
+    expect(rendered).toContain('request.internal=');
+    expect(rendered).toContain('hub=310ms');
+    expect(rendered).toContain('provider.send=700ms');
+    expect(rendered).toContain('hub.response=90ms');
+    expect(rendered).toContain('response=20ms');
   });
 
   it('appends hub stage top summary when provided by pipeline metadata', async () => {
@@ -319,6 +330,7 @@ describe('usage logger timing summary', () => {
     logUsageSummary('req_hub_top', {
       providerKey: 'demo.key1',
       model: 'demo-model',
+      finishReason: 'stop',
       latencyMs: 1200,
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       hubStageTop: [
@@ -333,5 +345,45 @@ describe('usage logger timing summary', () => {
     expect(rendered).toContain('req_inbound.stage2_semantic_map:7600msx1');
     expect(rendered).toContain('req_outbound.stage1_semantic_map:2100msx1');
     expect(rendered).not.toContain('req_process.stage2_route_select:900msx1');
+  });
+
+  it('rolls up non-stop usage logs into 1-minute summary', async () => {
+    process.env.ROUTECODEX_BUILD_MODE = 'release';
+    process.env.ROUTECODEX_USAGE_TIMING = '1';
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+    const { flushLogRollup } = await import('../../../../../src/server/runtime/http-server/executor/log-rollup.js');
+
+    logUsageSummary('req_rollup_1', {
+      providerKey: 'qwen.1',
+      model: 'qwen3.6-plus',
+      routeName: 'default',
+      poolId: 'tools-primary',
+      finishReason: 'length',
+      latencyMs: 1000,
+      externalLatencyMs: 600,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    });
+    logUsageSummary('req_rollup_2', {
+      providerKey: 'qwen.1',
+      model: 'qwen3.6-plus',
+      routeName: 'default',
+      poolId: 'tools-primary',
+      finishReason: 'length',
+      latencyMs: 1200,
+      externalLatencyMs: 700,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    });
+
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('[usage] request req_rollup_1'));
+    flushLogRollup('manual');
+    const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(lines.some((line) => line.includes('[usage][1m]'))).toBe(true);
+    expect(lines.some((line) => line.includes('default/tools-primary'))).toBe(true);
+    expect(lines.some((line) => line.includes('provider=qwen.1.qwen3.6-plus calls=2'))).toBe(true);
+    expect(lines.some((line) => line.includes('avg.total=1100ms'))).toBe(true);
+    expect(lines.some((line) => line.includes('avg.internal=450ms'))).toBe(true);
+    expect(lines.some((line) => line.includes('avg.external=650ms'))).toBe(true);
   });
 });

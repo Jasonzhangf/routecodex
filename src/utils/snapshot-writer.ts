@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { resolveRccSnapshotsDirFromEnv } from '../config/user-data-paths.js';
 import { runtimeFlags } from '../runtime/runtime-flags.js';
+import { shouldCaptureSnapshotStage } from './snapshot-stage-policy.js';
 
 export type ServerSnapshotPhase =
   | 'http-request'
@@ -25,6 +26,46 @@ type SnapshotHookWriter = (scope: string, payload: Record<string, unknown>) => P
 let snapshotHookWriterPromise: Promise<SnapshotHookWriter | null> | null = null;
 const DEFAULT_SERVER_SNAPSHOT_PAYLOAD_MAX_BYTES = 256 * 1024;
 const DEFAULT_SERVER_SNAPSHOT_KEEP_RECENT_FILES = 10;
+const DEFAULT_SERVER_SNAPSHOT_PRUNE_INTERVAL_MS = 15_000;
+const DEFAULT_SERVER_SNAPSHOT_PRUNE_MIN_WRITES = 8;
+const DEFAULT_SERVER_SNAPSHOT_ESTIMATE_NODE_BUDGET = 4000;
+
+type SnapshotPruneState = {
+  pending: boolean;
+  lastPruneAt: number;
+  writesSinceLastPrune: number;
+};
+
+const snapshotPruneStates = new Map<string, SnapshotPruneState>();
+
+function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
+  if (!value) {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
+    return true;
+  }
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') {
+    return false;
+  }
+  return fallback;
+}
+
+function shouldForceServerSnapshotDualWrite(): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_SERVER_SNAPSHOT_FORCE_DUAL_WRITE
+      ?? process.env.RCC_SERVER_SNAPSHOT_FORCE_DUAL_WRITE,
+    false
+  );
+}
+
+function resolveSnapshotFullCapture(): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_SNAPSHOT_FULL ?? process.env.RCC_SNAPSHOT_FULL,
+    runtimeFlags.snapshotsEnabled
+  );
+}
 
 function resolveServerSnapshotPayloadMaxBytes(): number {
   const raw =
@@ -50,17 +91,49 @@ function resolveServerSnapshotKeepRecentFiles(): number {
   return DEFAULT_SERVER_SNAPSHOT_KEEP_RECENT_FILES;
 }
 
+function resolveServerSnapshotPruneIntervalMs(): number {
+  const raw =
+    process.env.ROUTECODEX_SNAPSHOT_PRUNE_INTERVAL_MS
+    ?? process.env.RCC_SNAPSHOT_PRUNE_INTERVAL_MS
+    ?? '';
+  const parsed = Number.parseInt(String(raw).trim(), 10);
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    return parsed;
+  }
+  return DEFAULT_SERVER_SNAPSHOT_PRUNE_INTERVAL_MS;
+}
+
+function resolveServerSnapshotPruneMinWrites(): number {
+  const raw =
+    process.env.ROUTECODEX_SNAPSHOT_PRUNE_MIN_WRITES
+    ?? process.env.RCC_SNAPSHOT_PRUNE_MIN_WRITES
+    ?? '';
+  const parsed = Number.parseInt(String(raw).trim(), 10);
+  if (Number.isFinite(parsed) && parsed >= 1) {
+    return parsed;
+  }
+  return DEFAULT_SERVER_SNAPSHOT_PRUNE_MIN_WRITES;
+}
+
 function estimateSnapshotPayloadBytes(
   value: unknown,
   options?: {
     maxBytes?: number;
     depth?: number;
     seen?: Set<unknown>;
+    nodeBudget?: number;
+    visitedNodes?: number;
   }
 ): number {
   const maxBytes = options?.maxBytes ?? Number.POSITIVE_INFINITY;
   const depth = options?.depth ?? 0;
   const seen = options?.seen ?? new Set<unknown>();
+  const nodeBudget = options?.nodeBudget ?? DEFAULT_SERVER_SNAPSHOT_ESTIMATE_NODE_BUDGET;
+  const visitedNodes = (options?.visitedNodes ?? 0) + 1;
+
+  if (visitedNodes > nodeBudget) {
+    return maxBytes + 1;
+  }
 
   if (value === null || value === undefined) {
     return 4;
@@ -97,7 +170,9 @@ function estimateSnapshotPayloadBytes(
       bytes += estimateSnapshotPayloadBytes(item, {
         maxBytes: Math.max(0, maxBytes - bytes),
         depth: depth + 1,
-        seen
+        seen,
+        nodeBudget,
+        visitedNodes
       });
       if (bytes > maxBytes) {
         return maxBytes + 1;
@@ -112,7 +187,9 @@ function estimateSnapshotPayloadBytes(
       bytes += estimateSnapshotPayloadBytes(child, {
         maxBytes: Math.max(0, maxBytes - bytes),
         depth: depth + 1,
-        seen
+        seen,
+        nodeBudget,
+        visitedNodes
       });
       if (bytes > maxBytes) {
         return maxBytes + 1;
@@ -154,6 +231,9 @@ function summarizeSnapshotPayload(value: unknown): Record<string, unknown> {
 }
 
 function coerceServerSnapshotData(stage: string, data: unknown): unknown {
+  if (resolveSnapshotFullCapture()) {
+    return data;
+  }
   const maxBytes = resolveServerSnapshotPayloadMaxBytes();
   const estimatedBytes = estimateSnapshotPayloadBytes(data, { maxBytes: maxBytes + 1 });
   if (estimatedBytes <= maxBytes) {
@@ -192,10 +272,20 @@ function resolveSnapshotRoot(): string {
 
 function mapEndpointToFolder(entryEndpoint?: string): string {
   const ep = String(entryEndpoint || '').trim().toLowerCase();
-  if (ep.includes('/v1/responses') || ep.includes('/responses.submit')) {
+  if (
+    ep.includes('/v1/responses')
+    || ep.includes('/responses.submit')
+    || ep.includes('openai-responses')
+    || ep === 'responses'
+  ) {
     return 'openai-responses';
   }
-  if (ep.includes('/v1/messages')) {
+  if (
+    ep.includes('/v1/messages')
+    || ep.includes('anthropic-messages')
+    || ep === 'messages'
+    || ep === 'anthropic'
+  ) {
     return 'anthropic-messages';
   }
   return 'openai-chat';
@@ -274,6 +364,51 @@ async function pruneSnapshotFilesKeepRecent(dir: string, maxFiles: number): Prom
   );
 }
 
+function scheduleSnapshotPrune(dir: string, maxFiles: number): void {
+  if (!Number.isFinite(maxFiles) || maxFiles <= 0) {
+    return;
+  }
+  const now = Date.now();
+  const state = snapshotPruneStates.get(dir) ?? {
+    pending: false,
+    lastPruneAt: 0,
+    writesSinceLastPrune: 0
+  };
+  state.writesSinceLastPrune += 1;
+
+  if (state.pending) {
+    snapshotPruneStates.set(dir, state);
+    return;
+  }
+
+  const pruneIntervalMs = resolveServerSnapshotPruneIntervalMs();
+  const pruneMinWrites = resolveServerSnapshotPruneMinWrites();
+  const shouldPruneByWrites = state.writesSinceLastPrune >= pruneMinWrites;
+  const shouldPruneByInterval = pruneIntervalMs <= 0 || now - state.lastPruneAt >= pruneIntervalMs;
+  if (!shouldPruneByWrites && !shouldPruneByInterval) {
+    snapshotPruneStates.set(dir, state);
+    return;
+  }
+
+  state.pending = true;
+  state.writesSinceLastPrune = 0;
+  snapshotPruneStates.set(dir, state);
+
+  void pruneSnapshotFilesKeepRecent(dir, maxFiles)
+    .catch((error) => {
+      logServerSnapshotNonBlockingError(`pruneSnapshotFilesKeepRecent:${dir}`, error);
+    })
+    .finally(() => {
+      const latest = snapshotPruneStates.get(dir);
+      if (!latest) {
+        return;
+      }
+      latest.pending = false;
+      latest.lastPruneAt = Date.now();
+      snapshotPruneStates.set(dir, latest);
+    });
+}
+
 async function loadSnapshotHookWriter(): Promise<SnapshotHookWriter | null> {
   if (!snapshotHookWriterPromise) {
     snapshotHookWriterPromise = import('../modules/llmswitch/bridge.js')
@@ -297,38 +432,46 @@ export async function writeServerSnapshot(options: {
   if (!isSnapshotsEnabled()) {
     return; // default OFF
   }
+  if (!shouldCaptureSnapshotStage(String(options.phase))) {
+    return;
+  }
   const endpoint = options.entryEndpoint || '/v1/chat/completions';
   const groupRequestId = options.groupRequestId || options.requestId;
   const providerKey = options.providerKey;
   const data = coerceServerSnapshotData(String(options.phase), options.data);
 
-  // 1) 尝试通过 llmswitch-core hooks 写快照（供核心调试使用）
+  let hookWritten = false;
+  // 1) 优先通过 llmswitch-core hooks 写快照（供核心调试使用）
   try {
     const writeSnapshotViaHooks = await loadSnapshotHookWriter();
-    await writeSnapshotViaHooks?.('server', {
-      endpoint,
-      stage: String(options.phase),
-      requestId: options.requestId,
-      groupRequestId,
-      providerKey,
-      data,
-      verbosity: 'verbose'
-    });
+    if (writeSnapshotViaHooks) {
+      await writeSnapshotViaHooks('server', {
+        endpoint,
+        stage: String(options.phase),
+        requestId: options.requestId,
+        groupRequestId,
+        providerKey,
+        data,
+        verbosity: 'verbose'
+      });
+      hookWritten = true;
+    }
   } catch (error) {
     logServerSnapshotNonBlockingError(`writeSnapshotViaHooks:${options.phase}`, error);
-    // always fall through to local file snapshot
   }
 
-  // 2) 本地文件快照（永远写，非阻塞），便于 RouteCodex 侧对比 server/provider/pipeline
+  // 默认单写（hook 成功就不再本地重复落盘），避免 snapshot 双写导致 I/O 与内存占用放大。
+  // 若需要双写排障，可显式打开 ROUTECODEX_SERVER_SNAPSHOT_FORCE_DUAL_WRITE=1。
+  if (hookWritten && !shouldForceServerSnapshotDualWrite()) {
+    return;
+  }
+
+  // 2) fallback 本地文件快照（hook 不可用/失败时）
   try {
     const base = resolveSnapshotRoot();
     const folder = mapEndpointToFolder(options.entryEndpoint);
     const requestToken = String(groupRequestId || `req_${Date.now()}`).replace(/[^A-Za-z0-9_.-]/g, '_');
-    const providerToken =
-      typeof providerKey === 'string' && providerKey.trim().length
-        ? providerKey.trim().replace(/[^A-Za-z0-9_.-]/g, '_')
-        : '__pending__';
-    const dir = path.join(base, folder, providerToken, requestToken);
+    const dir = path.join(base, folder, requestToken);
     await ensureDir(dir);
     const stageToken = String(options.phase).replace(/[^a-z0-9_.-]/gi, '_');
     const file = `${stageToken}_server.json`;
@@ -341,7 +484,7 @@ export async function writeServerSnapshot(options: {
       data
     };
     await writeUniqueFile(dir, file, JSON.stringify(payload, null, 2));
-    await pruneSnapshotFilesKeepRecent(dir, resolveServerSnapshotKeepRecentFiles());
+    scheduleSnapshotPrune(dir, resolveServerSnapshotKeepRecentFiles());
   } catch (error) {
     logServerSnapshotNonBlockingError(`writeLocalSnapshot:${options.phase}`, error);
   }

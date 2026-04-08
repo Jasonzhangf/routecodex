@@ -47,6 +47,16 @@ type PythonRunResult = {
 const activeLaunchers: Set<LaunchHandle> = new Set();
 let lastCamoufoxLaunchFailureReason: string | null = null;
 
+function logCamoufoxLauncherNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  const reason = error instanceof Error ? (error.stack || `${error.name}: ${error.message}`) : String(error);
+  const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[camoufox-launcher] ${stage} failed (non-blocking): ${reason}${detailSuffix}`);
+}
+
 function setCamoufoxLaunchFailureReason(reason: string | null): void {
   lastCamoufoxLaunchFailureReason = reason && reason.trim().length > 0 ? reason.trim() : null;
 }
@@ -73,8 +83,8 @@ function terminateLauncher(handle: LaunchHandle): Promise<void> {
     const timer = setTimeout(() => {
       try {
         child.kill('SIGKILL');
-      } catch {
-        // ignore escalation failures
+      } catch (error) {
+        logCamoufoxLauncherNonBlocking('terminate_launcher.sigkill', error);
       }
       resolve();
     }, 2000);
@@ -89,7 +99,8 @@ function terminateLauncher(handle: LaunchHandle): Promise<void> {
         return;
       }
       child.kill('SIGTERM');
-    } catch {
+    } catch (error) {
+      logCamoufoxLauncherNonBlocking('terminate_launcher.sigterm', error);
       clearTimeout(timer);
       resolve();
     }
@@ -338,8 +349,8 @@ export function ensureCamoufoxProfileDir(provider?: string | null, alias?: strin
   const dir = getCamoufoxProfileDir(provider, alias);
   try {
     fs.mkdirSync(dir, { recursive: true });
-  } catch {
-    // directory creation failures are non-fatal for OAuth; browser can still run with its own defaults
+  } catch (error) {
+    logCamoufoxLauncherNonBlocking('ensure_profile_dir.mkdir', error, { dir });
   }
   return dir;
 }
@@ -362,8 +373,10 @@ function resolveCamoufoxScriptPath(): string | null {
         logOAuthDebug(`[OAuth] Camoufox: using script override ${resolved}`);
         return resolved;
       }
-    } catch {
-      // ignore resolution errors for explicit override
+    } catch (error) {
+      logCamoufoxLauncherNonBlocking('resolve_script_path.override_probe', error, {
+        configured: expanded
+      });
     }
   }
 
@@ -384,8 +397,8 @@ function resolveCamoufoxScriptPath(): string | null {
         return candidate;
       }
     }
-  } catch {
-    // ignore
+  } catch (error) {
+    logCamoufoxLauncherNonBlocking('resolve_script_path.builtin_probe', error);
   }
 
   return null;
@@ -439,7 +452,10 @@ function runPythonWithLaunchers(
         continue;
       }
       return { launcher, result };
-    } catch {
+    } catch (error) {
+      logCamoufoxLauncherNonBlocking('run_python_with_launchers.spawn_sync', error, {
+        command: launcher.command
+      });
       continue;
     }
   }
@@ -499,8 +515,8 @@ function resolveGenFingerprintScriptPath(): string | null {
         return candidate;
       }
     }
-  } catch {
-    // ignore
+  } catch (error) {
+    logCamoufoxLauncherNonBlocking('resolve_gen_fingerprint_script_path', error);
   }
   return null;
 }
@@ -600,8 +616,10 @@ function writeMinimalFingerprintEnv(profileId: string, osPolicy?: string | undef
       await fsAsync.mkdir(path.dirname(fpPath), { recursive: true });
       const payload = { env };
       await fsAsync.writeFile(fpPath, JSON.stringify(payload), { encoding: 'utf-8' });
-    } catch {
-      // best-effort
+    } catch (error) {
+      logCamoufoxLauncherNonBlocking('write_minimal_fingerprint_env.persist', error, {
+        path: fpPath
+      });
     }
   })();
   return env;
@@ -625,8 +643,10 @@ function ensureFingerprintEnv(profileId: string, provider?: string | null, alias
   const fpRoot = getFingerprintRoot();
   try {
     fs.mkdirSync(fpRoot, { recursive: true });
-  } catch {
-    // non-fatal
+  } catch (error) {
+    logCamoufoxLauncherNonBlocking('ensure_fingerprint_env.mkdir', error, {
+      root: fpRoot
+    });
   }
 
   const scriptArgs = ['--profile-id', profileId, '--output-dir', fpRoot];
@@ -685,8 +705,12 @@ export function ensureCamoufoxFingerprintForToken(
   const profileId = buildProfileId(provider, alias);
   try {
     void ensureFingerprintEnv(profileId, provider, alias);
-  } catch {
-    // fingerprint generation failures are non-fatal for token scanning
+  } catch (error) {
+    logCamoufoxLauncherNonBlocking('ensure_fingerprint_for_token', error, {
+      profileId,
+      provider: provider ?? null,
+      alias: alias ?? null
+    });
   }
 }
 

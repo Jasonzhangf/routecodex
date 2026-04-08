@@ -78,6 +78,7 @@ type ServerToolLoopState = {
 const STOP_MESSAGE_STAGE_TIMEOUT_MS = 900_000;
 const STOP_MESSAGE_LOOP_WARN_THRESHOLD = 5;
 const STOP_MESSAGE_LOOP_FAIL_THRESHOLD = 10;
+const FOLLOWUP_ERROR_REASON_MAX_LENGTH = 220;
 
 function logServerToolNonBlocking(stage: string, error: unknown, details?: Record<string, unknown>): void {
   const message = error instanceof Error ? error.message : String(error ?? 'unknown');
@@ -148,6 +149,29 @@ function normalizeClientInjectText(value: unknown, fallback = '继续执行'): s
       : fallback;
   const sanitized = sanitizeFollowupText(text);
   return sanitized || fallback;
+}
+
+function compactFollowupErrorReason(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().replace(/\s+/g, ' ');
+  if (!normalized) {
+    return undefined;
+  }
+  const httpCodeMatch =
+    normalized.match(/^http\s+(\d{3})\s*:/i) ||
+    normalized.match(/\bhttp\s+(\d{3})\b/i);
+  if (httpCodeMatch?.[1]) {
+    return `HTTP_${httpCodeMatch[1]}`;
+  }
+  if (/<\s*!doctype\s+html\b/i.test(normalized) || /<\s*html\b/i.test(normalized)) {
+    return 'UPSTREAM_HTML_ERROR';
+  }
+  if (normalized.length <= FOLLOWUP_ERROR_REASON_MAX_LENGTH) {
+    return normalized;
+  }
+  return `${normalized.slice(0, FOLLOWUP_ERROR_REASON_MAX_LENGTH)}…`;
 }
 
 function extractAppendUserTextFromFollowupPlan(followupPlan: unknown): string | undefined {
@@ -496,6 +520,44 @@ function createEmptyFollowupError(args: {
   return wrapped;
 }
 
+function createMissingFollowupPayloadError(args: {
+  flowId?: string;
+  requestId: string;
+  followupPlan: unknown;
+  adapterContext: AdapterContext;
+}): ProviderProtocolError & { status?: number } {
+  const followupPlanRecord =
+    args.followupPlan && typeof args.followupPlan === 'object' && !Array.isArray(args.followupPlan)
+      ? (args.followupPlan as Record<string, unknown>)
+      : undefined;
+  const capturedChatRequest = (args.adapterContext as any)?.capturedChatRequest;
+  const seedAvailable = Boolean(extractCapturedChatSeed(capturedChatRequest));
+  const wrapped = new ProviderProtocolError('[servertool] followup payload missing for non-clientInject flow', {
+    code: 'SERVERTOOL_FOLLOWUP_FAILED',
+    category: 'INTERNAL_ERROR',
+    details: {
+      flowId: args.flowId,
+      requestId: args.requestId,
+      reason: 'followup_payload_missing',
+      hasPayloadPlan: Boolean(followupPlanRecord && Object.prototype.hasOwnProperty.call(followupPlanRecord, 'payload')),
+      hasInjectionPlan: Boolean(
+        followupPlanRecord && Object.prototype.hasOwnProperty.call(followupPlanRecord, 'injection')
+      ),
+      hasMetadataPlan: Boolean(
+        followupPlanRecord && Object.prototype.hasOwnProperty.call(followupPlanRecord, 'metadata')
+      ),
+      hasCapturedChatRequest: Boolean(
+        capturedChatRequest &&
+          typeof capturedChatRequest === 'object' &&
+          !Array.isArray(capturedChatRequest)
+      ),
+      capturedSeedAvailable: seedAvailable
+    }
+  }) as ProviderProtocolError & { status?: number };
+  wrapped.status = 502;
+  return wrapped;
+}
+
 function isStopFinishReasonWithoutToolCalls(base: unknown): boolean {
   return inspectStopGatewaySignal(base).eligible;
 }
@@ -557,11 +619,13 @@ export async function runServerToolOrchestration(
     if (!normalized) return 'unknown';
     const mapping: Record<string, string> = {
       continue_execution_flow: 'continue_execution',
+      reasoning_stop_flow: 'reasoning.stop',
+      reasoning_stop_guard_flow: 'reasoning_stop_guard',
+      reasoning_stop_finalize_flow: 'reasoning_stop_finalize',
       review_flow: 'review',
       stop_message_flow: 'stop_message_auto',
       apply_patch_guard: 'apply_patch_guard',
       exec_command_guard: 'exec_command_guard',
-      iflow_model_error_retry: 'iflow_model_error_retry',
       antigravity_thought_signature_bootstrap: 'antigravity_thought_signature_bootstrap',
       web_search_flow: 'web_search',
       vision_flow: 'vision_auto',
@@ -942,8 +1006,7 @@ export async function runServerToolOrchestration(
   const isReviewFlow = engineResult.execution.flowId === 'review_flow';
   const isApplyPatchGuard = engineResult.execution.flowId === 'apply_patch_guard';
   const isExecCommandGuard = engineResult.execution.flowId === 'exec_command_guard';
-  const isErrorAutoFlow = engineResult.execution.flowId === 'iflow_model_error_retry';
-  const applyAutoLimit = isErrorAutoFlow || isApplyPatchGuard || isExecCommandGuard;
+  const applyAutoLimit = isApplyPatchGuard || isExecCommandGuard;
   // ServerTool followups must not inherit or inject any routeHint; always route fresh.
   const preserveRouteHint = false;
   const followupPlan = engineResult.execution.followup;
@@ -983,23 +1046,6 @@ export async function runServerToolOrchestration(
     return null;
   })();
 
-  const metadataOnlyFollowup =
-    !followupPayloadRaw &&
-    Boolean(
-      followupPlan &&
-        typeof followupPlan === 'object' &&
-        !Array.isArray(followupPlan) &&
-        Object.prototype.hasOwnProperty.call(followupPlan, 'metadata')
-    );
-
-  if (!followupPayloadRaw && !metadataOnlyFollowup) {
-    logProgress(5, totalSteps, 'completed (missing followup payload)', { flowId });
-    return {
-      chat: engineResult.finalChatResponse,
-      executed: true,
-      flowId: engineResult.execution.flowId
-    };
-  }
   const loopPayload =
     followupPayloadRaw ||
     (engineResult.execution.flowId === 'stop_message_flow'
@@ -1070,7 +1116,7 @@ export async function runServerToolOrchestration(
     stream: false,
     ...(engineResult.execution.followup.metadata ?? {})
   };
-  const forceReenterFollowup = isStopMessageFlow || isReviewFlow;
+  const forceReenterFollowup = isReviewFlow;
   const forceTmuxClientInjectFollowup =
     isClockHoldFlow || engineResult.execution.flowId === 'heartbeat_flow';
 
@@ -1146,10 +1192,16 @@ export async function runServerToolOrchestration(
     options.requestId,
     engineResult.execution.followup.requestIdSuffix
   );
-  const clientInjectOnlyRaw = (metadata as Record<string, unknown>).clientInjectOnly;
-  const clientInjectOnly =
-    clientInjectOnlyRaw === true ||
-    (typeof clientInjectOnlyRaw === 'string' && clientInjectOnlyRaw.trim().toLowerCase() === 'true');
+  const clientInjectOnly = readClientInjectOnly(metadata);
+  if (!followupPayloadRaw && !clientInjectOnly) {
+    logProgress(5, totalSteps, 'failed (missing followup payload; fail-fast)', { flowId });
+    throw createMissingFollowupPayloadError({
+      flowId: engineResult.execution.flowId,
+      requestId: options.requestId,
+      followupPlan,
+      adapterContext: options.adapterContext
+    });
+  }
   if (clientInjectOnly) {
     if (!options.clientInjectDispatch) {
       const wrapped = new ProviderProtocolError('[servertool] client inject dispatcher unavailable', {
@@ -1264,13 +1316,17 @@ export async function runServerToolOrchestration(
   }
 
   if (!followupPayloadRaw) {
-    const decorated = decorateFinalChatWithServerToolContext(engineResult.finalChatResponse, engineResult.execution);
-    logProgress(5, totalSteps, 'completed (metadata-only followup without payload)', { flowId });
-    return {
-      chat: decorated,
-      executed: true,
-      flowId: engineResult.execution.flowId
-    };
+    const wrapped = new ProviderProtocolError('[servertool] followup payload missing unexpectedly', {
+      code: 'SERVERTOOL_FOLLOWUP_FAILED',
+      category: 'INTERNAL_ERROR',
+      details: {
+        flowId: engineResult.execution.flowId,
+        requestId: options.requestId,
+        reason: 'followup_payload_missing_after_validation'
+      }
+    }) as ProviderProtocolError & { status?: number };
+    wrapped.status = 502;
+    throw wrapped;
   }
 
   // Build followup payload for non-client-inject flows
@@ -1391,6 +1447,27 @@ export async function runServerToolOrchestration(
           logProgress(5, totalSteps, 'failed (stopMessage followup failed; state cleared)', { flowId, attempt });
           throw error;
         }
+        const errorRecord =
+          error && typeof error === 'object' && !Array.isArray(error)
+            ? (error as Record<string, unknown>)
+            : undefined;
+        const errorDetails =
+          errorRecord?.details && typeof errorRecord.details === 'object' && !Array.isArray(errorRecord.details)
+            ? (errorRecord.details as Record<string, unknown>)
+            : undefined;
+        const upstreamCode =
+          (typeof errorRecord?.upstreamCode === 'string' && errorRecord.upstreamCode.trim())
+          || (typeof errorDetails?.upstreamCode === 'string' && errorDetails.upstreamCode.trim())
+          || undefined;
+        const reason =
+          (typeof errorDetails?.reason === 'string' && errorDetails.reason.trim())
+          || (typeof errorRecord?.reason === 'string' && errorRecord.reason.trim())
+          || (error instanceof Error && error.message ? error.message : undefined)
+          || undefined;
+        const compactReason = compactFollowupErrorReason(reason);
+        const compactErrorMessage = compactFollowupErrorReason(
+          error instanceof Error ? error.message : String(error ?? 'unknown')
+        );
         const wrapped = new ProviderProtocolError(
           `[servertool] Followup failed for flow ${engineResult.execution.flowId ?? 'unknown'} ` +
             `(attempt ${attempt}/${maxAttempts})`,
@@ -1401,10 +1478,18 @@ export async function runServerToolOrchestration(
               requestId: options.requestId,
               attempt,
               maxAttempts,
-              error: error instanceof Error ? error.message : String(error ?? 'unknown')
+              error: compactErrorMessage ?? 'unknown',
+              ...(compactReason ? { reason: compactReason } : {}),
+              ...(upstreamCode ? { upstreamCode } : {})
             }
           }
         );
+        if (compactReason) {
+          (wrapped as ProviderProtocolError & { reason?: string }).reason = compactReason;
+        }
+        if (upstreamCode) {
+          (wrapped as ProviderProtocolError & { upstreamCode?: string }).upstreamCode = upstreamCode;
+        }
         (wrapped as { cause?: unknown }).cause = error;
         throw wrapped;
       }

@@ -1,10 +1,10 @@
 import { describe, expect, test } from '@jest/globals';
 
 import {
-  buildStopMessageAutoMessageIflowPromptForTests,
+  buildStopMessageAutoMessagePromptForTests,
   type StopMessageAiFollowupHistoryEntry,
   type StopMessageAutoResponseSnapshot
-} from '../../src/servertool/handlers/stop-message-auto/iflow-followup.js';
+} from '../../src/servertool/handlers/stop-message-auto/ai-followup.js';
 
 describe('stop_message_auto ai followup prompt', () => {
   test('enforces pragmatic review with primary-goal-first judgement', () => {
@@ -25,7 +25,7 @@ describe('stop_message_auto ai followup prompt', () => {
       }
     ];
 
-    const prompt = buildStopMessageAutoMessageIflowPromptForTests({
+    const prompt = buildStopMessageAutoMessagePromptForTests({
       baseStopMessageText: '继续执行',
       candidateFollowupText: '修复 stopMessage 循环并补齐覆盖测试',
       responseSnapshot,
@@ -63,7 +63,7 @@ describe('stop_message_auto ai followup prompt', () => {
   });
 
   test('falls back to base stop message as short-term goal when candidate is empty', () => {
-    const prompt = buildStopMessageAutoMessageIflowPromptForTests({
+    const prompt = buildStopMessageAutoMessagePromptForTests({
       baseStopMessageText: '优先修复 oauth 认证流程',
       candidateFollowupText: '',
       responseSnapshot: {

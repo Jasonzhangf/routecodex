@@ -18,6 +18,30 @@ import { ErrorUtils } from '../shared/utils.js';
 import { createChatSequencer } from './sequencers/chat-sequencer.js';
 import { createChatStreamWriter } from '../shared/writer.js';
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logChatJsonToSseNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  try {
+    const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[chat-json-to-sse] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 /**
  * 重构后的Chat JSON到SSE转换器
  * 采用函数化架构，专注于编排而非具体业务逻辑
@@ -220,7 +244,12 @@ export class ChatJsonToSseConverterRefactored {
         if (typeof deltaContent === 'string') {
           context.eventStats.totalTokens += deltaContent.length;
         }
-      } catch { /* ignore parse errors */ }
+      } catch (error) {
+        logChatJsonToSseNonBlocking('stats.parse_chat_chunk', error, {
+          requestId: context.requestId,
+          eventType: et
+        });
+      }
     }
 
     if (typeof event?.timestamp === 'number') context.eventStats.lastEventTime = event.timestamp;

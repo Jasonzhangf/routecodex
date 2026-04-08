@@ -224,7 +224,8 @@ function readQuotaProviderSnapshot(quotaMod: any, providerKey: string): unknown 
       return null;
     }
     return (snapshot as Record<string, unknown>)[providerKey] ?? null;
-  } catch {
+  } catch (error) {
+    logControlNonBlockingError('readQuotaProviderSnapshot', error, { providerKey });
     return null;
   }
 }
@@ -312,12 +313,14 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
           ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
         }));
       }
-    } catch {
+    } catch (error) {
+      logControlNonBlockingError('snapshot.quotaAdminSnapshot', error);
       quotaProviders = undefined;
     }
     try {
       antigravitySnapshot = typeof quotaMod?.getRawSnapshot === 'function' ? quotaMod.getRawSnapshot() : undefined;
-    } catch {
+    } catch (error) {
+      logControlNonBlockingError('snapshot.antigravityRawSnapshot', error);
       antigravitySnapshot = undefined;
     }
 
@@ -325,7 +328,8 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
     try {
       const artifacts = typeof options.getVirtualRouterArtifacts === 'function' ? options.getVirtualRouterArtifacts() : null;
       vrConfig = artifacts && typeof artifacts === 'object' ? (artifacts as any).config ?? null : null;
-    } catch {
+    } catch (error) {
+      logControlNonBlockingError('snapshot.virtualRouterConfig', error);
       vrConfig = null;
     }
 
@@ -339,7 +343,8 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         const raw = fs.readFileSync(leasePath, 'utf8');
         antigravityAliasLeases = raw && raw.trim() ? JSON.parse(raw) : null;
       }
-    } catch {
+    } catch (error) {
+      logControlNonBlockingError('snapshot.antigravityAliasLeases', error);
       antigravityAliasLeases = null;
     }
 
@@ -400,8 +405,10 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         // Best-effort: ask other servers to restart to pick up the new config from disk.
         try {
           await broadcastRestartToOtherServers(options.getServerId());
-        } catch {
-          // ignore broadcast errors
+        } catch (error) {
+          logControlNonBlockingError('routing.policy.set.broadcastRestart', error, {
+            serverId: options.getServerId()
+          });
         }
         res.status(200).json({
           ok: true,
@@ -447,8 +454,11 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         if (restartScope === 'all') {
           try {
             await broadcastRestartToOtherServers(options.getServerId());
-          } catch {
-            // ignore broadcast errors
+          } catch (error) {
+            logControlNonBlockingError('routing.group.activate.broadcastRestart', error, {
+              serverId: options.getServerId(),
+              restartScope
+            });
           }
         }
 

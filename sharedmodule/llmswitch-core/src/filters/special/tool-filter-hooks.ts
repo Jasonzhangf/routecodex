@@ -75,8 +75,8 @@ function hasImageContent(messages: any[]): boolean {
         }
       }
     }
-  } catch {
-    // non-fatal
+  } catch (error) {
+    logToolFilterHookWarning('hasImageContent', error);
   }
   return false;
 }
@@ -94,8 +94,8 @@ function isVisionTool(tool: any): boolean {
     // 保守实现：仅将 view_image 视为视觉工具；其他名称可通过上层配置扩展。
     if (name === 'view_image') return true;
     if (name.includes('vision')) return true;
-  } catch {
-    // ignore
+  } catch (error) {
+    logToolFilterHookWarning('isVisionTool', error);
   }
   return false;
 }
@@ -217,8 +217,8 @@ function deriveMcpSessionState(messages: any[]): {
             if (name === 'list_mcp_resources') {
               listRequested = true;
             }
-          } catch {
-            /* ignore single tool_call */
+          } catch (error) {
+            logToolFilterHookWarning('deriveMcpSessionState.scan_assistant_tool_call', error);
           }
         }
       }
@@ -263,13 +263,13 @@ function deriveMcpSessionState(messages: any[]): {
           // Non-wrapped tool output (common for Codex tool responses).
           // If the payload looks like list_mcp_resources output and is empty/unsupported, disable MCP tools for this session.
           markListEmptyFromPayload(parsed);
-        } catch {
-          // ignore parse errors
+        } catch (error) {
+          logToolFilterHookWarning('deriveMcpSessionState.parse_tool_payload', error);
         }
       }
     }
-  } catch {
-    // ignore errors
+  } catch (error) {
+    logToolFilterHookWarning('deriveMcpSessionState', error);
   }
 
   return { listRequested, listEmpty };
@@ -289,7 +289,8 @@ const mcpToolHook: ToolFilterHook = ctx => {
           ? String((t as any).function.name)
           : '';
       return isMcpToolName(n);
-    } catch {
+    } catch (error) {
+      logToolFilterHookWarning('isMcpToolNameFromTool.extract_name', error);
       return false;
     }
   });
@@ -333,7 +334,8 @@ const mcpToolHook: ToolFilterHook = ctx => {
         typeof (t as any).function.name === 'string'
           ? String((t as any).function.name)
           : '';
-    } catch {
+    } catch (error) {
+      logToolFilterHookWarning('mcpToolHook.extract_tool_name', error);
       name = '';
     }
     const lower = name.toLowerCase();
@@ -437,8 +439,8 @@ export class ToolFilterHookFilter implements Filter<JsonObject> {
       if (Array.isArray((out as any).tools) && (out as any).tools.length === 0) {
         try {
           if ('tool_choice' in (out as any)) delete (out as any).tool_choice;
-        } catch {
-          /* ignore */
+        } catch (error) {
+          logToolFilterHookWarning('apply.drop_tool_choice_when_empty', error);
         }
       }
 

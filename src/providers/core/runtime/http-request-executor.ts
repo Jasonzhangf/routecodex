@@ -11,11 +11,33 @@ import {
   shouldCaptureVisionDebug,
   summarizeVisionMessages
 } from './vision-debug-utils.js';
-import {
-  buildIflowBusinessEnvelopeError,
-  readIflowBusinessErrorEnvelope
-} from './provider-iflow-business-error-utils.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
+
+const formatUnknownError = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+};
+
+const logHttpRequestExecutorNonBlockingError = (
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void => {
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[http-request-executor] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`
+    );
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+};
 
 export type PreparedHttpRequest = {
   endpoint: string;
@@ -172,8 +194,12 @@ export class HttpRequestExecutor {
           providerKey: context.providerKey,
           providerId: context.providerId
         });
-      } catch {
-        // ignore snapshot failures
+      } catch (snapshotError) {
+        logHttpRequestExecutorNonBlockingError('prepareHttpRequest.provider-preprocess-debug', snapshotError, {
+          requestId: context.requestId,
+          providerKey: context.providerKey,
+          providerId: context.providerId
+        });
       }
     }
 
@@ -222,8 +248,12 @@ export class HttpRequestExecutor {
         providerKey: options.providerKey,
         providerId: options.providerId
       });
-    } catch {
-      // ignore snapshot failures
+    } catch (snapshotError) {
+      logHttpRequestExecutorNonBlockingError('captureVisionDebugRequest.provider-body-debug', snapshotError, {
+        requestId,
+        providerKey: options.providerKey,
+        providerId: options.providerId
+      });
     }
     try {
       const summary = summarizeVisionMessages(body);
@@ -231,8 +261,10 @@ export class HttpRequestExecutor {
         `[vision-debug][build-body] route=${debug.routeName ?? options.routeName ?? 'vision'} ` +
         `request=${requestId} wantsSse=${options.wantsSse} ${summary}`
       );
-    } catch {
-      // best-effort logging
+    } catch (logError) {
+      logHttpRequestExecutorNonBlockingError('captureVisionDebugRequest.summarizeVisionMessages', logError, {
+        requestId
+      });
     }
   }
 
@@ -249,8 +281,12 @@ export class HttpRequestExecutor {
         providerKey: context.providerKey,
         providerId: context.providerId
       });
-    } catch {
-      /* ignore snapshot failures */
+    } catch (snapshotError) {
+      logHttpRequestExecutorNonBlockingError('snapshotProviderRequest.provider-request', snapshotError, {
+        requestId: context.requestId,
+        providerKey: context.providerKey,
+        providerId: context.providerId
+      });
     }
   }
 
@@ -352,8 +388,12 @@ export class HttpRequestExecutor {
       if (value) {
         return false;
       }
-    } catch {
-      // ignore
+    } catch (headerInspectError) {
+      logHttpRequestExecutorNonBlockingError('shouldTryNextTarget.inspectHeaders', headerInspectError, {
+        requestId: context.requestId,
+        providerKey: context.providerKey,
+        providerId: context.providerId
+      });
     }
 
     if (typeof err?.type === 'string' && err.type === 'network') {
@@ -409,8 +449,12 @@ export class HttpRequestExecutor {
                   providerKey: context.providerKey,
                   providerId: context.providerId
                 });
-              } catch {
-                /* ignore snapshot failures */
+              } catch (snapshotError) {
+                logHttpRequestExecutorNonBlockingError('executeHttpRequestOnce.provider-response.sse', snapshotError, {
+                  requestId: context.requestId,
+                  providerKey: context.providerKey,
+                  providerId: context.providerId
+                });
               }
             }
             return wrapped;
@@ -433,45 +477,18 @@ export class HttpRequestExecutor {
         providerKey: context.providerKey,
         providerId: context.providerId
       });
-    } catch {
-      /* ignore snapshot failures */
+    } catch (snapshotError) {
+      logHttpRequestExecutorNonBlockingError('executeHttpRequestOnce.provider-response', snapshotError, {
+        requestId: context.requestId,
+        providerKey: context.providerKey,
+        providerId: context.providerId
+      });
     }
     const profileBusinessError = this.deps.resolveBusinessResponseError?.(response, context);
     if (profileBusinessError) {
       throw profileBusinessError;
     }
 
-    const providerId = (context as unknown as { providerId?: unknown; providerType?: unknown; providerFamily?: unknown })
-      .providerId;
-    const family = (context as unknown as { providerFamily?: unknown }).providerFamily;
-    const pt = (typeof providerId === 'string' ? providerId : typeof family === 'string' ? family : '').toLowerCase();
-    if (pt === 'iflow') {
-      const data = (response as { data?: unknown }).data;
-      if (data && typeof data === 'object' && !Array.isArray(data)) {
-        const bag = data as { status?: unknown; msg?: unknown; message?: unknown };
-        const rawStatus = bag.status;
-        const statusStr =
-          typeof rawStatus === 'string' && rawStatus.trim().length
-            ? rawStatus.trim()
-            : typeof rawStatus === 'number'
-              ? String(rawStatus)
-              : '';
-        const msg =
-          (typeof bag.msg === 'string' && bag.msg.trim().length
-            ? bag.msg
-            : typeof bag.message === 'string' && bag.message.trim().length
-              ? bag.message
-              : '') || '';
-        if (statusStr === '439' && /token has expired/i.test(msg)) {
-          throw new Error(msg);
-        }
-
-        const envelope = readIflowBusinessErrorEnvelope(data);
-        if (envelope) {
-          throw buildIflowBusinessEnvelopeError(envelope, data as Record<string, unknown>);
-        }
-      }
-    }
     return response;
   }
 }

@@ -470,6 +470,23 @@ async function prepareTokenForStorage(
       } as UnknownObject;
     }
   }
+  if (providerType === 'qwen') {
+    const token = sanitizeToken(tokenData) ?? (tokenData as StoredOAuthToken);
+    const expiresAt = getExpiresAt(token);
+    const expiresInRaw = token.expires_in;
+    const expiresIn = typeof expiresInRaw === 'number' && Number.isFinite(expiresInRaw)
+      ? expiresInRaw
+      : (expiresAt && expiresAt > 10_000_000_000
+          ? Math.max(1, Math.floor((expiresAt - Date.now()) / 1000))
+          : 21600);
+    return {
+      ...(tokenData as Record<string, unknown>),
+      expires_in: expiresIn,
+      access_token: String(token.access_token ?? ''),
+      ...(token.apiKey ? { apiKey: token.apiKey, api_key: token.apiKey } : {}),
+      ...(token.api_key && !token.apiKey ? { apiKey: token.api_key, api_key: token.api_key } : {})
+    } as UnknownObject;
+  }
   return tokenData;
 }
 
@@ -1402,6 +1419,9 @@ export async function ensureValidOAuthToken(
   auth: OAuthAuth,
   opts: EnsureOpts = {}
 ): Promise<void> {
+  if (providerType.trim().toLowerCase() === 'iflow') {
+    throw new Error('[OAuth] provider "iflow" has been removed and is no longer supported.');
+  }
   if (!isOAuthConfig(auth)) {
     return;
   }

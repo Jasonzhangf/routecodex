@@ -112,9 +112,39 @@ const DEFAULT_STATS_LOG_PATH = path.join(resolveRccLogsDir(), 'provider-stats.js
 const DEFAULT_HISTORY_MAX_TAIL_BYTES = 8 * 1024 * 1024;
 const DEFAULT_HISTORY_MAX_LINES = 20000;
 const DEFAULT_PERSIST_INTERVAL_MS = 30000;
+const DEFAULT_STATS_LOG_MAX_BYTES = 64 * 1024 * 1024;
+const DEFAULT_STATS_LOG_MAX_BACKUPS = 3;
 const DEFAULT_DAILY_PERIODS = 90;
 const DEFAULT_WEEKLY_PERIODS = 104;
 const DEFAULT_MONTHLY_PERIODS = 36;
+const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
+const nonBlockingLogState = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logStatsManagerNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  const now = Date.now();
+  const last = nonBlockingLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingLogState.set(stage, now);
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[stats-manager] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
 
 function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
   if (!value) {
@@ -153,6 +183,47 @@ function resolvePositiveIntEnv(primary: string | undefined, secondary: string | 
     }
   }
   return fallback;
+}
+
+async function rotateStatsLogIfNeeded(logPath: string, maxBytes: number, maxBackups: number): Promise<void> {
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0) {
+    return;
+  }
+  if (!Number.isFinite(maxBackups) || maxBackups <= 0) {
+    return;
+  }
+  try {
+    const stat = await fs.stat(logPath);
+    if (!Number.isFinite(stat.size) || stat.size < maxBytes) {
+      return;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  for (let idx = maxBackups; idx >= 1; idx -= 1) {
+    const source = idx === 1 ? logPath : `${logPath}.${idx - 1}`;
+    const target = `${logPath}.${idx}`;
+    try {
+      await fs.rm(target, { force: true });
+    } catch (error) {
+      logStatsManagerNonBlockingError('rotateStatsLogIfNeeded.removeTarget', error, {
+        source,
+        target
+      });
+    }
+    try {
+      await fs.rename(source, target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        continue;
+      }
+      throw error;
+    }
+  }
 }
 
 function toUtcDayKey(ts: number): string {
@@ -308,6 +379,8 @@ export class StatsManager {
   private readonly weeklyPeriods = new Map<string, Omit<HistoricalPeriodBucket, 'period'>>();
   private readonly monthlyPeriods = new Map<string, Omit<HistoricalPeriodBucket, 'period'>>();
   private readonly persistIntervalMs: number;
+  private readonly statsLogMaxBytes: number;
+  private readonly statsLogMaxBackups: number;
   private readonly maxDailyPeriods: number;
   private readonly maxWeeklyPeriods: number;
   private readonly maxMonthlyPeriods: number;
@@ -326,6 +399,16 @@ export class StatsManager {
       process.env.ROUTECODEX_STATS_PERSIST_INTERVAL_MS,
       process.env.RCC_STATS_PERSIST_INTERVAL_MS,
       DEFAULT_PERSIST_INTERVAL_MS
+    );
+    this.statsLogMaxBytes = resolvePositiveIntEnv(
+      process.env.ROUTECODEX_STATS_LOG_MAX_BYTES,
+      process.env.RCC_STATS_LOG_MAX_BYTES,
+      DEFAULT_STATS_LOG_MAX_BYTES
+    );
+    this.statsLogMaxBackups = resolvePositiveIntEnv(
+      process.env.ROUTECODEX_STATS_LOG_MAX_BACKUPS,
+      process.env.RCC_STATS_LOG_MAX_BACKUPS,
+      DEFAULT_STATS_LOG_MAX_BACKUPS
     );
     this.maxDailyPeriods = resolvePositiveIntEnv(
       process.env.ROUTECODEX_STATS_DAILY_MAX_PERIODS,
@@ -604,6 +687,7 @@ export class StatsManager {
     try {
       const logPath = this.normalizeLogPath(options?.logPath);
       await fs.mkdir(path.dirname(logPath), { recursive: true });
+      await rotateStatsLogIfNeeded(logPath, this.statsLogMaxBytes, this.statsLogMaxBackups);
       const record = {
         ...snapshot,
         reason: options?.reason ?? 'shutdown',
@@ -702,8 +786,10 @@ export class StatsManager {
       }
       await this.persistSnapshot(snapshot, { reason: 'periodic' });
       this.lastPeriodicSignature = signature;
-    } catch {
-      // persistence must be best-effort
+    } catch (error) {
+      logStatsManagerNonBlockingError('persistPeriodicSnapshot', error, {
+        logPath: this.statsLogPath
+      });
     }
   }
 
@@ -810,7 +896,11 @@ export class StatsManager {
           } else {
             legacyRecords.push(record);
           }
-        } catch {
+        } catch (error) {
+          logStatsManagerNonBlockingError('loadHistoricalFromDisk.parseLine', error, {
+            logPath,
+            lineLength: line.length
+          });
           continue;
         }
       }
@@ -835,8 +925,8 @@ export class StatsManager {
         this.historicalSampleCount = merged.historicalSampleCount;
         this.mergeSnapshotIntoPeriods(record);
       }
-    } catch {
-      // File missing or unreadable -> treat as empty history.
+    } catch (error) {
+      logStatsManagerNonBlockingError('loadHistoricalFromDisk', error, { logPath });
     }
     this.historicalLoaded = true;
   }

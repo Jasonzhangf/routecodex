@@ -3,6 +3,30 @@ import type { Readable } from 'node:stream';
 
 type AnyObj = Record<string, unknown>;
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logSseResponseNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  try {
+    const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[sse-response] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function isReadable(v: unknown): v is Readable {
   return !!v && typeof (v as any).pipe === 'function';
 }
@@ -19,19 +43,31 @@ function setSSEHeadersRaw(res: ServerResponse) {
 export function sendNodeSSE(res: ServerResponse, stream: Readable) {
   setSSEHeadersRaw(res);
   // Write initial comment to establish stream in some proxies
-  try { res.write(': ok\n\n'); } catch { /* ignore */ }
+  try {
+    res.write(': ok\n\n');
+  } catch (error) {
+    logSseResponseNonBlocking('node.write_stream_preamble', error);
+  }
   stream.on('data', (chunk) => {
     res.write(typeof chunk === 'string' ? chunk : chunk.toString());
   });
   stream.on('end', () => {
-    try { res.write(':\n\n'); } catch { /* ignore */ }
+    try {
+      res.write(':\n\n');
+    } catch (error) {
+      logSseResponseNonBlocking('node.write_stream_epilogue', error);
+    }
     res.end();
   });
   stream.on('error', (err) => {
     try {
       res.write(`event: error\n`);
       res.write(`data: ${JSON.stringify({ message: String(err?.message || 'sse_error') })}\n\n`);
-    } catch { /* ignore */ }
+    } catch (error) {
+      logSseResponseNonBlocking('node.write_error_event', error, {
+        upstreamError: String((err as any)?.message ?? err ?? 'unknown')
+      });
+    }
     res.end();
   });
 }
@@ -47,14 +83,22 @@ export function sendExpressSSE(res: AnyObj, stream: Readable) {
   } else if (typeof (res as any).setHeader === 'function') {
     setSSEHeadersRaw(res as unknown as ServerResponse);
   }
-  try { (res as any).write(': ok\n\n'); } catch { /* ignore */ }
+  try {
+    (res as any).write(': ok\n\n');
+  } catch (error) {
+    logSseResponseNonBlocking('express.write_stream_preamble', error);
+  }
   stream.on('data', (chunk) => (res as any).write(typeof chunk === 'string' ? chunk : chunk.toString()));
   stream.on('end', () => (res as any).end());
   stream.on('error', (err) => {
     try {
       (res as any).write(`event: error\n`);
       (res as any).write(`data: ${JSON.stringify({ message: String(err?.message || 'sse_error') })}\n\n`);
-    } catch { /* ignore */ }
+    } catch (error) {
+      logSseResponseNonBlocking('express.write_error_event', error, {
+        upstreamError: String((err as any)?.message ?? err ?? 'unknown')
+      });
+    }
     (res as any).end();
   });
 }
@@ -87,7 +131,11 @@ export function sendSSEOrJSON(resOrReply: AnyObj, payload: AnyObj) {
   if (typeof (resOrReply as any).json === 'function') return (resOrReply as any).json(payload);
   if (typeof (resOrReply as any).send === 'function') return (resOrReply as any).send(jsonTxt);
   if (typeof (resOrReply as any).end === 'function') {
-    try { (resOrReply as any).setHeader?.('Content-Type', 'application/json; charset=utf-8'); } catch { /* ignore */ }
+    try {
+      (resOrReply as any).setHeader?.('Content-Type', 'application/json; charset=utf-8');
+    } catch (error) {
+      logSseResponseNonBlocking('json.set_header', error);
+    }
     return (resOrReply as any).end(jsonTxt);
   }
 }

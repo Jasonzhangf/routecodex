@@ -1,6 +1,35 @@
 import path from 'node:path';
 import { resolveRccSessionsDir } from '../../../config/user-data-paths.js';
 
+const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
+const nonBlockingLogState = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logSessionDirNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  const now = Date.now();
+  const last = nonBlockingLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingLogState.set(stage, now);
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[session-dir] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function sanitizeSegment(value: string): string {
   return String(value || '')
     .trim()
@@ -28,7 +57,8 @@ export function resolveServerScopedSessionDir(serverId: string): string | null {
       return null;
     }
     return path.join(resolveRccSessionsDir(), safe);
-  } catch {
+  } catch (error) {
+    logSessionDirNonBlockingError('resolveServerScopedSessionDir', error, { serverId });
     return null;
   }
 }
@@ -61,7 +91,11 @@ export function ensureServerScopedSessionDir(serverId: string): string | null {
       if (normalizedExisting === normalizedResolved) {
         return existing;
       }
-    } catch {
+    } catch (error) {
+      logSessionDirNonBlockingError('ensureServerScopedSessionDir.inspectExisting', error, {
+        serverId,
+        existing
+      });
       return existing;
     }
   }

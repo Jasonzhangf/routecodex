@@ -15,6 +15,26 @@ import { resolveProviderIdentity } from './provider-utils.js';
 import { initializeRouteErrorHub as initializeRouteErrorHubImpl } from '../../../error-handling/route-error-hub.js';
 import { formatErrorForErrorCenter } from '../../../utils/error-center-payload.js';
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logBootstrapNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[http-server-bootstrap] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 export function resolveVirtualRouterInput(server: any, userConfig: UnknownObject): UnknownObject {
   if (userConfig?.virtualrouter && typeof userConfig.virtualrouter === 'object') {
     return userConfig.virtualrouter as UnknownObject;
@@ -47,11 +67,16 @@ export function registerDaemonAdminUiRoute(server: any): void {
       let html = '';
       try {
         html = await fs.readFile(builtIndex, 'utf8');
-      } catch {
+      } catch (error) {
+        logBootstrapNonBlockingError('registerDaemonAdminUiRoute.readBuiltIndex', error, { builtIndex });
         try {
           const filePath = new URL('../../../../docs/daemon-admin-ui.html', import.meta.url);
           html = await fs.readFile(filePath, 'utf8');
-        } catch {
+        } catch (innerError) {
+          logBootstrapNonBlockingError('registerDaemonAdminUiRoute.readPackagedIndex', innerError, {
+            builtIndex,
+            fallback: '../../../../docs/daemon-admin-ui.html'
+          });
           html = await fs.readFile(legacyFile, 'utf8');
         }
       }
@@ -89,7 +114,12 @@ export function registerDaemonAdminUiRoute(server: any): void {
         res.status(404).end();
         return;
       }
-      const stat = await fs.stat(target).catch(() => null);
+      let stat: Awaited<ReturnType<typeof fs.stat>> | null = null;
+      try {
+        stat = await fs.stat(target);
+      } catch (error) {
+        logBootstrapNonBlockingError('registerDaemonAdminUiRoute.statAsset', error, { target });
+      }
       if (!stat || !stat.isFile()) {
         next();
         return;
@@ -102,7 +132,10 @@ export function registerDaemonAdminUiRoute(server: any): void {
       }
       res.setHeader('Cache-Control', 'no-store, max-age=0');
       res.sendFile(target);
-    } catch {
+    } catch (error) {
+      logBootstrapNonBlockingError('registerDaemonAdminUiRoute.serveAsset', error, {
+        path: String(req.path || '')
+      });
       next();
     }
   });
@@ -177,7 +210,8 @@ export function tryBuildProfiles(config: UnknownObject | undefined): ProviderPro
   }
   try {
     return buildProviderProfiles(config);
-  } catch {
+  } catch (error) {
+    logBootstrapNonBlockingError('tryBuildProfiles', error);
     return null;
   }
 }
@@ -441,8 +475,8 @@ export async function waitForRuntimeReady(server: any): Promise<void> {
     const timer = setTimeout(() => reject(new Error(`startup timeout after ${timeoutMs}ms`)), timeoutMs);
     try {
       (timer as unknown as { unref?: () => void }).unref?.();
-    } catch {
-      // ignore
+    } catch (error) {
+      logBootstrapNonBlockingError('waitForRuntimeReady.timerUnref', error, { timeoutMs });
     }
   });
   await Promise.race([server.runtimeReadyPromise, timeoutPromise]);

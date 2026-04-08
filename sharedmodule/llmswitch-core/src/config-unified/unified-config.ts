@@ -13,6 +13,20 @@ type ProviderEntry = { models?: ProviderModels } & UnknownRecord;
 const hasProviders = (value: unknown): value is { providers: Record<string, ProviderEntry> } =>
   isRecord(value) && typeof value.providers === 'object' && value.providers !== null;
 
+const logUnifiedConfigNonBlocking = (
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void => {
+  try {
+    const reason = error instanceof Error ? (error.stack || `${error.name}: ${error.message}`) : String(error);
+    const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[unified-config] ${stage} failed (non-blocking): ${reason}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+};
+
 const readJsonSync = (file: string): UnknownRecord | null => {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf-8')) as UnknownRecord;
@@ -151,7 +165,12 @@ export class UnifiedConfigFacade {
           modulesSafety = safetyRatio;
         }
       }
-    } catch { /* ignore */ }
+    } catch (error) {
+      logUnifiedConfigNonBlocking('context_budget.read_modules_json', error, {
+        configDir,
+        modelId
+      });
+    }
 
     // merged-config*.json
     try {
@@ -167,8 +186,11 @@ export class UnifiedConfigFacade {
           return { maxBytes: v, safetyRatio: safety, allowedBytes: Math.floor(v * (1 - safety)), source: `merged:${path.basename(f)}` };
         }
       }
-    } catch {
-      /* ignore */
+    } catch (error) {
+      logUnifiedConfigNonBlocking('context_budget.scan_merged_configs', error, {
+        configDir,
+        modelId
+      });
     }
 
     // config.json
@@ -181,7 +203,12 @@ export class UnifiedConfigFacade {
           return { maxBytes: v, safetyRatio: safety, allowedBytes: Math.floor(v * (1 - safety)), source: 'config.json' };
         }
       }
-    } catch { /* ignore */ }
+    } catch (error) {
+      logUnifiedConfigNonBlocking('context_budget.read_config_json', error, {
+        configDir,
+        modelId
+      });
+    }
 
     // fallback
     const def = modulesDefault && modulesDefault > 0 ? modulesDefault : 200_000;
@@ -226,12 +253,15 @@ export class UnifiedConfigFacade {
       this.fsWatcher = fs.watch(configDir, { persistent: false }, (event, file) => {
         try {
           this.watchers.forEach((fn) => fn({ file: file || '', event }));
-        } catch {
-          /* ignore */
+        } catch (error) {
+          logUnifiedConfigNonBlocking('watch_config.notify_callback', error, {
+            file: file || '',
+            event
+          });
         }
       });
-    } catch {
-      /* ignore */
+    } catch (error) {
+      logUnifiedConfigNonBlocking('watch_config.open_fs_watch', error);
     }
   }
 
@@ -244,8 +274,8 @@ export class UnifiedConfigFacade {
     if (this.watchers.length === 0 && this.fsWatcher) {
       try {
         this.fsWatcher.close();
-      } catch {
-        /* ignore */
+      } catch (error) {
+        logUnifiedConfigNonBlocking('unwatch_config.close_fs_watch', error);
       }
       this.fsWatcher = null;
     }

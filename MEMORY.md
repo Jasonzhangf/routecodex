@@ -2,6 +2,22 @@
 
 ## Skills 与调试工作流
 
+- 2026-04-07: 继续去重 session 清理路径中的 tmux 活性探针：`cleanupSessionStorageOnStartup` 与 `cleanupDeadTmuxSessionsFromRegistry` 引入单轮 memoized liveness cache，避免同一 tmuxSession 在一轮清理中被重复探测。与 tmux-probe TTL 缓存叠加后，进一步减少子进程探测开销。验证：session-storage-cleanup/session-client-registry/session-client-routes.stopmessage-cleanup 回归通过。
+
+Tags: performance-budget, session-cleanup-memoization, tmux-liveness-dedup, process-spawn-reduction, registry-cleanup, startup-cleanup
+
+- 2026-04-07: 继续 process 开销优化：`isTmuxSessionIdleForInject` 新增短 TTL 缓存（与 alive/workdir 共用 1200ms + 256 容量预算），仅缓存布尔结果，异常不缓存；并在注入前后清理/回写 cache，减少 heartbeat 周期中的 `tmux list-panes/capture-pane` 子进程开销。验证：`tmux-session-probe.spec` 新增 idle-cache 用例（list-panes/capture-pane 各 1 次）通过。
+
+Tags: performance-budget, tmux-idle-cache, heartbeat-overhead, process-spawn-reduction, ttl-cache, cache-budget, runtime-stability
+
+- 2026-04-06: 继续性能优化（process/thread 开销）：为 `tmux-session-probe` 增加短 TTL 探针缓存（默认 1200ms）与容量上限（默认 256），覆盖 `isTmuxSessionAlive`/`resolveTmuxSessionWorkingDirectory`，并在 tmux kill/注入路径更新缓存状态，减少高频 `spawnSync('tmux', ...)` 子进程创建。验证：新增 `tmux-session-probe.spec` 缓存用例（重复探针仅 1 次 has-session 调用）并通过。
+
+Tags: performance-budget, tmux-probe-cache, spawnsync-reduction, process-overhead, ttl-cache, cache-budget, session-runtime
+
+- 2026-04-06: 性能/预算审查沉淀：snap 模式下请求/响应历史大块禁止深拷贝，统一采用 `mmap-hint` 摘要（仅采样/限深/限键）后再落盘；并在 runtime setup 增加 `provider-traffic` 当前进程状态 reset，避免热重启后旧并发租约残留导致虚假饱和。验证链：`npx tsc --noEmit` + `provider-traffic-governor.spec` + `request-executor.single-attempt.spec` 通过。
+
+Tags: performance-budget, mmap-hint, zero-copy-summary, snapshots, provider-traffic, runtime-reload, concurrency-reset, verification
+
 - 2026-03-22: apply_patch 兼容修复第二轮收口（routecodex-273）：根因是 `compat_fix_apply_patch::fix_apply_patch_tool_calls_json` 在 payload 缺少 `messages` 时会提前返回，导致 `input.function_call` 路径根本未修复；同时 add-file 归一化对行末统一 `trim_end` 会放大空行/尾空白语义偏差。修复策略：仅在 Rust 真源改造——(1) messages/input 双路径独立处理，不再依赖 messages 存在；(2) arguments 支持 string/object/array wrapper 语义提取后统一归一；(3) add-file 归一化保留空行（`\n+\n`）与原始内容，不再对非 header 内容做 `trim_end`。验证闭环：replay original-shape + control、Jest apply-patch 三件套、Rust compat/blankline 单测、sharedmodule build:ci、根仓 build:dev、install:release 全部通过。  
 
 Tags: apply-patch, compatibility, input-function-call, blank-line, wrapper-shape, rust-core, no-ts-feature, routecodex-273, replay, build-dev, install-release

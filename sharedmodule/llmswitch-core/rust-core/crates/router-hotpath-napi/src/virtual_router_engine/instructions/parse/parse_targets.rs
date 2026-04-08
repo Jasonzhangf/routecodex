@@ -46,28 +46,39 @@ fn split_instruction_targets(content: &str) -> Vec<String> {
         .collect()
 }
 
-fn normalize_split_stop_message_head_token(token: &str) -> String {
-    let normalized = normalize_instruction_leading(token);
-    normalized
-        .trim_matches('"')
-        .trim_matches('\'')
-        .trim()
-        .to_string()
-}
-
 fn recover_split_stop_message_instruction(tokens: &[String]) -> Option<String> {
-    if tokens.len() < 2 {
+    if tokens.is_empty() {
         return None;
     }
-    let head = normalize_split_stop_message_head_token(&tokens[0]);
-    if !head.eq_ignore_ascii_case("sm") {
+    let head = normalize_instruction_leading(&tokens[0]);
+    let head_re = Regex::new(r#"(?i)^(?:"|')?(sm|stopmessage)(?:"|')?\s*([:,])?\s*(.*)$"#).ok()?;
+    let captures = head_re.captures(head.trim())?;
+    let command = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
+    if command.is_empty() {
         return None;
     }
-    let tail = tokens[1..].join(",").trim().to_string();
+    let separator = captures.get(2).map(|m| m.as_str()).unwrap_or(":");
+    let mut tail_tokens: Vec<String> = Vec::new();
+    let first_tail = captures.get(3).map(|m| m.as_str()).unwrap_or("").trim();
+    if !first_tail.is_empty() {
+        tail_tokens.push(first_tail.to_string());
+    }
+    for token in tokens.iter().skip(1) {
+        let trimmed = token.trim();
+        if !trimmed.is_empty() {
+            tail_tokens.push(trimmed.to_string());
+        }
+    }
+    let tail = tail_tokens.join(",").trim().to_string();
     if tail.is_empty() {
         return None;
     }
-    Some(format!("sm:{}", tail))
+    let normalized_command = if command.eq_ignore_ascii_case("sm") {
+        "sm"
+    } else {
+        "stopMessage"
+    };
+    Some(format!("{}{}{}", normalized_command, separator, tail))
 }
 
 pub(super) fn expand_instruction_segments(instruction: &str) -> Vec<String> {
@@ -76,7 +87,7 @@ pub(super) fn expand_instruction_segments(instruction: &str) -> Vec<String> {
         return Vec::new();
     }
     let normalized_leading = normalize_instruction_leading(trimmed);
-    let stop_re = Regex::new(r#"(?i)^(?:"|')?sm(?:"|')?\s*[:,]"#).unwrap();
+    let stop_re = Regex::new(r#"(?i)^(?:"|')?(?:sm|stopmessage)(?:"|')?\s*[:,]"#).unwrap();
     if stop_re.is_match(&normalized_leading) {
         return vec![normalize_stop_message_command_prefix(&normalized_leading)];
     }

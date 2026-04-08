@@ -478,7 +478,7 @@ function shouldShowHighlightedFinishReason(scope: string, action: string, finish
   }
   const normalizedScope = scope.trim().toLowerCase();
   const normalizedAction = action.trim().toLowerCase();
-  return (normalizedScope === 'response' || normalizedScope === 'hub.response') && normalizedAction === 'completed';
+  return (normalizedScope === 'response' || normalizedScope === 'hub' || normalizedScope === 'hub.response') && normalizedAction === 'completed';
 }
 
 function pruneRequestStageTimelines(nowMs: number): void {

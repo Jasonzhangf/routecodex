@@ -18,6 +18,30 @@ import {
 import { resolveRccPath } from '../config/user-data-paths.js';
 import { logProcessLifecycle } from '../utils/process-lifecycle-logger.js';
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logTokenDaemonCommandNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[commands.token-daemon] ${stage} failed (non-blocking): ${formatUnknownError(error)}${suffix}`);
+  } catch {
+    void 0;
+  }
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -40,7 +64,7 @@ export function createTokenDaemonCommand(): Command {
     .description('Background daemon for monitoring and refreshing OAuth tokens')
     .argument(
       '[selector]',
-      'Token selector: file basename, full path, or provider id (e.g. "iflow-oauth-1-work.json")'
+      'Token selector: file basename, full path, or provider id (e.g. "qwen-oauth-1-work.json")'
     )
     .action(async (selector?: string) => {
       if (!selector) {
@@ -121,7 +145,7 @@ export function createTokenDaemonCommand(): Command {
     .description('Trigger interactive re-auth for a specific token (opens browser)')
     .argument(
       '<selector>',
-      'Token selector: file basename, full path, or provider id (e.g. "iflow-oauth-1-work.json")'
+      'Token selector: file basename, full path, or provider id (e.g. "qwen-oauth-1-work.json")'
     )
     .action(async (selector: string) => {
       await safeInteractiveRefresh(selector, { force: true });
@@ -162,8 +186,10 @@ async function startDaemonForeground(options: { interval?: string; refreshAheadM
     await releaseTokenManagerLeader(ownerId);
     try {
       await fs.unlink(TOKEN_DAEMON_PID_FILE);
-    } catch {
-      // ignore
+    } catch (unlinkError) {
+      logTokenDaemonCommandNonBlockingError('cleanupAndExit.unlinkPidFile', unlinkError, {
+        pidFile: TOKEN_DAEMON_PID_FILE
+      });
     }
     process.exit(0);
   };
@@ -224,8 +250,10 @@ async function startDaemonBackground(options: { interval?: string; refreshAheadM
 
     try {
       child.unref();
-    } catch {
-      // ignore
+    } catch (unrefError) {
+      logTokenDaemonCommandNonBlockingError('startDaemonBackground.childUnref', unrefError, {
+        childPid: child.pid ?? null
+      });
     }
   } catch (error) {
     logProcessLifecycle({
@@ -267,8 +295,10 @@ async function stopExistingDaemon(): Promise<boolean> {
   }
   try {
     await fs.unlink(TOKEN_DAEMON_PID_FILE);
-  } catch {
-    // ignore
+  } catch (unlinkError) {
+    logTokenDaemonCommandNonBlockingError('stopExistingDaemon.unlinkPidFile', unlinkError, {
+      pidFile: TOKEN_DAEMON_PID_FILE
+    });
   }
   return true;
 }
@@ -289,8 +319,10 @@ async function writePidFile(pid: string): Promise<void> {
     const dir = path.dirname(TOKEN_DAEMON_PID_FILE);
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(TOKEN_DAEMON_PID_FILE, pid, 'utf8');
-  } catch {
-    // ignore pid file failures
+  } catch (writePidError) {
+    logTokenDaemonCommandNonBlockingError('writePidFile', writePidError, {
+      pidFile: TOKEN_DAEMON_PID_FILE
+    });
   }
 }
 

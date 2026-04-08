@@ -10,10 +10,49 @@ import { readStopMessageCompareContext } from '../stop-message-compare-context.j
 
 const FLOW_ID_GUARD = 'reasoning_stop_guard_flow';
 const FLOW_ID_FINALIZE = 'reasoning_stop_finalize_flow';
+const FLOW_ID_CONTINUE = 'reasoning_stop_continue_flow';
 const HOOK_ID = 'reasoning_stop_guard';
 
 const CONTINUE_TEXT =
-  '当前任务没有完成，请继续执行。请先调用 reasoning.stop 进行自查：任务目标、是否完成、完成证据或未完成原因。';
+  '当前任务没有完成，请继续执行。必须先调用 reasoning.stop 自查，并严格填写结构化字段：task_goal、is_completed，以及（is_completed=false 时）next_step 或 cannot_complete_reason。若存在下一步分析计划，必须写入 next_step；仅在当前确实阻塞无法推进时才填写 cannot_complete_reason。';
+
+function parseReasoningStopSummary(summary: string): {
+  completed?: boolean;
+  nextStep: string;
+} {
+  const normalized = typeof summary === 'string' ? summary.trim() : '';
+  if (!normalized) {
+    return { nextStep: '' };
+  }
+  const lines = normalized.split('\n').map((line) => line.trim()).filter(Boolean);
+  let completed: boolean | undefined;
+  let nextStep = '';
+  for (const line of lines) {
+    if (line.startsWith('是否完成:')) {
+      const value = line.slice('是否完成:'.length).trim();
+      if (value === '是') {
+        completed = true;
+      } else if (value === '否') {
+        completed = false;
+      }
+      continue;
+    }
+    if (line.startsWith('下一步:')) {
+      nextStep = line.slice('下一步:'.length).trim();
+      continue;
+    }
+  }
+  return { completed, nextStep };
+}
+
+function buildExecuteNextStepText(nextStep: string): string {
+  return [
+    '你在上一轮 reasoning.stop 自查中给出了下一步计划。',
+    `next_step: ${nextStep}`,
+    '现在立即执行该 next_step，不要停止。',
+    '若执行后仍未完成，请继续推进；只有在明确阻塞无法继续时，才再次调用 reasoning.stop 并填写 cannot_complete_reason。'
+  ].join('\n');
+}
 
 function isReasoningStopGuardEnabled(): boolean {
   const raw = String(process.env.ROUTECODEX_REASONING_STOP_GUARD_ENABLED ?? '').trim().toLowerCase();
@@ -117,6 +156,30 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
   return {
     flowId: FLOW_ID_FINALIZE,
     finalize: async () => {
+      const parsed = parseReasoningStopSummary(stopState.summary);
+      if (parsed.completed === false && parsed.nextStep) {
+        return {
+          chatResponse: ctx.base,
+          execution: {
+            flowId: FLOW_ID_CONTINUE,
+            followup: {
+              requestIdSuffix: ':reasoning_stop_continue',
+              entryEndpoint: ctx.entryEndpoint,
+              injection: {
+                ops: [
+                  { op: 'preserve_tools' },
+                  { op: 'ensure_standard_tools' },
+                  { op: 'append_assistant_message', required: false },
+                  { op: 'append_user_text', text: buildExecuteNextStepText(parsed.nextStep) }
+                ]
+              },
+              metadata: {
+                clientInjectSource: 'servertool.reasoning_stop_continue'
+              }
+            }
+          }
+        };
+      }
       const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
       clearReasoningStopState(ctx.adapterContext);
       return {

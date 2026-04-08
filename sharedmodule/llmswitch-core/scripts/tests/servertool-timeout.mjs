@@ -22,19 +22,9 @@ async function main() {
   const adapterContext = {
     requestId,
     entryEndpoint: '/v1/responses',
-    providerProtocol: 'gemini-chat',
+    providerProtocol: 'openai-chat',
     providerKey: 'antigravity.test.timeout',
     sessionId,
-    clientTmuxSessionId: `tmux_${sessionId}`,
-    tmuxSessionId: `tmux_${sessionId}`,
-    __rt: {
-      stopMessageState: {
-        stopMessageText: '继续执行',
-        stopMessageMaxRepeats: 1,
-        stopMessageUsed: 0,
-        stopMessageSource: 'explicit'
-      }
-    },
     capturedChatRequest: {
       model: 'gpt-5.2-codex',
       messages: [{ role: 'user', content: 'hi' }]
@@ -48,7 +38,7 @@ async function main() {
       {
         index: 0,
         finish_reason: 'stop',
-        message: { role: 'assistant', content: 'ok' }
+        message: { role: 'assistant', content: '', reasoning: '我需要继续执行下一步。' }
       }
     ]
   };
@@ -61,8 +51,7 @@ async function main() {
       adapterContext,
       requestId,
       entryEndpoint: '/v1/responses',
-      providerProtocol: 'gemini-chat',
-      clientInjectDispatch: async () => ({ ok: true }),
+      providerProtocol: 'openai-chat',
       reenterPipeline: async () => never
     });
     console.error('❌ expected servertool followup timeout, but orchestration completed');

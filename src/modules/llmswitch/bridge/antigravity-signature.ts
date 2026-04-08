@@ -21,6 +21,30 @@ type AntigravitySessionSignatureModule = {
 let cachedAntigravitySignatureModule: AntigravitySessionSignatureModule | null = null;
 let antigravitySignatureModuleWarmupPromise: Promise<AntigravitySessionSignatureModule | null> | null = null;
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logAntigravitySignatureNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[antigravity-signature] ${stage} failed (non-blocking): ${formatUnknownError(error)}${suffix}`);
+  } catch {
+    void 0;
+  }
+}
+
 function loadAntigravitySignatureModule(): AntigravitySessionSignatureModule | null {
   if (cachedAntigravitySignatureModule) {
     return cachedAntigravitySignatureModule;
@@ -29,7 +53,8 @@ function loadAntigravitySignatureModule(): AntigravitySessionSignatureModule | n
     cachedAntigravitySignatureModule = requireCoreDist<AntigravitySessionSignatureModule>(
       'conversion/compat/antigravity-session-signature'
     );
-  } catch {
+  } catch (requireError) {
+    logAntigravitySignatureNonBlockingError('loadAntigravitySignatureModule.requireCoreDist', requireError);
     cachedAntigravitySignatureModule = null;
   }
   return cachedAntigravitySignatureModule;
@@ -43,7 +68,8 @@ export async function warmupAntigravitySessionSignatureModule(): Promise<void> {
     antigravitySignatureModuleWarmupPromise = (async () => {
       try {
         return await importCoreDist<AntigravitySessionSignatureModule>('conversion/compat/antigravity-session-signature');
-      } catch {
+      } catch (importError) {
+        logAntigravitySignatureNonBlockingError('warmupAntigravitySessionSignatureModule.importCoreDist', importError);
         return null;
       }
     })();
@@ -63,7 +89,8 @@ export function extractAntigravityGeminiSessionId(payload: unknown): string | un
   }
   try {
     return fn(payload);
-  } catch {
+  } catch (extractError) {
+    logAntigravitySignatureNonBlockingError('extractAntigravityGeminiSessionId', extractError);
     return undefined;
   }
 }
@@ -90,8 +117,11 @@ export function cacheAntigravitySessionSignature(a: string, b: string, c?: strin
     } else {
       fn(sessionId, signature, messageCount);
     }
-  } catch {
-    // best-effort only
+  } catch (cacheError) {
+    logAntigravitySignatureNonBlockingError('cacheAntigravitySessionSignature', cacheError, {
+      aliasKey,
+      sessionId
+    });
   }
 }
 
@@ -107,7 +137,10 @@ export function getAntigravityLatestSignatureSessionIdForAlias(
   try {
     const out = fn(aliasKey, options);
     return typeof out === 'string' && out.trim().length ? out.trim() : undefined;
-  } catch {
+  } catch (lookupLatestError) {
+    logAntigravitySignatureNonBlockingError('getAntigravityLatestSignatureSessionIdForAlias', lookupLatestError, {
+      aliasKey
+    });
     return undefined;
   }
 }
@@ -125,7 +158,11 @@ export function lookupAntigravitySessionSignatureEntry(
   try {
     const out = fn(aliasKey, sessionId, options);
     return out && typeof out === 'object' ? (out as Record<string, unknown>) : undefined;
-  } catch {
+  } catch (lookupEntryError) {
+    logAntigravitySignatureNonBlockingError('lookupAntigravitySessionSignatureEntry', lookupEntryError, {
+      aliasKey,
+      sessionId
+    });
     return undefined;
   }
 }
@@ -138,8 +175,11 @@ export function invalidateAntigravitySessionSignature(aliasKey: string, sessionI
   }
   try {
     fn(aliasKey, sessionId);
-  } catch {
-    // best-effort only
+  } catch (invalidateError) {
+    logAntigravitySignatureNonBlockingError('invalidateAntigravitySessionSignature', invalidateError, {
+      aliasKey,
+      sessionId
+    });
   }
 }
 
@@ -161,7 +201,8 @@ export function clearAntigravitySessionAliasPins(options?: { hydrate?: boolean }
       ? Math.max(0, Math.floor(out.clearedByAlias))
       : 0;
     return { clearedBySession, clearedByAlias };
-  } catch {
+  } catch (clearPinsError) {
+    logAntigravitySignatureNonBlockingError('clearAntigravitySessionAliasPins', clearPinsError);
     return { clearedBySession: 0, clearedByAlias: 0 };
   }
 }
@@ -174,8 +215,8 @@ export function resetAntigravitySessionSignatureCachesForTests(): void {
   }
   try {
     fn();
-  } catch {
-    // best-effort only
+  } catch (resetError) {
+    logAntigravitySignatureNonBlockingError('resetAntigravitySessionSignatureCachesForTests', resetError);
   }
 }
 
@@ -187,8 +228,8 @@ export function configureAntigravitySessionSignaturePersistence(input: { stateDi
   }
   try {
     fn(input);
-  } catch {
-    // best-effort only
+  } catch (configureError) {
+    logAntigravitySignatureNonBlockingError('configureAntigravitySessionSignaturePersistence', configureError);
   }
 }
 
@@ -200,7 +241,7 @@ export function flushAntigravitySessionSignaturePersistenceSync(): void {
   }
   try {
     fn();
-  } catch {
-    // best-effort only
+  } catch (flushError) {
+    logAntigravitySignatureNonBlockingError('flushAntigravitySessionSignaturePersistenceSync', flushError);
   }
 }

@@ -7,7 +7,7 @@ import { extractCapturedChatSeed } from './followup-request-builder.js';
 import {
   renderStopMessageAutoFollowupViaAiAsync,
   extractStopMessageAutoResponseSnapshot
-} from './stop-message-auto/iflow-followup.js';
+} from './stop-message-auto/ai-followup.js';
 import { sanitizeFollowupText } from './followup-sanitize.js';
 import {
   getCapturedRequest,

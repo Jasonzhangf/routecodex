@@ -1,5 +1,29 @@
 import type { Filter, FilterContext, FilterResult, JsonObject } from '../types.js';
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logRequestToolcallsStringifyNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  try {
+    const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[request-toolcalls-stringify] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 /**
  * Ensure assistant.tool_calls[].function.arguments is a JSON string containing valid JSON.
  * - If arguments is not a string, JSON.stringify it.
@@ -74,7 +98,12 @@ export class RequestToolCallsStringifyFilter implements Filter<JsonObject> {
                 tc.function = fn;
               }
             }
-          } catch { /* ignore per-item errors */ }
+          } catch (error) {
+            logRequestToolcallsStringifyNonBlocking('normalize_tool_calls_for_message', error, {
+              messageRole: String((m as any)?.role ?? ''),
+              toolCallCount: Array.isArray((m as any)?.tool_calls) ? (m as any).tool_calls.length : 0
+            });
+          }
           // Invariant: assistant with tool_calls should use content=null
           (m as any).content = null;
         }

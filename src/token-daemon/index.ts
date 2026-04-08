@@ -36,11 +36,31 @@ export { TokenDaemon };
 
 const historyStore = new TokenHistoryStore();
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logTokenDaemonNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[token-daemon] ${stage} failed (non-blocking): ${formatUnknownError(error)}${suffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 async function cleanupInteractiveOAuthArtifacts(): Promise<void> {
   try {
     await shutdownLocalTokenPortalEnv();
-  } catch {
-    // ignore cleanup errors
+  } catch (cleanupError) {
+    logTokenDaemonNonBlockingError('cleanupInteractiveOAuthArtifacts', cleanupError);
   }
 }
 
@@ -472,8 +492,11 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
           process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = prevOpenOnly;
         }
       }
-    } catch {
-      // best-effort
+    } catch (openUrlError) {
+      logTokenDaemonNonBlockingError('interactiveRefresh.maybeOpenQuotaVerifyUrl', openUrlError, {
+        provider: token.provider,
+        alias: token.alias || 'default'
+      });
     }
   };
 
@@ -496,8 +519,11 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
         );
         await maybeOpenQuotaVerifyUrl(issue.url);
       }
-    } catch {
-      // best-effort: never block interactive oauth
+    } catch (quotaIssueError) {
+      logTokenDaemonNonBlockingError('interactiveRefresh.warnIfQuotaVerifyRequired', quotaIssueError, {
+        provider: token.provider,
+        alias: token.alias || 'default'
+      });
     }
   };
 
@@ -520,8 +546,8 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
               'Your user config has no "qwen" provider entry. This token will not be used until you add a qwen provider.'
             );
           }
-        } catch {
-          // ignore config load failures
+        } catch (configError) {
+          logTokenDaemonNonBlockingError('interactiveRefresh.qwenConfigCheck.preflight', configError);
         }
       }
       return;
@@ -558,9 +584,8 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
   // are applied to process.env before triggering the OAuth flow.
   try {
     await loadRouteCodexConfig();
-  } catch {
-    // best-effort: failure to load config should not block interactive re-auth;
-    // in that case, OAuth will fall back to default browser behavior.
+  } catch (configLoadError) {
+    logTokenDaemonNonBlockingError('interactiveRefresh.loadRouteCodexConfig', configLoadError);
   }
   // If token exists but config doesn't reference the provider, users will keep reauthing without effect.
   if (token.provider === 'qwen') {
@@ -572,8 +597,8 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
           'Your user config has no "qwen" provider entry. This token will not be used until you add a qwen provider.'
         );
       }
-    } catch {
-      // ignore
+    } catch (configError) {
+      logTokenDaemonNonBlockingError('interactiveRefresh.qwenConfigCheck.beforeOAuth', configError);
     }
   }
 
@@ -803,8 +828,12 @@ async function recordManualHistory(
       error: error ? (error instanceof Error ? error.message : String(error)) : undefined,
       tokenFileMtime
     });
-  } catch {
-    // ignore persistence failures for manual refreshes
+  } catch (historyError) {
+    logTokenDaemonNonBlockingError('recordManualHistory', historyError, {
+      provider: token.provider,
+      alias: token.alias || 'default',
+      outcome
+    });
   }
 }
 

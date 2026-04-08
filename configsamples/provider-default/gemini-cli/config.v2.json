@@ -40,6 +40,11 @@
         "maxContext": 1000000,
         "supportsStreaming": true
       }
+    },
+    "concurrency": {
+      "maxInFlight": 2,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
     }
   }
 }

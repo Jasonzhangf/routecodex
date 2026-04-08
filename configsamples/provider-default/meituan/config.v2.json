@@ -15,6 +15,11 @@
     "auth": {
       "type": "authorization",
       "secretRef": "${MEITUAN_API_KEY}"
+    },
+    "concurrency": {
+      "maxInFlight": 2,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
     }
   }
 }

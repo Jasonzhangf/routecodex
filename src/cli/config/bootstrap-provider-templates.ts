@@ -80,7 +80,7 @@ const GENERIC_STANDARD_TEMPLATES: InitProviderTemplate[] = [
   }
 ];
 
-const MANAGED_TEMPLATE_IDS = ['qwen', 'iflow', 'gemini-cli', 'antigravity', 'deepseek-web'] as const;
+const MANAGED_TEMPLATE_IDS = ['qwen', 'gemini-cli', 'antigravity', 'deepseek-web'] as const;
 
 function requireCatalogTemplate(id: string): InitProviderTemplate {
   const entry = getInitProviderCatalogEntry(id);

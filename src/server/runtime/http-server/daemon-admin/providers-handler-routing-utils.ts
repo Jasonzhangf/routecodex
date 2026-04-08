@@ -71,6 +71,26 @@ function isRecord(value: unknown): value is UnknownRecord {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logRoutingUtilsNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[providers-handler-routing-utils] ${stage} failed (non-blocking): ${formatUnknownError(error)}${suffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function createRoutingGroupError(code: RoutingGroupErrorCode, message: string): Error & { code: RoutingGroupErrorCode } {
   const error = new Error(message) as Error & { code: RoutingGroupErrorCode };
   error.code = code;
@@ -314,8 +334,8 @@ export function pickUserConfigPath(): string {
       if (p && fsSync.existsSync(p) && fsSync.statSync(p).isFile()) {
         return p;
       }
-    } catch {
-      // ignore
+    } catch (pathCheckError) {
+      logRoutingUtilsNonBlockingError('pickUserConfigPath.envCandidateCheck', pathCheckError, { candidate: p });
     }
   }
   return resolveRouteCodexConfigPath();
@@ -618,8 +638,10 @@ export async function listRoutingSources(): Promise<RoutingSourceSummary[]> {
       if (!lower.startsWith('config_')) continue;
       candidates.push({ kind: 'routecodex', label: name, path: path.join(routecodexHome, name) });
     }
-  } catch {
-    // ignore
+  } catch (listRootConfigsError) {
+    logRoutingUtilsNonBlockingError('listRoutingSources.scanRoutecodexHome', listRootConfigsError, {
+      routecodexHome
+    });
   }
 
   // Imported configs under ~/.rcc/config and ~/.rcc/config/multi
@@ -635,8 +657,8 @@ export async function listRoutingSources(): Promise<RoutingSourceSummary[]> {
         const label = dir.endsWith(path.join('config', 'multi')) ? `config/multi/${name}` : `config/${name}`;
         candidates.push({ kind: 'import', label, path: path.join(dir, name) });
       }
-    } catch {
-      // ignore
+    } catch (listImportConfigsError) {
+      logRoutingUtilsNonBlockingError('listRoutingSources.scanImportDir', listImportConfigsError, { dir });
     }
   }
 
@@ -667,8 +689,10 @@ export async function listRoutingSources(): Promise<RoutingSourceSummary[]> {
         location: snapshot.location,
         version: snapshot.version
       });
-    } catch {
-      // ignore parse/read errors
+    } catch (readSourceError) {
+      logRoutingUtilsNonBlockingError('listRoutingSources.readCandidate', readSourceError, {
+        path: abs
+      });
     }
   }
 
@@ -682,13 +706,15 @@ export async function listRoutingSources(): Promise<RoutingSourceSummary[]> {
 export async function backupFile(filePath: string): Promise<void> {
   try {
     await fs.access(filePath);
-  } catch {
+  } catch (accessError) {
+    logRoutingUtilsNonBlockingError('backupFile.access', accessError, { filePath });
     return;
   }
   const backup = `${filePath}.${Date.now()}.bak`;
   try {
     await fs.copyFile(filePath, backup);
-  } catch {
+  } catch (copyError) {
+    logRoutingUtilsNonBlockingError('backupFile.copy', copyError, { filePath, backup });
     return;
   }
 }

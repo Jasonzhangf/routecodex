@@ -168,13 +168,51 @@ function hasHeader(headers: Record<string, string> | undefined, name: string): b
   }
   return false;
 }
+const QWEN_DEFAULT_USER_AGENT = 'QwenCode/0.13.2 (darwin; arm64)';
+
+function maybeInjectQwenHeaders(
+  providerId: string,
+  compatibilityProfile: string,
+  headers: Record<string, string> | undefined
+): Record<string, string> | undefined {
+  const profile = typeof compatibilityProfile === 'string' ? compatibilityProfile.trim().toLowerCase() : '';
+  if (profile !== 'chat:qwen') {
+    return headers;
+  }
+  // Only inject for qwen provider (portal.qwen.ai)
+  const providerLower = providerId.trim().toLowerCase();
+  if (providerLower !== 'qwen') {
+    return headers;
+  }
+  const base: Record<string, string> = { ...(headers ?? {}) };
+  // Inject X-DashScope headers required by portal.qwen.ai
+  if (!hasHeader(base, 'X-DashScope-UserAgent')) {
+    base['X-DashScope-UserAgent'] = QWEN_DEFAULT_USER_AGENT;
+  }
+  if (!hasHeader(base, 'X-DashScope-CacheControl')) {
+    base['X-DashScope-CacheControl'] = 'enable';
+  }
+  if (!hasHeader(base, 'X-DashScope-AuthType')) {
+    base['X-DashScope-AuthType'] = 'qwen-oauth';
+  }
+  // Ensure User-Agent is set
+  if (!hasHeader(base, 'User-Agent')) {
+    base['User-Agent'] = QWEN_DEFAULT_USER_AGENT;
+  }
+  return base;
+}
 
 function maybeInjectClaudeCodeHeaders(
-  _providerId: string,
+  providerId: string,
   providerType: string,
   compatibilityProfile: string,
   headers: Record<string, string> | undefined
 ): Record<string, string> | undefined {
+  // First try qwen headers injection
+  const qwenHeaders = maybeInjectQwenHeaders(providerId, compatibilityProfile, headers);
+  if (qwenHeaders !== headers) {
+    return qwenHeaders;
+  }
   const profile = typeof compatibilityProfile === 'string' ? compatibilityProfile.trim().toLowerCase() : '';
   if (!profile || (profile !== 'anthropic:claude-code' && profile !== 'chat:claude-code')) {
     return headers;

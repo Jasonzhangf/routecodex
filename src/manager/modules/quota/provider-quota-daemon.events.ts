@@ -25,6 +25,32 @@ import {
   parseAntigravityGoogleAccountVerification
 } from './provider-quota-daemon.error-helpers.js';
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logProviderQuotaDaemonEventNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[provider-quota-daemon.events] ${stage} failed (non-blocking): ${formatUnknownError(error)}${suffix}`
+    );
+  } catch {
+    void 0;
+  }
+}
+
 export type ProviderQuotaDaemonEventContext = {
   quotaStates: Map<string, QuotaState>;
   staticConfigs: Map<string, StaticQuotaConfig>;
@@ -96,8 +122,10 @@ export async function handleProviderQuotaErrorEvent(
           authIssue: { kind: 'iflow_ak_blocked_434', blacklistUntil: nowMs + blacklistMs }
         }
       });
-    } catch {
-      // logging failure is non-fatal
+    } catch (appendError) {
+      logProviderQuotaDaemonEventNonBlockingError('iflow_434.appendProviderErrorEvent', appendError, {
+        providerKey
+      });
     }
     return;
   }
@@ -188,8 +216,10 @@ export async function handleProviderQuotaErrorEvent(
             authIssue: { kind: 'google_account_verification', url: verification.url }
           }
         });
-      } catch {
-        // logging failure is non-fatal
+      } catch (appendError) {
+        logProviderQuotaDaemonEventNonBlockingError('antigravity_verify.appendProviderErrorEvent', appendError, {
+          providerKey
+        });
       }
       return;
     }
@@ -234,8 +264,10 @@ export async function handleProviderQuotaErrorEvent(
             authIssue: { kind: 'oauth_reauth_required', cooldownUntil }
           }
         });
-      } catch {
-        // logging failure is non-fatal
+      } catch (appendError) {
+        logProviderQuotaDaemonEventNonBlockingError('antigravity_reauth.appendProviderErrorEvent', appendError, {
+          providerKey
+        });
       }
       return;
     }
@@ -418,14 +450,18 @@ export async function handleProviderQuotaErrorEvent(
         entryEndpoint: (event.runtime as { entryEndpoint?: string }).entryEndpoint
       }
     });
-  } catch {
-    // logging failure is non-fatal
+  } catch (appendError) {
+    logProviderQuotaDaemonEventNonBlockingError('appendProviderErrorEvent', appendError, {
+      providerKey
+    });
   }
 
   try {
     await saveProviderQuotaSnapshot(ctx.toSnapshotObject(), new Date(nowMs));
-  } catch {
-    // best-effort persistence only
+  } catch (snapshotError) {
+    logProviderQuotaDaemonEventNonBlockingError('saveProviderQuotaSnapshot', snapshotError, {
+      providerKey
+    });
   }
 }
 

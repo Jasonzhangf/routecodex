@@ -77,6 +77,13 @@ export interface ProviderTrafficGovernorLike {
   release(permit: ProviderTrafficPermit): Promise<{ released: boolean; activeInFlight: number }>;
 }
 
+export type ProviderTrafficResetResult = {
+  stateFilesScanned: number;
+  stateFilesUpdated: number;
+  leasesRemoved: number;
+  rpmEventsRemoved: number;
+};
+
 const DEFAULT_CONCURRENCY_TIMEOUT_MS = 60_000;
 const DEFAULT_CONCURRENCY_STALE_MS = 300_000;
 const DEFAULT_RPM_TIMEOUT_MS = 60_000;
@@ -87,6 +94,8 @@ const ACQUIRE_WAIT_BASE_MS = 100;
 const ACQUIRE_WAIT_MAX_MS = 2_000;
 const ACQUIRE_JITTER_MS = 40;
 const LOCK_WAIT_MAX_MS = 250;
+const PROVIDER_TRAFFIC_RUN_NAMESPACE =
+  `run-${process.pid}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -122,32 +131,11 @@ function isProcessAlive(pid: number | undefined): boolean {
   }
 }
 
-function resolveProviderTier(runtime: ProviderRuntimeProfile, providerKey?: string): 'single' | 'double' | 'quad' {
-  const candidates = [
-    runtime.providerFamily,
-    runtime.providerId,
-    providerKey,
-    runtime.providerKey,
-    runtime.runtimeKey
-  ]
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    .map((value) => value.trim().toLowerCase());
-  const isMatch = (needle: string): boolean => candidates.some((item) => item.includes(needle));
-  if (isMatch('deepseek') || isMatch('qwenchat')) {
-    return 'single';
-  }
-  if (isMatch('ali-coding-plan') || isMatch('tabglm') || isMatch('crs')) {
-    return 'quad';
-  }
-  return 'double';
-}
-
 export function resolveProviderTrafficPolicy(
   runtime: ProviderRuntimeProfile,
-  providerKey?: string
+  _providerKey?: string
 ): ResolvedProviderTrafficPolicy {
-  const tier = resolveProviderTier(runtime, providerKey);
-  const defaultMaxInFlight = tier === 'single' ? 1 : (tier === 'quad' ? 4 : 2);
+  const defaultMaxInFlight = 2;
   const defaultRpm = defaultMaxInFlight * 60;
   const configuredConcurrency = runtime.concurrency;
   const configuredRpm = runtime.rpm;
@@ -247,6 +235,11 @@ async function tryReadLockMeta(lockFile: string): Promise<{ pid?: number; create
   }
 }
 
+function hasValidLockMeta(meta: { pid?: number; createdAt?: number }): boolean {
+  return Number.isFinite(meta.pid) && (meta.pid as number) > 0
+    && Number.isFinite(meta.createdAt) && (meta.createdAt as number) > 0;
+}
+
 export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
   private readonly rootDir: string;
   private readonly lockDir: string;
@@ -258,9 +251,15 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     const testScopedRoot = jestWorker
       ? path.join(resolveRccStateDir(), 'provider-traffic-test', `worker-${jestWorker}`, `pid-${process.pid}`)
       : undefined;
+    const sharedNamespaceEnabled =
+      process.env.ROUTECODEX_PROVIDER_TRAFFIC_SHARED === '1'
+      || process.env.RCC_PROVIDER_TRAFFIC_SHARED === '1';
+    const defaultRoot = sharedNamespaceEnabled
+      ? path.join(resolveRccStateDir(), 'provider-traffic')
+      : path.join(resolveRccStateDir(), 'provider-traffic', PROVIDER_TRAFFIC_RUN_NAMESPACE);
     const base = rootDir
       ? path.resolve(rootDir)
-      : (testScopedRoot ?? path.join(resolveRccStateDir(), 'provider-traffic'));
+      : (testScopedRoot ?? defaultRoot);
     this.rootDir = base;
     this.lockDir = path.join(base, 'locks');
     this.stateDir = path.join(base, 'state');
@@ -283,6 +282,67 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
 
   private getStateFile(stateKey: string): string {
     return path.join(this.stateDir, `${stateKey}.json`);
+  }
+
+  async resetCurrentProcessState(): Promise<ProviderTrafficResetResult> {
+    await this.ensureDirs();
+    const result: ProviderTrafficResetResult = {
+      stateFilesScanned: 0,
+      stateFilesUpdated: 0,
+      leasesRemoved: 0,
+      rpmEventsRemoved: 0
+    };
+    let files: string[] = [];
+    try {
+      files = await fs.readdir(this.stateDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        return result;
+      }
+      throw error;
+    }
+
+    for (const file of files) {
+      if (!file.endsWith('.json')) {
+        continue;
+      }
+      const stateKey = file.slice(0, -'.json'.length);
+      if (!stateKey) {
+        continue;
+      }
+      result.stateFilesScanned += 1;
+      const stateFile = this.getStateFile(stateKey);
+      const lockFile = this.getLockFile(stateKey);
+      const lock = await this.acquireFileLock(lockFile, Date.now() + DEFAULT_CONCURRENCY_TIMEOUT_MS);
+      try {
+        const state = await readTrafficState(stateFile);
+        const removedRequestIds = new Set(
+          state.leases
+            .filter((lease) => lease.pid === process.pid)
+            .map((lease) => lease.requestId)
+        );
+        const nextLeases = state.leases.filter((lease) => lease.pid !== process.pid);
+        const nextRpmEvents = state.rpmEvents.filter((event) => !removedRequestIds.has(event.requestId));
+        const leaseDelta = Math.max(0, state.leases.length - nextLeases.length);
+        const rpmDelta = Math.max(0, state.rpmEvents.length - nextRpmEvents.length);
+        if (leaseDelta <= 0 && rpmDelta <= 0) {
+          continue;
+        }
+        result.leasesRemoved += leaseDelta;
+        result.rpmEventsRemoved += rpmDelta;
+        result.stateFilesUpdated += 1;
+        await writeTrafficState(stateFile, {
+          version: 1,
+          updatedAt: Date.now(),
+          leases: nextLeases,
+          rpmEvents: nextRpmEvents
+        });
+      } finally {
+        await lock.release();
+      }
+    }
+
+    return result;
   }
 
   private async acquireFileLock(lockFile: string, deadlineAt: number): Promise<LockHandle> {
@@ -312,10 +372,24 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
         };
       } catch (error) {
         const errno = (error as NodeJS.ErrnoException)?.code;
+        if (errno === 'ENOENT') {
+          await this.ensureDirs();
+          continue;
+        }
         if (errno !== 'EEXIST') {
           throw error;
         }
         const meta = await tryReadLockMeta(lockFile);
+        if (!hasValidLockMeta(meta)) {
+          try {
+            await fs.unlink(lockFile);
+            continue;
+          } catch (unlinkError) {
+            if ((unlinkError as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+              // another process may race us; fallback to wait
+            }
+          }
+        }
         const createdAt = meta.createdAt ?? 0;
         const lockAgeMs = createdAt > 0 ? now - createdAt : 0;
         const stale = lockAgeMs > LOCK_STALE_MS || !isProcessAlive(meta.pid);

@@ -87,6 +87,64 @@ const RETRYABLE_NETWORK_CODE_HINTS = [
 ];
 
 const truthy = new Set(['1', 'true', 'yes', 'on']);
+const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
+const nonBlockingLogState = new Map<string, number>();
+const FOLLOWUP_LOG_REASON_MAX_LEN = 180;
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logProviderResponseConverterNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  const now = Date.now();
+  const last = nonBlockingLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingLogState.set(stage, now);
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[provider-response-converter] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`
+    );
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
+function compactFollowupLogReason(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().replace(/\s+/g, ' ');
+  if (!normalized) {
+    return undefined;
+  }
+  const httpMatch =
+    normalized.match(/^http\s+(\d{3})\s*:/i) ||
+    normalized.match(/\bhttp\s+(\d{3})\b/i);
+  if (httpMatch?.[1]) {
+    return `HTTP_${httpMatch[1]}`;
+  }
+  if (/<\s*!doctype\s+html\b/i.test(normalized) || /<\s*html\b/i.test(normalized)) {
+    return 'UPSTREAM_HTML_ERROR';
+  }
+  if (normalized.length <= FOLLOWUP_LOG_REASON_MAX_LEN) {
+    return normalized;
+  }
+  return `${normalized.slice(0, FOLLOWUP_LOG_REASON_MAX_LEN)}…`;
+}
 
 function shouldEnableHubStageRecorder(): boolean {
   const raw = String(
@@ -398,8 +456,12 @@ export async function convertProviderResponseIfNeeded(
     const baseContext: Record<string, unknown> = {
       ...(metadataBag ?? {})
     };
+    const hasValidCapturedChatRequest =
+      baseContext.capturedChatRequest &&
+      typeof baseContext.capturedChatRequest === 'object' &&
+      !Array.isArray(baseContext.capturedChatRequest);
     if (
-      baseContext.capturedChatRequest === undefined &&
+      !hasValidCapturedChatRequest &&
       options.originalRequest &&
       typeof options.originalRequest === 'object' &&
       !Array.isArray(options.originalRequest)
@@ -574,8 +636,11 @@ export async function convertProviderResponseIfNeeded(
           if (Object.keys(baseRt).length || Object.keys(extraRt).length) {
             (out as any).__rt = { ...baseRt, ...extraRt };
           }
-        } catch {
-          // best-effort
+        } catch (error) {
+          logProviderResponseConverterNonBlockingError('reenter.buildNestedMetadata.mergeRuntimeMeta', error, {
+            requestId: reenterOpts.requestId,
+            entryEndpoint: resolvedEntry
+          });
         }
 
         if (asRecord((out as any).__rt)?.serverToolFollowup === true) {
@@ -650,8 +715,11 @@ export async function convertProviderResponseIfNeeded(
         if (Object.keys(baseRt).length || Object.keys(extraRt).length) {
             (out as any).__rt = { ...baseRt, ...extraRt };
         }
-      } catch {
-        // best-effort
+      } catch (error) {
+        logProviderResponseConverterNonBlockingError('clientInjectDispatch.mergeRuntimeMeta', error, {
+          requestId: injectOpts.requestId,
+          entryEndpoint: nestedEntry
+        });
       }
 
       if (asRecord((out as any).__rt)?.serverToolFollowup === true) {
@@ -762,6 +830,8 @@ export async function convertProviderResponseIfNeeded(
     const detailReason =
       typeof (detailRecord as Record<string, unknown> | undefined)?.reason === 'string'
         ? String((detailRecord as Record<string, unknown>).reason)
+        : typeof (detailRecord as Record<string, unknown> | undefined)?.error === 'string'
+          ? String((detailRecord as Record<string, unknown>).error)
         : undefined;
     const normalizedUpstreamCode = (upstreamCode || detailUpstreamCode || '').trim().toLowerCase();
     const isSseDecodeError =
@@ -786,13 +856,15 @@ export async function convertProviderResponseIfNeeded(
       }
       const normalizedCode = typeof errRecord.code === 'string' ? errRecord.code : errCode;
       if (isServerToolFollowupError) {
-        console.error('[RequestExecutor] ServerTool followup failed', {
-          requestId: options.requestId,
-          code: normalizedCode,
-          upstreamCode: upstreamCode || detailUpstreamCode,
-          reason: detailReason,
-          message
-        });
+        const compactReason = compactFollowupLogReason(detailReason) || compactFollowupLogReason(message);
+        const compactUpstreamCode = compactFollowupLogReason(upstreamCode || detailUpstreamCode);
+        const compactCode = compactFollowupLogReason(normalizedCode) || normalizedCode || 'UNKNOWN';
+        console.warn(
+          `[RequestExecutor] ServerTool followup failed req=${options.requestId}` +
+            ` code=${compactCode}` +
+            (compactUpstreamCode ? ` upstreamCode=${compactUpstreamCode}` : '') +
+            (compactReason ? ` reason=${JSON.stringify(compactReason)}` : '')
+        );
         if (normalizedUpstreamCode === 'client_inject_failed') {
           // Followup rejection should not break the main assistant response.
           return options.response;
@@ -801,7 +873,7 @@ export async function convertProviderResponseIfNeeded(
       logPipelineStage('convert.bridge.error', options.requestId, {
         code: normalizedCode,
         upstreamCode: upstreamCode || detailUpstreamCode,
-        reason: detailReason,
+        reason: compactFollowupLogReason(detailReason),
         message
       });
       if (isVerboseErrorLoggingEnabled()) {

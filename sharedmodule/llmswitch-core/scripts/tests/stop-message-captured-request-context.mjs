@@ -117,7 +117,6 @@ async function main() {
 
   let dispatchArgs = null;
   let reenterCalled = false;
-  let reenterArgs = null;
   const result = await runServerToolOrchestration({
     chat: {
       id: 'chatcmpl_stop',
@@ -138,9 +137,8 @@ async function main() {
       dispatchArgs = args;
       return { ok: true };
     },
-    reenterPipeline: async (args) => {
+    reenterPipeline: async () => {
       reenterCalled = true;
-      reenterArgs = args;
       return {
         body: {
           id: 'chatcmpl_followup',
@@ -159,19 +157,16 @@ async function main() {
 
   assert.equal(result.executed, true, 'stopMessage should execute followup flow');
   assert.equal(result.flowId, 'stop_message_flow', 'expected stop_message_flow');
-  assert.equal(reenterCalled, true, 'stop_message_flow should reenter by default');
-  assert.equal(dispatchArgs, null, 'stop_message_flow should skip clientInjectDispatch by default');
-  const metadata = reenterArgs?.metadata && typeof reenterArgs.metadata === 'object' ? reenterArgs.metadata : {};
-  assert.equal(metadata.clientInjectOnly, undefined, 'stopMessage reenter flow should not require clientInjectOnly');
-  const followupBody = reenterArgs?.body && typeof reenterArgs.body === 'object' ? reenterArgs.body : {};
-  const followupMessages = Array.isArray(followupBody.messages) ? followupBody.messages : [];
-  const lastMessage = [...followupMessages].reverse().find((item) => item && typeof item.content === 'string');
-  const injectText = lastMessage && typeof lastMessage.content === 'string' ? lastMessage.content : '';
+  assert.equal(reenterCalled, false, 'stop_message_flow should not reenter by default');
+  assert.ok(dispatchArgs && typeof dispatchArgs === 'object', 'stop_message_flow should dispatch client injection');
+  const metadata = dispatchArgs?.metadata && typeof dispatchArgs.metadata === 'object' ? dispatchArgs.metadata : {};
+  assert.equal(metadata.clientInjectOnly, true, 'stopMessage flow should set clientInjectOnly');
+  const injectText = typeof metadata.clientInjectText === 'string' ? metadata.clientInjectText : '';
   assert.ok(
     injectText.includes('继续执行'),
     'stopMessage followup text should be injected'
   );
-  assert.ok(Array.isArray(followupBody.messages), 'reenter followup should carry message history');
+  assert.ok(String(dispatchArgs.requestId || '').endsWith(':stop_followup'), 'stopMessage followup should keep suffix');
 
   hubPipeline.dispose();
   console.log('[matrix:stop-message-captured-request-context] ok');

@@ -36,6 +36,16 @@ type ShadowCompareBaselineMode =
     ? T
     : never;
 
+function isCapturedChatRequestShapeValid(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  const hasMessages = Array.isArray(record.messages);
+  const hasInput = Object.prototype.hasOwnProperty.call(record, "input") && record.input !== undefined;
+  return hasMessages || hasInput;
+}
+
 export async function executeRouteAndBuildOutbound<TContext = Record<string, unknown>>(args: {
   normalized: NormalizedRequest;
   hooks: RequestStageHooks<TContext>;
@@ -288,6 +298,19 @@ export async function executeRouteAndBuildOutbound<TContext = Record<string, unk
         normalized.metadata as Record<string, unknown> | undefined,
     }),
   );
+  if (!isCapturedChatRequestShapeValid(capturedChatRequest)) {
+    throw Object.assign(
+      new Error(
+        "[HubPipeline] capturedChatRequest must be chat-like (messages or input) for response-side servertool.",
+      ),
+      {
+        code: "ERR_CAPTURED_CHAT_REQUEST_INVALID",
+        requestId: normalized.id,
+        processMode: activeProcessMode,
+        entryEndpoint: normalized.entryEndpoint,
+      },
+    );
+  }
 
   const metadata = buildHubPipelineResultMetadataWithNative({
     normalized: {

@@ -78,6 +78,9 @@ export interface RoutingInstructionState {
   stopMessageAiMode?: 'on' | 'off';
   stopMessageAiSeedPrompt?: string;
   stopMessageAiHistory?: Array<Record<string, unknown>>;
+  reasoningStopArmed?: boolean;
+  reasoningStopSummary?: string;
+  reasoningStopUpdatedAt?: number;
   preCommandSource?: string;
   preCommandScriptPath?: string;
   preCommandUpdatedAt?: number;

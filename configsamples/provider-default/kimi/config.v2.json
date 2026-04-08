@@ -20,6 +20,11 @@
     "headers": {
       "User-Agent": "KimiCLI/1.0"
     },
-    "transportBackend": "vercel-ai-sdk"
+    "transportBackend": "vercel-ai-sdk",
+    "concurrency": {
+      "maxInFlight": 2,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
+    }
   }
 }

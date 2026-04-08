@@ -10,6 +10,35 @@ import {
   shouldTraceSessionScopeByContext
 } from '../../../utils/session-scope-trace.js';
 
+const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
+const nonBlockingLogState = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logMiddlewareNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  const now = Date.now();
+  const last = nonBlockingLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingLogState.set(stage, now);
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[http-middleware] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function isLocalhostRequest(req: Request): boolean {
   const ip = req.socket?.remoteAddress || '';
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
@@ -93,8 +122,8 @@ function attachClientDaemonHint(req: Request, daemonId: string | undefined): voi
     headers['x-routecodex-session-daemon-id'] = daemonId;
     headers['x-rcc-session-daemon-id'] = daemonId;
     headers['x-routecodex-daemon-id'] = daemonId;
-  } catch {
-    // best-effort only
+  } catch (error) {
+    logMiddlewareNonBlockingError('attachClientDaemonHint', error, { daemonId });
   }
 }
 
@@ -109,8 +138,8 @@ function attachClientTmuxHint(req: Request, tmuxSessionId: string | undefined): 
     headers['x-routecodex-tmux-session-id'] = tmuxSessionId;
     headers['x-rcc-tmux-session-id'] = tmuxSessionId;
     headers['x-tmux-session-id'] = tmuxSessionId;
-  } catch {
-    // best-effort only
+  } catch (error) {
+    logMiddlewareNonBlockingError('attachClientTmuxHint', error, { tmuxSessionId });
   }
 }
 

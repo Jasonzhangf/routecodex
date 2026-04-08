@@ -6,6 +6,7 @@ import type { ProviderRuntimeProfile } from '../../../providers/core/api/provide
 import { applyDefaultStageTimingMode, resolveRuntimeBuildMode } from './stage-timing-defaults.js';
 import { registerClockRuntimeHooks } from './clock-runtime-hooks.js';
 import { registerHeartbeatRuntimeHooks } from './heartbeat-runtime-hooks.js';
+import { getSharedProviderTrafficGovernor } from './provider-traffic-governor.js';
 
 type RoutingProviderScope = {
   providerKeys: string[];
@@ -15,6 +16,28 @@ type RoutingProviderScope = {
 };
 
 const TRUTHY_FLAG_SET = new Set(['1', 'true', 'yes', 'on']);
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logRuntimeSetupNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[http-server-runtime-setup] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`
+    );
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
 
 function readTruthyEnv(names: string[]): boolean {
   for (const name of names) {
@@ -126,6 +149,18 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
   // as token/quota managers to avoid non-routed providers doing background tasks.
   server.routingProviderScope = routingScope;
   await applyRoutingScopeToManagerModules(server, routingScope);
+  try {
+    const resetResult = await getSharedProviderTrafficGovernor().resetCurrentProcessState();
+    if (resetResult.leasesRemoved > 0 || resetResult.rpmEventsRemoved > 0) {
+      console.warn(
+        '[provider-traffic] reset stale current-process state on runtime setup',
+        JSON.stringify(resetResult)
+      );
+    }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`[provider-traffic] failed to reset state on runtime setup (non-blocking): ${reason}`);
+  }
   const hubCtor = await server.ensureHubPipelineCtor();
   const hubConfig: { virtualRouter: unknown; [key: string]: unknown } = {
     virtualRouter: bootstrapArtifacts.config
@@ -210,8 +245,12 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
         ...(routingStateStore ? { routingStateStore } : {}),
         ...('quotaView' in hubConfig ? { quotaView: hubConfig.quotaView } : {})
       });
-    } catch {
-      // best-effort
+    } catch (error) {
+      logRuntimeSetupNonBlockingError('setupRuntime.updateRuntimeDeps', error, {
+        hasHealthStore: Boolean(healthStore),
+        hasRoutingStateStore: Boolean(routingStateStore),
+        hasQuotaView: 'quotaView' in hubConfig
+      });
     }
     server.hubPipeline.updateVirtualRouterConfig(bootstrapArtifacts.config);
   }

@@ -61,6 +61,16 @@ type PersistenceState = {
 
 const GLOBAL_PERSISTENCE_KEY = '__LLMSWITCH_ANTIGRAVITY_SESSION_SIGNATURE_PERSISTENCE__';
 
+function logAntigravitySignatureNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  const reason = error instanceof Error ? (error.stack || `${error.name}: ${error.message}`) : String(error);
+  const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[antigravity-session-signature] ${stage} failed (non-blocking): ${reason}${detailSuffix}`);
+}
+
 function getPersistenceState(): PersistenceState | null {
   const g = globalThis as unknown as Record<string, unknown>;
   const existing = g[GLOBAL_PERSISTENCE_KEY];
@@ -96,8 +106,8 @@ export function configureAntigravitySessionSignaturePersistence(
     try {
       delete process.env.ROUTECODEX_ANTIGRAVITY_SIGNATURE_STATE_DIR;
       delete process.env.ROUTECODEX_ANTIGRAVITY_SIGNATURE_FILE;
-    } catch {
-      // best-effort only
+    } catch (error) {
+      logAntigravitySignatureNonBlocking('configure_persistence.clear_env', error);
     }
     return;
   }
@@ -121,16 +131,16 @@ export function configureAntigravitySessionSignaturePersistence(
   try {
     process.env.ROUTECODEX_ANTIGRAVITY_SIGNATURE_STATE_DIR = stateDir;
     process.env.ROUTECODEX_ANTIGRAVITY_SIGNATURE_FILE = fileName;
-  } catch {
-    // best-effort only
+  } catch (error) {
+    logAntigravitySignatureNonBlocking('configure_persistence.set_env', error, { stateDir, fileName });
   }
 
   // Ensure we hydrate immediately so a short-lived process (or a server restart)
   // never flushes an empty in-memory cache over an existing persisted file.
   try {
     hydrateSignaturesFromDiskIfNeeded(true);
-  } catch {
-    // best-effort only
+  } catch (error) {
+    logAntigravitySignatureNonBlocking('configure_persistence.hydrate', error, { stateDir, fileName });
   }
 }
 
@@ -611,8 +621,12 @@ function hydrateSignaturesFromDiskIfNeeded(force = false): void {
         signature: entry.signature,
         messageCount: entry.messageCount
       });
-    } catch {
-      // best-effort native sync; JS cache remains source of truth for persistence
+    } catch (error) {
+      logAntigravitySignatureNonBlocking('hydrate.native_sync_signature', error, {
+        aliasKey,
+        sessionId,
+        messageCount: entry.messageCount
+      });
     }
   };
 
@@ -760,11 +774,11 @@ function flushPersistedSignaturesSync(state: PersistenceState): void {
         typeof stat.mtimeMs === 'number' && Number.isFinite(stat.mtimeMs) ? stat.mtimeMs : stat.mtime.getTime();
       state.loadedOnce = true;
       state.loadedMtimeMs = mtimeMs;
-    } catch {
-      // ignore
+    } catch (error) {
+      logAntigravitySignatureNonBlocking('flush_persisted_signatures.refresh_mtime', error, { filePath });
     }
-  } catch {
-    // best-effort persistence: must not affect runtime
+  } catch (error) {
+    logAntigravitySignatureNonBlocking('flush_persisted_signatures.write', error, { filePath });
   }
 }
 
@@ -851,7 +865,10 @@ export function getAntigravityRequestSessionMeta(
       const ts = nowMs();
       requestSessionIds.set(rid, { aliasKey: alias, sessionId: sid, messageCount, timestamp: ts });
       return { aliasKey: alias, sessionId: sid, messageCount };
-    } catch {
+    } catch (error) {
+      logAntigravitySignatureNonBlocking('request_session.native_meta_lookup', error, {
+        requestId: rid
+      });
       return undefined;
     }
   }
@@ -979,8 +996,12 @@ export function cacheAntigravitySessionSignature(a: string, b: string, c?: strin
       signature: trimmedSignature,
       messageCount
     });
-  } catch {
-    // best-effort native sync; TS cache remains source for persistence semantics
+  } catch (error) {
+    logAntigravitySignatureNonBlocking('cache_signature.native_sync', error, {
+      aliasKey,
+      sessionId,
+      messageCount
+    });
   }
 }
 
@@ -1302,8 +1323,8 @@ export function resetAntigravitySessionSignatureCachesForTests(): void {
   }
   try {
     resetAntigravitySignatureCachesWithNative();
-  } catch {
-    // best-effort
+  } catch (error) {
+    logAntigravitySignatureNonBlocking('reset_native_caches', error);
   }
 }
 

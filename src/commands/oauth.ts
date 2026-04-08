@@ -21,13 +21,10 @@ async function safeInteractiveRefresh(
   }
 }
 
-function resolveAutoModeByProvider(provider?: string | null): 'iflow' | 'gemini' | 'qwen' | 'antigravity' | null {
+function resolveAutoModeByProvider(provider?: string | null): 'gemini' | 'qwen' | 'antigravity' | null {
   const raw = String(provider || '').trim().toLowerCase();
   if (!raw) {
     return null;
-  }
-  if (raw === 'iflow') {
-    return 'iflow';
   }
   if (raw === 'gemini-cli') {
     return 'gemini';
@@ -183,49 +180,6 @@ export function createOauthCommand(): Command {
           delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
         } else {
           process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT = prevAccountText;
-        }
-        delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
-      }
-    });
-
-  cmd
-    .command('iflow-auto')
-    .description('Trigger iFlow OAuth re-auth using Camoufox automation (auto portal + account selection)')
-    .argument(
-      '<selector>',
-      'Token selector: file basename, full path, or provider id (e.g. "iflow-oauth-1-186.json" or "iflow")'
-    )
-    .option('--dev', 'Run Camoufox automation in headed debug mode (default headless)')
-    .option('--headful', 'Open Camoufox in headed mode (alias of --dev)')
-    .action(async (selector: string, options: { dev?: boolean; headful?: boolean }) => {
-      const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
-      const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-      const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
-      process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
-      process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'iflow';
-      process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
-      if (options?.dev || options?.headful) {
-        process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
-      } else {
-        delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
-      }
-      try {
-        await safeInteractiveRefresh(selector, { force: true, mode: 'auto', noAutoFallback: true });
-      } finally {
-        if (prevBrowser === undefined) {
-          delete process.env.ROUTECODEX_OAUTH_BROWSER;
-        } else {
-          process.env.ROUTECODEX_OAUTH_BROWSER = prevBrowser;
-        }
-        if (prevAutoMode === undefined) {
-          delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-        } else {
-          process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
-        }
-        if (prevDevMode === undefined) {
-          delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
-        } else {
-          process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
         }
         delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
       }

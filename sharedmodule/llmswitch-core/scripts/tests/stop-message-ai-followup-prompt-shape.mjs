@@ -2,11 +2,11 @@
 
 import assert from 'node:assert/strict';
 
-import { buildStopMessageAutoMessageIflowPromptForTests } from '../../dist/servertool/handlers/stop-message-auto/iflow-followup.js';
+import { buildStopMessageAutoMessagePromptForTests } from '../../dist/servertool/handlers/stop-message-auto/ai-followup.js';
 
 async function main() {
   try {
-    const output = buildStopMessageAutoMessageIflowPromptForTests(
+    const output = buildStopMessageAutoMessagePromptForTests(
       {
         baseStopMessageText: '继续执行',
         candidateFollowupText: '优先补充 stopMessage 覆盖测试并验证',

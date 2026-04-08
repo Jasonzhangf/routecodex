@@ -1,5 +1,6 @@
 import type {
   ClassificationResult,
+  ModelCapability,
   RoutePoolTier,
   RouterMetadataInput,
   RoutingFeatures
@@ -500,12 +501,19 @@ function selectFromCandidates(
       ? Math.max(0, features.estimatedTokens)
       : 0;
   const webSearchRouteRequested = isWebSearchRouteRequested(classification.routeName, classification);
+  const multimodalRouteRequested = isMultimodalRouteRequested(classification.routeName, classification, features);
   const defaultWebSearchPools = filterPoolsByCapability(
     deps.routing[DEFAULT_ROUTE],
-    'web_search',
+    ['web_search'],
+    deps.providerRegistry
+  );
+  const defaultMultimodalPools = filterPoolsByCapability(
+    deps.routing[DEFAULT_ROUTE],
+    ['multimodal', 'vision'],
     deps.providerRegistry
   );
   const hasDefaultWebSearchFallback = routeHasTargets(defaultWebSearchPools);
+  const hasDefaultMultimodalFallback = routeHasTargets(defaultMultimodalPools);
 
   while (routeQueue.length) {
     const routeName = routeQueue.shift()!;
@@ -515,11 +523,23 @@ function selectFromCandidates(
     let routePools =
       webSearchRouteRequested && routeName === DEFAULT_ROUTE && hasDefaultWebSearchFallback
         ? defaultWebSearchPools
+        : multimodalRouteRequested && routeName === DEFAULT_ROUTE && hasDefaultMultimodalFallback
+          ? defaultMultimodalPools
         : deps.routing[routeName];
     if (webSearchRouteRequested && (routeName === 'web_search' || routeName === DEFAULT_ROUTE)) {
       const capabilityFiltered = filterPoolsByCapability(
         routePools,
-        'web_search',
+        ['web_search'],
+        deps.providerRegistry
+      );
+      if (routeHasTargets(capabilityFiltered)) {
+        routePools = capabilityFiltered;
+      }
+    }
+    if (multimodalRouteRequested && (routeName === 'multimodal' || routeName === 'vision' || routeName === DEFAULT_ROUTE)) {
+      const capabilityFiltered = filterPoolsByCapability(
+        routePools,
+        ['multimodal', 'vision'],
         deps.providerRegistry
       );
       if (routeHasTargets(capabilityFiltered)) {
@@ -586,9 +606,13 @@ function selectFromCandidates(
 
 function filterPoolsByCapability(
   pools: RoutePoolTier[] | undefined,
-  capability: 'web_search',
+  capabilities: Array<ModelCapability | 'vision'>,
   providerRegistry: SelectionDeps['providerRegistry']
 ): RoutePoolTier[] {
+  const expected = Array.from(new Set(capabilities.filter(Boolean)));
+  if (expected.length === 0) {
+    return [];
+  }
   if (!Array.isArray(pools)) {
     return [];
   }
@@ -597,7 +621,17 @@ function filterPoolsByCapability(
     if (!Array.isArray(pool.targets) || pool.targets.length === 0) {
       continue;
     }
-    const targets = pool.targets.filter((providerKey) => providerRegistry.hasCapability(providerKey, capability));
+    const targets = pool.targets.filter((providerKey) =>
+      expected.some((capability) => {
+        if (capability === 'vision') {
+          return (
+            providerRegistry.hasCapability(providerKey, 'multimodal') ||
+            providerRegistry.hasCapability(providerKey, capability as unknown as ModelCapability)
+          );
+        }
+        return providerRegistry.hasCapability(providerKey, capability);
+      })
+    );
     if (!targets.length) {
       continue;
     }
@@ -617,4 +651,27 @@ function isWebSearchRouteRequested(
     normalizeRouteAlias(requestedRoute || DEFAULT_ROUTE) === 'web_search' ||
     normalizeRouteAlias(classification.routeName || DEFAULT_ROUTE) === 'web_search'
   );
+}
+
+function isMultimodalRouteRequested(
+  requestedRoute: string,
+  classification: ClassificationResult,
+  features: RoutingFeatures
+): boolean {
+  if (features.hasImageAttachment !== true) {
+    return false;
+  }
+  const normalizedRequestedRoute = normalizeRouteAlias(requestedRoute || DEFAULT_ROUTE);
+  const normalizedClassifiedRoute = normalizeRouteAlias(classification.routeName || DEFAULT_ROUTE);
+  if (normalizedRequestedRoute === 'multimodal' || normalizedRequestedRoute === 'vision') {
+    return true;
+  }
+  if (normalizedClassifiedRoute === 'multimodal' || normalizedClassifiedRoute === 'vision') {
+    return true;
+  }
+  const candidates = Array.isArray(classification.candidates) ? classification.candidates : [];
+  if (candidates.some((route) => route === 'multimodal' || route === 'vision')) {
+    return true;
+  }
+  return true;
 }

@@ -56,8 +56,8 @@ function safeProcessCwd(fallback?: string): string {
     if (typeof cwd === 'string' && cwd.trim()) {
       return cwd;
     }
-  } catch {
-    // current working directory may disappear between launches
+  } catch (error) {
+    logNonBlockingError('safeProcessCwd.read_cwd', error);
   }
   const fallbackValue = String(fallback || '').trim();
   if (fallbackValue) {
@@ -68,8 +68,8 @@ function safeProcessCwd(fallback?: string): string {
     if (typeof home === 'string' && home.trim()) {
       return path.resolve(home);
     }
-  } catch {
-    // ignore homedir lookup failure
+  } catch (error) {
+    logNonBlockingError('safeProcessCwd.homedir_lookup', error);
   }
   return path.dirname(process.execPath);
 }
@@ -78,14 +78,14 @@ function ensureProcessCwdAccessible(): void {
   try {
     process.cwd();
     return;
-  } catch {
-    // fall through and rebind cwd
+  } catch (error) {
+    logNonBlockingError('ensureProcessCwdAccessible.read_cwd', error);
   }
   const fallbackDir = safeProcessCwd(path.dirname(process.argv[1] || process.execPath));
   try {
     process.chdir(fallbackDir);
-  } catch {
-    // keep original state if rebind fails; downstream callers still use safeProcessCwd
+  } catch (error) {
+    logNonBlockingError('ensureProcessCwdAccessible.chdir_fallback', error);
   }
 }
 
@@ -210,13 +210,37 @@ function shouldSuppressRuntimeLogLine(text: string): boolean {
   if (!text) {
     return false;
   }
+  if (text.includes('[virtual-router-hit]')) {
+    return true;
+  }
+  if (text.includes('[provider-switch]')) {
+    return true;
+  }
+  if (text.includes('[usage] request ')) {
+    return true;
+  }
+  if (
+    text.includes('[sticky-session-store]')
+    && text.includes('tmpCleanup failed (non-blocking)')
+    && text.includes('ENOENT')
+  ) {
+    return true;
+  }
+  if (
+    text.includes('[hub][')
+    || text.includes('[hub.response][')
+    || text.includes('[provider.send][')
+    || text.includes('[response][')
+  ) {
+    return true;
+  }
   if (isServertoolSkipDiagnosticLine(text)) {
     return true;
   }
   if (text.includes('[virtual-router][instruction_parse]') || text.includes('[virtual-router][stop_scope]')) {
     return false;
   }
-  if (text.includes('[servertool][iflow-automessage]') || text.includes('[servertool][ai-followup]')) {
+  if (text.includes('[servertool][ai-followup]')) {
     return false;
   }
   if (text.includes('[servertool][stop_compare]') || text.includes('[servertool][stop_watch]')) {
@@ -1061,7 +1085,8 @@ class RouteCodexApp {
         return null;
       }
       return { host: String(config.host || '0.0.0.0'), port: Number(config.port) };
-    } catch {
+    } catch (error) {
+      logNonBlockingError('getServerConfig', error);
       return null;
     }
   }
@@ -1093,8 +1118,8 @@ class RouteCodexApp {
         if (candidate && fsSync.existsSync(candidate) && fsSync.statSync(candidate).isFile()) {
           return candidate;
         }
-      } catch {
-        // ignore and fall back to the next candidate
+      } catch (error) {
+        logNonBlockingError('resolveUserConfigPath.env_candidate_probe', error);
       }
     }
     return resolveRouteCodexConfigPath();
@@ -1173,8 +1198,8 @@ class RouteCodexApp {
             return port;
           }
         }
-      } catch (e) {
-        // ignore and fall back
+      } catch (error) {
+        logNonBlockingError('detectServerPort.shared_config_probe', error);
       }
 
       // 最后检查默认配置文件
@@ -1216,7 +1241,11 @@ async function isServerHealthyQuick(port: number): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => {
-      try { controller.abort(); } catch { /* ignore */ }
+      try {
+        controller.abort();
+      } catch (error) {
+        logNonBlockingError('isServerHealthyQuick.abort_controller', error);
+      }
     }, 800);
     const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}${API_PATHS.HEALTH}`, {
       method: 'GET',
@@ -1229,7 +1258,8 @@ async function isServerHealthyQuick(port: number): Promise<boolean> {
     const data = await res.json().catch(() => null);
     const status = typeof data?.status === 'string' ? data.status.toLowerCase() : '';
     return !!data && (status === 'healthy' || status === 'ready' || status === 'ok' || data?.ready === true || data?.pipelineReady === true);
-  } catch {
+  } catch (error) {
+    logNonBlockingError('isServerHealthyQuick.probe', error);
     return false;
   }
 }
@@ -1250,8 +1280,8 @@ async function ensurePortAvailable(
       await new Promise(r => probe.close(() => r(null)));
       return 'available'; // free
     }
-  } catch {
-    // fallthrough
+  } catch (error) {
+    logNonBlockingError('ensurePortAvailable.quick_bind_probe', error);
   }
 
   if (restartInPlaceOnly) {
@@ -1453,7 +1483,11 @@ async function attemptHttpShutdown(port: number): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => {
-      try { controller.abort(); } catch { /* ignore */ }
+      try {
+        controller.abort();
+      } catch (error) {
+        logNonBlockingError('attemptHttpShutdown.abort_controller', error);
+      }
     }, 1000);
     const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}${API_PATHS.SHUTDOWN}`, {
       method: 'POST',

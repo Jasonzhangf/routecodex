@@ -93,6 +93,30 @@ import {
 import { normalizeHubPipelineRequest } from "./hub-pipeline-normalize-request.js";
 type ApplyPatchToolMode = "schema" | "freeform";
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logHubPipelineNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[hub-pipeline] ${stage} failed (non-blocking): ${formatUnknownError(error)}${suffix}`);
+  } catch {
+    void 0;
+  }
+}
+
 export type HubShadowCompareRequestConfig = {
   baselineMode: HubPolicyMode;
 };
@@ -229,12 +253,13 @@ export class HubPipeline {
         (event) => {
           try {
             this.routerEngine.handleProviderError(event);
-          } catch {
-            // ignore subscriber errors
+          } catch (subscriberError) {
+            logHubPipelineNonBlockingError('providerErrorCenter.handleProviderError', subscriberError);
           }
         },
       );
-    } catch {
+    } catch (subscribeError) {
+      logHubPipelineNonBlockingError('providerErrorCenter.subscribe', subscribeError);
       this.unsubscribeProviderErrors = undefined;
     }
     try {
@@ -242,12 +267,13 @@ export class HubPipeline {
         (event) => {
           try {
             this.routerEngine.handleProviderSuccess(event);
-          } catch {
-            // ignore subscriber errors
+          } catch (subscriberError) {
+            logHubPipelineNonBlockingError('providerSuccessCenter.handleProviderSuccess', subscriberError);
           }
         },
       );
-    } catch {
+    } catch (subscribeError) {
+      logHubPipelineNonBlockingError('providerSuccessCenter.subscribe', subscribeError);
       this.unsubscribeProviderSuccess = undefined;
     }
   }
@@ -276,8 +302,8 @@ export class HubPipeline {
         routingStateStore: (this.config.routingStateStore ?? null) as any,
         quotaView: this.config.quotaView ?? null,
       });
-    } catch {
-      // best-effort: runtime deps updates must never break routing
+    } catch (updateDepsError) {
+      logHubPipelineNonBlockingError('updateRuntimeDeps.routerEngine.updateDeps', updateDepsError);
     }
   }
 
@@ -295,16 +321,16 @@ export class HubPipeline {
     if (this.unsubscribeProviderErrors) {
       try {
         this.unsubscribeProviderErrors();
-      } catch {
-        // ignore dispose failures
+      } catch (disposeError) {
+        logHubPipelineNonBlockingError('dispose.unsubscribeProviderErrors', disposeError);
       }
       this.unsubscribeProviderErrors = undefined;
     }
     if (this.unsubscribeProviderSuccess) {
       try {
         this.unsubscribeProviderSuccess();
-      } catch {
-        // ignore dispose failures
+      } catch (disposeError) {
+        logHubPipelineNonBlockingError('dispose.unsubscribeProviderSuccess', disposeError);
       }
       this.unsubscribeProviderSuccess = undefined;
     }

@@ -31,9 +31,6 @@ function expandHome(p: string): string {
  * Get default token file path for provider type
  */
 function defaultTokenFile(providerType: string): string {
-  if (providerType === 'iflow') {
-    return path.join(resolveRccAuthDir(), 'iflow-oauth-1-default.json');
-  }
   if (providerType === 'qwen') {
     // Align with TokenFileAuthProvider + token-daemon defaults:
     // keep a stable, well-known Qwen token file for alias="default".

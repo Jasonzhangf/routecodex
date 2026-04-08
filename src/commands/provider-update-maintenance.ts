@@ -200,12 +200,12 @@ export function createListCommand(): Command {
 export function createAddCommand(): Command {
   return new Command('add')
     .description('Interactively create a new provider v2 config (guided standard protocols + managed-auth built-ins)')
-    .option('-i, --id <id>', 'Provider id (e.g. my-openai, qwen, iflow, gemini-cli, antigravity, deepseek-web)')
+    .option('-i, --id <id>', 'Provider id (e.g. my-openai, qwen, gemini-cli, antigravity, deepseek-web)')
     .option('--root <dir>', 'Override provider root directory')
     .action(async (opts: { id?: string; root?: string }) => {
       let providerId = (opts.id || '').trim();
       if (!providerId) {
-        providerId = await ask('Provider id (e.g. my-openai, qwen, iflow, gemini-cli, antigravity, deepseek-web)', 'glm');
+        providerId = await ask('Provider id (e.g. my-openai, qwen, gemini-cli, antigravity, deepseek-web)', 'glm');
       }
       if (!providerId.trim()) {
         console.error('Provider id is required');
@@ -239,7 +239,7 @@ export function createAddCommand(): Command {
       }
 
       const authTypeDefault = tpl.defaultAuthType ?? 'apikey';
-      const authType = await ask('Auth type (e.g. apikey, qwen-oauth, iflow-cookie, gemini-cli-oauth, antigravity-oauth, deepseek-account)', authTypeDefault);
+      const authType = await ask('Auth type (e.g. apikey, qwen-oauth, gemini-cli-oauth, antigravity-oauth, deepseek-account)', authTypeDefault);
 
       let apiKeyPlaceholder = '';
       let tokenFile = '';
@@ -344,7 +344,7 @@ export function createChangeCommand(): Command {
         typeof authNode.type === 'string'
           ? authNode.type
           : 'apikey';
-      const authType = await ask('Auth type (e.g. apikey, qwen-oauth, iflow-cookie, gemini-cli-oauth, antigravity-oauth, deepseek-account)', currentAuthType);
+      const authType = await ask('Auth type (e.g. apikey, qwen-oauth, gemini-cli-oauth, antigravity-oauth, deepseek-account)', currentAuthType);
       authNode.type = authType;
 
       let apiKeyPlaceholder = typeof (authNode as { apiKey?: unknown }).apiKey === 'string'

@@ -14,7 +14,6 @@ const TYPE_TO_PROTOCOL: Record<ProviderType, ProviderProtocol> = {
 const LEGACY_FAMILY_TO_TYPE: Record<string, ProviderType> = {
   glm: 'openai',
   qwen: 'openai',
-  iflow: 'openai',
   lmstudio: 'openai',
   kimi: 'openai',
   modelscope: 'openai',

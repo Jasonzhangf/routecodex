@@ -1,5 +1,40 @@
 import type { PipelineExecutionResult } from '../../../handlers/types.js';
 
+const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
+const nonBlockingLogState = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logProviderResponseUtilsNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  const now = Date.now();
+  const last = nonBlockingLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingLogState.set(stage, now);
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[provider-response-utils] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`
+    );
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 export function extractResponseStatus(response: unknown): number | undefined {
   if (!response || typeof response !== 'object') {
     return undefined;
@@ -64,7 +99,8 @@ export function cloneRequestPayload(payload: unknown): Record<string, unknown> |
   }
   try {
     return JSON.parse(JSON.stringify(payload));
-  } catch {
+  } catch (error) {
+    logProviderResponseUtilsNonBlockingError('cloneRequestPayload', error);
     return undefined;
   }
 }
@@ -108,7 +144,8 @@ export function resolveRequestSemantics(
   const cloneRecord = (value: Record<string, unknown>): Record<string, unknown> => {
     try {
       return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
-    } catch {
+    } catch (error) {
+      logProviderResponseUtilsNonBlockingError('resolveRequestSemantics.cloneRecord', error);
       return { ...value };
     }
   };
@@ -119,7 +156,8 @@ export function resolveRequestSemantics(
     try {
       const cloned = JSON.parse(JSON.stringify(value));
       return Array.isArray(cloned) ? cloned : undefined;
-    } catch {
+    } catch (error) {
+      logProviderResponseUtilsNonBlockingError('resolveRequestSemantics.cloneToolsArray', error);
       return value.slice();
     }
   };

@@ -3,7 +3,7 @@ import type { OAuthProviderId } from './token-types.js';
 
 type UnknownRecord = Record<string, unknown>;
 
-const DEFAULT_OAUTH_PROVIDERS: OAuthProviderId[] = ['iflow', 'qwen', 'gemini-cli', 'antigravity'];
+const DEFAULT_OAUTH_PROVIDERS: OAuthProviderId[] = ['qwen', 'gemini-cli', 'antigravity'];
 
 export class DynamicProviderRegistry {
   private providers: OAuthProviderId[] = [...DEFAULT_OAUTH_PROVIDERS];

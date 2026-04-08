@@ -72,6 +72,11 @@
       "apiKey": "${TABGLM_API_KEY}"
     },
     "compatibilityProfile": "anthropic:claude-code",
-    "transportBackend": "vercel-ai-sdk"
+    "transportBackend": "vercel-ai-sdk",
+    "concurrency": {
+      "maxInFlight": 4,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
+    }
   }
 }

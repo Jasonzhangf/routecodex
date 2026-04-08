@@ -155,6 +155,9 @@ function shouldInspectToolFailures(stage: string): boolean {
   if (!stage) {
     return false;
   }
+  if (stage.startsWith('chat_process.req.')) {
+    return true;
+  }
   return stage.startsWith('chat_process.resp.')
     || stage.startsWith('hub_followup.')
     || stage.startsWith('servertool.');

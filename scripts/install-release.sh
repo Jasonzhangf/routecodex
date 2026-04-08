@@ -61,6 +61,50 @@ else
   exit 1
 fi
 
+ensure_rcc_zod_runtime() {
+  local GLOBAL_NODE_MODULES
+  GLOBAL_NODE_MODULES=$(npm root -g 2>/dev/null || true)
+  if [ -z "${GLOBAL_NODE_MODULES:-}" ]; then
+    echo "⚠️  无法解析 npm 全局 node_modules 路径，跳过 zod 运行时自检"
+    return
+  fi
+  local RCC_DIR="${GLOBAL_NODE_MODULES}/@jsonstudio/rcc"
+  if [ ! -d "$RCC_DIR" ]; then
+    echo "⚠️  未找到全局 rcc 目录: $RCC_DIR，跳过 zod 运行时自检"
+    return
+  fi
+
+  if node -e "require.resolve('zod/v4', { paths: [process.argv[1]] });" "$RCC_DIR" >/dev/null 2>&1; then
+    echo "✅ zod/v4 运行时可解析"
+    return
+  fi
+
+  echo "⚠️  检测到全局 rcc 的 zod/v4 缺失，执行本地自愈..."
+  local LOCAL_ZOD_DIR="${PWD}/node_modules/zod"
+  local TARGET_ZOD_DIR="${RCC_DIR}/node_modules/zod"
+  if [ -d "$LOCAL_ZOD_DIR" ]; then
+    rm -rf "$TARGET_ZOD_DIR"
+    mkdir -p "${RCC_DIR}/node_modules"
+    cp -R "$LOCAL_ZOD_DIR" "$TARGET_ZOD_DIR"
+  else
+    echo "❌ 本地 zod 依赖不存在：$LOCAL_ZOD_DIR"
+    echo "💡 请先执行 npm install 后重试 release 安装"
+    exit 1
+  fi
+
+  if node -e "require.resolve('zod/v4', { paths: [process.argv[1]] });" "$RCC_DIR" >/dev/null 2>&1; then
+    local ZOD_VER
+    ZOD_VER=$(node -e "const fs=require('fs');const p=process.argv[1]+'/node_modules/zod/package.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));process.stdout.write(String(j.version||'unknown'));" "$RCC_DIR")
+    echo "✅ zod/v4 自愈完成（version=${ZOD_VER}）"
+    return
+  fi
+
+  echo "❌ zod/v4 运行时仍不可解析，请检查全局安装目录权限与依赖完整性"
+  exit 1
+}
+
+ensure_rcc_zod_runtime
+
 verify_server_request() {
   local VERIFY_CONFIG=${ROUTECODEX_INSTALL_VERIFY_CONFIG:-"$HOME/.rcc/config.json"}
   local VERIFY_TIMEOUT=${ROUTECODEX_INSTALL_VERIFY_TIMEOUT:-240}

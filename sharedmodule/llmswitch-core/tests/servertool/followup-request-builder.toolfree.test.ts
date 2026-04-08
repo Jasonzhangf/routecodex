@@ -136,4 +136,24 @@ describe('servertool followup request builder', () => {
     expect(reviewTool).toBeTruthy();
     expect(reviewTool.function.parameters?.required).toEqual(expect.arrayContaining(['goal', 'context', 'focus']));
   });
+
+  test('falls back to adapterContext.modelId when captured model is missing', () => {
+    const capturedChatRequest: any = {
+      messages: [{ role: 'user', content: '继续做' }]
+    };
+
+    const followup: any = buildServerToolFollowupChatPayloadFromInjection({
+      adapterContext: {
+        capturedChatRequest,
+        modelId: 'qwen3.6-plus'
+      },
+      chatResponse: { id: 'resp', choices: [] } as any,
+      injection: { ops: [{ op: 'append_user_text', text: '继续执行' }] } as any
+    });
+
+    expect(followup).toBeTruthy();
+    expect(followup.model).toBe('qwen3.6-plus');
+    expect(Array.isArray(followup.messages)).toBe(true);
+    expect(followup.messages.length).toBe(2);
+  });
 });

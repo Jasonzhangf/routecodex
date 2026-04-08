@@ -13,6 +13,24 @@ type TmuxInjectionCounterState = {
   bySource: Record<TmuxInjectionSource, number>;
 };
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error ?? 'unknown');
+}
+
+function logTmuxInjectionHistoryNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length
+      ? ` details=${JSON.stringify(details)}`
+      : '';
+    console.warn(`[tmux-injection-history] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function readString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -60,7 +78,11 @@ async function loadCounterState(counterPath: string): Promise<TmuxInjectionCount
     const raw = await fs.readFile(counterPath, 'utf8');
     const parsed = JSON.parse(raw);
     return sanitizeCounterState(parsed);
-  } catch {
+  } catch (error) {
+    const code = (error as { code?: unknown })?.code;
+    if (code !== 'ENOENT') {
+      logTmuxInjectionHistoryNonBlockingError('load_counter', error, { counterPath });
+    }
     return sanitizeCounterState(undefined);
   }
 }
@@ -87,7 +109,8 @@ export async function appendTmuxInjectionHistoryEvent(input: {
 
   try {
     await fs.mkdir(path.dirname(logging.logFile), { recursive: true });
-  } catch {
+  } catch (error) {
+    logTmuxInjectionHistoryNonBlockingError('mkdir', error, { logFile: logging.logFile });
     return;
   }
 
@@ -97,7 +120,9 @@ export async function appendTmuxInjectionHistoryEvent(input: {
     counterState.totalTriggered += 1;
     counterState.bySource[input.source] += 1;
     counterState.updatedAtMs = atMs;
-    await saveCounterState(logging.counterFile, counterState).catch(() => {});
+    await saveCounterState(logging.counterFile, counterState).catch((error) => {
+      logTmuxInjectionHistoryNonBlockingError('save_counter', error, { counterFile: logging.counterFile });
+    });
   }
 
   const event = {
@@ -116,5 +141,7 @@ export async function appendTmuxInjectionHistoryEvent(input: {
     }
   };
 
-  await fs.appendFile(logging.logFile, `${JSON.stringify(event)}\n`, 'utf8').catch(() => {});
+  await fs.appendFile(logging.logFile, `${JSON.stringify(event)}\n`, 'utf8').catch((error) => {
+    logTmuxInjectionHistoryNonBlockingError('append_event', error, { logFile: logging.logFile });
+  });
 }

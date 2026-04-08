@@ -249,4 +249,86 @@ describe('tmux-session-probe lifecycle logging', () => {
     const probe = await import('../../../src/server/runtime/http-server/tmux-session-probe.js');
     expect(probe.isTmuxSessionIdleForInject('codex-routecodex:0.0')).toBe(false);
   });
+
+  it('caches has-session probe briefly to reduce process spawn overhead', async () => {
+    jest.resetModules();
+    process.env.ROUTECODEX_TMUX_PROBE_CACHE_TTL_MS = '5000';
+    const spawnSyncMock = jest.fn((command: string, args: string[]) => {
+      if (command !== 'tmux') {
+        return { status: 1, stdout: '', stderr: 'unexpected command' } as any;
+      }
+      if (args[0] === '-V') {
+        return { status: 0, stdout: 'tmux 3.4', stderr: '' } as any;
+      }
+      if (args[0] === 'has-session') {
+        return { status: 0, stdout: '', stderr: '' } as any;
+      }
+      return { status: 1, stdout: '', stderr: 'unsupported' } as any;
+    });
+
+    await jest.unstable_mockModule('node:child_process', () => ({
+      spawnSync: spawnSyncMock
+    }));
+    await jest.unstable_mockModule('../../../src/utils/process-lifecycle-logger.js', () => ({
+      logProcessLifecycle: jest.fn()
+    }));
+
+    const probe = await import('../../../src/server/runtime/http-server/tmux-session-probe.js');
+    expect(probe.isTmuxSessionAlive('rcc-cache-test:0.0')).toBe(true);
+    expect(probe.isTmuxSessionAlive('rcc-cache-test:0.0')).toBe(true);
+
+    const hasSessionCalls = spawnSyncMock.mock.calls.filter(
+      (call) => call[0] === 'tmux' && Array.isArray(call[1]) && call[1][0] === 'has-session'
+    );
+    expect(hasSessionCalls).toHaveLength(1);
+    delete process.env.ROUTECODEX_TMUX_PROBE_CACHE_TTL_MS;
+  });
+
+  it('caches idle probe briefly to reduce list-panes/capture-pane spawn overhead', async () => {
+    jest.resetModules();
+    process.env.ROUTECODEX_TMUX_PROBE_CACHE_TTL_MS = '5000';
+    const spawnSyncMock = jest.fn((command: string, args: string[]) => {
+      if (command !== 'tmux') {
+        return { status: 1, stdout: '', stderr: 'unexpected command' } as any;
+      }
+      if (args[0] === '-V') {
+        return { status: 0, stdout: 'tmux 3.4', stderr: '' } as any;
+      }
+      if (args[0] === 'has-session') {
+        return { status: 0, stdout: '', stderr: '' } as any;
+      }
+      if (args[0] === 'list-panes') {
+        return { status: 0, stdout: 'node\t0\n', stderr: '' } as any;
+      }
+      if (args[0] === 'capture-pane') {
+        return {
+          status: 0,
+          stdout: '\n› Continue in the current session\n',
+          stderr: ''
+        } as any;
+      }
+      return { status: 1, stdout: '', stderr: 'unsupported' } as any;
+    });
+
+    await jest.unstable_mockModule('node:child_process', () => ({
+      spawnSync: spawnSyncMock
+    }));
+    await jest.unstable_mockModule('../../../src/utils/process-lifecycle-logger.js', () => ({
+      logProcessLifecycle: jest.fn()
+    }));
+
+    const probe = await import('../../../src/server/runtime/http-server/tmux-session-probe.js');
+    expect(probe.isTmuxSessionIdleForInject('rcc-cache-idle:0.0')).toBe(true);
+    expect(probe.isTmuxSessionIdleForInject('rcc-cache-idle:0.0')).toBe(true);
+
+    const listPaneCalls = spawnSyncMock.mock.calls.filter(
+      (call) => call[0] === 'tmux' && Array.isArray(call[1]) && call[1][0] === 'list-panes'
+    );
+    const captureCalls = spawnSyncMock.mock.calls.filter(
+      (call) => call[0] === 'tmux' && Array.isArray(call[1]) && call[1][0] === 'capture-pane'
+    );
+    expect(listPaneCalls).toHaveLength(1);
+    expect(captureCalls).toHaveLength(1);
+    delete process.env.ROUTECODEX_TMUX_PROBE_CACHE_TTL_MS;
+  });
 });

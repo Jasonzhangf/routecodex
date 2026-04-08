@@ -54,6 +54,30 @@ type CamoufoxOverrideOptions = {
   devMode?: boolean;
 };
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logTokenDaemonNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[token-daemon] ${stage} failed (non-blocking): ${formatUnknownError(error)}${suffix}`);
+  } catch {
+    void 0;
+  }
+}
+
 function resolveConfiguredProviders(userConfig: unknown): Set<OAuthProviderId> {
   const configured = new Set<OAuthProviderId>();
   const input = buildVirtualRouterInputFromUserConfig((userConfig ?? {}) as Record<string, unknown>);
@@ -159,7 +183,10 @@ async function isCamoufoxOauthEnabled(configPath?: string): Promise<boolean> {
     const enabled = raw === 'camoufox';
     camoufoxEnabledCache.set(cacheKey, enabled);
     return enabled;
-  } catch {
+  } catch (configError) {
+    logTokenDaemonNonBlockingError('isCamoufoxOauthEnabled.loadRouteCodexConfig', configError, {
+      configPath: configPath || 'default'
+    });
     camoufoxEnabledCache.set(cacheKey, false);
     return false;
   }
@@ -233,13 +260,13 @@ export class TokenDaemon {
     }
     try {
       await shutdownLocalTokenPortalEnv();
-    } catch {
-      // best-effort: portal shutdown must never block daemon stop
+    } catch (shutdownError) {
+      logTokenDaemonNonBlockingError('stop.shutdownLocalTokenPortalEnv', shutdownError);
     }
     try {
       await this.printSessionAndHistorySummary();
-    } catch {
-      // summary printing must never block shutdown
+    } catch (summaryError) {
+      logTokenDaemonNonBlockingError('stop.printSessionAndHistorySummary', summaryError);
     }
     if (LOG_ENABLED) {
       console.log(chalk.blue('ℹ'), 'Token Refresh Daemon stopped');
@@ -258,7 +285,10 @@ export class TokenDaemon {
       try {
         const { userConfig } = await loadRouteCodexConfig(this.configPath);
         configuredProviders = resolveConfiguredProviders(userConfig);
-      } catch {
+      } catch (loadConfigError) {
+        logTokenDaemonNonBlockingError('tick.loadRouteCodexConfig', loadConfigError, {
+          configPath: this.configPath || 'default'
+        });
         configuredProviders = new Set();
       }
     }
@@ -286,14 +316,16 @@ export class TokenDaemon {
         const msLeft = state.msUntilExpiry;
 
         // 预生成 Camoufox profile 目录 + fingerprint：按 provider + alias 派生稳定 profileId。
-        // iflow 自动认证强制开启 Camoufox，因此即便全局未启用 camoufox 浏览器也要提前准备。
-        const needsCamoufoxProfile = camoufoxEnabled || token.provider === 'iflow';
+        const needsCamoufoxProfile = camoufoxEnabled;
         if (needsCamoufoxProfile && token.alias) {
           try {
             ensureCamoufoxProfileDir(token.provider, token.alias);
             ensureCamoufoxFingerprintForToken(token.provider, token.alias);
-          } catch {
-            // profile / fingerprint 预生成失败不影响后续 token 刷新逻辑
+          } catch (prepareCamoufoxError) {
+            logTokenDaemonNonBlockingError('tick.ensureCamoufoxProfile', prepareCamoufoxError, {
+              provider: token.provider,
+              alias: token.alias
+            });
           }
         }
         if (token.alias === 'static') {
@@ -380,9 +412,7 @@ export class TokenDaemon {
     );
 
     try {
-      if (providerType === 'iflow') {
-        await (this as any).runIflowAutoAuthorization(token);
-      } else if (providerType === 'antigravity') {
+      if (providerType === 'antigravity') {
         await (this as any).runAntigravityAutoAuthorization(token);
       } else if (providerType === 'gemini-cli') {
         await (this as any).runGeminiCliAutoAuthorization(token);
@@ -454,28 +484,6 @@ export class TokenDaemon {
       }
       throw error;
     }
-  }
-
-  private async runIflowAutoAuthorization(token: TokenDescriptor): Promise<void> {
-    try {
-      await this.ensureTokenWithOverrides(token, {
-        useCamoufox: true,
-        autoMode: 'iflow',
-        devMode: false
-      });
-      return;
-    } catch (autoError) {
-      const message = autoError instanceof Error ? autoError.message : String(autoError);
-      console.warn(
-        chalk.yellow('!'),
-        `Camoufox auto OAuth failed for iflow (${token.displayName}): ${message}. Falling back to headful mode.`
-      );
-    }
-    await this.ensureTokenWithOverrides(token, {
-      useCamoufox: true,
-      autoMode: null,
-      devMode: true
-    });
   }
 
   private async runAntigravityAutoAuthorization(token: TokenDescriptor): Promise<void> {
@@ -552,7 +560,7 @@ export class TokenDaemon {
     const rawType = `${providerType}-oauth`;
     const wantsInteractive = Boolean(camoufoxOptions?.useCamoufox);
     // IMPORTANT: Token daemon must not pop interactive OAuth during background refresh.
-    // Only explicit auto-authorization flows (iflow/qwen/gemini-cli/antigravity) opt into interactive mode via Camoufox.
+    // Only explicit auto-authorization flows (qwen/gemini-cli/antigravity) opt into interactive mode via Camoufox.
     const runner = () =>
       ensureValidOAuthToken(
         providerType,
@@ -772,8 +780,10 @@ export class TokenDaemon {
           current.autoFailures += 1;
         }
         this.sessionStatsByProvider.set(providerType, current);
-      } catch {
-        // best-effort; do not block history persistence
+      } catch (sessionStatsError) {
+        logTokenDaemonNonBlockingError('recordHistoryEvent.sessionStatsByProvider', sessionStatsError, {
+          provider: token.provider
+        });
       }
 
       await this.historyStore.recordRefreshResult(token, outcome, {
@@ -935,15 +945,14 @@ async function maybeMarkTokenFileNoRefresh(filePath: string): Promise<void> {
     parsed.norefresh = true;
     parsed.noRefresh = true;
     await fs.writeFile(filePath, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
-  } catch {
-    // best-effort: never block token refresh flow
+  } catch (markNoRefreshError) {
+    logTokenDaemonNonBlockingError('maybeMarkTokenFileNoRefresh', markNoRefreshError, {
+      filePath
+    });
   }
 }
 
 function defaultTokenFilePath(provider: OAuthProviderId): string {
-  if (provider === 'iflow') {
-    return path.join(resolveRccAuthDir(), 'iflow-oauth-1-default.json');
-  }
   if (provider === 'qwen') {
     return path.join(resolveRccAuthDir(), 'qwen-oauth-1-default.json');
   }

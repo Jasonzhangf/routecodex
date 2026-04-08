@@ -1,9 +1,8 @@
 import path from 'path';
 
-export type OAuthProviderId = 'iflow' | 'qwen' | 'gemini-cli' | 'antigravity' | 'deepseek-account';
+export type OAuthProviderId = 'qwen' | 'gemini-cli' | 'antigravity' | 'deepseek-account';
 
 export const SUPPORTED_OAUTH_PROVIDERS: OAuthProviderId[] = [
-  'iflow',
   'qwen',
   'gemini-cli',
   'antigravity',

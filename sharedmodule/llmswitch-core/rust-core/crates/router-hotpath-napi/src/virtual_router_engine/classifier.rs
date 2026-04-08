@@ -69,13 +69,15 @@ impl RoutingClassifier {
             .get("serverToolRequired")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let has_web_search_tool_declared = features.has_web_search_tool_declared;
         let web_search_continuation = last_tool_category == "websearch";
         let local_tool_continuation = matches!(
             last_tool_category.as_str(),
             "read" | "write" | "search" | "other"
         );
         let web_search_from_intent = !local_tool_continuation && web_search_intent;
-        let web_search_declared_or_required = !local_tool_continuation && server_tool_required;
+        let web_search_declared_or_required =
+            !local_tool_continuation && (server_tool_required || has_web_search_tool_declared);
         let reached_long_context = features.estimated_tokens >= self.long_context_threshold_tokens;
         let latest_message_from_user = features.latest_message_from_user;
         let thinking_continuation = last_tool_category == "read";
@@ -125,6 +127,8 @@ impl RoutingClassifier {
                 "web_search:last-tool-websearch".to_string()
             } else if web_search_declared_or_required && server_tool_required {
                 "web_search:servertool-required".to_string()
+            } else if web_search_declared_or_required && has_web_search_tool_declared {
+                "web_search:tool-declared".to_string()
             } else {
                 "web_search:intent-keyword".to_string()
             },

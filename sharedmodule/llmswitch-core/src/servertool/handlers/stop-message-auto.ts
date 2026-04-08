@@ -17,7 +17,7 @@ import {
   resolveStopMessageAiApprovedMarker,
   resolveStopMessageAiDoneMarker,
   type StopMessageAiFollowupHistoryEntry
-} from './stop-message-auto/iflow-followup.js';
+} from './stop-message-auto/ai-followup.js';
 import {
   resolveStopMessageAiDoneNextTaskPrompt,
   resolveStopMessageDebugEnabled,

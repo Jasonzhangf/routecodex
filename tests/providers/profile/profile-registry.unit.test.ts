@@ -462,6 +462,9 @@ describe('provider family profile registry', () => {
       expect(headers?.['X-DashScope-AuthType']).toBe('qwen-oauth');
       expect(headers?.['User-Agent']).toContain('QwenCode/0.10.3');
       expect(headers?.['X-DashScope-UserAgent']).toBe(headers?.['User-Agent']);
+      expect(headers?.['X-Stainless-Lang']).toBe('js');
+      expect(headers?.['X-Stainless-Runtime']).toBe('node');
+      expect(headers?.['X-Stainless-Retry-Count']).toBe('0');
     } finally {
       if (previousUaVersion === undefined) {
         delete process.env.ROUTECODEX_QWEN_UA_VERSION;
@@ -489,6 +492,14 @@ describe('provider family profile registry', () => {
     } as any);
 
     expect((body as any)?.model).toBe('coder-model');
+    expect((body as any)?.messages?.[0]?.role).toBe('system');
+    expect((body as any)?.messages?.[0]?.content).toEqual([
+      {
+        type: 'text',
+        text: '',
+        cache_control: { type: 'ephemeral' }
+      }
+    ]);
   });
 
   test('qwen profile maps oauth vision model id to vision-model', () => {
@@ -509,6 +520,42 @@ describe('provider family profile registry', () => {
     } as any);
 
     expect((body as any)?.model).toBe('vision-model');
+  });
+
+  test('qwen profile merges user system messages into injected qwen-oauth system envelope', () => {
+    const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
+    expect(qwenProfile).toBeTruthy();
+
+    const body = qwenProfile?.buildRequestBody?.({
+      request: {
+        metadata: { authType: 'qwen-oauth' }
+      } as any,
+      defaultBody: {
+        model: 'qwen3.5-plus',
+        messages: [
+          { role: 'system', content: 'Be concise.' },
+          { role: 'user', content: 'hello' },
+          { role: 'system', content: [{ type: 'text', text: 'Keep markdown.' }] }
+        ]
+      } as any,
+      runtimeMetadata: {
+        authType: 'qwen-oauth'
+      } as any
+    } as any);
+
+    expect((body as any)?.model).toBe('coder-model');
+    expect((body as any)?.messages?.[0]?.role).toBe('system');
+    expect((body as any)?.messages?.[0]?.content).toEqual([
+      {
+        type: 'text',
+        text: '',
+        cache_control: { type: 'ephemeral' }
+      },
+      { type: 'text', text: 'Be concise.' },
+      { type: 'text', text: 'Keep markdown.' }
+    ]);
+    expect((body as any)?.messages?.[1]).toEqual({ role: 'user', content: 'hello' });
+    expect((body as any)?.messages).toHaveLength(2);
   });
 
   test('qwen profile keeps non-oauth model unchanged', () => {

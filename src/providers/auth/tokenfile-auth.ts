@@ -14,7 +14,6 @@ import type { IAuthProvider, AuthStatus } from './auth-interface.js';
 import type { OAuthAuth } from '../core/api/provider-config.js';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { resolveRccAuthDirForRead, resolveRccTokensDirForRead } from '../../config/user-data-paths.js';
-import { logOAuthDebug } from './oauth-logger.js';
 
 type TokenPayload = UnknownObject & {
   access_token?: string;
@@ -29,6 +28,16 @@ type TokenPayload = UnknownObject & {
 
 function isTokenPayload(value: unknown): value is TokenPayload {
   return typeof value === 'object' && value !== null;
+}
+
+function logTokenfileAuthNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  const reason = error instanceof Error ? (error.stack || `${error.name}: ${error.message}`) : String(error);
+  const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[tokenfile-auth] ${stage} failed (non-blocking): ${reason}${detailSuffix}`);
 }
 
 function resolveAuthDir(): string {
@@ -80,9 +89,7 @@ function pickLatestTokenFile(opts: { providerPrefix: string; alias?: string }): 
     }
     return best?.file ?? null;
   } catch (error) {
-    logOAuthDebug(
-      `[tokenfile-auth] failed to scan auth dir for latest token (non-blocking) dir=${authDir}: ${error instanceof Error ? error.message : String(error)}`
-    );
+    logTokenfileAuthNonBlocking('pick_latest_token_file.scan_auth_dir', error, { dir: authDir });
     return null;
   }
 }
@@ -209,9 +216,7 @@ export class TokenFileAuthProvider implements IAuthProvider {
       const apiKey = this.extractApiKey(parsed);
       return apiKey ? candidatePath : null;
     } catch (error) {
-      logOAuthDebug(
-        `[tokenfile-auth] pickTokenFileIfItContainsApiKey failed (non-blocking) path=${candidatePath}: ${error instanceof Error ? error.message : String(error)}`
-      );
+      logTokenfileAuthNonBlocking('pick_token_file_if_contains_api_key', error, { path: candidatePath });
       return null;
     }
   }
@@ -234,9 +239,7 @@ export class TokenFileAuthProvider implements IAuthProvider {
         fs.writeFileSync(filePath, '{}\n', 'utf8');
       }
     } catch (error) {
-      logOAuthDebug(
-        `[tokenfile-auth] ensureTokenFileExists failed (non-blocking) path=${filePath}: ${error instanceof Error ? error.message : String(error)}`
-      );
+      logTokenfileAuthNonBlocking('ensure_token_file_exists', error, { path: filePath });
     }
     return filePath;
   }
@@ -257,9 +260,7 @@ export class TokenFileAuthProvider implements IAuthProvider {
                 return pinned;
               }
             } catch (error) {
-              logOAuthDebug(
-                `[tokenfile-auth] qwen pinned token check failed (non-blocking) path=${pinned}: ${error instanceof Error ? error.message : String(error)}`
-              );
+              logTokenfileAuthNonBlocking('resolve_token_file.qwen_pinned_probe', error, { path: pinned });
             }
           }
           const match = pickLatestTokenFile({ providerPrefix: providerId, alias: tf });
@@ -284,31 +285,13 @@ export class TokenFileAuthProvider implements IAuthProvider {
             }
           }
         } catch (error) {
-          logOAuthDebug(
-            `[tokenfile-auth] qwen fallback scan failed (non-blocking) path=${resolved}: ${error instanceof Error ? error.message : String(error)}`
-          );
+          logTokenfileAuthNonBlocking('resolve_token_file.qwen_fallback_scan', error, { path: resolved });
         }
       }
       return this.ensureTokenFileExists(resolved);
     }
 
     const providerId = this.getConfiguredProviderId();
-    if (providerId === 'iflow') {
-      // RouteCodex iFlow auth only accepts RouteCodex-managed OAuth files.
-      const latest = pickLatestTokenFile({ providerPrefix: 'iflow' });
-      if (latest) {
-        const latestWithApiKey = this.pickTokenFileIfItContainsApiKey(latest);
-        if (latestWithApiKey) {
-          return latestWithApiKey;
-        }
-      }
-      const pinned = this.pickTokenFileIfItContainsApiKey(path.join(resolveAuthDir(), 'iflow-oauth-1-default.json'));
-      if (pinned) {
-        return pinned;
-      }
-      return null;
-    }
-
     // Qwen: default to RouteCodex auth dir tokens (daemon-admin / oauth-lifecycle output)
     if (providerId === 'qwen') {
       const legacySingle = path.join(resolveRccAuthDirForRead(), 'qwen-oauth.json');
@@ -317,9 +300,7 @@ export class TokenFileAuthProvider implements IAuthProvider {
           return legacySingle;
         }
       } catch (error) {
-        logOAuthDebug(
-          `[tokenfile-auth] qwen legacy single-file probe failed (non-blocking) path=${legacySingle}: ${error instanceof Error ? error.message : String(error)}`
-        );
+        logTokenfileAuthNonBlocking('resolve_token_file.qwen_legacy_single_probe', error, { path: legacySingle });
       }
       const latest = pickLatestTokenFile({ providerPrefix: 'qwen' });
       if (latest) {
@@ -332,9 +313,7 @@ export class TokenFileAuthProvider implements IAuthProvider {
           return rc;
         }
       } catch (error) {
-        logOAuthDebug(
-          `[tokenfile-auth] qwen legacy tokens-dir probe failed (non-blocking) path=${rc}: ${error instanceof Error ? error.message : String(error)}`
-        );
+        logTokenfileAuthNonBlocking('resolve_token_file.qwen_legacy_tokens_dir_probe', error, { path: rc });
       }
     }
 
@@ -347,9 +326,7 @@ export class TokenFileAuthProvider implements IAuthProvider {
         return path.join(dir, list.sort()[0]);
       }
     } catch (error) {
-      logOAuthDebug(
-        `[tokenfile-auth] cli-proxy-api scan failed (non-blocking) path=${dir}: ${error instanceof Error ? error.message : String(error)}`
-      );
+      logTokenfileAuthNonBlocking('resolve_token_file.cliproxy_scan', error, { path: dir });
     }
     return null;
   }
@@ -362,9 +339,7 @@ export class TokenFileAuthProvider implements IAuthProvider {
       const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')) as unknown;
       return isTokenPayload(parsed) ? parsed : null;
     } catch (error) {
-      logOAuthDebug(
-        `[tokenfile-auth] readJson failed (non-blocking) path=${p}: ${error instanceof Error ? error.message : String(error)}`
-      );
+      logTokenfileAuthNonBlocking('read_json', error, { path: p });
       return null;
     }
   }
@@ -401,11 +376,6 @@ export class TokenFileAuthProvider implements IAuthProvider {
 
   private resolveBearerCredential(tok: TokenPayload | null): string | null {
     const providerId = this.getConfiguredProviderId();
-
-    // Keep iFlow behavior: api_key is the effective credential for business requests.
-    if (providerId === 'iflow') {
-      return this.extractApiKey(tok) || this.extractAccessToken(tok);
-    }
 
     // Align with Qwen CLI qwen-oauth branch: access_token is the primary runtime credential.
     if (providerId === 'qwen') {

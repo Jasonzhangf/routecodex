@@ -6,7 +6,7 @@ import type { ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import { DEFAULT_PROVIDER } from '../../../constants/index.js';
 import { isCodexUaMode } from './provider-runtime-utils.js';
-import { HeaderUtils, IflowSigner, OAuthHeaderPreflight, RequestHeaderBuilder, SessionHeaderUtils } from './transport/index.js';
+import { HeaderUtils, OAuthHeaderPreflight, RequestHeaderBuilder, SessionHeaderUtils } from './transport/index.js';
 
 type ProviderConfigInternal = OpenAIStandardConfig['config'];
 
@@ -117,7 +117,7 @@ export async function finalizeProviderRequestHeaders(options: {
   providerType: string;
   isIflow: boolean;
 }): Promise<Record<string, string>> {
-  const { headers, request, finalizeHeaders, runtimeMetadata, familyProfile, providerType, isIflow } = options;
+  const { headers, request, finalizeHeaders, runtimeMetadata, familyProfile, providerType } = options;
   const finalized = await finalizeHeaders(headers, request);
 
   const profileResolvedUa = await familyProfile?.resolveUserAgent?.({
@@ -139,10 +139,6 @@ export async function finalizeProviderRequestHeaders(options: {
   });
   if (profileAdjustedHeaders && typeof profileAdjustedHeaders === 'object') {
     return profileAdjustedHeaders;
-  }
-
-  if (isIflow) {
-    IflowSigner.enforceIflowCliHeaders(finalized);
   }
 
   return finalized;

@@ -12,6 +12,9 @@ type StopMessageSubset = Pick<
   | 'stopMessageAiHistory'
   | 'stopMessageUpdatedAt'
   | 'stopMessageLastUsedAt'
+  | 'reasoningStopArmed'
+  | 'reasoningStopSummary'
+  | 'reasoningStopUpdatedAt'
 >;
 
 function isFiniteNumber(value: unknown): value is number {
@@ -50,7 +53,10 @@ function overlayPersistedUsage(existing: StopMessageSubset, persisted: StopMessa
     stopMessageUsed: persisted.stopMessageUsed,
     stopMessageLastUsedAt: persisted.stopMessageLastUsedAt,
     stopMessageAiSeedPrompt: persisted.stopMessageAiSeedPrompt,
-    stopMessageAiHistory: persisted.stopMessageAiHistory
+    stopMessageAiHistory: persisted.stopMessageAiHistory,
+    reasoningStopArmed: persisted.reasoningStopArmed,
+    reasoningStopSummary: persisted.reasoningStopSummary,
+    reasoningStopUpdatedAt: persisted.reasoningStopUpdatedAt
   };
 }
 
@@ -107,6 +113,9 @@ export function mergeStopMessageFromPersisted(
     stopMessageAiSeedPrompt: persisted.stopMessageAiSeedPrompt,
     stopMessageAiHistory: persisted.stopMessageAiHistory,
     stopMessageUpdatedAt: persisted.stopMessageUpdatedAt,
-    stopMessageLastUsedAt: persisted.stopMessageLastUsedAt
+    stopMessageLastUsedAt: persisted.stopMessageLastUsedAt,
+    reasoningStopArmed: persisted.reasoningStopArmed,
+    reasoningStopSummary: persisted.reasoningStopSummary,
+    reasoningStopUpdatedAt: persisted.reasoningStopUpdatedAt
   };
 }

@@ -1,7 +1,7 @@
 /**
  * Provider特定的OAuth配置
  *
- * 基于iflow和qwen的实际配置，提供预定义的OAuth流程配置
+ * 基于当前仍支持的 provider 配置预定义 OAuth 流程。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -139,94 +139,6 @@ function registerProviderOAuthConfigs(): void {
       customState: false,
       // 对齐 Gemini/Antigravity：始终请求可刷新离线 token
       requestOfflineAccess: true
-    }
-  });
-
-  // iFlow OAuth默认配置：优先授权码流程（回调链路）
-  // 说明：
-  // - /oauth/device/code 当前会返回 HTML 页面而非 device-code JSON，导致手动 OAuth 在首步即失败。
-  // - 默认改为授权码流程，走 /oauth + localhost 回调，保留 iflow-device 作为显式设备码备用。
-  OAuthFlowConfigManager.registerDefaultConfig('iflow', {
-    flowType: OAuthFlowType.AUTHORIZATION_CODE,
-    activationType: OAuthActivationType.AUTO_BROWSER,
-    endpoints: {
-      // 授权码主链路
-      deviceCodeUrl: 'https://iflow.cn/api/oauth2/device/code',
-      tokenUrl: 'https://iflow.cn/oauth/token',
-      authorizationUrl: 'https://iflow.cn/oauth',
-      userInfoUrl: 'https://iflow.cn/api/oauth/getUserInfo'
-    },
-    client: {
-      // 对齐CLIProxyAPI：使用官方客户端ID和密钥
-      clientId: '10009311001',
-      clientSecret: '4Z3YjXycVsQvyGF1etiNlIBB4RsqSDtW',
-      scopes: ['openid', 'profile', 'email', 'api'],
-      // 对齐 CLIProxyAPI：iflow OAuth callback 默认使用 11451，避免与主服务端口冲突
-      redirectUri: `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.LOCALHOST}:11451${API_PATHS.OAUTH_CALLBACK}`
-    },
-    headers: {
-      'User-Agent': 'iFlow-Cli',
-      'X-Requested-With': 'XMLHttpRequest',
-      'Origin': 'https://iflow.cn',
-      'Referer': 'https://iflow.cn/oauth',
-      'Accept': 'application/json'
-    },
-    polling: {
-      interval: 5000,
-      maxAttempts: 60,
-      timeout: 300000
-    },
-    retry: {
-      maxAttempts: 3,
-      backoffMs: 1000
-    },
-    features: {
-      supportsPKCE: true,
-      supportsApiKeyExchange: true,
-      requireHttpsCallback: true,
-      customState: true,
-      // 对齐 Antigravity/Gemini：请求离线 refresh_token，便于自动续期
-      requestOfflineAccess: true
-    }
-  });
-
-  // iFlow OAuth设备码配置（备用）
-  OAuthFlowConfigManager.registerDefaultConfig('iflow-device', {
-    flowType: OAuthFlowType.DEVICE_CODE,
-    activationType: OAuthActivationType.AUTO_BROWSER,
-    endpoints: {
-      // 兼容历史 CLI 链路：设备码端点仍使用 /api/oauth2 前缀
-      deviceCodeUrl: 'https://iflow.cn/api/oauth2/device/code',
-      tokenUrl: 'https://iflow.cn/api/oauth2/token',
-      userInfoUrl: 'https://iflow.cn/api/oauth/getUserInfo'
-    },
-    client: {
-      // 使用与主配置相同的客户端凭据
-      clientId: '10009311001',
-      clientSecret: '4Z3YjXycVsQvyGF1etiNlIBB4RsqSDtW',
-      scopes: ['openid', 'profile', 'email', 'api']
-    },
-    headers: {
-      'User-Agent': 'iFlow-Cli',
-      'X-Requested-With': 'XMLHttpRequest',
-      'Origin': 'https://iflow.cn',
-      'Referer': 'https://iflow.cn/oauth',
-      'Accept': 'application/json'
-    },
-    polling: {
-      interval: 5000,
-      maxAttempts: 60,
-      timeout: 300000
-    },
-    retry: {
-      maxAttempts: 3,
-      backoffMs: 1000
-    },
-    features: {
-      supportsPKCE: true,
-      supportsApiKeyExchange: true,
-      requireHttpsCallback: false,
-      customState: false
     }
   });
 

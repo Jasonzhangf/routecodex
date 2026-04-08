@@ -7,6 +7,30 @@ import {
 } from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
 import { enforceChatBudgetWithNative } from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logNormalizeNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  try {
+    const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[openai-message-normalize] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 // Message normalization utilities for OpenAI chat payloads (renamed to avoid confusion
 // with the deprecated "openai-normalizer" module entry). This file contains the
 // previously-implemented logic from openai-normalize.ts.
@@ -83,17 +107,28 @@ export function normalizeChatRequest(request: any): any {
               } else {
                 extractFromOutput(parsed?.output ?? parsed);
               }
-            } catch {
-              // ignore
+            } catch (error) {
+              logNormalizeNonBlocking('mcp_injection.parse_tool_message_content', error, {
+                toolRole: String((m as any)?.role ?? ''),
+                toolName: String((m as any)?.name ?? '')
+              });
             }
           }
-        } catch { /* ignore */ }
+        } catch (error) {
+          logNormalizeNonBlocking('mcp_injection.scan_tool_messages', error, {
+            messageCount: Array.isArray((normalized as any).messages) ? (normalized as any).messages.length : 0
+          });
+        }
 
         const discovered = Array.from(known);
         const currentTools: any[] = Array.isArray((normalized as any).tools) ? ((normalized as any).tools as any[]) : [];
         (normalized as any).tools = injectMcpToolsForChat(currentTools, discovered);
       }
-    } catch { /* ignore MCP injection */ }
+    } catch (error) {
+      logNormalizeNonBlocking('mcp_injection.apply', error, {
+        model: String((normalized as any)?.model ?? '')
+      });
+    }
   }
 
   // 工具消息文本化 + 最后一轮 call 结果一致化 + 空 assistant 回合清理（native）
@@ -102,7 +137,11 @@ export function normalizeChatRequest(request: any): any {
     if (msgs.length) {
       (normalized as any).messages = normalizeOpenaiChatMessagesWithNative(msgs);
     }
-  } catch { /* ignore message normalization */ }
+  } catch (error) {
+    logNormalizeNonBlocking('chat_messages.normalize_native', error, {
+      model: String((normalized as any)?.model ?? '')
+    });
+  }
 
   // 注意：不合并/删除多条 system（与 统一标准，避免高风险修改）。
 
@@ -119,7 +158,11 @@ export function normalizeChatRequest(request: any): any {
       })();
       normalized = enforceChatBudgetWithNative(normalized, allowed, sysLimit) as any;
     }
-  } catch { /* ignore budget enforcement */ }
+  } catch (error) {
+    logNormalizeNonBlocking('chat_budget.enforce_native', error, {
+      model: String((normalized as any)?.model ?? '')
+    });
+  }
 
   // Do not invoke legacy tooling stage here; codecs perform canonicalization
   return normalized;

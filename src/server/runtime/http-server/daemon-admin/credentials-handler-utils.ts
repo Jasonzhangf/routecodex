@@ -30,7 +30,7 @@ type ApiKeyMatch = {
 
 const APIKEY_FILE_PATTERN = /^(.+)-apikey-(\d+)(?:-(.+))?\.key$/i;
 
-export const SUPPORTED_OAUTH_PROVIDERS = new Set(['iflow', 'qwen', 'gemini-cli', 'antigravity']);
+export const SUPPORTED_OAUTH_PROVIDERS = new Set(['qwen', 'gemini-cli', 'antigravity']);
 
 export async function buildCredentialSummaries(): Promise<CredentialSummary[]> {
   const snapshot = await collectTokenSnapshot();

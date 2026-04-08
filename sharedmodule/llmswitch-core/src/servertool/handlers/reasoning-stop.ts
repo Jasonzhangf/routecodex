@@ -12,6 +12,7 @@ type ReasoningStopPayload = {
   completed: boolean;
   completionEvidence: string;
   cannotCompleteReason: string;
+  nextStep: string;
 };
 
 function parseToolArguments(toolCall: ToolCall): Record<string, unknown> {
@@ -97,6 +98,14 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>): {
     'cannotCompleteReason',
     'reason'
   ]);
+  const nextStep = readText(args, [
+    'next_step',
+    'nextStep',
+    'next_steps',
+    'nextSteps',
+    'plan_next_step',
+    'next_plan'
+  ]);
 
   if (completed && !completionEvidence) {
     return {
@@ -105,11 +114,11 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>): {
       message: 'reasoning.stop requires completion_evidence when is_completed=true.'
     };
   }
-  if (!completed && !cannotCompleteReason) {
+  if (!completed && !cannotCompleteReason && !nextStep) {
     return {
       ok: false,
-      code: 'CANNOT_COMPLETE_REASON_REQUIRED',
-      message: 'reasoning.stop requires cannot_complete_reason when is_completed=false.'
+      code: 'NEXT_STEP_OR_CANNOT_COMPLETE_REQUIRED',
+      message: 'reasoning.stop requires next_step or cannot_complete_reason when is_completed=false.'
     };
   }
 
@@ -119,7 +128,8 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>): {
       taskGoal,
       completed,
       completionEvidence,
-      cannotCompleteReason
+      cannotCompleteReason,
+      nextStep
     }
   };
 }
@@ -132,7 +142,12 @@ function buildSummary(payload: ReasoningStopPayload): string {
   if (payload.completed) {
     lines.push(`完成证据: ${payload.completionEvidence}`);
   } else {
-    lines.push(`无法完成原因: ${payload.cannotCompleteReason}`);
+    if (payload.cannotCompleteReason) {
+      lines.push(`无法完成原因: ${payload.cannotCompleteReason}`);
+    }
+    if (payload.nextStep) {
+      lines.push(`下一步: ${payload.nextStep}`);
+    }
   }
   return lines.join('\n');
 }

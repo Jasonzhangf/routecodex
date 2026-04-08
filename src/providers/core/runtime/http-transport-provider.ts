@@ -87,6 +87,40 @@ export class HttpTransportProvider extends BaseProvider {
   private requestExecutor!: HttpRequestExecutor;
   private injectedConfig: UnknownObject | null = null;
 
+  private formatUnknownError(error: unknown): string {
+    if (error instanceof Error) {
+      return error.stack || `${error.name}: ${error.message}`;
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+
+  private logNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+    const payload: Record<string, unknown> = {
+      providerType: this.providerType,
+      providerId: this.id,
+      stage,
+      error: this.formatUnknownError(error),
+      ...(details ?? {})
+    };
+    try {
+      this.dependencies.logger?.logModule(this.id, 'provider-non-blocking-error', payload);
+    } catch {
+      // logger itself should never break runtime path
+    }
+    try {
+      const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+      console.warn(
+        `[http-transport-provider] stage=${stage} provider=${this.id} failed (non-blocking): ${this.formatUnknownError(error)}${suffix}`
+      );
+    } catch {
+      // Never throw from non-blocking logging.
+    }
+  }
+
   constructor(
     config: OpenAIStandardConfig,
     dependencies: ModuleDependencies,
@@ -170,8 +204,8 @@ export class HttpTransportProvider extends BaseProvider {
     // 同步最新 ServiceProfile（providerType/baseUrl 等可能发生变化）
     try {
       this.serviceProfile = this.getServiceProfile();
-    } catch {
-      // ignore
+    } catch (error) {
+      this.logNonBlockingError('setConfig.refreshServiceProfile', error);
     }
   }
 
@@ -351,7 +385,8 @@ export class HttpTransportProvider extends BaseProvider {
       const headers = await this.buildRequestHeaders();
       const response = await this.httpClient.get(url, headers);
       return response.status === 200 || response.status === 404;
-    } catch {
+    } catch (error) {
+      this.logNonBlockingError('performHealthCheck', error, { url });
       return false;
     }
   }
@@ -567,7 +602,10 @@ export class HttpTransportProvider extends BaseProvider {
     let payload: Record<string, unknown> | null = null;
     try {
       payload = authReader.getTokenPayload();
-    } catch {
+    } catch (error) {
+      this.logNonBlockingError('resolveAuthResourceBaseUrlOverride.readTokenPayload', error, {
+        providerId
+      });
       return undefined;
     }
     if (!payload || typeof payload !== 'object') {

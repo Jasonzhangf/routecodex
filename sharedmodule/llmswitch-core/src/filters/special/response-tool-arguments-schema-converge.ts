@@ -8,6 +8,16 @@ function parseJson(str: string): any {
   try { return JSON.parse(str); } catch { return null; }
 }
 
+function logResponseToolArgsSchemaConvergeNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  const reason = error instanceof Error ? (error.stack || `${error.name}: ${error.message}`) : String(error);
+  const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[response-tool-arguments-schema-converge] ${stage} failed (non-blocking): ${reason}${detailSuffix}`);
+}
+
 /**
  * ResponseToolArgumentsSchemaConvergeFilter
  * - If tool schemas are available on context (context.toolSchemas[name] = JSONSchema),
@@ -44,7 +54,13 @@ export class ResponseToolArgumentsSchemaConvergeFilter implements Filter<JsonObj
           for (const k of Object.keys(props)) {
             if (k in parsed) whitelisted[k] = (parsed as any)[k];
           }
-          try { (fn as any).arguments = JSON.stringify(whitelisted); } catch { /* keep original */ }
+          try {
+            (fn as any).arguments = JSON.stringify(whitelisted);
+          } catch (error) {
+            logResponseToolArgsSchemaConvergeNonBlocking('stringify_schema_whitelisted_arguments', error, {
+              toolName: name
+            });
+          }
         }
       }
       (out as any).choices = choices;
@@ -54,4 +70,3 @@ export class ResponseToolArgumentsSchemaConvergeFilter implements Filter<JsonObj
     }
   }
 }
-

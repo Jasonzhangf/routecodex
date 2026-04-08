@@ -65,8 +65,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       // Monitor成功样本要求此Beta标头，确保上游接受Responses协议
       'OpenAI-Beta': 'responses-2024-12-17'
     },
-    // 默认 Provider 请求超时时间：500s
-    timeout: 500000,
+    // 默认 Provider 请求超时时间：240s
+    timeout: 240000,
     maxRetries: 3
   },
   openai: {
@@ -78,8 +78,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     headers: {
       'Content-Type': 'application/json'
     },
-    // 默认 Provider 请求超时时间：500s
-    timeout: 500000,
+    // 默认 Provider 请求超时时间：240s
+    timeout: 240000,
     maxRetries: 3
   },
 
@@ -98,8 +98,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'Content-Type': 'application/json'
       // 版本标头由上游/配置控制，这里不硬编码 anthropic-version，避免与兼容端点冲突
     },
-    // 默认 Provider 请求超时时间：1000s（更长的长上下文/工具回合）
-    timeout: 1000000,
+    // 默认 Provider 请求超时时间：300s（长上下文仍可通过环境变量覆盖）
+    timeout: 300000,
     maxRetries: 3
   },
   gemini: {
@@ -113,8 +113,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     headers: {
       'Content-Type': 'application/json'
     },
-    // 默认 Provider 请求超时时间：500s
-    timeout: 500000,
+    // 默认 Provider 请求超时时间：240s
+    timeout: 240000,
     maxRetries: 3
   },
   'gemini-cli': {
@@ -129,8 +129,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'X-Goog-Api-Client': 'gl-node/22.17.0',
       'Client-Metadata': 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI'
     },
-    // 默认 Provider 请求超时时间：500s
-    timeout: 500000,
+    // 默认 Provider 请求超时时间：240s
+    timeout: 240000,
     maxRetries: 3
   },
 
@@ -146,7 +146,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'User-Agent': 'RouteCodex/2.0'
     },
     // 默认 Provider 请求超时时间：500s
-    timeout: 500000,
+    timeout: 240000,
     maxRetries: 3
   },
 
@@ -170,7 +170,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'X-DashScope-AuthType': 'qwen-oauth'
     },
     // 默认 Provider 请求超时时间：500s
-    timeout: 500000,
+    timeout: 240000,
     maxRetries: 3
   },
 
@@ -187,27 +187,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'User-Agent': DEFAULT_QWENCHAT_USER_AGENT,
       'Accept-Language': DEFAULT_QWENCHAT_ACCEPT_LANGUAGE
     },
-    timeout: 500000,
+    timeout: 240000,
     maxRetries: 1
-  },
-
-  iflow: {
-    // 对齐最新 iflow API：apis.iflow.cn/v1
-    // 避免 baseUrl 已含 /v1 时 endpoint 再次携带 /v1 导致 /v1/v1 重复
-    defaultBaseUrl: 'https://apis.iflow.cn/v1',
-    defaultEndpoint: '/chat/completions',
-    defaultModel: 'kimi',
-    requiredAuth: [],
-    optionalAuth: ['oauth', 'apikey'],
-    headers: {
-      'Content-Type': 'application/json',
-      // iFlow 对部分模型（例如 glm-4.7）会基于 UA 做强约束：
-      // 必须伪装成 iFlow CLI 才能获得可用配额/能力，否则会返回 HTTP 200 + status=435 "Model not support"。
-      'User-Agent': 'iFlow-Cli'
-    },
-    // 默认 Provider 请求超时时间：500s
-    timeout: 500000,
-    maxRetries: 3
   },
 
   deepseek: {
@@ -226,7 +207,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'accept-charset': 'UTF-8',
       'User-Agent': 'DeepSeek/1.0.13 Android/35'
     },
-    timeout: 500000,
+    timeout: 240000,
     maxRetries: 3
   },
 
@@ -239,8 +220,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     headers: {
       'Content-Type': 'application/json'
     },
-    // LM Studio 默认请求超时时间：1000s（加倍以适配更长上下文/初始化耗时）
-    timeout: 1000000,
+    // LM Studio 默认请求超时时间：300s（必要时可通过环境变量提升）
+    timeout: 300000,
     maxRetries: 3
   }
 };
@@ -306,7 +287,6 @@ export enum ServiceType {
   OPENAI = 'openai',
   GLM = 'glm',
   QWEN = 'qwen',
-  IFLOW = 'iflow',
   LMSTUDIO = 'lmstudio'
 }
 

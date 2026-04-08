@@ -21,6 +21,11 @@
       }
     },
     "transportBackend": "vercel-ai-sdk",
-    "compatibilityProfile": "anthropic:claude-code"
+    "compatibilityProfile": "anthropic:claude-code",
+    "concurrency": {
+      "maxInFlight": 2,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
+    }
   }
 }

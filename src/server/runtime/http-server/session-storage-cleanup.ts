@@ -20,6 +20,26 @@ type CleanupSummary = {
   removedToolStateEntries: number;
 };
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error ?? 'unknown');
+}
+
+function logSessionStorageCleanupNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length
+      ? ` details=${JSON.stringify(details)}`
+      : '';
+    console.warn(
+      `[session-storage-cleanup] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`
+    );
+  } catch {
+    // Never throw from cleanup logging.
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -32,7 +52,11 @@ function parseJsonFile(filepath: string): Record<string, unknown> | null {
     }
     const parsed = JSON.parse(raw);
     return isRecord(parsed) ? parsed : null;
-  } catch {
+  } catch (error) {
+    const code = (error as { code?: unknown })?.code;
+    if (code !== 'ENOENT') {
+      logSessionStorageCleanupNonBlockingError('parse_json', error, { filepath });
+    }
     return null;
   }
 }
@@ -48,7 +72,11 @@ function removeFileIfExists(filepath: string): boolean {
   try {
     fs.unlinkSync(filepath);
     return true;
-  } catch {
+  } catch (error) {
+    const code = (error as { code?: unknown })?.code;
+    if (code !== 'ENOENT') {
+      logSessionStorageCleanupNonBlockingError('remove_file', error, { filepath });
+    }
     return false;
   }
 }
@@ -61,7 +89,11 @@ function removeDirIfEmpty(dirpath: string): boolean {
     }
     fs.rmdirSync(dirpath);
     return true;
-  } catch {
+  } catch (error) {
+    const code = (error as { code?: unknown })?.code;
+    if (code !== 'ENOENT' && code !== 'ENOTEMPTY') {
+      logSessionStorageCleanupNonBlockingError('remove_empty_dir', error, { dirpath });
+    }
     return false;
   }
 }
@@ -99,7 +131,8 @@ function sanitizeClockStateDir(args: {
   let entries: fs.Dirent[] = [];
   try {
     entries = fs.readdirSync(args.dirpath, { withFileTypes: true });
-  } catch {
+  } catch (error) {
+    logSessionStorageCleanupNonBlockingError('read_clock_dir', error, { dirpath: args.dirpath });
     return removedClockStateFiles;
   }
   for (const entry of entries) {
@@ -114,7 +147,8 @@ function sanitizeClockStateDir(args: {
     let alive = true;
     try {
       alive = args.isTmuxSessionAlive(tmuxSessionId);
-    } catch {
+    } catch (error) {
+      logSessionStorageCleanupNonBlockingError('clock_liveness_probe', error, { tmuxSessionId });
       alive = true;
     }
     if (!alive && removeFileIfExists(filePath)) {
@@ -265,6 +299,26 @@ export function cleanupSessionStorageOnStartup(options?: {
       ? Math.floor(Number(options?.staleAfterMs))
       : resolveHeartbeatTtlMs();
   const isTmuxSessionAlive = options?.isTmuxSessionAlive || (() => true);
+  const tmuxLivenessCache = new Map<string, boolean>();
+  const isTmuxSessionAliveMemoized = (tmuxSessionId: string): boolean => {
+    const normalized = normalizeString(tmuxSessionId);
+    if (!normalized) {
+      return false;
+    }
+    const cached = tmuxLivenessCache.get(normalized);
+    if (typeof cached === 'boolean') {
+      return cached;
+    }
+    let alive = true;
+    try {
+      alive = isTmuxSessionAlive(normalized);
+    } catch (error) {
+      logSessionStorageCleanupNonBlockingError('startup_liveness_probe', error, { tmuxSessionId: normalized });
+      alive = true;
+    }
+    tmuxLivenessCache.set(normalized, alive);
+    return alive;
+  };
 
   const summary: CleanupSummary = {
     removedLegacyScopeFiles: 0,
@@ -294,14 +348,7 @@ export function cleanupSessionStorageOnStartup(options?: {
         const tmuxMatch = /^tmux-(.+)\.json$/i.exec(entry.name);
         if (tmuxMatch) {
           const tmuxSessionId = normalizeString(tmuxMatch[1]);
-          let alive = Boolean(tmuxSessionId);
-          if (tmuxSessionId) {
-            try {
-              alive = isTmuxSessionAlive(tmuxSessionId);
-            } catch {
-              alive = true;
-            }
-          }
+          const alive = tmuxSessionId ? isTmuxSessionAliveMemoized(tmuxSessionId) : false;
           if (!alive && removeFileIfExists(fullpath)) {
             summary.removedDeadTmuxStateFiles += 1;
           }
@@ -318,14 +365,7 @@ export function cleanupSessionStorageOnStartup(options?: {
             continue;
           }
           const tmuxSessionId = normalizeString(heartbeatEntry.name.replace(/\.json$/i, ''));
-          let alive = Boolean(tmuxSessionId);
-          if (tmuxSessionId) {
-            try {
-              alive = isTmuxSessionAlive(tmuxSessionId);
-            } catch {
-              alive = true;
-            }
-          }
+          const alive = tmuxSessionId ? isTmuxSessionAliveMemoized(tmuxSessionId) : false;
           if (!alive && removeFileIfExists(path.join(fullpath, heartbeatEntry.name))) {
             summary.removedHeartbeatStateFiles += 1;
           }
@@ -336,7 +376,7 @@ export function cleanupSessionStorageOnStartup(options?: {
       if (entry.name === 'clock') {
         summary.removedClockStateFiles += sanitizeClockStateDir({
           dirpath: fullpath,
-          isTmuxSessionAlive
+          isTmuxSessionAlive: isTmuxSessionAliveMemoized
         });
         continue;
       }
@@ -345,14 +385,14 @@ export function cleanupSessionStorageOnStartup(options?: {
       if (fs.existsSync(nestedClockDir)) {
         summary.removedClockStateFiles += sanitizeClockStateDir({
           dirpath: nestedClockDir,
-          isTmuxSessionAlive
+          isTmuxSessionAlive: isTmuxSessionAliveMemoized
         });
       }
       const dirSummary = sanitizeSessionBindingsDir({
         dirpath: fullpath,
         nowMs,
         staleAfterMs,
-        isTmuxSessionAlive
+        isTmuxSessionAlive: isTmuxSessionAliveMemoized
       });
       summary.prunedRegistryDirs += dirSummary.prunedRegistryDirs;
       summary.removedRegistryDirs += dirSummary.removedRegistryDirs;
@@ -360,7 +400,8 @@ export function cleanupSessionStorageOnStartup(options?: {
       summary.removedRegistryMappings += dirSummary.removedRegistryMappings;
       summary.removedToolStateEntries += dirSummary.removedToolStateEntries;
     }
-  } catch {
+  } catch (error) {
+    logSessionStorageCleanupNonBlockingError('startup_cleanup', error, { baseDir });
     return summary;
   }
 

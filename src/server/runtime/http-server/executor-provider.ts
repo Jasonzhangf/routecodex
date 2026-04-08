@@ -330,13 +330,17 @@ export function computeRetryDelayMs(error: unknown, options?: WaitBeforeRetryOpt
   }
   // Single-provider pools can only retry the same provider key; enforce exponential
   // backoff to avoid retry storms when upstream is temporarily or deterministically failing.
+  // 2026-04: under provider-switch storms, 800ms base was still too aggressive at scale.
+  // Raise default generic backoff so switch/failover traffic naturally slows down.
+  const genericDefaultBaseMs = process.env.NODE_ENV === 'test' ? 800 : 2000;
+  const genericDefaultMaxMs = process.env.NODE_ENV === 'test' ? 15000 : 60000;
   const genericBaseMs = parsePositiveInt(
     process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS || process.env.RCC_PROVIDER_RETRY_BACKOFF_BASE_MS,
-    800
+    genericDefaultBaseMs
   );
   const genericMaxMs = parsePositiveInt(
     process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS || process.env.RCC_PROVIDER_RETRY_BACKOFF_MAX_MS,
-    15000
+    genericDefaultMaxMs
   );
   return Math.min(genericMaxMs, genericBaseMs * Math.pow(2, Math.max(0, attempt - 1)));
 }

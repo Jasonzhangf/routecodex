@@ -3,8 +3,6 @@ import { isIP } from 'node:net';
 import { PassThrough } from 'node:stream';
 
 import type { UnknownObject } from '../../../types/common-types.js';
-import { applyStandardToolTextRequestTransform } from './standard-tool-text-request-transform.js';
-import { applyStandardToolTextHarvestToChatPayload } from './standard-tool-text-harvest.js';
 
 export const DEFAULT_QWENCHAT_BASE_URL = 'https://chat.qwen.ai';
 export const DEFAULT_QWENCHAT_USER_AGENT =
@@ -1202,14 +1200,30 @@ export function extractQwenChatPayload(request: UnknownObject): QwenChatPayload 
   const container = isRecord(request) ? request : {};
   const payload = isRecord(container.data) ? container.data : container;
   const model = normalizeInputString(payload.model) || 'qwen3.6-plus';
+  // OpenAI-responses format: input field (string or array of content parts)
+  const inputField = payload.input;
+  let inputMessages: Array<{ role: string; content: string }> = [];
+  if (typeof inputField === 'string' && inputField.trim()) {
+    inputMessages = [{ role: 'user', content: inputField }];
+  } else if (Array.isArray(inputField)) {
+    const content = inputField
+      .filter((part: any) => typeof part?.text === 'string' || typeof part === 'string')
+      .map((part: any) => typeof part === 'string' ? part : part.text)
+      .join('\n');
+    if (content.trim()) {
+      inputMessages = [{ role: 'user', content }];
+    }
+  }
   const directMessages = Array.isArray(payload.messages) ? payload.messages : [];
   const compatPrompt = normalizeInputString(payload.prompt);
   const messages =
     directMessages.length > 0
       ? directMessages
-      : compatPrompt
-        ? [{ role: 'user', content: compatPrompt }]
-        : [];
+      : inputMessages.length > 0
+        ? inputMessages
+        : compatPrompt
+          ? [{ role: 'user', content: compatPrompt }]
+          : [];
   const streamFlag = payload.stream;
   // Follow OpenAI semantics: stream defaults to false unless explicitly true.
   const stream = streamFlag === true;
@@ -1683,9 +1697,6 @@ export function createOpenAiMappedSseStream(input: QwenSseChunkWriterInput): Nod
   const created = Math.floor(Date.now() / 1000);
   let doneWritten = false;
   let buffer = '';
-  const contentParts: string[] = [];
-  const reasoningParts: string[] = [];
-  const imageUrls: string[] = [];
   const usageRef: { usage?: Record<string, unknown> } = {};
   let lastUpstreamFinishReason: string | null = null;
 
@@ -1712,7 +1723,7 @@ export function createOpenAiMappedSseStream(input: QwenSseChunkWriterInput): Nod
           lastUpstreamFinishReason = reason;
         },
         includeFinishReason: false,
-        collect: { contentParts, reasoningParts, imageUrls, usageRef },
+        collect: { contentParts: [], reasoningParts: [], imageUrls: [], usageRef },
         responseId,
         created,
         model: input.model
@@ -1749,58 +1760,20 @@ export function createOpenAiMappedSseStream(input: QwenSseChunkWriterInput): Nod
           lastUpstreamFinishReason = reason;
         },
         includeFinishReason: false,
-        collect: { contentParts, reasoningParts, imageUrls, usageRef },
+        collect: { contentParts: [], reasoningParts: [], imageUrls: [], usageRef },
         responseId,
         created,
         model: input.model
       });
     }
-    const dedupImageUrls = Array.from(new Set(imageUrls));
-    const aggregatedContent = dedupImageUrls.length > 0
-      ? dedupImageUrls.join('\n')
-      : contentParts.join('');
-    const harvested = applyStandardToolTextHarvestToChatPayload({
-      id: responseId,
-      object: 'chat.completion',
-      created,
-      model: input.model,
-      choices: [
-        {
-          index: 0,
-          finish_reason: 'stop',
-          message: {
-            role: 'assistant',
-            content: aggregatedContent,
-            ...(reasoningParts.length ? { reasoning_content: reasoningParts.join('') } : {})
-          }
-        }
-      ],
-      ...(usageRef.usage ? { usage: usageRef.usage } : {})
-    });
-    const harvestedChoice = Array.isArray(harvested.choices) && harvested.choices.length > 0 && isRecord(harvested.choices[0])
-      ? (harvested.choices[0] as Record<string, unknown>)
-      : undefined;
-    const harvestedMessage = harvestedChoice && isRecord(harvestedChoice.message)
-      ? (harvestedChoice.message as Record<string, unknown>)
-      : undefined;
-    const harvestedToolCalls = harvestedMessage && Array.isArray(harvestedMessage.tool_calls)
-      ? harvestedMessage.tool_calls
-      : [];
-    const finalFinishReason =
-      harvestedToolCalls.length > 0
-        ? 'tool_calls'
-        : lastUpstreamFinishReason || 'stop';
-    const finalDelta: Record<string, unknown> =
-      harvestedToolCalls.length > 0
-        ? { tool_calls: harvestedToolCalls }
-        : {};
+    const finalFinishReason = lastUpstreamFinishReason || 'stop';
     output.write(
       `data: ${JSON.stringify(
         createOpenAiChunk({
           id: responseId,
           created,
           model: input.model,
-          delta: finalDelta,
+          delta: {},
           finishReason: finalFinishReason,
           usage: usageRef.usage
         })
@@ -1884,10 +1857,9 @@ export async function collectQwenSseAsOpenAiResult(args: {
   if (usageRef.usage) {
     result.usage = usageRef.usage;
   }
-  const harvested = applyStandardToolTextHarvestToChatPayload(result);
   const firstChoice =
-    Array.isArray(harvested.choices) && harvested.choices.length > 0 && isRecord(harvested.choices[0])
-      ? (harvested.choices[0] as Record<string, unknown>)
+    Array.isArray(result.choices) && result.choices.length > 0 && isRecord(result.choices[0])
+      ? (result.choices[0] as Record<string, unknown>)
       : undefined;
   const messageNode = firstChoice && isRecord(firstChoice.message) ? (firstChoice.message as Record<string, unknown>) : undefined;
   const finishReason = normalizeInputString(firstChoice?.finish_reason) || 'stop';
@@ -1900,7 +1872,7 @@ export async function collectQwenSseAsOpenAiResult(args: {
     (err as Error & { statusCode?: number; code?: string }).code = 'QWENCHAT_EMPTY_ASSISTANT';
     throw err;
   }
-  return harvested;
+  return result;
 }
 
 export async function buildQwenChatSendPlan(input: QwenChatSendInput): Promise<{
@@ -1908,7 +1880,7 @@ export async function buildQwenChatSendPlan(input: QwenChatSendInput): Promise<{
   completionHeaders: Record<string, string>;
   completionBody: Record<string, unknown>;
 }> {
-  const normalizedPayload = applyStandardToolTextRequest(input.payload);
+  const normalizedPayload = input.payload;
   if (!Array.isArray(normalizedPayload.messages) || normalizedPayload.messages.length === 0) {
     const err = new Error('Messages are required');
     (err as Error & { statusCode?: number; code?: string }).statusCode = 400;
@@ -1965,36 +1937,6 @@ export async function buildQwenChatSendPlan(input: QwenChatSendInput): Promise<{
     completionUrl: `${joinUrl(input.baseUrl, DEFAULT_QWENCHAT_COMPLETION_ENDPOINT)}?chat_id=${encodeURIComponent(chatId)}`,
     completionHeaders,
     completionBody
-  };
-}
-
-function applyStandardToolTextRequest(payload: QwenChatPayload): QwenChatPayload {
-  if (!Array.isArray(payload.tools) || payload.tools.length === 0) {
-    return payload;
-  }
-  const transformed = applyStandardToolTextRequestTransform(
-    {
-      model: payload.model,
-      messages: payload.messages,
-      tools: payload.tools,
-      metadata: payload.metadata
-    } as any,
-    {
-      providerProtocol: 'openai-chat',
-      entryEndpoint: '/v1/chat/completions'
-    } as any
-  ) as Record<string, unknown>;
-  const prompt = normalizeInputString(transformed.prompt);
-  if (!prompt) {
-    const err = new Error('QwenChat tool-text transform failed: prompt is empty');
-    (err as Error & { statusCode?: number; code?: string }).statusCode = 422;
-    (err as Error & { statusCode?: number; code?: string }).code = 'QWENCHAT_TOOL_TEXT_TRANSFORM_FAILED';
-    throw err;
-  }
-  return {
-    ...payload,
-    messages: [{ role: 'user', content: prompt }],
-    tools: undefined
   };
 }
 

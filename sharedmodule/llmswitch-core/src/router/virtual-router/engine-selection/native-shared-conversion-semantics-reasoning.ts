@@ -59,6 +59,45 @@ type NormalizedToolCall = {
   function: { name: string; arguments: string };
 };
 
+function normalizeToolCallEntries(raw: unknown[]): NormalizedToolCall[] {
+  return raw
+    .filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
+    .map((entry) => {
+      const row = entry as Record<string, unknown>;
+      const functionRow =
+        row.function && typeof row.function === 'object' && !Array.isArray(row.function)
+          ? (row.function as Record<string, unknown>)
+          : null;
+      const name = (
+        typeof functionRow?.name === 'string'
+          ? functionRow.name
+          : typeof row.name === 'string'
+            ? row.name
+            : ''
+      ).trim();
+      const argsCandidate =
+        typeof functionRow?.arguments === 'string'
+          ? functionRow.arguments
+          : typeof row.args === 'string'
+            ? row.args
+            : typeof row.arguments === 'string'
+              ? row.arguments
+              : '';
+      if (!name) {
+        return null;
+      }
+      return {
+        ...(typeof row.id === 'string' && row.id ? { id: row.id } : {}),
+        type: 'function' as const,
+        function: {
+          name,
+          arguments: argsCandidate
+        }
+      };
+    })
+    .filter((entry): entry is NormalizedToolCall => Boolean(entry));
+}
+
 export function extractToolCallsFromReasoningTextWithNative(
   text: string,
   idPrefix?: string
@@ -125,12 +164,7 @@ export function normalizeAssistantTextToToolCallsWithNative(
     return fail();
   }
   const baseMessage = message && typeof message === 'object' ? { ...message } : {};
-  const contentValue = baseMessage.content;
-  const sourceText = typeof contentValue === 'string' ? contentValue : '';
-  const payloadJson = safeStringify({
-    text: sourceText,
-    options: options ?? {}
-  });
+  const payloadJson = safeStringify(baseMessage);
   if (!payloadJson) {
     return fail('json stringify failed');
   }
@@ -140,35 +174,34 @@ export function normalizeAssistantTextToToolCallsWithNative(
       return fail('empty result');
     }
     const parsed = parseJson(raw);
-    if (!Array.isArray(parsed)) {
+    let normalizedMessage = { ...baseMessage };
+    let toolCallsSource: unknown[] = [];
+    if (Array.isArray(parsed)) {
+      toolCallsSource = parsed;
+    } else if (parsed && typeof parsed === 'object') {
+      const row = parsed as Record<string, unknown>;
+      const messageNode =
+        row.message && typeof row.message === 'object' && !Array.isArray(row.message)
+          ? (row.message as Record<string, unknown>)
+          : row;
+      normalizedMessage = {
+        ...normalizedMessage,
+        ...messageNode
+      };
+      toolCallsSource = Array.isArray(messageNode.tool_calls)
+        ? messageNode.tool_calls
+        : [];
+    } else {
       return fail('invalid payload');
     }
-    const normalizedCalls: NormalizedToolCall[] = parsed
-      .filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
-      .map((entry) => {
-        const row = entry as Record<string, unknown>;
-        const name = typeof row.name === 'string' ? row.name.trim() : '';
-        const args = typeof row.args === 'string' ? row.args : '';
-        if (!name) {
-          return null;
-        }
-        return {
-          ...(typeof row.id === 'string' && row.id ? { id: row.id } : {}),
-          type: 'function',
-          function: {
-            name,
-            arguments: args
-          }
-        };
-      })
-      .filter((entry): entry is NormalizedToolCall => Boolean(entry));
+    const normalizedCalls = normalizeToolCallEntries(toolCallsSource);
     if (normalizedCalls.length > 0) {
       return {
-        ...baseMessage,
+        ...normalizedMessage,
         tool_calls: normalizedCalls
       };
     }
-    return baseMessage;
+    return normalizedMessage;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

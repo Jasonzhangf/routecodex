@@ -30,6 +30,24 @@ type PipeCapable = { pipe?: unknown };
 type WebReadable = { getReader?: () => unknown };
 type AsyncIterableLike = { [Symbol.asyncIterator]?: () => AsyncIterator<unknown> };
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error ?? 'unknown');
+}
+
+function logSseDispatchNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length
+      ? ` details=${JSON.stringify(details)}`
+      : '';
+    console.warn(`[sse-dispatcher] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 export function hasSsePayload(body: unknown): body is SsePayloadShape {
   return Boolean(body && typeof body === 'object' && '__sse_responses' in (body as Record<string, unknown>));
 }
@@ -60,8 +78,8 @@ export function dispatchSseStream(options: DispatchSseOptions): boolean {
   const cleanup = () => {
     try {
       stream.destroy?.();
-    } catch {
-      /* ignore cleanup errors */
+    } catch (error) {
+      logSseDispatchNonBlockingError('cleanup.destroy_stream', error, { requestLabel });
     }
     logPipelineStage('response.sse.stream.end', requestLabel, { events: eventCount, status });
   };
@@ -79,13 +97,13 @@ export function dispatchSseStream(options: DispatchSseOptions): boolean {
         }
       };
       res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
-    } catch {
-      /* ignore write errors */
+    } catch (error) {
+      logSseDispatchNonBlockingError('stream_error.write_error_event', error, { requestLabel });
     }
     try {
       res.end();
-    } catch {
-      /* ignore end errors */
+    } catch (error) {
+      logSseDispatchNonBlockingError('stream_error.end', error, { requestLabel });
     }
   });
 
@@ -102,8 +120,8 @@ export function dispatchSseStream(options: DispatchSseOptions): boolean {
           event: eventCount,
           preview: trimmed
         });
-      } catch {
-        /* ignore preview errors */
+      } catch (error) {
+        logSseDispatchNonBlockingError('preview.extract', error, { requestLabel, eventCount });
       }
     }
 
@@ -111,7 +129,7 @@ export function dispatchSseStream(options: DispatchSseOptions): boolean {
     try {
       res.write(chunk);
     } catch (error) {
-      /* ignore write errors */
+      logSseDispatchNonBlockingError('stream.write_chunk', error, { requestLabel, eventCount });
     }
   });
 
@@ -119,8 +137,8 @@ export function dispatchSseStream(options: DispatchSseOptions): boolean {
     // End response directly (UTF-8 buffer disabled for testing)
     try {
       res.end();
-    } catch {
-      /* ignore end errors */
+    } catch (error) {
+      logSseDispatchNonBlockingError('stream.end', error, { requestLabel });
     }
   });
 
@@ -147,7 +165,8 @@ function toNodeReadable(streamLike: unknown): Readable | null {
   if (webCandidate && typeof webCandidate.getReader === 'function') {
     try {
       return Readable.fromWeb(streamLike as NodeReadableStream);
-    } catch {
+    } catch (error) {
+      logSseDispatchNonBlockingError('to_node_readable.from_web', error);
       return null;
     }
   }

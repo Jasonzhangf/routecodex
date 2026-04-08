@@ -27,6 +27,28 @@ async function waitForFile(dir: string, prefix: string, timeoutMs = 1500): Promi
   }
 }
 
+async function waitForFiles(dir: string, prefix: string, minCount: number, timeoutMs = 1500): Promise<string[]> {
+  const started = Date.now();
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      const entries = await fs.readdir(dir);
+      const hits = entries.filter((name) => name.startsWith(prefix)).map((name) => path.join(dir, name));
+      if (hits.length >= minCount) {
+        return hits;
+      }
+    } catch {
+      // ignore until timeout
+    }
+    if (Date.now() - started > timeoutMs) {
+      throw new Error(
+        `Timed out waiting for files in ${dir} with prefix ${prefix} (expected at least ${minCount})`
+      );
+    }
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 describe('runtime errorsample apply_patch scope', () => {
   let snapshotDir: string;
   let errorsDir: string;
@@ -48,7 +70,7 @@ describe('runtime errorsample apply_patch scope', () => {
     await fs.rm(errorsDir, { recursive: true, force: true });
   });
 
-  it('does not write client-tool-error samples for apply_patch context-drift failures', async () => {
+  it('writes client-tool-error samples for apply_patch context-drift failure subtypes', async () => {
     const recorder = await createSnapshotRecorder(
       {
         requestId: 'req_client_tool_apply_patch_drift_1',
@@ -79,9 +101,12 @@ describe('runtime errorsample apply_patch scope', () => {
       ]
     });
 
-    await new Promise((r) => setTimeout(r, 180));
     const clientToolDir = path.join(errorsDir, 'client-tool-error');
-    await expect(fs.readdir(clientToolDir)).rejects.toThrow();
+    const files = await waitForFiles(clientToolDir, 'chat_process.req.stage2.semantic_map.apply_patch-', 2);
+    const payloads = await Promise.all(files.map(async (file) => JSON.parse(await fs.readFile(file, 'utf8')) as any));
+    const errorTypes = new Set(payloads.map((json) => String(json?.errorType || '')));
+    expect(errorTypes.has('apply_patch_gnu_line_number_context_not_found')).toBe(true);
+    expect(errorTypes.has('apply_patch_expected_lines_not_found')).toBe(true);
   });
 
   it('writes client-tool-error sample for apply_patch empty update hunk subtype', async () => {

@@ -6,6 +6,7 @@ import { writeSnapshotViaHooks } from '../../../modules/llmswitch/bridge.js';
 import { buildInfo } from '../../../build-info.js';
 import { resolveRccSnapshotsDirFromEnv } from '../../../config/user-data-paths.js';
 import { runtimeFlags } from '../../../runtime/runtime-flags.js';
+import { shouldCaptureSnapshotStage } from '../../../utils/snapshot-stage-policy.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import { redactSensitiveData } from '../../../utils/sensitive-redaction.js';
 import {
@@ -32,6 +33,138 @@ type ProviderSnapshotWriteOptions = {
   providerKey?: string;
   providerId?: string;
 };
+
+const SNAPSHOT_SUMMARY_MAX_DEPTH = 2;
+const SNAPSHOT_SUMMARY_MAX_KEYS = 24;
+const SNAPSHOT_SUMMARY_MAX_ARRAY_SAMPLE = 2;
+const SNAPSHOT_SUMMARY_MAX_STRING_PREVIEW = 240;
+const SNAPSHOT_SUMMARY_MAX_NODES = 800;
+const LARGE_HISTORY_KEYS = new Set([
+  'messages',
+  'input',
+  'history',
+  'conversation',
+  'contents',
+  'events',
+  'items'
+]);
+
+type SnapshotSummaryState = {
+  visitedNodes: number;
+};
+
+function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
+  if (!value) {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
+    return true;
+  }
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') {
+    return false;
+  }
+  return fallback;
+}
+
+function isLargeHistoryPath(pathSegments: string[]): boolean {
+  if (!pathSegments.length) {
+    return false;
+  }
+  const last = pathSegments[pathSegments.length - 1];
+  return LARGE_HISTORY_KEYS.has(last.toLowerCase());
+}
+
+function resolveSnapshotFullCapture(): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_SNAPSHOT_FULL ?? process.env.RCC_SNAPSHOT_FULL,
+    runtimeFlags.snapshotsEnabled
+  );
+}
+
+function summarizeStringPreview(value: string): string | Record<string, unknown> {
+  if (value.length <= SNAPSHOT_SUMMARY_MAX_STRING_PREVIEW) {
+    return value;
+  }
+  return {
+    __truncated: true,
+    length: value.length,
+    preview: `${value.slice(0, SNAPSHOT_SUMMARY_MAX_STRING_PREVIEW)}…`
+  };
+}
+
+function summarizeSnapshotValue(
+  value: unknown,
+  depth: number,
+  pathSegments: string[],
+  state: SnapshotSummaryState
+): unknown {
+  state.visitedNodes += 1;
+  if (state.visitedNodes > SNAPSHOT_SUMMARY_MAX_NODES) {
+    return {
+      __storage: 'mmap-hint',
+      reason: 'node_budget_exceeded',
+      maxNodes: SNAPSHOT_SUMMARY_MAX_NODES
+    };
+  }
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === 'string') {
+    return summarizeStringPreview(value);
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    const length = value.length;
+    if (depth >= SNAPSHOT_SUMMARY_MAX_DEPTH || isLargeHistoryPath(pathSegments)) {
+      return {
+        __storage: 'mmap-hint',
+        type: 'array',
+        length,
+        sampled: value
+          .slice(0, SNAPSHOT_SUMMARY_MAX_ARRAY_SAMPLE)
+          .map((item) => summarizeSnapshotValue(item, depth + 1, pathSegments, state))
+      };
+    }
+    return value
+      .slice(0, SNAPSHOT_SUMMARY_MAX_ARRAY_SAMPLE)
+      .map((item) => summarizeSnapshotValue(item, depth + 1, pathSegments, state));
+  }
+
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const keys = Object.keys(record);
+    if (depth >= SNAPSHOT_SUMMARY_MAX_DEPTH) {
+      return {
+        __storage: 'mmap-hint',
+        type: 'object',
+        keyCount: keys.length,
+        keys: keys.slice(0, SNAPSHOT_SUMMARY_MAX_KEYS)
+      };
+    }
+    const out: Record<string, unknown> = {};
+    let count = 0;
+    for (const [key, child] of Object.entries(record)) {
+      if (count >= SNAPSHOT_SUMMARY_MAX_KEYS) {
+        out.__truncated = true;
+        out.__omittedKeys = Math.max(0, keys.length - SNAPSHOT_SUMMARY_MAX_KEYS);
+        break;
+      }
+      out[key] = summarizeSnapshotValue(child, depth + 1, [...pathSegments, key], state);
+      count += 1;
+    }
+    return out;
+  }
+
+  return String(value);
+}
+
+function buildMmapHintedSnapshotData(value: unknown): unknown {
+  return summarizeSnapshotValue(value, 0, [], { visitedNodes: 0 });
+}
 
 function resolveSnapshotBase(): string {
   return resolveRccSnapshotsDirFromEnv();
@@ -73,10 +206,20 @@ function resolveEndpoint(entryEndpoint?: string): { endpoint: string; folder: st
   // Bucket codex-samples strictly by inbound API entry endpoint.
   // Never infer snapshot folder from upstream provider URL/protocol.
   const ep = String(entryEndpoint || '').trim().toLowerCase();
-  if (ep.includes('/v1/responses') || ep.includes('/responses.submit')) {
+  if (
+    ep.includes('/v1/responses')
+    || ep.includes('/responses.submit')
+    || ep.includes('openai-responses')
+    || ep === 'responses'
+  ) {
     return { endpoint: '/v1/responses', folder: 'openai-responses' };
   }
-  if (ep.includes('/v1/messages')) {
+  if (
+    ep.includes('/v1/messages')
+    || ep.includes('anthropic-messages')
+    || ep === 'messages'
+    || ep === 'anthropic'
+  ) {
     return { endpoint: '/v1/messages', folder: 'anthropic-messages' };
   }
   return { endpoint: '/v1/chat/completions', folder: 'openai-chat' };
@@ -107,7 +250,10 @@ function buildSnapshotPayload(options: {
   url?: string;
   extraMeta?: Record<string, unknown>;
 }) {
-  const redactedData = redactSensitiveData(options.data);
+  const rawData = resolveSnapshotFullCapture()
+    ? options.data
+    : buildMmapHintedSnapshotData(options.data);
+  const redactedData = redactSensitiveData(rawData);
   const redactedHeaders = redactSensitiveData(maskHeaders(options.headers || {})) as Record<string, unknown>;
   return {
     meta: {
@@ -128,6 +274,157 @@ function toErrorCode(error: unknown): string | undefined {
   }
   const code = (error as { code?: unknown }).code;
   return typeof code === 'string' && code.trim() ? code : undefined;
+}
+
+function toFiniteNumber(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return value;
+}
+
+function toNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : undefined;
+}
+
+function isRateLimitCode(code: string | undefined): boolean {
+  if (!code) {
+    return false;
+  }
+  const upper = code.toUpperCase();
+  return (
+    upper === 'HTTP_429'
+    || upper.includes('RATE_LIMIT')
+    || upper.includes('TOO_MANY_REQUEST')
+    || upper.includes('429')
+  );
+}
+
+function read429HintFromSnapshotPayload(value: unknown): boolean {
+  const queue: unknown[] = [value];
+  const seen = new WeakSet<object>();
+  let steps = 0;
+
+  while (queue.length > 0 && steps < 400) {
+    steps += 1;
+    const current = queue.shift();
+    if (!current || typeof current !== 'object') {
+      continue;
+    }
+    if (seen.has(current as object)) {
+      continue;
+    }
+    seen.add(current as object);
+
+    const record = current as Record<string, unknown>;
+    const statusCode =
+      toFiniteNumber(record.statusCode)
+      ?? toFiniteNumber(record.status)
+      ?? toFiniteNumber(record.httpStatus)
+      ?? toFiniteNumber((record.error as Record<string, unknown> | undefined)?.status)
+      ?? toFiniteNumber((record.error as Record<string, unknown> | undefined)?.statusCode);
+    if (statusCode === 429) {
+      return true;
+    }
+
+    const codeCandidates = [
+      toNonEmptyString(record.code),
+      toNonEmptyString(record.errorCode),
+      toNonEmptyString(record.upstreamCode),
+      toNonEmptyString((record.error as Record<string, unknown> | undefined)?.code)
+    ];
+    if (codeCandidates.some((candidate) => isRateLimitCode(candidate))) {
+      return true;
+    }
+
+    for (const child of Object.values(record)) {
+      if (!child || typeof child !== 'object') {
+        continue;
+      }
+      queue.push(child);
+    }
+  }
+
+  return false;
+}
+
+function shouldSuppressSnapshotFor429(stage: string, payload: unknown): boolean {
+  const normalizedStage = String(stage || '').trim().toLowerCase();
+  if (!normalizedStage) {
+    return false;
+  }
+  if (
+    !normalizedStage.includes('provider-error')
+    && !normalizedStage.includes('provider-response')
+    && !normalizedStage.includes('provider-request.retry')
+    && !normalizedStage.includes('provider-response.retry')
+  ) {
+    return false;
+  }
+  return read429HintFromSnapshotPayload(payload);
+}
+
+async function purge429ProviderSnapshotArtifacts(options: {
+  entryEndpoint?: string;
+  requestId: string;
+  clientRequestId?: string;
+  providerKey?: string;
+  providerId?: string;
+}): Promise<void> {
+  const { folder } = resolveEndpoint(options.entryEndpoint);
+  const base = resolveSnapshotBase();
+  const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);
+  const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
+
+  if (providerToken) {
+    const providerDir = path.join(base, folder, providerToken, groupRequestId);
+    try {
+      await fsp.rm(providerDir, { recursive: true, force: true });
+    } catch (error) {
+      logSnapshotNonBlockingError(`purge429.providerDir:${providerToken}/${groupRequestId}`, error);
+    }
+  }
+
+  // Legacy fallback layout: <base>/<folder>/<groupRequestId>/provider-*.json
+  const legacyDir = path.join(base, folder, groupRequestId);
+  try {
+    const entries = await fsp.readdir(legacyDir, { withFileTypes: true });
+    const providerFilePattern = /^provider-(request|response|error)(\.retry)?(?:_\d+)?\.json$/;
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isFile() && providerFilePattern.test(entry.name))
+        .map((entry) => fsp.rm(path.join(legacyDir, entry.name), { force: true }))
+    );
+  } catch (error) {
+    const code = toErrorCode(error);
+    if (code !== 'ENOENT') {
+      logSnapshotNonBlockingError(`purge429.legacyDir:${groupRequestId}`, error);
+    }
+  }
+}
+
+function schedule429ProviderSnapshotPurge(options: {
+  entryEndpoint?: string;
+  requestId: string;
+  clientRequestId?: string;
+  providerKey?: string;
+  providerId?: string;
+}): void {
+  const recheckDelaysMs = [250, 1000, 3000];
+  for (const delayMs of recheckDelaysMs) {
+    const timer = setTimeout(() => {
+      void purge429ProviderSnapshotArtifacts(options).catch((error) => {
+        logSnapshotNonBlockingError(`purge429.schedule:${options.requestId}:${delayMs}`, error);
+      });
+    }, delayMs);
+    if (typeof (timer as { unref?: () => void }).unref === 'function') {
+      (timer as { unref: () => void }).unref();
+    }
+  }
 }
 
 function logSnapshotNonBlockingError(operation: string, error: unknown): void {
@@ -170,7 +467,7 @@ async function persistProviderSnapshot(input: ProviderSnapshotPersistInput): Pro
   } catch (error) {
     logSnapshotNonBlockingError(`writeSnapshotViaHooks:${input.stage}`, error);
     try {
-      const dir = path.join(resolveSnapshotBase(), input.folder, input.providerToken || '__pending__', input.groupRequestId);
+      const dir = path.join(resolveSnapshotBase(), input.folder, input.groupRequestId);
       await ensureDir(dir);
       const safeStage = input.stage.replace(/[^\w.-]/g, '_') || 'snapshot';
       await writeUniqueFile(dir, safeStage + '.json', JSON.stringify(input.payload, null, 2));
@@ -232,6 +529,22 @@ async function writeProviderErrorsample(snapshot: ProviderSnapshotPersistInput):
 }
 
 export async function writeProviderSnapshot(options: ProviderSnapshotWriteOptions): Promise<void> {
+  const stage = String(options.phase || '').trim();
+  if (shouldSuppressSnapshotFor429(stage, options.data)) {
+    const purgeInput = {
+      entryEndpoint: options.entryEndpoint,
+      requestId: options.requestId,
+      clientRequestId: options.clientRequestId,
+      providerKey: options.providerKey,
+      providerId: options.providerId
+    };
+    await purge429ProviderSnapshotArtifacts(purgeInput);
+    schedule429ProviderSnapshotPurge(purgeInput);
+    return;
+  }
+  if (!shouldCaptureSnapshotStage(stage)) {
+    return;
+  }
   const snapshot = buildProviderSnapshotPersistInput(options);
 
   if (!runtimeFlags.snapshotsEnabled) {
@@ -416,11 +729,26 @@ export async function writeProviderRetrySnapshot(options: {
   providerKey?: string;
   providerId?: string;
 }): Promise<void> {
+  if (shouldSuppressSnapshotFor429(options.type === 'request' ? 'provider-request.retry' : 'provider-response.retry', options.data)) {
+    const purgeInput = {
+      entryEndpoint: options.entryEndpoint,
+      requestId: options.requestId,
+      clientRequestId: options.clientRequestId,
+      providerKey: options.providerKey,
+      providerId: options.providerId
+    };
+    await purge429ProviderSnapshotArtifacts(purgeInput);
+    schedule429ProviderSnapshotPurge(purgeInput);
+    return;
+  }
   if (!runtimeFlags.snapshotsEnabled) {
     return;
   }
   const { endpoint, folder } = resolveEndpoint(options.entryEndpoint);
   const stage = options.type === 'request' ? 'provider-request.retry' : 'provider-response.retry';
+  if (!shouldCaptureSnapshotStage(stage)) {
+    return;
+  }
   const requestId = normalizeRequestId(options.requestId);
   const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);
   const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
@@ -446,7 +774,7 @@ export async function writeProviderRetrySnapshot(options: {
   } catch (error) {
     logSnapshotNonBlockingError(`writeSnapshotViaHooks(retry):${stage}`, error);
     try {
-      const dir = path.join(resolveSnapshotBase(), folder, providerToken || '__pending__', groupRequestId);
+      const dir = path.join(resolveSnapshotBase(), folder, groupRequestId);
       await ensureDir(dir);
       const safeStage = stage.replace(/[^\w.-]/g, '_') || 'snapshot';
       await writeUniqueFile(dir, `${safeStage}.json`, JSON.stringify(payload, null, 2));
@@ -467,12 +795,14 @@ export async function writeRepairFeedbackSnapshot(options: {
   if (!runtimeFlags.snapshotsEnabled) {
     return;
   }
+  if (!shouldCaptureSnapshotStage('repair-feedback')) {
+    return;
+  }
   try {
     // const requestId = normalizeRequestId(options.requestId);
     const { folder } = resolveEndpoint(options.entryEndpoint);
     const groupRequestId = normalizeRequestId(options.groupRequestId || options.requestId);
-    const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
-    const dir = path.join(resolveSnapshotBase(), folder, providerToken || '__pending__', groupRequestId);
+    const dir = path.join(resolveSnapshotBase(), folder, groupRequestId);
     await ensureDir(dir);
     const payload = {
       meta: {
@@ -499,6 +829,9 @@ export async function writeClientSnapshot(options: {
   if (!runtimeFlags.snapshotsEnabled) {
     return;
   }
+  if (!shouldCaptureSnapshotStage('client-request')) {
+    return;
+  }
   try {
     const stage: ClientPhase = 'client-request';
     const { endpoint, folder } = resolveEndpoint(options.entryEndpoint);
@@ -509,12 +842,13 @@ export async function writeClientSnapshot(options: {
         : undefined;
     const groupRequestId = normalizeRequestId(groupRequestIdCandidate || requestId);
     const providerToken = normalizeProviderToken(options.providerKey || '');
+    const fullCapture = resolveSnapshotFullCapture();
     const metadataSnapshot =
       options.metadata && typeof options.metadata === 'object'
-        ? JSON.parse(JSON.stringify(options.metadata))
+        ? (fullCapture ? options.metadata : buildMmapHintedSnapshotData(options.metadata))
         : undefined;
     const snapshotPayload = {
-      body: options.body,
+      body: fullCapture ? options.body : buildMmapHintedSnapshotData(options.body),
       metadata: metadataSnapshot || {}
     };
     const payload = buildSnapshotPayload({
@@ -542,7 +876,7 @@ export async function writeClientSnapshot(options: {
       return;
     } catch (error) {
       logSnapshotNonBlockingError(`writeSnapshotViaHooks(client):${requestId}`, error);
-      const dir = path.join(resolveSnapshotBase(), folder, providerToken || '__pending__', groupRequestId);
+      const dir = path.join(resolveSnapshotBase(), folder, groupRequestId);
       await ensureDir(dir);
       await writeUniqueFile(dir, `${stage}.json`, JSON.stringify(payload, null, 2));
     }

@@ -21,6 +21,13 @@ fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
     Some(trimmed.to_string())
 }
 
+fn read_bool(value: Option<&Value>) -> Option<bool> {
+    match value {
+        Some(Value::Bool(flag)) => Some(*flag),
+        _ => None,
+    }
+}
+
 fn normalize_stage_mode(value: Option<&Value>) -> Option<String> {
     let normalized = read_trimmed_string(value)?.to_ascii_lowercase();
     if normalized == "on" || normalized == "off" || normalized == "auto" {
@@ -129,6 +136,15 @@ fn serialize_stop_message_state_from_map(state: &Map<String, Value>) -> Map<Stri
     if !history.is_empty() {
         out.insert("stopMessageAiHistory".to_string(), Value::Array(history));
     }
+    if let Some(armed) = read_bool(state.get("reasoningStopArmed")) {
+        out.insert("reasoningStopArmed".to_string(), Value::Bool(armed));
+    }
+    if let Some(summary) = read_trimmed_string(state.get("reasoningStopSummary")) {
+        out.insert("reasoningStopSummary".to_string(), Value::String(summary));
+    }
+    if let Some(updated_at) = read_finite_f64(state.get("reasoningStopUpdatedAt")) {
+        set_i64(&mut out, "reasoningStopUpdatedAt", to_i64_floor(updated_at));
+    }
     out
 }
 
@@ -201,6 +217,15 @@ fn deserialize_stop_message_state_maps(data: &Map<String, Value>, state: &mut Ma
     let history = normalize_ai_history_entries(data.get("stopMessageAiHistory"));
     if !history.is_empty() {
         state.insert("stopMessageAiHistory".to_string(), Value::Array(history));
+    }
+    if let Some(armed) = read_bool(data.get("reasoningStopArmed")) {
+        state.insert("reasoningStopArmed".to_string(), Value::Bool(armed));
+    }
+    if let Some(summary) = read_trimmed_string(data.get("reasoningStopSummary")) {
+        state.insert("reasoningStopSummary".to_string(), Value::String(summary));
+    }
+    if let Some(updated_at_raw) = read_finite_f64(data.get("reasoningStopUpdatedAt")) {
+        set_i64(state, "reasoningStopUpdatedAt", to_i64_floor(updated_at_raw).max(0));
     }
     if !has_persisted_max_repeats {
         ensure_stop_message_mode_max_repeats(state);

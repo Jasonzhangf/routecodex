@@ -4,6 +4,7 @@ import { buildUsageLogText } from './usage-aggregator.js';
 import { buildProviderLabel } from './provider-response-utils.js';
 import { colorizeRequestLog, registerRequestLogContext } from '../../../utils/request-log-color.js';
 import { formatRequestTimingSummary, isUsageTimingOutputEnabled } from '../../../utils/stage-logger.js';
+import { recordUsageRollup } from './log-rollup.js';
 
 type HubStageTopEntry = {
   stage: string;
@@ -55,12 +56,23 @@ export function logUsageSummary(
   info: {
     providerKey?: string;
     model?: string;
+    routeName?: string;
+    poolId?: string;
+    finishReason?: string;
     usage?: UsageMetrics;
+    externalLatencyMs?: number;
+    trafficWaitMs?: number;
+    clientInjectWaitMs?: number;
+    sseDecodeMs?: number;
+    codecDecodeMs?: number;
+    providerAttemptCount?: number;
+    retryCount?: number;
     hubStageTop?: HubStageTopEntry[];
     latencyMs: number;
     timingRequestIds?: string[];
     sessionId?: unknown;
     conversationId?: unknown;
+    projectPath?: unknown;
   },
   options?: {
     terminalTiming?: boolean;
@@ -84,8 +96,59 @@ export function logUsageSummary(
     requestIds: info.timingRequestIds,
     terminal: options?.terminalTiming === true
   });
+  const externalLatencyMs = Number.isFinite(info.externalLatencyMs as number)
+    ? Math.max(0, Number(info.externalLatencyMs))
+    : 0;
+  const internalLatencyMs = Math.max(0, info.latencyMs - externalLatencyMs);
+  const trafficWaitMs = Number.isFinite(info.trafficWaitMs as number)
+    ? Math.max(0, Number(info.trafficWaitMs))
+    : 0;
+  const clientInjectWaitMs = Number.isFinite(info.clientInjectWaitMs as number)
+    ? Math.max(0, Number(info.clientInjectWaitMs))
+    : 0;
+  const sseDecodeMs = Number.isFinite(info.sseDecodeMs as number)
+    ? Math.max(0, Number(info.sseDecodeMs))
+    : 0;
+  const codecDecodeMs = Number.isFinite(info.codecDecodeMs as number)
+    ? Math.max(0, Number(info.codecDecodeMs))
+    : 0;
+  const providerAttemptCount = Number.isFinite(info.providerAttemptCount as number)
+    ? Math.max(1, Math.floor(Number(info.providerAttemptCount)))
+    : 1;
+  const retryCount = Number.isFinite(info.retryCount as number)
+    ? Math.max(0, Math.floor(Number(info.retryCount)))
+    : Math.max(0, providerAttemptCount - 1);
+  recordUsageRollup({
+    requestId,
+    routeName: info.routeName,
+    poolId: info.poolId,
+    providerKey: info.providerKey,
+    model: info.model,
+    sessionId:
+      (typeof info.sessionId === 'string' && info.sessionId.trim()
+        ? info.sessionId
+        : (typeof info.conversationId === 'string' ? info.conversationId : undefined)),
+    projectPath: typeof info.projectPath === 'string' ? info.projectPath : undefined,
+    latencyMs: info.latencyMs,
+    internalLatencyMs,
+    externalLatencyMs,
+    trafficWaitMs,
+    clientInjectWaitMs,
+    sseDecodeMs,
+    codecDecodeMs,
+    providerAttemptCount,
+    retryCount,
+    finishReason: info.finishReason
+  });
+  const finishReason = typeof info.finishReason === 'string' ? info.finishReason.trim().toLowerCase() : '';
+  if (finishReason !== 'stop') {
+    return;
+  }
   const hubStageTopSuffix = isUsageTimingOutputEnabled() ? formatHubStageTop(info.hubStageTop) : '';
-  const line = `[usage] request ${requestId} provider=${providerLabel} latency=${latency}ms (${usageText})${timingSuffix}${hubStageTopSuffix}`;
+  const extraBreakdown = ` retries=${retryCount} attempts=${providerAttemptCount}`
+    + ` wait.traffic=${formatMs(trafficWaitMs)} wait.inject=${formatMs(clientInjectWaitMs)}`
+    + ` decode.sse=${formatMs(sseDecodeMs)} decode.codec=${formatMs(codecDecodeMs)}`;
+  const line = `[usage] request ${requestId} provider=${providerLabel} latency=${latency}ms (${usageText})${extraBreakdown}${timingSuffix}${hubStageTopSuffix}`;
   console.log(colorizeRequestLog(line, requestId, {
     sessionId: info.sessionId,
     conversationId: info.conversationId

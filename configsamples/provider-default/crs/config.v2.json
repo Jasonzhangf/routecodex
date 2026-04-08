@@ -49,6 +49,11 @@
         "streaming": "always"
       }
     },
-    "transportBackend": "openai-sdk"
+    "transportBackend": "openai-sdk",
+    "concurrency": {
+      "maxInFlight": 8,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
+    }
   }
 }

@@ -507,8 +507,8 @@ async function main() {
     });
     assert.equal(result.nativeApplied, true);
     assert.equal(result.appliedProfile, 'chat:deepseek-web');
-    assert.equal(result.payload.choices?.[0]?.finish_reason, 'tool_calls');
-    assert.equal(result.payload.metadata?.deepseek?.toolCallState, 'text_tool_calls');
+    assert.equal(result.payload.choices?.[0]?.finish_reason, 'stop');
+    assert.equal(result.payload.metadata?.deepseek?.toolCallState, undefined);
   }
 
   {

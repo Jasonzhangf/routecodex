@@ -272,52 +272,6 @@ const CATALOG: InitProviderTemplate[] = [
     defaultModel: 'qwen3-coder-plus'
   },
   {
-    id: 'iflow',
-    label: 'iFlow (Cookie)',
-    description: 'iFlow OpenAI-compatible wire with cookie auth',
-    sdkBinding: {
-      family: 'custom-runtime',
-      supported: false,
-      notes: 'Requires cookie/HMAC auth handled by the existing RouteCodex runtime.'
-    },
-    capabilities: {
-      supportsCoding: true,
-      supportsLongContext: true,
-      supportsMultimodal: true,
-      supportsReasoning: true,
-      supportsTools: true
-    },
-    webSearch: {
-      engineId: 'iflow:web_search',
-      providerKey: 'iflow',
-      routeTarget: 'iflow.qwen3-coder-plus',
-      description: 'iFlow web_search backend',
-      executionMode: 'servertool'
-    },
-    provider: {
-      id: 'iflow',
-      enabled: true,
-      type: 'iflow',
-      baseURL: 'https://apis.iflow.cn/v1',
-      compatibilityProfile: 'chat:iflow',
-      auth: {
-        type: 'iflow-cookie',
-        cookieFile: '~/.rcc/auth/iflow-work.cookie'
-      },
-      models: {
-        'qwen3-coder-plus': { supportsStreaming: true, maxContext: 1000000 },
-        'qwen3-coder-next': { supportsStreaming: true, maxContext: 262144 },
-        'qwen3-max-2026-01-23': { supportsStreaming: true, maxContext: 262144 },
-        'qwen3-vl-plus': { supportsStreaming: true },
-        'kimi-k2.5': { supportsStreaming: true, maxContext: 262144 },
-        'glm-4.7': { supportsStreaming: true, maxContext: 202752 },
-        'glm-5': { supportsStreaming: true, maxContext: 202752 },
-        'minimax-m2.5': { supportsStreaming: true, maxContext: 204800 }
-      }
-    },
-    defaultModel: 'qwen3-coder-plus'
-  },
-  {
     id: 'mimo',
     label: 'MiMo (OpenAI-compatible)',
     description: 'Xiaomi MiMo OpenAI-compatible endpoint',

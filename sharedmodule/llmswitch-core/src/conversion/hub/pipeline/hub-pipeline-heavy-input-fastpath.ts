@@ -1,29 +1,16 @@
-import type { ProcessedRequest, StandardizedRequest } from "../types/standardized.js";
 import { ensureRuntimeMetadata, readRuntimeMetadata } from "../../runtime-metadata.js";
 
 const TRUTHY = new Set(["1", "true", "yes", "on"]);
 const FALSY = new Set(["0", "false", "no", "off"]);
-
 const DEFAULT_INPUT_TOKEN_THRESHOLD = 120_000;
-
-type HeavyInputFastpathConfig = {
-  enabled: boolean;
-  inputTokenThreshold: number;
-};
 
 function readBooleanEnv(names: string[], fallback: boolean): boolean {
   for (const name of names) {
     const raw = process.env[name];
-    if (raw === undefined) {
-      continue;
-    }
+    if (raw === undefined) continue;
     const normalized = String(raw).trim().toLowerCase();
-    if (TRUTHY.has(normalized)) {
-      return true;
-    }
-    if (FALSY.has(normalized)) {
-      return false;
-    }
+    if (TRUTHY.has(normalized)) return true;
+    if (FALSY.has(normalized)) return false;
   }
   return fallback;
 }
@@ -31,33 +18,17 @@ function readBooleanEnv(names: string[], fallback: boolean): boolean {
 function readPositiveIntEnv(names: string[], fallback: number): number {
   for (const name of names) {
     const raw = process.env[name];
-    if (raw === undefined) {
-      continue;
-    }
+    if (raw === undefined) continue;
     const parsed = Number.parseInt(String(raw).trim(), 10);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
   return fallback;
 }
 
-function getConfig(): HeavyInputFastpathConfig {
+function getConfig() {
   return {
-    enabled: readBooleanEnv(
-      [
-        "ROUTECODEX_HUB_FASTPATH_HEAVY_INPUT",
-        "RCC_HUB_FASTPATH_HEAVY_INPUT",
-      ],
-      true,
-    ),
-    inputTokenThreshold: readPositiveIntEnv(
-      [
-        "ROUTECODEX_HUB_FASTPATH_INPUT_TOKEN_THRESHOLD",
-        "RCC_HUB_FASTPATH_INPUT_TOKEN_THRESHOLD",
-      ],
-      DEFAULT_INPUT_TOKEN_THRESHOLD,
-    ),
+    enabled: readBooleanEnv(["ROUTECODEX_HUB_FASTPATH_HEAVY_INPUT", "RCC_HUB_FASTPATH_HEAVY_INPUT"], true),
+    inputTokenThreshold: readPositiveIntEnv(["ROUTECODEX_HUB_FASTPATH_INPUT_TOKEN_THRESHOLD", "RCC_HUB_FASTPATH_INPUT_TOKEN_THRESHOLD"], DEFAULT_INPUT_TOKEN_THRESHOLD),
   };
 }
 
@@ -65,204 +36,157 @@ export function isHeavyInputFastpathEnabled(): boolean {
   return getConfig().enabled;
 }
 
-function readEstimatedInputTokens(
-  metadata?: Record<string, unknown>,
-): number | undefined {
-  if (!metadata || typeof metadata !== "object") {
-    return undefined;
+export function shouldUseHeavyInputFastpath(metadata: unknown): boolean {
+  if (!isHeavyInputFastpathEnabled()) {
+    return false;
   }
-  const candidate =
-    typeof metadata.estimatedInputTokens === "number" &&
-    Number.isFinite(metadata.estimatedInputTokens)
-      ? Math.max(0, Math.floor(metadata.estimatedInputTokens))
-      : undefined;
-  if (candidate && candidate > 0) {
-    return candidate;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return false;
   }
-  const rt = readRuntimeMetadata(metadata);
-  const rtCandidate =
-    typeof (rt as Record<string, unknown> | undefined)
-      ?.hubFastpathEstimatedInputTokens === "number" &&
-    Number.isFinite(
-      (rt as Record<string, unknown>).hubFastpathEstimatedInputTokens,
-    )
-      ? Math.max(
-          0,
-          Math.floor(
-            (rt as Record<string, unknown>).hubFastpathEstimatedInputTokens as number,
-          ),
-        )
-      : undefined;
-  return rtCandidate && rtCandidate > 0 ? rtCandidate : undefined;
+  const record = metadata as Record<string, unknown>;
+  const rt = readRuntimeMetadata(record);
+  if (rt?.hubFastpathHeavyInput === true) {
+    return true;
+  }
+  const estimatedInputTokens =
+    typeof record.estimatedInputTokens === "number" && Number.isFinite(record.estimatedInputTokens)
+      ? record.estimatedInputTokens
+      : typeof rt?.hubFastpathEstimatedInputTokens === "number" && Number.isFinite(rt.hubFastpathEstimatedInputTokens)
+        ? Number(rt.hubFastpathEstimatedInputTokens)
+        : undefined;
+  if (estimatedInputTokens === undefined) {
+    return false;
+  }
+  return estimatedInputTokens >= resolveHeavyInputTokenThreshold();
 }
 
-export function shouldUseHeavyInputFastpath(
-  metadata?: Record<string, unknown>,
-): {
-  enabled: boolean;
-  hit: boolean;
-  threshold: number;
-  estimatedInputTokens?: number;
-} {
-  const config = getConfig();
-  const estimatedInputTokens = readEstimatedInputTokens(metadata);
-  const rt = metadata ? readRuntimeMetadata(metadata) : undefined;
-  const runtimeForced =
-    rt &&
-    typeof (rt as Record<string, unknown>).hubFastpathHeavyInput ===
-      "boolean" &&
-    (rt as Record<string, unknown>).hubFastpathHeavyInput === true;
-  const hit =
-    config.enabled &&
-    (runtimeForced ||
-      (typeof estimatedInputTokens === "number" &&
-        estimatedInputTokens >= config.inputTokenThreshold));
-  return {
-    enabled: config.enabled,
-    hit,
-    threshold: config.inputTokenThreshold,
-    ...(typeof estimatedInputTokens === "number"
-      ? { estimatedInputTokens }
-      : {}),
-  };
-}
+export function markHeavyInputFastpath(options?: unknown): void {
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    return;
+  }
+  const record = options as Record<string, unknown>;
+  const metadata =
+    record.metadata && typeof record.metadata === "object" && !Array.isArray(record.metadata)
+      ? (record.metadata as Record<string, unknown>)
+      : undefined;
+  if (!metadata) {
+    return;
+  }
 
-export function markHeavyInputFastpath(options: {
-  metadata?: Record<string, unknown>;
-  estimatedInputTokens?: number;
-  reason: "rough_estimate" | "full_estimate" | "metadata_threshold";
-}): void {
-  const { metadata, estimatedInputTokens, reason } = options;
-  if (!metadata || typeof metadata !== "object") {
-    return;
-  }
-  const config = getConfig();
-  if (!config.enabled) {
-    return;
-  }
   const rt = ensureRuntimeMetadata(metadata);
-  (rt as Record<string, unknown>).hubFastpathHeavyInput = true;
-  (rt as Record<string, unknown>).hubFastpathReason = reason;
-  (rt as Record<string, unknown>).hubFastpathInputTokenThreshold =
-    config.inputTokenThreshold;
-  if (
-    typeof estimatedInputTokens === "number" &&
-    Number.isFinite(estimatedInputTokens) &&
-    estimatedInputTokens > 0
-  ) {
-    const rounded = Math.max(1, Math.floor(estimatedInputTokens));
-    metadata.estimatedInputTokens = rounded;
-    (rt as Record<string, unknown>).hubFastpathEstimatedInputTokens = rounded;
+  rt.hubFastpathHeavyInput = true;
+  const reason =
+    typeof record.reason === "string" && record.reason.trim()
+      ? record.reason.trim()
+      : "heavy_input";
+  rt.hubFastpathReason = reason;
+
+  const estimatedInputTokens =
+    typeof record.estimatedInputTokens === "number" && Number.isFinite(record.estimatedInputTokens)
+      ? Math.max(0, Math.floor(record.estimatedInputTokens))
+      : typeof metadata.estimatedInputTokens === "number" && Number.isFinite(metadata.estimatedInputTokens)
+        ? Math.max(0, Math.floor(Number(metadata.estimatedInputTokens)))
+        : undefined;
+  if (estimatedInputTokens !== undefined) {
+    metadata.estimatedInputTokens = estimatedInputTokens;
+    rt.hubFastpathEstimatedInputTokens = estimatedInputTokens;
   }
 }
 
-export function buildCapturedChatRequestInput(args: {
-  workingRequest: StandardizedRequest | ProcessedRequest;
-  normalizedMetadata?: Record<string, unknown>;
-}): {
-  model?: unknown;
-  messages?: unknown;
-  tools?: unknown;
-  parameters?: unknown;
-} {
-  const { workingRequest, normalizedMetadata } = args;
-  const fastpath = shouldUseHeavyInputFastpath(normalizedMetadata);
-  if (fastpath.hit) {
+export function buildCapturedChatRequestInput(args: unknown): unknown {
+  const directRequest =
+    args && typeof args === "object" && !Array.isArray(args)
+      ? (args as Record<string, unknown>)
+      : undefined;
+  if (!directRequest) {
+    return {};
+  }
+
+  const record = directRequest;
+  const workingRequest =
+    record.workingRequest && typeof record.workingRequest === "object" && !Array.isArray(record.workingRequest)
+      ? (record.workingRequest as Record<string, unknown>)
+      : (record.messages || record.input ? record : undefined);
+  const normalizedMetadata =
+    record.normalizedMetadata &&
+    typeof record.normalizedMetadata === "object" &&
+    !Array.isArray(record.normalizedMetadata)
+      ? (record.normalizedMetadata as Record<string, unknown>)
+      : undefined;
+
+  if (normalizedMetadata && shouldUseHeavyInputFastpath(normalizedMetadata)) {
     markHeavyInputFastpath({
       metadata: normalizedMetadata,
-      estimatedInputTokens: fastpath.estimatedInputTokens,
-      reason: "metadata_threshold",
+      estimatedInputTokens: normalizedMetadata.estimatedInputTokens,
+      reason: "captured_snapshot"
     });
   }
-  // Hard rule: captured request must preserve full semantic payload.
+
+  const model =
+    (typeof workingRequest?.model === "string" && String(workingRequest.model).trim()) ||
+    (typeof normalizedMetadata?.model === "string" && normalizedMetadata.model.trim()) ||
+    null;
+  const messages = Array.isArray(workingRequest?.messages) ? workingRequest?.messages : [];
+  const hasInput = Boolean(workingRequest && Object.prototype.hasOwnProperty.call(workingRequest, "input"));
+  const input = hasInput ? workingRequest?.input : undefined;
+  const tools = Array.isArray(workingRequest?.tools) ? workingRequest?.tools : null;
+  const parameters =
+    workingRequest?.parameters && typeof workingRequest.parameters === "object" && !Array.isArray(workingRequest.parameters)
+      ? workingRequest.parameters
+      : null;
+
   return {
-    model: workingRequest.model,
-    messages: workingRequest.messages,
-    tools: workingRequest.tools,
-    parameters: workingRequest.parameters,
+    model,
+    messages,
+    ...(hasInput ? { input } : {}),
+    tools,
+    parameters,
   };
 }
 
-function estimateContentChars(content: unknown, cap: number): number {
-  if (cap <= 0 || content === undefined || content === null) {
+export function roughEstimateInputTokensFromRequest(request: unknown): number {
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
     return 0;
   }
-  if (typeof content === "string") {
-    return Math.min(content.length, cap);
-  }
-  if (Array.isArray(content)) {
-    let used = 0;
-    for (const part of content) {
-      if (used >= cap) {
-        break;
-      }
-      if (typeof part === "string") {
-        used += Math.min(part.length, cap - used);
-        continue;
-      }
-      if (!part || typeof part !== "object") {
-        continue;
-      }
-      const record = part as Record<string, unknown>;
+  const requestRecord = request as Record<string, unknown>;
+  const estimateTextTokens = (value: unknown): number => {
+    if (typeof value === "string") {
+      return Math.ceil(value.length / 4);
+    }
+    if (Array.isArray(value)) {
+      return value.reduce((sum, item) => sum + estimateTextTokens(item), 0);
+    }
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
       if (typeof record.text === "string") {
-        used += Math.min(record.text.length, cap - used);
-      } else if (typeof record.input_text === "string") {
-        used += Math.min(record.input_text.length, cap - used);
-      } else if (typeof record.output_text === "string") {
-        used += Math.min(record.output_text.length, cap - used);
-      } else {
-        used += Math.min(64, cap - used);
+        return Math.ceil(record.text.length / 4);
       }
+      if (typeof record.content === "string") {
+        return Math.ceil(record.content.length / 4);
+      }
+      let total = 0;
+      for (const nested of Object.values(record)) {
+        total += estimateTextTokens(nested);
+      }
+      return total;
     }
-    return used;
+    return 0;
+  };
+
+  let total = 0;
+  if (Array.isArray(requestRecord.messages)) {
+    total += estimateTextTokens(requestRecord.messages);
   }
-  return Math.min(64, cap);
-}
-
-export function roughEstimateInputTokensFromRequest(
-  request: StandardizedRequest | ProcessedRequest,
-): number {
-  const config = getConfig();
-  let chars = 0;
-  const charCap = Math.max(config.inputTokenThreshold * 8, 16_384);
-
-  const messages = Array.isArray(request.messages) ? request.messages : [];
-  for (const message of messages) {
-    if (chars >= charCap) {
-      break;
-    }
-    if (!message || typeof message !== "object") {
-      chars += 16;
-      continue;
-    }
-    const record = message as unknown as Record<string, unknown>;
-    if (typeof record.role === "string") {
-      chars += Math.min(record.role.length, charCap - chars);
-    }
-    if (typeof record.name === "string") {
-      chars += Math.min(record.name.length, Math.max(0, charCap - chars));
-    }
-    if (typeof record.tool_call_id === "string") {
-      chars += Math.min(
-        record.tool_call_id.length,
-        Math.max(0, charCap - chars),
-      );
-    }
-    chars += estimateContentChars(record.content, Math.max(0, charCap - chars));
-    if (Array.isArray(record.tool_calls)) {
-      chars += Math.min(record.tool_calls.length * 128, Math.max(0, charCap - chars));
-    }
+  if (Object.prototype.hasOwnProperty.call(requestRecord, "input")) {
+    total += estimateTextTokens(requestRecord.input);
   }
-
-  if (Array.isArray(request.tools)) {
-    chars += request.tools.length * 256;
+  if (Object.prototype.hasOwnProperty.call(requestRecord, "instructions")) {
+    total += estimateTextTokens(requestRecord.instructions);
   }
-
-  const estimated = Math.max(
-    Math.ceil(chars / 3.5),
-    messages.length * 8 + (Array.isArray(request.tools) ? request.tools.length * 32 : 0),
-  );
-  return Math.max(1, Math.floor(estimated));
+  if (total <= 0) {
+    total += estimateTextTokens(requestRecord);
+  }
+  return Math.max(0, Math.floor(total));
 }
 
 export function resolveHeavyInputTokenThreshold(): number {

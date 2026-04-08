@@ -32,6 +32,9 @@ export function applyRoutingInstructions(
             : {}
         )
       : undefined,
+    reasoningStopArmed: currentState.reasoningStopArmed,
+    reasoningStopSummary: currentState.reasoningStopSummary,
+    reasoningStopUpdatedAt: currentState.reasoningStopUpdatedAt,
     preCommandSource: currentState.preCommandSource,
     preCommandScriptPath: currentState.preCommandScriptPath,
     preCommandUpdatedAt: currentState.preCommandUpdatedAt,
@@ -174,6 +177,9 @@ export function applyRoutingInstructions(
         newState.disabledKeys.clear();
         newState.disabledModels.clear();
         applyStopMessageInstructionToState({ type: 'stopMessageClear' }, newState);
+        newState.reasoningStopArmed = undefined;
+        newState.reasoningStopSummary = undefined;
+        newState.reasoningStopUpdatedAt = undefined;
         clearPreCommandState(newState);
         break;
       case 'stopMessageSet':
@@ -207,6 +213,15 @@ export function serializeRoutingInstructionState(state: RoutingInstructionState)
       models: Array.from(models)
     })),
     ...serializeStopMessageState(state),
+    ...(typeof state.reasoningStopArmed === 'boolean'
+      ? { reasoningStopArmed: state.reasoningStopArmed }
+      : {}),
+    ...(typeof state.reasoningStopSummary === 'string' && state.reasoningStopSummary.trim()
+      ? { reasoningStopSummary: state.reasoningStopSummary.trim() }
+      : {}),
+    ...(typeof state.reasoningStopUpdatedAt === 'number' && Number.isFinite(state.reasoningStopUpdatedAt)
+      ? { reasoningStopUpdatedAt: state.reasoningStopUpdatedAt }
+      : {}),
     ...serializePreCommandState(state),
     ...(typeof state.chatProcessLastTotalTokens === 'number'
       ? { chatProcessLastTotalTokens: state.chatProcessLastTotalTokens }
@@ -240,6 +255,9 @@ export function deserializeRoutingInstructionState(data: Record<string, unknown>
     stopMessageAiMode: undefined,
     stopMessageAiSeedPrompt: undefined,
     stopMessageAiHistory: undefined,
+    reasoningStopArmed: undefined,
+    reasoningStopSummary: undefined,
+    reasoningStopUpdatedAt: undefined,
     preCommandSource: undefined,
     preCommandScriptPath: undefined,
     preCommandUpdatedAt: undefined,
@@ -280,6 +298,15 @@ export function deserializeRoutingInstructionState(data: Record<string, unknown>
   }
 
   deserializeStopMessageState(data, state);
+  if (typeof data.reasoningStopArmed === 'boolean') {
+    state.reasoningStopArmed = data.reasoningStopArmed;
+  }
+  if (typeof data.reasoningStopSummary === 'string' && data.reasoningStopSummary.trim()) {
+    state.reasoningStopSummary = data.reasoningStopSummary.trim();
+  }
+  if (typeof data.reasoningStopUpdatedAt === 'number' && Number.isFinite(data.reasoningStopUpdatedAt)) {
+    state.reasoningStopUpdatedAt = Math.max(0, Math.round(data.reasoningStopUpdatedAt));
+  }
   deserializePreCommandState(data, state);
   if (typeof data.chatProcessLastTotalTokens === 'number' && Number.isFinite(data.chatProcessLastTotalTokens)) {
     state.chatProcessLastTotalTokens = Math.max(0, Math.round(data.chatProcessLastTotalTokens));

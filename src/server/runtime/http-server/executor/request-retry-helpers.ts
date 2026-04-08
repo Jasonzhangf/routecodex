@@ -31,6 +31,26 @@ export type AntigravityRetrySignal = {
   avoidAllOnRetry?: boolean;
 };
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logRequestRetryNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[request-retry] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 export function resolveAntigravityMaxProviderAttempts(): number {
   const raw = String(
     process.env.ROUTECODEX_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS || process.env.RCC_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS || ''
@@ -289,7 +309,12 @@ export function bindSessionConversationSession(metadata: Record<string, unknown>
       ...(workdir ? { workdir } : {})
     };
     getSessionClientRegistry().bindConversationSession(bindInput);
-  } catch {
-    // best-effort only
+  } catch (error) {
+    logRequestRetryNonBlockingError('bindSessionConversationSession', error, {
+      conversationSessionId,
+      tmuxSessionId,
+      clientType,
+      hasWorkdir: Boolean(workdir)
+    });
   }
 }

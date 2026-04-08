@@ -29,6 +29,31 @@ export interface ConvertProviderResponseDeps {
   executeNested(input: PipelineExecutionInput): Promise<PipelineExecutionResult>;
 }
 
+const FOLLOWUP_LOG_REASON_MAX_LEN = 180;
+
+function compactFollowupLogReason(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().replace(/\s+/g, ' ');
+  if (!normalized) {
+    return undefined;
+  }
+  const httpMatch =
+    normalized.match(/^http\s+(\d{3})\s*:/i) ||
+    normalized.match(/\bhttp\s+(\d{3})\b/i);
+  if (httpMatch?.[1]) {
+    return `HTTP_${httpMatch[1]}`;
+  }
+  if (/<\s*!doctype\s+html\b/i.test(normalized) || /<\s*html\b/i.test(normalized)) {
+    return 'UPSTREAM_HTML_ERROR';
+  }
+  if (normalized.length <= FOLLOWUP_LOG_REASON_MAX_LEN) {
+    return normalized;
+  }
+  return `${normalized.slice(0, FOLLOWUP_LOG_REASON_MAX_LEN)}…`;
+}
+
 function extractClientModelId(
   metadata: Record<string, unknown>,
   originalRequest?: Record<string, unknown>
@@ -277,6 +302,8 @@ export async function convertProviderResponseIfNeeded(
     const detailReason =
       typeof (detailRecord as Record<string, unknown> | undefined)?.reason === 'string'
         ? String((detailRecord as Record<string, unknown>).reason)
+        : typeof (detailRecord as Record<string, unknown> | undefined)?.error === 'string'
+          ? String((detailRecord as Record<string, unknown>).error)
         : undefined;
     const detailUpstreamCode =
       typeof (detailRecord as Record<string, unknown> | undefined)?.upstreamCode === 'string'
@@ -292,13 +319,15 @@ export async function convertProviderResponseIfNeeded(
       (typeof errCode === 'string' && errCode.startsWith('SERVERTOOL_'));
 
     if (isServerToolFollowupError) {
-      console.error('[RequestExecutor] ServerTool followup failed', {
-        requestId: options.requestId,
-        code: errCode,
-        upstreamCode: upstreamCode || detailUpstreamCode,
-        reason: detailReason,
-        message
-      });
+      const compactReason = compactFollowupLogReason(detailReason) || compactFollowupLogReason(message);
+      const compactUpstreamCode = compactFollowupLogReason(upstreamCode || detailUpstreamCode);
+      const compactCode = compactFollowupLogReason(errCode) || errCode || 'UNKNOWN';
+      console.warn(
+        `[RequestExecutor] ServerTool followup failed req=${options.requestId}` +
+          ` code=${compactCode}` +
+          (compactUpstreamCode ? ` upstreamCode=${compactUpstreamCode}` : '') +
+          (compactReason ? ` reason=${JSON.stringify(compactReason)}` : '')
+      );
       throw error;
     }
 

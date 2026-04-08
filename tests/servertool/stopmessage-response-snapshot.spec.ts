@@ -3,7 +3,7 @@ import { describe, expect, test } from '@jest/globals';
 import {
   extractResponsesOutputText,
   extractStopMessageAutoResponseSnapshot
-} from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/iflow-followup.js';
+} from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/ai-followup.js';
 
 describe('stopmessage response snapshot extraction', () => {
   test('extracts responses message text when content part type is text', () => {

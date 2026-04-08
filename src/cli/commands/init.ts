@@ -69,7 +69,7 @@ Examples:
     .option('-c, --config <config>', 'Configuration file path')
     .option('-f, --force', 'Force overwrite existing configuration during fresh setup')
     .option('--camoufox', 'Force Camoufox environment preparation')
-    .option('--providers <ids>', 'Providers (comma-separated), e.g. openai,qwen,iflow')
+    .option('--providers <ids>', 'Providers (comma-separated), e.g. openai,qwen')
     .option('--default-provider <id>', 'Default provider id for routing.default')
     .option('--default-model <id>', 'Default model id for default provider routing target')
     .option('--provider-source <source>', 'Provider source policy: builtin|external|mixed (default: mixed)')

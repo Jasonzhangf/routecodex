@@ -1,7 +1,7 @@
 import type { ServerToolHandler, ServerToolHandlerPlan } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
 import { isStopEligibleForServerTool } from '../stop-gateway-context.js';
-import { extractStopMessageAutoResponseSnapshot } from './stop-message-auto/iflow-followup.js';
+import { extractStopMessageAutoResponseSnapshot } from './stop-message-auto/ai-followup.js';
 import { stripReasoningTransportNoise } from '../../conversion/shared/reasoning-normalizer.js';
 
 const FLOW_ID = 'reasoning_only_continue_flow';

@@ -17,6 +17,26 @@ import { logProcessLifecycleSync } from '../../../utils/process-lifecycle-logger
 import { setShutdownCallerContext } from '../../../utils/shutdown-caller-context.js';
 import { loadProviderConfigsV2 } from '../../../config/provider-v2-loader.js';
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logRoutesNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[http-routes] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 interface RouteOptions {
   app: Application;
   config: ServerConfigV2;
@@ -58,7 +78,14 @@ export function registerOAuthPortalRoute(app: Application): void {
     const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : 'demo-session';
     const displayName =
       typeof req.query.displayName === 'string' && req.query.displayName.trim() ? req.query.displayName : undefined;
-    const fingerprint = await loadTokenPortalFingerprintSummary(provider, alias).catch(() => null);
+    const fingerprint = await loadTokenPortalFingerprintSummary(provider, alias).catch((error) => {
+      logRoutesNonBlockingError('registerOAuthPortalRoute.loadTokenPortalFingerprintSummary', error, {
+        provider,
+        alias,
+        sessionId
+      });
+      return null;
+    });
     const html = renderTokenPortalPage({
       provider,
       alias,
@@ -506,8 +533,11 @@ export function registerHttpRoutes(options: RouteOptions): void {
       });
       try {
         res.status(200).json({ ok: true });
-      } catch {
-        // ignore secondary response errors
+      } catch (responseError) {
+        logRoutesNonBlockingError('shutdownRoute.sendAckOnException', responseError, {
+          path: req.path,
+          method: req.method
+        });
       }
       setTimeout(() => {
         try {
@@ -632,8 +662,12 @@ export function registerHttpRoutes(options: RouteOptions): void {
       if (http) {
         mapped = http;
       }
-    } catch {
-      /* ignore hub failures */
+    } catch (hubError) {
+      logRoutesNonBlockingError('globalMiddleware.reportRouteError', hubError, {
+        requestId: typeof req.headers['x-request-id'] === 'string' ? req.headers['x-request-id'] : undefined,
+        path: req.path,
+        method: req.method
+      });
     }
     res.status(mapped.status).json(mapped.body);
   });

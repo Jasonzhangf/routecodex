@@ -5,6 +5,30 @@ import { resolveRccPathForRead } from '../config/user-data-paths.js';
 
 async function sleep(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logValidateNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  try {
+    const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[validate] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 async function waitReady(base: string, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -15,7 +39,9 @@ async function waitReady(base: string, timeoutMs: number): Promise<boolean> {
         const status = j && typeof j === 'object' ? (j as any).status : undefined;
         if (status === 'ok') return true;
       }
-    } catch { /* ignore */ }
+    } catch (error) {
+      logValidateNonBlocking('wait_ready.health_probe', error, { base });
+    }
     await sleep(500);
   }
   return false;
@@ -207,9 +233,15 @@ function resolveDefaultModelFromConfig(cfgPath: string, endpoint: string): strin
         if (keys.length > 0 && keys[0].trim()) {
           return keys[0].trim();
         }
-      } catch { /* ignore per-provider errors */ }
+      } catch (error) {
+        logValidateNonBlocking('resolve_default_model.scan_provider_models', error, {
+          config: cfgPath
+        });
+      }
     }
-  } catch { /* ignore resolution errors */ }
+  } catch (error) {
+    logValidateNonBlocking('resolve_default_model.from_config', error, { config: cfgPath, endpoint });
+  }
   // 默认留空，让上游 schema 决定是否报错
   return '';
 }

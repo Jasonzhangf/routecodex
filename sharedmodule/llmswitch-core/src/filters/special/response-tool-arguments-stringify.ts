@@ -6,6 +6,30 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logResponseToolArgsStringifyNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  try {
+    const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[response-tool-arguments-stringify] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function packShellCommand(cmd: unknown): string[] | unknown {
   // Normalize into ["bash","-lc","<single string>"] to support pipes, parens, -exec, etc.
   const normalizeArray = (argv: string[]): string[] => {
@@ -89,7 +113,11 @@ export class ResponseToolArgumentsStringifyFilter implements Filter<JsonObject> 
               }
               if (!tc.type) tc.type = 'function';
             }
-          } catch { /* ignore */ }
+          } catch (error) {
+            logResponseToolArgsStringifyNonBlocking('normalize_single_tool_call', error, {
+              toolCallId: typeof (tc as any)?.id === 'string' ? (tc as any).id : undefined
+            });
+          }
         }
       }
       (out as any).choices = choices;

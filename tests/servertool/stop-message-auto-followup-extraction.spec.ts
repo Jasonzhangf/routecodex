@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
-import { extractStopMessageAutoResponseSnapshot } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/iflow-followup.js';
+import { extractStopMessageAutoResponseSnapshot } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/ai-followup.js';
 
 describe('stop message followup snapshot extraction', () => {
   test('extracts meaningful assistant text from tool_use input (choices path)', () => {

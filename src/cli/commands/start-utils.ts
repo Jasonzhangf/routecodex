@@ -8,6 +8,7 @@ type StartCommandArgOptions = {
   codex?: boolean;
   claude?: boolean;
   snap?: boolean;
+  snapStages?: string;
   snapOff?: boolean;
   verboseErrors?: boolean;
   quietErrors?: boolean;
@@ -86,6 +87,9 @@ export function buildStartCommandArgs(options: StartCommandArgOptions, configPat
   appendFlag(args, options.codex === true, '--codex');
   appendFlag(args, options.claude === true, '--claude');
   appendFlag(args, options.snap === true, '--snap');
+  if (typeof options.snapStages === 'string' && options.snapStages.trim()) {
+    args.push('--snap-stages', options.snapStages.trim());
+  }
   appendFlag(args, options.snapOff === true, '--snap-off');
   appendFlag(args, options.verboseErrors === true, '--verbose-errors');
   appendFlag(args, options.quietErrors === true, '--quiet-errors');

@@ -3,6 +3,20 @@
 
 type Unknown = Record<string, unknown>;
 
+function logGuidanceNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  try {
+    const reason = error instanceof Error ? (error.stack || `${error.name}: ${error.message}`) : String(error);
+    const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[guidance] ${stage} failed (non-blocking): ${reason}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function isObject(v: unknown): v is Unknown {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
@@ -237,7 +251,9 @@ export function augmentOpenAITools(tools: unknown[]): unknown[] {
         else if (n === 'update_plan') augmentUpdatePlan(fn);
         else if (n === 'view_image') augmentViewImage(fn);
         else if (n === 'list_mcp_resources' || n === 'read_mcp_resource' || n === 'list_mcp_resource_templates') augmentMCP(fn, n);
-      } catch { /* ignore */ }
+      } catch (error) {
+        logGuidanceNonBlocking('augment_openai_tool', error, { toolName: n });
+      }
     }
     out.push(copy);
   }
@@ -292,7 +308,9 @@ export function augmentAnthropicTools(tools: unknown[]): unknown[] {
           const guidance = [marker, 'Use minimally; avoid unnecessary large reads.'].join('\n');
           (copy as any).description = appendOnce(desc, guidance, marker);
         }
-      } catch { /* ignore */ }
+      } catch (error) {
+        logGuidanceNonBlocking('augment_anthropic_tool', error, { toolName: n });
+      }
     }
     out.push(copy);
   }

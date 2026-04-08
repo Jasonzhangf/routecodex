@@ -3,6 +3,16 @@ import type { Filter, FilterContext, FilterResult, JsonObject } from '../types.j
 function isObject(v: unknown): v is Record<string, unknown> { return !!v && typeof v === 'object' && !Array.isArray(v); }
 function parseJson(str: string): any { try { return JSON.parse(str); } catch { return null; } }
 
+function logResponseToolArgsBlacklistNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  const reason = error instanceof Error ? (error.stack || `${error.name}: ${error.message}`) : String(error);
+  const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[response-tool-arguments-blacklist] ${stage} failed (non-blocking): ${reason}${detailSuffix}`);
+}
+
 function getBlacklist(): string[] {
   const env = String((process as any)?.env?.ROUTECODEX_TOOLARGS_BLACKLIST || '').trim();
   if (!env) return [];
@@ -39,7 +49,13 @@ export class ResponseToolArgumentsBlacklistFilter implements Filter<JsonObject> 
             if (k in parsed) { delete (parsed as any)[k]; changed = true; }
           }
           if (changed) {
-            try { (fn as any).arguments = JSON.stringify(parsed); } catch { /* keep original */ }
+            try {
+              (fn as any).arguments = JSON.stringify(parsed);
+            } catch (error) {
+              logResponseToolArgsBlacklistNonBlocking('stringify_blacklisted_arguments', error, {
+                removedKeys: blacklist
+              });
+            }
           }
         }
       }
@@ -50,4 +66,3 @@ export class ResponseToolArgumentsBlacklistFilter implements Filter<JsonObject> 
     }
   }
 }
-

@@ -10,7 +10,6 @@ import {
   extractQwenChatPayload,
   parseIncomingMessages
 } from '../../../../src/providers/core/runtime/qwenchat-http-provider-helpers.js';
-import { standardToolTextRequestTransformRuntime } from '../../../../src/providers/core/runtime/standard-tool-text-request-transform.js';
 
 describe('qwenchat-http-provider helpers', () => {
   afterEach(() => {
@@ -305,22 +304,20 @@ describe('qwenchat-http-provider helpers', () => {
     expect(output).toContain('data: [DONE]');
   });
 
-  it('fails fast when standard tool-text transform does not produce prompt', async () => {
-    jest
-      .spyOn(standardToolTextRequestTransformRuntime, 'transform')
-      .mockReturnValue({
-        model: 'qwen3.6-plus',
-        messages: [{ role: 'user', content: 'fallback message should not be used' }],
-        tools: [
-          {
-            type: 'function',
-            function: { name: 'update_plan', parameters: { type: 'object' } }
+  it('does not perform provider-side tool-text request transform', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            id: 'chat-id-no-provider-tool-transform'
           }
-        ]
-      } as any);
-
-    await expect(
-      buildQwenChatSendPlan({
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )) as typeof fetch;
+    try {
+      const plan = await buildQwenChatSendPlan({
         baseUrl: 'https://chat.qwen.ai',
         baxiaTokens: { bxUa: 'bx-ua', bxUmidToken: 'bx-token', bxV: '2.5.36' },
         payload: {
@@ -333,14 +330,18 @@ describe('qwenchat-http-provider helpers', () => {
             }
           ]
         }
-      })
-    ).rejects.toMatchObject({
-      code: 'QWENCHAT_TOOL_TEXT_TRANSFORM_FAILED',
-      statusCode: 422
-    });
+      });
+
+      const content = String(
+        (plan.completionBody.messages as Array<Record<string, unknown>>)?.[0]?.content || ''
+      );
+      expect(content).toContain('请调用 update_plan');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
-  it('does not re-inject stale assistant tool-registry failure text into qwenchat tool prompt', async () => {
+  it('keeps assistant history untouched in provider request builder', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () =>
       new Response(
@@ -391,9 +392,9 @@ describe('qwenchat-http-provider helpers', () => {
       );
       expect(content).toContain('exec_command');
       expect(content).toContain('继续');
-      expect(content).not.toContain('Tool exec_command does not exists');
-      expect(content).not.toContain('Tool apply_patch does not exists');
-      expect(content).not.toContain('Tool mailbox.status does not exists');
+      expect(content).toContain('Tool exec_command does not exists');
+      expect(content).toContain('Tool apply_patch does not exists');
+      expect(content).toContain('Tool mailbox.status does not exists');
     } finally {
       globalThis.fetch = originalFetch;
     }

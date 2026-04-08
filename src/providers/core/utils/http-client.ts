@@ -263,8 +263,10 @@ export class HttpClient {
                 return this.wrapStreamWithTimeouts(nodeStream, controller, timeoutId, idleTimeoutMs, abortWithReason);
               }
             }
-          } catch {
-            // ignore conversion errors and continue to fallback
+          } catch (conversionError) {
+            logHttpClientNonBlockingError('postStream.convertWebReadable', conversionError, {
+              url: fullUrl
+            });
           }
         }
       }
@@ -325,8 +327,8 @@ export class HttpClient {
         upstream.removeListener('end', onEnd);
         upstream.removeListener('error', onError);
         upstream.removeListener('close', onClose);
-      } catch {
-        // ignore
+      } catch (removeListenerError) {
+        logHttpClientNonBlockingError('wrapStreamWithTimeouts.cleanup', removeListenerError);
       }
     };
 
@@ -341,7 +343,8 @@ export class HttpClient {
         abortWithReason('UPSTREAM_STREAM_IDLE_TIMEOUT');
         try {
           pass.destroy(Object.assign(new Error('UPSTREAM_STREAM_IDLE_TIMEOUT'), { code: 'UPSTREAM_STREAM_IDLE_TIMEOUT' }));
-        } catch {
+        } catch (destroyError) {
+          logHttpClientNonBlockingError('wrapStreamWithTimeouts.idleTimeoutDestroy', destroyError);
           pass.destroy();
         }
       }, idleTimeoutMs);
@@ -371,8 +374,8 @@ export class HttpClient {
 
     try {
       controller.signal.addEventListener?.('abort', onAbort as unknown as EventListener, { once: true } as AddEventListenerOptions);
-    } catch {
-      // ignore addEventListener failures
+    } catch (addListenerError) {
+      logHttpClientNonBlockingError('wrapStreamWithTimeouts.addAbortListener', addListenerError);
     }
 
     resetIdle();
@@ -386,16 +389,16 @@ export class HttpClient {
       cleanup();
       try {
         controller.abort();
-      } catch {
-        // ignore
+      } catch (abortError) {
+        logHttpClientNonBlockingError('wrapStreamWithTimeouts.closeAbort', abortError);
       }
       try {
         const destroyable = upstream as unknown as { destroy?: () => void };
         if (typeof destroyable.destroy === 'function') {
           destroyable.destroy();
         }
-      } catch {
-        // ignore
+      } catch (destroyUpstreamError) {
+        logHttpClientNonBlockingError('wrapStreamWithTimeouts.closeDestroyUpstream', destroyUpstreamError);
       }
     });
 
@@ -488,13 +491,14 @@ export class HttpClient {
         const headersObj: Record<string, string> = {};
         try {
           response.headers.forEach((value, key) => { headersObj[key] = value; });
-        } catch {
-          // ignore header parsing failures
+        } catch (headerError) {
+          logHttpClientNonBlockingError('sendSingleRequest.errorHeadersParse', headerError, { url, status: response.status });
         }
         let parsed: unknown;
         try {
           parsed = errorText ? JSON.parse(errorText) : undefined;
-        } catch {
+        } catch (parseError) {
+          logHttpClientNonBlockingError('sendSingleRequest.errorBodyParse', parseError, { url, status: response.status });
           parsed = undefined;
         }
         const message = this.buildHttpErrorMessage(response.status, errorText);
@@ -637,8 +641,8 @@ export class HttpClient {
       if (/openai_error/i.test(msg) || /bad_response_status_code/i.test(msg)) {
         return false;
       }
-    } catch {
-      // ignore parse errors
+    } catch (messageParseError) {
+      logHttpClientNonBlockingError('shouldRetry.messageParse', messageParseError);
     }
 
     // 网络错误通常可以重试

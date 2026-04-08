@@ -291,18 +291,34 @@ export function sendPipelineResponse(
     });
     const usageLogInfo = result.usageLogInfo;
     if (usageLogInfo) {
+      const finishReasonFromDetails =
+        typeof details?.finishReason === 'string' && details.finishReason.trim()
+          ? details.finishReason.trim()
+          : undefined;
+      const resolvedFinishReason = finishReasonFromDetails || usageLogInfo.finishReason;
       logPipelineStage('request.usage_log.start', requestLabel, {
         providerKey: usageLogInfo.providerKey
       });
       logUsageSummary(requestLabel, {
         providerKey: usageLogInfo.providerKey,
         model: usageLogInfo.model,
+        routeName: usageLogInfo.routeName,
+        poolId: usageLogInfo.poolId,
+        finishReason: resolvedFinishReason,
         usage: usageLogInfo.usage as any,
+        externalLatencyMs: usageLogInfo.externalLatencyMs,
+        trafficWaitMs: usageLogInfo.trafficWaitMs,
+        clientInjectWaitMs: usageLogInfo.clientInjectWaitMs,
+        sseDecodeMs: usageLogInfo.sseDecodeMs,
+        codecDecodeMs: usageLogInfo.codecDecodeMs,
+        providerAttemptCount: usageLogInfo.providerAttemptCount,
+        retryCount: usageLogInfo.retryCount,
         hubStageTop: usageLogInfo.hubStageTop as any,
         latencyMs: Date.now() - usageLogInfo.requestStartedAtMs,
         timingRequestIds: usageLogInfo.timingRequestIds,
         sessionId: usageLogInfo.sessionId,
-        conversationId: usageLogInfo.conversationId
+        conversationId: usageLogInfo.conversationId,
+        projectPath: usageLogInfo.projectPath
       });
       logPipelineStage('request.usage_log.completed', requestLabel, {
         providerKey: usageLogInfo.providerKey
@@ -451,18 +467,18 @@ export function sendPipelineResponse(
       try {
         const payload = { type: 'error', status: 504, error: { message, code } };
         res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
-      } catch {
-        /* ignore */
+      } catch (error) {
+        logResponseNonBlockingError(`response.sse.timeout.write_error_event:${requestLabel}`, error);
       }
       try {
         res.end();
-      } catch {
-        /* ignore */
+      } catch (error) {
+        logResponseNonBlockingError(`response.sse.timeout.end:${requestLabel}`, error);
       }
       try {
         stream.destroy?.(Object.assign(new Error(message), { code }));
-      } catch {
-        /* ignore */
+      } catch (error) {
+        logResponseNonBlockingError(`response.sse.timeout.destroy_stream:${requestLabel}`, error);
       }
     };
 
@@ -497,8 +513,9 @@ export function sendPipelineResponse(
         try {
           res.write(`: keepalive\n\n`);
           resetIdle();
-        } catch {
-          // ignore write failures; close handler will clean up
+        } catch (error) {
+          // keepalive is best-effort; stream close handlers still run.
+          logResponseNonBlockingError(`response.sse.keepalive.write:${requestLabel}`, error);
         }
       }, keepaliveMs);
       keepaliveTimer.unref?.();
@@ -512,8 +529,8 @@ export function sendPipelineResponse(
       clearTimers();
       try {
         stream.destroy?.();
-      } catch {
-        /* ignore cleanup errors */
+      } catch (error) {
+        logResponseNonBlockingError(`response.sse.cleanup.destroy_stream:${requestLabel}`, error);
       }
       const closeBeforeStreamEnd = trigger === 'close' && !streamEnded;
       const details = {
@@ -573,13 +590,13 @@ export function sendPipelineResponse(
           }
         };
         res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
-      } catch {
-        /* ignore write errors */
+      } catch (writeError) {
+        logResponseNonBlockingError(`response.sse.stream_error.write_error_event:${requestLabel}`, writeError);
       }
       try {
         res.end();
-      } catch {
-        /* ignore end errors */
+      } catch (endError) {
+        logResponseNonBlockingError(`response.sse.stream_error.end:${requestLabel}`, endError);
       }
     });
     stream.on('data', (chunk: unknown) => {
@@ -692,7 +709,8 @@ function toNodeReadable(streamLike: unknown): Readable | null {
   if (webCandidate && typeof webCandidate.getReader === 'function') {
     try {
       return Readable.fromWeb(streamLike as NodeReadableStream);
-    } catch {
+    } catch (error) {
+      logResponseNonBlockingError('toNodeReadable.fromWeb', error);
       return null;
     }
   }
@@ -836,7 +854,8 @@ function maybeAttachClientSseSnapshotStream(
     flushSnapshot(error);
     try {
       tee.destroy(error as Error);
-    } catch {
+    } catch (destroyError) {
+      logResponseNonBlockingError(`response.sse.snapshot.destroy_tee:${options.requestId}`, destroyError);
       tee.destroy();
     }
   });

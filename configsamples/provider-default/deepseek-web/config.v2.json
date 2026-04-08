@@ -51,6 +51,11 @@
           "web_search"
         ]
       }
+    },
+    "concurrency": {
+      "maxInFlight": 1,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
     }
   }
 }

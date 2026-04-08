@@ -8,12 +8,22 @@ import type {
 } from '../profile-contracts.js';
 
 type UnknownRecord = Record<string, unknown>;
+type QwenMessageNode = Record<string, unknown>;
 
 const DEFAULT_QWEN_CODE_UA_VERSION = '0.10.3';
 const QWEN_OAUTH_AUTH_TYPE = 'qwen-oauth';
 const QWEN_OAUTH_CODER_MODEL = 'coder-model';
 const QWEN_OAUTH_VISION_MODEL = 'vision-model';
 const QWEN_WEB_SEARCH_ENDPOINT = '/api/v1/indices/plugin/web_search';
+const QWEN_STAINLESS_RUNTIME_VERSION = 'v22.17.0';
+const QWEN_STAINLESS_PACKAGE_VERSION = '5.11.0';
+function buildDefaultQwenSystemPart(): UnknownRecord {
+  return {
+    type: 'text',
+    text: '',
+    cache_control: { type: 'ephemeral' }
+  };
+}
 
 function resolveQwenCodeUserAgentVersion(): string {
   const fromEnv =
@@ -28,6 +38,16 @@ function resolveQwenCodeUserAgentVersion(): string {
 function buildQwenCodeUserAgent(): string {
   const version = resolveQwenCodeUserAgentVersion();
   return `QwenCode/${version} (${process.platform}; ${process.arch})`;
+}
+
+function resolveQwenStainlessOs(): string {
+  if (process.platform === 'darwin') {
+    return 'MacOS';
+  }
+  if (process.platform === 'win32') {
+    return 'Windows';
+  }
+  return 'Linux';
 }
 
 function assignHeader(headers: Record<string, string>, target: string, value: string): void {
@@ -87,6 +107,213 @@ function hasConfiguredOAuthClient(auth: ResolveOAuthTokenFileInput['auth']): boo
 
 function isRecord(value: unknown): value is UnknownRecord {
   return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function toTextPart(text: string): UnknownRecord {
+  return {
+    type: 'text',
+    text
+  };
+}
+
+function isInjectedSystemPart(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const type = typeof value.type === 'string' ? value.type.trim().toLowerCase() : '';
+  if (type !== 'text') {
+    return false;
+  }
+  const cacheControl = isRecord(value.cache_control) ? value.cache_control : undefined;
+  const cacheType = typeof cacheControl?.type === 'string' ? cacheControl.type.trim().toLowerCase() : '';
+  if (cacheType !== 'ephemeral') {
+    return false;
+  }
+  const text = typeof value.text === 'string' ? value.text : '';
+  return text === '' || text === 'You are Qwen Code.';
+}
+
+function appendSystemContent(systemParts: UnknownRecord[], content: unknown): void {
+  if (content == null) {
+    return;
+  }
+
+  if (Array.isArray(content)) {
+    for (const item of content) {
+      if (typeof item === 'string') {
+        systemParts.push(toTextPart(item));
+        continue;
+      }
+      if (isRecord(item)) {
+        if (isInjectedSystemPart(item)) {
+          continue;
+        }
+        systemParts.push(item);
+        continue;
+      }
+      systemParts.push(toTextPart(String(item)));
+    }
+    return;
+  }
+
+  if (typeof content === 'string') {
+    systemParts.push(toTextPart(content));
+    return;
+  }
+
+  if (isRecord(content)) {
+    if (!isInjectedSystemPart(content)) {
+      systemParts.push(content);
+    }
+    return;
+  }
+
+  systemParts.push(toTextPart(String(content)));
+}
+
+function extractMessageText(content: unknown): string {
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+  if (!Array.isArray(content)) {
+    return '';
+  }
+  const parts: string[] = [];
+  for (const item of content) {
+    if (typeof item === 'string') {
+      if (item.trim()) {
+        parts.push(item.trim());
+      }
+      continue;
+    }
+    if (!isRecord(item)) {
+      continue;
+    }
+    for (const key of ['text', 'output_text', 'input_text', 'content'] as const) {
+      const value = item[key];
+      if (typeof value === 'string' && value.trim()) {
+        parts.push(value.trim());
+      }
+    }
+  }
+  return parts.join(' ').trim();
+}
+
+function normalizeToolCallId(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  return trimmed.length ? trimmed : undefined;
+}
+
+function normalizeNonSystemMessages(messages: QwenMessageNode[]): QwenMessageNode[] {
+  const normalized: QwenMessageNode[] = [];
+  const pendingToolCallIds: string[] = [];
+
+  for (const node of messages) {
+    if (!isRecord(node)) {
+      continue;
+    }
+    const role = typeof node.role === 'string' ? node.role.trim().toLowerCase() : '';
+
+    if (role === 'assistant') {
+      const clone: QwenMessageNode = { ...node };
+      const rawToolCalls = Array.isArray(clone.tool_calls) ? clone.tool_calls : [];
+      if (rawToolCalls.length > 0) {
+        const normalizedToolCalls: UnknownRecord[] = [];
+        for (const call of rawToolCalls) {
+          if (!isRecord(call)) {
+            continue;
+          }
+          const callClone: UnknownRecord = { ...call };
+          const normalizedId =
+            normalizeToolCallId(callClone.id) ??
+            normalizeToolCallId(callClone.call_id) ??
+            normalizeToolCallId(callClone.tool_call_id);
+          if (normalizedId) {
+            callClone.id = normalizedId;
+            pendingToolCallIds.push(normalizedId);
+          }
+          delete callClone.call_id;
+          delete callClone.tool_call_id;
+          normalizedToolCalls.push(callClone);
+        }
+        clone.tool_calls = normalizedToolCalls;
+        normalized.push(clone);
+        continue;
+      }
+
+      if (!extractMessageText(clone.content)) {
+        continue;
+      }
+      normalized.push(clone);
+      continue;
+    }
+
+    if (role === 'tool') {
+      const clone: QwenMessageNode = { ...node };
+      const contentText = extractMessageText(clone.content);
+      let toolCallId =
+        normalizeToolCallId(clone.tool_call_id) ??
+        normalizeToolCallId(clone.call_id);
+
+      if (!toolCallId && pendingToolCallIds.length === 1) {
+        toolCallId = pendingToolCallIds.shift();
+      } else if (toolCallId) {
+        const idx = pendingToolCallIds.indexOf(toolCallId);
+        if (idx >= 0) {
+          pendingToolCallIds.splice(idx, 1);
+        }
+      }
+
+      if (toolCallId) {
+        clone.tool_call_id = toolCallId;
+      } else {
+        delete clone.tool_call_id;
+      }
+      delete clone.call_id;
+      delete clone.id;
+
+      if (!toolCallId && !contentText) {
+        continue;
+      }
+      normalized.push(clone);
+      continue;
+    }
+
+    normalized.push(node);
+  }
+
+  return normalized;
+}
+
+function normalizeQwenOAuthMessages(body: UnknownRecord): void {
+  const rawMessages = Array.isArray(body.messages) ? body.messages : [];
+  const systemParts: UnknownRecord[] = [buildDefaultQwenSystemPart()];
+  const nonSystemMessagesRaw: QwenMessageNode[] = [];
+
+  for (const node of rawMessages) {
+    if (!isRecord(node)) {
+      continue;
+    }
+    const role = typeof node.role === 'string' ? node.role.trim().toLowerCase() : '';
+    if (role === 'system') {
+      appendSystemContent(systemParts, node.content);
+      continue;
+    }
+    nonSystemMessagesRaw.push(node);
+  }
+
+  const nonSystemMessages = normalizeNonSystemMessages(nonSystemMessagesRaw);
+
+  body.messages = [
+    {
+      role: 'system',
+      content: systemParts
+    },
+    ...nonSystemMessages
+  ];
 }
 
 function getRequestMetadata(request: unknown): UnknownRecord | undefined {
@@ -223,6 +450,7 @@ export const qwenFamilyProfile: ProviderFamilyProfile = {
     if (resolvedModel && resolvedModel !== rawModel) {
       requestBody.model = resolvedModel;
     }
+    normalizeQwenOAuthMessages(requestBody);
     return body;
   },
   resolveUserAgent(input: ResolveUserAgentInput): string | undefined {
@@ -240,6 +468,13 @@ export const qwenFamilyProfile: ProviderFamilyProfile = {
     assignHeader(headers, 'X-DashScope-CacheControl', 'enable');
     assignHeader(headers, 'X-DashScope-UserAgent', resolvedUserAgent);
     assignHeader(headers, 'X-DashScope-AuthType', resolveDashScopeAuthType(input));
+    assignHeader(headers, 'X-Stainless-Runtime-Version', QWEN_STAINLESS_RUNTIME_VERSION);
+    assignHeader(headers, 'X-Stainless-Lang', 'js');
+    assignHeader(headers, 'X-Stainless-Arch', process.arch);
+    assignHeader(headers, 'X-Stainless-Package-Version', QWEN_STAINLESS_PACKAGE_VERSION);
+    assignHeader(headers, 'X-Stainless-Retry-Count', '0');
+    assignHeader(headers, 'X-Stainless-Os', resolveQwenStainlessOs());
+    assignHeader(headers, 'X-Stainless-Runtime', 'node');
 
     // Remove legacy Gemini-style metadata headers for qwen requests.
     deleteHeaderInsensitive(headers, 'X-Goog-Api-Client');

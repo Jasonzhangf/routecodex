@@ -91,6 +91,26 @@ export interface StatsCenter {
   reset(): void;
 }
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logStatsCenterNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[stats-center] ${stage} failed (non-blocking): ${formatUnknownError(error)}${suffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function createEmptyRouterBucket(): RouterStatsBucket {
   return {
     requestCount: 0,
@@ -220,8 +240,10 @@ class DefaultStatsCenter implements StatsCenter {
       const payload = JSON.stringify(this.snapshot, null, 2);
       await fs.writeFile(this.persistPath, payload, 'utf-8');
       this.dirty = false;
-    } catch {
-      // ignore persistence errors
+    } catch (persistError) {
+      logStatsCenterNonBlockingError('flushToDisk', persistError, {
+        persistPath: this.persistPath
+      });
     } finally {
       this.flushInFlight = false;
     }
@@ -378,30 +400,30 @@ export function initStatsCenter(options?: StatsCenterOptions): StatsCenter {
     const handler = async () => {
       try {
         await center.flushToDisk();
-      } catch {
-        // ignore
+      } catch (flushError) {
+        logStatsCenterNonBlockingError('beforeExit.flushToDisk', flushError);
       }
       try {
         const snapshot = center.getSnapshot();
         printStatsToConsole(snapshot);
-      } catch {
-        // ignore
+      } catch (printError) {
+        logStatsCenterNonBlockingError('beforeExit.printStatsToConsole', printError);
       }
     };
     try {
       process.once('beforeExit', handler);
-    } catch {
-      // ignore
+    } catch (bindBeforeExitError) {
+      logStatsCenterNonBlockingError('bind.beforeExit', bindBeforeExitError);
     }
     try {
       process.once('SIGINT', handler);
-    } catch {
-      // ignore
+    } catch (bindSigintError) {
+      logStatsCenterNonBlockingError('bind.SIGINT', bindSigintError);
     }
     try {
       process.once('SIGTERM', handler);
-    } catch {
-      // ignore
+    } catch (bindSigtermError) {
+      logStatsCenterNonBlockingError('bind.SIGTERM', bindSigtermError);
     }
   }
 

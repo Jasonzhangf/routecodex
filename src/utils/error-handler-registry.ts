@@ -84,6 +84,28 @@ export interface ErrorHandlerRegistration {
   description?: string;
 }
 
+function logErrorHandlerRegistryNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  try {
+    const reason = error instanceof Error ? (error.stack || `${error.name}: ${error.message}`) : String(error);
+    const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[error-handler-registry] ${stage} failed (non-blocking): ${reason}${detailSuffix}`);
+  } catch (logError) {
+    try {
+      process.stderr.write(
+        `[error-handler-registry] logging failure (non-blocking): ${
+          logError instanceof Error ? logError.message : String(logError)
+        }\n`
+      );
+    } catch {
+      void 0;
+    }
+  }
+}
+
 /**
  * Error Handler Registry class
  * Centralized error handling system with registered handlers and message templates
@@ -512,7 +534,10 @@ export class ErrorHandlerRegistry {
           try {
             // Ask for candidates excluding the ones we already tried
             candidates = hooks.getAvailablePipelines ? hooks.getAvailablePipelines(exclude) : [];
-          } catch {
+          } catch (candidateError) {
+            logErrorHandlerRegistryNonBlocking('provider_error_handler.getAvailablePipelines', candidateError, {
+              source: context.source
+            });
             candidates = [];
           }
 
@@ -530,8 +555,10 @@ export class ErrorHandlerRegistry {
                   requestId: handlerContext.request?.route?.requestId,
                   message: `Failover triggered by ${context.error}`
                 } as any);
-              } catch {
-                /* ignore */
+              } catch (telemetryError) {
+                logErrorHandlerRegistryNonBlocking('provider_error_handler.errorCenter.handleError', telemetryError, {
+                  source: context.source
+                });
               }
 
               // Execute retry
@@ -554,7 +581,11 @@ export class ErrorHandlerRegistry {
           // Fallback if handler logic fails
           try {
             (context.context as RateLimitHandlerContext | undefined)?.deferred?.reject?.(context.error);
-          } catch { /* ignore */ }
+          } catch (rejectError) {
+            logErrorHandlerRegistryNonBlocking('provider_error_handler.defer_reject', rejectError, {
+              source: context.source
+            });
+          }
         }
       },
       priority: 2,
@@ -597,7 +628,10 @@ export class ErrorHandlerRegistry {
           let candidates: RateLimitPipelineDescriptor[] = [];
           try {
             candidates = hooks.getAvailablePipelines ? hooks.getAvailablePipelines(exclude) : [];
-          } catch {
+          } catch (candidateError) {
+            logErrorHandlerRegistryNonBlocking('rate_limit_handler.getAvailablePipelines', candidateError, {
+              source: context.source
+            });
             candidates = [];
           }
 
@@ -634,8 +668,11 @@ export class ErrorHandlerRegistry {
                   delay,
                   requestId: rateLimitContext.request?.route?.requestId
                 });
-              } catch {
-                // ignore telemetry failures
+              } catch (telemetryError) {
+                logErrorHandlerRegistryNonBlocking('rate_limit_handler.errorCenter.backoff', telemetryError, {
+                  source: context.source,
+                  pipelineId: pipeline.pipelineId
+                });
               }
               const resp = await (hooks.processWithPipeline
                 ? hooks.processWithPipeline(pipeline)
@@ -664,16 +701,21 @@ export class ErrorHandlerRegistry {
               requestId: rateLimitContext.request?.route?.requestId,
               message: context.error instanceof Error ? context.error.message : undefined
             });
-          } catch {
-            // ignore telemetry failures
+          } catch (telemetryError) {
+            logErrorHandlerRegistryNonBlocking('rate_limit_handler.errorCenter.final', telemetryError, {
+              source: context.source,
+              pipelineId: pipeline.pipelineId
+            });
           }
           deferred.reject(context.error || new Error('429 handling exhausted'));
         } catch (e) {
           // If the handler itself fails, reject via deferred if present
           try {
             (context.context as RateLimitHandlerContext | undefined)?.deferred?.reject?.(e);
-          } catch {
-            // ignore deferred rejection errors
+          } catch (rejectError) {
+            logErrorHandlerRegistryNonBlocking('rate_limit_handler.deferredReject', rejectError, {
+              source: context.source
+            });
           }
         }
       },
@@ -685,8 +727,10 @@ export class ErrorHandlerRegistry {
   private logDebugEvent(operationId: string, data: Record<string, unknown>): void {
     try {
       console.debug('[error-handler-registry]', operationId, data);
-    } catch {
-      // ignore logging failures
+    } catch (debugLogError) {
+      logErrorHandlerRegistryNonBlocking('logDebugEvent', debugLogError, {
+        operationId
+      });
     }
   }
 

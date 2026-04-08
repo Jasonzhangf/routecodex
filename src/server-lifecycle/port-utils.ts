@@ -57,7 +57,11 @@ async function isServerHealthyQuick(port: number): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => {
-      try { controller.abort(); } catch { /* ignore */ }
+      try {
+        controller.abort();
+      } catch (error) {
+        logPortUtilsNonBlockingError('isServerHealthyQuick.abort_controller', error, { port });
+      }
     }, 800);
     const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}/health`, {
       method: 'GET',
@@ -86,7 +90,11 @@ async function attemptHttpShutdown(port: number): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => {
-      try { controller.abort(); } catch { /* ignore */ }
+      try {
+        controller.abort();
+      } catch (error) {
+        logPortUtilsNonBlockingError('attemptHttpShutdown.abort_controller', error, { port });
+      }
     }, 1000);
     const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}${API_PATHS.SHUTDOWN}`, {
       method: 'POST',

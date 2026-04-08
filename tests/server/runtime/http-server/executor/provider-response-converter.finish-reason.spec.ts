@@ -5,7 +5,8 @@ const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
 const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
-  createSnapshotRecorder: mockCreateSnapshotRecorder
+  createSnapshotRecorder: mockCreateSnapshotRecorder,
+  sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
 });
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);

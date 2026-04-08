@@ -2,6 +2,32 @@ import { writeClientSnapshot } from '../../../../providers/core/utils/snapshot-w
 import { asRecord } from '../provider-utils.js';
 import type { PipelineExecutionInput } from '../../../handlers/types.js';
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logRequestExecutorCoreNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[request-executor-core] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`
+    );
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 export async function writeInboundClientSnapshot(options: {
   input: PipelineExecutionInput;
   initialMetadata: Record<string, unknown>;
@@ -27,8 +53,12 @@ export async function writeInboundClientSnapshot(options: {
         clientOriginator: headerOriginator
       }
     });
-  } catch {
-    // snapshot failure should not block request path
+  } catch (error) {
+    logRequestExecutorCoreNonBlockingError('writeInboundClientSnapshot', error, {
+      entryEndpoint: input.entryEndpoint,
+      requestId: input.requestId,
+      clientRequestId
+    });
   }
 }
 

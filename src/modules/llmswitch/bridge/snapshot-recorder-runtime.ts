@@ -339,16 +339,6 @@ function resolveClientToolErrorSampleWindowMs(): number {
 }
 
 export function isRecordableApplyPatchErrorType(errorType: string): boolean {
-  const normalized = String(errorType || '').trim().toLowerCase();
-  if (!normalized.startsWith('apply_patch_')) {
-    return true;
-  }
-  if (
-    normalized === 'apply_patch_expected_lines_not_found' ||
-    normalized === 'apply_patch_gnu_line_number_context_not_found'
-  ) {
-    return false;
-  }
   return true;
 }
 
@@ -375,7 +365,17 @@ export function shouldWriteClientToolErrorsample(args: {
     return true;
   }
   const now = Date.now();
-  const key = [args.endpoint, args.stage, args.failure.toolName, args.failure.errorType].join('|');
+  const matchedFingerprint =
+    args.failure.toolName === 'apply_patch'
+      ? clipText(String(args.failure.matchedText || '').replace(/\s+/g, ' ').toLowerCase(), 120)
+      : '';
+  const key = [
+    args.endpoint,
+    args.stage,
+    args.failure.toolName,
+    args.failure.errorType,
+    matchedFingerprint
+  ].join('|');
   for (const [sampleKey, seenAt] of clientToolErrorSampleWindow.entries()) {
     if (now - seenAt > windowMs) {
       clientToolErrorSampleWindow.delete(sampleKey);

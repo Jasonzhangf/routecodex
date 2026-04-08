@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import {
@@ -122,9 +123,36 @@ describe('servertool reasoning.stop guard', () => {
       { op: 'append_assistant_message', required: false },
       {
         op: 'append_user_text',
-        text: '当前任务没有完成，请继续执行。请先调用 reasoning.stop 进行自查：任务目标、是否完成、完成证据或未完成原因。'
+        text: '当前任务没有完成，请继续执行。必须先调用 reasoning.stop 自查，并严格填写结构化字段：task_goal、is_completed，以及（is_completed=false 时）next_step 或 cannot_complete_reason。若存在下一步分析计划，必须写入 next_step；仅在当前确实阻塞无法推进时才填写 cannot_complete_reason。'
       }
     ]);
+  });
+
+  test('fails fast when reasoning_stop_guard followup cannot build payload (missing seed)', async () => {
+    const adapterContext = {
+      sessionId: 'reasoning-stop-guard-missing-seed'
+    } as unknown as AdapterContext;
+
+    await expect(
+      runServerToolOrchestration({
+        chat: buildStopResponse('阶段完成'),
+        adapterContext,
+        requestId: 'req_reasoning_stop_guard_missing_seed',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        reenterPipeline: async () => ({
+          body: {
+            id: 'should-not-run'
+          } as JsonObject
+        })
+      })
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_FOLLOWUP_FAILED',
+      details: {
+        flowId: 'reasoning_stop_guard_flow',
+        reason: 'followup_payload_missing'
+      }
+    });
   });
 
   test('reasoning.stop tool call arms session state', async () => {
@@ -213,6 +241,70 @@ describe('servertool reasoning.stop guard', () => {
     const state = loadRoutingInstructionStateSync(`session:${sessionId}`);
     expect(state?.reasoningStopArmed).not.toBe(true);
     expect(state?.reasoningStopSummary).toBeUndefined();
+  });
+
+  test('returns structured error when reasoning.stop payload misses next_step and cannot_complete_reason', async () => {
+    const sessionId = 'reasoning-stop-guard-invalid-missing-next-or-reason';
+    const adapterContext = {
+      sessionId
+    } as unknown as AdapterContext;
+    const result = await runServerSideToolEngine({
+      chatResponse: buildReasoningStopToolCallResponse({
+        task_goal: '继续分析日志',
+        is_completed: false
+      }),
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_invalid_missing_next_or_reason'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('reasoning_stop_flow');
+    const outputs = (result.finalChatResponse as any).tool_outputs;
+    expect(Array.isArray(outputs)).toBe(true);
+    const last = outputs[outputs.length - 1];
+    const payload = JSON.parse(String(last.content || '{}'));
+    expect(payload.ok).toBe(false);
+    expect(payload.code).toBe('NEXT_STEP_OR_CANNOT_COMPLETE_REQUIRED');
+  });
+
+  test('when armed summary has next step, guard injects followup to execute next step', async () => {
+    const sessionId = 'reasoning-stop-guard-next-step-continue';
+    const stickyKey = `session:${sessionId}`;
+    const state = createEmptyRoutingInstructionState();
+    state.reasoningStopArmed = true;
+    state.reasoningStopSummary = '用户任务目标: A\n是否完成: 否\n下一步: 检查 daemon 日志并定位阻塞点';
+    state.reasoningStopUpdatedAt = Date.now();
+    saveRoutingInstructionStateSync(stickyKey, state);
+
+    const adapterContext = { sessionId } as unknown as AdapterContext;
+    const result = await runServerSideToolEngine({
+      chatResponse: buildStopResponse('先停一下'),
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_continue'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('reasoning_stop_continue_flow');
+    const followup = result.execution?.followup as
+      | {
+          metadata?: Record<string, unknown>;
+          injection?: { ops?: Array<Record<string, unknown>> };
+        }
+      | undefined;
+    const lastOp = followup?.injection?.ops?.[3];
+    expect(lastOp).toEqual(
+      expect.objectContaining({
+        op: 'append_user_text'
+      })
+    );
+    expect(String((lastOp as any)?.text || '')).toContain('next_step: 检查 daemon 日志并定位阻塞点');
+    // continue path should keep state armed until a completed/blocked finalize happens
+    const persisted = loadRoutingInstructionStateSync(stickyKey);
+    expect(persisted?.reasoningStopArmed).toBe(true);
   });
 
   test('allows real stop, appends summary, then clears reasoning.stop state', async () => {

@@ -24,9 +24,6 @@ export function expandHome(p: string): string {
 }
 
 export function defaultTokenFile(providerType: string): string {
-  if (providerType === 'iflow') {
-    return path.join(resolveRccAuthDir(), 'iflow-oauth-1-default.json');
-  }
   if (providerType === 'qwen') {
     return path.join(resolveRccAuthDir(), 'qwen-oauth-1-default.json');
   }
@@ -40,10 +37,7 @@ export function defaultTokenFile(providerType: string): string {
 }
 
 export function resolveIflowCredentialCandidates(): string[] {
-  const raw = String(process.env.IFLOW_OAUTH_TOKEN_FILE || '').trim();
-  const fromEnv = raw ? expandHome(raw) : '';
-  const candidates = [fromEnv].filter((item) => typeof item === 'string' && item.trim().length > 0) as string[];
-  return [...new Set(candidates)];
+  return [];
 }
 
 import type { OAuthAuth } from '../../core/api/provider-config.js';

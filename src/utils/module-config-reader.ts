@@ -7,6 +7,16 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+function logModuleConfigReaderNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[module-config-reader] ${stage} failed (non-blocking): ${reason}${detailSuffix}`);
+}
+
 /**
  * Module configuration interface
  */
@@ -90,7 +100,12 @@ export class ModuleConfigReader {
         try {
           const stat = await fs.stat(c);
           if (stat.isFile()) {return c;}
-        } catch { /* next */ }
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException | undefined)?.code;
+          if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+            logModuleConfigReaderNonBlocking('resolve_path.stat_candidate', error, { candidate: c });
+          }
+        }
       }
       // Fallback to original (will error upstream)
       return raw || './config/modules.json';

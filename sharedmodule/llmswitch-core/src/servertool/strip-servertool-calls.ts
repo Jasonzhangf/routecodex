@@ -8,8 +8,8 @@ function collectExecutedServerToolCallIds(payload: JsonObject): Set<string> {
     const name = typeof (entry as any).name === 'string' ? String((entry as any).name).trim() : '';
     const toolCallId = typeof (entry as any).tool_call_id === 'string' ? String((entry as any).tool_call_id).trim() : '';
     if (!name || !toolCallId) continue;
-    // Only strip servertool continue_execution tool calls.
-    if (name !== 'continue_execution') continue;
+    // Only strip executed servertool-only control tool calls.
+    if (name !== 'continue_execution' && name !== 'reasoning.stop') continue;
     ids.add(toolCallId);
   }
   return ids;

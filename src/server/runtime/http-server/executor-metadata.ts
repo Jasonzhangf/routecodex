@@ -10,6 +10,30 @@ import { resolveTmuxSessionIdAndSource } from './session-scope-resolution.js';
 import { evaluateTmuxScopeCleanup } from './tmux-scope-cleanup-policy.js';
 import { isTmuxSessionAlive, resolveTmuxSessionWorkingDirectory } from './tmux-session-probe.js';
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logExecutorMetadataNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[executor-metadata] ${stage} failed (non-blocking): ${formatUnknownError(error)}${suffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 export function cloneClientHeaders(source: unknown): Record<string, string> | undefined {
   if (!source || typeof source !== 'object') {
     return undefined;
@@ -151,8 +175,8 @@ function extractWorkdirFromTurnMetadata(rawTurnMetadata: string | undefined): st
   const candidates = [rawTurnMetadata];
   try {
     candidates.push(decodeURIComponent(rawTurnMetadata));
-  } catch {
-    // ignore URI decode failures
+  } catch (decodeError) {
+    logExecutorMetadataNonBlockingError('extractWorkdirFromTurnMetadata.decodeURIComponent', decodeError);
   }
   for (const candidate of [...candidates]) {
     const normalized = candidate.trim();
@@ -168,8 +192,8 @@ function extractWorkdirFromTurnMetadata(rawTurnMetadata: string | undefined): st
       if (decoded) {
         candidates.push(decoded);
       }
-    } catch {
-      // ignore base64 decoding errors
+    } catch (base64DecodeError) {
+      logExecutorMetadataNonBlockingError('extractWorkdirFromTurnMetadata.base64Decode', base64DecodeError);
     }
   }
 
@@ -180,8 +204,8 @@ function extractWorkdirFromTurnMetadata(rawTurnMetadata: string | undefined): st
       if (fromJson) {
         return fromJson;
       }
-    } catch {
-      // continue to querystring parsing
+    } catch (jsonParseError) {
+      logExecutorMetadataNonBlockingError('extractWorkdirFromTurnMetadata.jsonParse', jsonParseError);
     }
 
     try {
@@ -194,8 +218,8 @@ function extractWorkdirFromTurnMetadata(rawTurnMetadata: string | undefined): st
       if (fromParams) {
         return fromParams;
       }
-    } catch {
-      // ignore non-URLSearchParams text
+    } catch (urlParamsError) {
+      logExecutorMetadataNonBlockingError('extractWorkdirFromTurnMetadata.urlSearchParams', urlParamsError);
     }
   }
   return undefined;
@@ -442,8 +466,10 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   }).cleanupTmuxScope) {
     try {
       getSessionClientRegistry().unbindSessionScope(`tmux:${resolvedTmuxSessionId}`);
-    } catch {
-      // best-effort cleanup only
+    } catch (unbindError) {
+      logExecutorMetadataNonBlockingError('buildRequestMetadata.unbindSessionScope', unbindError, {
+        tmuxSessionId: resolvedTmuxSessionId
+      });
     }
     resolvedTmuxSessionId = undefined;
     tmuxSource = 'none';
@@ -596,8 +622,8 @@ function cloneMetadata(source: Record<string, unknown>): Record<string, unknown>
   if (typeof structuredCloneFn === 'function') {
     try {
       return structuredCloneFn(source);
-    } catch {
-      // fall through to JSON fallback
+    } catch (structuredCloneError) {
+      logExecutorMetadataNonBlockingError('cloneMetadata.structuredClone', structuredCloneError);
     }
   }
   try {

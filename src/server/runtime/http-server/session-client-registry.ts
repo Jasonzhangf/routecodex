@@ -24,6 +24,8 @@ import type {
 } from './session-client-registry-utils.js';
 
 const CLIENT_TMUX_INJECT_DELAY_MS = 10_000;
+const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
+const nonBlockingLogState = new Map<string, number>();
 
 function formatRegistryError(error: unknown): string {
   if (error instanceof Error) {
@@ -37,12 +39,18 @@ function isErrnoWithCode(error: unknown, code: string): boolean {
 }
 
 function logSessionClientRegistryNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  const now = Date.now();
+  const last = nonBlockingLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingLogState.set(stage, now);
   try {
     const detailSuffix = details && Object.keys(details).length
       ? ` details=${JSON.stringify(details)}`
       : '';
     console.warn(
-      `[session-client-registry] ${stage} failed: ${formatRegistryError(error)}${detailSuffix}`
+      `[session-client-registry] ${stage} failed (non-blocking): ${formatRegistryError(error)}${detailSuffix}`
     );
   } catch {
     // no-op
@@ -815,7 +823,13 @@ export class SessionClientRegistry {
         });
         clearTimeout(timeoutId);
         if (!response.ok) {
-          const errorText = await response.text().catch(() => String(response.status));
+          const errorText = await response.text().catch((error) => {
+            logSessionClientRegistryNonBlockingError('inject.read_error_response_text', error, {
+              daemonId: candidate.daemonId,
+              status: response.status
+            });
+            return String(response.status);
+          });
           candidate.lastError = `inject_http_${response.status}:${errorText}`;
           this.records.set(candidate.daemonId, candidate);
           continue;
@@ -850,7 +864,11 @@ export async function injectSessionClientPromptWithResult(
 export async function injectSessionClientPrompt(args: SessionClientInjectArgs): Promise<void> {
   try {
     await singleton.inject(args);
-  } catch {
-    // best-effort only
+  } catch (error) {
+    logSessionClientRegistryNonBlockingError('injectSessionClientPrompt', error, {
+      requestId: args.requestId,
+      source: args.source,
+      tmuxSessionId: args.tmuxSessionId
+    });
   }
 }

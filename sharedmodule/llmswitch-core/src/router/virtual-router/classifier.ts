@@ -18,6 +18,7 @@ export class RoutingClassifier {
     const lastToolCategory = features.lastAssistantToolCategory;
     const webSearchIntent = detectWebSearchIntent(features.userTextSample);
     const serverToolRequired = (features.metadata as any)?.serverToolRequired === true;
+    const hasWebSearchToolDeclared = features.hasWebSearchToolDeclared === true;
     const webSearchContinuation = lastToolCategory === 'websearch';
     const localToolContinuation =
       lastToolCategory === 'read' ||
@@ -25,7 +26,8 @@ export class RoutingClassifier {
       lastToolCategory === 'search' ||
       lastToolCategory === 'other';
     const webSearchFromIntent = !localToolContinuation && webSearchIntent;
-    const webSearchDeclaredOrRequired = !localToolContinuation && serverToolRequired;
+    const webSearchDeclaredOrRequired =
+      !localToolContinuation && (serverToolRequired || hasWebSearchToolDeclared);
     const reachedLongContext =
       features.estimatedTokens >= (this.config.longContextThresholdTokens ?? DEFAULT_LONG_CONTEXT_THRESHOLD);
     const latestMessageFromUser = features.latestMessageFromUser === true;
@@ -73,6 +75,8 @@ export class RoutingClassifier {
             ? 'web_search:last-tool-websearch'
             : webSearchDeclaredOrRequired && serverToolRequired
               ? 'web_search:servertool-required'
+              : webSearchDeclaredOrRequired && hasWebSearchToolDeclared
+                ? 'web_search:tool-declared'
               : 'web_search:intent-keyword'
       },
       search: {

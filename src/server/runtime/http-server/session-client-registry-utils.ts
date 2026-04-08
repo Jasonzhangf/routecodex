@@ -71,6 +71,24 @@ type ManagedProcessInfo = {
 
 const HEARTBEAT_TTL_MS = 45_000;
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error ?? 'unknown');
+}
+
+function logRegistryUtilsNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length
+      ? ` details=${JSON.stringify(details)}`
+      : '';
+    console.warn(`[session-client-registry] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 export function normalizeString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -249,7 +267,6 @@ export function cleanupStaleHeartbeatsFromRegistry(args: {
       reason: 'stale_heartbeat',
       isTmuxSessionAlive: args.isTmuxSessionAlive,
     });
-    const tmuxAlive = cleanupDecision.liveness === 'alive';
     const hasSharedTmuxPeer = tmuxSessionId
       ? hasOtherDaemonForTmuxSession({ records: args.records, daemonId, tmuxSessionId })
       : false;
@@ -325,6 +342,26 @@ export function cleanupDeadTmuxSessionsFromRegistry(args: {
   const sessionKillOutcome = new Map<string, boolean>();
   const killedProcessOnce = new Set<number>();
   const processKillOutcome = new Map<number, boolean>();
+  const tmuxLivenessCache = new Map<string, boolean>();
+  const isTmuxSessionAliveMemoized = (tmuxSessionId: string): boolean => {
+    const normalized = normalizeString(tmuxSessionId);
+    if (!normalized) {
+      return false;
+    }
+    const cached = tmuxLivenessCache.get(normalized);
+    if (typeof cached === 'boolean') {
+      return cached;
+    }
+    let alive = true;
+    try {
+      alive = args.isTmuxSessionAlive(normalized);
+    } catch (error) {
+      logRegistryUtilsNonBlockingError('stale_cleanup.liveness_probe', error, { tmuxSessionId: normalized });
+      alive = true;
+    }
+    tmuxLivenessCache.set(normalized, alive);
+    return alive;
+  };
 
   for (const [daemonId, record] of args.records.entries()) {
     const tmuxTarget = normalizeString(record.tmuxTarget);
@@ -347,12 +384,7 @@ export function cleanupDeadTmuxSessionsFromRegistry(args: {
     if (!tmuxSessionId) {
       continue;
     }
-    let alive = true;
-    try {
-      alive = args.isTmuxSessionAlive(tmuxSessionId);
-    } catch {
-      alive = true;
-    }
+    const alive = isTmuxSessionAliveMemoized(tmuxSessionId);
     if (alive) {
       continue;
     }
@@ -369,7 +401,8 @@ export function cleanupDeadTmuxSessionsFromRegistry(args: {
         let killed = false;
         try {
           killed = Boolean(args.terminateManagedTmuxSession(tmuxSessionId));
-        } catch {
+        } catch (error) {
+          logRegistryUtilsNonBlockingError('stale_cleanup.kill_tmux', error, { daemonId, tmuxSessionId });
           killed = false;
         }
         if (killed) {
@@ -403,7 +436,11 @@ export function cleanupDeadTmuxSessionsFromRegistry(args: {
             commandHint: normalizeString(record.managedClientCommandHint),
             clientType: normalizeString(record.clientType)
           }));
-        } catch {
+        } catch (error) {
+          logRegistryUtilsNonBlockingError('stale_cleanup.kill_process', error, {
+            daemonId,
+            pid: managedClientPid
+          });
           killed = false;
         }
         if (killed) {

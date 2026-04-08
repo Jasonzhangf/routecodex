@@ -11,7 +11,7 @@ type UnknownRecord = Record<string, unknown>;
 type ToolProtocol = 'native' | 'text';
 
 const PROFILE = 'chat:qwenchat-web';
-const DEFAULT_PROVIDER_PROTOCOL = 'openai-chat';
+const DEFAULT_PROVIDER_PROTOCOL = 'openai-responses';
 const DEFAULT_ENTRY_ENDPOINT = '/v1/chat/completions';
 
 const isRecord = (value: unknown): value is UnknownRecord =>
@@ -70,6 +70,14 @@ function buildCompatInput(
     deepseek: resolveToolTextNode(adapterContext)
   };
 
+  // Restore tools from __hub_capture if payload.tools was summarized (not array)
+  const capturedContext = adapterContext?.capturedContext as UnknownRecord | undefined;
+  const hubCapture = capturedContext?.__hub_capture as UnknownRecord | undefined;
+  const captureContext = hubCapture?.context as UnknownRecord | undefined;
+  if (!Array.isArray(payload.tools) && captureContext?.toolsRaw && Array.isArray(captureContext.toolsRaw)) {
+    payload = { ...payload, tools: captureContext.toolsRaw as unknown[] as JsonObject[] };
+  }
+
   return {
     payload,
     adapterContext: normalizedContext,
@@ -84,4 +92,3 @@ export function applyQwenChatWebRequestTransform(payload: JsonObject, adapterCon
 
   return runReqOutboundStage3CompatWithNative(buildCompatInput(payload, adapterContext)).payload;
 }
-

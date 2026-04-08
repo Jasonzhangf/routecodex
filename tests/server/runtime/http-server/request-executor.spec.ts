@@ -690,6 +690,116 @@ describe('HubRequestExecutor failover', () => {
     expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
   });
 
+  test('holds on last available provider when 429 occurs and retries same provider with backoff', async () => {
+    const providerA = 'openrouter.key1.qwen/qwen3.6-plus:free';
+    const providerB = 'qwen.2-135.qwen3.6-plus';
+    const error429A = Object.assign(new Error('HTTP 429: provider A rate limited'), {
+      statusCode: 429,
+      code: 'HTTP_429'
+    });
+    const error429B = Object.assign(new Error('HTTP 429: provider B rate limited'), {
+      statusCode: 429,
+      code: 'HTTP_429'
+    });
+    const processA = jest.fn(async () => {
+      throw error429A;
+    });
+    let providerBAttempt = 0;
+    const processB = jest.fn(async () => {
+      providerBAttempt += 1;
+      if (providerBAttempt === 1) {
+        throw error429B;
+      }
+      return { status: 200, data: { id: 'ok_after_last_provider_wait' } };
+    });
+
+    const handles = new Map<string, ProviderHandle>([
+      [providerA, buildHandle(providerA, processA)],
+      [providerB, buildHandle(providerB, processB)]
+    ]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        const excluded = new Set<string>(
+          Array.isArray(input.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : []
+        );
+        const providerKey = excluded.has(providerA) ? providerB : providerA;
+        return {
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
+            runtimeKey: providerKey
+          },
+          routingDecision: {
+            routeName: 'longcontext',
+            pool: [providerA, providerB]
+          },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const previousBase = process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
+    const previousMax = process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
+    process.env.ROUTECODEX_429_BACKOFF_BASE_MS = '1';
+    process.env.ROUTECODEX_429_BACKOFF_MAX_MS = '5';
+
+    try {
+      const deps = {
+        runtimeManager,
+        getHubPipeline: () => pipeline,
+        getModuleDependencies: () => ({
+          errorHandlingCenter: {
+            handleError: jest.fn(async () => undefined)
+          }
+        }),
+        logStage: jest.fn(),
+        stats: new StatsManager()
+      };
+
+      const executor = createRequestExecutor(deps);
+      const result = await executor.execute({
+        requestId: 'req-last-provider-429',
+        entryEndpoint: '/v1/responses',
+        body: {},
+        headers: {},
+        metadata: {}
+      });
+
+      expect(result).toEqual(expect.objectContaining({ status: 200 }));
+      expect(pipeline.execute).toHaveBeenCalledTimes(3);
+      expect(processA).toHaveBeenCalledTimes(1);
+      expect(processB).toHaveBeenCalledTimes(2);
+
+      const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
+      expect(secondCallMetadata.excludedProviderKeys).toEqual([providerA]);
+      const thirdCallMetadata = pipeline.execute.mock.calls[2][0].metadata as Record<string, unknown>;
+      expect(thirdCallMetadata.excludedProviderKeys).toEqual([providerA]);
+    } finally {
+      if (previousBase === undefined) {
+        delete process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
+      } else {
+        process.env.ROUTECODEX_429_BACKOFF_BASE_MS = previousBase;
+      }
+      if (previousMax === undefined) {
+        delete process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
+      } else {
+        process.env.ROUTECODEX_429_BACKOFF_MAX_MS = previousMax;
+      }
+    }
+  });
+
   test('retries failover when upstream SSE error event is retryable network failure', async () => {
     const firstProviderKey = 'deepseek-web.primary.deepseek-chat';
     const secondProviderKey = 'deepseek-web.backup.deepseek-chat';

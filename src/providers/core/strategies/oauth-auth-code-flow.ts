@@ -58,6 +58,16 @@ type StoredToken = UnknownObject & AuthCodeTokenResponse & {
   expired?: string;
 };
 
+function logOAuthAuthCodeNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  const reason = error instanceof Error ? (error.stack || `${error.name}: ${error.message}`) : String(error);
+  const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[oauth-auth-code-flow] ${stage} failed (non-blocking): ${reason}${detailSuffix}`);
+}
+
 function resolveGoogleUiLanguageHint(): string | null {
   const raw = String(
     process.env.ROUTECODEX_OAUTH_GOOGLE_HL ||
@@ -201,7 +211,12 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
         this.applyAuthRedirectParams(urlObj, authCodeData.flowStyle, serverResult.redirectUri, authCodeData.state);
         authCodeData.authUrl = urlObj.toString();
         authCodeData.redirectUri = serverResult.redirectUri;
-      } catch { /* ignore */ }
+      } catch (error) {
+        logOAuthAuthCodeNonBlocking('authenticate.update_redirect_uri', error, {
+          clientId: this.config?.client?.clientId ?? 'unknown',
+          redirectUri: serverResult.redirectUri
+        });
+      }
 
       const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
       const devMode = String(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '').trim();
@@ -353,7 +368,11 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
         }
         pathName = u.pathname || pathName;
       }
-    } catch { /* ignore parsing errors */ }
+    } catch (error) {
+      logOAuthAuthCodeNonBlocking('start_callback_server.parse_redirect_uri', error, {
+        configured
+      });
+    }
 
     const envPortRaw = String(process.env.OAUTH_CALLBACK_PORT || '').trim();
     if (this.isIflowOAuthProvider() && !envPortRaw) {

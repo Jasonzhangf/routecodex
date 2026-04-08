@@ -83,3 +83,9 @@ vendor/llmswitch-core/
 
 # Local agent skills (local only)
 .agents/
+sharedmodule/llmswitch-core/router_hotpath_napi.node
+sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/text_guidance_web.rs
+# mempalace local artifacts
+.mempalace/
+entities.json
+mempalace.yaml

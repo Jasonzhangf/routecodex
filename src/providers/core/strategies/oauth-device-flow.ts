@@ -68,6 +68,16 @@ type StoredToken = DeviceCodeTokenResponse & {
   expiry_date?: number | string;
 } & UnknownObject;
 
+function logOAuthDeviceFlowNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  const reason = error instanceof Error ? (error.stack || `${error.name}: ${error.message}`) : String(error);
+  const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[oauth-device-flow] ${stage} failed (non-blocking): ${reason}${detailSuffix}`);
+}
+
 /**
  * OAuth设备码流程策略
  */
@@ -185,7 +195,13 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
 
     const dbgEnabled = String(process.env.ROUTECODEX_OAUTH_DEBUG || '1') === '1';
     if (dbgEnabled) {
-      try { logOAuthDebug(`[OAuth] device-code raw: ${JSON.stringify(raw).slice(0, 512)}`); } catch { /* ignore */ }
+      try {
+        logOAuthDebug(`[OAuth] device-code raw: ${JSON.stringify(raw).slice(0, 512)}`);
+      } catch (error) {
+        logOAuthDeviceFlowNonBlocking('request_device_code.debug_raw_payload', error, {
+          clientId: this.config?.client?.clientId ?? 'unknown'
+        });
+      }
     }
 
     // 兼容多种形状（顶层/ data / result；蛇形/驼峰；uri/url）

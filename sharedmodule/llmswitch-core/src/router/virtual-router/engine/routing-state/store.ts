@@ -115,6 +115,9 @@ export function getRoutingInstructionState(
       existing.stopMessageAiMode = merged.stopMessageAiMode;
       existing.stopMessageAiSeedPrompt = merged.stopMessageAiSeedPrompt;
       existing.stopMessageAiHistory = merged.stopMessageAiHistory;
+      existing.reasoningStopArmed = merged.reasoningStopArmed;
+      existing.reasoningStopSummary = merged.reasoningStopSummary;
+      existing.reasoningStopUpdatedAt = merged.reasoningStopUpdatedAt;
       if (persisted) {
         existing.preCommandSource = persisted.preCommandSource;
         existing.preCommandScriptPath = persisted.preCommandScriptPath;
@@ -151,6 +154,9 @@ export function getRoutingInstructionState(
       stopMessageAiMode: undefined,
       stopMessageAiSeedPrompt: undefined,
       stopMessageAiHistory: undefined,
+      reasoningStopArmed: undefined,
+      reasoningStopSummary: undefined,
+      reasoningStopUpdatedAt: undefined,
       preCommandSource: undefined,
       preCommandScriptPath: undefined,
       preCommandUpdatedAt: undefined
@@ -178,6 +184,10 @@ function isRoutingStateEmpty(state: RoutingInstructionState): boolean {
     (typeof state.stopMessageUsed !== 'number' || !Number.isFinite(state.stopMessageUsed)) &&
     (typeof state.stopMessageStageMode !== 'string' || !state.stopMessageStageMode.trim()) &&
     (typeof state.stopMessageAiMode !== 'string' || !state.stopMessageAiMode.trim());
+  const noReasoningStop =
+    state.reasoningStopArmed !== true &&
+    (typeof state.reasoningStopSummary !== 'string' || !state.reasoningStopSummary.trim()) &&
+    (typeof state.reasoningStopUpdatedAt !== 'number' || !Number.isFinite(state.reasoningStopUpdatedAt));
   const noPreCommand =
     (!state.preCommandScriptPath || !state.preCommandScriptPath.trim()) &&
     (typeof state.preCommandUpdatedAt !== 'number' || !Number.isFinite(state.preCommandUpdatedAt));
@@ -190,6 +200,7 @@ function isRoutingStateEmpty(state: RoutingInstructionState): boolean {
     noDisabledKeys &&
     noDisabledModels &&
     noStopMessage &&
+    noReasoningStop &&
     noPreCommand
   );
 }
@@ -218,6 +229,9 @@ export function persistRoutingInstructionState(
     (typeof state.stopMessageUsed === 'number' && Number.isFinite(state.stopMessageUsed)) ||
     Boolean(state.stopMessageStageMode && state.stopMessageStageMode.trim()) ||
     Boolean(state.stopMessageAiMode && state.stopMessageAiMode.trim()) ||
+    state.reasoningStopArmed === true ||
+    Boolean(state.reasoningStopSummary && state.reasoningStopSummary.trim()) ||
+    (typeof state.reasoningStopUpdatedAt === 'number' && Number.isFinite(state.reasoningStopUpdatedAt)) ||
     Boolean(state.preCommandScriptPath && state.preCommandScriptPath.trim()) ||
     (typeof state.preCommandUpdatedAt === 'number' && Number.isFinite(state.preCommandUpdatedAt)));
   if (isRoutingStateEmpty(state)) {

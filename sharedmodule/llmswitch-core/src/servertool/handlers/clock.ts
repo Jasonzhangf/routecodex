@@ -162,6 +162,13 @@ function stripClockStopMarkerFromText(raw: string): { updated: string; changed: 
   return { updated: kept.join('\n'), changed };
 }
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error ?? 'unknown');
+}
+
 async function clearClockStopMarkerForReactivation(adapterContext: Record<string, unknown>): Promise<void> {
   const workdir = resolveWorkingDirectoryFromAdapterContextOrFallback(adapterContext);
   if (!workdir) {
@@ -555,7 +562,13 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
       logClock('update_miss', { sessionId, taskId });
       return respond({ ok: false, action, message: 'clock.update failed: task not found or patch invalid' });
     }
-    await clearClockStopMarkerForReactivation(ctx.adapterContext as unknown as Record<string, unknown>).catch(() => {});
+    await clearClockStopMarkerForReactivation(ctx.adapterContext as unknown as Record<string, unknown>).catch((error) => {
+      logClock('reactivate_clear_stop_marker_failed', {
+        sessionId,
+        action: 'update',
+        message: formatUnknownError(error)
+      });
+    });
     logClock('update', { sessionId, taskId });
     return respond({ ok: true, action, updated: mapTaskForTool(updated) });
   }
@@ -587,7 +600,13 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
     return item;
   });
   const scheduled = await scheduleClockTasks(sessionId, guardedItems, clockConfig);
-  await clearClockStopMarkerForReactivation(ctx.adapterContext as unknown as Record<string, unknown>).catch(() => {});
+  await clearClockStopMarkerForReactivation(ctx.adapterContext as unknown as Record<string, unknown>).catch((error) => {
+    logClock('reactivate_clear_stop_marker_failed', {
+      sessionId,
+      action: 'schedule',
+      message: formatUnknownError(error)
+    });
+  });
   logClock('schedule', { sessionId, count: scheduled.length });
   const allTasks = await listClockTasks(sessionId, clockConfig);
   const nearbyWarnings = buildNearbyReminderWarnings(scheduled, allTasks);

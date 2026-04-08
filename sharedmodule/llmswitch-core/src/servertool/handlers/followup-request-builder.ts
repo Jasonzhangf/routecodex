@@ -14,6 +14,28 @@ export type CapturedChatSeed = {
   parameters?: Record<string, unknown>;
 };
 
+function resolveFollowupModel(seedModel: unknown, adapterContext: unknown): string {
+  if (typeof seedModel === 'string' && seedModel.trim()) {
+    return seedModel.trim();
+  }
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    return '';
+  }
+  const record = adapterContext as Record<string, unknown>;
+  const candidates: unknown[] = [
+    record.model,
+    record.modelId,
+    record.assignedModelId,
+    record.originalModelId
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return '';
+}
+
 function extractResponsesTopLevelParameters(record: Record<string, unknown>): Record<string, unknown> | undefined {
   const allowed = new Set([
     'temperature',
@@ -378,6 +400,26 @@ function buildStandardFollowupTools(): JsonObject[] {
     {
       type: 'function',
       function: {
+        name: 'reasoning.stop',
+        description:
+          'Structured stop self-check gate. Required fields: task_goal, is_completed. If is_completed=true, completion_evidence is required. If is_completed=false, provide next_step (when a concrete next analysis step exists) or cannot_complete_reason (only when truly blocked).',
+        parameters: {
+          type: 'object',
+          properties: {
+            task_goal: { type: 'string' },
+            is_completed: { type: 'boolean' },
+            completion_evidence: { type: 'string' },
+            cannot_complete_reason: { type: 'string' },
+            next_step: { type: 'string' }
+          },
+          required: ['task_goal', 'is_completed'],
+          additionalProperties: false
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
         name: 'apply_patch',
         description: 'Apply a patch to repository files.',
         parameters: {
@@ -435,7 +477,8 @@ export function buildServerToolFollowupChatPayloadFromInjection(args: {
   if (!seed) {
     return null;
   }
-  if (!seed.model || typeof seed.model !== 'string' || !seed.model.trim()) {
+  const followupModel = resolveFollowupModel(seed.model, args.adapterContext);
+  if (!followupModel) {
     return null;
   }
 
@@ -524,7 +567,7 @@ export function buildServerToolFollowupChatPayloadFromInjection(args: {
   }
 
   return {
-    model: seed.model,
+    model: followupModel,
     messages,
     ...(tools ? { tools } : {}),
     ...(parameters ? { parameters } : {})

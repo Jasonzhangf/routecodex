@@ -51,6 +51,31 @@ export type RestartCommandContext = {
   exit: (code: number) => never;
 };
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logRestartNonBlocking(
+  ctx: RestartCommandContext,
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  try {
+    const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+    ctx.logger.info(`[restart] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function parseConfigPortHost(config: any): { port: number; host: string } {
   const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
   const host = (config?.httpserver?.host ?? config?.server?.host ?? config?.host ?? LOCAL_HOSTS.LOCALHOST);
@@ -186,7 +211,11 @@ async function isRouteCodexServer(ctx: RestartCommandContext, host: string, port
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => {
-      try { controller.abort(); } catch { /* ignore */ }
+      try {
+        controller.abort();
+      } catch (error) {
+        logRestartNonBlocking(ctx, 'health_probe.abort_controller', error, { host, port });
+      }
     }, 900);
     const res = await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${host}:${port}${API_PATHS.HEALTH}`, { signal: controller.signal }).catch(() => null);
     clearTimeout(timeout);
@@ -216,7 +245,14 @@ async function requestProcessRestartViaHttp(
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => {
-      try { controller.abort(); } catch { /* ignore */ }
+      try {
+        controller.abort();
+      } catch (error) {
+        logRestartNonBlocking(ctx, 'restart_process.abort_controller', error, {
+          host,
+          port: target.port
+        });
+      }
     }, 2500);
     const res = await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${host}:${target.port}/daemon/restart-process`, {
       method: 'POST',

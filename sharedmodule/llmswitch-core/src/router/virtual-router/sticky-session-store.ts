@@ -33,6 +33,19 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
+function logStickyStoreNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    process.stderr.write(`[sticky-session-store] ${stage} failed (non-blocking): ${formatError(error)}${suffix}\n`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function emitStickyStoreError(
   code: string,
   stage: 'sticky_session.persist' | 'sticky_session.read' | 'sticky_session.recover',
@@ -55,8 +68,11 @@ function emitStickyStoreError(
     const op = typeof details.operation === 'string' ? details.operation : 'unknown';
     const errMsg = typeof details.error === 'string' ? details.error : '';
     console.warn(`[sticky-session-store] ${code} stage=${stage} op=${op}${errMsg ? ` error=${errMsg}` : ''}`);
-  } catch {
-    // no-op
+  } catch (warnError) {
+    logStickyStoreNonBlockingError('emitStickyStoreError.consoleWarn', warnError, {
+      code,
+      stage
+    });
   }
 }
 
@@ -400,19 +416,24 @@ async function atomicWriteFile(filepath: string, content: string): Promise<void>
     await fs.promises.writeFile(tmp, content, { encoding: 'utf8' });
     try {
       await fs.promises.rename(tmp, filepath);
-    } catch {
+    } catch (renameError) {
       try {
         await fs.promises.unlink(filepath);
-      } catch {
-        // ignore unlink failures
+      } catch (unlinkError) {
+        if (!shouldIgnoreUnlinkError(unlinkError)) {
+          logStickyStoreNonBlockingError('atomicWriteFile.unlinkBeforeRename', unlinkError, { filepath, tmp });
+        }
       }
+      logStickyStoreNonBlockingError('atomicWriteFile.renamePrimary', renameError, { filepath, tmp });
       await fs.promises.rename(tmp, filepath);
     }
   } finally {
     try {
       await fs.promises.unlink(tmp);
-    } catch {
-      // ignore tmp cleanup failures
+    } catch (tmpCleanupError) {
+      if (!shouldIgnoreUnlinkError(tmpCleanupError)) {
+        logStickyStoreNonBlockingError('atomicWriteFile.tmpCleanup', tmpCleanupError, { filepath, tmp });
+      }
     }
   }
 }
@@ -423,19 +444,24 @@ function atomicWriteFileSync(filepath: string, content: string): void {
     fs.writeFileSync(tmp, content, { encoding: 'utf8' });
     try {
       fs.renameSync(tmp, filepath);
-    } catch {
+    } catch (renameError) {
       try {
         fs.unlinkSync(filepath);
-      } catch {
-        // ignore unlink failures
+      } catch (unlinkError) {
+        if (!shouldIgnoreUnlinkError(unlinkError)) {
+          logStickyStoreNonBlockingError('atomicWriteFileSync.unlinkBeforeRename', unlinkError, { filepath, tmp });
+        }
       }
+      logStickyStoreNonBlockingError('atomicWriteFileSync.renamePrimary', renameError, { filepath, tmp });
       fs.renameSync(tmp, filepath);
     }
   } finally {
     try {
       fs.unlinkSync(tmp);
-    } catch {
-      // ignore tmp cleanup failures
+    } catch (tmpCleanupError) {
+      if (!shouldIgnoreUnlinkError(tmpCleanupError)) {
+        logStickyStoreNonBlockingError('atomicWriteFileSync.tmpCleanup', tmpCleanupError, { filepath, tmp });
+      }
     }
   }
 }
@@ -449,6 +475,7 @@ function recoverPersistedJson(raw: string): PersistedRoutingState | Record<strin
     return null;
   }
   const maxScan = Math.min(text.length, 256 * 1024);
+  let parseFailures = 0;
   for (let i = maxScan - 1; i >= 1; i -= 1) {
     if (text[i] !== '}') {
       continue;
@@ -460,8 +487,14 @@ function recoverPersistedJson(raw: string): PersistedRoutingState | Record<strin
         return parsed as PersistedRoutingState | Record<string, unknown>;
       }
     } catch {
-      // keep scanning
+      parseFailures += 1;
     }
+  }
+  if (parseFailures > 0) {
+    logStickyStoreNonBlockingError('recoverPersistedJson.scan', `unable to recover JSON from truncated payload`, {
+      parseFailures,
+      maxScan
+    });
   }
   return null;
 }

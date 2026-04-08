@@ -1,7 +1,6 @@
 import { OpenAIHttpProvider } from './openai-http-provider.js';
 import { ResponsesHttpProvider } from './responses-http-provider.js';
 import { AnthropicHttpProvider } from './anthropic-http-provider.js';
-import { iFlowHttpProvider } from './iflow-http-provider.js';
 import { DeepSeekHttpProvider } from './deepseek-http-provider.js';
 import { QwenChatHttpProvider } from './qwenchat-http-provider.js';
 import { ChatHttpProvider } from './chat-http-provider.js';
@@ -168,7 +167,6 @@ export function resolveProviderModule(value?: string): OpenAIStandardConfig['typ
     case 'anthropic-http-provider':
     case 'gemini-http-provider':
     case 'gemini-cli-http-provider':
-    case 'iflow-http-provider':
     case 'deepseek-http-provider':
     case 'qwenchat-http-provider':
     case 'mock-provider':
@@ -246,9 +244,6 @@ export function instantiateProvider(
   }
   if (moduleType === 'anthropic-http-provider') {
     return new AnthropicHttpProvider(config, dependencies);
-  }
-  if (moduleType === 'iflow-http-provider') {
-    return new iFlowHttpProvider(config, dependencies);
   }
   const error = new Error(`[ProviderFactory] Unsupported providerType='${providerType}' and moduleType='${moduleType}'`);
   (error as Error & { code?: string }).code = 'ERR_UNSUPPORTED_PROVIDER_TYPE';

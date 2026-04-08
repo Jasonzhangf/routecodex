@@ -5,6 +5,30 @@ import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js
 import { logProcessLifecycle } from '../../utils/process-lifecycle-logger.js';
 import { listManagedServerPidsByPort } from '../../utils/managed-server-pids.js';
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logPortUtilsNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[port-utils] ${stage} failed (non-blocking): ${formatUnknownError(error)}${suffix}`);
+  } catch {
+    void 0;
+  }
+}
+
 export type PortUtilsSpinner = {
   start(text?: string): PortUtilsSpinner;
   succeed(text?: string): void;
@@ -130,8 +154,10 @@ export async function isServerHealthyQuickImpl(args: { port: number; fetchImpl: 
     const t = setTimeout(() => {
       try {
         controller.abort();
-      } catch {
-        /* ignore */
+      } catch (abortError) {
+        logPortUtilsNonBlockingError('isServerHealthyQuickImpl.abortController', abortError, {
+          port: args.port
+        });
       }
     }, 800);
     const res = await args.fetchImpl(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${args.port}${API_PATHS.HEALTH}`, {
@@ -207,8 +233,11 @@ export async function ensurePortAvailableImpl(args: {
           const t = setTimeout(() => {
             try {
               controller.abort();
-            } catch {
-              /* ignore */
+            } catch (abortError) {
+              logPortUtilsNonBlockingError('ensurePortAvailableImpl.abortController', abortError, {
+                host: h,
+                port
+              });
             }
           }, 700);
           const callerTs = new Date().toISOString();
@@ -247,13 +276,18 @@ export async function ensurePortAvailableImpl(args: {
             });
           });
           clearTimeout(t);
-        } catch {
-          /* ignore */
+        } catch (shutdownHostError) {
+          logPortUtilsNonBlockingError('ensurePortAvailableImpl.shutdownHost', shutdownHostError, {
+            host: h,
+            port
+          });
         }
       }
       await args.sleep(300);
-    } catch {
-      /* ignore */
+    } catch (shutdownError) {
+      logPortUtilsNonBlockingError('ensurePortAvailableImpl.gracefulHttpShutdown', shutdownError, {
+        port
+      });
     }
   }
 

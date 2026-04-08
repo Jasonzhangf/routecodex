@@ -18,12 +18,33 @@ const releaseArtifacts = [
   path.join(targetRelease, 'librouter_hotpath_napi.so'),
   path.join(targetRelease, 'router_hotpath_napi.dll')
 ];
+const cargoBinFromEnv = typeof process.env.CARGO === 'string' ? process.env.CARGO.trim() : '';
+const cargoBinFromHome =
+  typeof process.env.HOME === 'string' && process.env.HOME.trim()
+    ? path.join(process.env.HOME.trim(), '.cargo', 'bin', process.platform === 'win32' ? 'cargo.exe' : 'cargo')
+    : '';
+const cargoBinary = resolveCargoBinary();
 
 function readBoolEnv(name) {
   const value = String(process.env[name] || '')
     .trim()
     .toLowerCase();
   return value === '1' || value === 'true' || value === 'yes' || value === 'on';
+}
+
+function resolveCargoBinary() {
+  const candidates = [];
+  if (cargoBinFromEnv) candidates.push(cargoBinFromEnv);
+  candidates.push('cargo');
+  if (cargoBinFromHome) candidates.push(cargoBinFromHome);
+
+  for (const candidate of candidates) {
+    const probe = spawnSync(candidate, ['--version'], { stdio: 'pipe', cwd: projectRoot });
+    if ((probe.status ?? 1) === 0) {
+      return candidate;
+    }
+  }
+  return 'cargo';
 }
 
 function walkLatestMtime(entryPath) {
@@ -114,17 +135,23 @@ function syncNodeBridgeArtifact() {
 }
 
 function ensureCargoReady() {
-  const probe = spawnSync('cargo', ['--version'], { stdio: 'pipe', cwd: projectRoot });
+  const probe = spawnSync(cargoBinary, ['--version'], { stdio: 'pipe', cwd: projectRoot });
   if ((probe.status ?? 1) !== 0) {
-    console.error('[native-build] cargo is required but not available in PATH');
+    console.error(
+      `[native-build] cargo is required but unavailable (PATH/HOME fallback all failed). tried=${[
+        cargoBinFromEnv || '(env:CARGO empty)',
+        'cargo',
+        cargoBinFromHome || '(HOME/.cargo/bin/cargo unavailable)'
+      ].join(', ')}`
+    );
     process.exit(probe.status ?? 1);
   }
 }
 
 function runCargoBuild() {
   const args = ['build', '-p', 'router-hotpath-napi', '--release'];
-  console.log(`[native-build] run: cargo ${args.join(' ')}`);
-  const result = spawnSync('cargo', args, { stdio: 'inherit', cwd: rustRoot });
+  console.log(`[native-build] run: ${cargoBinary} ${args.join(' ')}`);
+  const result = spawnSync(cargoBinary, args, { stdio: 'inherit', cwd: rustRoot });
   if ((result.status ?? 1) !== 0) {
     process.exit(result.status ?? 1);
   }

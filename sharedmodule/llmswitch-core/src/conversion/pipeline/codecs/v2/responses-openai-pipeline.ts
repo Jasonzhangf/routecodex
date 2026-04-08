@@ -23,6 +23,30 @@ import { standardizedToChatEnvelopeWithNative } from '../../../../router/virtual
 const DEFAULT_RESPONSES_ENDPOINT = '/v1/responses';
 const RESPONSES_PROTOCOL = 'openai-responses';
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logResponsesOpenAiPipelineNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  try {
+    const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[responses-openai-pipeline] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function assertJsonObject(value: unknown, stage: string): JsonObject {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`Responses pipeline codec requires JSON payload at ${stage}`);
@@ -111,7 +135,14 @@ function captureToolResults(payload: JsonObject): Array<{ tool_call_id?: string;
       const rawOut = (it as any).output;
       if (typeof rawOut === 'string') output = rawOut;
       else if (rawOut && typeof rawOut === 'object') {
-        try { output = JSON.stringify(rawOut); } catch { /* ignore */ }
+        try {
+          output = JSON.stringify(rawOut);
+        } catch (error) {
+          logResponsesOpenAiPipelineNonBlocking('capture_tool_results.stringify_output', error, {
+            itemType: t,
+            toolCallId: typeof tool_call_id === 'string' ? tool_call_id : undefined
+          });
+        }
       }
       results.push({ tool_call_id, output });
     }

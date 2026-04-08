@@ -7,7 +7,17 @@ import {
 export const DEFAULT_STOP_MESSAGE_MAX_REPEATS = 10;
 
 export function serializeStopMessageState(state: RoutingInstructionState): Record<string, unknown> {
-  return serializeStopMessageStateWithNative(state);
+  const out = serializeStopMessageStateWithNative(state);
+  if (typeof state.reasoningStopArmed === 'boolean') {
+    out.reasoningStopArmed = state.reasoningStopArmed;
+  }
+  if (typeof state.reasoningStopSummary === 'string' && state.reasoningStopSummary.trim()) {
+    out.reasoningStopSummary = state.reasoningStopSummary.trim();
+  }
+  if (typeof state.reasoningStopUpdatedAt === 'number' && Number.isFinite(state.reasoningStopUpdatedAt)) {
+    out.reasoningStopUpdatedAt = Math.max(0, Math.round(state.reasoningStopUpdatedAt));
+  }
+  return out;
 }
 
 export function deserializeStopMessageState(
@@ -61,6 +71,15 @@ function deserializeStopMessageStateFallback(
   const history = normalizeStopMessageAiHistoryEntries(data.stopMessageAiHistory);
   if (history.length > 0) {
     state.stopMessageAiHistory = history;
+  }
+  if (typeof data.reasoningStopArmed === 'boolean') {
+    state.reasoningStopArmed = data.reasoningStopArmed;
+  }
+  if (typeof data.reasoningStopSummary === 'string' && data.reasoningStopSummary.trim()) {
+    state.reasoningStopSummary = data.reasoningStopSummary.trim();
+  }
+  if (typeof data.reasoningStopUpdatedAt === 'number' && Number.isFinite(data.reasoningStopUpdatedAt)) {
+    state.reasoningStopUpdatedAt = Math.max(0, Math.round(data.reasoningStopUpdatedAt));
   }
   // Keep stopMessage mode state armed consistently across old/new snapshots.
   if (!hasPersistedMaxRepeats) {

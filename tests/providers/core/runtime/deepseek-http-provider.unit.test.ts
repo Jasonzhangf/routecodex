@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 import { DeepSeekHttpProvider } from '../../../../src/providers/core/runtime/deepseek-http-provider.js';
-import * as standardToolRequestTransform from '../../../../src/providers/core/runtime/standard-tool-text-request-transform.js';
 
 jest.mock('../../../../src/providers/core/config/camoufox-launcher.js', () => ({
   ensureCamoufoxFingerprintForToken: jest.fn(async () => null),
@@ -254,7 +253,7 @@ describe('DeepSeekHttpProvider', () => {
     expect(body.chat_session_id).toBe('session-xyz');
   });
 
-  it('normalizes tools request through standard text-tool prompt skeleton', async () => {
+  it('keeps tools request payload shape untouched in provider runtime', async () => {
     const tokenFile = await createDeepSeekTokenFile('tool-prompt-token');
     const fakeSessionPow: FakeSessionPow = {
       ensureChatSession: jest.fn(async () => 'session-tool-1'),
@@ -329,64 +328,7 @@ describe('DeepSeekHttpProvider', () => {
 
     expect(body.chat_session_id).toBe('session-tool-1');
     expect(String(body.prompt || '')).toContain('mailbox.status');
-    expect(String(body.prompt || '')).toContain('tool_calls');
-  });
-
-  it('fails fast when standard tool-text transform does not produce prompt', async () => {
-    const tokenFile = await createDeepSeekTokenFile('tool-transform-fail-token');
-    const fakeSessionPow: FakeSessionPow = {
-      ensureChatSession: jest.fn(async () => 'session-tool-fail-1'),
-      createPowResponse: jest.fn(async () => 'pow-tool-fail-1'),
-      cleanup: jest.fn(async () => {})
-    };
-
-    const provider = new TestDeepSeekHttpProvider(
-      {
-        type: 'deepseek-http-provider',
-        config: {
-          providerType: 'openai',
-          providerId: 'deepseek',
-          baseUrl: 'https://chat.deepseek.com',
-          auth: {
-            type: 'apikey',
-            rawType: 'deepseek-account',
-            apiKey: '',
-            tokenFile
-          }
-        }
-      } as unknown as OpenAIStandardConfig,
-      deps,
-      fakeSessionPow
-    );
-
-    jest
-      .spyOn(standardToolRequestTransform.standardToolTextRequestTransformRuntime, 'transform')
-      .mockReturnValue({
-        model: 'deepseek-chat',
-        messages: [{ role: 'user', content: 'fallback text should not be used' }],
-        tools: [
-          {
-            type: 'function',
-            function: { name: 'mailbox.status', parameters: { type: 'object' } }
-          }
-        ]
-      } as any);
-
-    await provider.initialize();
-    expect(() =>
-      (provider as any).buildHttpRequestBody({
-        data: {
-          model: 'deepseek-chat',
-          messages: [{ role: 'user', content: '请调用 mailbox.status' }],
-          tools: [
-            {
-              type: 'function',
-              function: { name: 'mailbox.status', parameters: { type: 'object' } }
-            }
-          ]
-        }
-      })
-    ).toThrow('DeepSeek tool-text transform failed: prompt is empty');
+    expect(String(body.prompt || '')).not.toContain('tool_calls');
   });
 
   it('fails fast when compat payload prompt and messages are both missing', async () => {
@@ -655,7 +597,7 @@ describe('DeepSeekHttpProvider', () => {
     expect(fakeSessionPow.ensureChatSession.mock.calls[0]?.[0]?.['User-Agent']).toBe('Mozilla/5.0 Camoufox DeepSeek Test');
   });
 
-  it('harvests text-emitted function_calls with the same standard skeleton as qwenchat', async () => {
+  it('keeps text-emitted function_calls untouched in provider runtime postprocess', async () => {
     const tokenFile = await createDeepSeekTokenFile('harvest-token');
     const fakeSessionPow: FakeSessionPow = {
       ensureChatSession: jest.fn(async () => 'session-harvest-1'),
@@ -684,7 +626,7 @@ describe('DeepSeekHttpProvider', () => {
 
     await provider.initialize();
 
-    const harvested = await (provider as any).postprocessResponse(
+    const postprocessed = await (provider as any).postprocessResponse(
       {
         id: 'chatcmpl-deepseek-text-tool',
         object: 'chat.completion',
@@ -705,9 +647,9 @@ describe('DeepSeekHttpProvider', () => {
       { requestId: 'req-deepseek-harvest' } as any
     );
 
-    const firstChoice = (harvested as any)?.data?.choices?.[0] || (harvested as any)?.choices?.[0];
-    expect(firstChoice?.finish_reason).toBe('tool_calls');
-    expect(firstChoice?.message?.tool_calls?.[0]?.function?.name).toBe('mailbox.status');
-    expect(firstChoice?.message?.tool_calls?.[0]?.function?.arguments).toContain('finger-system-agent');
+    const firstChoice = (postprocessed as any)?.data?.choices?.[0] || (postprocessed as any)?.choices?.[0];
+    expect(firstChoice?.finish_reason).toBe('stop');
+    expect(firstChoice?.message?.tool_calls).toBeUndefined();
+    expect(String(firstChoice?.message?.content || '')).toContain('<function_calls>');
   });
 });

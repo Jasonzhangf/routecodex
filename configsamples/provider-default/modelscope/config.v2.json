@@ -76,6 +76,11 @@
         "supportsThinking": true
       }
     },
-    "transportBackend": "vercel-ai-sdk"
+    "transportBackend": "vercel-ai-sdk",
+    "concurrency": {
+      "maxInFlight": 2,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
+    }
   }
 }

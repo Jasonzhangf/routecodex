@@ -1,7 +1,6 @@
 import type { ProviderRuntimeMetadata } from '../provider-runtime-metadata.js';
 import type { ProviderFamilyProfile } from '../../../profile/profile-contracts.js';
 import { HeaderUtils } from './header-utils.js';
-import { IflowSigner } from './iflow-signer.js';
 import { ProviderPayloadUtils } from './provider-payload-utils.js';
 import { SessionHeaderUtils } from './session-header-utils.js';
 
@@ -238,9 +237,7 @@ export class RequestHeaderBuilder {
         HeaderUtils.deleteHeader(finalHeaders, 'User-Agent');
       }
     } else {
-      const resolvedUa = context.isIflow
-        ? (profileResolvedUa ?? uaFromConfig ?? uaFromService ?? context.inboundUserAgent ?? context.defaultUserAgent)
-        : (profileResolvedUa ?? uaFromConfig ?? context.inboundUserAgent ?? uaFromService ?? context.defaultUserAgent);
+      const resolvedUa = profileResolvedUa ?? uaFromConfig ?? context.inboundUserAgent ?? uaFromService ?? context.defaultUserAgent;
       HeaderUtils.assignHeader(finalHeaders, 'User-Agent', resolvedUa);
     }
 
@@ -295,10 +292,6 @@ export class RequestHeaderBuilder {
 
     if (isOpenCodeZen) {
       RequestHeaderBuilder.applyOpenCodeZenRoutingHeaders(finalHeaders, context);
-    }
-
-    if (context.isIflow) {
-      IflowSigner.enforceIflowCliHeaders(finalHeaders);
     }
 
     return finalHeaders;

@@ -29,6 +29,24 @@ type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   account_alias?: unknown;
 };
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error ?? 'unknown');
+}
+
+function logRuntimeProvidersNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length
+      ? ` details=${JSON.stringify(details)}`
+      : '';
+    console.warn(`[runtime-providers] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function resolveHomeDir(): string {
   const envHome = String(process.env.HOME || '').trim();
   if (envHome) {
@@ -156,8 +174,10 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
 
   try {
     startAntigravityPreload(Array.from(antigravityAliasMap.keys()));
-  } catch {
-    // best-effort
+  } catch (error) {
+    logRuntimeProvidersNonBlockingError('antigravity.preload', error, {
+      aliasCount: antigravityAliasMap.size
+    });
   }
 
   const quotaModule = server.managerDaemon?.getModule('quota') as
@@ -236,8 +256,11 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
           } else if (!runtimeKeyAuthType.has(runtimeKey)) {
             runtimeKeyAuthType.set(runtimeKey, null);
           }
-        } catch {
-          // ignore
+        } catch (error) {
+          logRuntimeProvidersNonBlockingError('runtime.auth_type_extract', error, {
+            providerKey,
+            runtimeKey
+          });
         }
 
         const handle = await server.createProviderHandle(runtimeKey, patchedRuntime);
@@ -290,8 +313,11 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
               providerKey
             }
           });
-        } catch {
-          // ignore
+        } catch (reportError) {
+          logRuntimeProvidersNonBlockingError('runtime.emit_provider_error', reportError, {
+            providerKey,
+            runtimeKey
+          });
         }
         continue;
       }
@@ -304,8 +330,11 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
         authType: authType ?? null,
         apikeyDailyResetTime: apikeyResetForKey
       });
-    } catch {
-      // best-effort
+    } catch (error) {
+      logRuntimeProvidersNonBlockingError('quota.register_provider_static_config', error, {
+        providerKey,
+        runtimeKey
+      });
     }
 
     if (server.providerHandles.has(runtimeKey)) {
@@ -405,7 +434,7 @@ export async function resolveRuntimeAuth(server: any, runtime: ProviderRuntimePr
 
   if (authType === 'apikey') {
     if (rawType === 'iflow-cookie') {
-      return { ...auth, type: 'apikey', rawType: auth.rawType ?? 'iflow-cookie' };
+      throw new Error('[runtime.auth] iflow-cookie auth has been removed; please migrate this provider auth config.');
     }
     if (rawType === 'deepseek-account') {
       const tokenFileRaw = pickString(authRecord.tokenFile, authRecord.token_file);
@@ -522,8 +551,12 @@ export async function disposeProviders(server: any): Promise<void> {
     handles.map(async (handle) => {
       try {
         await handle.instance.cleanup();
-      } catch {
-        // ignore cleanup errors
+      } catch (error) {
+        logRuntimeProvidersNonBlockingError('dispose.provider_cleanup', error, {
+          runtimeKey: handle.runtimeKey,
+          providerId: handle.providerId,
+          providerType: handle.providerType
+        });
       }
     })
   );

@@ -24,7 +24,7 @@ export function createCamoufoxFpCommand(): Command {
     .description('Inspect Camoufox fingerprint/profile mapping for a token selector')
     .argument(
       '<selector>',
-      'Token selector: file basename, full path, or provider id (e.g. "iflow-oauth-1-186.json" or "gemini")'
+      'Token selector: file basename, full path, or provider id (e.g. "qwen-oauth-1-186.json" or "gemini")'
     )
     .option('-j, --json', 'Output raw JSON fingerprint payload')
     .action(async (selector: string, options: { json?: boolean }) => {

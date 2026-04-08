@@ -78,7 +78,12 @@ pub(crate) fn build_route_queue(
     routing: &RoutingPools,
 ) -> Vec<String> {
     let mut queue: Vec<String> = Vec::new();
-    let _ = (features, routing);
+    let has_multimodal_targets = route_has_targets(routing, "multimodal");
+    let has_vision_targets = route_has_targets(routing, "vision");
+    let has_video_targets = route_has_targets(routing, "video");
+    let has_remote_video_attachment =
+        features.has_video_attachment && features.has_remote_video_attachment;
+
     if !requested_route.trim().is_empty() {
         queue.push(requested_route.to_string());
     }
@@ -87,10 +92,31 @@ pub(crate) fn build_route_queue(
             queue.push(route.clone());
         }
     }
-    if !queue.contains(&super::super::classifier::DEFAULT_ROUTE.to_string()) {
-        queue.push(super::super::classifier::DEFAULT_ROUTE.to_string());
+
+    if has_remote_video_attachment && has_video_targets && !queue.iter().any(|v| v == "video") {
+        queue.insert(0, "video".to_string());
     }
-    queue
+
+    if features.has_image_attachment {
+        if has_multimodal_targets {
+            if !queue.iter().any(|v| v == "multimodal") {
+                queue.insert(0, "multimodal".to_string());
+            }
+        } else if has_vision_targets && !queue.iter().any(|v| v == "vision") {
+            queue.insert(0, "vision".to_string());
+        }
+    }
+
+    let mut deduped: Vec<String> = Vec::new();
+    for route in queue {
+        if !route.trim().is_empty() && !deduped.contains(&route) {
+            deduped.push(route);
+        }
+    }
+    if !deduped.contains(&super::super::classifier::DEFAULT_ROUTE.to_string()) {
+        deduped.push(super::super::classifier::DEFAULT_ROUTE.to_string());
+    }
+    deduped
 }
 
 pub(crate) fn build_route_candidates(

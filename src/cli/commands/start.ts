@@ -19,9 +19,38 @@ import {
   resolveDaemonRestartDelayMs,
   resolveReleaseDaemonEnabled
 } from './start-utils.js';
+import {
+  getDefaultSnapshotStageSelector,
+  stageSelectorNeedsHubSnapshots
+} from '../../utils/snapshot-stage-policy.js';
 import type { StartCommandContext, StartCommandOptions } from './start-types.js';
 
 export type { StartCommandContext, StartCommandOptions } from './start-types.js';
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logStartNonBlocking(
+  ctx: StartCommandContext,
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  try {
+    const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    ctx.logger.warning(`[start] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
 
 function resolveShutdownExitCode(signal: NodeJS.Signals): number {
   if (signal === 'SIGINT') {
@@ -55,6 +84,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
     .option('--claude', 'Use Claude system prompt (tools unchanged)')
     .option('--ua <mode>', 'Upstream User-Agent override mode (e.g., codex)')
     .option('--snap', 'Force-enable snapshot capture')
+    .option('--snap-stages <stages>', 'Comma-separated snapshot stages/prefixes (supports * suffix; e.g. chat_process.req.*)')
     .option('--snap-off', 'Disable snapshot capture')
     .option('--verbose-errors', 'Print verbose error stacks in console output')
     .option('--quiet-errors', 'Silence detailed error stacks')
@@ -97,7 +127,23 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         const forceSnapshots = runMode === 'analysis' || options.snap === true;
         if (forceSnapshots) {
           ctx.env.ROUTECODEX_SNAPSHOT = '1';
-          ctx.env.ROUTECODEX_HUB_SNAPSHOTS = ctx.env.ROUTECODEX_HUB_SNAPSHOTS || '1';
+          const explicitSnapStages = typeof options.snapStages === 'string' ? options.snapStages.trim() : '';
+          const existingSnapStages = String(
+            ctx.env.ROUTECODEX_SNAPSHOT_STAGES
+            ?? ctx.env.RCC_SNAPSHOT_STAGES
+            ?? ''
+          ).trim();
+          const stageSelector = explicitSnapStages || existingSnapStages;
+          if (runMode === 'analysis') {
+            const analysisSelector = stageSelector || '*';
+            ctx.env.ROUTECODEX_SNAPSHOT_STAGES = analysisSelector;
+            ctx.env.ROUTECODEX_HUB_SNAPSHOTS = ctx.env.ROUTECODEX_HUB_SNAPSHOTS || '1';
+          } else {
+            const effectiveSelector = stageSelector || getDefaultSnapshotStageSelector();
+            ctx.env.ROUTECODEX_SNAPSHOT_STAGES = effectiveSelector;
+            ctx.env.ROUTECODEX_HUB_SNAPSHOTS = ctx.env.ROUTECODEX_HUB_SNAPSHOTS
+              || (stageSelectorNeedsHubSnapshots(effectiveSelector) ? '1' : '0');
+          }
           // Analysis mode should be able to capture streaming payloads even in release builds.
           // Keep this opt-in via --mode analysis (or explicit env override).
           ctx.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS = ctx.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS || '1';
@@ -327,8 +373,11 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             fsImpl.mkdirSync(routeCodexHome, { recursive: true });
             const pidFile = pathImpl.join(routeCodexHome, `server-${resolvedPort}.pid`);
             fsImpl.writeFileSync(pidFile, String(pid ?? ''), 'utf8');
-          } catch {
-            /* ignore */
+          } catch (error) {
+            logStartNonBlocking(ctx, 'write_pid_file', error, {
+              port: resolvedPort,
+              pid: pid ?? null
+            });
           }
         };
 
@@ -363,8 +412,11 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           writePidFile(daemonProc.pid);
           try {
             daemonProc.unref?.();
-          } catch {
-            /* ignore */
+          } catch (error) {
+            logStartNonBlocking(ctx, 'daemon_proc.unref', error, {
+              port: resolvedPort,
+              daemonPid: daemonProc.pid ?? null
+            });
           }
           spinner.succeed(`RouteCodex daemon supervisor started on ${serverHost}:${resolvedPort}`);
           ctx.logger.info(`Configuration loaded from: ${configPath}`);
@@ -462,7 +514,13 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           spawnOptions = { stdio: ['inherit', 'pipe', 'pipe'], env: childProcessEnv };
         } catch {
           if (serverLogStream) {
-            try { serverLogStream.end(); } catch { /* ignore */ }
+            try {
+              serverLogStream.end();
+            } catch (error) {
+              logStartNonBlocking(ctx, 'server_log_stream.end_on_spawn_fallback', error, {
+                port: resolvedPort
+              });
+            }
             serverLogStream = null;
           }
           serverLogPath = null;
@@ -485,8 +543,10 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           }
           try {
             serverLogStream.end();
-          } catch {
-            /* ignore */
+          } catch (error) {
+            logStartNonBlocking(ctx, 'server_log_stream.end', error, {
+              port: resolvedPort
+            });
           }
           serverLogStream = null;
         };
@@ -502,14 +562,20 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
             try {
               output.write(data);
-            } catch {
-              /* ignore */
+            } catch (error) {
+              logStartNonBlocking(ctx, 'forward_stream.output_write', error, {
+                port: resolvedPort,
+                streamTarget: output === process.stderr ? 'stderr' : 'stdout'
+              });
             }
             if (serverLogStream) {
               try {
                 serverLogStream.write(data);
-              } catch {
-                /* ignore */
+              } catch (error) {
+                logStartNonBlocking(ctx, 'forward_stream.logfile_write', error, {
+                  port: resolvedPort,
+                  logPath: serverLogPath
+                });
               }
             }
           });
@@ -526,6 +592,50 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           } catch {
             return false;
           }
+        };
+
+        const waitForServerEntryReady = async (deadlineMs: number): Promise<boolean> => {
+          while (Date.now() < deadlineMs) {
+            try {
+              if (fsImpl.existsSync(serverEntry)) {
+                const stat = fsImpl.statSync(serverEntry);
+                if (!stat.isDirectory()) {
+                  return true;
+                }
+              }
+            } catch {
+              // ignore transient fs errors while rebuild/restart race is in progress
+            }
+            await ctx.sleep(150);
+          }
+          return false;
+        };
+
+        const waitForChildHealthyOrExit = async (
+          proc: ReturnType<typeof ctx.spawn>,
+          deadlineMs: number
+        ): Promise<{ healthy: boolean; exitCode?: number | null; signal?: NodeJS.Signals | null }> => {
+          while (Date.now() < deadlineMs) {
+            if (await isChildHealthy()) {
+              return { healthy: true };
+            }
+            const procRecord = proc as unknown as {
+              exitCode?: number | null;
+              signalCode?: NodeJS.Signals | null;
+            };
+            const exited =
+              typeof procRecord.exitCode === 'number'
+              || Boolean(procRecord.signalCode);
+            if (exited) {
+              return {
+                healthy: false,
+                exitCode: procRecord.exitCode,
+                signal: procRecord.signalCode
+              };
+            }
+            await ctx.sleep(150);
+          }
+          return { healthy: false };
         };
 
         let activeChildProc = null as ReturnType<typeof ctx.spawn> | null;
@@ -548,41 +658,74 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               void (async () => {
                 try {
                   const exitPid = proc.pid ?? null;
-                  const deadline = Date.now() + restartRecoveryWaitMs;
-                  while (Date.now() < deadline) {
+                  const restartDeadline = Date.now() + restartRecoveryWaitMs;
+                  while (Date.now() < restartDeadline) {
                     const pids = ctx.findListeningPids(resolvedPort);
                     if (!pids.length || (exitPid && pids.every((pid) => pid !== exitPid))) {
                       break;
                     }
                     await ctx.sleep(150);
                   }
-                  const nextChild = ctx.spawn(nodeBin, args, spawnOptions);
-                  activeChildProc = nextChild;
-                  writePidFile(nextChild.pid);
-                  forwardToConsoleAndLog((nextChild as unknown as { stdout?: NodeJS.ReadableStream | null }).stdout, process.stdout);
-                  forwardToConsoleAndLog((nextChild as unknown as { stderr?: NodeJS.ReadableStream | null }).stderr, process.stderr);
-                  attachChildExitHandler(nextChild);
-                  const healthyDeadline = Date.now() + restartRecoveryWaitMs;
-                  while (Date.now() < healthyDeadline) {
-                    if (await isChildHealthy()) {
-                      ctx.logger.info(`[client-restart] RouteCodex child restarted on port ${resolvedPort} (pid=${nextChild.pid ?? 'unknown'})`);
+                  let attempt = 0;
+                  let lastFailure = 'unknown';
+                  while (Date.now() < restartDeadline) {
+                    attempt += 1;
+                    const entryReady = await waitForServerEntryReady(restartDeadline);
+                    if (!entryReady) {
+                      lastFailure = `server entry not ready: ${serverEntry}`;
+                      break;
+                    }
+                    const nextChild = ctx.spawn(nodeBin, args, spawnOptions);
+                    activeChildProc = nextChild;
+                    writePidFile(nextChild.pid);
+                    forwardToConsoleAndLog((nextChild as unknown as { stdout?: NodeJS.ReadableStream | null }).stdout, process.stdout);
+                    forwardToConsoleAndLog((nextChild as unknown as { stderr?: NodeJS.ReadableStream | null }).stderr, process.stderr);
+                    attachChildExitHandler(nextChild);
+                    const probe = await waitForChildHealthyOrExit(nextChild, restartDeadline);
+                    if (probe.healthy) {
+                      ctx.logger.info(`[client-restart] RouteCodex child restarted on port ${resolvedPort} (pid=${nextChild.pid ?? 'unknown'}, attempt=${attempt})`);
                       restartInFlight = false;
                       return;
                     }
-                    await ctx.sleep(150);
+                    const exited =
+                      typeof probe.exitCode === 'number'
+                      || Boolean(probe.signal);
+                    if (!exited) {
+                      lastFailure = `attempt=${attempt} did not become healthy before timeout`;
+                      break;
+                    }
+                    lastFailure = `attempt=${attempt} child exited early (code=${probe.exitCode ?? 'n/a'}, signal=${probe.signal ?? 'none'})`;
+                    await ctx.sleep(200);
                   }
-                  throw new Error(`Timed out waiting for restarted child on port ${resolvedPort}`);
+                  throw new Error(`Timed out waiting for restarted child on port ${resolvedPort}: ${lastFailure}`);
                 } catch (error) {
                   closeServerLogStream();
-                  try { cleanupKeypress(); } catch { /* ignore */ }
+                  try {
+                    cleanupKeypress();
+                  } catch (cleanupError) {
+                    logStartNonBlocking(ctx, 'cleanup_keypress.after_restart_failure', cleanupError, {
+                      port: resolvedPort
+                    });
+                  }
                   ctx.logger.error(error instanceof Error ? error.message : String(error));
                   ctx.exit(1);
                 }
               })();
               return;
             }
+            if (restartInFlight) {
+              // During managed restart bootstrap, child exits are handled by the restart loop.
+              // Do not terminate parent process prematurely.
+              return;
+            }
             closeServerLogStream();
-            try { cleanupKeypress(); } catch { /* ignore */ }
+            try {
+              cleanupKeypress();
+            } catch (error) {
+              logStartNonBlocking(ctx, 'cleanup_keypress.child_exit', error, {
+                port: resolvedPort
+              });
+            }
             if (signal) {ctx.exit(0);}
             ctx.exit(code ?? 0);
           });
@@ -615,11 +758,21 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             ctx.logger.warning(`[start] received ${sig} while shutdown is in progress; forcing exit.`);
             try {
               activeChildProc?.kill('SIGKILL');
-            } catch {
-              /* ignore */
+            } catch (error) {
+              logStartNonBlocking(ctx, 'shutdown.force_kill_on_reentry', error, {
+                port: resolvedPort,
+                signal: sig
+              });
             }
             closeServerLogStream();
-            try { cleanupKeypress(); } catch { /* ignore */ }
+            try {
+              cleanupKeypress();
+            } catch (error) {
+              logStartNonBlocking(ctx, 'cleanup_keypress.force_exit', error, {
+                port: resolvedPort,
+                signal: sig
+              });
+            }
             ctx.exit(code);
             return;
           }
@@ -634,7 +787,14 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               const controller = new AbortController();
               const timeoutMs = resolveStartShutdownHttpTimeoutMs(ctx.env);
               const timeout = setTimeout(() => {
-                try { controller.abort(); } catch { /* ignore */ }
+                try {
+                  controller.abort();
+                } catch (error) {
+                  logStartNonBlocking(ctx, 'shutdown_http.abort_controller', error, {
+                    port: resolvedPort,
+                    timeoutMs
+                  });
+                }
               }, timeoutMs);
               try {
                 await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.SHUTDOWN}`, {
@@ -670,8 +830,12 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               } else {
                 activeChildProc?.kill(sig);
               }
-            } catch {
-              /* ignore */
+            } catch (error) {
+              logStartNonBlocking(ctx, 'shutdown.signal_child', error, {
+                port: resolvedPort,
+                signal: sig,
+                childPid: activeChildProc?.pid ?? null
+              });
             }
             const childExited = await new Promise<boolean>((resolve) => {
               let settled = false;
@@ -688,8 +852,11 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             if (!childExited) {
               try {
                 activeChildProc?.kill('SIGKILL');
-              } catch {
-                /* ignore */
+              } catch (error) {
+                logStartNonBlocking(ctx, 'shutdown.force_kill_after_timeout', error, {
+                  port: resolvedPort,
+                  childPid: activeChildProc?.pid ?? null
+                });
               }
             }
             logProcessLifecycleSync({
@@ -717,8 +884,10 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             closeServerLogStream();
             try {
               ctx.exit(0);
-            } catch {
-              /* ignore */
+            } catch (error) {
+              logStartNonBlocking(ctx, 'shutdown.exit_zero', error, {
+                port: resolvedPort
+              });
             }
           } catch (error) {
             closeServerLogStream();

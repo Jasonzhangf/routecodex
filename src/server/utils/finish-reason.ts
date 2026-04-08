@@ -1,7 +1,7 @@
 export const STREAM_LOG_FINISH_REASON_KEY = "__routecodex_finish_reason";
 
 export function deriveFinishReason(body: unknown): string | undefined {
-  const record = asRecord(body);
+  const record = resolveFinishReasonRecord(body);
   if (!record) {
     return undefined;
   }
@@ -16,6 +16,10 @@ export function deriveFinishReason(body: unknown): string | undefined {
   const stopReason = readNonEmptyString(record.stop_reason);
   if (stopReason) {
     return mapStopReasonToFinishReason(stopReason);
+  }
+
+  if (hasChatChoiceToolCalls(firstChoice)) {
+    return "tool_calls";
   }
 
   const responseStatus = readNonEmptyString(record.status)?.toLowerCase();
@@ -35,7 +39,40 @@ export function deriveFinishReason(body: unknown): string | undefined {
     return "tool_calls";
   }
 
-  return readNonEmptyString(record[STREAM_LOG_FINISH_REASON_KEY]);
+  const wrappedFinishReason = readNonEmptyString(record[STREAM_LOG_FINISH_REASON_KEY]);
+  if (wrappedFinishReason) {
+    return wrappedFinishReason;
+  }
+
+  if (hasChatChoiceAssistantContent(firstChoice)) {
+    return "stop";
+  }
+
+  return undefined;
+}
+
+function resolveFinishReasonRecord(body: unknown): Record<string, unknown> | null {
+  const root = asRecord(body);
+  if (!root) {
+    return null;
+  }
+  const nestedCandidates = ['data', 'response', 'payload'] as const;
+  for (const key of nestedCandidates) {
+    const nested = asRecord(root[key]);
+    if (!nested) {
+      continue;
+    }
+    if (
+      Array.isArray(nested.choices) ||
+      Array.isArray(nested.output) ||
+      typeof nested.stop_reason === 'string' ||
+      typeof nested.status === 'string' ||
+      typeof nested[STREAM_LOG_FINISH_REASON_KEY] === 'string'
+    ) {
+      return nested;
+    }
+  }
+  return root;
 }
 
 function hasResponsesToolCall(record: Record<string, unknown>): boolean {
@@ -49,6 +86,36 @@ function hasResponsesToolCall(record: Record<string, unknown>): boolean {
     const type = readNonEmptyString(asRecord(item)?.type)?.toLowerCase();
     return type === "function_call" || type === "tool_call";
   });
+}
+
+function hasChatChoiceToolCalls(choice: Record<string, unknown> | null): boolean {
+  if (!choice) {
+    return false;
+  }
+  const message = asRecord(choice.message);
+  if (!message) {
+    return false;
+  }
+  const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+  return toolCalls.length > 0;
+}
+
+function hasChatChoiceAssistantContent(choice: Record<string, unknown> | null): boolean {
+  if (!choice) {
+    return false;
+  }
+  const message = asRecord(choice.message);
+  if (!message) {
+    return false;
+  }
+  const content = message.content;
+  if (typeof content === 'string') {
+    return content.trim().length > 0;
+  }
+  if (Array.isArray(content)) {
+    return content.length > 0;
+  }
+  return false;
 }
 
 function mapStopReasonToFinishReason(stopReason: string): string {

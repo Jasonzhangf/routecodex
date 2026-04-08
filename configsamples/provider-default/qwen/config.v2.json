@@ -12,6 +12,11 @@
       "tokenFile": "default"
     },
     "models": {
+      "qwen3.6-plus": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      },
       "qwen3-coder-plus": {
         "maxTokens": 64000,
         "maxContext": 256000,
@@ -33,6 +38,11 @@
         "supportsStreaming": true
       }
     },
-    "transportBackend": "vercel-ai-sdk"
+    "transportBackend": "vercel-ai-sdk",
+    "concurrency": {
+      "maxInFlight": 1,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
+    }
   }
 }

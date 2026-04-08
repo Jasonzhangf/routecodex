@@ -30,6 +30,7 @@ const mockStopMessageModule = () => ({
 const mockTmuxProbeModule = () => ({
   injectTmuxSessionText: jest.fn(async () => ({ ok: true })),
   isTmuxSessionAlive: jest.fn((tmuxSessionId: string) => tmuxSessionId !== 'rcc_dead'),
+  isTmuxSessionIdleForInject: jest.fn(() => true),
   resolveTmuxSessionWorkingDirectory: jest.fn(() => '/tmp/mock-heartbeat')
 });
 

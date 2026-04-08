@@ -11,6 +11,30 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logRequestToolsNormalizeNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  try {
+    const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[request-tools-normalize] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 /**
  * Normalize OpenAI tools definitions at the final request stage.
  * - Enforces { command: string | string[], workdir?: string } shape for shell-like tools.
@@ -27,7 +51,11 @@ export class RequestOpenAIToolsNormalizeFilter implements Filter<JsonObject> {
       const hasApplyPatchTool = hasApplyPatchToolDeclared(tools);
       if (!tools.length) {
         // No tools present: drop tool_choice to avoid provider-side validation errors
-        try { if ('tool_choice' in (out as any)) delete (out as any).tool_choice; } catch { /* ignore */ }
+        try {
+          if ('tool_choice' in (out as any)) delete (out as any).tool_choice;
+        } catch (error) {
+          logRequestToolsNormalizeNonBlocking('drop_tool_choice_when_empty', error);
+        }
         return { ok: true, data: out };
       }
 
@@ -36,7 +64,9 @@ export class RequestOpenAIToolsNormalizeFilter implements Filter<JsonObject> {
         const mod = await import('../../conversion/args-mapping.js');
         const normalizeTools = (mod as any)?.normalizeTools as ((t: any[]) => any[]);
         if (typeof normalizeTools === 'function') normalizedList = normalizeTools(tools);
-      } catch { /* passthrough on failure */ }
+      } catch (error) {
+        logRequestToolsNormalizeNonBlocking('load_args_mapping.normalize_tools', error);
+      }
 
       const finalTools: any[] = [];
       const max = Math.max(tools.length, normalizedList.length);
@@ -58,7 +88,13 @@ export class RequestOpenAIToolsNormalizeFilter implements Filter<JsonObject> {
             (dst as any).function = { ...((dst as any).function as any), description: '' };
           }
           // Drop non-standard strict flag to pass strict providers that reject unknown tool fields
-          try { if ('strict' in (dst as any).function) delete (dst as any).function.strict; } catch { /* ignore */ }
+          try {
+            if ('strict' in (dst as any).function) delete (dst as any).function.strict;
+          } catch (error) {
+            logRequestToolsNormalizeNonBlocking('drop_strict_flag.normalized_tool', error, {
+              toolName: String(((dst as any).function as any)?.name ?? '')
+            });
+          }
           // Switch schema for specific built-in tools at unified shaping point
           try {
             const rawToolName = String(((dst as any).function as any).name || '');
@@ -77,7 +113,11 @@ export class RequestOpenAIToolsNormalizeFilter implements Filter<JsonObject> {
               const label = rawToolName && rawToolName.trim().length > 0 ? rawToolName.trim() : 'exec_command';
               (dst as any).function.description = buildShellDescription(label, hasApplyPatchTool);
             }
-          } catch { /* ignore */ }
+          } catch (error) {
+            logRequestToolsNormalizeNonBlocking('shell_schema_rewrite', error, {
+              toolName: String(((dst as any).function as any)?.name ?? '')
+            });
+          }
           finalTools.push(dst);
         } else if (src && isObject(src)) {
           // Fallback: minimally enforce required fields on raw src entries
@@ -86,14 +126,26 @@ export class RequestOpenAIToolsNormalizeFilter implements Filter<JsonObject> {
           if (!isObject(item.function)) item.function = {};
           if (typeof item.function.name !== 'string') item.function.name = String(item.name || 'tool');
           if (!isObject(item.function.parameters)) item.function.parameters = { type: 'object', properties: {}, additionalProperties: true };
-          try { if ('strict' in item.function) delete item.function.strict; } catch { /* ignore */ }
+          try {
+            if ('strict' in item.function) delete item.function.strict;
+          } catch (error) {
+            logRequestToolsNormalizeNonBlocking('drop_strict_flag.raw_tool', error, {
+              toolName: String(item.function?.name ?? '')
+            });
+          }
           finalTools.push(item);
         }
       }
 
       (out as any).tools = finalTools;
       // If tools ended up empty, drop tool_choice to avoid upstream validation issues
-      try { if (Array.isArray((out as any).tools) && (out as any).tools.length === 0 && 'tool_choice' in (out as any)) delete (out as any).tool_choice; } catch { /* ignore */ }
+      try {
+        if (Array.isArray((out as any).tools) && (out as any).tools.length === 0 && 'tool_choice' in (out as any)) {
+          delete (out as any).tool_choice;
+        }
+      } catch (error) {
+        logRequestToolsNormalizeNonBlocking('drop_tool_choice_after_normalize', error);
+      }
       return { ok: true, data: out };
     } catch {
       return { ok: true, data: input };

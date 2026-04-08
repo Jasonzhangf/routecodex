@@ -25,7 +25,7 @@ function createRuntime(overrides?: Partial<ProviderRuntimeProfile>): ProviderRun
 }
 
 describe('provider-traffic-governor', () => {
-  it('applies provider tier defaults for concurrency and rpm', () => {
+  it('applies generic defaults when provider config omits concurrency/rpm', () => {
     const deepseekPolicy = resolveProviderTrafficPolicy(
       createRuntime({
         providerId: 'deepseek',
@@ -34,8 +34,8 @@ describe('provider-traffic-governor', () => {
       }),
       'deepseek.alias.deepseek-chat'
     );
-    expect(deepseekPolicy.concurrency.maxInFlight).toBe(1);
-    expect(deepseekPolicy.rpm.requestsPerMinute).toBe(60);
+    expect(deepseekPolicy.concurrency.maxInFlight).toBe(2);
+    expect(deepseekPolicy.rpm.requestsPerMinute).toBe(120);
 
     const tabglmPolicy = resolveProviderTrafficPolicy(
       createRuntime({
@@ -45,8 +45,8 @@ describe('provider-traffic-governor', () => {
       }),
       'tabglm.key1.glm-5.1'
     );
-    expect(tabglmPolicy.concurrency.maxInFlight).toBe(4);
-    expect(tabglmPolicy.rpm.requestsPerMinute).toBe(240);
+    expect(tabglmPolicy.concurrency.maxInFlight).toBe(2);
+    expect(tabglmPolicy.rpm.requestsPerMinute).toBe(120);
 
     const genericPolicy = resolveProviderTrafficPolicy(
       createRuntime({
@@ -67,8 +67,8 @@ describe('provider-traffic-governor', () => {
       }),
       'crs.key1.gpt-5.3-codex'
     );
-    expect(crsPolicy.concurrency.maxInFlight).toBe(4);
-    expect(crsPolicy.rpm.requestsPerMinute).toBe(240);
+    expect(crsPolicy.concurrency.maxInFlight).toBe(2);
+    expect(crsPolicy.rpm.requestsPerMinute).toBe(120);
   });
 
   it('honors explicit runtime overrides for concurrency and rpm', () => {
@@ -140,6 +140,56 @@ describe('provider-traffic-governor', () => {
       });
       expect(second.activeInFlight).toBe(1);
       await governor.release(second.permit);
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('resetCurrentProcessState releases stale local leases without process restart', async () => {
+    const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-reset-${process.pid}-${randomUUID()}`);
+    const governor = new ProviderTrafficGovernor(rootDir);
+    const runtime = createRuntime({
+      runtimeKey: 'qwenchat.reset',
+      providerId: 'qwenchat',
+      providerFamily: 'qwenchat',
+      concurrency: {
+        maxInFlight: 1,
+        acquireTimeoutMs: 150,
+        staleLeaseMs: 60000
+      },
+      rpm: {
+        requestsPerMinute: 100,
+        acquireTimeoutMs: 150
+      }
+    });
+    try {
+      await governor.acquire({
+        runtimeKey: runtime.runtimeKey,
+        providerKey: 'qwenchat.1.qwen3.6-plus',
+        requestId: 'reset-req-1',
+        runtime
+      });
+
+      await expect(
+        governor.acquire({
+          runtimeKey: runtime.runtimeKey,
+          providerKey: 'qwenchat.1.qwen3.6-plus',
+          requestId: 'reset-req-2',
+          runtime
+        })
+      ).rejects.toBeInstanceOf(ProviderTrafficSaturatedError);
+
+      const resetResult = await governor.resetCurrentProcessState();
+      expect(resetResult.leasesRemoved).toBeGreaterThanOrEqual(1);
+
+      const afterReset = await governor.acquire({
+        runtimeKey: runtime.runtimeKey,
+        providerKey: 'qwenchat.1.qwen3.6-plus',
+        requestId: 'reset-req-3',
+        runtime
+      });
+      expect(afterReset.activeInFlight).toBe(1);
+      await governor.release(afterReset.permit);
     } finally {
       await fs.rm(rootDir, { recursive: true, force: true });
     }

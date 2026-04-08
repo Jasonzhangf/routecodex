@@ -14,6 +14,26 @@ type ReloadableServerInstance = ServerInstance & {
   reloadRuntime?: (config: JsonObject, options: { providerProfiles?: unknown }) => Promise<void>;
 };
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logConfigAdminNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[config-admin] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 /**
  * 与 index.ts 中逻辑对齐：解析用户配置文件路径。
  * 优先使用环境变量（RCC4_CONFIG_PATH / ROUTECODEX_CONFIG / ROUTECODEX_CONFIG_PATH），
@@ -31,8 +51,8 @@ function pickUserConfigPath(): string {
       if (p && fsSync.existsSync(p) && fsSync.statSync(p).isFile()) {
         return p;
       }
-    } catch {
-      // ignore and continue
+    } catch (error) {
+      logConfigAdminNonBlockingError('pickUserConfigPath.checkCandidate', error, { path: p });
     }
   }
   return resolveRouteCodexConfigPath();
@@ -97,8 +117,8 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
         ...Object.keys(providersRoot || {}),
         ...resolveReferencedProviderIds(userConfig)
       ]);
-    } catch {
-      // 若读取失败，不阻止模板列表返回；仅视为无绑定信息
+    } catch (error) {
+      logConfigAdminNonBlockingError('handleListProviderTemplates.readUserConfig', error);
     }
 
     // 2) 独立 Provider 配置：~/.rcc/provider/*.json
@@ -144,13 +164,17 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
               authType,
               boundToConfig
             });
-          } catch {
-            // 单个文件解析失败时跳过，不影响整体返回
+          } catch (error) {
+            logConfigAdminNonBlockingError('handleListProviderTemplates.readProviderConfig', error, {
+              source: fullPath
+            });
           }
         }
       }
-    } catch {
-      // provider 目录不存在或不可读时，视为无独立 Provider
+    } catch (error) {
+      logConfigAdminNonBlockingError('handleListProviderTemplates.readProviderDirectory', error, {
+        providerDir
+      });
     }
 
     // 3) 内置模板集合：标准 provider 只给协议级引导；OAuth/account provider 保留宿主管理模板

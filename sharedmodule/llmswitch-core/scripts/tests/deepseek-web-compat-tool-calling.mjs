@@ -106,19 +106,19 @@ function testRequestTransform() {
   assert.equal(out.stream, true, 'stream should be preserved');
   assert.equal(Array.isArray(out.ref_file_ids), true, 'ref_file_ids should be array');
   assert.equal(
+    out.prompt.includes('Search latest RouteCodex updates'),
+    true,
+    'prompt should keep user message text'
+  );
+  assert.equal(
     out.prompt.includes('Tool-call output contract (STRICT):'),
-    true,
-    'prompt should include strict tool-call output contract'
+    false,
+    'strict tool-call guidance should no longer be injected at compat stage'
   );
   assert.equal(
-    out.prompt.includes('tool_choice is required for this turn: return at least one tool call.'),
-    true,
-    'required tool_choice should be emphasized in prompt'
-  );
-  assert.equal(
-    out.prompt.includes('Do NOT output pseudo tool results in text'),
-    true,
-    'prompt should forbid pseudo tool-result text blocks'
+    out.prompt.includes('RCC_TOOL_CALLS_JSON'),
+    false,
+    'tool-text request guidance should be handled in req_process stage, not compat stage'
   );
 }
 
@@ -156,9 +156,9 @@ function testRequestTransformAutoToolChoiceHint() {
   }).payload;
 
   assert.equal(
-    out.prompt.includes('If no tool is needed, plain text is allowed.'),
-    true,
-    'auto tool_choice should retain plain-text allowance'
+    out.prompt,
+    'Check README quickly',
+    'compat stage should keep prompt mapped from message text without tool guidance injection'
   );
 }
 
@@ -813,19 +813,8 @@ function testControlProviderUnaffected() {
 function main() {
   testRequestTransform();
   testRequestTransformAutoToolChoiceHint();
-  testNativeToolCalls();
-  testTextFallbackToolCalls();
-  testTextFallbackToolCallsWithTailSentinel();
-  testQuotedToolCallsAreHarvested();
-  testFallbackRepairsEvenWhenRequestedToolsDiffer();
-  testFallbackStillRepairsWhenRequestToolsEmpty();
-  testCommandBlockWithoutToolShapeStaysText();
-  testStrictRequiredFailure();
-  testXmlToolCallBlocksAreHarvested();
-  testFunctionResultsMarkupHarvest();
-  testCommentaryTagStrippedFromAssistantText();
-  testBusinessEnvelopeUnwrap();
-  testBusinessEnvelopeReadableError();
+  // Note: response-side tool-call harvest/assertions belong to resp_process_stage1_tool_governance now.
+  // compat stage should keep provider envelope + usage semantics only.
   testUsageBackfillFromEstimate();
   testUsageKeepsUpstreamWhenPresent();
   testControlProviderUnaffected();

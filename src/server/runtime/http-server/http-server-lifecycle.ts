@@ -21,6 +21,21 @@ import { clearHeartbeatRuntimeHooks } from './heartbeat-runtime-hooks.js';
 import { cleanupSessionStorageOnShutdown } from './session-storage-cleanup.js';
 import { isTmuxSessionAlive } from './tmux-session-probe.js';
 
+const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
+const nonBlockingLogState = new Map<string, number>();
+
+function logLifecycleNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  const now = Date.now();
+  const last = nonBlockingLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingLogState.set(stage, now);
+  const reason = formatValueForConsole(error);
+  const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[RouteCodexHttpServer][lifecycle][non-blocking] stage=${stage} error=${reason}${detailSuffix}`);
+}
+
 export async function initializeHttpServer(server: any): Promise<void> {
   try {
     console.log('[RouteCodexHttpServer] Starting initialization...');
@@ -44,8 +59,8 @@ export async function initializeHttpServer(server: any): Promise<void> {
         if (typeof mod.QuotaManagerModule === 'function') {
           daemon.registerModule(new mod.QuotaManagerModule());
         }
-      } catch {
-        // optional module
+      } catch (error) {
+        logLifecycleNonBlockingError('initialize.optional_quota_module', error);
       }
       await daemon.start();
       server.managerDaemon = daemon;
@@ -162,8 +177,8 @@ export async function startHttpServer(server: any): Promise<void> {
     if (process.env.JEST_WORKER_ID || process.env.NODE_ENV === 'test') {
       try {
         (server.server as unknown as { unref?: () => void }).unref?.();
-      } catch {
-        // ignore
+      } catch (error) {
+        logLifecycleNonBlockingError('start.server_unref', error);
       }
     }
 

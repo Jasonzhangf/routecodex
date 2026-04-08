@@ -56,7 +56,7 @@ export const DEFAULT_TIMEOUTS = {
 
   // Host → client (SSE bridge)
   HTTP_SSE_IDLE_MS: 900_000,               // 15 min（与 provider idle cap 对齐）
-  HTTP_SSE_TOTAL_MS: 1_000_000,            // 16.6 min（覆盖 LM Studio 默认 1000s provider timeout）
+  HTTP_SSE_TOTAL_MS: 300_000,              // 5 min（默认更激进，避免长时间占用并发与内存）
 } as const;
 
 // HTTP 协议前缀
@@ -88,7 +88,7 @@ export const DEFAULT_PROVIDER = {
   USER_AGENT: 'codex_cli_rs/0.73.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5',
 
   // 请求超时和重试
-  TIMEOUT_MS: 500_000,        // 500 秒 (可通过 config/profile 覆盖)
+  TIMEOUT_MS: 240_000,        // 240 秒 (可通过 config/profile 覆盖)
   MAX_RETRIES: 3,             // 默认最大重试次数
 
   // SSE 流式响应超时

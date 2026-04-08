@@ -5,7 +5,7 @@ import {
   saveRoutingInstructionStateSync
 } from '../../../router/virtual-router/sticky-session-store.js';
 import { isStopEligibleForServerTool } from '../../stop-gateway-context.js';
-import { extractResponsesOutputText, hasToolLikeOutput } from './iflow-followup.js';
+import { extractResponsesOutputText, hasToolLikeOutput } from './ai-followup.js';
 import { resolveStopMessageSnapshot } from './routing-state.js';
 
 export function resolveStickyKey(
@@ -235,11 +235,6 @@ export function resolveStopMessageFollowupToolContentMaxChars(params: {
       return Math.max(64, Math.floor(parsed));
     }
     return undefined;
-  }
-
-  const providerKey = typeof params.providerKey === 'string' ? params.providerKey.trim().toLowerCase() : '';
-  if (providerKey.startsWith('iflow.')) {
-    return 1200;
   }
 
   const model = typeof params.model === 'string' ? params.model.trim().toLowerCase() : '';

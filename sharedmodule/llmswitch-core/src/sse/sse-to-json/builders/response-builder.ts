@@ -17,6 +17,30 @@ import type {
 } from '../../types/index.js';
 import { normalizeResponsesMessageItem } from '../../shared/responses-output-normalizer.js';
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logResponseBuilderNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  try {
+    const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[responses-response-builder] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 // 构建器状态
 export type ResponseBuilderState = 'initial' | 'building' | 'completed' | 'error';
 
@@ -637,7 +661,12 @@ export class ResponsesResponseBuilder {
         // 没有任何累计增量时，保底写入 done 事件里的值
         outputItemState.arguments = finalChunk;
       }
-    } catch { /* ignore */ }
+    } catch (error) {
+      logResponseBuilderNonBlocking('function_call.done.merge_final', error, {
+        itemId: String(data?.item_id ?? ''),
+        callId: String(data?.call_id ?? '')
+      });
+    }
     outputItemState.status = 'completed';
     outputItemState.lastEventTime = event.timestamp;
   }
@@ -917,7 +946,12 @@ export class ResponsesResponseBuilder {
           }
         }
       }
-    } catch { /* ignore */ }
+    } catch (error) {
+      logResponseBuilderNonBlocking('output_item.done.merge_item_payload', error, {
+        itemId: String(data?.item_id ?? ''),
+        outputType: String(outputItemState.type ?? '')
+      });
+    }
 
     outputItemState.status = 'completed';
     outputItemState.lastEventTime = event.timestamp;
@@ -1193,7 +1227,12 @@ export class ResponsesResponseBuilder {
         }
         return { success: true, response: this.response as ResponsesResponse };
       }
-    } catch { /* ignore */ }
+    } catch (error) {
+      logResponseBuilderNonBlocking('build.salvage_fallback', error, {
+        state: this.state,
+        outputItemCount: this.outputItemBuilders.size
+      });
+    }
 
     return { success: false, error: new Error('Building not completed') };
   }

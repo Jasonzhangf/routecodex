@@ -60,7 +60,7 @@ function tryWriteSnapshot(options: ToolGovernanceOptions | undefined, stage: str
     const ep = String(snap.endpoint || 'chat').toLowerCase();
     const group = ep.includes('responses') ? 'openai-responses' : ep.includes('messages') ? 'anthropic-messages' : 'openai-chat';
     const rid = String(snap.requestId || `req_${Date.now()}_${Math.random().toString(36).slice(2,8)}`);
-    const dir = path.join(base, group, '__pending__', rid);
+    const dir = path.join(base, group, rid);
     const file = path.join(dir, `govern-${stage}.json`);
     if (fs.existsSync(file)) return; // 不重复
     fs.mkdirSync(dir, { recursive: true });

@@ -42,6 +42,24 @@ import {
 import { clearStopMessageTmuxScope, migrateStopMessageTmuxScope } from './stopmessage-scope-rebind.js';
 import { matchesExpectedClientApiKey } from '../../../utils/session-client-token.js';
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error ?? 'unknown');
+}
+
+function logSessionClientRoutesNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length
+      ? ` details=${JSON.stringify(details)}`
+      : '';
+    console.warn(`[session-client-routes] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function stripHeartbeatStopMarkerFromText(raw: string): { updated: string; changed: boolean } {
   const lines = String(raw || '').split(/\r?\n/);
   let changed = false;
@@ -384,7 +402,12 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
         const daemonWorkdir = daemonId ? normalizeWorkdir(parseString(registry.findByDaemonId(daemonId)?.workdir)) : undefined;
         const tmuxWorkdir = resolveTmuxSessionWorkingDirectory(tmuxSessionId);
         const workdir = bodyWorkdir || daemonWorkdir || tmuxWorkdir;
-        await clearHeartbeatStopMarkerForWorkdir(workdir).catch(() => {});
+        await clearHeartbeatStopMarkerForWorkdir(workdir).catch((error) => {
+          logSessionClientRoutesNonBlockingError('heartbeat.clear_stop_marker', error, {
+            tmuxSessionId,
+            workdir
+          });
+        });
         const injectText =
           (await buildHeartbeatInjectTextSnapshot()) ||
           '[Heartbeat]\n请先判断你当前是否仍在执行上一次已开始的任务。\n如果当前任务仍在执行中，请忽略本次提醒，不要打断当前工作。\n如果当前任务已经空闲或已中断，请读取 HEARTBEAT.md，更新 DELIVERY.md（最多只保留最近十次交付记录，不要无限追加成巨型文件），并调用 drudge.review。';

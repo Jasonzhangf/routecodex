@@ -5,13 +5,11 @@
  * - ApiKeyAuthProvider
  * - OAuthAuthProvider
  * - TokenFileAuthProvider
- * - IflowCookieAuthProvider
  */
 
 import { ApiKeyAuthProvider } from '../../../auth/apikey-auth.js';
 import { OAuthAuthProvider } from '../../../auth/oauth-auth.js';
 import { TokenFileAuthProvider } from '../../../auth/tokenfile-auth.js';
-import { IflowCookieAuthProvider } from '../../../auth/iflow-cookie-auth.js';
 import { ApiKeyRotator } from '../../../auth/apikey-auth.js';
 import { getProviderFamilyProfile } from '../../../profile/profile-registry.js';
 import type { IAuthProvider } from '../../../auth/auth-interface.js';
@@ -84,20 +82,15 @@ export class AuthProviderFactory {
     const baseUrl = typeof this.context.config.config.baseUrl === 'string'
       ? this.context.config.config.baseUrl.toLowerCase()
       : '';
-    const isIflowFamily =
+    const isLegacyIflowCookie =
       providerId === 'iflow' ||
       baseUrl.includes('apis.iflow.cn') ||
-      baseUrl.includes('iflow.cn');
-
-    // iFlow Cookie 模式：使用浏览器导出的 Cookie 交换 API Key，避免频繁走 OAuth。
-    if (
-      isIflowFamily &&
-      (rawType === 'iflow-cookie' ||
-        (!((auth as ApiKeyAuth).apiKey) &&
-          (typeof (auth as unknown as { cookie?: unknown }).cookie === 'string' ||
-            typeof (auth as unknown as { cookieFile?: unknown }).cookieFile === 'string')))
-    ) {
-      return new IflowCookieAuthProvider(auth as unknown as Record<string, unknown>);
+      baseUrl.includes('iflow.cn') ||
+      rawType === 'iflow-cookie';
+    if (isLegacyIflowCookie) {
+      throw new Error(
+        '[AuthProviderFactory] iflow provider/cookie auth has been removed; please migrate this runtime to a supported provider.'
+      );
     }
 
     // 检查是否有多 key entries，有则使用轮询模式
@@ -133,14 +126,13 @@ export class AuthProviderFactory {
       moduleType: this.context.moduleType
     });
 
-    // For providers like Qwen/iflow/Gemini CLI where public OAuth client may not be available,
+    // For providers like Qwen/Gemini CLI where public OAuth client may not be available,
     // allow reading tokens produced by external login tools (CLIProxyAPI) via token file.
     const useTokenFile =
       (typeof profileTokenFileMode === 'boolean'
         ? profileTokenFileMode
         : (
             resolvedOAuthProviderId === 'qwen' ||
-            resolvedOAuthProviderId === 'iflow' ||
             this.context.moduleType === 'gemini-cli-http-provider'
           )) &&
       !auth.clientId &&

@@ -23,7 +23,6 @@ export type ProviderTemplateId =
   | 'anthropic'
   | 'gemini'
   | 'qwen'
-  | 'iflow'
   | 'gemini-cli'
   | 'antigravity'
   | 'deepseek-web'

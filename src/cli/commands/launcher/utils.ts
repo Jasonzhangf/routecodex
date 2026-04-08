@@ -8,6 +8,16 @@ import type fs from 'node:fs';
 import type path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
+function logLauncherUtilsNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  const reason = error instanceof Error ? (error.stack || `${error.name}: ${error.message}`) : String(error);
+  const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[launcher-utils] ${stage} failed (non-blocking): ${reason}${detailSuffix}`);
+}
+
 /**
  * Resolve binary path from command name
  */
@@ -28,18 +38,18 @@ export function resolveBinary(options: {
   const candidates: string[] = [];
   try {
     candidates.push(options.pathImpl.join('/opt/homebrew/bin', raw));
-  } catch {
-    // ignore
+  } catch (error) {
+    logLauncherUtilsNonBlocking('resolve_binary.join_homebrew', error, { command: raw });
   }
   try {
     candidates.push(options.pathImpl.join('/usr/local/bin', raw));
-  } catch {
-    // ignore
+  } catch (error) {
+    logLauncherUtilsNonBlocking('resolve_binary.join_usr_local', error, { command: raw });
   }
   try {
     candidates.push(options.pathImpl.join(options.homedir(), '.local', 'bin', raw));
-  } catch {
-    // ignore
+  } catch (error) {
+    logLauncherUtilsNonBlocking('resolve_binary.join_local_bin', error, { command: raw });
   }
 
   for (const candidate of candidates) {
@@ -47,8 +57,8 @@ export function resolveBinary(options: {
       if (candidate && options.fsImpl.existsSync(candidate)) {
         return candidate;
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      logLauncherUtilsNonBlocking('resolve_binary.exists_probe', error, { candidate });
     }
   }
 
@@ -68,7 +78,8 @@ export function parseServerUrl(
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
-  } catch {
+  } catch (error) {
+    logLauncherUtilsNonBlocking('parse_server_url.direct', error, { raw: trimmed });
     parsed = new URL(`http://${trimmed}`);
   }
   const protocol = parsed.protocol === 'https:' ? 'https' : 'http';
@@ -162,7 +173,8 @@ export function readConfigApiKey(fsImpl: typeof fs, configPath: string): string 
       return envValue && envValue.trim() ? envValue.trim() : null;
     }
     return value;
-  } catch {
+  } catch (error) {
+    logLauncherUtilsNonBlocking('read_config_apikey', error, { configPath });
     return null;
   }
 }
@@ -217,7 +229,8 @@ export function tryReadConfigHostPort(
     const hostRaw = config?.httpserver?.host ?? config?.server?.host ?? config?.host;
     const host = typeof hostRaw === 'string' && hostRaw.trim() ? hostRaw.trim() : null;
     return { host, port };
-  } catch {
+  } catch (error) {
+    logLauncherUtilsNonBlocking('try_read_config_host_port', error, { configPath });
     return { host: null, port: null };
   }
 }
@@ -245,8 +258,8 @@ export function rotateLogFile(fsImpl: typeof fs, filePath: string, maxBytes = 8 
           }
           fsImpl.renameSync(from, to);
         }
-      } catch {
-        // ignore
+      } catch (error) {
+        logLauncherUtilsNonBlocking('rotate_log_file.rotate_backup', error, { from, to });
       }
     }
 
@@ -254,13 +267,13 @@ export function rotateLogFile(fsImpl: typeof fs, filePath: string, maxBytes = 8 
     if (fsImpl.existsSync(firstBackup)) {
       try {
         fsImpl.unlinkSync(firstBackup);
-      } catch {
-        // ignore
+      } catch (error) {
+        logLauncherUtilsNonBlocking('rotate_log_file.unlink_first_backup', error, { firstBackup });
       }
     }
     fsImpl.renameSync(filePath, firstBackup);
-  } catch {
-    // ignore rotation failures
+  } catch (error) {
+    logLauncherUtilsNonBlocking('rotate_log_file', error, { filePath, maxBytes, maxBackups });
   }
 }
 
@@ -271,7 +284,8 @@ export function isTmuxAvailable(spawnSyncImpl: typeof spawnSync = spawnSync): bo
   try {
     const result = spawnSyncImpl('tmux', ['-V'], { encoding: 'utf8' });
     return result.status === 0;
-  } catch {
+  } catch (error) {
+    logLauncherUtilsNonBlocking('is_tmux_available', error);
     return false;
   }
 }
@@ -290,7 +304,8 @@ export function normalizePathForComparison(candidate: string, pathImpl?: typeof 
       return resolved.toLowerCase();
     }
     return resolved;
-  } catch {
+  } catch (error) {
+    logLauncherUtilsNonBlocking('normalize_path_for_comparison', error, { candidate: raw });
     return raw;
   }
 }
@@ -378,12 +393,13 @@ export function resolveWorkingDirectory(
     if (requested) {
       return resolved;
     }
-  } catch {
-    // fall through to fallback candidates
+  } catch (error) {
+    logLauncherUtilsNonBlocking('resolve_working_directory.primary', error, { requested: requested ?? null });
   }
   try {
     return pathImpl.resolve(getCwd());
-  } catch {
+  } catch (error) {
+    logLauncherUtilsNonBlocking('resolve_working_directory.resolve_cwd', error);
     const fallbackCandidates = [
       typeof process.env.PWD === 'string' ? process.env.PWD : '',
       typeof process.env.HOME === 'string' ? process.env.HOME : ''
@@ -398,8 +414,10 @@ export function resolveWorkingDirectory(
         if (stats && typeof stats.isDirectory === 'function' && stats.isDirectory()) {
           return resolved;
         }
-      } catch {
-        // try next fallback
+      } catch (fallbackError) {
+        logLauncherUtilsNonBlocking('resolve_working_directory.fallback_candidate', fallbackError, {
+          candidate
+        });
       }
     }
 

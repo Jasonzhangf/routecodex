@@ -4,6 +4,32 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logRequestToolListFilterNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[request-tool-list-filter] ${stage} failed (non-blocking): ${formatUnknownError(error)}${suffix}`
+    );
+  } catch {
+    void 0;
+  }
+}
+
 function envMode(): 'phase'|'all'|'off' {
   const v = String(process?.env?.RCC_MCP_EXPOSE || '').toLowerCase();
   if (v === 'off' || v === '0' || v === 'false') return 'off';
@@ -63,8 +89,8 @@ function extractMcpServerLabelsFromOutput(output: unknown): string[] {
         add((t as any).source?.server);
       }
     }
-  } catch {
-    // best-effort
+  } catch (extractError) {
+    logRequestToolListFilterNonBlockingError('extractMcpServerLabelsFromOutput', extractError);
   }
 
   return found;
@@ -99,12 +125,12 @@ function collectServersFromMessages(messages: any[]): string[] {
         // Fallback: some environments may return raw shapes (no envelope).
         // Only accept when output clearly advertises server labels, not echoed arguments.
         for (const s of extractMcpServerLabelsFromOutput((parsed as any).output ?? parsed)) out.add(s);
-      } catch {
-        // ignore parse errors
+      } catch (parseError) {
+        logRequestToolListFilterNonBlockingError('collectServersFromMessages.parseMessageContent', parseError);
       }
     }
-  } catch {
-    // ignore errors
+  } catch (collectError) {
+    logRequestToolListFilterNonBlockingError('collectServersFromMessages', collectError);
   }
   return Array.from(out);
 }
@@ -156,12 +182,12 @@ function detectEmptyMcpListFromMessages(messages: any[]): boolean {
             if (code === -32601 || msg.includes('method not found')) return true;
           }
         }
-      } catch {
-        // ignore parse errors
+      } catch (parseError) {
+        logRequestToolListFilterNonBlockingError('detectEmptyMcpListFromMessages.parseMessageContent', parseError);
       }
     }
-  } catch {
-    // ignore errors
+  } catch (detectError) {
+    logRequestToolListFilterNonBlockingError('detectEmptyMcpListFromMessages', detectError);
   }
   return false;
 }
@@ -310,7 +336,8 @@ export class RequestToolListFilter implements Filter<JsonObject> {
 
       (out as any).tools = tools;
       return { ok: true, data: out };
-    } catch {
+    } catch (applyError) {
+      logRequestToolListFilterNonBlockingError('apply', applyError);
       return { ok: true, data: input };
     }
   }

@@ -19,6 +19,20 @@ import type {
 } from "./types.js";
 import { appendHeartbeatHistoryEvent } from "./history-store.js";
 
+function logHeartbeatSessionStoreNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {},
+): void {
+  const reason =
+    error instanceof Error ? error.stack || `${error.name}: ${error.message}` : String(error);
+  const detailSuffix =
+    Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : "";
+  console.warn(
+    `[heartbeat-session-store] ${stage} failed (non-blocking): ${reason}${detailSuffix}`,
+  );
+}
+
 function readString(value: unknown): string | undefined {
   if (typeof value !== "string") {
     return undefined;
@@ -134,7 +148,8 @@ async function pathExists(filePath: string): Promise<boolean> {
   try {
     await fs.access(filePath);
     return true;
-  } catch {
+  } catch (error) {
+    logHeartbeatSessionStoreNonBlocking("path_exists.access", error, { filePath });
     return false;
   }
 }
@@ -173,8 +188,11 @@ async function resolveLegacyHeartbeatStateFiles(
         out.add(filePath);
       }
     }
-  } catch {
-    // best-effort legacy scan only
+  } catch (error) {
+    logHeartbeatSessionStoreNonBlocking("resolve_legacy_state_files.scan_store_base", error, {
+      storeBaseDir,
+      tmuxSessionId,
+    });
   }
 
   return Array.from(out);
@@ -244,8 +262,11 @@ export async function loadHeartbeatState(
     try {
       const raw = await readJsonFile(filePath);
       return coerceHeartbeatState(raw, tmuxSessionId);
-    } catch {
-      // fall through to legacy scan
+    } catch (error) {
+      logHeartbeatSessionStoreNonBlocking("load_state.primary_read", error, {
+        filePath,
+        tmuxSessionId,
+      });
     }
   }
 
@@ -260,12 +281,18 @@ export async function loadHeartbeatState(
       }
       try {
         await fs.rm(legacyFilePath, { force: true });
-      } catch {
-        // best-effort legacy cleanup
+      } catch (error) {
+        logHeartbeatSessionStoreNonBlocking("load_state.cleanup_legacy_file", error, {
+          legacyFilePath,
+          tmuxSessionId,
+        });
       }
       return migrated;
-    } catch {
-      // try next legacy candidate
+    } catch (error) {
+      logHeartbeatSessionStoreNonBlocking("load_state.read_legacy_candidate", error, {
+        legacyFilePath,
+        tmuxSessionId,
+      });
     }
   }
 
@@ -339,16 +366,22 @@ export async function removeHeartbeatState(tmuxSessionId: string): Promise<void>
   if (filePath) {
     try {
       await fs.rm(filePath, { force: true });
-    } catch {
-      // ignore
+    } catch (error) {
+      logHeartbeatSessionStoreNonBlocking("remove_state.primary_file", error, {
+        filePath,
+        tmuxSessionId,
+      });
     }
   }
   const legacyFiles = await resolveLegacyHeartbeatStateFiles(sessionDir, tmuxSessionId);
   for (const legacyFilePath of legacyFiles) {
     try {
       await fs.rm(legacyFilePath, { force: true });
-    } catch {
-      // ignore
+    } catch (error) {
+      logHeartbeatSessionStoreNonBlocking("remove_state.legacy_file", error, {
+        legacyFilePath,
+        tmuxSessionId,
+      });
     }
   }
 }
@@ -375,8 +408,10 @@ export async function listHeartbeatStates(): Promise<HeartbeatState[]> {
         }
         dirs.add(path.join(storeBaseDir, entry.name, "heartbeat"));
       }
-    } catch {
-      // best-effort listing only
+    } catch (error) {
+      logHeartbeatSessionStoreNonBlocking("list_states.scan_store_base", error, {
+        storeBaseDir,
+      });
     }
   }
 
@@ -396,16 +431,21 @@ export async function listHeartbeatStates(): Promise<HeartbeatState[]> {
           if (!prev || state.updatedAtMs >= prev.updatedAtMs) {
             merged.set(state.tmuxSessionId, state);
           }
-        } catch {
+        } catch (error) {
           const fallback = buildHeartbeatState(tmuxSessionId);
           const prev = merged.get(fallback.tmuxSessionId);
           if (!prev || fallback.updatedAtMs >= prev.updatedAtMs) {
             merged.set(fallback.tmuxSessionId, fallback);
           }
+          logHeartbeatSessionStoreNonBlocking("list_states.read_state_file", error, {
+            dir,
+            file: entry.name,
+            tmuxSessionId,
+          });
         }
       }
-    } catch {
-      // ignore missing directories
+    } catch (error) {
+      logHeartbeatSessionStoreNonBlocking("list_states.read_directory", error, { dir });
     }
   }
 

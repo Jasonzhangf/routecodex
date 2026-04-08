@@ -16,11 +16,12 @@ import { getServerToolHandler, listAutoServerToolHooks } from './registry.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import { executeWebSearchBackendPlan } from './handlers/web-search.js';
 import { executeVisionBackendPlan } from './handlers/vision.js';
-import './handlers/iflow-model-error-retry.js';
 import './handlers/antigravity-thought-signature-bootstrap.js';
 import './handlers/memory/cache-auto.js';
 import './handlers/stop-message-auto.js';
 import './handlers/reasoning-only-continue.js';
+import './handlers/reasoning-stop.js';
+import './handlers/reasoning-stop-guard.js';
 import './handlers/clock.js';
 import './handlers/clock-auto.js';
 import './handlers/exec-command-guard.js';
@@ -202,6 +203,9 @@ function normalizeServerToolCallName(name: string): string {
   const normalized = name.trim().toLowerCase();
   if (normalized === 'websearch' || normalized === 'web-search') {
     return 'web_search';
+  }
+  if (normalized === 'reasoning_stop' || normalized === 'reasoning-stop') {
+    return 'reasoning.stop';
   }
   return normalized;
 }

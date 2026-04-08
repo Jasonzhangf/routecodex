@@ -38,6 +38,9 @@ function normalizeServerToolName(value: unknown): string {
   if (key === 'websearch' || key === 'web-search') {
     return 'web_search';
   }
+  if (key === 'reasoning_stop' || key === 'reasoning-stop') {
+    return 'reasoning.stop';
+  }
   return key;
 }
 

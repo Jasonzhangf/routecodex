@@ -30,6 +30,40 @@ type QuotaDepletedPayload = {
 
 type DebugLike = { log?: (...args: unknown[]) => void } | Console | undefined;
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logHealthNonBlockingError(
+  stage: string,
+  error: unknown,
+  debug?: DebugLike,
+  details?: Record<string, unknown>
+): void {
+  const payload = details && Object.keys(details).length > 0 ? details : undefined;
+  try {
+    if (typeof debug?.log === 'function') {
+      debug.log('[virtual-router] health non-blocking failure', {
+        stage,
+        error: formatUnknownError(error),
+        ...(payload ? { details: payload } : {})
+      });
+      return;
+    }
+    const suffix = payload ? ` details=${JSON.stringify(payload)}` : '';
+    console.warn(`[virtual-router] ${stage} failed (non-blocking): ${formatUnknownError(error)}${suffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function parseDurationToMs(value?: string): number | null {
   if (!value || typeof value !== 'string') {
     return null;
@@ -416,8 +450,11 @@ export function applyAntigravityRiskPolicyImpl(
         }
         healthManager.tripProvider(key, 'auth_verify', ANTIGRAVITY_AUTH_VERIFY_BAN_MS);
         markProviderCooldown(key, ANTIGRAVITY_AUTH_VERIFY_BAN_MS);
-      } catch {
-        // ignore lookup failures
+      } catch (tripError) {
+        logHealthNonBlockingError('applyAntigravityRiskPolicy.authVerify.tripProvider', tripError, debug, {
+          providerKey: key,
+          runtimeKey
+        });
       }
     }
     debug?.log?.('[virtual-router] antigravity auth verify blacklist', {
@@ -450,8 +487,11 @@ export function applyAntigravityRiskPolicyImpl(
         healthManager.tripProvider(key, 'signature_missing', ANTIGRAVITY_THOUGHT_SIGNATURE_MISSING_COOLDOWN_MS);
         markProviderCooldown(key, ANTIGRAVITY_THOUGHT_SIGNATURE_MISSING_COOLDOWN_MS);
         affected.push(key);
-      } catch {
-        // ignore lookup failures
+      } catch (tripError) {
+        logHealthNonBlockingError('applyAntigravityRiskPolicy.signatureMissing.tripProvider', tripError, debug, {
+          providerKey: key,
+          runtimeKey
+        });
       }
     }
     if (affected.length) {
@@ -504,8 +544,11 @@ export function applyAntigravityRiskPolicyImpl(
       try {
         healthManager.tripProvider(key, 'risk_cooldown', ANTIGRAVITY_RISK_COOLDOWN_MS);
         markProviderCooldown(key, ANTIGRAVITY_RISK_COOLDOWN_MS);
-      } catch {
-        // ignore lookup failures
+      } catch (tripError) {
+        logHealthNonBlockingError('applyAntigravityRiskPolicy.riskCooldown.tripProvider', tripError, debug, {
+          providerKey: key,
+          runtimeKey
+        });
       }
     }
     debug?.log?.('[virtual-router] antigravity risk cooldown', {
@@ -521,8 +564,11 @@ export function applyAntigravityRiskPolicyImpl(
       try {
         healthManager.tripProvider(key, 'risk_blacklist', ttl);
         markProviderCooldown(key, ttl);
-      } catch {
-        // ignore lookup failures
+      } catch (tripError) {
+        logHealthNonBlockingError('applyAntigravityRiskPolicy.riskBlacklist.tripProvider', tripError, debug, {
+          providerKey: key,
+          runtimeKey
+        });
       }
     }
     debug?.log?.('[virtual-router] antigravity risk blacklist', {
@@ -688,8 +734,11 @@ export function applySeriesCooldownImpl(
       healthManager.tripProvider(providerKey, 'rate_limit', seriesDetail.cooldownMs);
       markProviderCooldown(providerKey, seriesDetail.cooldownMs);
       affected.push(providerKey);
-    } catch {
-      // ignore lookup failures; invalid keys may show up if config drifted
+    } catch (tripError) {
+      logHealthNonBlockingError('applySeriesCooldown.tripProvider', tripError, debug, {
+        providerKey,
+        series: seriesDetail.series
+      });
     }
   }
   if (affected.length) {
@@ -749,8 +798,11 @@ export function applyQuotaRecoveryImpl(
     healthManager.recordSuccess(providerKey);
     resetRateLimitBackoffForProvider(providerKey);
     clearProviderCooldown(providerKey);
-  } catch {
-    // 恢复失败不得影响主路由流程
+  } catch (recoveryError) {
+    logHealthNonBlockingError('applyQuotaRecovery', recoveryError, debug, {
+      providerKey,
+      reason: detail.reason
+    });
   }
   return true;
 }
@@ -804,8 +856,12 @@ export function applyQuotaDepletedImpl(
       cooldownMs: ttl,
       reason: detail.reason
     });
-  } catch {
-    // ignore failures
+  } catch (depletedError) {
+    logHealthNonBlockingError('applyQuotaDepleted', depletedError, debug, {
+      providerKey: detail.providerKey,
+      cooldownMs: ttl,
+      reason: detail.reason
+    });
   }
   return true;
 }

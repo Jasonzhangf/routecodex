@@ -31,6 +31,24 @@ type ResponsesPayload = {
   [key: string]: unknown;
 };
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error ?? 'unknown');
+}
+
+function logResponsesHandlerNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length
+      ? ` details=${JSON.stringify(details)}`
+      : '';
+    console.warn(`[responses-handler] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 export async function handleResponses(
   req: Request,
   res: Response,
@@ -195,8 +213,8 @@ export async function handleResponses(
         const wantsStreamForError = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
         try {
           logRequestError(entryEndpoint, requestId, err);
-        } catch {
-          /* ignore logging */
+        } catch (loggingError) {
+          logResponsesHandlerNonBlockingError('timeout.log_request_error', loggingError, { requestId });
         }
         // Best-effort: notify pipeline/servertool via shared connection state object.
         try {
@@ -204,8 +222,8 @@ export async function handleResponses(
           if (state && typeof state === 'object') {
             state.disconnected = true;
           }
-        } catch {
-          /* ignore */
+        } catch (stateError) {
+          logResponsesHandlerNonBlockingError('timeout.mark_connection_disconnected', stateError, { requestId });
         }
         if (res.headersSent) {
           // If we've already started an SSE response, try to emit an explicit error event
@@ -222,14 +240,14 @@ export async function handleResponses(
                 }
               };
               res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
-            } catch {
-              /* ignore */
+            } catch (writeError) {
+              logResponsesHandlerNonBlockingError('timeout.sse_error_frame_write', writeError, { requestId });
             }
           }
           try {
             res.end();
-          } catch {
-            /* ignore */
+          } catch (endError) {
+            logResponsesHandlerNonBlockingError('timeout.response_end', endError, { requestId });
           }
           return;
         }

@@ -109,6 +109,7 @@ export function buildRouteCandidates(
   providerRegistry: ProviderRegistry
 ): string[] {
   const hasMultimodalTargets = routeHasTargets(routing.multimodal);
+  const hasVisionTargets = routeHasTargets(routing.vision);
   const hasVideoTargets = routeHasTargets(routing.video);
   const hasRemoteVideoAttachment = features.hasVideoAttachment === true && features.hasRemoteVideoAttachment === true;
   const normalized = normalizeRouteAlias(requestedRoute || DEFAULT_ROUTE);
@@ -131,6 +132,10 @@ export function buildRouteCandidates(
     if (hasMultimodalTargets) {
       if (!baseList.includes('multimodal')) {
         baseList.unshift('multimodal');
+      }
+    } else if (hasVisionTargets) {
+      if (!baseList.includes('vision')) {
+        baseList.unshift('vision');
       }
     }
 
@@ -158,6 +163,9 @@ export function buildRouteCandidates(
 
   if (features.hasImageAttachment && hasMultimodalTargets) {
     ordered = reorderForPreferredModel(ordered, 'kimi-k2.5', routing, providerRegistry);
+  }
+  if (features.hasImageAttachment && !hasMultimodalTargets && hasVisionTargets) {
+    ordered = ['vision', ...ordered.filter((routeName) => routeName !== 'vision')];
   }
   const deduped: string[] = [];
   for (const routeName of ordered) {

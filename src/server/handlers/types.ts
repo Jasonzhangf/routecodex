@@ -22,7 +22,17 @@ export interface PipelineExecutionResult {
   usageLogInfo?: {
     providerKey?: string;
     model?: string;
+    routeName?: string;
+    poolId?: string;
+    finishReason?: string;
     usage?: Record<string, unknown>;
+    externalLatencyMs?: number;
+    trafficWaitMs?: number;
+    clientInjectWaitMs?: number;
+    sseDecodeMs?: number;
+    codecDecodeMs?: number;
+    providerAttemptCount?: number;
+    retryCount?: number;
     hubStageTop?: Array<{
       stage: string;
       totalMs: number;
@@ -34,6 +44,7 @@ export interface PipelineExecutionResult {
     timingRequestIds?: string[];
     sessionId?: unknown;
     conversationId?: unknown;
+    projectPath?: unknown;
   };
 }
 

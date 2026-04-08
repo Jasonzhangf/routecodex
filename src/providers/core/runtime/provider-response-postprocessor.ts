@@ -3,12 +3,8 @@ import type { UnknownObject } from '../../../types/common-types.js';
 import { ProviderPayloadUtils } from './transport/provider-payload-utils.js';
 
 function hasSessionRewriteActive(context: ProviderContext): boolean {
-  const meta = context?.runtimeMetadata?.metadata;
-  if (!meta || typeof meta !== 'object') {
-    return false;
-  }
-  const value = (meta as Record<string, unknown>).__iflowSessionRewriteActive;
-  return value === true;
+  void context;
+  return false;
 }
 
 function restoreClientSessionHeaders(
@@ -19,27 +15,7 @@ function restoreClientSessionHeaders(
     return headers;
   }
 
-  const meta = context.runtimeMetadata?.metadata as Record<string, unknown> | undefined;
-  const clientSessionId =
-    typeof meta?.__iflowClientSessionId === 'string'
-      ? meta.__iflowClientSessionId
-      : undefined;
-  const clientConversationId =
-    typeof meta?.__iflowClientConversationId === 'string'
-      ? meta.__iflowClientConversationId
-      : undefined;
-
-  const nextHeaders: Record<string, string> = { ...headers };
-  if (clientSessionId) {
-    nextHeaders['session_id'] = clientSessionId;
-    nextHeaders['session-id'] = clientSessionId;
-  }
-  if (clientConversationId) {
-    nextHeaders['conversation_id'] = clientConversationId;
-    nextHeaders['conversation-id'] = clientConversationId;
-  }
-
-  return nextHeaders;
+  return { ...headers };
 }
 
 export function buildPostprocessedProviderResponse(args: {
