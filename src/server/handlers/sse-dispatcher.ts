@@ -57,7 +57,29 @@ export function dispatchSseStream(options: DispatchSseOptions): boolean {
   const stream = toNodeReadable(streamSource);
   if (!stream) {
     logPipelineStage('response.sse.missing', requestLabel, { status });
-    res.status(502).json({ error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' } });
+    const payload = {
+      type: 'error',
+      status: 502,
+      error: {
+        message: 'SSE stream missing from pipeline result',
+        code: 'sse_bridge_error',
+        request_id: requestLabel
+      }
+    };
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    try {
+      res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
+    } catch (error) {
+      logSseDispatchNonBlockingError('missing_stream.write_error_event', error, { requestLabel });
+    }
+    try {
+      res.end();
+    } catch (error) {
+      logSseDispatchNonBlockingError('missing_stream.end', error, { requestLabel });
+    }
     return false;
   }
   applyResponseHeaders(res, headers, true);

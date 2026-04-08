@@ -558,7 +558,8 @@ function isStopMessageAutoMessageEnabled(): boolean {
     .trim()
     .toLowerCase();
   if (!raw) {
-    return true;
+    // 默认关闭：只有显式配置/环境变量开启才启用 ai-followup。
+    return false;
   }
   if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') {
     return false;

@@ -240,6 +240,32 @@ function formatRequestId(value?: string): string {
   return resolveEffectiveRequestId(value);
 }
 
+function sendSseBridgeError(res: Response, requestLabel: string, status = 502): void {
+  const payload = {
+    type: 'error',
+    status,
+    error: {
+      message: 'SSE stream missing from pipeline result',
+      code: 'sse_bridge_error',
+      request_id: requestLabel
+    }
+  };
+  res.status(200);
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  try {
+    res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
+  } catch (error) {
+    logResponseNonBlockingError(`sendSseBridgeError:write:${requestLabel}`, error);
+  }
+  try {
+    res.end();
+  } catch (error) {
+    logResponseNonBlockingError(`sendSseBridgeError:end:${requestLabel}`, error);
+  }
+}
+
 export function hasSsePayload(body: unknown): body is SsePayloadShape {
   return Boolean(body && typeof body === 'object' && '__sse_responses' in (body as Record<string, unknown>));
 }
@@ -331,18 +357,26 @@ export function sendPipelineResponse(
 
   if (forceSSE && !expectsStream) {
     logPipelineStage('response.sse.missing', requestLabel, { status });
-    logResponseCompleted({ status: 502, mode: 'sse', reason: 'missing_stream' });
+    logResponseCompleted({ status: 200, mode: 'sse', reason: 'missing_stream', bridgeStatus: 502 });
     if (captureClientResponse) {
       void writeServerSnapshot({
         phase: 'client-response.error',
         requestId: requestLabel,
         entryEndpoint,
-        data: { status: 502, error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' } }
+        data: {
+          mode: 'sse',
+          status: 200,
+          payload: {
+            type: 'error',
+            status: 502,
+            error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' }
+          }
+        }
       }).catch((error) => {
         logResponseNonBlockingError(`writeServerSnapshot:sse_missing:${requestLabel}`, error);
       });
     }
-    res.status(502).json({ error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' } });
+    sendSseBridgeError(res, requestLabel, 502);
     return;
   }
 
@@ -353,18 +387,26 @@ export function sendPipelineResponse(
     const stream = toNodeReadable(streamSource);
     if (!stream) {
       logPipelineStage('response.sse.missing', requestLabel, {});
-      logResponseCompleted({ status: 502, mode: 'sse', reason: 'missing_stream' });
+      logResponseCompleted({ status: 200, mode: 'sse', reason: 'missing_stream', bridgeStatus: 502 });
       if (captureClientResponse) {
         void writeServerSnapshot({
           phase: 'client-response.error',
           requestId: requestLabel,
           entryEndpoint,
-          data: { status: 502, error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' } }
+          data: {
+            mode: 'sse',
+            status: 200,
+            payload: {
+              type: 'error',
+              status: 502,
+              error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' }
+            }
+          }
         }).catch((error) => {
           logResponseNonBlockingError(`writeServerSnapshot:sse_missing_stream:${requestLabel}`, error);
         });
       }
-      res.status(502).json({ error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' } });
+      sendSseBridgeError(res, requestLabel, 502);
       return;
     }
     const outboundStream = captureClientResponse
