@@ -192,4 +192,34 @@ describe('log rollup', () => {
     flushLogRollup('manual');
     expect(logSpy).not.toHaveBeenCalled();
   });
+
+  it('prints virtual-router-hit in realtime mode and suppresses 1m rollup', async () => {
+    process.env.ROUTECODEX_LOG_ROLLUP = '1';
+    process.env.ROUTECODEX_LOG_ROLLUP_REALTIME = '1';
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { recordVirtualRouterHitRollup, flushLogRollup } = await import(
+      '../../../../../src/server/runtime/http-server/executor/log-rollup.js'
+    );
+
+    recordVirtualRouterHitRollup({
+      routeName: 'tools',
+      poolId: 'tools-primary',
+      providerKey: 'ali-coding-plan.key1.glm-5',
+      model: 'glm-5',
+      sessionId: 'sid-rt-1',
+      projectPath: '/tmp/project-rt',
+      activeInFlight: 2,
+      maxInFlight: 6
+    });
+    flushLogRollup('manual');
+
+    const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(lines.some((line) => line.includes('[virtual-router-hit][rt]'))).toBe(true);
+    expect(lines.some((line) => line.includes('tools/tools-primary -> ali-coding-plan.key1.glm-5.glm-5'))).toBe(true);
+    expect(lines.some((line) => line.includes('[concurrency:2/6]'))).toBe(true);
+    expect(lines.some((line) => line.includes('session.virtual_hits=1'))).toBe(true);
+    expect(lines.some((line) => line.includes('[rollup][1m]'))).toBe(false);
+    expect(lines.some((line) => line.includes('[virtual-router-hit][1m]'))).toBe(false);
+    expect(lines.some((line) => line.includes('[usage][1m]'))).toBe(false);
+  });
 });

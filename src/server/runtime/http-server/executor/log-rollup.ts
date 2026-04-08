@@ -337,6 +337,37 @@ function emitRealtimeSessionRequestLog(args: {
   console.log(colorize(`  session.calls=${calls} session.retries=${retries}`, sessionColor));
 }
 
+function emitRealtimeVirtualRouterHitLog(args: {
+  sessionId: string;
+  projectPath?: string;
+  routeName: string;
+  poolId: string;
+  providerKey: string;
+  model: string;
+  activeInFlight: number;
+  maxInFlight: number;
+  sessionVirtualHits: number;
+}): void {
+  const sessionColor = resolveSessionAnsiColor(args.sessionId) || ANSI_SESSION;
+  const sessionLabel = shortSessionId(args.sessionId);
+  const project = trimPathForLog(
+    normalizeProjectPath(args.projectPath)
+      || resolveProjectPathFromRegistry(args.sessionId)
+      || '-'
+  );
+  const routePool = formatRoutePool(args.routeName, args.poolId);
+  const provider = formatProvider(args.providerKey, args.model);
+  const active = Math.max(0, Math.floor(args.activeInFlight));
+  const max = Math.max(0, Math.floor(args.maxInFlight));
+  console.log(colorize(`[virtual-router-hit][rt] session=${sessionLabel} project=${project}`, sessionColor));
+  console.log(
+    colorize(
+      `  ${routePool} -> ${provider} [concurrency:${active}/${max}] session.virtual_hits=${Math.max(0, Math.floor(args.sessionVirtualHits))}`,
+      sessionColor
+    )
+  );
+}
+
 function resolveProjectPathFromRegistry(sessionId: string): string | undefined {
   const normalizedSession = normalizeSessionId(sessionId);
   if (!normalizedSession || normalizedSession === 'unknown') {
@@ -416,6 +447,19 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
   if (sessionExisting) {
     sessionExisting.virtualHits += 1;
     updateSessionProjectPath(sessionId, event.projectPath);
+    if (isRealtimeRollupEnabled()) {
+      emitRealtimeVirtualRouterHitLog({
+        sessionId,
+        projectPath: sessionExisting.projectPath,
+        routeName,
+        poolId,
+        providerKey,
+        model,
+        activeInFlight: Math.max(0, Math.floor(event.activeInFlight ?? 0)),
+        maxInFlight: Math.max(0, Math.floor(event.maxInFlight ?? 0)),
+        sessionVirtualHits: sessionExisting.virtualHits
+      });
+    }
     return;
   }
   sessionRollups.set(sessionId, {
@@ -443,6 +487,19 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
     maxRetryCount: 0
   });
   updateSessionProjectPath(sessionId, event.projectPath);
+  if (isRealtimeRollupEnabled()) {
+    emitRealtimeVirtualRouterHitLog({
+      sessionId,
+      projectPath: sessionRollups.get(sessionId)?.projectPath,
+      routeName,
+      poolId,
+      providerKey,
+      model,
+      activeInFlight: Math.max(0, Math.floor(event.activeInFlight ?? 0)),
+      maxInFlight: Math.max(0, Math.floor(event.maxInFlight ?? 0)),
+      sessionVirtualHits: 1
+    });
+  }
 }
 
 export function recordUsageRollup(event: UsageRollupRecord): void {
