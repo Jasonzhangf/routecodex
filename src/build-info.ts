@@ -2,6 +2,6 @@
 export interface BuildInfo { mode: 'dev' | 'release'; version: string; buildTime: string }
 export const buildInfo: BuildInfo = {
   mode: 'release',
-  version: '0.90.974',
-  buildTime: '2026-04-09T00:26:54.323Z'
+  version: '0.90.975',
+  buildTime: '2026-04-09T00:50:50.059Z'
 };

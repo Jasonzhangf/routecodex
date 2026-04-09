@@ -123,7 +123,7 @@ describe('servertool reasoning.stop guard', () => {
       { op: 'append_assistant_message', required: false },
       {
         op: 'append_user_text',
-        text: '当前任务没有完成，请继续执行。必须先调用 reasoning.stop 自查，并严格填写结构化字段：task_goal、is_completed，以及（is_completed=false 时）next_step 或 cannot_complete_reason。若存在下一步分析计划，必须写入 next_step；仅在当前确实阻塞无法推进时才填写 cannot_complete_reason。'
+        text: '当前任务未完成，禁止直接停止。你必须先调用 reasoning.stop 做停止自检。只允许两种真实停止条件：1) 已完成用户任务，并给出 completion_evidence；2) 已尝试完所有可行路径且仍被阻塞，并给出 cannot_complete_reason + blocking_evidence（并声明 attempts_exhausted=true）。若仍有任何可执行下一步，必须填写 next_step 并继续执行，不得停止。'
       }
     ]);
   });
@@ -164,7 +164,9 @@ describe('servertool reasoning.stop guard', () => {
       chatResponse: buildReasoningStopToolCallResponse({
         task_goal: '修复 qwen stop 异常',
         is_completed: false,
-        cannot_complete_reason: '需要更多样本'
+        cannot_complete_reason: '需要更多样本',
+        attempts_exhausted: true,
+        blocking_evidence: '已检查最近 20 分钟样本，均缺少完整上下文'
       }),
       adapterContext,
       entryEndpoint: '/v1/chat/completions',
@@ -178,7 +180,9 @@ describe('servertool reasoning.stop guard', () => {
     expect(state?.reasoningStopArmed).toBe(true);
     expect(state?.reasoningStopSummary).toContain('用户任务目标: 修复 qwen stop 异常');
     expect(state?.reasoningStopSummary).toContain('是否完成: 否');
+    expect(state?.reasoningStopSummary).toContain('已穷尽可行尝试: 是');
     expect(state?.reasoningStopSummary).toContain('无法完成原因: 需要更多样本');
+    expect(state?.reasoningStopSummary).toContain('阻塞证据: 已检查最近 20 分钟样本，均缺少完整上下文');
   });
 
   test('returns structured error when reasoning.stop payload misses task_goal', async () => {
@@ -267,6 +271,57 @@ describe('servertool reasoning.stop guard', () => {
     const payload = JSON.parse(String(last.content || '{}'));
     expect(payload.ok).toBe(false);
     expect(payload.code).toBe('NEXT_STEP_OR_CANNOT_COMPLETE_REQUIRED');
+  });
+
+  test('returns structured error when reasoning.stop uses cannot_complete_reason without attempts_exhausted=true', async () => {
+    const sessionId = 'reasoning-stop-guard-invalid-attempts-exhausted';
+    const adapterContext = { sessionId } as unknown as AdapterContext;
+    const result = await runServerSideToolEngine({
+      chatResponse: buildReasoningStopToolCallResponse({
+        task_goal: '继续分析日志',
+        is_completed: false,
+        cannot_complete_reason: '上游 429 持续'
+      }),
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_invalid_attempts_exhausted'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('reasoning_stop_flow');
+    const outputs = (result.finalChatResponse as any).tool_outputs;
+    expect(Array.isArray(outputs)).toBe(true);
+    const last = outputs[outputs.length - 1];
+    const payload = JSON.parse(String(last.content || '{}'));
+    expect(payload.ok).toBe(false);
+    expect(payload.code).toBe('ATTEMPTS_EXHAUSTED_REQUIRED');
+  });
+
+  test('returns structured error when reasoning.stop uses cannot_complete_reason without blocking_evidence', async () => {
+    const sessionId = 'reasoning-stop-guard-invalid-blocking-evidence';
+    const adapterContext = { sessionId } as unknown as AdapterContext;
+    const result = await runServerSideToolEngine({
+      chatResponse: buildReasoningStopToolCallResponse({
+        task_goal: '继续分析日志',
+        is_completed: false,
+        cannot_complete_reason: '上游 429 持续',
+        attempts_exhausted: true
+      }),
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_invalid_blocking_evidence'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('reasoning_stop_flow');
+    const outputs = (result.finalChatResponse as any).tool_outputs;
+    expect(Array.isArray(outputs)).toBe(true);
+    const last = outputs[outputs.length - 1];
+    const payload = JSON.parse(String(last.content || '{}'));
+    expect(payload.ok).toBe(false);
+    expect(payload.code).toBe('BLOCKING_EVIDENCE_REQUIRED');
   });
 
   test('when armed summary has next step, guard injects followup to execute next step', async () => {

@@ -402,7 +402,7 @@ function buildStandardFollowupTools(): JsonObject[] {
       function: {
         name: 'reasoning.stop',
         description:
-          'Structured stop self-check gate. Required fields: task_goal, is_completed. If is_completed=true, completion_evidence is required. If is_completed=false, provide next_step (when a concrete next analysis step exists) or cannot_complete_reason (only when truly blocked).',
+          'Structured stop self-check gate. Stop is allowed only when either: (A) task is completed with completion_evidence; or (B) all feasible attempts are exhausted and blocked, with cannot_complete_reason + blocking_evidence + attempts_exhausted=true. Required: task_goal, is_completed. If not completed but a concrete next action exists, fill next_step and continue instead of stopping.',
         parameters: {
           type: 'object',
           properties: {
@@ -410,6 +410,8 @@ function buildStandardFollowupTools(): JsonObject[] {
             is_completed: { type: 'boolean' },
             completion_evidence: { type: 'string' },
             cannot_complete_reason: { type: 'string' },
+            blocking_evidence: { type: 'string' },
+            attempts_exhausted: { type: 'boolean' },
             next_step: { type: 'string' }
           },
           required: ['task_goal', 'is_completed'],

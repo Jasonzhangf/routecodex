@@ -12,6 +12,8 @@ type ReasoningStopPayload = {
   completed: boolean;
   completionEvidence: string;
   cannotCompleteReason: string;
+  blockingEvidence: string;
+  attemptsExhausted?: boolean;
   nextStep: string;
 };
 
@@ -98,6 +100,17 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>): {
     'cannotCompleteReason',
     'reason'
   ]);
+  const blockingEvidence = readText(args, [
+    'blocking_evidence',
+    'blockingEvidence',
+    'block_evidence'
+  ]);
+  const attemptsExhausted = readBool(args, [
+    'attempts_exhausted',
+    'attemptsExhausted',
+    'all_attempts_exhausted',
+    'allAttemptsExhausted'
+  ]);
   const nextStep = readText(args, [
     'next_step',
     'nextStep',
@@ -121,6 +134,20 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>): {
       message: 'reasoning.stop requires next_step or cannot_complete_reason when is_completed=false.'
     };
   }
+  if (!completed && cannotCompleteReason && !nextStep && attemptsExhausted !== true) {
+    return {
+      ok: false,
+      code: 'ATTEMPTS_EXHAUSTED_REQUIRED',
+      message: 'reasoning.stop requires attempts_exhausted=true when stopping with cannot_complete_reason.'
+    };
+  }
+  if (!completed && cannotCompleteReason && !nextStep && !blockingEvidence) {
+    return {
+      ok: false,
+      code: 'BLOCKING_EVIDENCE_REQUIRED',
+      message: 'reasoning.stop requires blocking_evidence when stopping with cannot_complete_reason.'
+    };
+  }
 
   return {
     ok: true,
@@ -129,6 +156,8 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>): {
       completed,
       completionEvidence,
       cannotCompleteReason,
+      blockingEvidence,
+      ...(typeof attemptsExhausted === 'boolean' ? { attemptsExhausted } : {}),
       nextStep
     }
   };
@@ -143,7 +172,13 @@ function buildSummary(payload: ReasoningStopPayload): string {
     lines.push(`完成证据: ${payload.completionEvidence}`);
   } else {
     if (payload.cannotCompleteReason) {
+      if (typeof payload.attemptsExhausted === 'boolean') {
+        lines.push(`已穷尽可行尝试: ${payload.attemptsExhausted ? '是' : '否'}`);
+      }
       lines.push(`无法完成原因: ${payload.cannotCompleteReason}`);
+      if (payload.blockingEvidence) {
+        lines.push(`阻塞证据: ${payload.blockingEvidence}`);
+      }
     }
     if (payload.nextStep) {
       lines.push(`下一步: ${payload.nextStep}`);

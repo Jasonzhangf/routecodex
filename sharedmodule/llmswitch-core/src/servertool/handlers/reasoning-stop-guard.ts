@@ -14,7 +14,7 @@ const FLOW_ID_CONTINUE = 'reasoning_stop_continue_flow';
 const HOOK_ID = 'reasoning_stop_guard';
 
 const CONTINUE_TEXT =
-  '当前任务没有完成，请继续执行。必须先调用 reasoning.stop 自查，并严格填写结构化字段：task_goal、is_completed，以及（is_completed=false 时）next_step 或 cannot_complete_reason。若存在下一步分析计划，必须写入 next_step；仅在当前确实阻塞无法推进时才填写 cannot_complete_reason。';
+  '当前任务未完成，禁止直接停止。你必须先调用 reasoning.stop 做停止自检。只允许两种真实停止条件：1) 已完成用户任务，并给出 completion_evidence；2) 已尝试完所有可行路径且仍被阻塞，并给出 cannot_complete_reason + blocking_evidence（并声明 attempts_exhausted=true）。若仍有任何可执行下一步，必须填写 next_step 并继续执行，不得停止。';
 
 function parseReasoningStopSummary(summary: string): {
   completed?: boolean;
@@ -50,7 +50,7 @@ function buildExecuteNextStepText(nextStep: string): string {
     '你在上一轮 reasoning.stop 自查中给出了下一步计划。',
     `next_step: ${nextStep}`,
     '现在立即执行该 next_step，不要停止。',
-    '若执行后仍未完成，请继续推进；只有在明确阻塞无法继续时，才再次调用 reasoning.stop 并填写 cannot_complete_reason。'
+    '只有满足以下任一条件才允许停止：A) 已完成任务并提供 completion_evidence；B) 已尝试完所有可行路径且阻塞，并提供 cannot_complete_reason + blocking_evidence（attempts_exhausted=true）。'
   ].join('\n');
 }
 

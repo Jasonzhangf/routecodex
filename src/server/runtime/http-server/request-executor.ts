@@ -433,6 +433,21 @@ function serializeRequestPayloadForRetry(payload: unknown): string | undefined {
   }
 }
 
+function cloneRequestPayloadForRetry(payload: unknown): Record<string, unknown> | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  try {
+    const cloned = structuredClone(payload) as unknown;
+    if (cloned && typeof cloned === 'object' && !Array.isArray(cloned)) {
+      return cloned as Record<string, unknown>;
+    }
+  } catch (error) {
+    logRequestExecutorNonBlockingError('cloneRequestPayloadForRetry.structuredClone', error);
+  }
+  return undefined;
+}
+
 function restoreRequestPayloadFromRetrySnapshot(
   serializedPayload?: string,
   fallbackPayload?: Record<string, unknown>
@@ -441,7 +456,7 @@ function restoreRequestPayloadFromRetrySnapshot(
     if (serializedPayload.length > RETRY_SNAPSHOT_RESTORE_MAX_CHARS) {
       logRequestExecutorNonBlockingError(
         'restoreRequestPayloadFromRetrySnapshot.oversized_skip',
-        new Error('serialized retry payload too large'),
+        'serialized retry payload too large',
         { payloadLength: serializedPayload.length, maxChars: RETRY_SNAPSHOT_RESTORE_MAX_CHARS }
       );
     } else {
@@ -459,6 +474,10 @@ function restoreRequestPayloadFromRetrySnapshot(
   }
   if (!fallbackPayload || typeof fallbackPayload !== 'object') {
     return undefined;
+  }
+  const clonedFallback = cloneRequestPayloadForRetry(fallbackPayload);
+  if (clonedFallback && typeof clonedFallback === 'object') {
+    return clonedFallback;
   }
   return { ...fallbackPayload };
 }
@@ -1073,10 +1092,20 @@ export class HubRequestExecutor implements RequestExecutor {
         let aggregatedUsage: UsageMetrics | undefined;
         const excludedProviderKeys = new Set<string>();
         let maxAttempts = resolveMaxProviderAttempts();
-        const originalRequestSnapshot = restoreRequestPayloadFromRetrySnapshot(
-          serializeRequestPayloadForRetry(input.body)
-        );
-        const originalRequestSnapshotSerialized = serializeRequestPayloadForRetry(originalRequestSnapshot);
+        const serializedInputBody = serializeRequestPayloadForRetry(input.body);
+        const originalRequestSnapshot =
+          cloneRequestPayloadForRetry(input.body)
+          ?? (
+            typeof serializedInputBody === 'string' && serializedInputBody.length <= RETRY_SNAPSHOT_RESTORE_MAX_CHARS
+              ? restoreRequestPayloadFromRetrySnapshot(serializedInputBody)
+              : undefined
+          );
+        const originalRequestSnapshotSerializedRaw = serializeRequestPayloadForRetry(originalRequestSnapshot);
+        const originalRequestSnapshotSerialized =
+          typeof originalRequestSnapshotSerializedRaw === 'string'
+            && originalRequestSnapshotSerializedRaw.length <= RETRY_SNAPSHOT_RESTORE_MAX_CHARS
+            ? originalRequestSnapshotSerializedRaw
+            : undefined;
         let attempt = 0;
         let lastError: unknown;
         let initialRoutePool: string[] | null = null;
