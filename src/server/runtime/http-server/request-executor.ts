@@ -581,7 +581,48 @@ function buildRecoverableErrorBackoffKey(args: {
   return `${statusPart}|${errorPart}|${upstreamPart}|${reasonPart}`;
 }
 
-function consumeRecoverableErrorBackoffMs(key: string): number {
+function resolveRecoverableBackoffCapMs(args: {
+  statusCode?: number;
+  errorCode?: string;
+  upstreamCode?: string;
+  reason?: string;
+}): number {
+  const status = typeof args.statusCode === 'number' ? args.statusCode : undefined;
+  const errorCode = normalizeCodeKey(args.errorCode);
+  const upstreamCode = normalizeCodeKey(args.upstreamCode);
+  const reason = typeof args.reason === 'string' ? args.reason.trim().toLowerCase() : '';
+  // 429 类错误按“快速换 provider”策略：小步快跑，不做长阻塞。
+  if (
+    status === 429
+    || errorCode === 'HTTP_429'
+    || upstreamCode === 'HTTP_429'
+    || errorCode === 'INSUFFICIENT_QUOTA'
+    || upstreamCode === 'INSUFFICIENT_QUOTA'
+    || reason.includes('insufficient_quota')
+  ) {
+    return process.env.NODE_ENV === 'test' ? 500 : 4_000;
+  }
+  // ServerTool timeout/失败不应进入超长退避，否则会放大 followup 风暴。
+  if (
+    errorCode === 'SERVERTOOL_TIMEOUT'
+    || (typeof errorCode === 'string' && errorCode.startsWith('SERVERTOOL_'))
+    || (typeof upstreamCode === 'string' && upstreamCode.startsWith('SERVERTOOL_'))
+    || reason.includes('[servertool]')
+  ) {
+    return process.env.NODE_ENV === 'test' ? 1_500 : 12_000;
+  }
+  return process.env.NODE_ENV === 'test' ? 5_000 : 120_000;
+}
+
+function consumeRecoverableErrorBackoffMs(
+  key: string,
+  args: {
+    statusCode?: number;
+    errorCode?: string;
+    upstreamCode?: string;
+    reason?: string;
+  }
+): number {
   const now = Date.now();
   for (const [existingKey, state] of recoverableErrorBackoffState.entries()) {
     if (now - state.updatedAtMs >= RECOVERABLE_BACKOFF_TTL_MS) {
@@ -611,7 +652,7 @@ function consumeRecoverableErrorBackoffMs(key: string): number {
     if (Number.isFinite(parsed) && parsed > 0) {
       return parsed;
     }
-    return process.env.NODE_ENV === 'test' ? 5_000 : 120_000;
+    return resolveRecoverableBackoffCapMs(args);
   })();
   return Math.min(maxMs, baseMs * Math.pow(2, Math.max(0, consecutive - 1)));
 }
@@ -1334,7 +1375,12 @@ export class HubRequestExecutor implements RequestExecutor {
               upstreamCode: retryError.upstreamCode,
               reason: retryError.reason
             });
-            recoverableBackoffMs = consumeRecoverableErrorBackoffMs(recoverableKey);
+            recoverableBackoffMs = consumeRecoverableErrorBackoffMs(recoverableKey, {
+              statusCode: retryError.statusCode,
+              errorCode: retryError.errorCode,
+              upstreamCode: retryError.upstreamCode,
+              reason: retryError.reason
+            });
             await waitRecoverableBackoffWithGlobalGate(recoverableKey, recoverableBackoffMs);
             retryBackoffMs = recoverableBackoffMs;
           } else {
@@ -1994,7 +2040,12 @@ export class HubRequestExecutor implements RequestExecutor {
               upstreamCode: retryError.upstreamCode,
               reason: retryError.reason
             });
-            recoverableBackoffMs = consumeRecoverableErrorBackoffMs(recoverableKey);
+            recoverableBackoffMs = consumeRecoverableErrorBackoffMs(recoverableKey, {
+              statusCode: retryError.statusCode,
+              errorCode: retryError.errorCode,
+              upstreamCode: retryError.upstreamCode,
+              reason: retryError.reason
+            });
             await waitRecoverableBackoffWithGlobalGate(recoverableKey, recoverableBackoffMs);
             retryBackoffMs = recoverableBackoffMs;
           } else {

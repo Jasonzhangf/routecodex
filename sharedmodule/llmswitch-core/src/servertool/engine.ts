@@ -79,6 +79,9 @@ const STOP_MESSAGE_STAGE_TIMEOUT_MS = 900_000;
 const STOP_MESSAGE_LOOP_WARN_THRESHOLD = 5;
 const STOP_MESSAGE_LOOP_FAIL_THRESHOLD = 10;
 const FOLLOWUP_ERROR_REASON_MAX_LENGTH = 220;
+const DEFAULT_SERVERTOOL_TIMEOUT_MS = 120_000;
+const DEFAULT_SERVERTOOL_FOLLOWUP_TIMEOUT_MS = 90_000;
+const MAX_SERVERTOOL_TIMEOUT_MS = 180_000;
 
 function logServerToolNonBlocking(stage: string, error: unknown, details?: Record<string, unknown>): void {
   const message = error instanceof Error ? error.message : String(error ?? 'unknown');
@@ -100,22 +103,30 @@ function parseTimeoutMs(raw: unknown, fallback: number): number {
   return Math.floor(n);
 }
 
+function clampTimeoutMs(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return DEFAULT_SERVERTOOL_TIMEOUT_MS;
+  }
+  return Math.max(100, Math.min(MAX_SERVERTOOL_TIMEOUT_MS, Math.floor(value)));
+}
+
 function resolveServerToolTimeoutMs(): number {
-  return parseTimeoutMs(
+  return clampTimeoutMs(parseTimeoutMs(
     process.env.ROUTECODEX_SERVERTOOL_TIMEOUT_MS ||
       process.env.RCC_SERVERTOOL_TIMEOUT_MS ||
       process.env.LLMSWITCH_SERVERTOOL_TIMEOUT_MS,
-    500_000
-  );
+    DEFAULT_SERVERTOOL_TIMEOUT_MS
+  ));
 }
 
 function resolveServerToolFollowupTimeoutMs(fallback: number): number {
-  return parseTimeoutMs(
+  const parsed = parseTimeoutMs(
     process.env.ROUTECODEX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS ||
       process.env.RCC_SERVERTOOL_FOLLOWUP_TIMEOUT_MS ||
       process.env.LLMSWITCH_SERVERTOOL_FOLLOWUP_TIMEOUT_MS,
-    fallback
+    Math.min(DEFAULT_SERVERTOOL_FOLLOWUP_TIMEOUT_MS, fallback)
   );
+  return Math.min(clampTimeoutMs(parsed), clampTimeoutMs(fallback));
 }
 
 function parseBooleanLike(value: unknown): boolean | undefined {
@@ -1006,7 +1017,15 @@ export async function runServerToolOrchestration(
   const isReviewFlow = engineResult.execution.flowId === 'review_flow';
   const isApplyPatchGuard = engineResult.execution.flowId === 'apply_patch_guard';
   const isExecCommandGuard = engineResult.execution.flowId === 'exec_command_guard';
-  const applyAutoLimit = isApplyPatchGuard || isExecCommandGuard;
+  const isReasoningOnlyContinueFlow = engineResult.execution.flowId === 'reasoning_only_continue_flow';
+  const isReasoningStopGuardFlow = engineResult.execution.flowId === 'reasoning_stop_guard_flow';
+  const isReasoningStopContinueFlow = engineResult.execution.flowId === 'reasoning_stop_continue_flow';
+  const applyAutoLimit =
+    isApplyPatchGuard
+    || isExecCommandGuard
+    || isReasoningOnlyContinueFlow
+    || isReasoningStopGuardFlow
+    || isReasoningStopContinueFlow;
   // ServerTool followups must not inherit or inject any routeHint; always route fresh.
   const preserveRouteHint = false;
   const followupPlan = engineResult.execution.followup;
