@@ -8,7 +8,8 @@ import {
   logRequestStart,
   logRequestComplete,
   logRequestError,
-  captureClientHeaders
+  captureClientHeaders,
+  captureRawRequestBodyForMetadata
 } from './handler-utils.js';
 import { resumeResponsesConversation } from '../../modules/llmswitch/bridge.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
@@ -91,7 +92,7 @@ export async function handleResponses(
     let payload = (req.body && typeof req.body === 'object'
       ? req.body
       : {}) as ResponsesPayload;
-    const originalPayload = JSON.parse(JSON.stringify(payload)) as ResponsesPayload;
+    const originalPayload = captureRawRequestBodyForMetadata(payload) as ResponsesPayload;
     if (options.responseIdFromPath && !payload.response_id) {
       payload.response_id = options.responseIdFromPath;
     }

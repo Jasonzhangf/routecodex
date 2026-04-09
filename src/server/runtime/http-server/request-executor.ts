@@ -100,6 +100,8 @@ const recoverableErrorBackoffState = new Map<string, { consecutive: number; upda
 const recoverableRetryGateState = new Map<string, Promise<void>>();
 const PROVIDER_SWITCH_LOG_THROTTLE_MS = 5_000;
 const providerSwitchLogState = new Map<string, { lastAtMs: number; suppressed: number }>();
+const RETRY_SNAPSHOT_PARSE_MAX_CHARS = 256 * 1024;
+const RETRY_SNAPSHOT_RESTORE_MAX_CHARS = 2 * 1024 * 1024;
 // Re-export for backward compatibility
 export type { SseWrapperErrorInfo };
 
@@ -174,6 +176,17 @@ function readStatusCodeCandidate(value: unknown): number | undefined {
 }
 
 function parseJsonRecordFromText(text: string): Record<string, unknown> | null {
+  if (typeof text !== 'string' || !text) {
+    return null;
+  }
+  if (text.length > RETRY_SNAPSHOT_PARSE_MAX_CHARS) {
+    logRequestExecutorNonBlockingError(
+      'parseJsonRecordFromText.oversized_skip',
+      new Error('candidate text too large'),
+      { candidateLength: text.length, maxChars: RETRY_SNAPSHOT_PARSE_MAX_CHARS }
+    );
+    return null;
+  }
   const normalized = text.trim();
   if (!normalized) {
     return null;
@@ -425,6 +438,13 @@ function restoreRequestPayloadFromRetrySnapshot(
   fallbackPayload?: Record<string, unknown>
 ): Record<string, unknown> | undefined {
   if (serializedPayload && typeof serializedPayload === 'string') {
+    if (serializedPayload.length > RETRY_SNAPSHOT_RESTORE_MAX_CHARS) {
+      logRequestExecutorNonBlockingError(
+        'restoreRequestPayloadFromRetrySnapshot.oversized_skip',
+        new Error('serialized retry payload too large'),
+        { payloadLength: serializedPayload.length, maxChars: RETRY_SNAPSHOT_RESTORE_MAX_CHARS }
+      );
+    } else {
     try {
       const parsed = JSON.parse(serializedPayload) as unknown;
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -434,6 +454,7 @@ function restoreRequestPayloadFromRetrySnapshot(
       logRequestExecutorNonBlockingError('restoreRequestPayloadFromRetrySnapshot.parseSerialized', error, {
         payloadLength: serializedPayload.length
       });
+    }
     }
   }
   if (!fallbackPayload || typeof fallbackPayload !== 'object') {

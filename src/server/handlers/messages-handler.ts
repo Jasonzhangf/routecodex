@@ -8,7 +8,8 @@ import {
   logRequestStart,
   logRequestComplete,
   logRequestError,
-  captureClientHeaders
+  captureClientHeaders,
+  captureRawRequestBodyForMetadata
 } from './handler-utils.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 import { parseSseJsonRequest } from '../utils/sse-request-parser.js';
@@ -74,7 +75,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       jsonPayload = (req.body && typeof req.body === 'object'
         ? req.body
         : {}) as MessagesPayload;
-      originalPayload = JSON.parse(JSON.stringify(jsonPayload)) as MessagesPayload;
+      originalPayload = captureRawRequestBodyForMetadata(jsonPayload) as MessagesPayload;
       rawRequestMetadata = originalPayload;
       applySystemPromptOverride(entryEndpoint, jsonPayload);
       pipelineBody = jsonPayload;

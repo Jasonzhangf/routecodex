@@ -38,6 +38,7 @@ type RequestLogMeta = Record<string, unknown> | undefined;
 
 const SHOULD_LOG_HTTP_EVENTS = buildInfo.mode !== 'release'
   || process.env.ROUTECODEX_HTTP_LOG_VERBOSE === '1';
+const RAW_REQUEST_PREVIEW_MAX_ARRAY_ITEMS = 32;
 
 function logHandlerNonBlockingError(operation: string, error: unknown): void {
   const reason = error instanceof Error ? error.message : String(error);
@@ -380,6 +381,36 @@ export function captureClientHeaders(headers: IncomingHttpHeaders | undefined): 
     }
   }
   return result;
+}
+
+export function captureRawRequestBodyForMetadata(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
+  }
+  const source = payload as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  let truncatedAny = false;
+  for (const [key, value] of Object.entries(source)) {
+    if (Array.isArray(value)) {
+      if (value.length > RAW_REQUEST_PREVIEW_MAX_ARRAY_ITEMS) {
+        out[key] = value.slice(0, RAW_REQUEST_PREVIEW_MAX_ARRAY_ITEMS);
+        out[`__${key}_truncated_count`] = value.length - RAW_REQUEST_PREVIEW_MAX_ARRAY_ITEMS;
+        truncatedAny = true;
+      } else {
+        out[key] = value.slice();
+      }
+      continue;
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      out[key] = { ...(value as Record<string, unknown>) };
+      continue;
+    }
+    out[key] = value;
+  }
+  if (truncatedAny) {
+    out.__raw_request_body_truncated = true;
+  }
+  return out;
 }
 
 function normalizeError(error: unknown, requestId: string, endpoint: string): Error & Record<string, unknown> {

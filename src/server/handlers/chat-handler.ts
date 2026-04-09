@@ -8,7 +8,8 @@ import {
   logRequestStart,
   logRequestComplete,
   logRequestError,
-  captureClientHeaders
+  captureClientHeaders,
+  captureRawRequestBodyForMetadata
 } from './handler-utils.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 import { trackClientConnectionState } from '../utils/client-connection-state.js';
@@ -33,7 +34,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       ? req.body
       : {}) as ChatCompletionPayload;
     const isVideoRequest = payloadContainsVideoInput(payload);
-    const originalPayload = JSON.parse(JSON.stringify(payload)) as ChatCompletionPayload;
+    const originalPayload = captureRawRequestBodyForMetadata(payload) as ChatCompletionPayload;
     const clientHeaders = captureClientHeaders(req.headers);
     const clientConnectionState = trackClientConnectionState(req, res);
     const acceptsSse = typeof req.headers['accept'] === 'string'
