@@ -600,16 +600,16 @@ function resolveRecoverableBackoffCapMs(args: {
     || upstreamCode === 'INSUFFICIENT_QUOTA'
     || reason.includes('insufficient_quota')
   ) {
-    return process.env.NODE_ENV === 'test' ? 500 : 4_000;
+    return 0;
   }
-  // ServerTool timeout/失败不应进入超长退避，否则会放大 followup 风暴。
+  // ServerTool timeout/失败直接切 provider 重试，不做额外阻塞。
   if (
     errorCode === 'SERVERTOOL_TIMEOUT'
     || (typeof errorCode === 'string' && errorCode.startsWith('SERVERTOOL_'))
     || (typeof upstreamCode === 'string' && upstreamCode.startsWith('SERVERTOOL_'))
     || reason.includes('[servertool]')
   ) {
-    return process.env.NODE_ENV === 'test' ? 1_500 : 12_000;
+    return 0;
   }
   return process.env.NODE_ENV === 'test' ? 5_000 : 120_000;
 }

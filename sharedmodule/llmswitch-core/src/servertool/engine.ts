@@ -79,9 +79,6 @@ const STOP_MESSAGE_STAGE_TIMEOUT_MS = 900_000;
 const STOP_MESSAGE_LOOP_WARN_THRESHOLD = 5;
 const STOP_MESSAGE_LOOP_FAIL_THRESHOLD = 10;
 const FOLLOWUP_ERROR_REASON_MAX_LENGTH = 220;
-const DEFAULT_SERVERTOOL_TIMEOUT_MS = 120_000;
-const DEFAULT_SERVERTOOL_FOLLOWUP_TIMEOUT_MS = 90_000;
-const MAX_SERVERTOOL_TIMEOUT_MS = 180_000;
 
 function logServerToolNonBlocking(stage: string, error: unknown, details?: Record<string, unknown>): void {
   const message = error instanceof Error ? error.message : String(error ?? 'unknown');
@@ -103,30 +100,22 @@ function parseTimeoutMs(raw: unknown, fallback: number): number {
   return Math.floor(n);
 }
 
-function clampTimeoutMs(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) {
-    return DEFAULT_SERVERTOOL_TIMEOUT_MS;
-  }
-  return Math.max(100, Math.min(MAX_SERVERTOOL_TIMEOUT_MS, Math.floor(value)));
-}
-
 function resolveServerToolTimeoutMs(): number {
-  return clampTimeoutMs(parseTimeoutMs(
+  return parseTimeoutMs(
     process.env.ROUTECODEX_SERVERTOOL_TIMEOUT_MS ||
       process.env.RCC_SERVERTOOL_TIMEOUT_MS ||
       process.env.LLMSWITCH_SERVERTOOL_TIMEOUT_MS,
-    DEFAULT_SERVERTOOL_TIMEOUT_MS
-  ));
+    0
+  );
 }
 
-function resolveServerToolFollowupTimeoutMs(fallback: number): number {
-  const parsed = parseTimeoutMs(
+function resolveServerToolFollowupTimeoutMs(_fallback: number): number {
+  return parseTimeoutMs(
     process.env.ROUTECODEX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS ||
       process.env.RCC_SERVERTOOL_FOLLOWUP_TIMEOUT_MS ||
       process.env.LLMSWITCH_SERVERTOOL_FOLLOWUP_TIMEOUT_MS,
-    Math.min(DEFAULT_SERVERTOOL_FOLLOWUP_TIMEOUT_MS, fallback)
+    0
   );
-  return Math.min(clampTimeoutMs(parsed), clampTimeoutMs(fallback));
 }
 
 function parseBooleanLike(value: unknown): boolean | undefined {
@@ -1975,8 +1964,14 @@ function buildServerToolLoopState(
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return null;
   }
+  const useFlowOnlyAutoLimit =
+    flowId === 'apply_patch_guard'
+    || flowId === 'exec_command_guard'
+    || flowId === 'reasoning_only_continue_flow'
+    || flowId === 'reasoning_stop_guard_flow'
+    || flowId === 'reasoning_stop_continue_flow';
   const trackPayload =
-    typeof flowId === 'string' && flowId.trim() && flowId !== 'stop_message_flow';
+    typeof flowId === 'string' && flowId.trim() && flowId !== 'stop_message_flow' && !useFlowOnlyAutoLimit;
   const payloadHash = trackPayload ? hashPayload(payload) : '__servertool_auto__';
   if (!payloadHash) {
     return null;
