@@ -4,6 +4,7 @@ import path from 'path';
 import { resolveRccSnapshotsDirFromEnv } from '../config/user-data-paths.js';
 import { runtimeFlags } from '../runtime/runtime-flags.js';
 import { shouldCaptureSnapshotStage } from './snapshot-stage-policy.js';
+import { canWriteSnapshotToLocalDisk } from './snapshot-local-disk-gate.js';
 
 export type ServerSnapshotPhase =
   | 'http-request'
@@ -63,7 +64,7 @@ function shouldForceServerSnapshotDualWrite(): boolean {
 function resolveSnapshotFullCapture(): boolean {
   return resolveBoolFromEnv(
     process.env.ROUTECODEX_SNAPSHOT_FULL ?? process.env.RCC_SNAPSHOT_FULL,
-    runtimeFlags.snapshotsEnabled
+    false
   );
 }
 
@@ -468,6 +469,9 @@ export async function writeServerSnapshot(options: {
 
   // 2) fallback 本地文件快照（hook 不可用/失败时）
   try {
+    if (!canWriteSnapshotToLocalDisk(options.requestId, groupRequestId)) {
+      return;
+    }
     const base = resolveSnapshotRoot();
     const folder = mapEndpointToFolder(options.entryEndpoint);
     const requestToken = String(groupRequestId || `req_${Date.now()}`).replace(/[^A-Za-z0-9_.-]/g, '_');

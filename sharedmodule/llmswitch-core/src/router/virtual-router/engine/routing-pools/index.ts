@@ -348,10 +348,6 @@ function requestRequiresSearchRoute(
     return true;
   }
 
-  if (features.hasWebSearchToolDeclared === true) {
-    return true;
-  }
-
   return (features.metadata as any)?.serverToolRequired === true;
 }
 

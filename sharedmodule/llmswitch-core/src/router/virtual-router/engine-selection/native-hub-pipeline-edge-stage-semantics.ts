@@ -163,6 +163,36 @@ export function sanitizeChatCompletionLikeWithNative<T>(candidate: T): T {
   }
 }
 
+export function normalizeOpenaiChatReasoningOutboundWithNative<T>(
+  candidate: T,
+): T {
+  const capability = "normalizeOpenaiChatReasoningOutboundJson";
+  const fail = (reason?: string) => failNativeRequired<T>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail("native disabled");
+  }
+  const fn = readNativeFunction("normalizeOpenaiChatReasoningOutboundJson");
+  if (!fn) {
+    return fail();
+  }
+  const candidateJson = safeStringify(candidate);
+  if (!candidateJson) {
+    return fail("json stringify failed");
+  }
+  try {
+    const raw = fn(candidateJson);
+    if (typeof raw !== "string" || !raw) {
+      return fail("empty result");
+    }
+    const parsed = parseRecord(raw);
+    return (parsed as unknown as T) ?? fail("invalid payload");
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : String(error ?? "unknown");
+    return fail(reason);
+  }
+}
+
 export function stripPrivateFieldsWithNative<T extends Record<string, unknown>>(
   payload: T,
 ): T {

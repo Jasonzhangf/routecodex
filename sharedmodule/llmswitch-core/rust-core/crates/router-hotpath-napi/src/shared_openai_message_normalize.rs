@@ -265,6 +265,9 @@ fn normalize_openai_message(message: &Value, disable_shell_coerce: bool) -> Valu
         return message.clone();
     };
     let mut out = message_obj.clone();
+    if out.get("role").and_then(Value::as_str) == Some("developer") {
+        out.insert("role".to_string(), Value::String("system".to_string()));
+    }
 
     if let Some(content) = out.get("content").cloned() {
         if !content.is_null() && !content.is_string() && !content.is_array() && !content.is_object()
@@ -364,11 +367,15 @@ pub(crate) fn normalize_openai_chat_messages(messages: &Value) -> Value {
         let Some(message_obj) = message.as_object_mut() else {
             continue;
         };
-        let role = message_obj
+        let mut role = message_obj
             .get("role")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_ascii_lowercase();
+        if role == "developer" {
+            message_obj.insert("role".to_string(), Value::String("system".to_string()));
+            role = "system".to_string();
+        }
         if role != "tool" {
             continue;
         }
@@ -488,7 +495,7 @@ pub fn normalize_openai_chat_messages_json(messages_json: String) -> NapiResult<
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_openai_chat_messages, normalize_openai_tool_call};
+    use super::{normalize_openai_chat_messages, normalize_openai_message, normalize_openai_tool_call};
     use serde_json::json;
 
     #[test]
@@ -596,5 +603,24 @@ mod tests {
             out[1]["content"],
             "[RouteCodex] Tool output was empty; execution status unknown."
         );
+    }
+
+    #[test]
+    fn normalize_openai_message_coerces_developer_to_system() {
+        let message = json!({ "role": "developer", "content": "policy" });
+        let out = normalize_openai_message(&message, false);
+        assert_eq!(out["role"], "system");
+        assert_eq!(out["content"], "policy");
+    }
+
+    #[test]
+    fn normalize_openai_chat_messages_coerces_developer_to_system() {
+        let messages = json!([
+          { "role": "developer", "content": "policy" },
+          { "role": "user", "content": "hello" }
+        ]);
+        let out = normalize_openai_chat_messages(&messages);
+        assert_eq!(out[0]["role"], "system");
+        assert_eq!(out[1]["role"], "user");
     }
 }

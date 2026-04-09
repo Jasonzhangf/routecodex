@@ -19,6 +19,7 @@ import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { applyHubFollowupPolicyShadow } from './followup-shadow.js';
 import { buildServerToolFollowupChatPayloadFromInjection, extractCapturedChatSeed } from './handlers/followup-request-builder.js';
 import { sanitizeFollowupText } from './handlers/followup-sanitize.js';
+import { clearReasoningStopState } from './handlers/reasoning-stop-state.js';
 import { findNextUndeliveredDueAtMs, listClockTasks, resolveClockConfig } from './clock/task-store.js';
 import { resolveClockSessionScope } from './clock/session-scope.js';
 import { savePendingServerToolInjection } from './pending-session.js';
@@ -172,6 +173,41 @@ function compactFollowupErrorReason(value: unknown): string | undefined {
     return normalized;
   }
   return `${normalized.slice(0, FOLLOWUP_ERROR_REASON_MAX_LENGTH)}…`;
+}
+
+function isReasoningStopContinueFlow(flowId: unknown): boolean {
+  return typeof flowId === 'string' && flowId.trim() === 'reasoning_stop_continue_flow';
+}
+
+function shouldSoftSkipReasoningStopContinueFollowup(args: {
+  flowId?: string;
+  upstreamCode?: string;
+  upstreamStatus?: number;
+  reason?: string;
+  errorMessage?: string;
+}): boolean {
+  if (!isReasoningStopContinueFlow(args.flowId)) {
+    return false;
+  }
+  const upstreamCode = typeof args.upstreamCode === 'string' ? args.upstreamCode.trim().toUpperCase() : '';
+  const reason = typeof args.reason === 'string' ? args.reason.trim().toLowerCase() : '';
+  const errorMessage = typeof args.errorMessage === 'string' ? args.errorMessage.trim().toLowerCase() : '';
+  const upstreamStatus = typeof args.upstreamStatus === 'number' ? Math.floor(args.upstreamStatus) : undefined;
+  if (upstreamStatus === 400) {
+    return true;
+  }
+  if (upstreamCode === 'INVALID_PARAMETER_ERROR' || upstreamCode === 'HTTP_400') {
+    return true;
+  }
+  if (
+    reason.includes('invalid_parameter_error')
+    || reason.includes('http_400')
+    || reason.includes('http 400')
+    || errorMessage.includes('invalid_parameter_error')
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function extractAppendUserTextFromFollowupPlan(followupPlan: unknown): string | undefined {
@@ -1467,6 +1503,20 @@ export async function runServerToolOrchestration(
           (typeof errorRecord?.upstreamCode === 'string' && errorRecord.upstreamCode.trim())
           || (typeof errorDetails?.upstreamCode === 'string' && errorDetails.upstreamCode.trim())
           || undefined;
+        const upstreamStatus =
+          (typeof errorRecord?.status === 'number' && Number.isFinite(errorRecord.status)
+            ? Math.floor(errorRecord.status)
+            : undefined)
+          || (typeof errorRecord?.statusCode === 'number' && Number.isFinite(errorRecord.statusCode)
+            ? Math.floor(errorRecord.statusCode)
+            : undefined)
+          || (typeof errorDetails?.status === 'number' && Number.isFinite(errorDetails.status)
+            ? Math.floor(errorDetails.status)
+            : undefined)
+          || (typeof errorDetails?.statusCode === 'number' && Number.isFinite(errorDetails.statusCode)
+            ? Math.floor(errorDetails.statusCode)
+            : undefined)
+          || undefined;
         const reason =
           (typeof errorDetails?.reason === 'string' && errorDetails.reason.trim())
           || (typeof errorRecord?.reason === 'string' && errorRecord.reason.trim())
@@ -1476,6 +1526,41 @@ export async function runServerToolOrchestration(
         const compactErrorMessage = compactFollowupErrorReason(
           error instanceof Error ? error.message : String(error ?? 'unknown')
         );
+        if (
+          shouldSoftSkipReasoningStopContinueFollowup({
+            flowId: engineResult.execution.flowId,
+            upstreamCode,
+            upstreamStatus,
+            reason: compactReason,
+            errorMessage: compactErrorMessage
+          })
+        ) {
+          clearReasoningStopState(options.adapterContext);
+          const fallbackExecution = {
+            ...engineResult.execution,
+            context: {
+              ...(engineResult.execution.context ?? {}),
+              reasoning_stop_continue: {
+                skipped: true,
+                reason: compactReason ?? compactErrorMessage ?? 'invalid_parameter_error'
+              }
+            }
+          };
+          const fallbackChat = decorateFinalChatWithServerToolContext(
+            engineResult.finalChatResponse,
+            fallbackExecution
+          );
+          logProgress(5, totalSteps, 'completed (reasoning_stop_continue followup soft-skipped)', {
+            flowId,
+            attempt,
+            reason: compactReason ?? compactErrorMessage
+          });
+          return {
+            chat: fallbackChat,
+            executed: true,
+            flowId: engineResult.execution.flowId
+          };
+        }
         const wrapped = new ProviderProtocolError(
           `[servertool] Followup failed for flow ${engineResult.execution.flowId ?? 'unknown'} ` +
             `(attempt ${attempt}/${maxAttempts})`,
@@ -1497,6 +1582,9 @@ export async function runServerToolOrchestration(
         }
         if (upstreamCode) {
           (wrapped as ProviderProtocolError & { upstreamCode?: string }).upstreamCode = upstreamCode;
+        }
+        if (typeof upstreamStatus === 'number' && upstreamStatus > 0) {
+          (wrapped as ProviderProtocolError & { status?: number }).status = upstreamStatus;
         }
         (wrapped as { cause?: unknown }).cause = error;
         throw wrapped;

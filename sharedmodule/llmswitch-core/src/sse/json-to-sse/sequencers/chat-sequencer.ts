@@ -48,10 +48,14 @@ function validateMessageSequence(message: any, previousMessage?: any): boolean {
 
   // 允许两种有效形态：
   // 1) content 存在（字符串/数组/对象）
-  // 2) 仅工具调用（content 为空，但存在 tool_calls[] 且 finish_reason=tool_calls）
+  // 2) reasoning-only 输出
+  // 3) 仅工具调用（content 为空，但存在 tool_calls[] 且 finish_reason=tool_calls）
   const hasContent = hasMeaningfulContent((message as any).content);
+  const hasReasoning =
+    (typeof (message as any).reasoning_content === 'string' && (message as any).reasoning_content.trim().length > 0)
+    || (typeof (message as any).reasoning === 'string' && (message as any).reasoning.trim().length > 0);
   const hasToolCalls = Array.isArray((message as any).tool_calls) && (message as any).tool_calls.length > 0;
-  if (!hasContent && !hasToolCalls) return false;
+  if (!hasContent && !hasReasoning && !hasToolCalls) return false;
 
   // 不允许 assistant 之后出现 user 倒序
   if (previousMessage?.role === 'assistant' && message.role === 'user') return false;
@@ -224,7 +228,12 @@ export async function* sequenceChatResponse(
     yield* sequenceMessageContent(message, context, config);
 
     // 发送finish_reason事件（若未提供则根据消息推断）
-    yield buildFinishEvent((choice as any).finish_reason || (message?.tool_calls ? 'tool_calls' : 'stop'), context, config);
+    yield buildFinishEvent(
+      (choice as any).finish_reason || (message?.tool_calls ? 'tool_calls' : 'stop'),
+      context,
+      config,
+      response.usage
+    );
 
     // 发送done事件
     yield buildDoneEvent(context, config);

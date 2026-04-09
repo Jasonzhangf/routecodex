@@ -46,6 +46,11 @@ fi
 
 echo "🧹 卸载已有 @jsonstudio/rcc 全局安装（若存在）..."
 npm uninstall -g @jsonstudio/rcc >/dev/null 2>&1 || true
+GLOBAL_NODE_MODULES=$(npm root -g 2>/dev/null || true)
+if [ -n "${GLOBAL_NODE_MODULES:-}" ] && [ -d "${GLOBAL_NODE_MODULES}/@jsonstudio/rcc" ]; then
+  echo "🧹 清理全局目录残留: ${GLOBAL_NODE_MODULES}/@jsonstudio/rcc"
+  rm -rf "${GLOBAL_NODE_MODULES}/@jsonstudio/rcc"
+fi
 
 echo "🌍 全局安装 @jsonstudio/rcc (release)..."
 npm install -g "${RCC_TARBALL}" --no-audit --no-fund
@@ -55,7 +60,7 @@ echo "🔍 验证 rcc 安装..."
 if command -v rcc >/dev/null 2>&1; then
   echo "✅ @jsonstudio/rcc 已全局安装：$(command -v rcc)"
   rcc --version || true
-  node -e "const fs=require('fs');const path=require('path');const cp=require('child_process');const root=cp.execSync('npm root -g').toString().trim();const llmsPath=path.join(root,'@jsonstudio','rcc','node_modules','@jsonstudio','llms');const pkgPath=path.join(llmsPath,'package.json');const link=fs.existsSync(llmsPath)&&fs.lstatSync(llmsPath).isSymbolicLink();const target=link?fs.readlinkSync(llmsPath):'(inline)';const version=fs.existsSync(pkgPath)?JSON.parse(fs.readFileSync(pkgPath,'utf8')).version:'unknown';console.log('🔎 全局 rcc @jsonstudio/llms:',version,'link=',link,'target=',target);"
+  node -e "const fs=require('fs');const path=require('path');const cp=require('child_process');const root=cp.execSync('npm root -g').toString().trim();const llmsPath=path.join(root,'@jsonstudio','rcc','node_modules','@jsonstudio','llms');const pkgPath=path.join(llmsPath,'package.json');if(!fs.existsSync(pkgPath)){console.error('❌ 全局 rcc 缺少内置 @jsonstudio/llms');process.exit(1);}const version=JSON.parse(fs.readFileSync(pkgPath,'utf8')).version||'unknown';const isLink=fs.existsSync(llmsPath)&&fs.lstatSync(llmsPath).isSymbolicLink();console.log('🔎 全局 rcc 内置 @jsonstudio/llms:',version,isLink?'(legacy-symlink-residue)':'(embedded)');"
 else
   echo "❌ 未找到 rcc 命令，请检查 npm 全局安装路径"
   exit 1

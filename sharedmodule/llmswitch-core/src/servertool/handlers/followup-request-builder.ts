@@ -340,10 +340,34 @@ function compactToolContentInMessages(source: JsonObject[], options: { maxChars:
   return messages;
 }
 
-function buildStandardFollowupTools(): JsonObject[] {
+function shouldIncludeReasoningStopToolFromOps(ops: ServerToolFollowupInjectionPlan['ops'] | undefined): boolean {
+  if (!Array.isArray(ops) || ops.length === 0) {
+    return false;
+  }
+  for (const op of ops) {
+    if (!op || typeof op !== 'object') {
+      continue;
+    }
+    if (op.op !== 'append_user_text' && op.op !== 'inject_system_text') {
+      continue;
+    }
+    const text = typeof (op as { text?: unknown }).text === 'string'
+      ? String((op as { text: string }).text).trim().toLowerCase()
+      : '';
+    if (!text) {
+      continue;
+    }
+    if (text.includes('reasoning.stop') || text.includes('stopless')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function buildStandardFollowupTools(options?: { includeReasoningStopTool?: boolean }): JsonObject[] {
   // Keep this list minimal and stable. Used only as a best-effort fallback when a followup hop
   // would otherwise have no tools at all (which can cause tool-based clients to "break" mid-session).
-  return [
+  const tools: JsonObject[] = [
     {
       type: 'function',
       function: {
@@ -400,6 +424,23 @@ function buildStandardFollowupTools(): JsonObject[] {
     {
       type: 'function',
       function: {
+        name: 'apply_patch',
+        description: 'Apply a patch to repository files.',
+        parameters: {
+          type: 'object',
+          properties: {
+            patch: { type: 'string' }
+          },
+          required: ['patch'],
+          additionalProperties: false
+        }
+      }
+    }
+  ] as unknown as JsonObject[];
+  if (options?.includeReasoningStopTool === true) {
+    tools.push({
+      type: 'function',
+      function: {
         name: 'reasoning.stop',
         description:
           'Structured stop self-check gate. Stop is allowed only when either: (A) task is completed with completion_evidence; or (B) all feasible attempts are exhausted and blocked, with cannot_complete_reason + blocking_evidence + attempts_exhausted=true. Required: task_goal, is_completed. If not completed but a concrete next action exists, fill next_step and continue instead of stopping.',
@@ -418,26 +459,15 @@ function buildStandardFollowupTools(): JsonObject[] {
           additionalProperties: false
         }
       }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'apply_patch',
-        description: 'Apply a patch to repository files.',
-        parameters: {
-          type: 'object',
-          properties: {
-            patch: { type: 'string' }
-          },
-          required: ['patch'],
-          additionalProperties: false
-        }
-      }
-    }
-  ] as unknown as JsonObject[];
+    } as unknown as JsonObject);
+  }
+  return tools;
 }
 
-function ensureStandardToolsIfMissing(current: JsonObject[] | undefined): JsonObject[] {
+function ensureStandardToolsIfMissing(
+  current: JsonObject[] | undefined,
+  options?: { includeReasoningStopTool?: boolean }
+): JsonObject[] {
   const existing = Array.isArray(current) ? (cloneJson(current) as JsonObject[]) : [];
   const seen = new Set<string>();
   for (const tool of existing) {
@@ -446,7 +476,7 @@ function ensureStandardToolsIfMissing(current: JsonObject[] | undefined): JsonOb
     const name = fn && typeof fn === 'object' && typeof fn.name === 'string' ? String(fn.name).trim() : '';
     if (name) seen.add(name);
   }
-  for (const tool of buildStandardFollowupTools()) {
+  for (const tool of buildStandardFollowupTools(options)) {
     const fn = (tool as any).function;
     const name = fn && typeof fn === 'object' && typeof fn.name === 'string' ? String(fn.name).trim() : '';
     if (!name) continue;
@@ -489,6 +519,21 @@ export function buildServerToolFollowupChatPayloadFromInjection(args: {
   // Followup is a normal request hop: inherit tool schema from the captured request and
   // let compat/tool-governance apply standard sanitization rules.
   let tools: JsonObject[] | undefined = Array.isArray(seed.tools) ? (cloneJson(seed.tools) as JsonObject[]) : undefined;
+  const includeReasoningStopTool =
+    shouldIncludeReasoningStopToolFromOps(ops)
+    || Boolean(
+      Array.isArray(tools)
+      && tools.some((tool) => {
+        if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+          return false;
+        }
+        const fn = (tool as any).function;
+        const name = fn && typeof fn === 'object' && typeof fn.name === 'string'
+          ? String(fn.name).trim().toLowerCase()
+          : '';
+        return name === 'reasoning.stop';
+      })
+    );
   const parameters = seed.parameters ? (cloneJson(seed.parameters) as Record<string, unknown>) : undefined;
 
   for (const op of ops) {
@@ -498,7 +543,7 @@ export function buildServerToolFollowupChatPayloadFromInjection(args: {
       continue;
     }
     if (op.op === 'ensure_standard_tools') {
-      tools = ensureStandardToolsIfMissing(tools);
+      tools = ensureStandardToolsIfMissing(tools, { includeReasoningStopTool });
       continue;
     }
     if (op.op === 'trim_openai_messages') {

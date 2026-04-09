@@ -474,14 +474,16 @@ fn validate_chat_envelope(
             .get("role")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let valid_role = matches!(role, "system" | "user" | "assistant" | "tool");
+        let valid_role = matches!(role, "system" | "developer" | "user" | "assistant" | "tool");
         if !valid_role {
             return Err(build_validation_error(
                 stage,
                 direction,
                 "message_role",
-                format!("messages[{index}].role must be one of system, user, assistant, tool")
-                    .as_str(),
+                format!(
+                    "messages[{index}].role must be one of system, developer, user, assistant, tool (got \"{role}\")"
+                )
+                .as_str(),
                 source,
             ));
         }
@@ -534,4 +536,52 @@ pub fn validate_chat_envelope_json(
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     validate_chat_envelope(&chat, stage.as_str(), direction.as_str(), source.as_deref())?;
     serde_json::to_string(&true).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_chat_envelope;
+    use serde_json::json;
+
+    #[test]
+    fn validate_chat_envelope_accepts_developer_role() {
+        let chat = json!({
+          "messages": [
+            { "role": "developer", "content": "you are strict" },
+            { "role": "user", "content": "hello" }
+          ],
+          "parameters": {
+            "model": "gpt-5"
+          },
+          "metadata": {
+            "context": {}
+          }
+        });
+        let result = validate_chat_envelope(&chat, "req_inbound", "request", Some("test"));
+        assert!(
+            result.is_ok(),
+            "{}",
+            result
+                .err()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_chat_envelope_rejects_unknown_role() {
+        let chat = json!({
+          "messages": [
+            { "role": "foobar", "content": "hi" }
+          ],
+          "parameters": {
+            "model": "gpt-5"
+          },
+          "metadata": {
+            "context": {}
+          }
+        });
+        let result = validate_chat_envelope(&chat, "req_inbound", "request", Some("test"));
+        assert!(result.is_err());
+    }
 }

@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::hub_reasoning_tool_normalizer::{
     build_message_reasoning_value, collect_reasoning_content_segments,
     collect_reasoning_summary_segments, normalize_message_reasoning_ssot,
+    project_message_reasoning_text,
 };
 use crate::shared_responses_tool_utils::strip_internal_tooling_metadata_impl;
 
@@ -244,6 +245,136 @@ fn sanitize_chat_completion_like(candidate: &Value) -> Option<Value> {
         .unwrap_or(false)
     {
         row.remove("usage");
+    }
+    Some(Value::Object(row))
+}
+
+fn derive_reasoning_details_from_payload(reasoning: &Value) -> Vec<Value> {
+    let mut details: Vec<Value> = Vec::new();
+    let Some(reasoning_row) = reasoning.as_object() else {
+        return details;
+    };
+
+    if let Some(summary_items) = reasoning_row.get("summary").and_then(Value::as_array) {
+        for entry in summary_items {
+            let Some(entry_row) = entry.as_object() else {
+                continue;
+            };
+            let text = entry_row
+                .get("text")
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            let Some(text) = text else {
+                continue;
+            };
+            details.push(Value::Object(Map::from_iter([
+                (
+                    "type".to_string(),
+                    Value::String(
+                        entry_row
+                            .get("type")
+                            .and_then(Value::as_str)
+                            .map(|value| value.trim().to_string())
+                            .filter(|value| !value.is_empty())
+                            .unwrap_or_else(|| "summary_text".to_string()),
+                    ),
+                ),
+                ("text".to_string(), Value::String(text)),
+            ])));
+        }
+    }
+
+    if let Some(content_items) = reasoning_row.get("content").and_then(Value::as_array) {
+        for entry in content_items {
+            let Some(entry_row) = entry.as_object() else {
+                continue;
+            };
+            let text = entry_row
+                .get("text")
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            let Some(text) = text else {
+                continue;
+            };
+            details.push(Value::Object(Map::from_iter([
+                (
+                    "type".to_string(),
+                    Value::String(
+                        entry_row
+                            .get("type")
+                            .and_then(Value::as_str)
+                            .map(|value| value.trim().to_string())
+                            .filter(|value| !value.is_empty())
+                            .unwrap_or_else(|| "reasoning_text".to_string()),
+                    ),
+                ),
+                ("text".to_string(), Value::String(text)),
+            ])));
+        }
+    }
+
+    if let Some(encrypted_content) = reasoning_row
+        .get("encrypted_content")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        details.push(Value::Object(Map::from_iter([
+            (
+                "type".to_string(),
+                Value::String("reasoning.encrypted_content".to_string()),
+            ),
+            (
+                "encrypted_content".to_string(),
+                Value::String(encrypted_content),
+            ),
+        ])));
+    }
+
+    details
+}
+
+fn normalize_client_openai_chat_message_reasoning(message: &mut Map<String, Value>) {
+    normalize_message_reasoning_ssot(message);
+
+    let reasoning_text = message
+        .get("reasoning")
+        .and_then(project_message_reasoning_text)
+        .or_else(|| resolve_non_empty_string(message.get("reasoning_content")));
+
+    let reasoning_details = message
+        .get("reasoning")
+        .map(derive_reasoning_details_from_payload)
+        .unwrap_or_default();
+
+    if let Some(text) = reasoning_text {
+        message.insert("reasoning".to_string(), Value::String(text.clone()));
+        message.insert("reasoning_content".to_string(), Value::String(text));
+    } else {
+        message.remove("reasoning");
+        message.remove("reasoning_content");
+    }
+
+    if !reasoning_details.is_empty() {
+        message.insert("reasoning_details".to_string(), Value::Array(reasoning_details));
+    } else {
+        message.remove("reasoning_details");
+    }
+}
+
+fn normalize_openai_chat_reasoning_outbound(candidate: &Value) -> Option<Value> {
+    let mut row = sanitize_chat_completion_like(candidate)?.as_object()?.clone();
+    if let Some(choices) = row.get_mut("choices").and_then(Value::as_array_mut) {
+        for choice in choices.iter_mut() {
+            let Some(choice_row) = choice.as_object_mut() else {
+                continue;
+            };
+            if let Some(message) = choice_row.get_mut("message").and_then(Value::as_object_mut) {
+                normalize_client_openai_chat_message_reasoning(message);
+            }
+        }
     }
     Some(Value::Object(row))
 }
@@ -2785,6 +2916,14 @@ pub fn sanitize_chat_completion_like_json(candidate_json: String) -> NapiResult<
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi(js_name = "normalizeOpenaiChatReasoningOutboundJson")]
+pub fn normalize_openai_chat_reasoning_outbound_json(candidate_json: String) -> NapiResult<String> {
+    let candidate: Value = serde_json::from_str(&candidate_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = normalize_openai_chat_reasoning_outbound(&candidate);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[napi]
 pub fn resolve_anthropic_stop_reason_json(stop_reason_json: String) -> NapiResult<String> {
     let stop_reason: Value = serde_json::from_str(&stop_reason_json)
@@ -2960,6 +3099,53 @@ pub fn build_responses_payload_from_chat_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_openai_chat_reasoning_outbound_maps_structured_reasoning_for_clients() {
+        let payload = serde_json::json!({
+            "id": "chatcmpl_reasoning_client",
+            "object": "chat.completion",
+            "created": 1,
+            "model": "qwen3.6-plus",
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "reasoning": {
+                            "summary": [{ "type": "summary_text", "text": "先确认目标" }],
+                            "content": [{ "type": "reasoning_text", "text": "再检查代码路径" }],
+                            "encrypted_content": "opaque-sig"
+                        }
+                    }
+                }
+            ]
+        });
+
+        let output = normalize_openai_chat_reasoning_outbound(&payload).expect("normalized");
+        let message = &output["choices"][0]["message"];
+        assert_eq!(
+            message["reasoning"],
+            Value::String("再检查代码路径".to_string())
+        );
+        assert_eq!(
+            message["reasoning_content"],
+            Value::String("再检查代码路径".to_string())
+        );
+        let details = message["reasoning_details"]
+            .as_array()
+            .cloned()
+            .expect("reasoning details");
+        assert_eq!(details.len(), 3);
+        assert_eq!(details[0]["type"], Value::String("summary_text".to_string()));
+        assert_eq!(details[1]["type"], Value::String("reasoning_text".to_string()));
+        assert_eq!(
+            details[2]["type"],
+            Value::String("reasoning.encrypted_content".to_string())
+        );
+    }
 
     #[test]
     fn build_responses_payload_from_chat_filters_executed_tool_outputs_from_required_action() {

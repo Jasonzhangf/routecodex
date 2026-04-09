@@ -297,9 +297,11 @@ function resolveNormalizedChatUsage(
     totalTokens = promptTokens + completionTokens;
   }
   if (promptTokens !== undefined) {
+    usageRecord.input_tokens = promptTokens;
     usageRecord.prompt_tokens = promptTokens;
   }
   if (completionTokens !== undefined) {
+    usageRecord.output_tokens = completionTokens;
     usageRecord.completion_tokens = completionTokens;
   }
   if (totalTokens !== undefined) {
@@ -521,16 +523,7 @@ export function sendPipelineResponse(
       entryEndpoint,
       usageFallback: result.usageLogInfo?.usage
     });
-    if (streamUsage.usage) {
-      try {
-        res.setHeader('x-routecodex-usage', JSON.stringify(streamUsage.usage));
-      } catch (error) {
-        logResponseNonBlockingError(`response.sse.usage_header:${requestLabel}`, error);
-      }
-      logPipelineStage('response.chat_usage.stream_header', requestLabel, {
-        source: streamUsage.source
-      });
-    }
+    void streamUsage;
     res.status(status);
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');

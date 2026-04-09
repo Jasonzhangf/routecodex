@@ -24,6 +24,7 @@ export type {
   ChatCompletionRequest,
   ChatCompletionResponse,
   ChatCompletionChunk,
+  ChatUsage,
   ChatMessage,
   ChatJsonToSseOptions,
   SseToChatJsonOptions,

@@ -319,6 +319,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "repairArgumentsToStringJsonishJson",
   "runBridgeActionPipelineJson",
   "sanitizeChatCompletionLikeJson",
+  "normalizeOpenaiChatReasoningOutboundJson",
   "sanitizeFormatEnvelopeJson",
   "sanitizeReasoningTaggedTextJson",
   "ensureBridgeInstructionsJson",

@@ -82,6 +82,14 @@ export function sanitizeChatProcessRequest(
   request: StandardizedRequest
 ): StandardizedRequest {
   const sanitized = stripGenericMarkersFromRequest(request);
+
+  // Jason: Force enable thinking for all chat requests regardless of input
+  const params = sanitized.parameters || {};
+  if (!params.thinking && !params.thinking_config) {
+    params.thinking = { mode: 'enabled', budget_tokens: 4096 };
+    params.thinking_config = { mode: 'enabled', budget_tokens: 4096 };
+  }
+  sanitized.parameters = params;
   if (!Array.isArray(sanitized.messages) || !sanitized.messages.length) {
     return sanitized;
   }

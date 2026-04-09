@@ -15,7 +15,8 @@ import type {
   ChatChoiceBuilder,
   ChatToolCallChunk,
   ChatMessage,
-  ChatToolCall
+  ChatToolCall,
+  ChatUsage
 } from '../types/index.js';
 import {
   TimeUtils,
@@ -24,6 +25,47 @@ import {
 import { normalizeMessageReasoningTools } from '../../conversion/shared/reasoning-tool-normalizer.js';
 import { normalizeChatMessageContent } from '../../conversion/shared/chat-output-normalizer.js';
 import { dispatchReasoning } from '../shared/reasoning-dispatcher.js';
+
+function readNonNegativeInteger(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+    return Math.round(value);
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return Math.round(parsed);
+    }
+  }
+  return undefined;
+}
+
+function normalizeChatUsage(usage: unknown): ChatUsage | null {
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) {
+    return null;
+  }
+  const record = usage as Record<string, unknown>;
+  const promptTokens = readNonNegativeInteger(
+    record.prompt_tokens ?? record.input_tokens ?? record.promptTokens ?? record.inputTokens
+  );
+  const completionTokens = readNonNegativeInteger(
+    record.completion_tokens ?? record.output_tokens ?? record.completionTokens ?? record.outputTokens
+  );
+  const totalTokens = readNonNegativeInteger(
+    record.total_tokens ??
+      record.totalTokens ??
+      ((promptTokens ?? 0) + (completionTokens ?? 0) > 0
+        ? (promptTokens ?? 0) + (completionTokens ?? 0)
+        : undefined)
+  );
+  if (promptTokens === undefined || completionTokens === undefined || totalTokens === undefined) {
+    return null;
+  }
+  return {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: totalTokens
+  };
+}
 
 /**
  * Chat SSE到JSON转换器
@@ -349,6 +391,12 @@ export class ChatSseToJsonConverter {
           context.currentResponse.model = chunk.model;
         }
 
+        const normalizedUsage = normalizeChatUsage(chunk.usage);
+        if (normalizedUsage) {
+          context.currentResponse.usage = normalizedUsage;
+          context.eventStats.totalTokens = normalizedUsage.total_tokens;
+        }
+
         // 处理choices
         if (chunk.choices && Array.isArray(chunk.choices)) {
           for (const choice of chunk.choices) {
@@ -611,8 +659,8 @@ export class ChatSseToJsonConverter {
     }
 
     // 处理reasoning
-    if (delta.reasoning) {
-      const chunk = delta.reasoning;
+    if (delta.reasoning_content || delta.reasoning) {
+      const chunk = delta.reasoning_content || delta.reasoning || '';
       messageBuilder.reasoningContent = (messageBuilder.reasoningContent || '') + chunk;
       choiceBuilder.accumulatedContent += chunk;
     }
@@ -899,6 +947,7 @@ export class ChatSseToJsonConverter {
       object: 'chat.completion',
       created: context.currentResponse.created || 0,
       model: context.currentResponse.model,
+      usage: this.buildUsageInfo(context) || undefined,
       choices: choices.map(choice => ({
         ...choice,
         // 确保message对象存在
@@ -941,8 +990,16 @@ export class ChatSseToJsonConverter {
    * 构建使用量信息
    */
   private buildUsageInfo(_context: SseToChatJsonContext): ChatCompletionResponse['usage'] | null {
-    // 这里可以基于token计数来计算usage
-    // 暂时返回null，后续可以实现更精确的token计数
+    const directUsage = normalizeChatUsage(_context.currentResponse.usage);
+    if (directUsage) {
+      return directUsage;
+    }
+    for (let index = _context.aggregatedChunks.length - 1; index >= 0; index--) {
+      const usage = normalizeChatUsage(_context.aggregatedChunks[index]?.usage);
+      if (usage) {
+        return usage;
+      }
+    }
     return null;
   }
 

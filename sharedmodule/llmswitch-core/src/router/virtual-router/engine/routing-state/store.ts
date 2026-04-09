@@ -115,6 +115,7 @@ export function getRoutingInstructionState(
       existing.stopMessageAiMode = merged.stopMessageAiMode;
       existing.stopMessageAiSeedPrompt = merged.stopMessageAiSeedPrompt;
       existing.stopMessageAiHistory = merged.stopMessageAiHistory;
+      existing.reasoningStopMode = merged.reasoningStopMode;
       existing.reasoningStopArmed = merged.reasoningStopArmed;
       existing.reasoningStopSummary = merged.reasoningStopSummary;
       existing.reasoningStopUpdatedAt = merged.reasoningStopUpdatedAt;
@@ -154,6 +155,7 @@ export function getRoutingInstructionState(
       stopMessageAiMode: undefined,
       stopMessageAiSeedPrompt: undefined,
       stopMessageAiHistory: undefined,
+      reasoningStopMode: undefined,
       reasoningStopArmed: undefined,
       reasoningStopSummary: undefined,
       reasoningStopUpdatedAt: undefined,
@@ -185,6 +187,7 @@ function isRoutingStateEmpty(state: RoutingInstructionState): boolean {
     (typeof state.stopMessageStageMode !== 'string' || !state.stopMessageStageMode.trim()) &&
     (typeof state.stopMessageAiMode !== 'string' || !state.stopMessageAiMode.trim());
   const noReasoningStop =
+    (typeof state.reasoningStopMode !== 'string' || !state.reasoningStopMode.trim()) &&
     state.reasoningStopArmed !== true &&
     (typeof state.reasoningStopSummary !== 'string' || !state.reasoningStopSummary.trim()) &&
     (typeof state.reasoningStopUpdatedAt !== 'number' || !Number.isFinite(state.reasoningStopUpdatedAt));
@@ -229,6 +232,7 @@ export function persistRoutingInstructionState(
     (typeof state.stopMessageUsed === 'number' && Number.isFinite(state.stopMessageUsed)) ||
     Boolean(state.stopMessageStageMode && state.stopMessageStageMode.trim()) ||
     Boolean(state.stopMessageAiMode && state.stopMessageAiMode.trim()) ||
+    Boolean(state.reasoningStopMode && state.reasoningStopMode.trim()) ||
     state.reasoningStopArmed === true ||
     Boolean(state.reasoningStopSummary && state.reasoningStopSummary.trim()) ||
     (typeof state.reasoningStopUpdatedAt === 'number' && Number.isFinite(state.reasoningStopUpdatedAt)) ||

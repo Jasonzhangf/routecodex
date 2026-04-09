@@ -2,7 +2,7 @@ import type { JsonObject, JsonValue } from '../../conversion/hub/types/json.js';
 import type { ServerToolHandler, ServerToolHandlerPlan, ToolCall } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
 import { cloneJson } from '../server-side-tools.js';
-import { armReasoningStopState } from './reasoning-stop-state.js';
+import { armReasoningStopState, readReasoningStopMode, type ReasoningStopMode } from './reasoning-stop-state.js';
 
 const FLOW_ID = 'reasoning_stop_flow';
 const TOOL_NAME = 'reasoning.stop';
@@ -15,6 +15,8 @@ type ReasoningStopPayload = {
   blockingEvidence: string;
   attemptsExhausted?: boolean;
   nextStep: string;
+  userInputRequired?: boolean;
+  userQuestion: string;
 };
 
 function parseToolArguments(toolCall: ToolCall): Record<string, unknown> {
@@ -66,7 +68,7 @@ function readBool(record: Record<string, unknown>, keys: string[]): boolean | un
   return undefined;
 }
 
-function normalizeReasoningStopPayload(args: Record<string, unknown>): {
+function normalizeReasoningStopPayload(args: Record<string, unknown>, mode: ReasoningStopMode): {
   ok: true;
   payload: ReasoningStopPayload;
 } | {
@@ -119,6 +121,16 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>): {
     'plan_next_step',
     'next_plan'
   ]);
+  const userInputRequired = readBool(args, [
+    'user_input_required',
+    'userInputRequired'
+  ]);
+  const userQuestion = readText(args, [
+    'user_question',
+    'userQuestion',
+    'question_for_user',
+    'questionForUser'
+  ]);
 
   if (completed && !completionEvidence) {
     return {
@@ -127,21 +139,51 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>): {
       message: 'reasoning.stop requires completion_evidence when is_completed=true.'
     };
   }
-  if (!completed && !cannotCompleteReason && !nextStep) {
+  if (completed && userInputRequired === true) {
+    return {
+      ok: false,
+      code: 'USER_INPUT_CONFLICT_WITH_COMPLETED',
+      message: 'reasoning.stop cannot set user_input_required=true when is_completed=true.'
+    };
+  }
+  if (!completed && userInputRequired === true) {
+    if (mode === 'endless') {
+      return {
+        ok: false,
+        code: 'USER_INPUT_NOT_ALLOWED_IN_ENDLESS',
+        message: 'reasoning.stop in stopless:endless mode cannot stop for user_input_required=true.'
+      };
+    }
+    if (!cannotCompleteReason) {
+      return {
+        ok: false,
+        code: 'CANNOT_COMPLETE_REASON_REQUIRED_FOR_USER_INPUT',
+        message: 'reasoning.stop requires cannot_complete_reason when user_input_required=true.'
+      };
+    }
+    if (!userQuestion) {
+      return {
+        ok: false,
+        code: 'USER_QUESTION_REQUIRED',
+        message: 'reasoning.stop requires user_question when user_input_required=true.'
+      };
+    }
+  }
+  if (!completed && userInputRequired !== true && !cannotCompleteReason && !nextStep) {
     return {
       ok: false,
       code: 'NEXT_STEP_OR_CANNOT_COMPLETE_REQUIRED',
       message: 'reasoning.stop requires next_step or cannot_complete_reason when is_completed=false.'
     };
   }
-  if (!completed && cannotCompleteReason && !nextStep && attemptsExhausted !== true) {
+  if (!completed && userInputRequired !== true && cannotCompleteReason && !nextStep && attemptsExhausted !== true) {
     return {
       ok: false,
       code: 'ATTEMPTS_EXHAUSTED_REQUIRED',
       message: 'reasoning.stop requires attempts_exhausted=true when stopping with cannot_complete_reason.'
     };
   }
-  if (!completed && cannotCompleteReason && !nextStep && !blockingEvidence) {
+  if (!completed && userInputRequired !== true && cannotCompleteReason && !nextStep && !blockingEvidence) {
     return {
       ok: false,
       code: 'BLOCKING_EVIDENCE_REQUIRED',
@@ -158,7 +200,9 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>): {
       cannotCompleteReason,
       blockingEvidence,
       ...(typeof attemptsExhausted === 'boolean' ? { attemptsExhausted } : {}),
-      nextStep
+      nextStep,
+      ...(typeof userInputRequired === 'boolean' ? { userInputRequired } : {}),
+      userQuestion
     }
   };
 }
@@ -171,6 +215,12 @@ function buildSummary(payload: ReasoningStopPayload): string {
   if (payload.completed) {
     lines.push(`完成证据: ${payload.completionEvidence}`);
   } else {
+    if (typeof payload.userInputRequired === 'boolean') {
+      lines.push(`需用户参与: ${payload.userInputRequired ? '是' : '否'}`);
+    }
+    if (payload.userQuestion) {
+      lines.push(`用户问题: ${payload.userQuestion}`);
+    }
     if (payload.cannotCompleteReason) {
       if (typeof payload.attemptsExhausted === 'boolean') {
         lines.push(`已穷尽可行尝试: ${payload.attemptsExhausted ? '是' : '否'}`);
@@ -220,7 +270,8 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
   }
 
   const parsed = parseToolArguments(toolCall);
-  const normalized = normalizeReasoningStopPayload(parsed);
+  const mode = readReasoningStopMode(ctx.adapterContext);
+  const normalized = normalizeReasoningStopPayload(parsed, mode);
 
   if (normalized.ok === false) {
     return {

@@ -72,4 +72,21 @@ describe('qwen profile request sanitization', () => {
     expect(body.messages[2]?.content?.[0]?.text).toBe('JAVA_HOME=');
     expect(body.messages[2]?.tool_call_id).toBeUndefined();
   });
+
+  test('clamps oversized max_tokens for qwen oauth followups', () => {
+    const body = qwenFamilyProfile.buildRequestBody?.({
+      request: {
+        metadata: { authType: 'qwen-oauth' }
+      } as any,
+      runtimeMetadata: { authType: 'qwen-oauth' } as any,
+      defaultBody: {
+        model: 'qwen3.6-plus',
+        max_tokens: 128000,
+        messages: [{ role: 'user', content: 'continue' }]
+      } as any
+    } as any) as any;
+
+    expect(body?.model).toBe('coder-model');
+    expect(body?.max_tokens).toBe(65536);
+  });
 });

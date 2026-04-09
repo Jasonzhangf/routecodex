@@ -8,6 +8,7 @@ import {
   applyClientPassthroughPatchWithNative,
   buildResponsesPayloadFromChatWithNative
 } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
+import { normalizeOpenaiChatReasoningOutboundWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js';
 import {
   resolveAliasMapFromSemantics,
   resolveClientToolsRawFromSemantics
@@ -355,7 +356,7 @@ export function buildClientPayloadForProtocol(options: ClientRemapProtocolSwitch
   let clientPayload: JsonObject;
   const toolsRaw = resolveClientToolsRawFromSemantics(options.requestSemantics) as BridgeToolDefinition[] | undefined;
   if (options.clientProtocol === 'openai-chat') {
-    clientPayload = options.payload;
+    clientPayload = normalizeOpenaiChatReasoningOutboundWithNative(options.payload) as JsonObject;
   } else if (options.clientProtocol === 'anthropic-messages') {
     clientPayload = buildAnthropicResponseFromChat(options.payload, {
       aliasMap: resolveAliasMapFromSemantics(options.requestSemantics)

@@ -7,6 +7,7 @@ import { buildInfo } from '../../../build-info.js';
 import { resolveRccSnapshotsDirFromEnv } from '../../../config/user-data-paths.js';
 import { runtimeFlags } from '../../../runtime/runtime-flags.js';
 import { shouldCaptureSnapshotStage } from '../../../utils/snapshot-stage-policy.js';
+import { canWriteSnapshotToLocalDisk } from '../../../utils/snapshot-local-disk-gate.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import { redactSensitiveData } from '../../../utils/sensitive-redaction.js';
 import {
@@ -78,7 +79,7 @@ function isLargeHistoryPath(pathSegments: string[]): boolean {
 function resolveSnapshotFullCapture(): boolean {
   return resolveBoolFromEnv(
     process.env.ROUTECODEX_SNAPSHOT_FULL ?? process.env.RCC_SNAPSHOT_FULL,
-    runtimeFlags.snapshotsEnabled
+    false
   );
 }
 
@@ -771,11 +772,14 @@ export async function writeProviderRetrySnapshot(options: {
       verbosity: 'verbose'
     });
     return;
-  } catch (error) {
-    logSnapshotNonBlockingError(`writeSnapshotViaHooks(retry):${stage}`, error);
-    try {
-      const dir = path.join(resolveSnapshotBase(), folder, groupRequestId);
-      await ensureDir(dir);
+    } catch (error) {
+      logSnapshotNonBlockingError(`writeSnapshotViaHooks(retry):${stage}`, error);
+      try {
+        if (!canWriteSnapshotToLocalDisk(options.requestId, options.clientRequestId)) {
+          return;
+        }
+        const dir = path.join(resolveSnapshotBase(), folder, groupRequestId);
+        await ensureDir(dir);
       const safeStage = stage.replace(/[^\w.-]/g, '_') || 'snapshot';
       await writeUniqueFile(dir, `${safeStage}.json`, JSON.stringify(payload, null, 2));
     } catch (fallbackError) {
@@ -802,6 +806,9 @@ export async function writeRepairFeedbackSnapshot(options: {
     // const requestId = normalizeRequestId(options.requestId);
     const { folder } = resolveEndpoint(options.entryEndpoint);
     const groupRequestId = normalizeRequestId(options.groupRequestId || options.requestId);
+    if (!canWriteSnapshotToLocalDisk(options.requestId, groupRequestId)) {
+      return;
+    }
     const dir = path.join(resolveSnapshotBase(), folder, groupRequestId);
     await ensureDir(dir);
     const payload = {
@@ -876,6 +883,9 @@ export async function writeClientSnapshot(options: {
       return;
     } catch (error) {
       logSnapshotNonBlockingError(`writeSnapshotViaHooks(client):${requestId}`, error);
+      if (!canWriteSnapshotToLocalDisk(requestId, groupRequestId)) {
+        return;
+      }
       const dir = path.join(resolveSnapshotBase(), folder, groupRequestId);
       await ensureDir(dir);
       await writeUniqueFile(dir, `${stage}.json`, JSON.stringify(payload, null, 2));

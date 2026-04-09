@@ -14,6 +14,7 @@ const DEFAULT_QWEN_CODE_UA_VERSION = '0.10.3';
 const QWEN_OAUTH_AUTH_TYPE = 'qwen-oauth';
 const QWEN_OAUTH_CODER_MODEL = 'coder-model';
 const QWEN_OAUTH_VISION_MODEL = 'vision-model';
+const QWEN_OAUTH_MAX_TOKENS = 65536;
 const QWEN_WEB_SEARCH_ENDPOINT = '/api/v1/indices/plugin/web_search';
 const QWEN_STAINLESS_RUNTIME_VERSION = 'v22.17.0';
 const QWEN_STAINLESS_PACKAGE_VERSION = '5.11.0';
@@ -419,6 +420,24 @@ function resolveQwenOAuthModel(requestedModel: string): string {
   return QWEN_OAUTH_CODER_MODEL;
 }
 
+function clampQwenOAuthMaxTokens(body: UnknownRecord): void {
+  const clampValue = (key: 'max_tokens' | 'max_output_tokens') => {
+    const raw = body[key];
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw > QWEN_OAUTH_MAX_TOKENS) {
+      body[key] = QWEN_OAUTH_MAX_TOKENS;
+      return;
+    }
+    if (typeof raw === 'string') {
+      const parsed = Number(raw.trim());
+      if (Number.isFinite(parsed) && parsed > QWEN_OAUTH_MAX_TOKENS) {
+        body[key] = QWEN_OAUTH_MAX_TOKENS;
+      }
+    }
+  };
+  clampValue('max_tokens');
+  clampValue('max_output_tokens');
+}
+
 export const qwenFamilyProfile: ProviderFamilyProfile = {
   id: 'qwen/default',
   providerFamily: 'qwen',
@@ -450,6 +469,7 @@ export const qwenFamilyProfile: ProviderFamilyProfile = {
     if (resolvedModel && resolvedModel !== rawModel) {
       requestBody.model = resolvedModel;
     }
+    clampQwenOAuthMaxTokens(requestBody);
     normalizeQwenOAuthMessages(requestBody);
     return body;
   },

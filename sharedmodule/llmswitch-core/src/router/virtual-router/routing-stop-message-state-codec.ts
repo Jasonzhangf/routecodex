@@ -8,6 +8,12 @@ export const DEFAULT_STOP_MESSAGE_MAX_REPEATS = 10;
 
 export function serializeStopMessageState(state: RoutingInstructionState): Record<string, unknown> {
   const out = serializeStopMessageStateWithNative(state);
+  if (
+    typeof state.reasoningStopMode === 'string' &&
+    (state.reasoningStopMode === 'on' || state.reasoningStopMode === 'off' || state.reasoningStopMode === 'endless')
+  ) {
+    out.reasoningStopMode = state.reasoningStopMode;
+  }
   if (typeof state.reasoningStopArmed === 'boolean') {
     out.reasoningStopArmed = state.reasoningStopArmed;
   }
@@ -71,6 +77,12 @@ function deserializeStopMessageStateFallback(
   const history = normalizeStopMessageAiHistoryEntries(data.stopMessageAiHistory);
   if (history.length > 0) {
     state.stopMessageAiHistory = history;
+  }
+  if (typeof data.reasoningStopMode === 'string') {
+    const normalizedMode = data.reasoningStopMode.trim().toLowerCase();
+    if (normalizedMode === 'on' || normalizedMode === 'off' || normalizedMode === 'endless') {
+      state.reasoningStopMode = normalizedMode as 'on' | 'off' | 'endless';
+    }
   }
   if (typeof data.reasoningStopArmed === 'boolean') {
     state.reasoningStopArmed = data.reasoningStopArmed;

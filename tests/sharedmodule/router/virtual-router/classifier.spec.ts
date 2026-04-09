@@ -62,7 +62,8 @@ describe('RoutingClassifier user overrides', () => {
       buildFeatures({
         latestMessageFromUser: true,
         hasTools: true,
-        hasWebTool: true
+        hasWebTool: true,
+        hasWebSearchToolDeclared: true
       })
     );
     expect(result.routeName).toBe('thinking');

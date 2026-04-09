@@ -68,6 +68,7 @@ export interface ChatDelta {
   role?: 'system' | 'user' | 'assistant' | 'tool';
   content?: string | null;
   reasoning?: string;
+  reasoning_content?: string;
   function_call?: ChatFunctionCall;
   tool_calls?: ChatToolCallChunk[];
 }

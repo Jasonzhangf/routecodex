@@ -82,6 +82,45 @@ describe('resp_outbound stages snapshot payloads', () => {
     });
   });
 
+  it('normalizes structured reasoning for openai-chat client outbound', () => {
+    const clientPayload = runRespOutboundStage1ClientRemap({
+      payload: {
+        id: 'chatcmpl_reasoning_outbound',
+        object: 'chat.completion',
+        created: 1730000001,
+        model: 'qwen3.6-plus',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: '',
+              reasoning: {
+                summary: [{ type: 'summary_text', text: '先确认目标' }],
+                content: [{ type: 'reasoning_text', text: '再检查代码路径' }],
+                encrypted_content: 'opaque-sig'
+              }
+            }
+          }
+        ]
+      } as any,
+      clientProtocol: 'openai-chat',
+      requestId: 'req-openai-chat-reasoning'
+    }) as any;
+
+    const message = clientPayload?.choices?.[0]?.message;
+    expect(message?.reasoning).toBe('再检查代码路径');
+    expect(message?.reasoning_content).toBe('再检查代码路径');
+    expect(Array.isArray(message?.reasoning_details)).toBe(true);
+    expect(message?.reasoning_details).toEqual([
+      { type: 'summary_text', text: '先确认目标' },
+      { type: 'reasoning_text', text: '再检查代码路径' },
+      { type: 'reasoning.encrypted_content', encrypted_content: 'opaque-sig' }
+    ]);
+    expect(clientPayload?.choices?.[0]?.finish_reason).toBe('stop');
+  });
+
   it('returns stream and records payload when streaming is enabled', async () => {
     const recorder = new StubStageRecorder();
     const clientPayload = {

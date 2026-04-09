@@ -3,7 +3,7 @@
  * 提供纯函数，将Chat响应数据转换为SSE事件对象，不处理流写入
  */
 
-import type { ChatSseEvent, ChatCompletionResponse, ChatToolCall } from '../../types/index.js';
+import type { ChatSseEvent, ChatCompletionResponse, ChatToolCall, ChatUsage } from '../../types/index.js';
 import { IdUtils, TimeUtils } from '../../shared/utils.js';
 
 // 生成器配置
@@ -30,6 +30,47 @@ export const DEFAULT_CHAT_EVENT_GENERATOR_CONFIG: ChatEventGeneratorConfig = {
   enableIdGeneration: true,
   enableTimestampGeneration: true
 };
+
+function readNonNegativeInteger(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+    return Math.round(value);
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return Math.round(parsed);
+    }
+  }
+  return undefined;
+}
+
+function normalizeChatUsage(usage: unknown): ChatUsage | undefined {
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) {
+    return undefined;
+  }
+  const record = usage as Record<string, unknown>;
+  const promptTokens = readNonNegativeInteger(
+    record.prompt_tokens ?? record.input_tokens ?? record.promptTokens ?? record.inputTokens
+  );
+  const completionTokens = readNonNegativeInteger(
+    record.completion_tokens ?? record.output_tokens ?? record.completionTokens ?? record.outputTokens
+  );
+  const totalTokens = readNonNegativeInteger(
+    record.total_tokens ??
+      record.totalTokens ??
+      ((promptTokens ?? 0) + (completionTokens ?? 0) > 0
+        ? (promptTokens ?? 0) + (completionTokens ?? 0)
+        : undefined)
+  );
+  if (promptTokens === undefined || completionTokens === undefined || totalTokens === undefined) {
+    return undefined;
+  }
+  return {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: totalTokens
+  };
+}
 
 /**
  * 创建默认上下文
@@ -109,7 +150,7 @@ export function* buildReasoningDeltas(
     ...baseChunk,
     choices: [{
       index: context.choiceIndex,
-      delta: { reasoning },
+      delta: { reasoning, reasoning_content: reasoning },
       logprobs: null,
       finish_reason: null
     }]
@@ -241,9 +282,11 @@ export function* buildToolCallArgsDeltas(
 export function buildFinishEvent(
   finishReason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'function_call',
   context: ChatEventGeneratorContext,
-  config: ChatEventGeneratorConfig = DEFAULT_CHAT_EVENT_GENERATOR_CONFIG
+  config: ChatEventGeneratorConfig = DEFAULT_CHAT_EVENT_GENERATOR_CONFIG,
+  usage?: ChatCompletionResponse['usage']
 ): ChatSseEvent {
   const baseChunk = createBaseChunk(context, config);
+  const normalizedUsage = normalizeChatUsage(usage);
 
   const chunk = {
     ...baseChunk,
@@ -252,7 +295,8 @@ export function buildFinishEvent(
       delta: {},
       logprobs: null,
       finish_reason: finishReason
-    }]
+    }],
+    ...(normalizedUsage ? { usage: normalizedUsage } : {})
   };
 
   return {

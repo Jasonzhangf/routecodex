@@ -9,6 +9,7 @@ type VirtualRouterHitRecord = {
   model?: string;
   sessionId?: string;
   projectPath?: string;
+  reason?: string;
   activeInFlight?: number;
   maxInFlight?: number;
 };
@@ -315,11 +316,8 @@ function emitRealtimeSessionRequestLog(args: {
 }): void {
   const sessionColor = resolveSessionAnsiColor(args.sessionId) || ANSI_SESSION;
   const sessionLabel = shortSessionId(args.sessionId);
-  const project = trimPathForLog(
-    normalizeProjectPath(args.projectPath)
-    || resolveProjectPathFromRegistry(args.sessionId)
-    || '-'
-  );
+  const projectResolution = resolveProjectPathWithSource(args.sessionId, args.projectPath);
+  const project = trimPathForLog(projectResolution.path || '-');
   const routePool = formatRoutePool(args.event.routeName, args.event.poolId);
   const provider = formatProvider(args.event.providerKey, args.event.model);
   const requestLabel = shortRequestId(args.event.requestId);
@@ -344,50 +342,68 @@ function emitRealtimeVirtualRouterHitLog(args: {
   poolId: string;
   providerKey: string;
   model: string;
+  reason?: string;
   activeInFlight: number;
   maxInFlight: number;
   sessionVirtualHits: number;
 }): void {
   const sessionColor = resolveSessionAnsiColor(args.sessionId) || ANSI_SESSION;
   const sessionLabel = shortSessionId(args.sessionId);
-  const project = trimPathForLog(
-    normalizeProjectPath(args.projectPath)
-      || resolveProjectPathFromRegistry(args.sessionId)
-      || '-'
-  );
+  const projectResolution = resolveProjectPathWithSource(args.sessionId, args.projectPath);
+  const project = trimPathForLog(projectResolution.path || '-');
   const routePool = formatRoutePool(args.routeName, args.poolId);
   const provider = formatProvider(args.providerKey, args.model);
   const active = Math.max(0, Math.floor(args.activeInFlight));
   const max = Math.max(0, Math.floor(args.maxInFlight));
-  console.log(colorize(`[virtual-router-hit][rt] session=${sessionLabel} project=${project}`, sessionColor));
   console.log(
     colorize(
-      `  ${routePool} -> ${provider} [concurrency:${active}/${max}] session.virtual_hits=${Math.max(0, Math.floor(args.sessionVirtualHits))}`,
+      `[virtual-router-hit][rt] session=${sessionLabel} project=${project} session_source=${projectResolution.source}`,
+      sessionColor
+    )
+  );
+  console.log(
+    colorize(
+      `  ${routePool} -> ${provider} [concurrency:${active}/${max}] session.virtual_hits=${Math.max(0, Math.floor(args.sessionVirtualHits))}${args.reason ? ` reason=${args.reason}` : ''}`,
       sessionColor
     )
   );
 }
 
-function resolveProjectPathFromRegistry(sessionId: string): string | undefined {
+function resolveProjectPathFromRegistry(sessionId: string): { path?: string; source: 'registry.tmux' | 'registry.bound' | 'none' } {
   const normalizedSession = normalizeSessionId(sessionId);
   if (!normalizedSession || normalizedSession === 'unknown') {
-    return undefined;
+    return { source: 'none' };
   }
   try {
     const registry = getSessionClientRegistry();
     const byTmux = registry.findByTmuxSessionId(normalizedSession);
     const tmuxWorkdir = normalizeProjectPath(byTmux?.workdir);
     if (tmuxWorkdir) {
-      return tmuxWorkdir;
+      return { path: tmuxWorkdir, source: 'registry.tmux' };
     }
     const boundWorkdir = normalizeProjectPath(registry.resolveBoundWorkdir(normalizedSession));
     if (boundWorkdir) {
-      return boundWorkdir;
+      return { path: boundWorkdir, source: 'registry.bound' };
     }
   } catch {
     // non-blocking fallback
   }
-  return undefined;
+  return { source: 'none' };
+}
+
+function resolveProjectPathWithSource(
+  sessionId: string,
+  incomingProjectPath?: string
+): { path?: string; source: 'request.cwd' | 'registry.tmux' | 'registry.bound' | 'none' } {
+  const normalizedIncoming = normalizeProjectPath(incomingProjectPath);
+  if (normalizedIncoming) {
+    return { path: normalizedIncoming, source: 'request.cwd' };
+  }
+  const fallback = resolveProjectPathFromRegistry(sessionId);
+  return {
+    path: fallback.path,
+    source: fallback.source
+  };
 }
 
 function updateSessionProjectPath(sessionId: string, incomingProjectPath?: string): void {
@@ -403,7 +419,7 @@ function updateSessionProjectPath(sessionId: string, incomingProjectPath?: strin
   if (record.projectPath) {
     return;
   }
-  const fallback = resolveProjectPathFromRegistry(sessionId);
+  const fallback = resolveProjectPathFromRegistry(sessionId).path;
   if (fallback) {
     record.projectPath = fallback;
   }
@@ -455,6 +471,7 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
         poolId,
         providerKey,
         model,
+        reason: normalizeLabel(event.reason, ''),
         activeInFlight: Math.max(0, Math.floor(event.activeInFlight ?? 0)),
         maxInFlight: Math.max(0, Math.floor(event.maxInFlight ?? 0)),
         sessionVirtualHits: sessionExisting.virtualHits
@@ -495,6 +512,7 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
       poolId,
       providerKey,
       model,
+      reason: normalizeLabel(event.reason, ''),
       activeInFlight: Math.max(0, Math.floor(event.activeInFlight ?? 0)),
       maxInFlight: Math.max(0, Math.floor(event.maxInFlight ?? 0)),
       sessionVirtualHits: 1
@@ -897,7 +915,7 @@ export function flushLogRollup(trigger: 'interval' | 'beforeExit' | 'exit' | 'ma
     const avgRetries = row.usageCalls > 0 ? row.totalRetryCount / row.usageCalls : 0;
     const sessionDir = row.sessionId === 'unknown'
       ? '-'
-      : (normalizeProjectPath(row.projectPath) || resolveProjectPathFromRegistry(row.sessionId) || '-');
+      : (normalizeProjectPath(row.projectPath) || resolveProjectPathFromRegistry(row.sessionId).path || '-');
     const sessionColor = resolveSessionAnsiColor(row.sessionId) || ANSI_SESSION;
     const sessionLabel = shortSessionId(row.sessionId);
     console.log(colorize(`  ${idx + 1}) session=${sessionLabel}`, sessionColor));
@@ -977,7 +995,7 @@ export function flushLogRollup(trigger: 'interval' | 'beforeExit' | 'exit' | 'ma
     .map(([sessionId, events]) => ({
       sessionId,
       events: [...events].sort((a, b) => a.atMs - b.atMs),
-      projectPath: normalizeProjectPath(sessionRollups.get(sessionId)?.projectPath) || resolveProjectPathFromRegistry(sessionId)
+      projectPath: normalizeProjectPath(sessionRollups.get(sessionId)?.projectPath) || resolveProjectPathFromRegistry(sessionId).path
     }))
     .filter((row) => row.events.length > 0)
     .sort((a, b) => {

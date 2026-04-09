@@ -32,6 +32,7 @@ export function applyRoutingInstructions(
             : {}
         )
       : undefined,
+    reasoningStopMode: currentState.reasoningStopMode,
     reasoningStopArmed: currentState.reasoningStopArmed,
     reasoningStopSummary: currentState.reasoningStopSummary,
     reasoningStopUpdatedAt: currentState.reasoningStopUpdatedAt,
@@ -177,6 +178,7 @@ export function applyRoutingInstructions(
         newState.disabledKeys.clear();
         newState.disabledModels.clear();
         applyStopMessageInstructionToState({ type: 'stopMessageClear' }, newState);
+        newState.reasoningStopMode = undefined;
         newState.reasoningStopArmed = undefined;
         newState.reasoningStopSummary = undefined;
         newState.reasoningStopUpdatedAt = undefined;
@@ -213,6 +215,10 @@ export function serializeRoutingInstructionState(state: RoutingInstructionState)
       models: Array.from(models)
     })),
     ...serializeStopMessageState(state),
+    ...(typeof state.reasoningStopMode === 'string'
+      && (state.reasoningStopMode === 'on' || state.reasoningStopMode === 'off' || state.reasoningStopMode === 'endless')
+      ? { reasoningStopMode: state.reasoningStopMode }
+      : {}),
     ...(typeof state.reasoningStopArmed === 'boolean'
       ? { reasoningStopArmed: state.reasoningStopArmed }
       : {}),
@@ -255,6 +261,7 @@ export function deserializeRoutingInstructionState(data: Record<string, unknown>
     stopMessageAiMode: undefined,
     stopMessageAiSeedPrompt: undefined,
     stopMessageAiHistory: undefined,
+    reasoningStopMode: undefined,
     reasoningStopArmed: undefined,
     reasoningStopSummary: undefined,
     reasoningStopUpdatedAt: undefined,
@@ -298,6 +305,12 @@ export function deserializeRoutingInstructionState(data: Record<string, unknown>
   }
 
   deserializeStopMessageState(data, state);
+  if (typeof data.reasoningStopMode === 'string') {
+    const normalizedMode = data.reasoningStopMode.trim().toLowerCase();
+    if (normalizedMode === 'on' || normalizedMode === 'off' || normalizedMode === 'endless') {
+      state.reasoningStopMode = normalizedMode as 'on' | 'off' | 'endless';
+    }
+  }
   if (typeof data.reasoningStopArmed === 'boolean') {
     state.reasoningStopArmed = data.reasoningStopArmed;
   }

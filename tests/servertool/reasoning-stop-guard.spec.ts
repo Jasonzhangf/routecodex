@@ -77,6 +77,7 @@ function createEmptyRoutingInstructionState(): RoutingInstructionState {
     stopMessageAiMode: undefined,
     stopMessageAiSeedPrompt: undefined,
     stopMessageAiHistory: undefined,
+    reasoningStopMode: undefined,
     reasoningStopArmed: undefined,
     reasoningStopSummary: undefined,
     reasoningStopUpdatedAt: undefined,
@@ -84,6 +85,19 @@ function createEmptyRoutingInstructionState(): RoutingInstructionState {
     preCommandScriptPath: undefined,
     preCommandUpdatedAt: undefined
   };
+}
+
+function setStoplessMode(sessionId: string, mode: 'on' | 'off' | 'endless'): void {
+  const stickyKey = `session:${sessionId}`;
+  const existing = loadRoutingInstructionStateSync(stickyKey);
+  const next = existing ?? createEmptyRoutingInstructionState();
+  next.reasoningStopMode = mode;
+  if (mode === 'off') {
+    next.reasoningStopArmed = undefined;
+    next.reasoningStopSummary = undefined;
+    next.reasoningStopUpdatedAt = undefined;
+  }
+  saveRoutingInstructionStateSync(stickyKey, next);
 }
 
 describe('servertool reasoning.stop guard', () => {
@@ -96,9 +110,27 @@ describe('servertool reasoning.stop guard', () => {
     fs.mkdirSync(SESSION_DIR, { recursive: true });
   });
 
-  test('intercepts stop and injects servertool followup when reasoning.stop state is missing', async () => {
+  test('is disabled by default (session switch default off)', async () => {
     const adapterContext = {
-      sessionId: 'reasoning-stop-guard-s1'
+      sessionId: 'reasoning-stop-default-off'
+    } as unknown as AdapterContext;
+    const result = await runServerSideToolEngine({
+      chatResponse: buildStopResponse('阶段完成'),
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_default_off'
+    });
+
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
+  });
+
+  test('intercepts stop and injects servertool followup when reasoning.stop state is missing', async () => {
+    const sessionId = 'reasoning-stop-guard-s1';
+    setStoplessMode(sessionId, 'on');
+    const adapterContext = {
+      sessionId
     } as unknown as AdapterContext;
     const result = await runServerSideToolEngine({
       chatResponse: buildStopResponse('阶段完成'),
@@ -123,14 +155,47 @@ describe('servertool reasoning.stop guard', () => {
       { op: 'append_assistant_message', required: false },
       {
         op: 'append_user_text',
-        text: '当前任务未完成，禁止直接停止。你必须先调用 reasoning.stop 做停止自检。只允许两种真实停止条件：1) 已完成用户任务，并给出 completion_evidence；2) 已尝试完所有可行路径且仍被阻塞，并给出 cannot_complete_reason + blocking_evidence（并声明 attempts_exhausted=true）。若仍有任何可执行下一步，必须填写 next_step 并继续执行，不得停止。'
+        text: '请尽量自行继续完成当前任务。若仍有可执行下一步，请先执行，不要直接停止。仅当你明确需要用户参与（例如高风险选择、关键信息缺失且无法自行确认）时，才调用 reasoning.stop，并在参数中提供 user_input_required=true 与 user_question。'
       }
     ]);
   });
 
-  test('fails fast when reasoning_stop_guard followup cannot build payload (missing seed)', async () => {
+  test('endless mode injects strict anti-stop prompt', async () => {
+    const sessionId = 'reasoning-stop-guard-endless-s1';
+    setStoplessMode(sessionId, 'endless');
     const adapterContext = {
-      sessionId: 'reasoning-stop-guard-missing-seed'
+      sessionId
+    } as unknown as AdapterContext;
+    const result = await runServerSideToolEngine({
+      chatResponse: buildStopResponse('阶段完成'),
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_guard_endless'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('reasoning_stop_guard_flow');
+    const followup = result.execution?.followup as
+      | {
+          injection?: { ops?: Array<Record<string, unknown>> };
+        }
+      | undefined;
+    const lastOp = followup?.injection?.ops?.[3];
+    expect(lastOp).toEqual(
+      expect.objectContaining({
+        op: 'append_user_text'
+      })
+    );
+    expect(String((lastOp as any)?.text || '')).toContain('stopless:endless');
+    expect(String((lastOp as any)?.text || '')).toContain('禁止直接停止');
+  });
+
+  test('fails fast when reasoning_stop_guard followup cannot build payload (missing seed)', async () => {
+    const sessionId = 'reasoning-stop-guard-missing-seed';
+    setStoplessMode(sessionId, 'on');
+    const adapterContext = {
+      sessionId
     } as unknown as AdapterContext;
 
     await expect(
@@ -183,6 +248,137 @@ describe('servertool reasoning.stop guard', () => {
     expect(state?.reasoningStopSummary).toContain('已穷尽可行尝试: 是');
     expect(state?.reasoningStopSummary).toContain('无法完成原因: 需要更多样本');
     expect(state?.reasoningStopSummary).toContain('阻塞证据: 已检查最近 20 分钟样本，均缺少完整上下文');
+  });
+
+  test('accepts <**stopless:on/off**> directive and binds it to session', async () => {
+    const sessionId = 'reasoning-stop-switch-by-directive';
+    const adapterContextOn = {
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [
+          {
+            role: 'user',
+            content: '开启 stopless 模式 <**stopless:on**>'
+          }
+        ]
+      }
+    } as unknown as AdapterContext;
+    const onResult = await runServerSideToolEngine({
+      chatResponse: buildStopResponse('阶段完成'),
+      adapterContext: adapterContextOn,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_switch_on'
+    });
+    expect(onResult.mode).toBe('tool_flow');
+    expect(onResult.execution?.flowId).toBe('reasoning_stop_guard_flow');
+    expect(loadRoutingInstructionStateSync(`session:${sessionId}`)?.reasoningStopMode).toBe('on');
+    expect(String((adapterContextOn as any).capturedChatRequest?.messages?.[0]?.content || '')).toBe('开启 stopless 模式');
+
+    const adapterContextOff = {
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [
+          {
+            role: 'user',
+            content: '关闭 stopless 模式 <**stopless:off**>'
+          }
+        ]
+      }
+    } as unknown as AdapterContext;
+    const offResult = await runServerSideToolEngine({
+      chatResponse: buildStopResponse('阶段完成'),
+      adapterContext: adapterContextOff,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_switch_off'
+    });
+    expect(offResult.mode).toBe('passthrough');
+    expect(offResult.execution).toBeUndefined();
+    expect(loadRoutingInstructionStateSync(`session:${sessionId}`)?.reasoningStopMode).toBe('off');
+    expect(String((adapterContextOff as any).capturedChatRequest?.messages?.[0]?.content || '')).toBe('关闭 stopless 模式');
+  });
+
+  test('accepts <**stopless:endless**> directive and binds it to session', async () => {
+    const sessionId = 'reasoning-stop-switch-endless-by-directive';
+    const adapterContext = {
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [
+          {
+            role: 'user',
+            content: '开启极限模式 <**stopless:endless**>'
+          }
+        ]
+      }
+    } as unknown as AdapterContext;
+    const result = await runServerSideToolEngine({
+      chatResponse: buildStopResponse('阶段完成'),
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_switch_endless'
+    });
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('reasoning_stop_guard_flow');
+    expect(loadRoutingInstructionStateSync(`session:${sessionId}`)?.reasoningStopMode).toBe('endless');
+    expect(String((adapterContext as any).capturedChatRequest?.messages?.[0]?.content || '')).toBe('开启极限模式');
+  });
+
+  test('does not toggle stopless mode when session scope is missing', async () => {
+    const adapterContext = {
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [
+          {
+            role: 'user',
+            content: '开启 stopless <**stopless:on**>'
+          }
+        ]
+      }
+    } as unknown as AdapterContext;
+    const result = await runServerSideToolEngine({
+      chatResponse: buildStopResponse('阶段完成'),
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_switch_no_session'
+    });
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
+    expect(String((adapterContext as any).capturedChatRequest?.messages?.[0]?.content || '')).toBe('开启 stopless');
+  });
+
+  test('strips malformed stopless marker even when directive parse fails', async () => {
+    const sessionId = 'reasoning-stop-switch-strip-invalid-marker';
+    const stickyKey = `session:${sessionId}`;
+    saveRoutingInstructionStateSync(stickyKey, null);
+    const adapterContext = {
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [
+          {
+            role: 'user',
+            content: '测试标记清理 <**stopless:invalid_mode**>'
+          }
+        ]
+      }
+    } as unknown as AdapterContext;
+
+    const result = await runServerSideToolEngine({
+      chatResponse: buildStopResponse('阶段完成'),
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_strip_invalid_marker'
+    });
+    expect(result.mode).toBe('passthrough');
+    expect(loadRoutingInstructionStateSync(stickyKey)?.reasoningStopMode).toBeUndefined();
+    expect(String((adapterContext as any).capturedChatRequest?.messages?.[0]?.content || '')).toBe('测试标记清理');
   });
 
   test('returns structured error when reasoning.stop payload misses task_goal', async () => {
@@ -245,6 +441,66 @@ describe('servertool reasoning.stop guard', () => {
     const state = loadRoutingInstructionStateSync(`session:${sessionId}`);
     expect(state?.reasoningStopArmed).not.toBe(true);
     expect(state?.reasoningStopSummary).toBeUndefined();
+  });
+
+  test('on mode accepts user_input_required stop and records question in summary', async () => {
+    const sessionId = 'reasoning-stop-guard-user-input-on-mode';
+    setStoplessMode(sessionId, 'on');
+    const adapterContext = { sessionId } as unknown as AdapterContext;
+    const result = await runServerSideToolEngine({
+      chatResponse: buildReasoningStopToolCallResponse({
+        task_goal: '确认上线窗口',
+        is_completed: false,
+        cannot_complete_reason: '涉及生产变更，需要用户确认',
+        user_input_required: true,
+        user_question: '请确认是否允许今晚 22:00 执行发布？'
+      }),
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_user_input_on_mode'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('reasoning_stop_flow');
+    const outputs = (result.finalChatResponse as any).tool_outputs;
+    expect(Array.isArray(outputs)).toBe(true);
+    const last = outputs[outputs.length - 1];
+    const payload = JSON.parse(String(last.content || '{}'));
+    expect(payload.ok).toBe(true);
+    expect(payload.armed).toBe(true);
+    expect(String(payload.summary || '')).toContain('需用户参与: 是');
+    expect(String(payload.summary || '')).toContain('用户问题: 请确认是否允许今晚 22:00 执行发布？');
+  });
+
+  test('endless mode rejects user_input_required stop', async () => {
+    const sessionId = 'reasoning-stop-guard-user-input-endless-mode';
+    setStoplessMode(sessionId, 'endless');
+    const adapterContext = { sessionId } as unknown as AdapterContext;
+    const result = await runServerSideToolEngine({
+      chatResponse: buildReasoningStopToolCallResponse({
+        task_goal: '确认上线窗口',
+        is_completed: false,
+        cannot_complete_reason: '涉及生产变更，需要用户确认',
+        user_input_required: true,
+        user_question: '请确认是否允许今晚 22:00 执行发布？'
+      }),
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_user_input_endless_mode'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('reasoning_stop_flow');
+    const outputs = (result.finalChatResponse as any).tool_outputs;
+    expect(Array.isArray(outputs)).toBe(true);
+    const last = outputs[outputs.length - 1];
+    const payload = JSON.parse(String(last.content || '{}'));
+    expect(payload.ok).toBe(false);
+    expect(payload.code).toBe('USER_INPUT_NOT_ALLOWED_IN_ENDLESS');
+    const state = loadRoutingInstructionStateSync(`session:${sessionId}`);
+    expect(state?.reasoningStopArmed).not.toBe(true);
   });
 
   test('returns structured error when reasoning.stop payload misses next_step and cannot_complete_reason', async () => {
@@ -328,6 +584,7 @@ describe('servertool reasoning.stop guard', () => {
     const sessionId = 'reasoning-stop-guard-next-step-continue';
     const stickyKey = `session:${sessionId}`;
     const state = createEmptyRoutingInstructionState();
+    state.reasoningStopMode = 'on';
     state.reasoningStopArmed = true;
     state.reasoningStopSummary = '用户任务目标: A\n是否完成: 否\n下一步: 检查 daemon 日志并定位阻塞点';
     state.reasoningStopUpdatedAt = Date.now();
@@ -362,10 +619,42 @@ describe('servertool reasoning.stop guard', () => {
     expect(persisted?.reasoningStopArmed).toBe(true);
   });
 
+  test('on mode allows finalize stop when summary asks for user input', async () => {
+    const sessionId = 'reasoning-stop-guard-user-input-finalize';
+    const stickyKey = `session:${sessionId}`;
+    const state = createEmptyRoutingInstructionState();
+    state.reasoningStopMode = 'on';
+    state.reasoningStopArmed = true;
+    state.reasoningStopSummary =
+      '用户任务目标: A\n是否完成: 否\n需用户参与: 是\n用户问题: 需要你确认是否继续执行高风险操作？\n无法完成原因: 当前步骤涉及高风险变更';
+    state.reasoningStopUpdatedAt = Date.now();
+    saveRoutingInstructionStateSync(stickyKey, state);
+
+    const adapterContext = { sessionId } as unknown as AdapterContext;
+    const result = await runServerSideToolEngine({
+      chatResponse: buildStopResponse('请你确认一下'),
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_user_input_finalize'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('reasoning_stop_finalize_flow');
+    expect(result.execution?.followup).toBeUndefined();
+    const message = (result.finalChatResponse as any).choices?.[0]?.message;
+    expect(message?.content).toContain('[reasoning.stop]');
+    expect(message?.content).toContain('需用户参与: 是');
+    const cleared = loadRoutingInstructionStateSync(stickyKey);
+    expect(cleared?.reasoningStopArmed).toBeUndefined();
+    expect(cleared?.reasoningStopSummary).toBeUndefined();
+  });
+
   test('allows real stop, appends summary, then clears reasoning.stop state', async () => {
     const sessionId = 'reasoning-stop-guard-s3';
     const stickyKey = `session:${sessionId}`;
     const state = createEmptyRoutingInstructionState();
+    state.reasoningStopMode = 'on';
     state.reasoningStopArmed = true;
     state.reasoningStopSummary = '用户任务目标: A\n是否完成: 是\n完成证据: B';
     state.reasoningStopUpdatedAt = Date.now();
@@ -390,6 +679,8 @@ describe('servertool reasoning.stop guard', () => {
     expect(message?.content).toContain('[reasoning.stop]');
     expect(message?.content).toContain('完成证据: B');
     const cleared = loadRoutingInstructionStateSync(stickyKey);
-    expect(cleared).toBeNull();
+    expect(cleared?.reasoningStopMode).toBe('on');
+    expect(cleared?.reasoningStopArmed).toBeUndefined();
+    expect(cleared?.reasoningStopSummary).toBeUndefined();
   });
 });

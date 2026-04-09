@@ -12,6 +12,7 @@ type StopMessageSubset = Pick<
   | 'stopMessageAiHistory'
   | 'stopMessageUpdatedAt'
   | 'stopMessageLastUsedAt'
+  | 'reasoningStopMode'
   | 'reasoningStopArmed'
   | 'reasoningStopSummary'
   | 'reasoningStopUpdatedAt'
@@ -54,6 +55,7 @@ function overlayPersistedUsage(existing: StopMessageSubset, persisted: StopMessa
     stopMessageLastUsedAt: persisted.stopMessageLastUsedAt,
     stopMessageAiSeedPrompt: persisted.stopMessageAiSeedPrompt,
     stopMessageAiHistory: persisted.stopMessageAiHistory,
+    reasoningStopMode: persisted.reasoningStopMode,
     reasoningStopArmed: persisted.reasoningStopArmed,
     reasoningStopSummary: persisted.reasoningStopSummary,
     reasoningStopUpdatedAt: persisted.reasoningStopUpdatedAt
@@ -114,6 +116,7 @@ export function mergeStopMessageFromPersisted(
     stopMessageAiHistory: persisted.stopMessageAiHistory,
     stopMessageUpdatedAt: persisted.stopMessageUpdatedAt,
     stopMessageLastUsedAt: persisted.stopMessageLastUsedAt,
+    reasoningStopMode: persisted.reasoningStopMode,
     reasoningStopArmed: persisted.reasoningStopArmed,
     reasoningStopSummary: persisted.reasoningStopSummary,
     reasoningStopUpdatedAt: persisted.reasoningStopUpdatedAt

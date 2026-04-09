@@ -67,6 +67,7 @@ import { resolveProviderRequestContext } from './executor/provider-request-conte
 import { isServerToolEnabled } from './servertool-admin-state.js';
 import { registerRequestLogContext } from '../../utils/request-log-color.js';
 import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../../utils/finish-reason.js';
+import { allowSnapshotLocalDiskWrite } from '../../../utils/snapshot-local-disk-gate.js';
 import {
   createNoopProviderTrafficGovernor,
   getSharedProviderTrafficGovernor,
@@ -98,10 +99,19 @@ const nonBlockingLogState = new Map<string, number>();
 const RECOVERABLE_BACKOFF_TTL_MS = 5 * 60_000;
 const recoverableErrorBackoffState = new Map<string, { consecutive: number; updatedAtMs: number }>();
 const recoverableRetryGateState = new Map<string, Promise<void>>();
+const recoverableRetryWaiterState = new Map<string, { activeWaiters: number; updatedAtMs: number }>();
+const logicalChainRetryState = new Map<string, {
+  recoverableRetries: number;
+  updatedAtMs: number;
+  activeExecutions: number;
+}>();
 const PROVIDER_SWITCH_LOG_THROTTLE_MS = 5_000;
 const providerSwitchLogState = new Map<string, { lastAtMs: number; suppressed: number }>();
 const RETRY_SNAPSHOT_PARSE_MAX_CHARS = 256 * 1024;
 const RETRY_SNAPSHOT_RESTORE_MAX_CHARS = 2 * 1024 * 1024;
+const RETRY_SNAPSHOT_SERIALIZE_MAX_CHARS = 256 * 1024;
+const RETRY_PAYLOAD_ESTIMATE_MAX_BYTES = RETRY_SNAPSHOT_SERIALIZE_MAX_CHARS * 2;
+const RETRY_PAYLOAD_ESTIMATE_NODE_BUDGET = 4000;
 // Re-export for backward compatibility
 export type { SseWrapperErrorInfo };
 
@@ -124,6 +134,19 @@ type HubDecodeBreakdown = {
   sseDecodeMs: number;
   codecDecodeMs: number;
 };
+
+type RetryPayloadSeed =
+  | {
+    mode: 'serialized';
+    serializedPayload: string;
+  }
+  | {
+    mode: 'snapshot';
+    snapshotPayload: Record<string, unknown>;
+  }
+  | {
+    mode: 'none';
+  };
 
 function formatUnknownError(error: unknown): string {
   if (error instanceof Error) {
@@ -448,6 +471,144 @@ function cloneRequestPayloadForRetry(payload: unknown): Record<string, unknown> 
   return undefined;
 }
 
+function estimateRetryPayloadBytes(
+  value: unknown,
+  options?: {
+    maxBytes?: number;
+    depth?: number;
+    seen?: Set<unknown>;
+    nodeBudget?: number;
+    visitedNodes?: number;
+  }
+): number {
+  const maxBytes = options?.maxBytes ?? Number.POSITIVE_INFINITY;
+  const depth = options?.depth ?? 0;
+  const seen = options?.seen ?? new Set<unknown>();
+  const nodeBudget = options?.nodeBudget ?? RETRY_PAYLOAD_ESTIMATE_NODE_BUDGET;
+  const visitedNodes = (options?.visitedNodes ?? 0) + 1;
+
+  if (visitedNodes > nodeBudget) {
+    return maxBytes + 1;
+  }
+
+  if (value === null || value === undefined) {
+    return 4;
+  }
+  const valueType = typeof value;
+  if (valueType === 'string') {
+    return Math.min(maxBytes + 1, (value as string).length * 2 + 2);
+  }
+  if (valueType === 'number') {
+    return 8;
+  }
+  if (valueType === 'boolean') {
+    return 4;
+  }
+  if (valueType === 'bigint') {
+    return String(value).length + 8;
+  }
+  if (valueType === 'symbol' || valueType === 'function') {
+    return 16;
+  }
+  if (seen.has(value)) {
+    return 8;
+  }
+  seen.add(value);
+
+  if (depth >= 8) {
+    return 64;
+  }
+
+  let bytes = 0;
+  if (Array.isArray(value)) {
+    bytes += 2;
+    for (const item of value) {
+      bytes += estimateRetryPayloadBytes(item, {
+        maxBytes: Math.max(0, maxBytes - bytes),
+        depth: depth + 1,
+        seen,
+        nodeBudget,
+        visitedNodes
+      });
+      if (bytes > maxBytes) {
+        return maxBytes + 1;
+      }
+    }
+    return bytes;
+  }
+  if (value && typeof value === 'object') {
+    bytes += 2;
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      bytes += key.length * 2 + 4;
+      bytes += estimateRetryPayloadBytes(child, {
+        maxBytes: Math.max(0, maxBytes - bytes),
+        depth: depth + 1,
+        seen,
+        nodeBudget,
+        visitedNodes
+      });
+      if (bytes > maxBytes) {
+        return maxBytes + 1;
+      }
+    }
+    return bytes;
+  }
+  return 16;
+}
+
+function prepareRequestPayloadRetrySeed(payload: unknown): RetryPayloadSeed {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { mode: 'none' };
+  }
+
+  const estimatedBytes = estimateRetryPayloadBytes(payload, {
+    maxBytes: RETRY_PAYLOAD_ESTIMATE_MAX_BYTES + 1
+  });
+  if (estimatedBytes <= RETRY_PAYLOAD_ESTIMATE_MAX_BYTES) {
+    const serializedPayload = serializeRequestPayloadForRetry(payload);
+    if (
+      typeof serializedPayload === 'string'
+      && serializedPayload.length <= RETRY_SNAPSHOT_SERIALIZE_MAX_CHARS
+    ) {
+      return {
+        mode: 'serialized',
+        serializedPayload
+      };
+    }
+  }
+
+  const snapshotPayload = cloneRequestPayloadForRetry(payload);
+  if (snapshotPayload) {
+    return {
+      mode: 'snapshot',
+      snapshotPayload
+    };
+  }
+
+  const serializedPayload = serializeRequestPayloadForRetry(payload);
+  if (
+    typeof serializedPayload === 'string'
+    && serializedPayload.length <= RETRY_SNAPSHOT_SERIALIZE_MAX_CHARS
+  ) {
+    return {
+      mode: 'serialized',
+      serializedPayload
+    };
+  }
+
+  return { mode: 'none' };
+}
+
+function restoreRequestPayloadFromRetrySeed(seed: RetryPayloadSeed): Record<string, unknown> | undefined {
+  if (seed.mode === 'serialized') {
+    return restoreRequestPayloadFromRetrySnapshot(seed.serializedPayload);
+  }
+  if (seed.mode === 'snapshot') {
+    return cloneRequestPayloadForRetry(seed.snapshotPayload) ?? { ...seed.snapshotPayload };
+  }
+  return undefined;
+}
+
 function restoreRequestPayloadFromRetrySnapshot(
   serializedPayload?: string,
   fallbackPayload?: Record<string, unknown>
@@ -518,9 +679,6 @@ function isBlockingRecoverableRetryError(args: {
     || errorCode === 'HTTP_504'
     || errorCode === 'SSE_TO_JSON_ERROR'
     || errorCode === 'SSE_DECODE_ERROR'
-    || errorCode === 'SERVERTOOL_FOLLOWUP_FAILED'
-    || errorCode === 'SERVERTOOL_EMPTY_FOLLOWUP'
-    || (typeof errorCode === 'string' && errorCode.startsWith('SERVERTOOL_'))
   ) {
     return true;
   }
@@ -600,16 +758,7 @@ function resolveRecoverableBackoffCapMs(args: {
     || upstreamCode === 'INSUFFICIENT_QUOTA'
     || reason.includes('insufficient_quota')
   ) {
-    return 0;
-  }
-  // ServerTool timeout/失败直接切 provider 重试，不做额外阻塞。
-  if (
-    errorCode === 'SERVERTOOL_TIMEOUT'
-    || (typeof errorCode === 'string' && errorCode.startsWith('SERVERTOOL_'))
-    || (typeof upstreamCode === 'string' && upstreamCode.startsWith('SERVERTOOL_'))
-    || reason.includes('[servertool]')
-  ) {
-    return 0;
+    return process.env.NODE_ENV === 'test' ? 800 : 4_000;
   }
   return process.env.NODE_ENV === 'test' ? 5_000 : 120_000;
 }
@@ -664,23 +813,181 @@ async function waitRecoverableBackoffMs(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitRecoverableBackoffWithGlobalGate(key: string, ms: number): Promise<void> {
+function resolveRecoverableBackoffMaxWaiters(): number {
+  const raw =
+    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_WAITERS
+    ?? process.env.RCC_RECOVERABLE_BACKOFF_MAX_WAITERS
+    ?? '';
+  const parsed = Number.parseInt(String(raw).trim(), 10);
+  if (Number.isFinite(parsed) && parsed >= 1) {
+    return parsed;
+  }
+  return 64;
+}
+
+function acquireRecoverableWaiterSlot(key: string): { key: string; activeWaiters: number } {
   const normalizedKey = key.trim() || 'recoverable:unknown';
+  const now = Date.now();
+  for (const [existingKey, state] of recoverableRetryWaiterState.entries()) {
+    if (state.activeWaiters <= 0 || now - state.updatedAtMs >= RECOVERABLE_BACKOFF_TTL_MS) {
+      recoverableRetryWaiterState.delete(existingKey);
+    }
+  }
+  const current = recoverableRetryWaiterState.get(normalizedKey);
+  const nextActiveWaiters = (current?.activeWaiters ?? 0) + 1;
+  const maxWaiters = resolveRecoverableBackoffMaxWaiters();
+  if (nextActiveWaiters > maxWaiters) {
+    throw Object.assign(
+      new Error(`recoverable retry waiters overloaded for key ${normalizedKey}`),
+      {
+        statusCode: 429,
+        code: 'PROVIDER_TRAFFIC_SATURATED',
+        retryable: true,
+        details: {
+          reason: 'recoverable_waiter_overload',
+          recoverableKey: normalizedKey,
+          activeWaiters: current?.activeWaiters ?? 0,
+          maxWaiters
+        }
+      }
+    );
+  }
+  recoverableRetryWaiterState.set(normalizedKey, {
+    activeWaiters: nextActiveWaiters,
+    updatedAtMs: now
+  });
+  return {
+    key: normalizedKey,
+    activeWaiters: nextActiveWaiters
+  };
+}
+
+function releaseRecoverableWaiterSlot(key: string): void {
+  const normalizedKey = key.trim() || 'recoverable:unknown';
+  const current = recoverableRetryWaiterState.get(normalizedKey);
+  if (!current) {
+    return;
+  }
+  const nextActiveWaiters = Math.max(0, current.activeWaiters - 1);
+  if (nextActiveWaiters === 0) {
+    recoverableRetryWaiterState.delete(normalizedKey);
+    return;
+  }
+  recoverableRetryWaiterState.set(normalizedKey, {
+    activeWaiters: nextActiveWaiters,
+    updatedAtMs: Date.now()
+  });
+}
+
+async function waitRecoverableBackoffWithGlobalGate(key: string, ms: number): Promise<void> {
+  const waiter = acquireRecoverableWaiterSlot(key);
+  const normalizedKey = waiter.key;
   const previous = recoverableRetryGateState.get(normalizedKey) ?? Promise.resolve();
   let release: () => void = () => undefined;
   const current = new Promise<void>((resolve) => {
     release = resolve;
   });
   recoverableRetryGateState.set(normalizedKey, current);
-  await previous.catch(() => undefined);
   try {
+    await previous.catch(() => undefined);
     await waitRecoverableBackoffMs(ms);
   } finally {
     release();
     if (recoverableRetryGateState.get(normalizedKey) === current) {
       recoverableRetryGateState.delete(normalizedKey);
     }
+    releaseRecoverableWaiterSlot(normalizedKey);
   }
+}
+
+function deriveLogicalRequestChainKey(requestId: string): string {
+  const normalized = typeof requestId === 'string' ? requestId.trim() : '';
+  if (!normalized) {
+    return 'request-chain:unknown';
+  }
+  const root = normalized.split(':')[0]?.trim() || normalized;
+  return root || 'request-chain:unknown';
+}
+
+function resolveLogicalChainRecoverableRetryLimit(): number {
+  const raw =
+    process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT
+    ?? process.env.RCC_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT
+    ?? '';
+  const parsed = Number.parseInt(String(raw).trim(), 10);
+  if (Number.isFinite(parsed) && parsed >= 1) {
+    return parsed;
+  }
+  return 8;
+}
+
+function retainLogicalRequestChain(key: string): string {
+  const normalizedKey = key.trim() || 'request-chain:unknown';
+  const now = Date.now();
+  for (const [existingKey, state] of logicalChainRetryState.entries()) {
+    if (state.activeExecutions <= 0 && now - state.updatedAtMs >= RECOVERABLE_BACKOFF_TTL_MS) {
+      logicalChainRetryState.delete(existingKey);
+    }
+  }
+  const current = logicalChainRetryState.get(normalizedKey);
+  logicalChainRetryState.set(normalizedKey, {
+    recoverableRetries: current?.recoverableRetries ?? 0,
+    updatedAtMs: now,
+    activeExecutions: (current?.activeExecutions ?? 0) + 1
+  });
+  return normalizedKey;
+}
+
+function releaseLogicalRequestChain(key: string): void {
+  const current = logicalChainRetryState.get(key);
+  if (!current) {
+    return;
+  }
+  const nextActiveExecutions = Math.max(0, current.activeExecutions - 1);
+  if (nextActiveExecutions === 0) {
+    logicalChainRetryState.delete(key);
+    return;
+  }
+  logicalChainRetryState.set(key, {
+    ...current,
+    activeExecutions: nextActiveExecutions,
+    updatedAtMs: Date.now()
+  });
+}
+
+function consumeLogicalChainRecoverableRetry(key: string): {
+  allowed: boolean;
+  count: number;
+  limit: number;
+} {
+  const normalizedKey = key.trim() || 'request-chain:unknown';
+  const limit = resolveLogicalChainRecoverableRetryLimit();
+  const current = logicalChainRetryState.get(normalizedKey) ?? {
+    recoverableRetries: 0,
+    updatedAtMs: 0,
+    activeExecutions: 0
+  };
+  const count = current.recoverableRetries + 1;
+  const next = {
+    ...current,
+    recoverableRetries: count,
+    updatedAtMs: Date.now()
+  };
+  logicalChainRetryState.set(normalizedKey, next);
+  return {
+    allowed: count <= limit,
+    count,
+    limit
+  };
+}
+
+function resetRequestExecutorInternalStateForTests(): void {
+  nonBlockingLogState.clear();
+  recoverableErrorBackoffState.clear();
+  recoverableRetryGateState.clear();
+  recoverableRetryWaiterState.clear();
+  logicalChainRetryState.clear();
+  providerSwitchLogState.clear();
 }
 
 function resolveTrafficRuntimeProfile(
@@ -885,7 +1192,6 @@ function emitVirtualRouterConcurrencyLog(args: {
   activeInFlight: number;
   maxInFlight: number;
 }): void {
-  void args.reason;
   recordVirtualRouterHitRollup({
     routeName: args.routeName,
     poolId: args.poolId,
@@ -893,6 +1199,7 @@ function emitVirtualRouterConcurrencyLog(args: {
     model: args.model,
     sessionId: args.sessionId,
     projectPath: args.projectPath,
+    reason: args.reason,
     activeInFlight: args.activeInFlight,
     maxInFlight: args.maxInFlight
   });
@@ -1095,6 +1402,15 @@ export class HubRequestExecutor implements RequestExecutor {
     // Stats must remain stable across provider retries and requestId enhancements.
     const statsRequestId = input.requestId;
     const executorRequestId = input.requestId;
+    const logicalRequestChainKey = retainLogicalRequestChain(deriveLogicalRequestChainKey(executorRequestId));
+    let logicalRequestChainReleased = false;
+    const releaseLogicalRequestChainIfNeeded = () => {
+      if (logicalRequestChainReleased) {
+        return;
+      }
+      logicalRequestChainReleased = true;
+      releaseLogicalRequestChain(logicalRequestChainKey);
+    };
     this.deps.stats.recordRequestStart(statsRequestId);
     const requestStartedAt = Date.now();
     let recordedAnyAttempt = false;
@@ -1133,20 +1449,13 @@ export class HubRequestExecutor implements RequestExecutor {
         let aggregatedUsage: UsageMetrics | undefined;
         const excludedProviderKeys = new Set<string>();
         let maxAttempts = resolveMaxProviderAttempts();
-        const serializedInputBody = serializeRequestPayloadForRetry(input.body);
+        const retryPayloadSeed = prepareRequestPayloadRetrySeed(input.body);
         const originalRequestSnapshot =
-          cloneRequestPayloadForRetry(input.body)
-          ?? (
-            typeof serializedInputBody === 'string' && serializedInputBody.length <= RETRY_SNAPSHOT_RESTORE_MAX_CHARS
-              ? restoreRequestPayloadFromRetrySnapshot(serializedInputBody)
-              : undefined
-          );
-        const originalRequestSnapshotSerializedRaw = serializeRequestPayloadForRetry(originalRequestSnapshot);
-        const originalRequestSnapshotSerialized =
-          typeof originalRequestSnapshotSerializedRaw === 'string'
-            && originalRequestSnapshotSerializedRaw.length <= RETRY_SNAPSHOT_RESTORE_MAX_CHARS
-            ? originalRequestSnapshotSerializedRaw
-            : undefined;
+          retryPayloadSeed.mode === 'snapshot'
+            ? retryPayloadSeed.snapshotPayload
+            : (retryPayloadSeed.mode === 'serialized'
+                ? restoreRequestPayloadFromRetrySnapshot(retryPayloadSeed.serializedPayload)
+                : undefined);
         let attempt = 0;
         let lastError: unknown;
         let initialRoutePool: string[] | null = null;
@@ -1165,10 +1474,7 @@ export class HubRequestExecutor implements RequestExecutor {
         // don't inherit a provider-specific id from a previous attempt.
         input.requestId = providerRequestId;
         if (attempt > 1 && originalRequestSnapshot && typeof originalRequestSnapshot === 'object') {
-          const cloned = restoreRequestPayloadFromRetrySnapshot(
-            originalRequestSnapshotSerialized,
-            originalRequestSnapshot as Record<string, unknown>
-          );
+          const cloned = restoreRequestPayloadFromRetrySeed(retryPayloadSeed);
           if (cloned && typeof cloned === 'object') {
             input.body = cloned;
           }
@@ -1369,6 +1675,21 @@ export class HubRequestExecutor implements RequestExecutor {
           let retryBackoffMs = 0;
           let recoverableBackoffMs = 0;
           if (blockingRecoverable) {
+            const logicalChainRetry = consumeLogicalChainRecoverableRetry(logicalRequestChainKey);
+            if (!logicalChainRetry.allowed) {
+              this.logStage('provider.retry.logical_chain_limit_hit', providerRequestId, {
+                providerKey: target.providerKey,
+                logicalRequestChainKey,
+                logicalChainRecoverableRetries: logicalChainRetry.count,
+                logicalChainRecoverableRetryLimit: logicalChainRetry.limit,
+                attempt,
+                ...(typeof retryError.statusCode === 'number' ? { statusCode: retryError.statusCode } : {}),
+                ...(retryError.errorCode ? { errorCode: retryError.errorCode } : {}),
+                ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {}),
+                reason: retryError.reason
+              });
+              throw error;
+            }
             const recoverableKey = buildRecoverableErrorBackoffKey({
               statusCode: retryError.statusCode,
               errorCode: retryError.errorCode,
@@ -1501,6 +1822,8 @@ export class HubRequestExecutor implements RequestExecutor {
         });
 
         let trafficPermit: ProviderTrafficPermit | null = null;
+        let trafficPolicyMaxInFlight = 0;
+        let trafficActiveInFlightAtAcquire = 0;
         let providerSendStartedAtMs = 0;
         let providerSendElapsedMs = 0;
         try {
@@ -1519,6 +1842,8 @@ export class HubRequestExecutor implements RequestExecutor {
             softWaitTimeoutMs: undefined
           });
           trafficPermit = trafficAcquired.permit;
+          trafficPolicyMaxInFlight = trafficAcquired.policy.concurrency.maxInFlight;
+          trafficActiveInFlightAtAcquire = trafficAcquired.activeInFlight;
           if (trafficAcquired.waitedMs > 0) {
             cumulativeTrafficWaitMs += trafficAcquired.waitedMs;
             this.logStage('provider.traffic.acquire.wait', input.requestId, {
@@ -1541,21 +1866,6 @@ export class HubRequestExecutor implements RequestExecutor {
             pipelineResult.routingDecision && typeof pipelineResult.routingDecision === 'object'
               ? (pipelineResult.routingDecision as Record<string, unknown>)
               : undefined;
-          emitVirtualRouterConcurrencyLog({
-            sessionId: readString(mergedMetadata.sessionId) ?? readString(mergedMetadata.conversationId),
-            projectPath:
-              readString(mergedMetadata.clientWorkdir)
-              ?? readString(mergedMetadata.client_workdir)
-              ?? readString(mergedMetadata.workdir)
-              ?? readString(mergedMetadata.cwd),
-            routeName: pipelineResult.routingDecision?.routeName,
-            poolId: readString(routingDecisionRecord?.poolId),
-            providerKey: target.providerKey,
-            model: providerModel,
-            reason: readString(routingDecisionRecord?.reasoning),
-            activeInFlight: trafficAcquired.activeInFlight,
-            maxInFlight: trafficAcquired.policy.concurrency.maxInFlight
-          });
 
           providerSendStartedAtMs = Date.now();
           this.logStage('provider.send.start', input.requestId, {
@@ -1571,6 +1881,12 @@ export class HubRequestExecutor implements RequestExecutor {
 
           const providerResponse = await handle.instance.processIncoming(providerPayload);
           const responseStatus = extractResponseStatus(providerResponse);
+          allowSnapshotLocalDiskWrite(
+            executorRequestId,
+            providerRequestId,
+            input.requestId,
+            clientRequestId
+          );
           providerSendElapsedMs = Date.now() - providerSendStartedAtMs;
           cumulativeExternalLatencyMs += providerSendElapsedMs;
           this.logStage('provider.send.completed', input.requestId, {
@@ -1791,6 +2107,27 @@ export class HubRequestExecutor implements RequestExecutor {
             convertedStatus,
             attempt
           });
+          try {
+            await this.trafficGovernor.observeOutcome?.({
+              runtimeKey,
+              providerKey: target.providerKey,
+              requestId: input.requestId,
+              success: true,
+              statusCode: convertedStatus,
+              activeInFlight: trafficActiveInFlightAtAcquire,
+              configuredMaxInFlight: trafficPolicyMaxInFlight || undefined
+            });
+          } catch (observeError) {
+            this.logStage('provider.traffic.observe_outcome.error', input.requestId, {
+              providerKey: target.providerKey,
+              runtimeKey,
+              message:
+                observeError instanceof Error
+                  ? observeError.message
+                  : String(observeError ?? 'Unknown observe outcome error'),
+              attempt
+            });
+          }
           const emptyAssistantSignal = detectRetryableEmptyAssistantResponse(converted.body);
           if (emptyAssistantSignal) {
             const bodyForError = converted.body as Record<string, unknown>;
@@ -1838,6 +2175,22 @@ export class HubRequestExecutor implements RequestExecutor {
           this.logStage('provider.tool_usage_record.completed', input.requestId, {
             providerKey: target.providerKey,
             attempt
+          });
+
+          emitVirtualRouterConcurrencyLog({
+            sessionId: readString(mergedMetadata.sessionId) ?? readString(mergedMetadata.conversationId),
+            projectPath:
+              readString(mergedMetadata.clientWorkdir)
+              ?? readString(mergedMetadata.client_workdir)
+              ?? readString(mergedMetadata.workdir)
+              ?? readString(mergedMetadata.cwd),
+            routeName: pipelineResult.routingDecision?.routeName,
+            poolId: readString(routingDecisionRecord?.poolId),
+            providerKey: target.providerKey,
+            model: providerModel,
+            reason: readString(routingDecisionRecord?.reasoning),
+            activeInFlight: trafficActiveInFlightAtAcquire,
+            maxInFlight: trafficPolicyMaxInFlight || trafficAcquired.policy.concurrency.maxInFlight
           });
 
           recordAttempt({ usage: aggregatedUsage, error: false });
@@ -1888,6 +2241,30 @@ export class HubRequestExecutor implements RequestExecutor {
           }
           const errorMessage = error instanceof Error ? error.message : String(error ?? 'Unknown error');
           const retryError = extractRetryErrorSnapshot(error);
+          try {
+            await this.trafficGovernor.observeOutcome?.({
+              runtimeKey,
+              providerKey: target.providerKey,
+              requestId: input.requestId,
+              success: false,
+              statusCode: retryError.statusCode,
+              errorCode: retryError.errorCode,
+              upstreamCode: retryError.upstreamCode,
+              reason: retryError.reason,
+              activeInFlight: trafficActiveInFlightAtAcquire,
+              configuredMaxInFlight: trafficPolicyMaxInFlight || undefined
+            });
+          } catch (observeError) {
+            this.logStage('provider.traffic.observe_outcome.error', input.requestId, {
+              providerKey: target.providerKey,
+              runtimeKey,
+              message:
+                observeError instanceof Error
+                  ? observeError.message
+                  : String(observeError ?? 'Unknown observe outcome error'),
+              attempt
+            });
+          }
           this.logStage('provider.send.error', input.requestId, {
             providerKey: target.providerKey,
             message: errorMessage,
@@ -2034,6 +2411,21 @@ export class HubRequestExecutor implements RequestExecutor {
           let retryBackoffMs = 0;
           let recoverableBackoffMs = 0;
           if (blockingRecoverable) {
+            const logicalChainRetry = consumeLogicalChainRecoverableRetry(logicalRequestChainKey);
+            if (!logicalChainRetry.allowed) {
+              this.logStage('provider.retry.logical_chain_limit_hit', input.requestId, {
+                providerKey: target.providerKey,
+                logicalRequestChainKey,
+                logicalChainRecoverableRetries: logicalChainRetry.count,
+                logicalChainRecoverableRetryLimit: logicalChainRetry.limit,
+                attempt,
+                ...(typeof retryError.statusCode === 'number' ? { statusCode: retryError.statusCode } : {}),
+                ...(retryError.errorCode ? { errorCode: retryError.errorCode } : {}),
+                ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {}),
+                reason: retryError.reason
+              });
+              throw error;
+            }
             const recoverableKey = buildRecoverableErrorBackoffKey({
               statusCode: retryError.statusCode,
               errorCode: retryError.errorCode,
@@ -2184,6 +2576,7 @@ export class HubRequestExecutor implements RequestExecutor {
         throw lastError ?? new Error('Provider execution failed without response');
       } finally {
         await this.deps.onRequestEnd?.({ requestId: executorRequestId });
+        releaseLogicalRequestChainIfNeeded();
       }
     } catch (error: unknown) {
       // If we failed before selecting a provider (no bindProvider/recordAttempt),
@@ -2191,6 +2584,7 @@ export class HubRequestExecutor implements RequestExecutor {
       if (!recordedAnyAttempt) {
         recordAttempt({ error: true });
       }
+      releaseLogicalRequestChainIfNeeded();
       throw error;
     }
   }
@@ -2208,7 +2602,10 @@ export const __requestExecutorTestables = {
   readString,
   extractRetryErrorSnapshot,
   truncateReason,
-  detectRetryableEmptyAssistantResponse
+  detectRetryableEmptyAssistantResponse,
+  deriveLogicalRequestChainKey,
+  prepareRequestPayloadRetrySeed,
+  resetRequestExecutorInternalStateForTests
 };
 
 export function createRequestExecutor(deps: RequestExecutorDeps): RequestExecutor {

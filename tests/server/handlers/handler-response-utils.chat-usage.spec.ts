@@ -58,6 +58,42 @@ describe('sendPipelineResponse chat usage normalization', () => {
     expect(usage.total_tokens).toBe(20);
   });
 
+  it('backfills input/output aliases when provider returns prompt/completion usage', async () => {
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          id: 'chatcmpl_test_usage_prompt_completion_only',
+          object: 'chat.completion',
+          choices: [],
+          usage: {
+            prompt_tokens: 42,
+            completion_tokens: 9,
+            total_tokens: 51
+          }
+        }
+      } as any,
+      'req-chat-usage-prompt-completion-shape',
+      { entryEndpoint: '/v1/chat/completions' }
+    );
+
+    const json = res.jsonBody as Record<string, unknown>;
+    const usage = json.usage as Record<string, unknown>;
+    expect(usage.prompt_tokens).toBe(42);
+    expect(usage.completion_tokens).toBe(9);
+    expect(usage.total_tokens).toBe(51);
+    expect(usage.input_tokens).toBe(42);
+    expect(usage.output_tokens).toBe(9);
+  });
+
   it('injects normalized chat usage from usageLogInfo fallback when body usage is missing', async () => {
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
@@ -92,9 +128,11 @@ describe('sendPipelineResponse chat usage normalization', () => {
     expect(usage.prompt_tokens).toBe(99);
     expect(usage.completion_tokens).toBe(21);
     expect(usage.total_tokens).toBe(120);
+    expect(usage.input_tokens).toBe(99);
+    expect(usage.output_tokens).toBe(21);
   });
 
-  it('sets normalized usage header for chat SSE responses', async () => {
+  it('does not emit custom usage header for chat SSE responses', async () => {
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -125,11 +163,6 @@ describe('sendPipelineResponse chat usage normalization', () => {
     );
     await finished;
 
-    const header = res.headers.get('x-routecodex-usage');
-    expect(typeof header).toBe('string');
-    const usage = JSON.parse(String(header)) as Record<string, unknown>;
-    expect(usage.prompt_tokens).toBe(30);
-    expect(usage.completion_tokens).toBe(7);
-    expect(usage.total_tokens).toBe(37);
+    expect(res.headers.get('x-routecodex-usage')).toBeUndefined();
   });
 });

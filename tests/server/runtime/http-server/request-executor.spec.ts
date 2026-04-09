@@ -28,6 +28,10 @@ function buildHandle(providerKey: string, processFn: () => Promise<unknown>): Pr
 }
 
 describe('HubRequestExecutor failover', () => {
+  beforeEach(() => {
+    __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
+  });
+
   test('covers request-executor helper snapshots and truncation utilities', () => {
     expect(__requestExecutorTestables.readString('  abc  ')).toBe('abc');
     expect(__requestExecutorTestables.readString('')).toBeUndefined();
@@ -1109,6 +1113,235 @@ describe('HubRequestExecutor failover', () => {
 
     expect(pipeline.execute).toHaveBeenCalledTimes(1);
     expect(failingProcess).toHaveBeenCalledTimes(1);
+  });
+
+  test('derives logical request chain from followup request id and avoids serializing oversized retry seed', () => {
+    expect(__requestExecutorTestables.deriveLogicalRequestChainKey('req-root:reasoning_stop_guard:servertool_followup'))
+      .toBe('req-root');
+
+    const retrySeed = __requestExecutorTestables.prepareRequestPayloadRetrySeed({
+      model: 'glm-5',
+      messages: [
+        {
+          role: 'user',
+          content: 'x'.repeat(400_000)
+        }
+      ]
+    });
+
+    expect(retrySeed.mode).toBe('snapshot');
+    expect((retrySeed as { serializedPayload?: string }).serializedPayload).toBeUndefined();
+  });
+
+  test('caps recoverable retry storms within the same logical request chain', async () => {
+    const providerA = 'storm.a.glm-5';
+    const providerB = 'storm.b.glm-5';
+    const providerC = 'storm.c.glm-5';
+    const retryable429 = () => Object.assign(new Error('HTTP 429: rate limited'), {
+      statusCode: 429,
+      code: 'HTTP_429'
+    });
+    const failingProcess = jest.fn(async () => {
+      throw retryable429();
+    });
+
+    const handles = new Map<string, ProviderHandle>([
+      [providerA, buildHandle(providerA, failingProcess)],
+      [providerB, buildHandle(providerB, failingProcess)],
+      [providerC, buildHandle(providerC, failingProcess)]
+    ]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+
+    const pool = [providerA, providerB, providerC];
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        const excluded = new Set<string>(
+          Array.isArray(input.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
+        );
+        const providerKey = pool.find((key) => !excluded.has(key)) ?? providerA;
+        return {
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
+            runtimeKey: providerKey
+          },
+          routingDecision: { routeName: 'default', pool },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const previousLimit = process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT;
+    const previousBase = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
+    const previousMax = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
+    process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT = '2';
+    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = '1';
+    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = '1';
+
+    try {
+      const logStage = jest.fn();
+      const deps = {
+        runtimeManager,
+        getHubPipeline: () => pipeline,
+        getModuleDependencies: () => ({
+          errorHandlingCenter: {
+            handleError: jest.fn(async () => undefined)
+          }
+        }),
+        logStage,
+        stats: new StatsManager()
+      };
+
+      const executor = createRequestExecutor(deps);
+      await expect(executor.execute({
+        requestId: 'req-storm-root:reasoning_stop_guard',
+        entryEndpoint: '/v1/responses',
+        body: {},
+        headers: {},
+        metadata: {}
+      })).rejects.toMatchObject({
+        statusCode: 429,
+        code: 'HTTP_429'
+      });
+
+      expect(pipeline.execute).toHaveBeenCalledTimes(3);
+      expect(
+        logStage.mock.calls.some(
+          (call) => call[0] === 'provider.retry.logical_chain_limit_hit' && call[2]?.logicalRequestChainKey === 'req-storm-root'
+        )
+      ).toBe(true);
+    } finally {
+      if (previousLimit === undefined) {
+        delete process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT;
+      } else {
+        process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT = previousLimit;
+      }
+      if (previousBase === undefined) {
+        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
+      } else {
+        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = previousBase;
+      }
+      if (previousMax === undefined) {
+        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
+      } else {
+        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = previousMax;
+      }
+    }
+  });
+
+  test('rejects when recoverable backoff waiter queue is overloaded', async () => {
+    const providerKey = 'ali-coding-plan.key1.glm-5';
+    let callCount = 0;
+    const processIncoming = jest.fn(async () => {
+      callCount += 1;
+      if (callCount <= 2) {
+        const error = Object.assign(new Error('HTTP 429: Too many requests'), {
+          statusCode: 429,
+          code: 'HTTP_429',
+          retryable: true
+        });
+        throw error;
+      }
+      return { status: 200, data: { id: 'ok-after-backoff' } };
+    });
+
+    const handle = buildHandle(providerKey, processIncoming);
+    const runtimeManager = {
+      resolveRuntimeKey: (key: string) => key,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === providerKey ? handle : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn(async (input: any) => ({
+        requestId: input.id,
+        providerPayload: {},
+        target: {
+          providerKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-responses',
+          runtimeKey: providerKey
+        },
+        routingDecision: { routeName: 'tools', pool: [providerKey] },
+        metadata: {}
+      })),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const previousWaiters = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_WAITERS;
+    const previousBase = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
+    const previousMax = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
+    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_WAITERS = '1';
+    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = '500';
+    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = '500';
+
+    try {
+      const deps = {
+        runtimeManager,
+        getHubPipeline: () => pipeline,
+        getModuleDependencies: () => ({
+          errorHandlingCenter: {
+            handleError: jest.fn(async () => undefined)
+          }
+        }),
+        logStage: jest.fn(),
+        stats: new StatsManager()
+      };
+
+      const executor = createRequestExecutor(deps);
+      const first = executor.execute({
+        requestId: 'req-recoverable-overload-1',
+        entryEndpoint: '/v1/responses',
+        body: {},
+        headers: {},
+        metadata: {}
+      });
+
+      while (processIncoming.mock.calls.length < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      const second = executor.execute({
+        requestId: 'req-recoverable-overload-2',
+        entryEndpoint: '/v1/responses',
+        body: {},
+        headers: {},
+        metadata: {}
+      });
+
+      await expect(second).rejects.toMatchObject({
+        statusCode: 429,
+        code: 'PROVIDER_TRAFFIC_SATURATED',
+        details: expect.objectContaining({
+          reason: 'recoverable_waiter_overload'
+        })
+      });
+      await expect(first).resolves.toEqual(expect.objectContaining({ status: 200 }));
+    } finally {
+      if (previousWaiters === undefined) {
+        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_WAITERS;
+      } else {
+        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_WAITERS = previousWaiters;
+      }
+      if (previousBase === undefined) {
+        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
+      } else {
+        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = previousBase;
+      }
+      if (previousMax === undefined) {
+        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
+      } else {
+        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = previousMax;
+      }
+    }
   });
 
 });

@@ -18,7 +18,6 @@ export class RoutingClassifier {
     const lastToolCategory = features.lastAssistantToolCategory;
     const webSearchIntent = detectWebSearchIntent(features.userTextSample);
     const serverToolRequired = (features.metadata as any)?.serverToolRequired === true;
-    const hasWebSearchToolDeclared = features.hasWebSearchToolDeclared === true;
     const webSearchContinuation = lastToolCategory === 'websearch';
     const localToolContinuation =
       lastToolCategory === 'read' ||
@@ -26,8 +25,7 @@ export class RoutingClassifier {
       lastToolCategory === 'search' ||
       lastToolCategory === 'other';
     const webSearchFromIntent = !localToolContinuation && webSearchIntent;
-    const webSearchDeclaredOrRequired =
-      !localToolContinuation && (serverToolRequired || hasWebSearchToolDeclared);
+    const webSearchRequired = !localToolContinuation && serverToolRequired;
     const reachedLongContext =
       features.estimatedTokens >= (this.config.longContextThresholdTokens ?? DEFAULT_LONG_CONTEXT_THRESHOLD);
     const latestMessageFromUser = features.latestMessageFromUser === true;
@@ -66,17 +64,17 @@ export class RoutingClassifier {
         // 1) 上一轮 assistant 已触发 websearch 类工具（续写命中）
         // 2) 本轮已标记 serverToolRequired（例如 stage1 注入 websearch 工具）
         // 3) 用户输入命中联网搜索意图关键词
+        // 注意：仅“声明了 web_search 工具”不应直接触发 web_search 路由，
+        // 以免把普通工具会话误路由到 web_search。
         triggered:
           webSearchContinuation ||
-          webSearchDeclaredOrRequired ||
+          webSearchRequired ||
           webSearchFromIntent,
         reason:
           webSearchContinuation
             ? 'web_search:last-tool-websearch'
-            : webSearchDeclaredOrRequired && serverToolRequired
+            : webSearchRequired
               ? 'web_search:servertool-required'
-              : webSearchDeclaredOrRequired && hasWebSearchToolDeclared
-                ? 'web_search:tool-declared'
               : 'web_search:intent-keyword'
       },
       search: {
