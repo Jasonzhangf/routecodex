@@ -4,6 +4,7 @@ import type { Response } from 'express';
 import type { PipelineExecutionResult } from './types.js';
 import { formatRequestTimingSummary, logPipelineStage } from '../utils/stage-logger.js';
 import { logUsageSummary } from '../runtime/http-server/executor/usage-logger.js';
+import { normalizeUsage } from '../runtime/http-server/executor/usage-aggregator.js';
 import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
@@ -47,6 +48,12 @@ type SseFinishReasonTracker = {
   seenRequiredActionEvent: boolean;
   seenTerminalEvent: boolean;
   lastEventName?: string;
+};
+
+type ChatUsageNormalizationResult = {
+  payload: unknown;
+  normalized: boolean;
+  source?: 'body' | 'usage_log';
 };
 
 const SHOULD_LOG_HTTP_EVENTS = buildInfo.mode !== 'release'
@@ -240,6 +247,98 @@ function formatRequestId(value?: string): string {
   return resolveEffectiveRequestId(value);
 }
 
+function isChatCompletionsEndpoint(entryEndpoint?: string): boolean {
+  return typeof entryEndpoint === 'string' && entryEndpoint.toLowerCase().includes('/v1/chat/completions');
+}
+
+function sanitizeNumericUsageField(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function resolveNormalizedChatUsage(
+  body: unknown,
+  options: {
+    entryEndpoint?: string;
+    usageFallback?: Record<string, unknown>;
+  }
+): { usage?: Record<string, unknown>; source?: 'body' | 'usage_log' } {
+  if (!isChatCompletionsEndpoint(options.entryEndpoint)) {
+    return {};
+  }
+  const record =
+    body && typeof body === 'object' && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : undefined;
+  const rawUsage = record?.usage;
+  const normalizedFromBody = normalizeUsage(rawUsage);
+  const normalizedFromFallback = normalizeUsage(options.usageFallback);
+  const normalized = normalizedFromBody ?? normalizedFromFallback;
+  if (!normalized) {
+    return {};
+  }
+  const usageSource: 'body' | 'usage_log' = normalizedFromBody ? 'body' : 'usage_log';
+  const usageRecord =
+    rawUsage && typeof rawUsage === 'object' && !Array.isArray(rawUsage)
+      ? ({ ...(rawUsage as Record<string, unknown>) } as Record<string, unknown>)
+      : {};
+  const promptTokens = sanitizeNumericUsageField(normalized.prompt_tokens);
+  const completionTokens = sanitizeNumericUsageField(normalized.completion_tokens);
+  let totalTokens = sanitizeNumericUsageField(normalized.total_tokens);
+  if (totalTokens === undefined && promptTokens !== undefined && completionTokens !== undefined) {
+    totalTokens = promptTokens + completionTokens;
+  }
+  if (promptTokens !== undefined) {
+    usageRecord.prompt_tokens = promptTokens;
+  }
+  if (completionTokens !== undefined) {
+    usageRecord.completion_tokens = completionTokens;
+  }
+  if (totalTokens !== undefined) {
+    usageRecord.total_tokens = totalTokens;
+  }
+  return { usage: usageRecord, source: usageSource };
+}
+
+function normalizeChatUsagePayload(
+  body: unknown,
+  options: {
+    entryEndpoint?: string;
+    usageFallback?: Record<string, unknown>;
+  }
+): ChatUsageNormalizationResult {
+  if (!isChatCompletionsEndpoint(options.entryEndpoint)) {
+    return { payload: body, normalized: false };
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { payload: body, normalized: false };
+  }
+  const record = body as Record<string, unknown>;
+  if ('__sse_responses' in record) {
+    return { payload: body, normalized: false };
+  }
+  const resolved = resolveNormalizedChatUsage(body, options);
+  if (!resolved.usage) {
+    return { payload: body, normalized: false };
+  }
+  return {
+    payload: {
+      ...record,
+      usage: resolved.usage
+    },
+    normalized: true,
+    source: resolved.source
+  };
+}
+
 function sendSseBridgeError(res: Response, requestLabel: string, status = 502): void {
   const payload = {
     type: 'error',
@@ -418,6 +517,20 @@ export function sendPipelineResponse(
       })
       : stream;
     applyHeaders(res, result.headers, true);
+    const streamUsage = resolveNormalizedChatUsage(body, {
+      entryEndpoint,
+      usageFallback: result.usageLogInfo?.usage
+    });
+    if (streamUsage.usage) {
+      try {
+        res.setHeader('x-routecodex-usage', JSON.stringify(streamUsage.usage));
+      } catch (error) {
+        logResponseNonBlockingError(`response.sse.usage_header:${requestLabel}`, error);
+      }
+      logPipelineStage('response.chat_usage.stream_header', requestLabel, {
+        source: streamUsage.source
+      });
+    }
     res.status(status);
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -695,8 +808,18 @@ export function sendPipelineResponse(
   logPipelineStage('response.json.write', requestLabel, { status });
   // E1 boundary rule: internal env variables use "__*" and must never reach client payloads.
   // Preserve the SSE carrier key (it is handled above and never JSON-encoded).
-  const sanitized = stripInternalKeysDeep(body, { preserveKeys: new Set(['__sse_responses']) });
-  const jsonFinishReason = deriveFinishReason(body);
+  const usageNormalized = normalizeChatUsagePayload(body, {
+    entryEndpoint,
+    usageFallback: result.usageLogInfo?.usage
+  });
+  if (usageNormalized.normalized) {
+    logPipelineStage('response.chat_usage.normalized', requestLabel, {
+      source: usageNormalized.source
+    });
+  }
+  const clientBody = usageNormalized.payload;
+  const sanitized = stripInternalKeysDeep(clientBody, { preserveKeys: new Set(['__sse_responses']) });
+  const jsonFinishReason = deriveFinishReason(clientBody);
   getSessionExecutionStateTracker().recordJsonResponseComplete(requestLabel, jsonFinishReason);
   if (captureClientResponse) {
     void writeServerSnapshot({
