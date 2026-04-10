@@ -6,49 +6,26 @@ import type {
   ResolveOAuthTokenFileInput,
   ResolveUserAgentInput
 } from '../profile-contracts.js';
+import {
+  buildQwenStainlessHeaderEntries,
+  resolveQwenCodeUserAgent
+} from '../../core/utils/qwen-client-fingerprint.js';
 
 type UnknownRecord = Record<string, unknown>;
 type QwenMessageNode = Record<string, unknown>;
 
-const DEFAULT_QWEN_CODE_UA_VERSION = '0.10.3';
+const QWEN_CODE_SERVICE_NAME = 'qwen-code';
 const QWEN_OAUTH_AUTH_TYPE = 'qwen-oauth';
 const QWEN_OAUTH_CODER_MODEL = 'coder-model';
 const QWEN_OAUTH_VISION_MODEL = 'vision-model';
 const QWEN_OAUTH_MAX_TOKENS = 65536;
 const QWEN_WEB_SEARCH_ENDPOINT = '/api/v1/indices/plugin/web_search';
-const QWEN_STAINLESS_RUNTIME_VERSION = 'v22.17.0';
-const QWEN_STAINLESS_PACKAGE_VERSION = '5.11.0';
 function buildDefaultQwenSystemPart(): UnknownRecord {
   return {
     type: 'text',
     text: '',
     cache_control: { type: 'ephemeral' }
   };
-}
-
-function resolveQwenCodeUserAgentVersion(): string {
-  const fromEnv =
-    process.env.ROUTECODEX_QWEN_UA_VERSION ||
-    process.env.RCC_QWEN_UA_VERSION ||
-    process.env.ROUTECODEX_QWEN_CODE_UA_VERSION ||
-    process.env.RCC_QWEN_CODE_UA_VERSION;
-  const normalized = typeof fromEnv === 'string' ? fromEnv.trim() : '';
-  return normalized || DEFAULT_QWEN_CODE_UA_VERSION;
-}
-
-function buildQwenCodeUserAgent(): string {
-  const version = resolveQwenCodeUserAgentVersion();
-  return `QwenCode/${version} (${process.platform}; ${process.arch})`;
-}
-
-function resolveQwenStainlessOs(): string {
-  if (process.platform === 'darwin') {
-    return 'MacOS';
-  }
-  if (process.platform === 'win32') {
-    return 'Windows';
-  }
-  return 'Linux';
 }
 
 function assignHeader(headers: Record<string, string>, target: string, value: string): void {
@@ -172,123 +149,6 @@ function appendSystemContent(systemParts: UnknownRecord[], content: unknown): vo
   systemParts.push(toTextPart(String(content)));
 }
 
-function extractMessageText(content: unknown): string {
-  if (typeof content === 'string') {
-    return content.trim();
-  }
-  if (!Array.isArray(content)) {
-    return '';
-  }
-  const parts: string[] = [];
-  for (const item of content) {
-    if (typeof item === 'string') {
-      if (item.trim()) {
-        parts.push(item.trim());
-      }
-      continue;
-    }
-    if (!isRecord(item)) {
-      continue;
-    }
-    for (const key of ['text', 'output_text', 'input_text', 'content'] as const) {
-      const value = item[key];
-      if (typeof value === 'string' && value.trim()) {
-        parts.push(value.trim());
-      }
-    }
-  }
-  return parts.join(' ').trim();
-}
-
-function normalizeToolCallId(raw: unknown): string | undefined {
-  if (typeof raw !== 'string') {
-    return undefined;
-  }
-  const trimmed = raw.trim();
-  return trimmed.length ? trimmed : undefined;
-}
-
-function normalizeNonSystemMessages(messages: QwenMessageNode[]): QwenMessageNode[] {
-  const normalized: QwenMessageNode[] = [];
-  const pendingToolCallIds: string[] = [];
-
-  for (const node of messages) {
-    if (!isRecord(node)) {
-      continue;
-    }
-    const role = typeof node.role === 'string' ? node.role.trim().toLowerCase() : '';
-
-    if (role === 'assistant') {
-      const clone: QwenMessageNode = { ...node };
-      const rawToolCalls = Array.isArray(clone.tool_calls) ? clone.tool_calls : [];
-      if (rawToolCalls.length > 0) {
-        const normalizedToolCalls: UnknownRecord[] = [];
-        for (const call of rawToolCalls) {
-          if (!isRecord(call)) {
-            continue;
-          }
-          const callClone: UnknownRecord = { ...call };
-          const normalizedId =
-            normalizeToolCallId(callClone.id) ??
-            normalizeToolCallId(callClone.call_id) ??
-            normalizeToolCallId(callClone.tool_call_id);
-          if (normalizedId) {
-            callClone.id = normalizedId;
-            pendingToolCallIds.push(normalizedId);
-          }
-          delete callClone.call_id;
-          delete callClone.tool_call_id;
-          normalizedToolCalls.push(callClone);
-        }
-        clone.tool_calls = normalizedToolCalls;
-        normalized.push(clone);
-        continue;
-      }
-
-      if (!extractMessageText(clone.content)) {
-        continue;
-      }
-      normalized.push(clone);
-      continue;
-    }
-
-    if (role === 'tool') {
-      const clone: QwenMessageNode = { ...node };
-      const contentText = extractMessageText(clone.content);
-      let toolCallId =
-        normalizeToolCallId(clone.tool_call_id) ??
-        normalizeToolCallId(clone.call_id);
-
-      if (!toolCallId && pendingToolCallIds.length === 1) {
-        toolCallId = pendingToolCallIds.shift();
-      } else if (toolCallId) {
-        const idx = pendingToolCallIds.indexOf(toolCallId);
-        if (idx >= 0) {
-          pendingToolCallIds.splice(idx, 1);
-        }
-      }
-
-      if (toolCallId) {
-        clone.tool_call_id = toolCallId;
-      } else {
-        delete clone.tool_call_id;
-      }
-      delete clone.call_id;
-      delete clone.id;
-
-      if (!toolCallId && !contentText) {
-        continue;
-      }
-      normalized.push(clone);
-      continue;
-    }
-
-    normalized.push(node);
-  }
-
-  return normalized;
-}
-
 function normalizeQwenOAuthMessages(body: UnknownRecord): void {
   const rawMessages = Array.isArray(body.messages) ? body.messages : [];
   const systemParts: UnknownRecord[] = [buildDefaultQwenSystemPart()];
@@ -306,14 +166,12 @@ function normalizeQwenOAuthMessages(body: UnknownRecord): void {
     nonSystemMessagesRaw.push(node);
   }
 
-  const nonSystemMessages = normalizeNonSystemMessages(nonSystemMessagesRaw);
-
   body.messages = [
     {
       role: 'system',
       content: systemParts
     },
-    ...nonSystemMessages
+    ...nonSystemMessagesRaw
   ];
 }
 
@@ -438,6 +296,103 @@ function clampQwenOAuthMaxTokens(body: UnknownRecord): void {
   clampValue('max_output_tokens');
 }
 
+function hasNonEmptyTools(body: UnknownRecord): boolean {
+  return Array.isArray(body.tools) && body.tools.length > 0;
+}
+
+function resolveQwenOAuthProviderProtocol(input: BuildRequestBodyInput): string {
+  const runtimeProtocol =
+    input.runtimeMetadata && typeof input.runtimeMetadata.providerProtocol === 'string'
+      ? input.runtimeMetadata.providerProtocol.trim()
+      : '';
+  if (runtimeProtocol) {
+    return runtimeProtocol;
+  }
+  const metadata = getRequestMetadata(input.request);
+  const metadataProtocol = typeof metadata?.providerProtocol === 'string' ? metadata.providerProtocol.trim() : '';
+  return metadataProtocol;
+}
+
+function resolveQwenOAuthReasoningEffort(body: UnknownRecord, input: BuildRequestBodyInput): string {
+  const direct = typeof body.reasoning_effort === 'string' ? body.reasoning_effort.trim() : '';
+  if (direct) {
+    return direct;
+  }
+  const runtimeEffort =
+    input.runtimeMetadata && typeof input.runtimeMetadata.reasoning_effort === 'string'
+      ? input.runtimeMetadata.reasoning_effort.trim()
+      : '';
+  if (runtimeEffort) {
+    return runtimeEffort;
+  }
+  const runtimeMetadataNode =
+    input.runtimeMetadata && isRecord(input.runtimeMetadata.metadata) ? input.runtimeMetadata.metadata : undefined;
+  const metadataEffort =
+    typeof runtimeMetadataNode?.reasoning_effort === 'string' ? runtimeMetadataNode.reasoning_effort.trim() : '';
+  if (metadataEffort) {
+    return metadataEffort;
+  }
+  const requestMetadata = getRequestMetadata(input.request);
+  return typeof requestMetadata?.reasoning_effort === 'string' ? requestMetadata.reasoning_effort.trim() : '';
+}
+
+function ensureQwenOAuthToolChoice(body: UnknownRecord): void {
+  if (!hasNonEmptyTools(body)) {
+    return;
+  }
+  const existing = body.tool_choice;
+  if (typeof existing === 'string' && existing.trim()) {
+    return;
+  }
+  if (isRecord(existing)) {
+    return;
+  }
+  body.tool_choice = 'auto';
+}
+
+function normalizeQwenOAuthReasoning(body: UnknownRecord, input: BuildRequestBodyInput): void {
+  if (body.reasoning === false) {
+    return;
+  }
+  const providerProtocol = resolveQwenOAuthProviderProtocol(input).toLowerCase();
+  const hasTools = hasNonEmptyTools(body);
+  const shouldPromoteStructuredReasoning = providerProtocol === 'openai-chat' || hasTools;
+  const effort = resolveQwenOAuthReasoningEffort(body, input) || (shouldPromoteStructuredReasoning ? 'high' : '');
+  const current = body.reasoning;
+
+  if (isRecord(current)) {
+    if (!current.effort && effort) {
+      current.effort = effort;
+    }
+    if (!current.summary && shouldPromoteStructuredReasoning) {
+      current.summary = 'detailed';
+    }
+    return;
+  }
+
+  if (current === true || current == null) {
+    if (!effort && !shouldPromoteStructuredReasoning) {
+      return;
+    }
+    body.reasoning = {
+      ...(effort ? { effort } : {}),
+      ...(shouldPromoteStructuredReasoning ? { summary: 'detailed' } : {})
+    };
+  }
+}
+
+function mirrorQwenOAuthReasoningEffort(body: UnknownRecord): void {
+  const existing = typeof body.reasoning_effort === 'string' ? body.reasoning_effort.trim() : '';
+  if (existing) {
+    return;
+  }
+  const reasoning = isRecord(body.reasoning) ? body.reasoning : undefined;
+  const effort = typeof reasoning?.effort === 'string' ? reasoning.effort.trim() : '';
+  if (effort) {
+    body.reasoning_effort = effort;
+  }
+}
+
 export const qwenFamilyProfile: ProviderFamilyProfile = {
   id: 'qwen/default',
   providerFamily: 'qwen',
@@ -470,31 +425,33 @@ export const qwenFamilyProfile: ProviderFamilyProfile = {
       requestBody.model = resolvedModel;
     }
     clampQwenOAuthMaxTokens(requestBody);
+    ensureQwenOAuthToolChoice(requestBody);
+    normalizeQwenOAuthReasoning(requestBody, input);
+    mirrorQwenOAuthReasoningEffort(requestBody);
     normalizeQwenOAuthMessages(requestBody);
     return body;
   },
   resolveUserAgent(input: ResolveUserAgentInput): string | undefined {
-    return input.uaFromConfig ?? input.uaFromService ?? buildQwenCodeUserAgent();
+    return resolveQwenCodeUserAgent();
   },
   applyRequestHeaders(input: ApplyRequestHeadersInput): Record<string, string> {
     const headers = { ...(input.headers || {}) };
 
-    const resolvedUserAgent =
-      findHeaderValue(headers, 'User-Agent') ||
-      buildQwenCodeUserAgent();
+    const resolvedUserAgent = resolveQwenCodeUserAgent();
     assignHeader(headers, 'User-Agent', resolvedUserAgent);
 
     // Keep request headers consistent with Qwen Code DashScope-compatible client behavior.
     assignHeader(headers, 'X-DashScope-CacheControl', 'enable');
     assignHeader(headers, 'X-DashScope-UserAgent', resolvedUserAgent);
     assignHeader(headers, 'X-DashScope-AuthType', resolveDashScopeAuthType(input));
-    assignHeader(headers, 'X-Stainless-Runtime-Version', QWEN_STAINLESS_RUNTIME_VERSION);
-    assignHeader(headers, 'X-Stainless-Lang', 'js');
-    assignHeader(headers, 'X-Stainless-Arch', process.arch);
-    assignHeader(headers, 'X-Stainless-Package-Version', QWEN_STAINLESS_PACKAGE_VERSION);
-    assignHeader(headers, 'X-Stainless-Retry-Count', '0');
-    assignHeader(headers, 'X-Stainless-Os', resolveQwenStainlessOs());
-    assignHeader(headers, 'X-Stainless-Runtime', 'node');
+    for (const [key, value] of Object.entries(buildQwenStainlessHeaderEntries())) {
+      assignHeader(headers, key, value);
+    }
+
+    // Align with Qwen CLI upstream shape: do not forward Codex session/originator headers.
+    deleteHeaderInsensitive(headers, 'originator');
+    deleteHeaderInsensitive(headers, 'session_id');
+    deleteHeaderInsensitive(headers, 'conversation_id');
 
     // Remove legacy Gemini-style metadata headers for qwen requests.
     deleteHeaderInsensitive(headers, 'X-Goog-Api-Client');

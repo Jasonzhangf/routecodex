@@ -2,7 +2,7 @@ import { describe, expect, test } from '@jest/globals';
 import { qwenFamilyProfile } from '../../../src/providers/profile/families/qwen-profile.js';
 
 describe('qwen profile request sanitization', () => {
-  test('drops empty assistant/tool turns and backfills tool_call_id when unambiguous', () => {
+  test('preserves non-system history shape and only injects qwen system envelope', () => {
     const body = qwenFamilyProfile.buildRequestBody?.({
       request: {
         metadata: { authType: 'qwen-oauth' }
@@ -37,19 +37,30 @@ describe('qwen profile request sanitization', () => {
     expect(body?.model).toBe('coder-model');
     expect(Array.isArray(body?.messages)).toBe(true);
     expect(body.messages[0]?.role).toBe('system');
+    expect(body.messages[0]?.content).toEqual([
+      { type: 'text', text: '', cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: 'You are helpful.' }
+    ]);
 
-    const roles = body.messages.map((m: any) => m.role);
-    expect(roles).toEqual(['system', 'user', 'assistant', 'tool']);
-
-    const assistant = body.messages[2];
-    expect(Array.isArray(assistant.tool_calls)).toBe(true);
-    expect(assistant.tool_calls[0]?.id).toBe('call_exec_1');
-    expect(assistant.tool_calls[0]?.call_id).toBeUndefined();
-    expect(assistant.tool_calls[0]?.tool_call_id).toBeUndefined();
-
-    const tool = body.messages[3];
-    expect(tool.tool_call_id).toBe('call_exec_1');
-    expect(tool.call_id).toBeUndefined();
+    expect(body.messages).toHaveLength(6);
+    expect(body.messages[1]).toEqual({ role: 'user', content: [{ type: 'text', text: 'run java -version' }] });
+    expect(body.messages[2]).toEqual({ role: 'assistant', content: [{ type: 'text', text: '' }] });
+    expect(body.messages[3]).toEqual({ role: 'tool', content: [{ type: 'text', text: '' }] });
+    expect(body.messages[4]).toEqual({
+      role: 'assistant',
+      content: [{ type: 'text', text: '' }],
+      tool_calls: [
+        {
+          id: 'call_exec_1',
+          type: 'function',
+          function: { name: 'exec_command', arguments: '{"cmd":"java -version"}' }
+        }
+      ]
+    });
+    expect(body.messages[5]).toEqual({
+      role: 'tool',
+      content: [{ type: 'text', text: '17.0.16' }]
+    });
   });
 
   test('keeps non-empty tool turn without tool_call_id', () => {
@@ -88,5 +99,65 @@ describe('qwen profile request sanitization', () => {
 
     expect(body?.model).toBe('coder-model');
     expect(body?.max_tokens).toBe(65536);
+  });
+
+  test('promotes chat inbound qwen tool requests to structured reasoning and auto tool_choice', () => {
+    const body = qwenFamilyProfile.buildRequestBody?.({
+      request: {
+        metadata: { authType: 'qwen-oauth' }
+      } as any,
+      runtimeMetadata: {
+        authType: 'qwen-oauth',
+        providerProtocol: 'openai-chat',
+        reasoning_effort: 'high'
+      } as any,
+      defaultBody: {
+        model: 'qwen3.6-plus',
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: { type: 'object', properties: { cmd: { type: 'string' } } }
+            }
+          }
+        ],
+        messages: [{ role: 'user', content: 'run pwd' }]
+      } as any
+    } as any) as any;
+
+    expect(body?.tool_choice).toBe('auto');
+    expect(body?.reasoning).toEqual({ effort: 'high', summary: 'detailed' });
+    expect(body?.reasoning_effort).toBe('high');
+  });
+
+  test('backfills missing effort/summary on structured qwen chat reasoning', () => {
+    const body = qwenFamilyProfile.buildRequestBody?.({
+      request: {
+        metadata: { authType: 'qwen-oauth' }
+      } as any,
+      runtimeMetadata: {
+        authType: 'qwen-oauth',
+        providerProtocol: 'openai-chat',
+        reasoning_effort: 'high'
+      } as any,
+      defaultBody: {
+        model: 'qwen3.6-plus',
+        reasoning: {},
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: { type: 'object', properties: { cmd: { type: 'string' } } }
+            }
+          }
+        ],
+        messages: [{ role: 'user', content: 'continue' }]
+      } as any
+    } as any) as any;
+
+    expect(body?.reasoning).toEqual({ effort: 'high', summary: 'detailed' });
+    expect(body?.reasoning_effort).toBe('high');
   });
 });

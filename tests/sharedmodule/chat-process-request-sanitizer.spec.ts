@@ -1,6 +1,18 @@
 import { sanitizeChatProcessRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-request-sanitizer.js';
 
 describe('sanitizeChatProcessRequest', () => {
+  it('does not inject synthetic thinking parameters', () => {
+    const input: any = {
+      messages: [
+        { role: 'user', content: 'hello' }
+      ]
+    };
+
+    const out: any = sanitizeChatProcessRequest(input);
+
+    expect(out.parameters).toBeUndefined();
+  });
+
   it('removes empty/template assistant turns and keeps tool_calls turns', () => {
     const input: any = {
       messages: [

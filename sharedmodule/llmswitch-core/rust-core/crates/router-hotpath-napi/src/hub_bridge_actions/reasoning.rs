@@ -683,10 +683,11 @@ fn normalize_responses_content_block(block: &mut Value, segments: &mut Vec<Strin
         {
             let cleaned = strip_reasoning_from_text_value(text, segments);
             obj.insert("text".to_string(), Value::String(cleaned));
-            if let Some(merged) = merge_reasoning_text(obj.get("reasoning_content"), segments) {
-                obj.insert("reasoning_content".to_string(), Value::String(merged));
-            } else {
-                obj.remove("reasoning_content");
+            if !segments.is_empty() {
+                if let Some(merged) = merge_reasoning_text(obj.get("reasoning_content"), segments)
+                {
+                    obj.insert("reasoning_content".to_string(), Value::String(merged));
+                }
             }
         }
     }
@@ -698,10 +699,11 @@ fn normalize_responses_content_block(block: &mut Value, segments: &mut Vec<Strin
         } else if let Some(text) = content.as_str() {
             let cleaned = strip_reasoning_from_text_value(text, segments);
             *content = Value::String(cleaned);
-            if let Some(merged) = merge_reasoning_text(obj.get("reasoning_content"), segments) {
-                obj.insert("reasoning_content".to_string(), Value::String(merged));
-            } else {
-                obj.remove("reasoning_content");
+            if !segments.is_empty() {
+                if let Some(merged) = merge_reasoning_text(obj.get("reasoning_content"), segments)
+                {
+                    obj.insert("reasoning_content".to_string(), Value::String(merged));
+                }
             }
         }
     }
@@ -732,11 +734,7 @@ fn normalize_responses_message_block(
             merge_reasoning_text(message.get("reasoning_content"), &local_segments)
         {
             message.insert("reasoning_content".to_string(), Value::String(merged));
-        } else {
-            message.remove("reasoning_content");
         }
-    } else if message.contains_key("reasoning_content") {
-        message.remove("reasoning_content");
     }
 }
 
@@ -766,19 +764,18 @@ fn normalize_responses_input(payload: &mut Map<String, Value>) {
             let cleaned = strip_reasoning_from_text_value(text, &mut reasoning_segments);
             entry_obj.insert("text".to_string(), Value::String(cleaned));
         }
-        if let Some(merged) =
-            merge_reasoning_text(entry_obj.get("reasoning_content"), &reasoning_segments)
-        {
-            entry_obj.insert("reasoning_content".to_string(), Value::String(merged));
-        } else {
-            entry_obj.remove("reasoning_content");
+        if !reasoning_segments.is_empty() {
+            if let Some(merged) =
+                merge_reasoning_text(entry_obj.get("reasoning_content"), &reasoning_segments)
+            {
+                entry_obj.insert("reasoning_content".to_string(), Value::String(merged));
+            }
         }
     }
 }
 
 fn normalize_responses_instructions(payload: &mut Map<String, Value>) {
     let Some(instructions) = payload.get("instructions").and_then(Value::as_str) else {
-        payload.remove(RESPONSES_INSTRUCTIONS_REASONING_FIELD);
         return;
     };
     let mut segments: Vec<String> = Vec::new();
@@ -789,8 +786,6 @@ fn normalize_responses_instructions(payload: &mut Map<String, Value>) {
             RESPONSES_INSTRUCTIONS_REASONING_FIELD.to_string(),
             Value::String(segments.join("\n")),
         );
-    } else {
-        payload.remove(RESPONSES_INSTRUCTIONS_REASONING_FIELD);
     }
 }
 
@@ -818,11 +813,12 @@ fn normalize_responses_required_action(payload: &mut Map<String, Value>) {
             let mut segments: Vec<String> = Vec::new();
             let cleaned = strip_reasoning_from_text_value(instructions, &mut segments);
             call_obj.insert("instructions".to_string(), Value::String(cleaned));
-            if let Some(merged) = merge_reasoning_text(call_obj.get("reasoning_content"), &segments)
-            {
-                call_obj.insert("reasoning_content".to_string(), Value::String(merged));
-            } else {
-                call_obj.remove("reasoning_content");
+            if !segments.is_empty() {
+                if let Some(merged) =
+                    merge_reasoning_text(call_obj.get("reasoning_content"), &segments)
+                {
+                    call_obj.insert("reasoning_content".to_string(), Value::String(merged));
+                }
             }
         }
     }
@@ -970,10 +966,10 @@ fn normalize_anthropic_message(message: &mut Map<String, Value>) {
             *content = Value::String(cleaned);
         }
     }
-    if let Some(merged) = merge_reasoning_text(message.get("reasoning_content"), &segments) {
-        message.insert("reasoning_content".to_string(), Value::String(merged));
-    } else {
-        message.remove("reasoning_content");
+    if !segments.is_empty() {
+        if let Some(merged) = merge_reasoning_text(message.get("reasoning_content"), &segments) {
+            message.insert("reasoning_content".to_string(), Value::String(merged));
+        }
     }
 }
 
@@ -987,12 +983,12 @@ pub(crate) fn normalize_reasoning_in_anthropic_payload(payload: &mut Value) {
             for block in arr.iter_mut() {
                 normalize_anthropic_block(block, &mut response_segments);
             }
-            if let Some(merged) =
-                merge_reasoning_text(obj.get("reasoning_content"), &response_segments)
-            {
-                obj.insert("reasoning_content".to_string(), Value::String(merged));
-            } else {
-                obj.remove("reasoning_content");
+            if !response_segments.is_empty() {
+                if let Some(merged) =
+                    merge_reasoning_text(obj.get("reasoning_content"), &response_segments)
+                {
+                    obj.insert("reasoning_content".to_string(), Value::String(merged));
+                }
             }
         }
     }

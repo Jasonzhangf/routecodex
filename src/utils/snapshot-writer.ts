@@ -25,11 +25,9 @@ type SnapshotGlobal = {
 type SnapshotHookWriter = (scope: string, payload: Record<string, unknown>) => Promise<void>;
 
 let snapshotHookWriterPromise: Promise<SnapshotHookWriter | null> | null = null;
-const DEFAULT_SERVER_SNAPSHOT_PAYLOAD_MAX_BYTES = 256 * 1024;
 const DEFAULT_SERVER_SNAPSHOT_KEEP_RECENT_FILES = 10;
 const DEFAULT_SERVER_SNAPSHOT_PRUNE_INTERVAL_MS = 15_000;
 const DEFAULT_SERVER_SNAPSHOT_PRUNE_MIN_WRITES = 8;
-const DEFAULT_SERVER_SNAPSHOT_ESTIMATE_NODE_BUDGET = 4000;
 
 type SnapshotPruneState = {
   pending: boolean;
@@ -59,25 +57,6 @@ function shouldForceServerSnapshotDualWrite(): boolean {
       ?? process.env.RCC_SERVER_SNAPSHOT_FORCE_DUAL_WRITE,
     false
   );
-}
-
-function resolveSnapshotFullCapture(): boolean {
-  return resolveBoolFromEnv(
-    process.env.ROUTECODEX_SNAPSHOT_FULL ?? process.env.RCC_SNAPSHOT_FULL,
-    false
-  );
-}
-
-function resolveServerSnapshotPayloadMaxBytes(): number {
-  const raw =
-    process.env.ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES
-    ?? process.env.RCC_SNAPSHOT_PAYLOAD_MAX_BYTES
-    ?? '';
-  const parsed = Number.parseInt(String(raw).trim(), 10);
-  if (Number.isFinite(parsed) && parsed > 0) {
-    return parsed;
-  }
-  return DEFAULT_SERVER_SNAPSHOT_PAYLOAD_MAX_BYTES;
 }
 
 function resolveServerSnapshotKeepRecentFiles(): number {
@@ -116,137 +95,9 @@ function resolveServerSnapshotPruneMinWrites(): number {
   return DEFAULT_SERVER_SNAPSHOT_PRUNE_MIN_WRITES;
 }
 
-function estimateSnapshotPayloadBytes(
-  value: unknown,
-  options?: {
-    maxBytes?: number;
-    depth?: number;
-    seen?: Set<unknown>;
-    nodeBudget?: number;
-    visitedNodes?: number;
-  }
-): number {
-  const maxBytes = options?.maxBytes ?? Number.POSITIVE_INFINITY;
-  const depth = options?.depth ?? 0;
-  const seen = options?.seen ?? new Set<unknown>();
-  const nodeBudget = options?.nodeBudget ?? DEFAULT_SERVER_SNAPSHOT_ESTIMATE_NODE_BUDGET;
-  const visitedNodes = (options?.visitedNodes ?? 0) + 1;
-
-  if (visitedNodes > nodeBudget) {
-    return maxBytes + 1;
-  }
-
-  if (value === null || value === undefined) {
-    return 4;
-  }
-  const valueType = typeof value;
-  if (valueType === 'string') {
-    return Math.min(maxBytes + 1, (value as string).length * 2 + 2);
-  }
-  if (valueType === 'number') {
-    return 8;
-  }
-  if (valueType === 'boolean') {
-    return 4;
-  }
-  if (valueType === 'bigint') {
-    return String(value).length + 8;
-  }
-  if (valueType === 'symbol' || valueType === 'function') {
-    return 16;
-  }
-  if (seen.has(value)) {
-    return 8;
-  }
-  seen.add(value);
-
-  if (depth >= 8) {
-    return 64;
-  }
-
-  let bytes = 0;
-  if (Array.isArray(value)) {
-    bytes += 2;
-    for (const item of value) {
-      bytes += estimateSnapshotPayloadBytes(item, {
-        maxBytes: Math.max(0, maxBytes - bytes),
-        depth: depth + 1,
-        seen,
-        nodeBudget,
-        visitedNodes
-      });
-      if (bytes > maxBytes) {
-        return maxBytes + 1;
-      }
-    }
-    return bytes;
-  }
-  if (value && typeof value === 'object') {
-    bytes += 2;
-    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      bytes += key.length * 2 + 4;
-      bytes += estimateSnapshotPayloadBytes(child, {
-        maxBytes: Math.max(0, maxBytes - bytes),
-        depth: depth + 1,
-        seen,
-        nodeBudget,
-        visitedNodes
-      });
-      if (bytes > maxBytes) {
-        return maxBytes + 1;
-      }
-    }
-    return bytes;
-  }
-  return 16;
-}
-
-function summarizeSnapshotPayload(value: unknown): Record<string, unknown> {
-  if (Array.isArray(value)) {
-    return {
-      type: 'array',
-      length: value.length,
-      sampleTypes: value.slice(0, 8).map((item) => typeof item)
-    };
-  }
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    const keys = Object.keys(record);
-    return {
-      type: 'object',
-      keyCount: keys.length,
-      keys: keys.slice(0, 24)
-    };
-  }
-  if (typeof value === 'string') {
-    return {
-      type: 'string',
-      length: value.length,
-      preview: value.length > 160 ? `${value.slice(0, 160)}…` : value
-    };
-  }
-  return {
-    type: typeof value,
-    value: value ?? null
-  };
-}
-
 function coerceServerSnapshotData(stage: string, data: unknown): unknown {
-  if (resolveSnapshotFullCapture()) {
-    return data;
-  }
-  const maxBytes = resolveServerSnapshotPayloadMaxBytes();
-  const estimatedBytes = estimateSnapshotPayloadBytes(data, { maxBytes: maxBytes + 1 });
-  if (estimatedBytes <= maxBytes) {
-    return data;
-  }
-  return {
-    __snapshot_truncated: true,
-    stage,
-    maxBytes,
-    estimatedBytes,
-    summary: summarizeSnapshotPayload(data)
-  };
+  void stage;
+  return data;
 }
 
 function logServerSnapshotNonBlockingError(operation: string, error: unknown): void {

@@ -1,4 +1,5 @@
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
+import { resolveQwenCodeUserAgent } from '../core/utils/qwen-client-fingerprint.js';
 
 /**
  * Qwen UserInfo 获取API Key的辅助函数
@@ -27,23 +28,6 @@ export interface QwenTokenData {
   norefresh?: boolean;
 }
 
-const DEFAULT_QWEN_CODE_UA_VERSION = '0.10.3';
-
-function resolveQwenCodeUserAgentVersion(): string {
-  const fromEnv =
-    process.env.ROUTECODEX_QWEN_UA_VERSION ||
-    process.env.RCC_QWEN_UA_VERSION ||
-    process.env.ROUTECODEX_QWEN_CODE_UA_VERSION ||
-    process.env.RCC_QWEN_CODE_UA_VERSION;
-  const normalized = typeof fromEnv === 'string' ? fromEnv.trim() : '';
-  return normalized || DEFAULT_QWEN_CODE_UA_VERSION;
-}
-
-function buildQwenCodeUserAgent(): string {
-  const version = resolveQwenCodeUserAgentVersion();
-  return `QwenCode/${version} (${process.platform}; ${process.arch})`;
-}
-
 /**
  * 使用access_token调用Qwen的userInfo接口获取API Key
  * 等价于CLIProxyAPI的FetchUserInfo
@@ -64,7 +48,7 @@ export async function fetchQwenUserInfo(accessToken: string): Promise<QwenUserIn
       ];
   
   try {
-    const userAgent = buildQwenCodeUserAgent();
+    const userAgent = resolveQwenCodeUserAgent();
     const commonHeaders: Record<string, string> = {
       'Accept': 'application/json',
       'User-Agent': userAgent,

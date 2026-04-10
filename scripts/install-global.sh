@@ -96,14 +96,15 @@ build_project() {
 
     # 构建项目
     echo "🔨 编译TypeScript..."
-    # dev 包：显式使用 BUILD_MODE=dev 以便在编译期区分 dev/release
-   BUILD_MODE=dev ROUTECODEX_SKIP_AUTO_BUMP=1 timeout 300 npm run build || {
+    # 本地全局安装使用最小构建链路，绕开 prebuild 审计脚本，避免与 repo-level 审计耦合。
+    BUILD_MODE=dev ROUTECODEX_SKIP_AUTO_BUMP=1 timeout 300 npm run build:min || {
        echo "❌ 构建超时或失败"
-       echo "💡 尝试手动构建：npm run build"
+       echo "💡 尝试手动构建：BUILD_MODE=dev npm run build:min"
        exit 1
    }
     # 确保CLI可执行（本地 + 全局目标自愈）
     node scripts/ensure-cli-executable.mjs || true
+    ROUTECODEX_SHIM_DIR="$HOME/.local/bin" node scripts/ensure-cli-command-shim.mjs || true
 
     # 检查构建结果
     if [ ! -f "dist/cli.js" ]; then
@@ -139,8 +140,8 @@ global_install() {
         fi
     fi
 
-    # 执行安装（跳过可选依赖，减少体积；允许脚本执行以生成可执行文件）
-    npm install -g . --no-audit --no-fund --omit=optional
+    # 依赖本地已完成的 dist，跳过 install 阶段脚本，避免二次触发 repo 审计/构建。
+    npm install -g . --no-audit --no-fund --omit=optional --ignore-scripts
 
     # 全局安装后再次修复可执行位（解决偶发 permission denied）
     node scripts/ensure-cli-executable.mjs || true
@@ -227,7 +228,7 @@ cleanup_old_install() {
     fi
 
     # 清理旧的可执行文件
-    if [ -L "$NPM_PREFIX/bin/routecodex" ]; then
+    if [ -e "$NPM_PREFIX/bin/routecodex" ]; then
         echo "🗑️  删除旧的routecodex可执行文件..."
         rm -f "$NPM_PREFIX/bin/routecodex"
     fi

@@ -348,7 +348,27 @@ fn test_req_profile_chat_qwen_native_applied() {
         payload: json!({
             "model": "gpt-4",
             "messages": [
-                {"role": "user", "content": "hello qwen"}
+                {"role": "user", "content": "hello qwen"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"pwd\"}"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "name": "exec_command",
+                    "content": "ok"
+                }
             ],
             "reasoning": {
                 "effort": "high",
@@ -398,25 +418,22 @@ fn test_req_profile_chat_qwen_native_applied() {
     assert!(result.native_applied);
     assert_eq!(result.applied_profile, Some("chat:qwen".to_string()));
     assert_eq!(result.payload["model"], "qwen3-coder-plus");
-    assert_eq!(result.payload["input"][0]["role"], "user");
     assert_eq!(result.payload["messages"][0]["role"], "user");
+    assert_eq!(result.payload["messages"][0]["content"], "hello qwen");
     assert_eq!(
-        result.payload["messages"][0]["content"][0]["type"],
-        "text"
+        result.payload["messages"][1]["tool_calls"][0]["function"]["name"],
+        "exec_command"
     );
-    assert_eq!(
-        result.payload["input"][0]["content"][0]["text"],
-        "hello qwen"
-    );
-    assert_eq!(result.payload["parameters"]["max_output_tokens"], 256);
-    assert_eq!(result.payload["parameters"]["stop_sequences"][0], "END");
-    assert_eq!(result.payload["parameters"]["reasoning"]["effort"], "high");
-    assert_eq!(result.payload["parameters"]["reasoning"]["summary"], "auto");
+    assert_eq!(result.payload["messages"][2]["tool_call_id"], "call_1");
+    assert_eq!(result.payload["max_tokens"], 256);
+    assert_eq!(result.payload["stop"][0], "END");
+    assert_eq!(result.payload["reasoning"]["effort"], "high");
+    assert_eq!(result.payload["reasoning"]["summary"], "auto");
     assert_eq!(
         result.payload["tools"][0]["function"]["name"],
         "exec_command"
     );
-    assert!(result.payload["tools"][0].get("extra").is_none());
+    assert_eq!(result.payload["tools"][0]["extra"], true);
 }
 
 #[test]
@@ -483,6 +500,130 @@ fn test_req_profile_chat_qwen_normalizes_responses_input_content_types() {
     assert!(!serialized.contains("\"input_text\""));
     assert!(!serialized.contains("\"input_image\""));
     assert!(!serialized.contains("\"input_video\""));
+    assert!(result.payload.get("input").is_none());
+}
+
+#[test]
+fn test_req_profile_chat_qwen_preserves_tool_choice() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "qwen3.6-plus",
+            "messages": [
+                {"role": "user", "content": "call echo"}
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "echo",
+                        "description": "Echo text",
+                        "parameters": {
+                            "type": "object",
+                            "properties": { "text": { "type": "string" } },
+                            "required": ["text"]
+                        }
+                    }
+                }
+            ],
+            "tool_choice": { "type": "function", "name": "echo" }
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:qwen".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_qwen_tool_choice_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.applied_profile, Some("chat:qwen".to_string()));
+    assert_eq!(result.payload["tool_choice"]["type"], "function");
+    assert_eq!(result.payload["tool_choice"]["function"]["name"], "echo");
+}
+
+#[test]
+fn test_req_profile_chat_qwen_preserves_historical_reasoning_content() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "qwen3.6-plus",
+            "messages": [
+                { "role": "user", "content": "run pwd" },
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "先确认当前工作目录，再继续执行工具调用。",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": { "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" }
+                        }
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "name": "exec_command",
+                    "content": "ok"
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:qwen".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_qwen_reasoning_history_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.applied_profile, Some("chat:qwen".to_string()));
+    assert_eq!(
+        result.payload["messages"][1]["reasoning_content"],
+        "先确认当前工作目录，再继续执行工具调用。"
+    );
+    assert_eq!(
+        result.payload["messages"][1]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
 }
 
 #[test]

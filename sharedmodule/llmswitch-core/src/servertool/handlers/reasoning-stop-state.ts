@@ -8,8 +8,8 @@ import { resolveStopMessageSessionScope } from './stop-message-auto/runtime-util
 import { extractCapturedChatSeed } from './followup-request-builder.js';
 
 const REASONING_STOP_SUMMARY_MAX_CHARS = 4000;
-const STOPLESS_DIRECTIVE_PATTERN = /<\*\*\s*stopless\s*:\s*([a-z0-9_-]+)\s*\*\*>/gi;
-const STOPLESS_DIRECTIVE_STRIP_PATTERN = /<\*\*\s*stopless\s*:\s*[^*]*\*\*>/gi;
+const STOPLESS_DIRECTIVE_PATTERN = /<\*\*stopless:([a-z0-9_-]+)\*\*>/gi;
+const STOPLESS_DIRECTIVE_STRIP_PATTERN = /<\*\*stopless:[^*]+\*\*>/gi;
 
 export type ReasoningStopMode = 'on' | 'off' | 'endless';
 
@@ -32,11 +32,12 @@ function createEmptyRoutingInstructionState(): RoutingInstructionState {
     stopMessageAiMode: undefined,
     stopMessageAiSeedPrompt: undefined,
     stopMessageAiHistory: undefined,
-    reasoningStopMode: undefined,
-    reasoningStopArmed: undefined,
-    reasoningStopSummary: undefined,
-    reasoningStopUpdatedAt: undefined,
-    preCommandSource: undefined,
+   reasoningStopMode: undefined,
+   reasoningStopArmed: undefined,
+   reasoningStopSummary: undefined,
+   reasoningStopUpdatedAt: undefined,
+    reasoningStopFailCount: undefined,
+   preCommandSource: undefined,
     preCommandScriptPath: undefined,
     preCommandUpdatedAt: undefined
   };
@@ -104,7 +105,8 @@ function isStateEmpty(state: RoutingInstructionState): boolean {
   const noReasoningStop =
     (typeof state.reasoningStopMode !== 'string' || !state.reasoningStopMode.trim()) &&
     state.reasoningStopArmed !== true &&
-    (typeof state.reasoningStopSummary !== 'string' || !state.reasoningStopSummary.trim()) &&
+    (typeof state.reasoningStopUpdatedAt !== 'number' || !Number.isFinite(state.reasoningStopUpdatedAt)) &&
+    (typeof state.reasoningStopFailCount !== 'number' || !Number.isFinite(state.reasoningStopFailCount));
     (typeof state.reasoningStopUpdatedAt !== 'number' || !Number.isFinite(state.reasoningStopUpdatedAt));
   const noPreCommand =
     (!state.preCommandScriptPath || !state.preCommandScriptPath.trim()) &&
@@ -435,9 +437,71 @@ export function clearReasoningStopState(adapterContext: unknown): void {
   if (!state) {
     return;
   }
-  state.reasoningStopArmed = undefined;
-  state.reasoningStopSummary = undefined;
-  state.reasoningStopUpdatedAt = undefined;
+ state.reasoningStopArmed = undefined;
+ state.reasoningStopSummary = undefined;
+ state.reasoningStopUpdatedAt = undefined;
+  state.reasoningStopFailCount = undefined;
+ if (isStateEmpty(state)) {
+    saveRoutingInstructionStateSync(stickyKey, null);
+    return;
+  }
+  saveRoutingInstructionStateSync(stickyKey, state);
+}
+
+export function readReasoningStopFailCount(adapterContext: unknown): number {
+  const stickyKey = resolveStickyKey(adapterContext);
+  if (!stickyKey) {
+    return 0;
+  }
+  let state: RoutingInstructionState | null = null;
+  try {
+    state = loadRoutingInstructionStateSync(stickyKey);
+  } catch {
+    state = null;
+  }
+  if (!state) {
+    return 0;
+  }
+  const count = state.reasoningStopFailCount;
+  return typeof count === 'number' && Number.isFinite(count) ? count : 0;
+}
+
+export function incrementReasoningStopFailCount(adapterContext: unknown): number {
+  const stickyKey = resolveStickyKey(adapterContext);
+  if (!stickyKey) {
+    return 0;
+  }
+  let state: RoutingInstructionState | null = null;
+  try {
+    state = loadRoutingInstructionStateSync(stickyKey);
+  } catch {
+    state = null;
+  }
+  const next = state ?? createEmptyRoutingInstructionState();
+  const currentCount = typeof next.reasoningStopFailCount === 'number' && Number.isFinite(next.reasoningStopFailCount)
+    ? next.reasoningStopFailCount
+    : 0;
+  const newCount = currentCount + 1;
+  next.reasoningStopFailCount = newCount;
+  saveRoutingInstructionStateSync(stickyKey, next);
+  return newCount;
+}
+
+export function resetReasoningStopFailCount(adapterContext: unknown): void {
+  const stickyKey = resolveStickyKey(adapterContext);
+  if (!stickyKey) {
+    return;
+  }
+  let state: RoutingInstructionState | null = null;
+  try {
+    state = loadRoutingInstructionStateSync(stickyKey);
+  } catch {
+    state = null;
+  }
+  if (!state) {
+    return;
+  }
+  state.reasoningStopFailCount = undefined;
   if (isStateEmpty(state)) {
     saveRoutingInstructionStateSync(stickyKey, null);
     return;

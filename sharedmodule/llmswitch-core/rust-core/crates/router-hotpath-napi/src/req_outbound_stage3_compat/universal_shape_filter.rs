@@ -253,6 +253,13 @@ fn normalize_request_message(
         }
     }
 
+    if let Some(reasoning_content) = read_string(row.get("reasoning_content")) {
+        out.insert(
+            "reasoning_content".to_string(),
+            Value::String(reasoning_content),
+        );
+    }
+
     if role == "assistant" && has_array_items(row.get("tool_calls")) {
         let tool_calls = normalize_assistant_tool_calls(row.get("tool_calls"), request_cfg);
         out.insert("tool_calls".to_string(), Value::Array(tool_calls));

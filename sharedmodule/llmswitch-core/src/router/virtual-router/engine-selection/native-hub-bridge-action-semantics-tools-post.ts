@@ -319,6 +319,19 @@ export function normalizeMessageReasoningToolsWithNative(
   message: Record<string, unknown>,
   idPrefix?: string
 ): NativeNormalizeMessageReasoningToolsOutput {
+  const existingToolCalls = Array.isArray((message as Record<string, unknown>)?.tool_calls)
+    ? (((message as Record<string, unknown>).tool_calls as unknown[]).length > 0)
+    : false;
+  const existingFunctionCall =
+    (message as Record<string, unknown>)?.function_call
+    && typeof (message as Record<string, unknown>).function_call === 'object'
+    && !Array.isArray((message as Record<string, unknown>).function_call);
+  if (existingToolCalls || existingFunctionCall) {
+    return {
+      message,
+      toolCallsAdded: 0
+    };
+  }
   const capability = 'normalizeMessageReasoningToolsJson';
   const fail = (reason?: string) => failNativeRequired<NativeNormalizeMessageReasoningToolsOutput>(capability, reason);
   if (isNativeDisabledByEnv()) {
@@ -349,6 +362,31 @@ export function normalizeChatResponseReasoningToolsWithNative(
   response: Record<string, unknown>,
   idPrefixBase?: string
 ): Record<string, unknown> {
+  const choices = Array.isArray((response as Record<string, unknown>)?.choices)
+    ? ((response as Record<string, unknown>).choices as unknown[])
+    : [];
+  for (const choice of choices) {
+    if (!choice || typeof choice !== 'object' || Array.isArray(choice)) {
+      continue;
+    }
+    const message =
+      (choice as Record<string, unknown>).message
+      && typeof (choice as Record<string, unknown>).message === 'object'
+      && !Array.isArray((choice as Record<string, unknown>).message)
+        ? ((choice as Record<string, unknown>).message as Record<string, unknown>)
+        : undefined;
+    if (!message) {
+      continue;
+    }
+    const existingToolCalls = Array.isArray(message.tool_calls) ? ((message.tool_calls as unknown[]).length > 0) : false;
+    const existingFunctionCall =
+      message.function_call
+      && typeof message.function_call === 'object'
+      && !Array.isArray(message.function_call);
+    if (existingToolCalls || existingFunctionCall) {
+      return response;
+    }
+  }
   const capability = 'normalizeChatResponseReasoningToolsJson';
   const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
   if (isNativeDisabledByEnv()) {

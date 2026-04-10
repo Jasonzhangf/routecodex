@@ -1530,6 +1530,45 @@ fn reasoning_normalizer_responses_payload_json() {
 }
 
 #[test]
+fn reasoning_normalizer_responses_payload_preserves_existing_reasoning_content() {
+    let payload = json!({
+        "id": "resp_keep_reasoning",
+        "output": [
+            {
+                "type": "message",
+                "status": "completed",
+                "role": "assistant",
+                "reasoning_content": "already-thought",
+                "content": [
+                    {"type": "output_text", "text": "Hi"}
+                ]
+            }
+        ]
+    });
+    let input = json!({
+        "payload": payload,
+        "options": {"includeOutput": true}
+    })
+    .to_string();
+    let raw = normalize_reasoning_in_responses_payload_json(input).unwrap();
+    let parsed: Value = serde_json::from_str(&raw).unwrap();
+    let output = parsed
+        .get("payload")
+        .and_then(|v| v.get("output"))
+        .and_then(Value::as_array)
+        .unwrap();
+    let message = output
+        .iter()
+        .find(|item| item.get("type").and_then(Value::as_str) == Some("message"))
+        .and_then(Value::as_object)
+        .unwrap();
+    assert_eq!(
+        message.get("reasoning_content").and_then(Value::as_str),
+        Some("already-thought")
+    );
+}
+
+#[test]
 fn reasoning_utils_extract_reasoning_segments_json() {
     let input = json!({"source": "A<think>why</think> B"});
     let raw = extract_reasoning_segments_json(input.to_string()).unwrap();

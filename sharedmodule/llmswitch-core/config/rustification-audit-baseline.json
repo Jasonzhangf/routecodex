@@ -1,36 +1,36 @@
 {
-  "generatedAt": "2026-04-09T12:05:40.614Z",
+  "generatedAt": "2026-04-10T10:33:44.750Z",
   "scope": "sharedmodule/llmswitch-core/src",
   "metrics": {
     "prodTsFileCount": 604,
-    "prodTsLocTotal": 102226,
+    "prodTsLocTotal": 102774,
     "nonNativeFileCount": 311,
-    "nonNativeLocTotal": 59538
+    "nonNativeLocTotal": 59872
   },
   "byTopDir": {
     "router": {
       "prodTsFiles": 153,
-      "prodTsLoc": 31370,
+      "prodTsLoc": 31446,
       "nonNativeFiles": 77,
-      "nonNativeLoc": 14942
+      "nonNativeLoc": 14950
     },
     "conversion": {
       "prodTsFiles": 287,
-      "prodTsLoc": 30564,
+      "prodTsLoc": 30763,
       "nonNativeFiles": 76,
-      "nonNativeLoc": 7530
+      "nonNativeLoc": 7583
     },
     "servertool": {
       "prodTsFiles": 62,
-      "prodTsLoc": 18440,
+      "prodTsLoc": 18708,
       "nonNativeFiles": 59,
-      "nonNativeLoc": 15939
+      "nonNativeLoc": 16207
     },
     "sse": {
       "prodTsFiles": 44,
-      "prodTsLoc": 13387,
+      "prodTsLoc": 13392,
       "nonNativeFiles": 43,
-      "nonNativeLoc": 13012
+      "nonNativeLoc": 13017
     },
     "tools": {
       "prodTsFiles": 24,
@@ -756,7 +756,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage-provider-payload.ts",
-      "loc": 252,
+      "loc": 397,
       "nativeLinked": true,
       "topDir": "conversion"
     },
@@ -774,7 +774,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-max-tokens-policy.ts",
-      "loc": 54,
+      "loc": 107,
       "nativeLinked": false,
       "topDir": "conversion"
     },
@@ -960,7 +960,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage1_client_remap/client-remap-protocol-switch.ts",
-      "loc": 381,
+      "loc": 382,
       "nativeLinked": true,
       "topDir": "conversion"
     },
@@ -2268,7 +2268,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-bridge-action-semantics-tools-post.ts",
-      "loc": 380,
+      "loc": 418,
       "nativeLinked": true,
       "topDir": "router"
     },
@@ -2298,7 +2298,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.ts",
-      "loc": 449,
+      "loc": 479,
       "nativeLinked": true,
       "topDir": "router"
     },
@@ -2484,7 +2484,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts",
-      "loc": 340,
+      "loc": 341,
       "nativeLinked": false,
       "topDir": "router"
     },
@@ -2814,13 +2814,13 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions/state.ts",
-      "loc": 339,
+      "loc": 345,
       "nativeLinked": false,
       "topDir": "router"
     },
     {
       "path": "sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions/types.ts",
-      "loc": 93,
+      "loc": 94,
       "nativeLinked": false,
       "topDir": "router"
     },
@@ -3114,13 +3114,13 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/servertool/handlers/reasoning-stop-guard.ts",
-      "loc": 261,
+      "loc": 465,
       "nativeLinked": false,
       "topDir": "servertool"
     },
     {
       "path": "sharedmodule/llmswitch-core/src/servertool/handlers/reasoning-stop-state.ts",
-      "loc": 447,
+      "loc": 511,
       "nativeLinked": false,
       "topDir": "servertool"
     },
@@ -3360,7 +3360,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.ts",
-      "loc": 340,
+      "loc": 344,
       "nativeLinked": false,
       "topDir": "sse"
     },
@@ -3516,7 +3516,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/types/chat-types.ts",
-      "loc": 422,
+      "loc": 423,
       "nativeLinked": false,
       "topDir": "sse"
     },

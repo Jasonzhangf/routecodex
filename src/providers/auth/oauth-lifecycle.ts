@@ -471,6 +471,9 @@ async function prepareTokenForStorage(
     }
   }
   if (providerType === 'qwen') {
+    const rawExisting = await readRawTokenFile(tokenFilePath);
+    const existing = rawExisting && typeof rawExisting === 'object' ? (rawExisting as UnknownObject) : null;
+    const resolvedAlias = resolveTokenAliasFromPath(tokenFilePath);
     const token = sanitizeToken(tokenData) ?? (tokenData as StoredOAuthToken);
     const expiresAt = getExpiresAt(token);
     const expiresInRaw = token.expires_in;
@@ -480,7 +483,11 @@ async function prepareTokenForStorage(
           ? Math.max(1, Math.floor((expiresAt - Date.now()) / 1000))
           : 21600);
     return {
+      ...(existing || {}),
       ...(tokenData as Record<string, unknown>),
+      status: 'success',
+      type: 'qwen',
+      ...(resolvedAlias ? { alias: resolvedAlias } : {}),
       expires_in: expiresIn,
       access_token: String(token.access_token ?? ''),
       ...(token.apiKey ? { apiKey: token.apiKey, api_key: token.apiKey } : {}),

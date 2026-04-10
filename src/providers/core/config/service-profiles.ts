@@ -6,6 +6,7 @@
 import os from 'node:os';
 import { API_ENDPOINTS, API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS, DEFAULT_CONFIG } from "../../../constants/index.js";
 import type { ServiceProfile } from '../api/provider-types.js';
+import { resolveQwenCodeUserAgent } from '../utils/qwen-client-fingerprint.js';
 
 /**
  * 解析 Gemini UA 并返回合适的 User-Agent。
@@ -27,16 +28,6 @@ function resolveGeminiCliUserAgent(): string {
     system = 'Windows';
   }
   return `GeminiCLI/${version} (${system}; ${arch})`;
-}
-
-function resolveQwenCodeUserAgent(): string {
-  const fromEnv =
-    process.env.ROUTECODEX_QWEN_UA_VERSION ||
-    process.env.RCC_QWEN_UA_VERSION ||
-    process.env.ROUTECODEX_QWEN_CODE_UA_VERSION ||
-    process.env.RCC_QWEN_CODE_UA_VERSION;
-  const version = typeof fromEnv === 'string' && fromEnv.trim() ? fromEnv.trim() : '0.10.3';
-  return `QwenCode/${version} (${process.platform}; ${process.arch})`;
 }
 
 const DEFAULT_QWENCHAT_USER_AGENT =

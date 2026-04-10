@@ -32,11 +32,12 @@ export function applyRoutingInstructions(
             : {}
         )
       : undefined,
-    reasoningStopMode: currentState.reasoningStopMode,
-    reasoningStopArmed: currentState.reasoningStopArmed,
-    reasoningStopSummary: currentState.reasoningStopSummary,
-    reasoningStopUpdatedAt: currentState.reasoningStopUpdatedAt,
-    preCommandSource: currentState.preCommandSource,
+   reasoningStopMode: currentState.reasoningStopMode,
+   reasoningStopArmed: currentState.reasoningStopArmed,
+   reasoningStopSummary: currentState.reasoningStopSummary,
+   reasoningStopUpdatedAt: currentState.reasoningStopUpdatedAt,
+    reasoningStopFailCount: currentState.reasoningStopFailCount,
+   preCommandSource: currentState.preCommandSource,
     preCommandScriptPath: currentState.preCommandScriptPath,
     preCommandUpdatedAt: currentState.preCommandUpdatedAt,
     chatProcessLastTotalTokens: currentState.chatProcessLastTotalTokens,
@@ -178,11 +179,12 @@ export function applyRoutingInstructions(
         newState.disabledKeys.clear();
         newState.disabledModels.clear();
         applyStopMessageInstructionToState({ type: 'stopMessageClear' }, newState);
-        newState.reasoningStopMode = undefined;
-        newState.reasoningStopArmed = undefined;
-        newState.reasoningStopSummary = undefined;
-        newState.reasoningStopUpdatedAt = undefined;
-        clearPreCommandState(newState);
+       newState.reasoningStopMode = undefined;
+       newState.reasoningStopArmed = undefined;
+       newState.reasoningStopSummary = undefined;
+       newState.reasoningStopUpdatedAt = undefined;
+        newState.reasoningStopFailCount = undefined;
+       clearPreCommandState(newState);
         break;
       case 'stopMessageSet':
       case 'stopMessageMode':
@@ -225,10 +227,13 @@ export function serializeRoutingInstructionState(state: RoutingInstructionState)
     ...(typeof state.reasoningStopSummary === 'string' && state.reasoningStopSummary.trim()
       ? { reasoningStopSummary: state.reasoningStopSummary.trim() }
       : {}),
-    ...(typeof state.reasoningStopUpdatedAt === 'number' && Number.isFinite(state.reasoningStopUpdatedAt)
-      ? { reasoningStopUpdatedAt: state.reasoningStopUpdatedAt }
+   ...(typeof state.reasoningStopUpdatedAt === 'number' && Number.isFinite(state.reasoningStopUpdatedAt)
+     ? { reasoningStopUpdatedAt: state.reasoningStopUpdatedAt }
+     : {}),
+    ...(typeof state.reasoningStopFailCount === 'number' && Number.isFinite(state.reasoningStopFailCount)
+      ? { reasoningStopFailCount: state.reasoningStopFailCount }
       : {}),
-    ...serializePreCommandState(state),
+   ...serializePreCommandState(state),
     ...(typeof state.chatProcessLastTotalTokens === 'number'
       ? { chatProcessLastTotalTokens: state.chatProcessLastTotalTokens }
       : {}),
@@ -261,11 +266,12 @@ export function deserializeRoutingInstructionState(data: Record<string, unknown>
     stopMessageAiMode: undefined,
     stopMessageAiSeedPrompt: undefined,
     stopMessageAiHistory: undefined,
-    reasoningStopMode: undefined,
-    reasoningStopArmed: undefined,
-    reasoningStopSummary: undefined,
-    reasoningStopUpdatedAt: undefined,
-    preCommandSource: undefined,
+   reasoningStopMode: undefined,
+   reasoningStopArmed: undefined,
+   reasoningStopSummary: undefined,
+   reasoningStopUpdatedAt: undefined,
+    reasoningStopFailCount: undefined,
+   preCommandSource: undefined,
     preCommandScriptPath: undefined,
     preCommandUpdatedAt: undefined,
     chatProcessLastTotalTokens: undefined,

@@ -17,7 +17,7 @@ const APPLY_PATCH_CONTEXT_MISMATCH_HINT: &str = "\n\n[RouteCodex hint] apply_pat
 const APPLY_PATCH_MIXED_SYNTAX_HINT: &str = "\n\n[RouteCodex hint] apply_patch 混用了两种补丁语法：如果已经使用 `*** Begin Patch`，块内不要再写 `--- a/...` / `+++ b/...`。请二选一：要么发送纯 internal patch grammar，要么发送原始 GNU unified diff。";
 const APPLY_PATCH_EXPECTED_LINES_HINT: &str = "\n\n[RouteCodex hint] apply_patch 没找到待替换原文，通常说明文件已经变化或上下文过大。请重新读取目标文件最新内容后，用更小、唯一的上下文重试；必要时把大 patch 拆成多次小 patch。";
 
-const CHAT_PARAMETER_KEYS: [&str; 17] = [
+const CHAT_PARAMETER_KEYS: [&str; 19] = [
     "model",
     "temperature",
     "top_p",
@@ -32,12 +32,14 @@ const CHAT_PARAMETER_KEYS: [&str; 17] = [
     "seed",
     "user",
     "metadata",
+    "reasoning",
+    "reasoning_effort",
     "stop",
     "stop_sequences",
     "stream",
 ];
 
-const KNOWN_TOP_LEVEL_FIELDS: [&str; 22] = [
+const KNOWN_TOP_LEVEL_FIELDS: [&str; 24] = [
     "messages",
     "tools",
     "tool_outputs",
@@ -55,6 +57,8 @@ const KNOWN_TOP_LEVEL_FIELDS: [&str; 22] = [
     "seed",
     "user",
     "metadata",
+    "reasoning",
+    "reasoning_effort",
     "stop",
     "stop_sequences",
     "stream",
@@ -895,5 +899,27 @@ mod tests {
             tool_outputs[0]["content"],
             "[RouteCodex] Tool output was empty; execution status unknown."
         );
+    }
+
+    #[test]
+    fn map_openai_chat_to_chat_preserves_reasoning_parameters() {
+        let payload = json!({
+          "messages": [
+            { "role": "user", "content": "hello" }
+          ],
+          "model": "test-model",
+          "reasoning": { "effort": "high", "summary": "detailed" },
+          "reasoning_effort": "high"
+        });
+        let mapped = map_openai_chat_to_chat(payload, json!({})).expect("map success");
+        let params = mapped
+            .get("parameters")
+            .and_then(Value::as_object)
+            .expect("parameters");
+        assert_eq!(
+            params.get("reasoning"),
+            Some(&json!({ "effort": "high", "summary": "detailed" }))
+        );
+        assert_eq!(params.get("reasoning_effort"), Some(&json!("high")));
     }
 }

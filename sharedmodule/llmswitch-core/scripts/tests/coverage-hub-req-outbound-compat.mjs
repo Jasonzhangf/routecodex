@@ -132,8 +132,8 @@ async function main() {
     assert.equal(result.nativeApplied, true);
     assert.equal(result.appliedProfile, 'chat:qwen');
     assert.equal(result.payload.model, 'qwen3-coder-plus');
-    assert.equal(result.payload.input?.[0]?.content?.[0]?.text, 'hello-qwen-native');
-    assert.equal(result.payload.parameters?.max_output_tokens, 128);
+    assert.equal(result.payload.messages?.[0]?.content, 'hello-qwen-native');
+    assert.equal(result.payload.max_tokens, 128);
     assert.equal(result.payload.tools?.[0]?.function?.name, 'exec_command');
   }
 

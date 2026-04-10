@@ -338,6 +338,7 @@ fn derive_reasoning_details_from_payload(reasoning: &Value) -> Vec<Value> {
 
 fn normalize_client_openai_chat_message_reasoning(message: &mut Map<String, Value>) {
     normalize_message_reasoning_ssot(message);
+    let has_reasoning_payload = message.get("reasoning").is_some();
 
     let reasoning_text = message
         .get("reasoning")
@@ -350,11 +351,12 @@ fn normalize_client_openai_chat_message_reasoning(message: &mut Map<String, Valu
         .unwrap_or_default();
 
     if let Some(text) = reasoning_text {
-        message.insert("reasoning".to_string(), Value::String(text.clone()));
         message.insert("reasoning_content".to_string(), Value::String(text));
     } else {
-        message.remove("reasoning");
         message.remove("reasoning_content");
+        if !has_reasoning_payload {
+            message.remove("reasoning");
+        }
     }
 
     if !reasoning_details.is_empty() {
@@ -3127,7 +3129,7 @@ mod tests {
         let output = normalize_openai_chat_reasoning_outbound(&payload).expect("normalized");
         let message = &output["choices"][0]["message"];
         assert_eq!(
-            message["reasoning"],
+            message["reasoning"]["content"][0]["text"],
             Value::String("再检查代码路径".to_string())
         );
         assert_eq!(

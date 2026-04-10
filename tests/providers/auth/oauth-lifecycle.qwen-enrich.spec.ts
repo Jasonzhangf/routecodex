@@ -188,4 +188,60 @@ describe('ensureValidOAuthToken (qwen) enriches api_key', () => {
       }
     }
   });
+
+  test('fills qwen status/type/alias from token file when existing file is sparse', async () => {
+    const prevFetch = globalThis.fetch;
+    const prevHome = process.env.HOME;
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-oauth-qwen-'));
+    process.env.HOME = tmpHome;
+
+    const tokenFile = path.join(tmpHome, '.routecodex', 'auth', 'qwen-oauth-6-xfour8605.json');
+    writeJson(tokenFile, {
+      expires_in: 21600,
+      access_token: 'access-test',
+      refresh_token: 'refresh-test',
+      token_type: 'bearer',
+      expires_at: Date.now() + 60 * 60 * 1000
+    });
+
+    globalThis.fetch = (async (input: any) => {
+      const url = typeof input === 'string' ? input : String(input?.url || '');
+      if (url.startsWith('https://chat.qwen.ai/api/v1/user/info')) {
+        return new Response(
+          JSON.stringify({ data: { apiKey: 'sk-qwen-test', email: 'xfour8605@gmail.com' } }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return new Response(JSON.stringify({ error: `unexpected fetch: ${url}` }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }) as any;
+
+    try {
+      await ensureValidOAuthToken(
+        'qwen',
+        {
+          type: 'qwen-oauth',
+          tokenFile
+        } as any,
+        { openBrowser: false, forceReauthorize: false, forceReacquireIfRefreshFails: true }
+      );
+
+      const updated = readJson(tokenFile);
+      expect(updated.status).toBe('success');
+      expect(updated.type).toBe('qwen');
+      expect(updated.alias).toBe('xfour8605');
+      expect(updated.access_token).toBe('access-test');
+      expect(updated.api_key || updated.apiKey).toBe('sk-qwen-test');
+    } finally {
+      globalThis.fetch = prevFetch as any;
+      process.env.HOME = prevHome;
+      try {
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    }
+  });
 });

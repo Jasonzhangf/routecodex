@@ -2,6 +2,14 @@
 
 ## Skills 与调试工作流
 
+- 2026-04-10: qwen `finish_reason=stop` 深挖补充：若 headers/UA 已和 Qwen CLI 对齐，但工具场景仍异常 stop，优先检查 `chat:qwen` 是否**改写了非 system messages/history**。Qwen CLI 真正只做 system envelope 注入/合并；对 assistant/tool 历史的空 turn 删除、tool_call_id 回填、tool_calls id 改写都会破坏 proxy 透明性，并可能触发 qwen 在长上下文下更容易 stop。最小正确修复是：除首条 system envelope、provider 模型映射、`reasoning.effort -> reasoning_effort`、必要 token clamp 外，不动非 system history。验证：Jest qwen profile 回归通过，build:min + install:global + SIGUSR2 后 5555 升级到 0.90.998；在线 `qwen.qwen3.6-plus` 普通请求返回 `OK`，强制工具请求返回 `requires_action` + function_call。
+
+Tags: qwen, finish-reason-stop, proxy-transparency, message-history, system-envelope-only, qwen-cli-alignment, tool-calls, build-min, install-global, sigusr2, online-verification
+
+- 2026-04-10: qwen OAuth 多账号实操沉淀：4 个别名 token（`geetasamoda / jasonqueque / antonsoltan / xfour8605`）全部通过各自**隔离 Camoufox profile**补齐成功。可复用动作：每个账号只用对应 `rc-auth.<alias>` / `rc-qwen.<alias>`，成功后立刻 `camo stop` 关闭；对未登录 alias，不要在 `rc-qwen.<alias>` 里硬等自动 selector，而是先在 `rc-auth.<alias>` 走 `chat.qwen.ai/auth?user_code=...` → Google account chooser → Qwen 已登录首页，再回到 `authorize?user_code=...` 点击 `.qwen-confirm-btn` 完成 device-code 授权。反模式：不同 alias 混用 profile、成功后不关浏览器、在 Google consent 页用宽泛 selector（如 `button:last-of-type`）误点到无关按钮。验证：`~/.rcc/auth/qwen-oauth-{3,4,5,6}-*.json` 全部为 `status=success`，`camo status` 最终 `count=0`。
+
+Tags: qwen-oauth, multi-account, camoufox, isolated-profile, device-code, manual-confirm, account-leak-prevention, token-success, browser-cleanup
+
 - 2026-04-07: 继续去重 session 清理路径中的 tmux 活性探针：`cleanupSessionStorageOnStartup` 与 `cleanupDeadTmuxSessionsFromRegistry` 引入单轮 memoized liveness cache，避免同一 tmuxSession 在一轮清理中被重复探测。与 tmux-probe TTL 缓存叠加后，进一步减少子进程探测开销。验证：session-storage-cleanup/session-client-registry/session-client-routes.stopmessage-cleanup 回归通过。
 
 Tags: performance-budget, session-cleanup-memoization, tmux-liveness-dedup, process-spawn-reduction, registry-cleanup, startup-cleanup
@@ -1277,3 +1285,7 @@ Tags: rust-migration, routecodex-3.11.7, hub-pipeline, thin-shell, node-result, 
 - 2026-03-22: opencode-zen 401/429 排查确认“可用性差异”核心在请求头对齐，而非 OAuth。Zen 鉴权继续使用 API Key（`Authorization: Bearer <key>`）；参考 `aiapi` 的 Zen 实现与本地 opencode 二进制行为，补齐 Zen 路径 `x-opencode-project/session/request/client` 头透传与 metadata 派生，并在 Zen 路径显式移除 `originator/session_id/conversation_id` 旧头，避免与 opencode 头部语义冲突。验证链：`tests/providers/core/runtime/http-transport-provider.headers.test.ts` 新增/通过（9/9）；`npm run build:dev` + `npm run install:release` 成功；`routecodex --version`/`rcc --version`=0.90.698；5520 `/v1/responses` 对 `mimo-v2-pro-free` 与 `minimax-m2.5-free` 返回 200（不再是 401）。
 
 Tags: opencode-zen, auth-header-alignment, x-opencode-headers, bearer-apikey, no-oauth, provider-runtime, release-build
+
+- 2026-04-10: qwen 多账号 provider 的配置真源是**单一** `~/.rcc/provider/qwen/config.v2.json` 的 `provider.auth.entries[]`；把账号拆成多份 `config.v2.<alias>.json` 不会替代主配置。`tokenFile: "default"` 只会钉住单 token，而 `auth.entries[]` 才会在 bootstrap 阶段展开成 `qwen.<alias>.<model>` 多 runtime（本次验证为 6 个：`1 / 2-135 / 3-geetasamoda / 4-jasonqueque / 5-antonsoltan / 6-xfour8605`）。验证链：bootstrap 产物出现 6 个 `qwen.*.qwen3.6-plus` runtime，5555 SIGUSR2 热重载成功，`qwen.qwen3.6-plus` 在线请求返回 200，日志命中多个 qwen alias。
+
+Tags: qwen, multi-token, auth.entries, provider-config-v2, bootstrap-runtime, hot-reload

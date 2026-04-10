@@ -363,4 +363,109 @@ describe('client-remap-protocol-switch', () => {
       expect(error?.retryable).toBe(true);
     }
   });
+
+  it('does not duplicate responses function_call when reasoning text also contains xml tool markup', () => {
+    const payload = {
+      id: 'chatcmpl_xml_1',
+      object: 'chat.completion',
+      choices: [
+        {
+          index: 0,
+          finish_reason: 'tool_calls',
+          message: {
+            role: 'assistant',
+            content: '',
+            reasoning_content: [
+              'I must call echo with AUTO-XML.',
+              '```xml',
+              '<function=echo>',
+              '<parameter=text>',
+              'AUTO-XML',
+              '</parameter>',
+              '</function>',
+              '```'
+            ].join('\n'),
+            tool_calls: [
+              {
+                id: 'call_xml_1',
+                type: 'function',
+                function: {
+                  name: 'echo',
+                  arguments: '{"text":"AUTO-XML"}'
+                }
+              }
+            ]
+          }
+        }
+      ]
+    };
+
+    const result = buildClientPayloadForProtocol({
+      payload: payload as any,
+      clientProtocol: 'openai-responses',
+      requestId: 'req-test-responses-no-dup-xml'
+    });
+
+    const functionCalls = (result as any).output.filter((item: any) => item?.type === 'function_call');
+    const requiredCalls = (result as any).required_action.submit_tool_outputs.tool_calls;
+    expect(functionCalls).toHaveLength(1);
+    expect(requiredCalls).toHaveLength(1);
+    expect(functionCalls[0].name).toBe('echo');
+    expect(functionCalls[0].arguments).toBe('{"text":"AUTO-XML"}');
+    expect(requiredCalls[0].name).toBe('echo');
+    expect(requiredCalls[0].arguments ?? requiredCalls[0].function?.arguments).toBe('{"text":"AUTO-XML"}');
+  });
+
+  it('does not duplicate responses function_call when reasoning text also contains json tool markup', () => {
+    const payload = {
+      id: 'chatcmpl_json_1',
+      object: 'chat.completion',
+      choices: [
+        {
+          index: 0,
+          finish_reason: 'tool_calls',
+          message: {
+            role: 'assistant',
+            content: '',
+            reasoning_content: [
+              'I must call echo with AUTO-JSON.',
+              '```json',
+              '{',
+              '  "name": "echo",',
+              '  "arguments": {',
+              '    "text": "AUTO-JSON"',
+              '  }',
+              '}',
+              '```'
+            ].join('\n'),
+            tool_calls: [
+              {
+                id: 'call_json_1',
+                type: 'function',
+                function: {
+                  name: 'echo',
+                  arguments: '{"text":"AUTO-JSON"}'
+                }
+              }
+            ]
+          }
+        }
+      ]
+    };
+
+    const result = buildClientPayloadForProtocol({
+      payload: payload as any,
+      clientProtocol: 'openai-responses',
+      requestId: 'req-test-responses-no-dup-json'
+    });
+
+    const functionCalls = (result as any).output.filter((item: any) => item?.type === 'function_call');
+    const requiredCalls = (result as any).required_action.submit_tool_outputs.tool_calls;
+    expect(functionCalls).toHaveLength(1);
+    expect(requiredCalls).toHaveLength(1);
+    expect(functionCalls[0].name).toBe('echo');
+    expect(functionCalls[0].arguments).toBe('{"text":"AUTO-JSON"}');
+    expect(requiredCalls[0].name).toBe('echo');
+    expect(requiredCalls[0].arguments ?? requiredCalls[0].function?.arguments).toBe('{"text":"AUTO-JSON"}');
+  });
 });

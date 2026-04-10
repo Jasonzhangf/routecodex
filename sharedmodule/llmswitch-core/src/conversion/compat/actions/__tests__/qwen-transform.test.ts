@@ -1,7 +1,7 @@
 import { applyQwenRequestTransform, applyQwenResponseTransform } from '../qwen-transform.js';
 
 describe('qwen-transform native wrapper', () => {
-  test('maps model and normalizes messages into qwen input', () => {
+  test('keeps qwen request openai-chat shape and only normalizes incompatible content parts', () => {
     const result = applyQwenRequestTransform(
       {
         model: 'gpt-4o',
@@ -17,34 +17,20 @@ describe('qwen-transform native wrapper', () => {
     expect((result as any).messages).toEqual([
       {
         role: 'user',
-        content: [{ type: 'text', text: 'hello qwen' }]
+        content: 'hello qwen'
       }
     ]);
-    expect((result as any).input).toEqual([
-      {
-        role: 'user',
-        content: [{ type: 'text', text: 'hello qwen' }]
-      }
-    ]);
+    expect((result as any).input).toBeUndefined();
   });
 
-  test('keeps native reasoning defaults and low-effort override behavior', () => {
-    const defaultReasoning = applyQwenRequestTransform(
-      {
-        model: 'qwen3.5-plus',
-        messages: [{ role: 'user', content: 'hi' }]
-      } as any,
-      {
-        compatibilityProfile: 'chat:qwen',
-        providerProtocol: 'openai-chat'
-      } as any
-    );
-
-    const lowEffort = applyQwenRequestTransform(
+  test('preserves reasoning and top-level chat fields', () => {
+    const result = applyQwenRequestTransform(
       {
         model: 'qwen3.5-plus',
         messages: [{ role: 'user', content: 'hi' }],
-        reasoning: { effort: 'low' }
+        reasoning: { effort: 'low' },
+        max_tokens: 2048,
+        stop: ['END']
       } as any,
       {
         compatibilityProfile: 'chat:qwen',
@@ -52,8 +38,9 @@ describe('qwen-transform native wrapper', () => {
       } as any
     );
 
-    expect((defaultReasoning as any).parameters.reasoning).toBe(true);
-    expect((lowEffort as any).parameters?.reasoning).toBeUndefined();
+    expect((result as any).reasoning).toEqual({ effort: 'low' });
+    expect((result as any).max_tokens).toBe(2048);
+    expect((result as any).stop).toEqual(['END']);
   });
 
   test('preserves metadata and response-side finish_reason/tool_calls/usage mapping', () => {
@@ -137,10 +124,9 @@ describe('qwen-transform native wrapper', () => {
     );
 
     expect((result as any).messages[0].content[0]).toEqual({ type: 'text', text: 'alpha' });
-    expect((result as any).input[0].content[0]).toEqual({ type: 'text', text: 'alpha' });
-    expect((result as any).input[0].content[1]).toEqual({ meta: 1 });
+    expect((result as any).messages[0].content[1]).toEqual({ meta: 1 });
     expect(JSON.stringify((result as any).messages)).not.toContain('"input_text"');
-    expect(JSON.stringify((result as any).input)).not.toContain('"input_text"');
+    expect((result as any).input).toBeUndefined();
   });
 
   test('normalizes input_image/input_video into qwen media content types', () => {
@@ -163,10 +149,90 @@ describe('qwen-transform native wrapper', () => {
       } as any
     );
 
-    const inputParts = (result as any).input[0].content;
+    const inputParts = (result as any).messages[0].content;
     expect(inputParts[0]).toEqual({ type: 'image_url', image_url: { url: 'https://example.com/a.png' } });
     expect(inputParts[1]).toEqual({ type: 'video_url', video_url: { url: 'https://example.com/a.mp4' } });
     expect(JSON.stringify((result as any).messages)).not.toContain('"input_image"');
     expect(JSON.stringify((result as any).messages)).not.toContain('"input_video"');
+  });
+
+  test('preserves assistant tool history and tool results', () => {
+    const result = applyQwenRequestTransform(
+      {
+        model: 'qwen3.6-plus',
+        messages: [
+          { role: 'user', content: 'run pwd' },
+          {
+            role: 'assistant',
+            content: '',
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+              }
+            ]
+          },
+          {
+            role: 'tool',
+            tool_call_id: 'call_1',
+            name: 'exec_command',
+            content: 'ok'
+          }
+        ],
+        tools: [
+          {
+            type: 'function',
+            function: { name: 'exec_command', description: 'run shell', parameters: { type: 'object' } },
+            extra: true
+          }
+        ]
+      } as any,
+      {
+        compatibilityProfile: 'chat:qwen',
+        providerProtocol: 'openai-chat'
+      } as any
+    );
+
+    expect((result as any).messages[1].tool_calls[0].id).toBe('call_1');
+    expect((result as any).messages[2].tool_call_id).toBe('call_1');
+    expect((result as any).messages[2].name).toBe('exec_command');
+    expect((result as any).tools[0].extra).toBe(true);
+  });
+
+  test('preserves historical assistant reasoning_content for qwen chat requests', () => {
+    const result = applyQwenRequestTransform(
+      {
+        model: 'qwen3.6-plus',
+        messages: [
+          { role: 'user', content: 'run pwd' },
+          {
+            role: 'assistant',
+            content: '',
+            reasoning_content: '先确认当前工作目录，再继续执行工具调用。',
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+              }
+            ]
+          },
+          {
+            role: 'tool',
+            tool_call_id: 'call_1',
+            name: 'exec_command',
+            content: 'ok'
+          }
+        ]
+      } as any,
+      {
+        compatibilityProfile: 'chat:qwen',
+        providerProtocol: 'openai-chat'
+      } as any
+    );
+
+    expect((result as any).messages[1].reasoning_content).toBe('先确认当前工作目录，再继续执行工具调用。');
+    expect((result as any).messages[1].tool_calls[0].id).toBe('call_1');
   });
 });

@@ -35,138 +35,6 @@ type ProviderSnapshotWriteOptions = {
   providerId?: string;
 };
 
-const SNAPSHOT_SUMMARY_MAX_DEPTH = 2;
-const SNAPSHOT_SUMMARY_MAX_KEYS = 24;
-const SNAPSHOT_SUMMARY_MAX_ARRAY_SAMPLE = 2;
-const SNAPSHOT_SUMMARY_MAX_STRING_PREVIEW = 240;
-const SNAPSHOT_SUMMARY_MAX_NODES = 800;
-const LARGE_HISTORY_KEYS = new Set([
-  'messages',
-  'input',
-  'history',
-  'conversation',
-  'contents',
-  'events',
-  'items'
-]);
-
-type SnapshotSummaryState = {
-  visitedNodes: number;
-};
-
-function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
-  if (!value) {
-    return fallback;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
-    return true;
-  }
-  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') {
-    return false;
-  }
-  return fallback;
-}
-
-function isLargeHistoryPath(pathSegments: string[]): boolean {
-  if (!pathSegments.length) {
-    return false;
-  }
-  const last = pathSegments[pathSegments.length - 1];
-  return LARGE_HISTORY_KEYS.has(last.toLowerCase());
-}
-
-function resolveSnapshotFullCapture(): boolean {
-  return resolveBoolFromEnv(
-    process.env.ROUTECODEX_SNAPSHOT_FULL ?? process.env.RCC_SNAPSHOT_FULL,
-    false
-  );
-}
-
-function summarizeStringPreview(value: string): string | Record<string, unknown> {
-  if (value.length <= SNAPSHOT_SUMMARY_MAX_STRING_PREVIEW) {
-    return value;
-  }
-  return {
-    __truncated: true,
-    length: value.length,
-    preview: `${value.slice(0, SNAPSHOT_SUMMARY_MAX_STRING_PREVIEW)}…`
-  };
-}
-
-function summarizeSnapshotValue(
-  value: unknown,
-  depth: number,
-  pathSegments: string[],
-  state: SnapshotSummaryState
-): unknown {
-  state.visitedNodes += 1;
-  if (state.visitedNodes > SNAPSHOT_SUMMARY_MAX_NODES) {
-    return {
-      __storage: 'mmap-hint',
-      reason: 'node_budget_exceeded',
-      maxNodes: SNAPSHOT_SUMMARY_MAX_NODES
-    };
-  }
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (typeof value === 'string') {
-    return summarizeStringPreview(value);
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    const length = value.length;
-    if (depth >= SNAPSHOT_SUMMARY_MAX_DEPTH || isLargeHistoryPath(pathSegments)) {
-      return {
-        __storage: 'mmap-hint',
-        type: 'array',
-        length,
-        sampled: value
-          .slice(0, SNAPSHOT_SUMMARY_MAX_ARRAY_SAMPLE)
-          .map((item) => summarizeSnapshotValue(item, depth + 1, pathSegments, state))
-      };
-    }
-    return value
-      .slice(0, SNAPSHOT_SUMMARY_MAX_ARRAY_SAMPLE)
-      .map((item) => summarizeSnapshotValue(item, depth + 1, pathSegments, state));
-  }
-
-  if (typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    const keys = Object.keys(record);
-    if (depth >= SNAPSHOT_SUMMARY_MAX_DEPTH) {
-      return {
-        __storage: 'mmap-hint',
-        type: 'object',
-        keyCount: keys.length,
-        keys: keys.slice(0, SNAPSHOT_SUMMARY_MAX_KEYS)
-      };
-    }
-    const out: Record<string, unknown> = {};
-    let count = 0;
-    for (const [key, child] of Object.entries(record)) {
-      if (count >= SNAPSHOT_SUMMARY_MAX_KEYS) {
-        out.__truncated = true;
-        out.__omittedKeys = Math.max(0, keys.length - SNAPSHOT_SUMMARY_MAX_KEYS);
-        break;
-      }
-      out[key] = summarizeSnapshotValue(child, depth + 1, [...pathSegments, key], state);
-      count += 1;
-    }
-    return out;
-  }
-
-  return String(value);
-}
-
-function buildMmapHintedSnapshotData(value: unknown): unknown {
-  return summarizeSnapshotValue(value, 0, [], { visitedNodes: 0 });
-}
-
 function resolveSnapshotBase(): string {
   return resolveRccSnapshotsDirFromEnv();
 }
@@ -251,10 +119,7 @@ function buildSnapshotPayload(options: {
   url?: string;
   extraMeta?: Record<string, unknown>;
 }) {
-  const rawData = resolveSnapshotFullCapture()
-    ? options.data
-    : buildMmapHintedSnapshotData(options.data);
-  const redactedData = redactSensitiveData(rawData);
+  const redactedData = redactSensitiveData(options.data);
   const redactedHeaders = redactSensitiveData(maskHeaders(options.headers || {})) as Record<string, unknown>;
   return {
     meta: {
@@ -849,13 +714,12 @@ export async function writeClientSnapshot(options: {
         : undefined;
     const groupRequestId = normalizeRequestId(groupRequestIdCandidate || requestId);
     const providerToken = normalizeProviderToken(options.providerKey || '');
-    const fullCapture = resolveSnapshotFullCapture();
     const metadataSnapshot =
       options.metadata && typeof options.metadata === 'object'
-        ? (fullCapture ? options.metadata : buildMmapHintedSnapshotData(options.metadata))
+        ? options.metadata
         : undefined;
     const snapshotPayload = {
-      body: fullCapture ? options.body : buildMmapHintedSnapshotData(options.body),
+      body: options.body,
       metadata: metadataSnapshot || {}
     };
     const payload = buildSnapshotPayload({

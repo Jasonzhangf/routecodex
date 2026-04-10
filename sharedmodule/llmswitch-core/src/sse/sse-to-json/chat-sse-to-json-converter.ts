@@ -827,12 +827,14 @@ export class ChatSseToJsonConverter {
     }
 
     const target = message as unknown as Record<string, unknown>;
-    normalizeMessageReasoningTools(target, {
+    const normalization = normalizeMessageReasoningTools(target, {
       idPrefix: `chat_sse_reasoning_${choiceBuilder.index + 1}`
     });
 
     const reasoningSource =
-      typeof (target as any).reasoning_content === 'string'
+      typeof normalization.cleanedReasoning === 'string'
+        ? normalization.cleanedReasoning
+        : typeof (target as any).reasoning_content === 'string'
         ? (target as any).reasoning_content
         : typeof (target as any).reasoning === 'string'
           ? (target as any).reasoning

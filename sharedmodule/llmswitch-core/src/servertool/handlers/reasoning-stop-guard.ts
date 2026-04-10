@@ -7,6 +7,9 @@ import {
   type ReasoningStopMode,
   clearReasoningStopState,
   readReasoningStopState,
+  readReasoningStopFailCount,
+  incrementReasoningStopFailCount,
+  resetReasoningStopFailCount,
   syncReasoningStopModeFromRequest
 } from './reasoning-stop-state.js';
 import { extractStopMessageAutoResponseSnapshot } from './stop-message-auto/ai-followup.js';
@@ -17,18 +20,38 @@ const FLOW_ID_GUARD = 'reasoning_stop_guard_flow';
 const FLOW_ID_FINALIZE = 'reasoning_stop_finalize_flow';
 const FLOW_ID_CONTINUE = 'reasoning_stop_continue_flow';
 const HOOK_ID = 'reasoning_stop_guard';
-
-const ENDLESS_CONTINUE_TEXT =
-  '你当前处于 stopless:endless 模式。当前任务未完成，禁止直接停止。你必须先调用 reasoning.stop 做停止自检。只允许两种真实停止条件：1) 已完成用户任务，并给出 completion_evidence；2) 已尝试完所有可行路径且仍被阻塞，并给出 cannot_complete_reason + blocking_evidence（并声明 attempts_exhausted=true）。若仍有任何可执行下一步，必须填写 next_step 并继续执行，不得停止。';
+const ON_MODE_MAX_FAIL_COUNT = 5;
 
 const ON_CONTINUE_TEXT =
-  '请尽量自行继续完成当前任务。若仍有可执行下一步，请先执行，不要直接停止。仅当你明确需要用户参与（例如高风险选择、关键信息缺失且无法自行确认）时，才调用 reasoning.stop，并在参数中提供 user_input_required=true 与 user_question。';
+  '禁止直接停止。你当前处于 reasoning.stop 模式。每次停止前必须调用 reasoning.stop 工具并提供以下信息：\n' +
+  '- 是否完成: 是/否\n' +
+  '- 完成证据(completion_evidence): 如果任务完成，提供具体证据\n' +
+  '- 未完成原因(cannot_complete_reason): 如果未完成，说明为什么\n' +
+  '- 阻塞证据(blocking_evidence): 如果被阻塞，提供具体阻塞点\n' +
+  '- 下一步(next_step): 你计划的下一步行动（如果有）\n' +
+  '- 需用户参与(user_input_required): 是否需要用户参与才能继续\n' +
+  '- 用户问题(user_question): 如果需要用户参与，具体问什么\n' +
+  '你现在立即继续执行，不要停止。';
+
+const ENDLESS_CONTINUE_TEXT =
+  '绝对禁止停止。你当前处于 stopless:endless 模式。在任何情况下都不允许停止，除非满足以下唯一条件：\n' +
+  '你已经穷尽所有可能的尝试路径，仍然无法解决阻塞问题，并且确定必须用户参与才能继续。\n' +
+  '你必须满足以下全部条件才能停止：\n' +
+  '1. next_step 必须为空——你已经没有任何可执行的下一步\n' +
+  '2. attempts_exhausted=true——你已经尝试了所有可行路径\n' +
+  '3. cannot_complete_reason——明确说明为什么无法完成\n' +
+  '4. blocking_evidence——提供具体的阻塞证据\n' +
+  '5. user_input_required=true——必须用户参与\n' +
+  '6. user_question——向用户提出具体问题\n' +
+  '只要还有任何可执行的 next_step，你就必须继续执行，不得停止。\n' +
+  '你现在立即继续执行，绝对不要停止。';
 
 function parseReasoningStopSummary(summary: string): {
   completed?: boolean;
   nextStep: string;
   userInputRequired?: boolean;
   userQuestion: string;
+  attemptsExhausted?: boolean;
 } {
   const normalized = typeof summary === 'string' ? summary.trim() : '';
   if (!normalized) {
@@ -39,6 +62,7 @@ function parseReasoningStopSummary(summary: string): {
   let nextStep = '';
   let userInputRequired: boolean | undefined;
   let userQuestion = '';
+  let attemptsExhausted: boolean | undefined;
   for (const line of lines) {
     if (line.startsWith('是否完成:')) {
       const value = line.slice('是否完成:'.length).trim();
@@ -66,8 +90,17 @@ function parseReasoningStopSummary(summary: string): {
       userQuestion = line.slice('用户问题:'.length).trim();
       continue;
     }
+    if (line.startsWith('穷尽所有尝试:')) {
+      const value = line.slice('穷尽所有尝试:'.length).trim();
+      if (value === '是') {
+        attemptsExhausted = true;
+      } else if (value === '否') {
+        attemptsExhausted = false;
+      }
+      continue;
+    }
   }
-  return { completed, nextStep, userInputRequired, userQuestion };
+  return { completed, nextStep, userInputRequired, userQuestion, attemptsExhausted };
 }
 
 function buildExecuteNextStepText(nextStep: string): string {
@@ -84,22 +117,31 @@ function resolveGuardPromptByMode(mode: ReasoningStopMode): string {
 }
 
 function isReasoningStopGuardEnabled(): boolean {
-  const raw = String(process.env.ROUTECODEX_REASONING_STOP_GUARD_ENABLED ?? '').trim().toLowerCase();
-  if (!raw) {
-    return true;
-  }
-  if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') {
+  const envValue = process.env.LLMSWITCHCORE_REASONING_STOP_GUARD_ENABLED;
+  if (envValue === '0' || envValue === 'false') {
     return false;
   }
   return true;
 }
 
 function shouldSkipGuardForReasoningOnlyResponse(base: JsonObject, adapterContext: unknown): boolean {
-  const snapshot = extractStopMessageAutoResponseSnapshot(base, adapterContext);
-  const assistantText = typeof snapshot.assistantText === 'string' ? snapshot.assistantText : '';
-  const reasoningText = typeof snapshot.reasoningText === 'string' ? snapshot.reasoningText : '';
-  const normalizedAssistant = stripReasoningTransportNoise(assistantText);
-  return normalizedAssistant.trim().length === 0 && reasoningText.trim().length > 0;
+  const choices = Array.isArray((base as any).choices) ? ((base as any).choices as unknown[]) : [];
+  if (choices.length === 0) {
+    return false;
+  }
+  const first = choices[0];
+  if (!first || typeof first !== 'object' || Array.isArray(first)) {
+    return false;
+  }
+  const message = (first as Record<string, unknown>).message;
+  if (!message || typeof message !== 'object' || Array.isArray(message)) {
+    return false;
+  }
+  const content = (message as Record<string, unknown>).content;
+  if (typeof content === 'string' && content.trim() === '') {
+    return true;
+  }
+  return false;
 }
 
 function shouldDeferToStopMessageAuto(adapterContext: unknown): boolean {
@@ -107,8 +149,6 @@ function shouldDeferToStopMessageAuto(adapterContext: unknown): boolean {
   if (!stopCompare) {
     return false;
   }
-  // stop_message_auto owns all armed sessions (including mode=off and transitional skip states),
-  // so reasoning.stop guard must not override its legacy semantics.
   return stopCompare.armed === true;
 }
 
@@ -190,50 +230,214 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
     flowId: FLOW_ID_FINALIZE,
     finalize: async () => {
       const parsed = parseReasoningStopSummary(stopState.summary);
-      if (
-        stoplessMode === 'on' &&
-        parsed.completed === false &&
-        parsed.userInputRequired === true &&
-        parsed.userQuestion
-      ) {
-        const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
-        clearReasoningStopState(ctx.adapterContext);
-        return {
-          chatResponse: patched,
-          execution: {
-            flowId: FLOW_ID_FINALIZE,
-            context: {
-              reasoning_stop: {
-                finalized: true,
-                user_input_required: true
+      
+      if (stoplessMode === 'on') {
+        const failCount = readReasoningStopFailCount(ctx.adapterContext);
+        if (failCount >= ON_MODE_MAX_FAIL_COUNT) {
+          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
+          clearReasoningStopState(ctx.adapterContext);
+          resetReasoningStopFailCount(ctx.adapterContext);
+          return {
+            chatResponse: patched,
+            execution: {
+              flowId: FLOW_ID_FINALIZE,
+              context: {
+                reasoning_stop: {
+                  finalized: true,
+                  fail_count_exceeded: true
+                }
               }
             }
-          }
-        };
-      }
-      if (parsed.completed === false && parsed.nextStep) {
+          };
+        }
+        
+        if (parsed.completed === true) {
+          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
+          clearReasoningStopState(ctx.adapterContext);
+          resetReasoningStopFailCount(ctx.adapterContext);
+          return {
+            chatResponse: patched,
+            execution: {
+              flowId: FLOW_ID_FINALIZE,
+              context: {
+                reasoning_stop: {
+                  finalized: true,
+                  completed: true
+                }
+              }
+            }
+          };
+        }
+        
+        if (parsed.completed === false && parsed.userInputRequired === true && parsed.userQuestion) {
+          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
+          clearReasoningStopState(ctx.adapterContext);
+          resetReasoningStopFailCount(ctx.adapterContext);
+          return {
+            chatResponse: patched,
+            execution: {
+              flowId: FLOW_ID_FINALIZE,
+              context: {
+                reasoning_stop: {
+                  finalized: true,
+                  user_input_required: true
+                }
+              }
+            }
+          };
+        }
+        
+        if (parsed.completed === false && parsed.nextStep) {
+          incrementReasoningStopFailCount(ctx.adapterContext);
+          return {
+            chatResponse: ctx.base,
+            execution: {
+              flowId: FLOW_ID_CONTINUE,
+              followup: {
+                requestIdSuffix: ':reasoning_stop_continue',
+                entryEndpoint: ctx.entryEndpoint,
+                injection: {
+                  ops: [
+                    { op: 'preserve_tools' },
+                    { op: 'ensure_standard_tools' },
+                    { op: 'append_assistant_message', required: false },
+                    { op: 'append_user_text', text: buildExecuteNextStepText(parsed.nextStep) }
+                  ]
+                },
+                metadata: {
+                  clientInjectSource: 'servertool.reasoning_stop_continue'
+                }
+              }
+            }
+          };
+        }
+        
+        incrementReasoningStopFailCount(ctx.adapterContext);
+        const newFailCount = readReasoningStopFailCount(ctx.adapterContext);
+        if (newFailCount >= ON_MODE_MAX_FAIL_COUNT) {
+          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
+          clearReasoningStopState(ctx.adapterContext);
+          resetReasoningStopFailCount(ctx.adapterContext);
+          return {
+            chatResponse: patched,
+            execution: {
+              flowId: FLOW_ID_FINALIZE,
+              context: {
+                reasoning_stop: {
+                  finalized: true,
+                  fail_count_exceeded: true
+                }
+              }
+            }
+          };
+        }
+        
         return {
           chatResponse: ctx.base,
           execution: {
-            flowId: FLOW_ID_CONTINUE,
+            flowId: FLOW_ID_GUARD,
             followup: {
-              requestIdSuffix: ':reasoning_stop_continue',
+              requestIdSuffix: ':reasoning_stop_guard',
               entryEndpoint: ctx.entryEndpoint,
               injection: {
                 ops: [
                   { op: 'preserve_tools' },
                   { op: 'ensure_standard_tools' },
                   { op: 'append_assistant_message', required: false },
-                  { op: 'append_user_text', text: buildExecuteNextStepText(parsed.nextStep) }
+                  { op: 'append_user_text', text: ON_CONTINUE_TEXT }
                 ]
               },
               metadata: {
-                clientInjectSource: 'servertool.reasoning_stop_continue'
+                clientInjectSource: 'servertool.reasoning_stop_guard'
               }
             }
           }
         };
       }
+      
+      if (stoplessMode === 'endless') {
+        if (parsed.completed === true) {
+          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
+          clearReasoningStopState(ctx.adapterContext);
+          return {
+            chatResponse: patched,
+            execution: {
+              flowId: FLOW_ID_FINALIZE,
+              context: {
+                reasoning_stop: {
+                  finalized: true,
+                  completed: true
+                }
+              }
+            }
+          };
+        }
+        
+        if (!parsed.nextStep && parsed.attemptsExhausted === true && parsed.userInputRequired === true && parsed.userQuestion) {
+          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
+          clearReasoningStopState(ctx.adapterContext);
+          return {
+            chatResponse: patched,
+            execution: {
+              flowId: FLOW_ID_FINALIZE,
+              context: {
+                reasoning_stop: {
+                  finalized: true,
+                  attempts_exhausted: true,
+                  user_input_required: true
+                }
+              }
+            }
+          };
+        }
+        
+        if (parsed.nextStep) {
+          return {
+            chatResponse: ctx.base,
+            execution: {
+              flowId: FLOW_ID_CONTINUE,
+              followup: {
+                requestIdSuffix: ':reasoning_stop_continue',
+                entryEndpoint: ctx.entryEndpoint,
+                injection: {
+                  ops: [
+                    { op: 'preserve_tools' },
+                    { op: 'ensure_standard_tools' },
+                    { op: 'append_assistant_message', required: false },
+                    { op: 'append_user_text', text: buildExecuteNextStepText(parsed.nextStep) }
+                  ]
+                },
+                metadata: {
+                  clientInjectSource: 'servertool.reasoning_stop_continue'
+                }
+              }
+            }
+          };
+        }
+        
+        return {
+          chatResponse: ctx.base,
+          execution: {
+            flowId: FLOW_ID_GUARD,
+            followup: {
+              requestIdSuffix: ':reasoning_stop_guard',
+              entryEndpoint: ctx.entryEndpoint,
+              injection: {
+                ops: [
+                  { op: 'preserve_tools' },
+                  { op: 'ensure_standard_tools' },
+                  { op: 'append_assistant_message', required: false },
+                  { op: 'append_user_text', text: ENDLESS_CONTINUE_TEXT }
+                ]
+              },
+              metadata: {
+                clientInjectSource: 'servertool.reasoning_stop_guard'
+              }
+            }
+          }
+        };
+      }
+      
       const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
       clearReasoningStopState(ctx.adapterContext);
       return {

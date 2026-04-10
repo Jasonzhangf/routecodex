@@ -78,11 +78,12 @@ export interface RoutingInstructionState {
   stopMessageAiMode?: 'on' | 'off';
   stopMessageAiSeedPrompt?: string;
   stopMessageAiHistory?: Array<Record<string, unknown>>;
-  reasoningStopMode?: 'on' | 'off' | 'endless';
-  reasoningStopArmed?: boolean;
-  reasoningStopSummary?: string;
-  reasoningStopUpdatedAt?: number;
-  preCommandSource?: string;
+ reasoningStopMode?: 'on' | 'off' | 'endless';
+ reasoningStopArmed?: boolean;
+ reasoningStopSummary?: string;
+ reasoningStopUpdatedAt?: number;
+  reasoningStopFailCount?: number;
+ preCommandSource?: string;
   preCommandScriptPath?: string;
   preCommandUpdatedAt?: number;
   chatProcessLastTotalTokens?: number;

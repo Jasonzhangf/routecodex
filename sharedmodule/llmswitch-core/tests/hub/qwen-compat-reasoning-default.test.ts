@@ -3,7 +3,7 @@ import { describe, expect, test } from '@jest/globals';
 import { applyQwenRequestTransform } from '../../src/conversion/compat/actions/qwen-transform.js';
 
 describe('qwen compat reasoning defaults', () => {
-  test('defaults reasoning to true when not specified', () => {
+  test('keeps request unchanged when reasoning is not specified', () => {
     const payload: any = {
       model: 'qwen3.5-plus',
       messages: [{ role: 'user', content: 'hi' }]
@@ -11,11 +11,10 @@ describe('qwen compat reasoning defaults', () => {
 
     const out = applyQwenRequestTransform(payload) as any;
 
-    expect(out.parameters).toBeTruthy();
-    expect(out.parameters.reasoning).toBe(true);
+    expect(out.reasoning).toBeUndefined();
   });
 
-  test('does not enable reasoning when effort is low', () => {
+  test('preserves low-effort reasoning and sibling top-level fields', () => {
     const payload: any = {
       model: 'qwen3.5-plus',
       messages: [{ role: 'user', content: 'hi' }],
@@ -25,12 +24,11 @@ describe('qwen compat reasoning defaults', () => {
 
     const out = applyQwenRequestTransform(payload) as any;
 
-    expect(out.parameters).toBeTruthy();
-    expect(out.parameters.temperature).toBe(0.2);
-    expect(out.parameters.reasoning).toBeUndefined();
+    expect(out.temperature).toBe(0.2);
+    expect(out.reasoning).toEqual({ effort: 'low' });
   });
 
-  test('forces reasoning true when explicitly non-low', () => {
+  test('preserves structured reasoning when explicitly provided', () => {
     const payload: any = {
       model: 'qwen3.5-plus',
       messages: [{ role: 'user', content: 'hi' }],
@@ -39,7 +37,6 @@ describe('qwen compat reasoning defaults', () => {
 
     const out = applyQwenRequestTransform(payload) as any;
 
-    expect(out.parameters).toBeTruthy();
-    expect(out.parameters.reasoning).toBe(true);
+    expect(out.reasoning).toEqual({ effort: 'high', summary: 'auto' });
   });
 });

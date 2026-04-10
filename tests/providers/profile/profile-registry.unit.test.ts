@@ -451,6 +451,11 @@ describe('provider family profile registry', () => {
       const headers = qwenProfile?.applyRequestHeaders?.({
         headers: {
           Authorization: 'Bearer sk-qwen-test-token',
+          'User-Agent': 'curl/8.7.1',
+          'X-DashScope-UserAgent': 'curl/8.7.1',
+          originator: 'codex-tui',
+          session_id: 'session-from-client',
+          conversation_id: 'conversation-from-client',
           'X-Goog-Api-Client': 'gl-node/22.17.0',
           'Client-Metadata': 'legacy'
         }
@@ -460,11 +465,39 @@ describe('provider family profile registry', () => {
       expect(headers?.['Client-Metadata']).toBeUndefined();
       expect(headers?.['X-DashScope-CacheControl']).toBe('enable');
       expect(headers?.['X-DashScope-AuthType']).toBe('qwen-oauth');
-      expect(headers?.['User-Agent']).toContain('QwenCode/0.10.3');
+      expect(headers?.['User-Agent']).toBe('QwenCode/0.10.3 (darwin; arm64)');
       expect(headers?.['X-DashScope-UserAgent']).toBe(headers?.['User-Agent']);
       expect(headers?.['X-Stainless-Lang']).toBe('js');
       expect(headers?.['X-Stainless-Runtime']).toBe('node');
       expect(headers?.['X-Stainless-Retry-Count']).toBe('0');
+      expect(headers?.originator).toBeUndefined();
+      expect(headers?.session_id).toBeUndefined();
+      expect(headers?.conversation_id).toBeUndefined();
+    } finally {
+      if (previousUaVersion === undefined) {
+        delete process.env.ROUTECODEX_QWEN_UA_VERSION;
+      } else {
+        process.env.ROUTECODEX_QWEN_UA_VERSION = previousUaVersion;
+      }
+    }
+  });
+
+  test('qwen profile resolveUserAgent ignores client/config passthrough and stays qwen-cli aligned', () => {
+    const previousUaVersion = process.env.ROUTECODEX_QWEN_UA_VERSION;
+    process.env.ROUTECODEX_QWEN_UA_VERSION = '0.10.3';
+
+    try {
+      const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
+      expect(qwenProfile).toBeTruthy();
+
+      const resolved = qwenProfile?.resolveUserAgent?.({
+        uaFromConfig: 'curl/8.7.1',
+        uaFromService: 'custom-service/1.0',
+        inboundUserAgent: 'codex-tui/0.118.0',
+        defaultUserAgent: 'RouteCodex/2.0'
+      } as any);
+
+      expect(resolved).toBe('QwenCode/0.10.3 (darwin; arm64)');
     } finally {
       if (previousUaVersion === undefined) {
         delete process.env.ROUTECODEX_QWEN_UA_VERSION;
@@ -500,6 +533,7 @@ describe('provider family profile registry', () => {
         cache_control: { type: 'ephemeral' }
       }
     ]);
+    expect((body as any)?.reasoning_effort).toBeUndefined();
   });
 
   test('qwen profile maps oauth vision model id to vision-model', () => {
@@ -556,6 +590,28 @@ describe('provider family profile registry', () => {
     ]);
     expect((body as any)?.messages?.[1]).toEqual({ role: 'user', content: 'hello' });
     expect((body as any)?.messages).toHaveLength(2);
+  });
+
+  test('qwen profile mirrors reasoning.effort into reasoning_effort for oauth requests', () => {
+    const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
+    expect(qwenProfile).toBeTruthy();
+
+    const body = qwenProfile?.buildRequestBody?.({
+      request: {
+        metadata: { authType: 'qwen-oauth' }
+      } as any,
+      defaultBody: {
+        model: 'qwen3.6-plus',
+        reasoning: { effort: 'high', summary: 'detailed' },
+        messages: [{ role: 'user', content: 'hello' }]
+      } as any,
+      runtimeMetadata: {
+        authType: 'qwen-oauth'
+      } as any
+    } as any);
+
+    expect((body as any)?.reasoning).toEqual({ effort: 'high', summary: 'detailed' });
+    expect((body as any)?.reasoning_effort).toBe('high');
   });
 
   test('qwen profile keeps non-oauth model unchanged', () => {
