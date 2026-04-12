@@ -193,6 +193,47 @@ describe('tool governor exec_command guard', () => {
     expect(choice?.finish_reason).toBe('stop');
   });
 
+  it('harvests explicit execute_command alias without touching shell body', () => {
+    const response: any = {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: [
+              '<<RCC_TOOL_CALLS_JSON',
+              JSON.stringify({
+                tool_calls: [
+                  {
+                    name: 'execute_command',
+                    input: {
+                      cmd: "bash -lc 'cd /workspace && catdocs/design/project-dispatch-operation-architecture.md'",
+                      workdir: '/workspace',
+                      yield_time_ms: 300
+                    }
+                  }
+                ]
+              }),
+              'RCC_TOOL_CALLS_JSON'
+            ].join('\n')
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const out: any = processChatResponseTools(response);
+    const choice = out?.choices?.[0];
+    const toolCalls = choice?.message?.tool_calls || [];
+    expect(choice?.finish_reason).toBe('tool_calls');
+    expect(toolCalls.map((row: any) => row?.function?.name)).toEqual(['exec_command']);
+    const args = JSON.parse(String(toolCalls?.[0]?.function?.arguments || '{}'));
+    expect(args.cmd).toBe(
+      "bash -lc 'cd /workspace && catdocs/design/project-dispatch-operation-architecture.md'"
+    );
+    expect(args.workdir).toBe('/workspace');
+    expect(args.yield_time_ms).toBe(300);
+  });
+
   it('blocks policy-defined mass kill command with policy message', () => {
     const request: any = {
       metadata: {

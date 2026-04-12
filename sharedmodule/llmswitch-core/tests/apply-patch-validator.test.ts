@@ -218,6 +218,35 @@ describe('apply_patch validator (shape fixes)', () => {
     expect(normalized.patch).toContain('*** End Patch');
   });
 
+  test('repairs legacy context-diff hunk headers inside Begin Patch Update File envelope', () => {
+    const patch = [
+      '*** Begin Patch',
+      '*** Update File: src/runtime/context-ledger-memory.ts',
+      '*** 880,283 ****',
+      "   const DIGEST_VERBOSE_OUTPUT_TOOLS = new Set([",
+      "     'update_plan',",
+      "     'reasoning.stop',",
+      "     'report-task-completion',",
+      '   ]);',
+      '--- 886,330 ----',
+      '+ ',
+      '+ // Digest 只保留重要工具调用',
+      '+ const DIGEST_IMPORTANT_TOOLS = new Set([',
+      "+   'apply_patch',",
+      '+ ]);',
+      '*** End Patch'
+    ].join('\n');
+
+    const res = validateToolCall('apply_patch', JSON.stringify({ input: patch }));
+    expect(res.ok).toBe(true);
+    const normalized = JSON.parse(res.normalizedArgs as string);
+    expect(normalized.patch).toContain('*** Update File: src/runtime/context-ledger-memory.ts');
+    expect(normalized.patch).toContain('@@');
+    expect(normalized.patch).toContain("DIGEST_IMPORTANT_TOOLS = new Set([");
+    expect(normalized.patch).not.toContain('*** 880,283 ****');
+    expect(normalized.patch).not.toContain('--- 886,330 ----');
+  });
+
   test('normalizes Begin Patch payload that only has legacy --- a/file header', () => {
     const patch = [
       '*** Begin Patch',
@@ -354,5 +383,54 @@ describe('apply_patch validator (shape fixes)', () => {
     expect(normalized.patch).toContain('*** Add File: nested-command.txt');
     expect(normalized.patch).toContain('*** Begin Patch');
     expect(normalized.patch).toContain('*** End Patch');
+  });
+
+  test('uses native compat to strip File prefix from absolute update path', () => {
+    const patch = [
+      '*** Begin Patch',
+      '*** Update File: File: /Volumes/extension/code/finger/src/orchestration/session-types.ts',
+      '@@',
+      '-old',
+      '+new',
+      '*** End Patch'
+    ].join('\n');
+
+    const res = validateToolCall('apply_patch', patch);
+    expect(res.ok).toBe(true);
+    const normalized = JSON.parse(res.normalizedArgs as string);
+    expect(normalized.patch).toContain(
+      '*** Update File: /Volumes/extension/code/finger/src/orchestration/session-types.ts'
+    );
+    expect(normalized.patch).not.toContain('*** Update File: File:');
+  });
+
+  test('uses native compat to convert update-file is new suffix into add-file', () => {
+    const patch = [
+      '*** Begin Patch',
+      '*** Update File: File: tests/unit/runtime/track-metadata.test.ts is new',
+      "describe('track metadata', () => {});",
+      '*** End Patch'
+    ].join('\n');
+
+    const res = validateToolCall('apply_patch', patch);
+    expect(res.ok).toBe(true);
+    const normalized = JSON.parse(res.normalizedArgs as string);
+    expect(normalized.patch).toContain('*** Add File: tests/unit/runtime/track-metadata.test.ts');
+    expect(normalized.patch).toContain("+describe('track metadata', () => {});");
+    expect(normalized.patch).not.toContain('is new');
+  });
+
+  test('rejects add-file payloads that still contain unified hunk headers as file content', () => {
+    const patch = [
+      '*** Begin Patch',
+      '*** Add File: hello.txt',
+      '+@@ -0,0 +1 @@',
+      '+hello',
+      '*** End Patch'
+    ].join('\n');
+
+    const res = validateToolCall('apply_patch', patch);
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('unsupported_patch_format');
   });
 });

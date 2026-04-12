@@ -1,6 +1,6 @@
 {
   "name": "@jsonstudio/llms",
-  "version": "0.6.4336",
+  "version": "0.6.4363",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",

@@ -114,9 +114,9 @@ const PROVIDER_TRAFFIC_RUN_NAMESPACE =
 
 const ADAPTIVE_WINDOW_MINUTES = 15;
 const ADAPTIVE_TREND_SPLIT_MINUTES = 5;
-const ADAPTIVE_TREND_THRESHOLD = 0.2;
-const ADAPTIVE_BURST_429_THRESHOLD = 3;
-const ADAPTIVE_COOLDOWN_DOWN_MS = 3 * 60_000;
+const ADAPTIVE_TREND_THRESHOLD = 0.35;
+const ADAPTIVE_BURST_429_THRESHOLD = 5;
+const ADAPTIVE_COOLDOWN_DOWN_MS = 15 * 60_000;
 const ADAPTIVE_COOLDOWN_UP_MS = 2 * 60_000;
 const ADAPTIVE_DEFAULT_HARD_MAX = 64;
 const ADAPTIVE_DEFAULT_HARD_MULTIPLIER = 2;
@@ -421,7 +421,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
       if (typeof fromEnv === 'string' && fromEnv.trim()) {
         return path.resolve(fromEnv.trim());
       }
-      return path.join(resolveRccStateDir(), 'provider-traffic', 'dynamic-concurrency-overrides.json');
+      return path.join(base, 'dynamic-concurrency-overrides.json');
     })();
   }
 
@@ -680,14 +680,13 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     const trendUp = (last5 - prev5) > ADAPTIVE_TREND_THRESHOLD;
     const latest429 = window[window.length - 1]?.http429 ?? 0;
     const canAdjustDown = state.currentCap > state.minCap;
+    const cooldownDone = nowMs >= state.cooldownUntilMs;
     const beforeCap = state.currentCap;
     let changed = false;
     let reason = '';
 
-    if ((latest429 >= ADAPTIVE_BURST_429_THRESHOLD || (trendUp && total429 >= 2)) && canAdjustDown) {
-      state.currentCap = latest429 >= ADAPTIVE_BURST_429_THRESHOLD
-        ? clampInt(state.currentCap - 2, state.minCap, state.hardMaxCap)
-        : clampInt(Math.floor(state.currentCap * 0.8), state.minCap, state.hardMaxCap);
+    if (cooldownDone && (latest429 >= ADAPTIVE_BURST_429_THRESHOLD || (trendUp && total429 >= 2)) && canAdjustDown) {
+      state.currentCap = clampInt(state.currentCap - 1, state.minCap, state.hardMaxCap);
       state.cooldownUntilMs = nowMs + ADAPTIVE_COOLDOWN_DOWN_MS;
       changed = state.currentCap !== beforeCap;
       reason = latest429 >= ADAPTIVE_BURST_429_THRESHOLD ? 'burst_429' : 'avg_429_trend_up';
@@ -698,15 +697,24 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
         state.safeCap = nextSafeCap;
         changed = true;
       }
-      const cooldownDone = nowMs >= state.cooldownUntilMs;
       const utilizationHigh = peak >= Math.max(1, Math.ceil(state.currentCap * 0.8));
+      const canRecoverToSafeCap =
+        cooldownDone
+        && utilizationHigh
+        && state.currentCap < state.safeCap;
       const canProbeUp =
         cooldownDone
         && utilizationHigh
         && state.currentCap < state.hardMaxCap
         && !state.triedIncreaseCaps.has(state.currentCap)
         && state.currentCap >= state.safeCap;
-      if (canProbeUp) {
+      if (canRecoverToSafeCap) {
+        const targetCap = Math.min(state.hardMaxCap, state.safeCap);
+        state.currentCap = clampInt(state.currentCap + 1, state.minCap, targetCap);
+        state.cooldownUntilMs = nowMs + ADAPTIVE_COOLDOWN_UP_MS;
+        changed = true;
+        reason = 'no_429_recover_safe_cap';
+      } else if (canProbeUp) {
         const fromCap = state.currentCap;
         state.triedIncreaseCaps.add(fromCap);
         state.currentCap = clampInt(fromCap + 1, state.minCap, state.hardMaxCap);

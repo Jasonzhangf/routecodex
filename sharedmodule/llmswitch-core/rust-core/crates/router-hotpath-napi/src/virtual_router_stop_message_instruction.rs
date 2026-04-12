@@ -3,6 +3,7 @@ use napi_derive::napi;
 use serde::Serialize;
 
 const SM_UNBOUNDED_MAX_REPEATS: i64 = 2_147_483_647;
+const STOP_MESSAGE_DEFAULT_MAX_REPEATS: i64 = 10;
 const SM_DEFAULT_TEXT: &str = "继续执行";
 
 #[derive(Debug, Serialize)]
@@ -17,6 +18,7 @@ struct StopMessageInstructionParseOutput {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StopMessagePrefix {
     Sm,
+    StopMessage,
 }
 
 fn starts_with_command_prefix(instruction: &str, prefix: &str) -> Option<usize> {
@@ -43,6 +45,9 @@ fn starts_with_command_prefix(instruction: &str, prefix: &str) -> Option<usize> 
 fn starts_with_stop_message(instruction: &str) -> Option<(usize, StopMessagePrefix)> {
     if let Some(idx) = starts_with_command_prefix(instruction, "sm") {
         return Some((idx, StopMessagePrefix::Sm));
+    }
+    if let Some(idx) = starts_with_command_prefix(instruction, "stopmessage") {
+        return Some((idx, StopMessagePrefix::StopMessage));
     }
     None
 }
@@ -314,8 +319,13 @@ fn parse_stop_message_instruction(
         return None;
     }
 
+    let default_max_repeats = match prefix {
+        StopMessagePrefix::Sm => SM_UNBOUNDED_MAX_REPEATS,
+        StopMessagePrefix::StopMessage => STOP_MESSAGE_DEFAULT_MAX_REPEATS,
+    };
+
     let (max_repeats, ai_mode) =
-        parse_stop_message_tail_with_defaults(&tail_tokens, SM_UNBOUNDED_MAX_REPEATS, Some("on"));
+        parse_stop_message_tail_with_defaults(&tail_tokens, default_max_repeats, Some("on"));
     make_set_output(text, max_repeats, ai_mode)
 }
 

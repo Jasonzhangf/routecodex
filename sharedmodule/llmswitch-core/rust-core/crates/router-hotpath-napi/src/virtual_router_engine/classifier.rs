@@ -80,13 +80,15 @@ impl RoutingClassifier {
             !local_tool_continuation && (server_tool_required || has_web_search_tool_declared);
         let reached_long_context = features.estimated_tokens >= self.long_context_threshold_tokens;
         let latest_message_from_user = features.latest_message_from_user;
+        let has_tool_activity = features.has_tools || features.has_tool_call_responses;
         let thinking_continuation = last_tool_category == "read";
-        let thinking_from_user = latest_message_from_user;
+        let thinking_from_user = latest_message_from_user
+            && features.has_thinking_keyword
+            && !has_tool_activity;
         let thinking_from_read = !thinking_from_user && thinking_continuation;
         let coding_continuation = last_tool_category == "write";
         let search_continuation = last_tool_category == "search";
         let tools_continuation = last_tool_category == "other";
-        let has_tool_activity = features.has_tools || features.has_tool_call_responses;
         let has_remote_video_attachment =
             features.has_video_attachment && features.has_remote_video_attachment;
 
@@ -303,3 +305,44 @@ pub(crate) const ROUTE_PRIORITY: [&str; 10] = [
     "background",
     DEFAULT_ROUTE,
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn classifier() -> RoutingClassifier {
+        RoutingClassifier::new(&json!({}))
+    }
+
+    #[test]
+    fn tools_declared_without_thinking_keyword_route_to_tools() {
+        let features = RoutingFeatures {
+            latest_message_from_user: true,
+            has_tools: true,
+            has_thinking_keyword: false,
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_eq!(result.route_name, "tools");
+        assert!(result.reasoning.contains("tools:tool-request-detected"));
+        assert!(!result.reasoning.contains("thinking:user-input"));
+    }
+
+    #[test]
+    fn explicit_thinking_keyword_without_tools_route_to_thinking() {
+        let features = RoutingFeatures {
+            latest_message_from_user: true,
+            has_thinking_keyword: true,
+            has_tools: false,
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_eq!(result.route_name, "thinking");
+        assert!(result.reasoning.contains("thinking:user-input"));
+    }
+}

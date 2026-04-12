@@ -67,7 +67,8 @@ async function main() {
    assert(caseWebIntent.result.routeName === 'web_search', `web intent should route to web_search (via keywords), got ${caseWebIntent.result.routeName}`);
    assert(caseWebIntent.result.reasoning.includes('web_search:intent-keyword'), 'web intent reason should be intent-keyword');
 
-   // Test: web_search tool declared WITHOUT intent keywords should still route to web_search
+   // Test: merely declaring web_search tool must not force web_search route.
+   // Current SSOT requires explicit intent, serverToolRequired, or prior web_search continuation.
    const caseToolDeclaredNoIntent = classify('route-case-tool-declared-no-intent', {
      model: 'gpt-test',
      messages: [{ role: 'user', content: 'Hello, how are you?' }],
@@ -81,7 +82,10 @@ async function main() {
        }
      ]
    });
-   assert(caseToolDeclaredNoIntent.result.routeName === 'web_search', `tool declared without intent should route to web_search, got ${caseToolDeclaredNoIntent.result.routeName}`);
+   assert(
+     caseToolDeclaredNoIntent.result.routeName === 'thinking',
+     `tool declared without intent should stay on thinking user-input route, got ${caseToolDeclaredNoIntent.result.routeName}`
+   );
 
   const caseNoStickyWebSearch = classify('route-case-no-sticky-websearch', {
     model: 'gpt-test',

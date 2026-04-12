@@ -11,6 +11,7 @@ import {
   ensureClientHeadersOnPayload,
   resolveClientRequestId
 } from './executor-metadata.js';
+import { rebindResponsesConversationRequestId } from '../../../modules/llmswitch/bridge.js';
 import {
   type ConvertProviderResponseOptions,
   convertProviderResponseIfNeeded as convertProviderResponseWithBridge
@@ -1760,6 +1761,16 @@ export class HubRequestExecutor implements RequestExecutor {
         const previousRequestId = input.requestId;
         if (providerContext.requestId !== input.requestId) {
           input.requestId = providerContext.requestId;
+          try {
+            await rebindResponsesConversationRequestId(previousRequestId, input.requestId);
+          } catch (error) {
+            logRequestExecutorNonBlockingError('responsesConversation.rebindRequestId', error, {
+              previousRequestId,
+              requestId: input.requestId,
+              providerKey: target.providerKey,
+              runtimeKey
+            });
+          }
         }
         this.logStage('provider.context_resolve.completed', input.requestId, {
           providerKey: target.providerKey,
@@ -1879,14 +1890,14 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt
           });
 
-          const providerResponse = await handle.instance.processIncoming(providerPayload);
-          const responseStatus = extractResponseStatus(providerResponse);
           allowSnapshotLocalDiskWrite(
             executorRequestId,
             providerRequestId,
             input.requestId,
             clientRequestId
           );
+          const providerResponse = await handle.instance.processIncoming(providerPayload);
+          const responseStatus = extractResponseStatus(providerResponse);
           providerSendElapsedMs = Date.now() - providerSendStartedAtMs;
           cumulativeExternalLatencyMs += providerSendElapsedMs;
           this.logStage('provider.send.completed', input.requestId, {

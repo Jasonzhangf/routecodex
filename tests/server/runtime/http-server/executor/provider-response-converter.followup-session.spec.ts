@@ -125,4 +125,75 @@ describe('provider-response-converter serverTool followup metadata', () => {
     const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, any>;
     expect(bridgeArgs?.context?.capturedChatRequest).toEqual(originalRequest);
   });
+
+  it('backfills capturedChatRequest.tools from requestSemantics clientToolsRaw when captured request lost tools', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementation(async ({ context }) => {
+      return {
+        body: {
+          id: 'msg_ok',
+          observedCaptured: context?.capturedChatRequest
+        }
+      };
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const capturedChatRequest = {
+      model: 'gpt-5.3-codex',
+      messages: [{ role: 'user', content: 'audit project' }]
+    };
+    const clientToolsRaw = [
+      {
+        type: 'function',
+        function: {
+          name: 'exec_command',
+          parameters: {
+            type: 'object',
+            properties: { cmd: { type: 'string' } },
+            required: ['cmd']
+          }
+        }
+      }
+    ];
+
+    await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        requestId: 'req_captured_tools_backfill_1',
+        wantsStream: false,
+        response: { body: { id: 'resp_ok', output: [] } } as any,
+        originalRequest: { response_id: 'resp_1', tool_outputs: [{ tool_call_id: 'call_1', output: 'ok' }] },
+        requestSemantics: {
+          tools: {
+            clientToolsRaw
+          }
+        } as any,
+        pipelineMetadata: {
+          capturedChatRequest
+        }
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
+    const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, any>;
+    expect(bridgeArgs?.context?.capturedChatRequest).toMatchObject({
+      model: 'gpt-5.3-codex',
+      messages: [{ role: 'user', content: 'audit project' }],
+      tools: clientToolsRaw
+    });
+  });
 });

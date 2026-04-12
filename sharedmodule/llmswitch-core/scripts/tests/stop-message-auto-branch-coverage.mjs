@@ -194,6 +194,7 @@ async function main() {
   const originalAutoEnabled = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_ENABLED;
   const originalAutoIflow = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
   const originalAutoIflowBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+  const originalStopMessageConfigPath = process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH;
   const originalDefaultEnabled = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED;
   const originalDefaultText = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_TEXT;
   const originalDefaultMax = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_MAX_REPEATS;
@@ -206,6 +207,7 @@ async function main() {
   process.env.HOME = tmpRoot;
   process.env.ROUTECODEX_USER_DIR = userDir;
   process.env.ROUTECODEX_SESSION_DIR = sessionDir;
+  process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH = path.join(tmpRoot, 'stop-message.json');
   process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_ENABLED = '0';
   process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW = '0';
   process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '0';
@@ -503,8 +505,8 @@ async function main() {
     const iflowTriggered = await withEnv(
       {
         ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_ENABLED: '1',
-        ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW: '1',
-        ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN: iflowMockBin
+        ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND: 'codex',
+        ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN: iflowMockBin
       },
       async () =>
         runCase({
@@ -552,6 +554,8 @@ async function main() {
     else delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
     if (typeof originalAutoIflowBin === 'string') process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = originalAutoIflowBin;
     else delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+    if (typeof originalStopMessageConfigPath === 'string') process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH = originalStopMessageConfigPath;
+    else delete process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH;
     if (typeof originalDefaultEnabled === 'string') process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = originalDefaultEnabled;
     else delete process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED;
     if (typeof originalDefaultText === 'string') process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_TEXT = originalDefaultText;

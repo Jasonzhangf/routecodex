@@ -76,6 +76,40 @@ fn should_force_search(root: &Map<String, Value>, adapter_context: &AdapterConte
     root.get("web_search").and_then(|v| v.as_object()).is_some()
 }
 
+fn route_starts_with(adapter_context: &AdapterContext, prefixes: &[&str]) -> bool {
+    let route_id = adapter_context
+        .route_id
+        .as_ref()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    prefixes.iter().any(|prefix| route_id.starts_with(prefix))
+}
+
+fn has_declared_tools(root: &Map<String, Value>) -> bool {
+    root.get("tools")
+        .and_then(|v| v.as_array())
+        .map(|rows| !rows.is_empty())
+        .unwrap_or(false)
+}
+
+fn should_force_tool_required(
+    root: &Map<String, Value>,
+    adapter_context: &AdapterContext,
+    strict_tool_required: bool,
+    search_enabled: bool,
+) -> bool {
+    if !strict_tool_required || !has_declared_tools(root) {
+        return false;
+    }
+    if route_starts_with(adapter_context, &["tools"]) {
+        return true;
+    }
+    if search_enabled && route_starts_with(adapter_context, &SEARCH_ROUTE_PREFIXES) {
+        return true;
+    }
+    false
+}
+
 pub(crate) fn apply_deepseek_web_request_compat(
     payload: Value,
     adapter_context: &AdapterContext,
@@ -92,7 +126,9 @@ pub(crate) fn apply_deepseek_web_request_compat(
         search_by_model
     };
     let (strict_tool_required, text_tool_fallback) = resolve_deepseek_options(adapter_context);
-    let prompt = build_deepseek_prompt(root);
+    let force_tool_required =
+        should_force_tool_required(root, adapter_context, strict_tool_required, search_enabled);
+    let prompt = build_deepseek_prompt(root, force_tool_required);
 
     let mut next = Map::<String, Value>::new();
     if let Some(chat_session_id) = read_trimmed_string(root.get("chat_session_id")) {

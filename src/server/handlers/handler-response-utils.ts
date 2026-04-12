@@ -880,14 +880,25 @@ function toNodeReadable(streamLike: unknown): Readable | null {
 }
 
 function shouldCaptureClientStreamSnapshots(): boolean {
+  const explicit = String(
+    process.env.ROUTECODEX_CAPTURE_CLIENT_STREAM_SNAPSHOTS
+      ?? process.env.RCC_CAPTURE_CLIENT_STREAM_SNAPSHOTS
+      ?? ''
+  ).trim().toLowerCase();
+  if (explicit === '1' || explicit === 'true') {
+    return true;
+  }
+  if (explicit === '0' || explicit === 'false') {
+    return false;
+  }
   const flag = String(process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS || '').trim().toLowerCase();
   if (flag === '1' || flag === 'true') {
-    return true;
+    return false;
   }
   if (flag === '0' || flag === 'false') {
     return false;
   }
-  return isSnapshotsEnabled();
+  return false;
 }
 
 function resolveClientStreamSnapshotMaxBytes(): number {

@@ -83,7 +83,9 @@ export interface RoutingInstructionState {
  reasoningStopSummary?: string;
  reasoningStopUpdatedAt?: number;
   reasoningStopFailCount?: number;
- preCommandSource?: string;
+  reasoningStopGuardTriggerCount?: number; // Storm protection: guard trigger count
+  reasoningStopGuardTriggerAt?: number; // Storm protection: last guard trigger timestamp
+  preCommandSource?: string;
   preCommandScriptPath?: string;
   preCommandUpdatedAt?: number;
   chatProcessLastTotalTokens?: number;

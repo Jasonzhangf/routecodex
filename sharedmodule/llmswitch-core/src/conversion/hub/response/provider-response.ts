@@ -412,6 +412,8 @@ export async function convertProviderResponse(
       entryEndpoint: options.entryEndpoint,
       requestId: options.context.requestId,
       clientProtocol,
+      requestSemantics: options.requestSemantics,
+      adapterContext: options.context as unknown as Record<string, unknown>,
       stageRecorder: options.stageRecorder
     }),
     {

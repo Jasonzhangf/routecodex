@@ -44,4 +44,23 @@ describe('extractSessionIdentifiersFromMetadata', () => {
     expect(identifiers.sessionId).toBe('019bb087-5b1e-7bd0-b9cb-7317ebd76f74');
     expect(identifiers.conversationId).toBe('019bb087-5b1e-7bd0-b9cb-7317ebd76f74');
   });
+
+  test('parses codex-style generated session token from raw payload fallback', () => {
+    const identifiers = extractSessionIdentifiersFromMetadata({
+      __raw_request_body: {
+        metadata: {
+          user_id:
+            'user_foo__session_codex_cli_session_openai-chat-crs_key2-gpt-5_3-codex-_a4714ec8f5'
+        },
+        rawText:
+          '{"metadata":{"conversation_id":"codex_cli_conversation_openai-chat-crs_key2-gpt-5_3-c_2cc168faa7"}}'
+      }
+    });
+    expect(identifiers.sessionId).toBe(
+      'codex_cli_session_openai-chat-crs_key2-gpt-5_3-codex-_a4714ec8f5'
+    );
+    expect(identifiers.conversationId).toBe(
+      'codex_cli_conversation_openai-chat-crs_key2-gpt-5_3-c_2cc168faa7'
+    );
+  });
 });

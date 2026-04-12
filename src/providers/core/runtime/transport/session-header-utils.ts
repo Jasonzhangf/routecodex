@@ -5,6 +5,59 @@ import { HeaderUtils } from './header-utils.js';
 import { ProviderPayloadUtils } from './provider-payload-utils.js';
 
 export class SessionHeaderUtils {
+  private static readIdentifier(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+
+  private static ensureRuntimeMetadataCarrier(
+    runtimeMetadata?: ProviderRuntimeMetadata
+  ): Record<string, unknown> | undefined {
+    if (!runtimeMetadata) {
+      return undefined;
+    }
+    if (!runtimeMetadata.metadata || typeof runtimeMetadata.metadata !== 'object') {
+      runtimeMetadata.metadata = {};
+    }
+    return runtimeMetadata.metadata as Record<string, unknown>;
+  }
+
+  static ensureCodexSessionMetadata(
+    runtimeMetadata?: ProviderRuntimeMetadata
+  ): { sessionId?: string; conversationId?: string } {
+    const metadata = SessionHeaderUtils.ensureRuntimeMetadataCarrier(runtimeMetadata);
+    if (!metadata) {
+      return {};
+    }
+
+    const existingSessionId =
+      SessionHeaderUtils.readIdentifier(metadata.sessionId)
+      ?? SessionHeaderUtils.readIdentifier(metadata.session_id)
+      ?? SessionHeaderUtils.readIdentifier((runtimeMetadata as Record<string, unknown>)?.sessionId);
+    const existingConversationId =
+      SessionHeaderUtils.readIdentifier(metadata.conversationId)
+      ?? SessionHeaderUtils.readIdentifier(metadata.conversation_id)
+      ?? SessionHeaderUtils.readIdentifier((runtimeMetadata as Record<string, unknown>)?.conversationId);
+
+    const sessionId =
+      existingSessionId
+      ?? existingConversationId
+      ?? SessionHeaderUtils.buildCodexIdentifier('session', runtimeMetadata);
+    const conversationId =
+      existingConversationId
+      ?? existingSessionId
+      ?? SessionHeaderUtils.buildCodexIdentifier('conversation', runtimeMetadata);
+
+    metadata.sessionId = sessionId;
+    metadata.conversationId = conversationId;
+    (runtimeMetadata as Record<string, unknown>).sessionId = sessionId;
+    (runtimeMetadata as Record<string, unknown>).conversationId = conversationId;
+    return { sessionId, conversationId };
+  }
+
   static normalizeCodexClientHeaders(
     headers: Record<string, string> | undefined,
     codexUaMode: boolean
@@ -27,12 +80,35 @@ export class SessionHeaderUtils {
     headers: Record<string, string>,
     runtimeMetadata?: ProviderRuntimeMetadata
   ): void {
-    HeaderUtils.setHeaderIfMissing(headers, 'session_id', SessionHeaderUtils.buildCodexIdentifier('session', runtimeMetadata));
-    HeaderUtils.setHeaderIfMissing(
-      headers,
-      'conversation_id',
-      SessionHeaderUtils.buildCodexIdentifier('conversation', runtimeMetadata)
-    );
+    const runtimeMetadataRecord =
+      runtimeMetadata && typeof runtimeMetadata === 'object'
+        ? (runtimeMetadata as Record<string, unknown>)
+        : undefined;
+    const runtimeMetadataCarrier =
+      runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object'
+        ? (runtimeMetadata.metadata as Record<string, unknown>)
+        : undefined;
+    const existingSessionId =
+      SessionHeaderUtils.readIdentifier(HeaderUtils.findHeaderValue(headers, 'session_id'))
+      ?? SessionHeaderUtils.readIdentifier(runtimeMetadataCarrier?.sessionId)
+      ?? SessionHeaderUtils.readIdentifier(runtimeMetadataCarrier?.session_id)
+      ?? SessionHeaderUtils.readIdentifier(runtimeMetadataRecord?.sessionId);
+    const existingConversationId =
+      SessionHeaderUtils.readIdentifier(HeaderUtils.findHeaderValue(headers, 'conversation_id'))
+      ?? SessionHeaderUtils.readIdentifier(runtimeMetadataCarrier?.conversationId)
+      ?? SessionHeaderUtils.readIdentifier(runtimeMetadataCarrier?.conversation_id)
+      ?? SessionHeaderUtils.readIdentifier(runtimeMetadataRecord?.conversationId);
+    const resolvedSessionId =
+      existingSessionId
+      ?? existingConversationId
+      ?? SessionHeaderUtils.buildCodexIdentifier('session', runtimeMetadata);
+    const resolvedConversationId =
+      existingConversationId
+      ?? existingSessionId
+      ?? SessionHeaderUtils.buildCodexIdentifier('conversation', runtimeMetadata);
+
+    HeaderUtils.setHeaderIfMissing(headers, 'session_id', resolvedSessionId);
+    HeaderUtils.setHeaderIfMissing(headers, 'conversation_id', resolvedConversationId);
   }
 
   static extractClientHeaders(

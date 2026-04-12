@@ -10,6 +10,12 @@ import { shouldCaptureSnapshotStage } from '../../../utils/snapshot-stage-policy
 import { canWriteSnapshotToLocalDisk } from '../../../utils/snapshot-local-disk-gate.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import { redactSensitiveData } from '../../../utils/sensitive-redaction.js';
+import { coerceSnapshotPayloadForWrite } from '../../../utils/snapshot-payload-guard.js';
+import {
+  ensureSnapshotRuntimeMarker,
+  pruneSnapshotRequestDirsKeepRecent,
+  resolveSnapshotKeepRecentRequestDirs
+} from '../../../utils/snapshot-request-retention.js';
 import {
   resetProviderSnapshotErrorBufferForTests,
 } from './snapshot-writer-buffer.js';
@@ -318,6 +324,41 @@ async function writeUniqueFile(dir: string, baseName: string, contents: string):
   await fsp.writeFile(path.join(dir, fallback), contents, 'utf-8');
 }
 
+function resolveSnapshotDir(folder: string, groupRequestId: string, providerToken?: string): string {
+  if (providerToken) {
+    return path.join(resolveSnapshotBase(), folder, providerToken, groupRequestId);
+  }
+  return path.join(resolveSnapshotBase(), folder, groupRequestId);
+}
+
+async function writeCanonicalSnapshotFileIfMissing(dir: string, baseName: string, contents: string): Promise<void> {
+  try {
+    await fsp.writeFile(path.join(dir, baseName), contents, { encoding: 'utf-8', flag: 'wx' });
+  } catch (error) {
+    if (toErrorCode(error) === 'EEXIST') {
+      return;
+    }
+    throw error;
+  }
+}
+
+async function mirrorSnapshotToLocalDisk(input: ProviderSnapshotPersistInput): Promise<void> {
+  if (!canWriteSnapshotToLocalDisk(input.requestId, input.groupRequestId)) {
+    return;
+  }
+  const dir = resolveSnapshotDir(input.folder, input.groupRequestId, input.providerToken || undefined);
+  await ensureDir(dir);
+  await ensureSnapshotRuntimeMarker(dir, {
+    endpoint: input.endpoint,
+    requestId: input.requestId,
+    groupRequestId: input.groupRequestId,
+    providerKey: input.providerToken || undefined
+  });
+  const safeStage = input.stage.replace(/[^\w.-]/g, '_') || 'snapshot';
+  await writeCanonicalSnapshotFileIfMissing(dir, `${safeStage}.json`, JSON.stringify(input.payload, null, 2));
+  await pruneSnapshotRequestDirsKeepRecent(path.dirname(dir), resolveSnapshotKeepRecentRequestDirs());
+}
+
 async function persistProviderSnapshot(input: ProviderSnapshotPersistInput): Promise<void> {
   try {
     await writeSnapshotViaHooks({
@@ -329,14 +370,12 @@ async function persistProviderSnapshot(input: ProviderSnapshotPersistInput): Pro
       data: input.payload,
       verbosity: 'verbose'
     });
+    await mirrorSnapshotToLocalDisk(input);
     return;
   } catch (error) {
     logSnapshotNonBlockingError(`writeSnapshotViaHooks:${input.stage}`, error);
     try {
-      const dir = path.join(resolveSnapshotBase(), input.folder, input.groupRequestId);
-      await ensureDir(dir);
-      const safeStage = input.stage.replace(/[^\w.-]/g, '_') || 'snapshot';
-      await writeUniqueFile(dir, safeStage + '.json', JSON.stringify(input.payload, null, 2));
+      await mirrorSnapshotToLocalDisk(input);
     } catch (fallbackError) {
       logSnapshotNonBlockingError(`fallbackWrite:${input.stage}`, fallbackError);
     }
@@ -349,7 +388,7 @@ function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions
   const requestId = normalizeRequestId(options.requestId);
   const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);
   const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
-  const payload = buildSnapshotPayload({
+  const payload = coerceSnapshotPayloadForWrite(stage, buildSnapshotPayload({
     stage,
     data: options.data,
     headers: options.headers,
@@ -360,7 +399,7 @@ function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions
       ...(options.providerKey ? { providerKey: options.providerKey } : {}),
       ...(options.providerId ? { providerId: options.providerId } : {})
     }
-  });
+  }));
 
   return { endpoint, folder, stage, requestId, groupRequestId, providerToken, payload };
 }
@@ -618,13 +657,13 @@ export async function writeProviderRetrySnapshot(options: {
   const requestId = normalizeRequestId(options.requestId);
   const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);
   const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
-  const payload = buildSnapshotPayload({
+  const payload = coerceSnapshotPayloadForWrite(stage, buildSnapshotPayload({
     stage,
     data: options.data,
     headers: options.headers,
     url: options.url,
     extraMeta: options.clientRequestId ? { clientRequestId: options.clientRequestId } : undefined
-  });
+  }));
 
   try {
     await writeSnapshotViaHooks({
@@ -636,17 +675,12 @@ export async function writeProviderRetrySnapshot(options: {
       data: payload,
       verbosity: 'verbose'
     });
+    await mirrorSnapshotToLocalDisk({ endpoint, folder, stage, requestId, groupRequestId, providerToken, payload });
     return;
-    } catch (error) {
-      logSnapshotNonBlockingError(`writeSnapshotViaHooks(retry):${stage}`, error);
-      try {
-        if (!canWriteSnapshotToLocalDisk(options.requestId, options.clientRequestId)) {
-          return;
-        }
-        const dir = path.join(resolveSnapshotBase(), folder, groupRequestId);
-        await ensureDir(dir);
-      const safeStage = stage.replace(/[^\w.-]/g, '_') || 'snapshot';
-      await writeUniqueFile(dir, `${safeStage}.json`, JSON.stringify(payload, null, 2));
+  } catch (error) {
+    logSnapshotNonBlockingError(`writeSnapshotViaHooks(retry):${stage}`, error);
+    try {
+      await mirrorSnapshotToLocalDisk({ endpoint, folder, stage, requestId, groupRequestId, providerToken, payload });
     } catch (fallbackError) {
       logSnapshotNonBlockingError(`fallbackWrite(retry):${stage}`, fallbackError);
     }
@@ -669,22 +703,29 @@ export async function writeRepairFeedbackSnapshot(options: {
   }
   try {
     // const requestId = normalizeRequestId(options.requestId);
-    const { folder } = resolveEndpoint(options.entryEndpoint);
+    const { endpoint, folder } = resolveEndpoint(options.entryEndpoint);
     const groupRequestId = normalizeRequestId(options.groupRequestId || options.requestId);
     if (!canWriteSnapshotToLocalDisk(options.requestId, groupRequestId)) {
       return;
     }
     const dir = path.join(resolveSnapshotBase(), folder, groupRequestId);
     await ensureDir(dir);
-    const payload = {
+    await ensureSnapshotRuntimeMarker(dir, {
+      entryEndpoint: options.entryEndpoint || endpoint,
+      requestId: options.requestId,
+      groupRequestId,
+      providerKey: options.providerKey || options.providerId || undefined
+    });
+    const payload = coerceSnapshotPayloadForWrite('repair-feedback', {
       meta: {
         stage: 'repair-feedback',
         version: String(process.env.ROUTECODEX_VERSION || 'dev'),
         buildTime: String(process.env.ROUTECODEX_BUILD_TIME || new Date().toISOString())
       },
       feedback: options.feedback
-    };
+    });
     await writeUniqueFile(dir, 'repair-feedback.json', JSON.stringify(payload, null, 2));
+    await pruneSnapshotRequestDirsKeepRecent(path.dirname(dir), resolveSnapshotKeepRecentRequestDirs());
   } catch (error) {
     logSnapshotNonBlockingError('writeRepairFeedbackSnapshot', error);
   }
@@ -722,7 +763,7 @@ export async function writeClientSnapshot(options: {
       body: options.body,
       metadata: metadataSnapshot || {}
     };
-    const payload = buildSnapshotPayload({
+    const payload = coerceSnapshotPayloadForWrite(stage, buildSnapshotPayload({
       stage,
       data: snapshotPayload,
       headers: options.headers,
@@ -733,7 +774,7 @@ export async function writeClientSnapshot(options: {
         userAgent: options.metadata?.userAgent,
         ...(metadataSnapshot ? { requestMetadata: metadataSnapshot } : {})
       }
-    });
+    }));
     try {
       await writeSnapshotViaHooks({
         endpoint,
@@ -744,15 +785,27 @@ export async function writeClientSnapshot(options: {
         data: payload,
         verbosity: 'verbose'
       });
+      await mirrorSnapshotToLocalDisk({
+        endpoint,
+        folder,
+        stage,
+        requestId,
+        groupRequestId,
+        providerToken,
+        payload
+      });
       return;
     } catch (error) {
       logSnapshotNonBlockingError(`writeSnapshotViaHooks(client):${requestId}`, error);
-      if (!canWriteSnapshotToLocalDisk(requestId, groupRequestId)) {
-        return;
-      }
-      const dir = path.join(resolveSnapshotBase(), folder, groupRequestId);
-      await ensureDir(dir);
-      await writeUniqueFile(dir, `${stage}.json`, JSON.stringify(payload, null, 2));
+      await mirrorSnapshotToLocalDisk({
+        endpoint,
+        folder,
+        stage,
+        requestId,
+        groupRequestId,
+        providerToken,
+        payload
+      });
     }
   } catch (error) {
     logSnapshotNonBlockingError('writeClientSnapshot', error);

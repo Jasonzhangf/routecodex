@@ -1,5 +1,5 @@
-use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
 use crate::hub_reasoning_tool_normalizer::extract_tool_calls_from_reasoning_text_json;
+use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
 use napi::bindgen_prelude::Result as NapiResult;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -190,13 +190,17 @@ fn collect_json_candidates(text: &str) -> Vec<String> {
                 break;
             };
             if ch == '{' {
-                if let Some((end, candidate)) = extract_balanced_json_candidate_at(text, index, '{', '}') {
+                if let Some((end, candidate)) =
+                    extract_balanced_json_candidate_at(text, index, '{', '}')
+                {
                     out.push(candidate);
                     index = end;
                     continue;
                 }
             } else if ch == '[' {
-                if let Some((end, candidate)) = extract_balanced_json_candidate_at(text, index, '[', ']') {
+                if let Some((end, candidate)) =
+                    extract_balanced_json_candidate_at(text, index, '[', ']')
+                {
                     out.push(candidate);
                     index = end;
                     continue;
@@ -314,11 +318,13 @@ fn extract_reasoning_json_tool_calls(
         .map(|v| v.trim())
         .filter(|v| !v.is_empty())
         .unwrap_or("call");
-    let extracted_raw =
-        match extract_tool_calls_from_reasoning_text_json(text.to_string(), Some(id_prefix.to_string())) {
-            Ok(raw) => raw,
-            Err(_) => return Vec::new(),
-        };
+    let extracted_raw = match extract_tool_calls_from_reasoning_text_json(
+        text.to_string(),
+        Some(id_prefix.to_string()),
+    ) {
+        Ok(raw) => raw,
+        Err(_) => return Vec::new(),
+    };
     let extracted = match serde_json::from_str::<Value>(&extracted_raw) {
         Ok(value) => value,
         Err(_) => return Vec::new(),

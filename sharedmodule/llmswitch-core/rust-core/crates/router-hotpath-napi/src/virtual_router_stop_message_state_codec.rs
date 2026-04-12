@@ -225,7 +225,11 @@ fn deserialize_stop_message_state_maps(data: &Map<String, Value>, state: &mut Ma
         state.insert("reasoningStopSummary".to_string(), Value::String(summary));
     }
     if let Some(updated_at_raw) = read_finite_f64(data.get("reasoningStopUpdatedAt")) {
-        set_i64(state, "reasoningStopUpdatedAt", to_i64_floor(updated_at_raw).max(0));
+        set_i64(
+            state,
+            "reasoningStopUpdatedAt",
+            to_i64_floor(updated_at_raw).max(0),
+        );
     }
     if !has_persisted_max_repeats {
         ensure_stop_message_mode_max_repeats(state);

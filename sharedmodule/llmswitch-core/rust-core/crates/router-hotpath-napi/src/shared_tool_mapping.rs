@@ -173,9 +173,7 @@ fn normalize_generic_tool_schema(candidate: Option<&Value>) -> Option<Value> {
             .and_then(Value::as_str)
             .map(|value| value.trim().eq_ignore_ascii_case("object"))
             .unwrap_or(false);
-    if should_fill_properties
-        && !matches!(schema.get("properties"), Some(Value::Object(_)))
-    {
+    if should_fill_properties && !matches!(schema.get("properties"), Some(Value::Object(_))) {
         schema.insert("properties".to_string(), Value::Object(Map::new()));
     }
 

@@ -103,6 +103,42 @@ describe('errorsample writer safeguards', () => {
     }
   });
 
+  it('keeps only the newest 50 generic errorsamples by default', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-errorsamples-default-prune-'));
+    const envBackup = new Map<string, string | undefined>();
+    for (const key of ENV_KEYS) {
+      envBackup.set(key, process.env[key]);
+    }
+    try {
+      process.env.RCC_ERRORSAMPLES_DIR = tmp;
+      process.env.ROUTECODEX_ERRORSAMPLE_PRUNE_INTERVAL_MS = '0';
+      delete process.env.ROUTECODEX_ERRORSAMPLE_MAX_FILES_PER_GROUP;
+      delete process.env.RCC_ERRORSAMPLE_MAX_FILES_PER_GROUP;
+
+      for (let i = 0; i < 55; i += 1) {
+        await writeErrorsampleJson({
+          group: 'provider-error',
+          kind: `provider-error.${i}`,
+          payload: { i, msg: `sample-${i}` }
+        });
+      }
+
+      const groupDir = path.join(tmp, 'provider-error');
+      const files = await listFiles(groupDir);
+      expect(files.length).toBeLessThanOrEqual(50);
+    } finally {
+      for (const key of ENV_KEYS) {
+        const value = envBackup.get(key);
+        if (value == null) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('redacts obvious secret fields before persisting sample payload', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-errorsamples-redact-'));
     const envBackup = new Map<string, string | undefined>();

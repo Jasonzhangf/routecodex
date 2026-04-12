@@ -17,6 +17,8 @@ use uuid::Uuid;
 
 const DEFAULT_SNAPSHOT_QUEUE_CAPACITY: usize = 10;
 const DEFAULT_SNAPSHOT_KEEP_RECENT_FILES: usize = 10;
+const DEFAULT_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS: usize = 50;
+const DEFAULT_ERRORSAMPLE_KEEP_RECENT_FILES: usize = 50;
 const SNAPSHOT_DROP_LOG_THROTTLE_MS: i64 = 5_000;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -77,6 +79,32 @@ fn resolve_snapshot_keep_recent_files() -> usize {
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0);
     parsed.unwrap_or(DEFAULT_SNAPSHOT_KEEP_RECENT_FILES)
+}
+
+fn resolve_snapshot_keep_recent_request_dirs() -> usize {
+    let raw = env::var("ROUTECODEX_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS")
+        .ok()
+        .or_else(|| env::var("RCC_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS").ok());
+    let parsed = raw
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0);
+    parsed.unwrap_or(DEFAULT_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS)
+}
+
+fn resolve_errorsample_keep_recent_files() -> usize {
+    let raw = env::var("ROUTECODEX_ERRORSAMPLE_MAX_FILES_PER_GROUP")
+        .ok()
+        .or_else(|| env::var("RCC_ERRORSAMPLE_MAX_FILES_PER_GROUP").ok());
+    let parsed = raw
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0);
+    parsed.unwrap_or(DEFAULT_ERRORSAMPLE_KEEP_RECENT_FILES)
 }
 
 fn snapshot_writer_loop(receiver: Receiver<SnapshotHookOptions>) {
@@ -636,6 +664,91 @@ fn prune_snapshot_files_keep_recent(dir: &Path, keep_recent: usize) {
     }
 }
 
+fn is_request_like_snapshot_dir(path: &Path, name: &str) -> bool {
+    if name.starts_with("__") || name == "_tmp" {
+        return false;
+    }
+    if name.starts_with("req_") || name.starts_with("req-") {
+        return true;
+    }
+    path.join("__runtime.json").is_file()
+}
+
+fn prune_snapshot_request_dirs_keep_recent(parent_dir: &Path, keep_recent: usize) {
+    if keep_recent < 1 {
+        return;
+    }
+    let entries = match fs::read_dir(parent_dir) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let mut dirs: Vec<(PathBuf, String, i128)> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = match entry.file_name().to_str() {
+            Some(v) => v.to_string(),
+            None => continue,
+        };
+        if !is_request_like_snapshot_dir(&path, &name) {
+            continue;
+        }
+        dirs.push((path.clone(), name, file_mtime_ms(&path)));
+    }
+    if dirs.len() <= keep_recent {
+        return;
+    }
+    dirs.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.1.cmp(&b.1)));
+    for stale in dirs.into_iter().skip(keep_recent) {
+        if let Err(error) = fs::remove_dir_all(&stale.0) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                eprintln!(
+                    "[hub_snapshot_hooks] Failed to prune stale request dir {:?}: {}",
+                    stale.0, error
+                );
+            }
+        }
+    }
+}
+
+fn prune_errorsample_files_keep_recent(dir: &Path, keep_recent: usize) {
+    if keep_recent < 1 {
+        return;
+    }
+    let entries = match fs::read_dir(dir) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let mut files: Vec<(PathBuf, String, i128)> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = match entry.file_name().to_str() {
+            Some(v) => v.to_string(),
+            None => continue,
+        };
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        files.push((path.clone(), name, file_mtime_ms(&path)));
+    }
+    if files.len() <= keep_recent {
+        return;
+    }
+    files.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.1.cmp(&b.1)));
+    for stale in files.into_iter().skip(keep_recent) {
+        if let Err(error) = fs::remove_file(&stale.0) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                eprintln!(
+                    "[hub_snapshot_hooks] Failed to prune stale errorsample {:?}: {}",
+                    stale.0, error
+                );
+            }
+        }
+    }
+}
+
 fn merge_dirs(src: &Path, dest: &Path) {
     if let Err(e) = fs::create_dir_all(dest) {
         eprintln!(
@@ -805,6 +918,12 @@ fn write_snapshot_file(
     let file_name = format!("{}{}.json", stage_token, channel_suffix(&options.channel));
     write_unique_file(&dir, file_name.as_str(), payload.as_str())?;
     prune_snapshot_files_keep_recent(&dir, resolve_snapshot_keep_recent_files());
+    if let Some(parent_dir) = dir.parent() {
+        prune_snapshot_request_dirs_keep_recent(
+            parent_dir,
+            resolve_snapshot_keep_recent_request_dirs(),
+        );
+    }
     Ok(())
 }
 
@@ -869,6 +988,7 @@ fn write_snapshot_via_hooks_sync(options: SnapshotHookOptions) {
                     stage, e
                 );
             }
+            prune_errorsample_files_keep_recent(&dir, resolve_errorsample_keep_recent_files());
         }
     }
 }

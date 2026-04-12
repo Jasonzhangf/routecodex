@@ -32,11 +32,11 @@ tool:exec_command (tool:exec_command)
     const msg = governed.choices[0]?.message;
     expect(msg).toBeDefined();
 
-    // NOTE: response tool filters are strict and do not "repair" text markup into tool_calls.
-    // Text tool markup should remain visible for debugging instead of being silently upgraded.
-    expect(typeof msg.content).toBe('string');
-    expect(String(msg.content)).toContain('tool:exec_command');
-    expect(Array.isArray(msg?.tool_calls) ? msg.tool_calls.length : 0).toBe(0);
+    expect(Array.isArray(msg?.tool_calls) ? msg.tool_calls.length : 0).toBe(1);
+    expect(msg?.tool_calls?.[0]?.function?.name).toBe('exec_command');
+    expect(JSON.parse(String(msg?.tool_calls?.[0]?.function?.arguments || '{}')).cmd).toBe('which flutter');
+    expect(msg.content).toBeNull();
+    expect(governed.choices[0]?.finish_reason).toBe('tool_calls');
   });
 
   it('harvests JSON tool_calls wrapper when upstream emits empty tool_calls array', async () => {
@@ -69,10 +69,10 @@ tool:exec_command (tool:exec_command)
     const governed: any = result.governedPayload;
     const calls = Array.isArray(governed?.choices?.[0]?.message?.tool_calls) ? governed.choices[0].message.tool_calls : [];
     expect(calls.length).toBe(2);
-    expect(calls[0]?.function?.name).toBe('shell_command');
-    expect(calls[1]?.function?.name).toBe('shell_command');
-    expect(JSON.parse(String(calls[0]?.function?.arguments || '{}')).command).toBe('bd --no-db ready');
-    expect(JSON.parse(String(calls[1]?.function?.arguments || '{}')).command).toBe('bd --no-db list --status in_progress');
+    expect(calls[0]?.function?.name).toBe('exec_command');
+    expect(calls[1]?.function?.name).toBe('exec_command');
+    expect(JSON.parse(String(calls[0]?.function?.arguments || '{}')).cmd).toBe('bd --no-db ready');
+    expect(JSON.parse(String(calls[1]?.function?.arguments || '{}')).cmd).toBe('bd --no-db list --status in_progress');
     expect(governed?.choices?.[0]?.finish_reason).toBe('tool_calls');
   });
 

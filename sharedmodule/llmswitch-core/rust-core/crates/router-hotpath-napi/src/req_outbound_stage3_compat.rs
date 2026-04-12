@@ -157,6 +157,7 @@ mod qwen;
 mod request_stage;
 mod response_stage;
 mod responses;
+mod shared_tool_text_guidance;
 mod tool_text_request_guidance;
 pub(crate) mod universal_shape_filter;
 

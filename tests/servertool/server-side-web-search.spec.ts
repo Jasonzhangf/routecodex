@@ -114,6 +114,82 @@ describe('ServerTool web_search engine (generic)', () => {
     expect(result.finalChatResponse).toBe(chatResponse);
   });
 
+  test('does not auto-trigger web_search without explicit tool call even when invoker and config exist', async () => {
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-no-auto-websearch',
+      object: 'chat.completion',
+      model: 'gpt-4o-mini',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: '先给结论，不联网。'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const webSearch = {
+      engines: [
+        {
+          id: 'stub',
+          providerKey: 'stub-backend',
+          description: 'stub backend',
+          default: true
+        }
+      ],
+      injectPolicy: 'always',
+      force: true
+    } as any;
+
+    const ctx: AdapterContext = {
+      ...baseCtx,
+      requestId: 'req-web-auto-disabled',
+      webSearch,
+      __rt: {
+        webSearch
+      }
+    } as any;
+
+    const invocations: any[] = [];
+    const providerInvoker: ProviderInvoker = async (options) => {
+      invocations.push(options);
+      return {
+        providerResponse: {
+          id: 'search-resp',
+          model: 'stub-backend-model',
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: 'assistant',
+                content: 'should not happen'
+              },
+              finish_reason: 'stop'
+            }
+          ]
+        } as any
+      };
+    };
+
+    process.env.ROUTECODEX_SERVER_SIDE_TOOLS = 'web_search';
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext: ctx,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-web-auto-disabled',
+      providerProtocol: 'openai-chat',
+      providerInvoker
+    });
+
+    expect(result.mode).toBe('passthrough');
+    expect(result.finalChatResponse).toBe(chatResponse);
+    expect(invocations).toHaveLength(0);
+  });
+
   test('performs search via providerInvoker and injects tool_outputs', async () => {
     const chatResponse = buildChatWithToolCall('today news');
 

@@ -49,6 +49,14 @@ fn normalize_identifier(value: Option<&Value>) -> Option<String> {
     Some(trimmed.to_string())
 }
 
+fn is_plausible_derived_identifier(token: &str) -> bool {
+    let trimmed = token.trim();
+    if trimmed.len() < 8 {
+        return false;
+    }
+    trimmed.starts_with("codex_cli_") || trimmed.chars().any(|ch| ch.is_ascii_digit())
+}
+
 fn normalize_header_key(value: &str) -> String {
     value
         .chars()
@@ -140,23 +148,24 @@ fn find_identifier(source: &Value, preferred_keys: &[&str], regex: &Regex) -> Op
             if trimmed.is_empty() {
                 return None;
             }
+            let looks_like_json = (trimmed.starts_with('{') && trimmed.ends_with('}'))
+                || (trimmed.starts_with('[') && trimmed.ends_with(']'));
+            if looks_like_json {
+                if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+                    if let Some(found) = find_identifier(&parsed, preferred_keys, regex) {
+                        return Some(found);
+                    }
+                }
+            }
             if let Some(captures) = regex.captures(trimmed) {
                 if let Some(matched) = captures.get(1) {
                     let token = matched.as_str().trim();
-                    if !token.is_empty() {
+                    if !token.is_empty() && is_plausible_derived_identifier(token) {
                         return Some(token.to_string());
                     }
                 }
             }
-            let looks_like_json = (trimmed.starts_with('{') && trimmed.ends_with('}'))
-                || (trimmed.starts_with('[') && trimmed.ends_with(']'));
-            if !looks_like_json {
-                return None;
-            }
-            match serde_json::from_str::<Value>(trimmed) {
-                Ok(parsed) => find_identifier(&parsed, preferred_keys, regex),
-                Err(_) => None,
-            }
+            None
         }
         Value::Array(items) => {
             for item in items {
@@ -232,8 +241,8 @@ fn derive_identifiers_from_raw_payload(
         }
     }
 
-    let mut session_id = raw_user_metadata_session.clone();
-    let mut conversation_id = raw_user_metadata_session;
+    let mut session_id = raw_user_metadata_session;
+    let mut conversation_id: Option<String> = None;
 
     for candidate in targets {
         if session_id.is_none() {
@@ -283,10 +292,9 @@ fn extract_session_identifiers_from_metadata(metadata: Option<&Value>) -> Sessio
         }
     }
 
-    let session_regex =
-        Regex::new(r"(?i)session[_:\-\s]?([0-9a-f]{8,}(?:-[0-9a-f]{4,}){0,5})").unwrap();
+    let session_regex = Regex::new(r"(?i)session[_:\-\s]?([A-Za-z0-9][A-Za-z0-9_-]{7,})").unwrap();
     let conversation_regex =
-        Regex::new(r"(?i)conversation[_:\-\s]?([0-9a-f]{8,}(?:-[0-9a-f]{4,}){0,5})").unwrap();
+        Regex::new(r"(?i)conversation[_:\-\s]?([A-Za-z0-9][A-Za-z0-9_-]{7,})").unwrap();
 
     if session_id.is_none() || conversation_id.is_none() {
         let (fallback_session, fallback_conversation) =

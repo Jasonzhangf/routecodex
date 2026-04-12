@@ -161,23 +161,49 @@ fn drop_empty_update_sections(text: &str) -> String {
     candidate
 }
 
-fn normalize_apply_patch_header_path(raw: &str) -> String {
+fn normalize_apply_patch_header_path_with_new_file_hint(raw: &str) -> (String, bool) {
     let mut out = raw.trim().to_string();
     if out.is_empty() {
-        return out;
+        return (out, false);
     }
-    let bytes = out.as_bytes();
-    if bytes.len() >= 2 {
-        let first = bytes[0] as char;
-        let last = bytes[bytes.len() - 1] as char;
-        let is_wrapped = (first == '"' && last == '"')
-            || (first == '\'' && last == '\'')
-            || (first == '`' && last == '`');
-        if is_wrapped {
-            out = out[1..out.len() - 1].trim().to_string();
+
+    let mut new_file_hint = false;
+    loop {
+        let mut changed = false;
+        let bytes = out.as_bytes();
+        if bytes.len() >= 2 {
+            let first = bytes[0] as char;
+            let last = bytes[bytes.len() - 1] as char;
+            let is_wrapped = (first == '"' && last == '"')
+                || (first == '\'' && last == '\'')
+                || (first == '`' && last == '`');
+            if is_wrapped {
+                out = out[1..out.len() - 1].trim().to_string();
+                changed = true;
+            }
+        }
+
+        let lower = out.to_ascii_lowercase();
+        if lower.starts_with("file:") {
+            out = out[5..].trim().to_string();
+            changed = true;
+        }
+        if lower.ends_with(" is new") && out.len() >= " is new".len() {
+            let keep = out.len() - " is new".len();
+            out = out[..keep].trim().to_string();
+            new_file_hint = true;
+            changed = true;
+        }
+
+        if !changed {
+            break;
         }
     }
-    out
+    (out, new_file_hint)
+}
+
+fn normalize_apply_patch_header_path(raw: &str) -> String {
+    normalize_apply_patch_header_path_with_new_file_hint(raw).0
 }
 
 fn normalize_apply_patch_header_line(line: &str) -> String {
@@ -211,9 +237,14 @@ fn normalize_apply_patch_header_line(line: &str) -> String {
     let update_re = Regex::new(r"^\*\*\* Update File:\s*(.+?)(?:\s+\*\*\*)?\s*$").unwrap();
     if let Some(caps) = update_re.captures(line) {
         if let Some(path) = caps.get(1) {
+            let (normalized_path, new_file_hint) =
+                normalize_apply_patch_header_path_with_new_file_hint(path.as_str());
+            if new_file_hint {
+                return format!("*** Add File: {}", normalized_path);
+            }
             return format!(
                 "*** Update File: {}",
-                normalize_apply_patch_header_path(path.as_str())
+                normalized_path
             );
         }
     }
@@ -253,6 +284,221 @@ fn is_legacy_context_diff_hunk_header_line(trimmed: &str) -> bool {
     }
     matches_legacy_header(trimmed, "*** ", " ****")
         || matches_legacy_header(trimmed, "--- ", " ----")
+}
+
+fn decode_legacy_old_line(raw: &str) -> (char, String) {
+    let lead = raw.chars().next().unwrap_or(' ');
+    match lead {
+        '!' | '-' => {
+            let rest = raw[1..].strip_prefix(' ').unwrap_or(&raw[1..]);
+            ('-', rest.to_string())
+        }
+        ' ' => (' ', raw[1..].to_string()),
+        _ => (' ', raw.to_string()),
+    }
+}
+
+fn decode_legacy_new_line(raw: &str) -> (char, String) {
+    let lead = raw.chars().next().unwrap_or('+');
+    match lead {
+        '!' | '+' => {
+            let rest = raw[1..].strip_prefix(' ').unwrap_or(&raw[1..]);
+            ('+', rest.to_string())
+        }
+        ' ' => (' ', raw[1..].to_string()),
+        _ => ('+', raw.to_string()),
+    }
+}
+
+fn repair_legacy_context_diff_hunks_inside_apply_patch_envelope(text: &str) -> String {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    let mut i = 0usize;
+    let mut changed = false;
+
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+        if !trimmed.starts_with("*** Update File:") {
+            out.push(line.to_string());
+            i += 1;
+            continue;
+        }
+
+        out.push(trimmed.to_string());
+        i += 1;
+
+        let mut section_body: Vec<&str> = Vec::new();
+        while i < lines.len() {
+            let next_trimmed = lines[i].trim();
+            if next_trimmed.starts_with("*** Update File:")
+                || next_trimmed.starts_with("*** Add File:")
+                || next_trimmed.starts_with("*** Delete File:")
+                || next_trimmed.starts_with("*** End Patch")
+            {
+                break;
+            }
+            section_body.push(lines[i]);
+            i += 1;
+        }
+
+        let has_modern_hunk = section_body
+            .iter()
+            .any(|entry| entry.trim_start().starts_with("@@"));
+        let has_legacy_old = section_body.iter().any(|entry| {
+            let trimmed_entry = entry.trim();
+            trimmed_entry.starts_with("*** ") && trimmed_entry.ends_with(" ****")
+        });
+        let has_legacy_new = section_body.iter().any(|entry| {
+            let trimmed_entry = entry.trim();
+            trimmed_entry.starts_with("--- ") && trimmed_entry.ends_with(" ----")
+        });
+
+        if has_modern_hunk || !has_legacy_old || !has_legacy_new {
+            out.extend(section_body.into_iter().map(str::to_string));
+            continue;
+        }
+
+        let mut converted_section: Vec<String> = Vec::new();
+        let mut j = 0usize;
+        let mut converted_any = false;
+
+        while j < section_body.len() {
+            let current = section_body[j];
+            let current_trimmed = current.trim();
+            let is_old_header =
+                current_trimmed.starts_with("*** ") && current_trimmed.ends_with(" ****");
+
+            if !is_old_header {
+                converted_section.push(current.to_string());
+                j += 1;
+                continue;
+            }
+
+            j += 1;
+            let mut old_lines: Vec<&str> = Vec::new();
+            while j < section_body.len() {
+                let probe_trimmed = section_body[j].trim();
+                let probe_is_old =
+                    probe_trimmed.starts_with("*** ") && probe_trimmed.ends_with(" ****");
+                let probe_is_new =
+                    probe_trimmed.starts_with("--- ") && probe_trimmed.ends_with(" ----");
+                if probe_is_old || probe_is_new {
+                    break;
+                }
+                old_lines.push(section_body[j]);
+                j += 1;
+            }
+
+            if j >= section_body.len() {
+                converted_section.push(current.to_string());
+                converted_section.extend(old_lines.into_iter().map(str::to_string));
+                break;
+            }
+
+            let new_header_trimmed = section_body[j].trim();
+            if !(new_header_trimmed.starts_with("--- ") && new_header_trimmed.ends_with(" ----")) {
+                converted_section.push(current.to_string());
+                converted_section.extend(old_lines.into_iter().map(str::to_string));
+                continue;
+            }
+
+            j += 1;
+            let mut new_lines: Vec<&str> = Vec::new();
+            while j < section_body.len() {
+                let probe_trimmed = section_body[j].trim();
+                let probe_is_old =
+                    probe_trimmed.starts_with("*** ") && probe_trimmed.ends_with(" ****");
+                if probe_is_old {
+                    break;
+                }
+                new_lines.push(section_body[j]);
+                j += 1;
+            }
+
+            converted_section.push("@@".to_string());
+
+            let mut oi = 0usize;
+            let mut ni = 0usize;
+            while oi < old_lines.len() || ni < new_lines.len() {
+                let old_entry = old_lines.get(oi).copied();
+                let new_entry = new_lines.get(ni).copied();
+
+                match (old_entry, new_entry) {
+                    (Some(old_raw), Some(new_raw)) => {
+                        let (old_kind, old_text) = decode_legacy_old_line(old_raw);
+                        let (new_kind, new_text) = decode_legacy_new_line(new_raw);
+                        if old_kind == ' ' && new_kind == ' ' && old_text == new_text {
+                            converted_section.push(format!(" {}", old_text));
+                            oi += 1;
+                            ni += 1;
+                            continue;
+                        }
+                        if old_kind == '-' {
+                            converted_section.push(format!("-{}", old_text));
+                            oi += 1;
+                            if new_kind == '+' {
+                                converted_section.push(format!("+{}", new_text));
+                                ni += 1;
+                            }
+                            continue;
+                        }
+                        if new_kind == '+' {
+                            converted_section.push(format!("+{}", new_text));
+                            ni += 1;
+                            continue;
+                        }
+                        if old_kind == ' ' {
+                            converted_section.push(format!(" {}", old_text));
+                            oi += 1;
+                            continue;
+                        }
+                        if new_kind == ' ' {
+                            converted_section.push(format!(" {}", new_text));
+                            ni += 1;
+                            continue;
+                        }
+                        oi += 1;
+                        ni += 1;
+                    }
+                    (Some(old_raw), None) => {
+                        let (old_kind, old_text) = decode_legacy_old_line(old_raw);
+                        if old_kind == '-' {
+                            converted_section.push(format!("-{}", old_text));
+                        } else {
+                            converted_section.push(format!(" {}", old_text));
+                        }
+                        oi += 1;
+                    }
+                    (None, Some(new_raw)) => {
+                        let (new_kind, new_text) = decode_legacy_new_line(new_raw);
+                        if new_kind == '+' {
+                            converted_section.push(format!("+{}", new_text));
+                        } else {
+                            converted_section.push(format!(" {}", new_text));
+                        }
+                        ni += 1;
+                    }
+                    (None, None) => break,
+                }
+            }
+
+            converted_any = true;
+        }
+
+        if converted_any {
+            changed = true;
+            out.extend(converted_section);
+        } else {
+            out.extend(section_body.into_iter().map(str::to_string));
+        }
+    }
+
+    if changed {
+        out.join("\n")
+    } else {
+        text.to_string()
+    }
 }
 
 fn normalize_apply_patch_text(raw: &str) -> String {
@@ -312,14 +558,18 @@ fn normalize_apply_patch_text(raw: &str) -> String {
         text = format!("{}\n*** End Patch", text.trim());
     }
 
+    text = repair_legacy_context_diff_hunks_inside_apply_patch_envelope(&text);
+    let has_modern_hunk = text.lines().any(|line| line.trim_start().starts_with("@@"));
+
     let mut out: Vec<String> = Vec::new();
     let mut in_add_section = false;
     let mut pending_unified_from: Option<String> = None;
     for line in text.split('\n') {
         let raw_line = line.strip_suffix('\r').unwrap_or(line);
         let mut normalized = normalize_apply_patch_header_line(raw_line.trim());
-        if raw_line.trim() == "***************"
-            || is_legacy_context_diff_hunk_header_line(raw_line.trim())
+        if has_modern_hunk
+            && (raw_line.trim() == "***************"
+                || is_legacy_context_diff_hunk_header_line(raw_line.trim()))
         {
             continue;
         }
@@ -1007,6 +1257,34 @@ mod tests {
     }
 
     #[test]
+    fn converts_legacy_context_diff_hunks_inside_update_file_envelope() {
+        let payload = json!({
+          "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+              "type": "function",
+              "function": {
+                "name": "apply_patch",
+                "arguments": "*** Begin Patch\n*** Update File: src/runtime/context-ledger-memory.ts\n*** 880,283 ****\n   const DIGEST_VERBOSE_OUTPUT_TOOLS = new Set([\n     'update_plan',\n     'reasoning.stop',\n     'report-task-completion',\n   ]);\n--- 886,330 ----\n+ \n+ // Digest 只保留重要工具调用\n+ const DIGEST_IMPORTANT_TOOLS = new Set([\n+   'apply_patch',\n+ ]);\n*** End Patch"
+              }
+            }]
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        let args = output["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert!(patch.contains("*** Update File: src/runtime/context-ledger-memory.ts"));
+        assert!(patch.contains("@@"));
+        assert!(patch.contains("+// Digest 只保留重要工具调用"));
+        assert!(!patch.contains("*** 880,283 ****"));
+        assert!(!patch.contains("--- 886,330 ----"));
+    }
+
+    #[test]
     fn keeps_single_trailing_end_patch_when_input_contains_duplicates() {
         let payload = json!({
           "messages": [{
@@ -1029,5 +1307,55 @@ mod tests {
         let patch = parsed["patch"].as_str().expect("patch");
         assert_eq!(patch.matches("*** End Patch").count(), 1);
         assert!(patch.ends_with("*** End Patch"));
+    }
+
+    #[test]
+    fn strips_file_prefix_from_update_header_paths() {
+        let payload = json!({
+          "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+              "type": "function",
+              "function": {
+                "name": "apply_patch",
+                "arguments": "*** Begin Patch\n*** Update File: File: src/orchestration/session-types.ts\n@@\n-x\n+y\n*** End Patch"
+              }
+            }]
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        let args = output["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert!(patch.contains("*** Update File: src/orchestration/session-types.ts"));
+        assert!(!patch.contains("*** Update File: File: src/orchestration/session-types.ts"));
+    }
+
+    #[test]
+    fn converts_update_file_is_new_suffix_into_add_file() {
+        let payload = json!({
+          "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+              "type": "function",
+              "function": {
+                "name": "apply_patch",
+                "arguments": "*** Begin Patch\n*** Update File: File: tests/unit/runtime/track-metadata.test.ts is new\n+import { describe } from 'vitest';\n*** End Patch"
+              }
+            }]
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        let args = output["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert!(patch.contains("*** Add File: tests/unit/runtime/track-metadata.test.ts"));
+        assert!(!patch.contains("*** Update File: File: tests/unit/runtime/track-metadata.test.ts is new"));
     }
 }

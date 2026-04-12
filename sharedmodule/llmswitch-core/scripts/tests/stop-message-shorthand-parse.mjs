@@ -31,24 +31,46 @@ function run() {
   assert.strictEqual(setDefault[0].stopMessageText, '继续');
   assert.strictEqual(setDefault[0].stopMessageMaxRepeats, 10);
 
+  const supportsModeShorthand = parseFrom('<**stopMessage:on**>').some((inst) => inst?.type === 'stopMessageMode');
+
   const setLowercasePrefix = parseFrom('<**stopmessage:"继续"**>');
   assert.strictEqual(setLowercasePrefix.length, 1);
   assert.strictEqual(setLowercasePrefix[0].type, 'stopMessageSet');
   assert.strictEqual(setLowercasePrefix[0].stopMessageText, '继续');
 
   const modeWithTrailingText = parseFrom('<**stopMessage:on**>继续');
-  assert.strictEqual(modeWithTrailingText.length, 0);
+  assert.strictEqual(modeWithTrailingText.length, supportsModeShorthand ? 1 : 0);
+  if (supportsModeShorthand) {
+    assert.strictEqual(modeWithTrailingText[0].type, 'stopMessageMode');
+    assert.strictEqual(modeWithTrailingText[0].stopMessageStageMode, 'on');
+    assert.strictEqual(modeWithTrailingText[0].stopMessageMaxRepeats, 10);
+  }
 
   const modeWithRepeat = parseFrom('<**stopMessage:on,3**>继续');
-  assert.strictEqual(modeWithRepeat.length, 0);
+  assert.strictEqual(modeWithRepeat.length, supportsModeShorthand ? 1 : 0);
+  if (supportsModeShorthand) {
+    assert.strictEqual(modeWithRepeat[0].type, 'stopMessageMode');
+    assert.strictEqual(modeWithRepeat[0].stopMessageStageMode, 'on');
+    assert.strictEqual(modeWithRepeat[0].stopMessageMaxRepeats, 3);
+  }
 
   const modeWithRepeatAndTimeTag = parseFrom(
     '<**stopMessage:on,3**>继续\n[Time/Date]: utc=2026-02-07T00:00:00.000Z local=2026-02-07 08:00:00.000 +08:00'
   );
-  assert.strictEqual(modeWithRepeatAndTimeTag.length, 0);
+  assert.strictEqual(modeWithRepeatAndTimeTag.length, supportsModeShorthand ? 1 : 0);
+  if (supportsModeShorthand) {
+    assert.strictEqual(modeWithRepeatAndTimeTag[0].type, 'stopMessageMode');
+    assert.strictEqual(modeWithRepeatAndTimeTag[0].stopMessageStageMode, 'on');
+    assert.strictEqual(modeWithRepeatAndTimeTag[0].stopMessageMaxRepeats, 3);
+  }
 
   const modeWithoutTrailing = parseFrom('<**stopMessage:on,3**>');
-  assert.strictEqual(modeWithoutTrailing.length, 0);
+  assert.strictEqual(modeWithoutTrailing.length, supportsModeShorthand ? 1 : 0);
+  if (supportsModeShorthand) {
+    assert.strictEqual(modeWithoutTrailing[0].type, 'stopMessageMode');
+    assert.strictEqual(modeWithoutTrailing[0].stopMessageStageMode, 'on');
+    assert.strictEqual(modeWithoutTrailing[0].stopMessageMaxRepeats, 3);
+  }
   const historicalSetInstructions = parseRoutingInstructions([
     { role: 'user', content: '<**stopMessage:"继续执行",5**>继续' },
     { role: 'assistant', content: '收到' },

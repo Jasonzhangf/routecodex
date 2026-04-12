@@ -7,7 +7,10 @@ use super::tool_guidance::{
 };
 use super::types::PromptMessage;
 
-pub(super) fn to_prompt_messages(root: &Map<String, Value>) -> Vec<PromptMessage> {
+pub(super) fn to_prompt_messages(
+    root: &Map<String, Value>,
+    require_tool_call_override: bool,
+) -> Vec<PromptMessage> {
     let mut messages: Vec<PromptMessage> = Vec::new();
     let rows = root
         .get("messages")
@@ -39,16 +42,20 @@ pub(super) fn to_prompt_messages(root: &Map<String, Value>) -> Vec<PromptMessage
         if !reasoning.is_empty() {
             parts.push(reasoning);
         }
-        messages.push(PromptMessage {
-            role,
-            text: parts.join("\n").trim().to_string(),
-        });
+        let text = parts.join("\n").trim().to_string();
+        if text.is_empty() {
+            continue;
+        }
+        messages.push(PromptMessage { role, text });
     }
 
     let instruction = if has_tool_guidance_marker(&messages) {
         String::new()
     } else {
-        build_tool_fallback_instruction(root.get("tools"), is_tool_choice_required(root))
+        build_tool_fallback_instruction(
+            root.get("tools"),
+            require_tool_call_override || is_tool_choice_required(root),
+        )
     };
     if !instruction.is_empty() {
         if let Some(first) = messages.first_mut() {

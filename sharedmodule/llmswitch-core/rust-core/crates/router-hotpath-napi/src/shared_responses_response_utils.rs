@@ -154,6 +154,10 @@ fn resolve_finish_reason_impl(response: &Value, tool_calls: &[Value]) -> String 
         return "stop".to_string();
     };
 
+    if !tool_calls.is_empty() {
+        return "tool_calls".to_string();
+    }
+
     if let Some(metadata_finish_reason) = response_obj
         .get("metadata")
         .and_then(Value::as_object)
@@ -163,10 +167,6 @@ fn resolve_finish_reason_impl(response: &Value, tool_calls: &[Value]) -> String 
         .filter(|value| !value.is_empty())
     {
         return metadata_finish_reason;
-    }
-
-    if !tool_calls.is_empty() {
-        return "tool_calls".to_string();
     }
 
     let status = response_obj
@@ -500,13 +500,16 @@ mod tests {
     }
 
     #[test]
-    fn responses_response_utils_resolve_finish_reason_prefers_metadata_then_status() {
+    fn responses_response_utils_resolve_finish_reason_prefers_tool_calls_then_metadata_then_status() {
         let response = serde_json::json!({
             "metadata": { "finish_reason": "custom_stop" },
             "status": "requires_action"
         });
         let finish = resolve_finish_reason_impl(&response, &[]);
         assert_eq!(finish, "custom_stop");
+
+        let finish = resolve_finish_reason_impl(&response, &[serde_json::json!({"id":"call_1"})]);
+        assert_eq!(finish, "tool_calls");
 
         let response = serde_json::json!({ "status": "failed" });
         let finish = resolve_finish_reason_impl(&response, &[]);

@@ -207,4 +207,58 @@ describe('cli restart command', () => {
     await program.parseAsync(['node', 'routecodex', 'restart'], { from: 'node' });
     expect(signals).toEqual([{ pid: 777, signal: 'SIGUSR2' }]);
   });
+
+  it('sends the shared http apikey to daemon restart endpoint', async () => {
+    const program = new Command();
+    const fetchCalls: Array<{ url: string; options?: Record<string, unknown> }> = [];
+    let findCall = 0;
+    createRestartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5555,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: (port) => {
+        findCall += 1;
+        if (port !== 5520) {
+          return [];
+        }
+        return findCall <= 1 ? [901] : [901];
+      },
+      sleep: async () => {},
+      sendSignal: () => {
+        throw new Error('should not fall back to SIGUSR2 when restart endpoint accepts apikey');
+      },
+      fetch: (async (url: string, options?: Record<string, unknown>) => {
+        fetchCalls.push({ url, options });
+        if (String(url).includes('/health')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ server: 'routecodex', status: 'ok' })
+          } as any;
+        }
+        if (String(url).includes('/daemon/restart-process')) {
+          return {
+            ok: true,
+            status: 202,
+            text: async () => '',
+            json: async () => ({ ok: true, accepted: true })
+          } as any;
+        }
+        return { ok: false, status: 404, text: async () => '' } as any;
+      }) as any,
+      env: {
+        ROUTECODEX_HTTP_APIKEY: 'shared-http-key'
+      },
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'restart', '--port', '5520'], { from: 'node' });
+    const restartCall = fetchCalls.find((entry) => String(entry.url).includes('/daemon/restart-process'));
+    expect(restartCall).toBeDefined();
+    expect(restartCall?.options?.headers).toEqual({ 'x-api-key': 'shared-http-key' });
+  });
 });

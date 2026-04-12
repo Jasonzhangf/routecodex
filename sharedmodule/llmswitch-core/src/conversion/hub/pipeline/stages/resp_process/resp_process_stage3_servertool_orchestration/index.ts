@@ -46,6 +46,22 @@ export async function runRespProcessStage3ServerToolOrchestration(
   options: RespProcessStage3ServerToolOrchestrationOptions
 ): Promise<RespProcessStage3ServerToolOrchestrationResult> {
   const forceDetailLog = isHubStageTimingDetailEnabled();
+  const runtimeMeta =
+    options.adapterContext &&
+    typeof options.adapterContext === 'object' &&
+    !Array.isArray(options.adapterContext)
+      ? ((options.adapterContext as Record<string, unknown>).__rt as Record<string, unknown> | undefined)
+      : undefined;
+  if (runtimeMeta?.serverToolFollowup === true) {
+    recordStage(options.stageRecorder, 'chat_process.resp.stage5.servertool_orchestration', {
+      executed: false,
+      inputShape: detectProviderResponseShapeWithNative(options.payload)
+    });
+    return {
+      payload: options.payload,
+      executed: false
+    };
+  }
   const hasServerToolSupport =
     Boolean(options.providerInvoker) || Boolean(options.reenterPipeline) || Boolean(options.clientInjectDispatch);
   const inputShape = detectProviderResponseShapeWithNative(options.payload);

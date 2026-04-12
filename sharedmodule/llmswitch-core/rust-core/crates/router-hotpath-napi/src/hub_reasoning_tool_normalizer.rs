@@ -821,14 +821,24 @@ fn parse_markup_argument_value(raw: &str) -> Value {
 
 fn normalize_tool_name(raw: &str) -> String {
     let trimmed = raw.trim();
-    if trimmed.eq_ignore_ascii_case("execute") {
-        return "shell".to_string();
-    }
     let without_prefix = if trimmed.to_ascii_lowercase().starts_with("functions.") {
         trimmed[10..].trim()
     } else {
         trimmed
     };
+    let lowered = without_prefix.to_ascii_lowercase();
+    if matches!(
+        lowered.as_str(),
+        "execute"
+            | "execute_command"
+            | "execute-command"
+            | "shell_command"
+            | "shell"
+            | "bash"
+            | "terminal"
+    ) {
+        return "exec_command".to_string();
+    }
     normalize_responses_function_name(Some(without_prefix))
         .unwrap_or_else(|| without_prefix.to_string())
 }
@@ -902,16 +912,13 @@ fn apply_markup_arg_aliases(tool_name: &str, args_obj: &mut Map<String, Value>) 
         }
     }
 
-    if lname == "exec_command" || lname == "shell_command" || lname == "shell" {
+    if lname == "exec_command" {
         if !args_obj.contains_key("cmd") {
             if let Some(command) =
                 read_command_from_args_value(Some(&Value::Object(args_obj.clone())))
             {
                 if !command.trim().is_empty() {
-                    args_obj.insert("cmd".to_string(), Value::String(command.clone()));
-                    if !args_obj.contains_key("command") {
-                        args_obj.insert("command".to_string(), Value::String(command));
-                    }
+                    args_obj.insert("cmd".to_string(), Value::String(command));
                 }
             }
         }
@@ -1143,24 +1150,13 @@ fn normalize_reasoning_harvested_arguments(
         return None;
     }
 
-    if matches!(
-        lowered.as_str(),
-        "exec_command" | "shell_command" | "shell" | "bash" | "terminal"
-    ) {
+    if lowered == "exec_command" {
         let parsed_args = parse_lenient_string(args_text.as_str());
         let command = read_command_from_args_value(Some(args_source))
-            .or_else(|| read_command_from_args_value(Some(&parsed_args)))?;
-        let workdir = read_workdir_from_args_value(Some(args_source))
-            .or_else(|| read_workdir_from_args_value(Some(&parsed_args)));
+            .or_else(|| read_command_from_args_value(Some(&parsed_args)));
+        let command = command?;
         let mut args_obj = Map::new();
-        args_obj.insert("cmd".to_string(), Value::String(command.clone()));
-        args_obj.insert("command".to_string(), Value::String(command));
-        if let Some(path) = workdir {
-            args_obj.insert("workdir".to_string(), Value::String(path.clone()));
-            if lowered != "exec_command" {
-                args_obj.insert("cwd".to_string(), Value::String(path));
-            }
-        }
+        args_obj.insert("cmd".to_string(), Value::String(command));
         return serde_json::to_string(&Value::Object(args_obj)).ok();
     }
 
@@ -1197,7 +1193,7 @@ fn normalize_shell_like_args_text_for_tool_name(
     args_text: String,
 ) -> String {
     let normalized_tool_name = normalize_tool_name(tool_name);
-    if normalized_tool_name != "exec_command" && normalized_tool_name != "shell_command" {
+    if normalized_tool_name != "exec_command" {
         return args_text;
     }
 
@@ -1207,15 +1203,8 @@ fn normalize_shell_like_args_text_for_tool_name(
         .or_else(|| read_command_from_args_value(Some(&parsed_args)));
 
     if let Some(command) = inferred_command {
-        if normalized_tool_name == "exec_command" {
-            if !args_obj.contains_key("cmd") {
-                args_obj.insert("cmd".to_string(), Value::String(command.clone()));
-            }
-            if !args_obj.contains_key("command") {
-                args_obj.insert("command".to_string(), Value::String(command));
-            }
-        } else if !args_obj.contains_key("command") {
-            args_obj.insert("command".to_string(), Value::String(command));
+        if !args_obj.contains_key("cmd") {
+            args_obj.insert("cmd".to_string(), Value::String(command));
         }
     }
 
@@ -1389,7 +1378,6 @@ fn parse_markup_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedTo
         let value =
             parse_markup_argument_value(caps.get(2).map(|m| m.as_str()).unwrap_or_default());
         if key == "toon" {
-            args_obj.insert("command".to_string(), value.clone());
             args_obj.insert("cmd".to_string(), value);
             continue;
         }
@@ -1975,6 +1963,8 @@ fn parse_explicit_json_tool_calls(text: &str, id_prefix: &str) -> Vec<Value> {
                                     .or_else(|| function.get("parameters"))
                             })
                             .is_some();
+                    let has_inferable_name =
+                        infer_tool_name_from_args_value(pick_tool_call_args_source(row)).is_some();
                     let has_tool_type = row
                         .get("type")
                         .and_then(Value::as_str)
@@ -1983,7 +1973,7 @@ fn parse_explicit_json_tool_calls(text: &str, id_prefix: &str) -> Vec<Value> {
                             lowered == "function" || lowered == "function_call"
                         })
                         .unwrap_or(false);
-                    if has_name && (has_arguments || has_tool_type) {
+                    if (has_name || has_inferable_name) && (has_arguments || has_tool_type) {
                         Some(vec![Value::Object(row.clone())])
                     } else {
                         None
@@ -2010,6 +2000,8 @@ fn parse_explicit_json_tool_calls(text: &str, id_prefix: &str) -> Vec<Value> {
                     .is_some()
                 || row.get("tool_name").is_some()
                 || row.get("tool").is_some();
+            let has_inferable_name =
+                infer_tool_name_from_args_value(pick_tool_call_args_source(row)).is_some();
             let has_arguments = row.get("arguments").is_some()
                 || row.get("input").is_some()
                 || row.get("params").is_some()
@@ -2025,7 +2017,7 @@ fn parse_explicit_json_tool_calls(text: &str, id_prefix: &str) -> Vec<Value> {
                             .or_else(|| function.get("parameters"))
                     })
                     .is_some();
-            if !(has_name && has_arguments) {
+            if !((has_name || has_inferable_name) && has_arguments) {
                 continue;
             }
             let Ok(raw_entry) = serde_json::to_string(entry) else {
@@ -2069,7 +2061,9 @@ fn parse_explicit_json_tool_calls(text: &str, id_prefix: &str) -> Vec<Value> {
                         .is_some()
                     || row.get("tool_name").is_some()
                     || row.get("tool").is_some();
-                if !has_name {
+                let has_inferable_name =
+                    infer_tool_name_from_args_value(pick_tool_call_args_source(row)).is_some();
+                if !(has_name || has_inferable_name) {
                     continue;
                 }
                 let Ok(raw_entry) = serde_json::to_string(entry) else {
@@ -3119,7 +3113,7 @@ mod tests {
                 .and_then(Value::as_object)
                 .and_then(|row| row.get("name"))
                 .and_then(Value::as_str),
-            Some("shell")
+            Some("exec_command")
         );
     }
 
@@ -3557,7 +3551,7 @@ exec_command
             .unwrap_or("{}");
         let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
         assert_eq!(args_json["cmd"], "pwd");
-        assert_eq!(args_json["command"], "pwd");
+        assert!(args_json.get("command").is_none());
         assert_eq!(output.get("content").and_then(Value::as_str), Some(""));
     }
 
@@ -3595,7 +3589,7 @@ exec_command
             .unwrap_or("{}");
         let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
         assert_eq!(args_json["cmd"], "git status");
-        assert_eq!(args_json["command"], "git status");
+        assert!(args_json.get("command").is_none());
         assert_eq!(output.get("content").and_then(Value::as_str), Some(""));
     }
 
@@ -3796,6 +3790,42 @@ exec_command
                 .and_then(Value::as_str),
             Some("agent.dispatch")
         );
+    }
+
+    #[test]
+    fn normalize_assistant_text_drops_shell_payload_markup_without_cmd() {
+        let message = json!({
+            "role": "assistant",
+            "content": "",
+            "reasoning_content":
+                "<tool_call>\n\
+                <id>call_a</id>\n\
+                shell\n\
+                <arg_key>payload</arg_key><arg_value>{\"path\":\"C:\\\\tmp\",\"meta\":{\"note\":\"line\\nnext\",\"items\":[1,{\"k\":\"v\"}]}}</arg_value>\n\
+                </tool_call>\n\
+                <tool_call>\n\
+                <id>call_b</id>\n\
+                shell\n\
+                <arg_key>payload</arg_key><arg_value>{\"path\":\"/tmp\",\"meta\":{\"note\":\"quote: \\\"hi\\\"\",\"items\":[2,{\"k\":\"w\"}]}}</arg_value>\n\
+                </tool_call>\n\
+                <tool_call>\n\
+                <id>call_c</id>\n\
+                shell\n\
+                <arg_key>payload</arg_key><arg_value>{\"path\":\"/var/tmp\",\"meta\":{\"note\":\"backslash: \\\\ end\",\"items\":[3,{\"k\":\"z\"}],\"nested\":{\"a\":1,\"b\":{\"c\":\"d\"}}}}</arg_value>\n\
+                </tool_call>"
+        });
+
+        let output_json = normalize_assistant_text_to_tool_calls_json(message.to_string(), None)
+            .expect("normalize_assistant_text_to_tool_calls_json failed");
+
+        let output: Value =
+            serde_json::from_str(&output_json).expect("failed to parse output json");
+        let tool_calls = output
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert!(tool_calls.is_empty());
     }
 
     #[test]

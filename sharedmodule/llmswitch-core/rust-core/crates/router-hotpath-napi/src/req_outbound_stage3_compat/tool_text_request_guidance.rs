@@ -39,12 +39,28 @@ fn collect_tool_names(tools_raw: Option<&Value>) -> Vec<String> {
         let Some(name) = read_trimmed_string(function_obj.get("name")) else {
             continue;
         };
-        if !out.iter().any(|entry| entry == &name) {
-            out.push(name);
+        let display_name = normalize_display_tool_name(name.as_str());
+        if !out.iter().any(|entry| entry == &display_name) {
+            out.push(display_name);
         }
     }
 
     out
+}
+
+fn is_shell_like_tool_name(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "exec_command" | "shell_command" | "shell" | "bash" | "terminal"
+    )
+}
+
+fn normalize_display_tool_name(name: &str) -> String {
+    if is_shell_like_tool_name(name) {
+        "exec_command".to_string()
+    } else {
+        name.trim().to_string()
+    }
 }
 
 fn is_tool_choice_required(root: &Map<String, Value>) -> bool {
@@ -79,28 +95,66 @@ fn build_default_instruction(
     let marker = read_trimmed_string(config.and_then(|row| row.get("marker")))
         .unwrap_or_else(|| DEFAULT_MARKER.to_string());
 
-    let mut lines = vec![
-        format!("{}:", marker),
-        "1) If calling tools, output exactly one JSON object: {\"tool_calls\":[{\"name\":\"tool_name\",\"input\":{...}}]}".to_string(),
-        "2) Use only keys: `tool_calls` + each call `name` and `input`.".to_string(),
-        "3) Do not output markdown fences, prose, or tool transcripts around JSON.".to_string(),
-        "4) Do NOT output pseudo tool results in text (forbidden examples: {\"exec_command\":...}, <function_results>...</function_results>).".to_string(),
-        "5) Do NOT use bracket pseudo-calls like `[调用 list_files] {...}` / `[call list_files] {...}` / `调用工具: list_files({...})`.".to_string(),
-    ];
+    let mut lines = vec![format!("{}:", marker)];
+    let mut step = 1usize;
+    let mut push_line = |text: String| {
+        lines.push(format!("{}) {}", step, text));
+        step += 1;
+    };
+
+    push_line(
+        "This is a text-tool runtime. Tool JSON you emit will be executed by the outer system; do NOT say tools are missing, unavailable, sandboxed, or unsupported."
+            .to_string(),
+    );
+    push_line(
+        "If calling tools, output exactly one heredoc container: <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"tool_name\",\"input\":{...}}]}\\nRCC_TOOL_CALLS_JSON"
+            .to_string(),
+    );
+    push_line("Use only keys: `tool_calls` + each call `name` and `input`.".to_string());
+    push_line(
+        "Container content must be valid JSON. Do not output markdown fences, XML tags, prose, or tool transcripts around the JSON."
+            .to_string(),
+    );
+    push_line(
+        "When the user asks you to inspect files, run checks, read code, or execute commands, do NOT describe planned commands first — emit the tool-call container immediately in the same turn."
+            .to_string(),
+    );
+    push_line(
+        "Forbidden refusal/noise examples: `Tool exec_command does not exists`, `I cannot access your local files`, `当前环境是沙箱隔离`."
+            .to_string(),
+    );
+    push_line(
+        "Do NOT output pseudo tool results in text (forbidden examples: {\"exec_command\":...}, <function_results>...</function_results>)."
+            .to_string(),
+    );
+    push_line(
+        "Do NOT use bracket pseudo-calls like `[调用 list_files] {...}` / `[call list_files] {...}` / `调用工具: list_files({...})`."
+            .to_string(),
+    );
+    push_line(
+        "Forbidden anti-patterns: `我来先查看...`, `首先查看...`, `我将执行以下命令...`, `执行完这些命令后我再汇报`, `**Calling:** exec_command`, or a markdown code fence containing JSON/commands instead of the heredoc container."
+            .to_string(),
+    );
+    if tool_names.iter().any(|name| name == "exec_command") {
+        push_line(
+            "For shell/terminal execution, ALWAYS use tool name `exec_command` with exactly `input.cmd`, and make `cmd` a single string like `bash -lc 'pwd'`. Do NOT emit `command`, `cwd`, or `workdir`."
+                .to_string(),
+        );
+    }
 
     if include_tool_names && !tool_names.is_empty() {
-        lines.push(format!(
-            "6) Allowed tool names this turn: {}",
+        push_line(format!(
+            "Allowed tool names this turn: {}",
             tool_names.join(", ")
         ));
     } else {
-        lines.push("6) Tool name must match provided schema exactly.".to_string());
+        push_line("Tool name must match provided schema exactly.".to_string());
     }
 
-    lines.push(if required {
-        "7) tool_choice is required for this turn: return at least one tool call.".to_string()
+    push_line(if required {
+        "tool_choice is required for this turn: return at least one tool call.".to_string()
     } else {
-        "7) If no tool is needed, plain text is allowed.".to_string()
+        "If no tool is needed, plain text is allowed.".to_string()
     });
 
     lines.join("\n")
@@ -341,5 +395,27 @@ mod tests {
         let content = payload["messages"][0]["content"].as_str().unwrap_or("");
         assert!(content
             .contains("tool_choice is required for this turn: return at least one tool call."));
+        assert!(content.contains("Allowed tool names this turn: exec_command"));
+        assert!(content.contains("bash -lc 'pwd'"));
+    }
+
+    #[test]
+    fn guidance_warns_against_tool_registry_refusal_and_uses_exec_command_canonical_shape() {
+        let mut payload = json!({
+            "tools": [
+                { "type": "function", "function": { "name": "exec_command" } },
+                { "type": "function", "function": { "name": "apply_patch" } }
+            ],
+            "messages": [{ "role": "user", "content": "check files" }]
+        });
+
+        apply_tool_text_request_guidance(&mut payload, None);
+
+        let content = payload["messages"][0]["content"].as_str().unwrap_or("");
+        assert!(content.contains("Tool exec_command does not exists"));
+        assert!(content.contains("当前环境是沙箱隔离"));
+        assert!(content.contains("Allowed tool names this turn: exec_command, apply_patch"));
+        assert!(content.contains("use tool name `exec_command`"));
+        assert!(content.contains("Do NOT emit `command`, `cwd`, or `workdir`"));
     }
 }

@@ -268,20 +268,13 @@ fn derive_reasoning_details_from_payload(reasoning: &Value) -> Vec<Value> {
             let Some(text) = text else {
                 continue;
             };
-            details.push(Value::Object(Map::from_iter([
-                (
-                    "type".to_string(),
-                    Value::String(
-                        entry_row
-                            .get("type")
-                            .and_then(Value::as_str)
-                            .map(|value| value.trim().to_string())
-                            .filter(|value| !value.is_empty())
-                            .unwrap_or_else(|| "summary_text".to_string()),
-                    ),
-                ),
-                ("text".to_string(), Value::String(text)),
-            ])));
+            let kind = entry_row
+                .get("type")
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "summary_text".to_string());
+            details.push(Value::String(format!("[{}] {}", kind, text)));
         }
     }
 
@@ -298,20 +291,13 @@ fn derive_reasoning_details_from_payload(reasoning: &Value) -> Vec<Value> {
             let Some(text) = text else {
                 continue;
             };
-            details.push(Value::Object(Map::from_iter([
-                (
-                    "type".to_string(),
-                    Value::String(
-                        entry_row
-                            .get("type")
-                            .and_then(Value::as_str)
-                            .map(|value| value.trim().to_string())
-                            .filter(|value| !value.is_empty())
-                            .unwrap_or_else(|| "reasoning_text".to_string()),
-                    ),
-                ),
-                ("text".to_string(), Value::String(text)),
-            ])));
+            let kind = entry_row
+                .get("type")
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "reasoning_text".to_string());
+            details.push(Value::String(format!("[{}] {}", kind, text)));
         }
     }
 
@@ -321,16 +307,10 @@ fn derive_reasoning_details_from_payload(reasoning: &Value) -> Vec<Value> {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
     {
-        details.push(Value::Object(Map::from_iter([
-            (
-                "type".to_string(),
-                Value::String("reasoning.encrypted_content".to_string()),
-            ),
-            (
-                "encrypted_content".to_string(),
-                Value::String(encrypted_content),
-            ),
-        ])));
+        details.push(Value::String(format!(
+            "[reasoning.encrypted_content] {}",
+            encrypted_content
+        )));
     }
 
     details
@@ -344,7 +324,6 @@ fn normalize_client_openai_chat_message_reasoning(message: &mut Map<String, Valu
         .get("reasoning")
         .and_then(project_message_reasoning_text)
         .or_else(|| resolve_non_empty_string(message.get("reasoning_content")));
-
     let reasoning_details = message
         .get("reasoning")
         .map(derive_reasoning_details_from_payload)
@@ -358,16 +337,20 @@ fn normalize_client_openai_chat_message_reasoning(message: &mut Map<String, Valu
             message.remove("reasoning");
         }
     }
-
     if !reasoning_details.is_empty() {
-        message.insert("reasoning_details".to_string(), Value::Array(reasoning_details));
+        message.insert(
+            "reasoning_details".to_string(),
+            Value::Array(reasoning_details),
+        );
     } else {
         message.remove("reasoning_details");
     }
 }
 
 fn normalize_openai_chat_reasoning_outbound(candidate: &Value) -> Option<Value> {
-    let mut row = sanitize_chat_completion_like(candidate)?.as_object()?.clone();
+    let mut row = sanitize_chat_completion_like(candidate)?
+        .as_object()?
+        .clone();
     if let Some(choices) = row.get_mut("choices").and_then(Value::as_array_mut) {
         for choice in choices.iter_mut() {
             let Some(choice_row) = choice.as_object_mut() else {
@@ -2475,13 +2458,23 @@ fn merge_source_retention(out: &mut Map<String, Value>, source_row: &Map<String,
         }
     }
 
-    for key in [
-        "metadata",
-        "temperature",
-        "top_p",
-        "prompt_cache_key",
-        "reasoning",
-    ] {
+    if let Some(source_metadata) = source_row.get("metadata").and_then(|v| v.as_object()) {
+        match out.get_mut("metadata").and_then(|v| v.as_object_mut()) {
+            Some(existing_metadata) => {
+                for (key, value) in source_metadata {
+                    existing_metadata.insert(key.to_string(), value.clone());
+                }
+            }
+            None => {
+                out.insert(
+                    "metadata".to_string(),
+                    Value::Object(source_metadata.clone()),
+                );
+            }
+        }
+    }
+
+    for key in ["temperature", "top_p", "prompt_cache_key", "reasoning"] {
         if out.contains_key(key) {
             continue;
         }
@@ -3140,12 +3133,13 @@ mod tests {
             .as_array()
             .cloned()
             .expect("reasoning details");
-        assert_eq!(details.len(), 3);
-        assert_eq!(details[0]["type"], Value::String("summary_text".to_string()));
-        assert_eq!(details[1]["type"], Value::String("reasoning_text".to_string()));
         assert_eq!(
-            details[2]["type"],
-            Value::String("reasoning.encrypted_content".to_string())
+            details,
+            vec![
+                Value::String("[summary_text] 先确认目标".to_string()),
+                Value::String("[reasoning_text] 再检查代码路径".to_string()),
+                Value::String("[reasoning.encrypted_content] opaque-sig".to_string())
+            ]
         );
     }
 
@@ -3590,6 +3584,7 @@ mod tests {
 
         assert_eq!(output["request_id"], Value::String("req_merge".to_string()));
         assert_eq!(output["metadata"]["keep"], Value::Bool(true));
+        assert_eq!(output["metadata"]["source"], Value::Bool(true));
         assert!(output["metadata"].get("toolCallIdStyle").is_none());
         assert_eq!(output["temperature"], Value::from(0.4));
         assert_eq!(output["top_p"], Value::from(0.8));
@@ -3615,6 +3610,67 @@ mod tests {
         assert_eq!(
             output["output"][0]["encrypted_content"],
             Value::String("encrypted".to_string())
+        );
+    }
+
+    #[test]
+    fn build_responses_payload_from_chat_source_metadata_overrides_context_deepseek_tool_state() {
+        let payload = serde_json::json!({
+            "id": "resp_deepseek_meta",
+            "model": "deepseek-chat",
+            "choices": [
+                {
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "exec_command",
+                                    "arguments": "{\"cmd\":\"pwd\"}"
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        });
+
+        let context = serde_json::json!({
+            "requestId": "req_deepseek_meta",
+            "toolsRaw": [],
+            "metadata": {
+                "keep": true,
+                "deepseek": {
+                    "toolCallState": "no_tool_calls",
+                    "toolCallSource": "none"
+                }
+            },
+            "sourceForRetention": {
+                "metadata": {
+                    "deepseek": {
+                        "toolCallState": "text_tool_calls",
+                        "toolCallSource": "fallback"
+                    }
+                }
+            }
+        });
+
+        let output =
+            build_responses_payload_from_chat_core(&payload, Some("req_deepseek_meta"), &context)
+                .expect("build responses payload");
+
+        assert_eq!(output["metadata"]["keep"], Value::Bool(true));
+        assert_eq!(
+            output["metadata"]["deepseek"]["toolCallState"],
+            Value::String("text_tool_calls".to_string())
+        );
+        assert_eq!(
+            output["metadata"]["deepseek"]["toolCallSource"],
+            Value::String("fallback".to_string())
         );
     }
 

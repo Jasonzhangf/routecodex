@@ -42,5 +42,25 @@ describe('tool-text-request-guidance native wrapper', () => {
     expect(result.messages[0].content).toContain(
       'Allowed tool names this turn: exec_command',
     );
+    expect(result.messages[0].content).toContain("bash -lc 'pwd'");
+  });
+
+  test('warns against fake registry refusals and prefers exec_command canonical shape', () => {
+    const result = applyToolTextRequestGuidance(
+      {
+        tools: [
+          { type: 'function', function: { name: 'exec_command' } },
+          { type: 'function', function: { name: 'apply_patch' } },
+        ],
+        messages: [{ role: 'user', content: 'inspect files' }],
+      } as any,
+      { includeToolNames: true },
+    ) as any;
+
+    expect(result.messages[0].content).toContain('Tool exec_command does not exists');
+    expect(result.messages[0].content).toContain('当前环境是沙箱隔离');
+    expect(result.messages[0].content).toContain('Allowed tool names this turn: exec_command, apply_patch');
+    expect(result.messages[0].content).toContain('use tool name `exec_command`');
+    expect(result.messages[0].content).toContain('Do NOT emit `command`, `cwd`, or `workdir`');
   });
 });

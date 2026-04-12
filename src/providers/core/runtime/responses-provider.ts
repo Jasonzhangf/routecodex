@@ -240,18 +240,20 @@ export class ResponsesProvider extends HttpTransportProvider {
       requestId: context.requestId,
       model: typeof body.model === 'string' ? body.model : 'unknown'
     });
-    await this.snapshotPhase(
-      'provider-response',
-      context,
-      {
-        mode: 'sse',
-        clientStream: providerStream === true,
-        payload: json ?? null
-      },
-      headers,
-      targetUrl,
-      entryEndpoint
-    );
+    if (!captureSse) {
+      await this.snapshotPhase(
+        'provider-response',
+        context,
+        {
+          mode: 'sse',
+          clientStream: providerStream === true,
+          payload: json ?? null
+        },
+        headers,
+        targetUrl,
+        entryEndpoint
+      );
+    }
     this.reportResponsesFailureIfNeeded(json, context);
     return {
       data: json,
@@ -299,18 +301,20 @@ export class ResponsesProvider extends HttpTransportProvider {
         requestId: context.requestId,
         model: typeof context.model === 'string' ? context.model : 'unknown'
       });
-      await this.snapshotPhase(
-        'provider-response',
-        context,
-        {
-          mode: 'sse',
-          clientStream: providerStream === true,
-          payload: json ?? null
-        },
-        headers,
-        targetUrl,
-        entryEndpoint
-      );
+      if (!captureSse) {
+        await this.snapshotPhase(
+          'provider-response',
+          context,
+          {
+            mode: 'sse',
+            clientStream: providerStream === true,
+            payload: json ?? null
+          },
+          headers,
+          targetUrl,
+          entryEndpoint
+        );
+      }
       this.reportResponsesFailureIfNeeded(json, context);
       return {
         data: json,

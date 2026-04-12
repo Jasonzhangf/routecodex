@@ -337,7 +337,7 @@ async function main() {
     });
     assert.equal(result.nativeApplied, true);
     assert.equal(result.appliedProfile, 'chat:lmstudio');
-    assert.equal(result.payload.tool_choice, 'required');
+    assert.equal(result.payload.tool_choice, undefined);
     assert.equal(result.payload.input?.[0]?.call_id, 'call_shell_1');
     assert.equal(result.payload.input?.[0]?.id, 'fc_shell_1');
   }
@@ -507,8 +507,8 @@ async function main() {
     });
     assert.equal(result.nativeApplied, true);
     assert.equal(result.appliedProfile, 'chat:deepseek-web');
-    assert.equal(result.payload.choices?.[0]?.finish_reason, 'stop');
-    assert.equal(result.payload.metadata?.deepseek?.toolCallState, undefined);
+    assert.equal(result.payload.choices?.[0]?.finish_reason, 'tool_calls');
+    assert.equal(result.payload.metadata?.deepseek?.toolCallState, 'text_tool_calls');
   }
 
   {
@@ -650,7 +650,7 @@ async function main() {
         }
       }
     });
-    assert.equal(payload.tool_choice, 'required');
+    assert.equal(payload.tool_choice, undefined);
     assert.equal(stageEvents.length, 1);
     assert.equal(stageEvents[0]?.value?.profile, 'chat:lmstudio');
   }

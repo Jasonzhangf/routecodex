@@ -631,7 +631,7 @@ fn test_resp_profile_chat_deepseek_web_unwraps_envelope_and_harvests_tool_calls(
                     "message": {
                         "role": "assistant",
                         "tool_calls": [],
-                        "content": "<function_calls>{\"tool_calls\":[{\"id\":\"call_deepseek_1\",\"type\":\"function\",\"function\":{\"name\":\"shell_command\",\"arguments\":{\"command\":\"pwd\",\"cwd\":\"/tmp\"}}}]}</function_calls>"
+                        "content": "<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"id\":\"call_deepseek_1\",\"name\":\"exec_command\",\"input\":{\"cmd\":\"bash -lc 'pwd'\"}}]}\nRCC_TOOL_CALLS_JSON"
                     }
                 }]
             }
@@ -735,7 +735,7 @@ fn test_resp_profile_chat_deepseek_web_harvests_function_results_markup() {
 }
 
 #[test]
-fn test_resp_profile_chat_deepseek_web_harvests_markdown_bullet_and_repairs_cmd_quotes() {
+fn test_resp_profile_chat_deepseek_web_harvests_tool_calls_from_rcc_container_only() {
     let input = ReqOutboundCompatInput {
         payload: json!({
             "choices": [{
@@ -744,7 +744,7 @@ fn test_resp_profile_chat_deepseek_web_harvests_markdown_bullet_and_repairs_cmd_
                 "message": {
                     "role": "assistant",
                     "tool_calls": [],
-                    "content": "我先创建 epic，再把子任务挂进去。\n\n• {\"tool_calls\":[{\"input\":{\"cmd\":\"bd --no-db create \"Mailbox 统一消息与心跳优先级改造\" --type epic --description \"统一 mailbox 消息三段式格式，定义优先级\"\"},\"name\":\"exec_command\"}]}"
+                    "content": "准备执行。\n<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"bash -lc 'bd --no-db create \\\"Mailbox 统一消息与心跳优先级改造\\\" --type epic'\"}}]}\nRCC_TOOL_CALLS_JSON\n容器外文本不参与解析。"
                 }
             }]
         }),
@@ -789,10 +789,16 @@ fn test_resp_profile_chat_deepseek_web_harvests_markdown_bullet_and_repairs_cmd_
         .as_str()
         .unwrap_or("")
         .contains("Mailbox 统一消息与心跳优先级改造"));
+    let content = result.payload["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("");
+    assert!(content.contains("准备执行"));
+    assert!(content.contains("容器外文本不参与解析"));
+    assert!(!content.contains("RCC_TOOL_CALLS_JSON"));
 }
 
 #[test]
-fn test_resp_profile_chat_deepseek_web_harvests_quote_wrapped_tool_calls() {
+fn test_resp_profile_chat_deepseek_web_harvests_quote_wrapped_tool_calls_via_global_text_harvest() {
     let input = ReqOutboundCompatInput {
         payload: json!({
             "choices": [{
@@ -853,6 +859,134 @@ fn test_resp_profile_chat_deepseek_web_harvests_quote_wrapped_tool_calls() {
     assert_eq!(
         result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
         "exec_command"
+    );
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_harvests_truncated_rcc_container_by_boundary_repair_only() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [],
+                    "content": "<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}"
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_container_boundary_repair_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }]
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": true,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_does_not_harvest_container_external_patch_text() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [],
+                    "content": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-old\n+new\n*** End Patch"
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_no_patch_harvest_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "apply_patch",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"patch": {"type": "string"}},
+                            "required": ["patch"]
+                        }
+                    }
+                }]
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": false,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "stop");
+    assert_eq!(
+        result.payload["choices"][0]["message"]["tool_calls"],
+        json!([])
     );
 }
 
@@ -1109,6 +1243,586 @@ fn test_resp_profile_chat_deepseek_web_required_tool_missing_returns_error() {
     };
     let error = run_resp_inbound_stage3_compat(input).unwrap_err();
     assert!(error.contains("tool_choice=required"));
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_harvests_real_failed_command_wrappers() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [],
+                    "content": r#"根据你的描述，system agent 重启后无法向 project agent 派发任务，问题出在 agent 注册表在重启后未重建。
+让我定位具体代码：
+<command>
+  <grep_command>
+  cd /Volumes/extension/code/finger && grep -n "agentRegistry\|registerAgent\|getAgent" src/orchestration/message-hub.ts | head -30
+  </grep_command>
+</command>
+<command>
+  <grep_command>
+  cd /Volumes/extension/code/finger && grep -n "resolveTargetModule\|moduleLookup" src/blocks/agent-runtime-block/index.ts | head -30
+  </grep_command>
+</command>
+<command>
+  <grep_command>
+  cd /Volumes/extension/code/finger && ls -la src/agents/finger-system-agent/registry.ts
+  </grep_command>
+</command>"#
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_real_failed_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}, "workdir": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "auto"
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": false,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(
+        result.applied_profile,
+        Some("chat:deepseek-web".to_string())
+    );
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["metadata"]["deepseek"]["toolCallState"],
+        "text_tool_calls"
+    );
+    assert_eq!(
+        result.payload["metadata"]["deepseek"]["toolCallSource"],
+        "fallback"
+    );
+
+    let tool_calls = result.payload["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(tool_calls.len(), 3);
+    for entry in &tool_calls {
+        assert_eq!(entry["function"]["name"], "exec_command");
+    }
+    let args0: Value = serde_json::from_str(
+        tool_calls[0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    let args1: Value = serde_json::from_str(
+        tool_calls[1]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    let args2: Value = serde_json::from_str(
+        tool_calls[2]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    assert_eq!(
+        args0["cmd"],
+        r#"cd /Volumes/extension/code/finger && grep -n "agentRegistry\|registerAgent\|getAgent" src/orchestration/message-hub.ts | head -30"#
+    );
+    assert_eq!(
+        args1["cmd"],
+        r#"cd /Volumes/extension/code/finger && grep -n "resolveTargetModule\|moduleLookup" src/blocks/agent-runtime-block/index.ts | head -30"#
+    );
+    assert_eq!(
+        args2["cmd"],
+        "cd /Volumes/extension/code/finger && ls -la src/agents/finger-system-agent/registry.ts"
+    );
+    let content = result.payload["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("");
+    assert!(content.contains("system agent 重启后无法向 project agent 派发任务"));
+    assert!(content.contains("让我定位具体代码"));
+    assert!(!content.contains("<command>"));
+    assert!(!content.contains("<grep_command>"));
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_harvests_live_single_command_wrapper() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [],
+                    "content": r#"现在我看到问题了。让我查看 message-hub 如何查找 target agent：
+
+<command>
+<grep_command>
+cd /Volumes/extension/code/finger && grep -n "hasModule\|getModule" src/orchestration/message-hub.ts | head -30
+</grep_command>
+</command>
+
+<command>
+<grep_command>
+cd /Volumes/extension/code/finger && grep -n "resolveAgentToModule" src/orchestration/message-hub.ts
+</grep_command>
+</command>
+
+<command>
+<grep_command>
+cd /Volumes/extension/code/finger && grep -n "moduleRegistry\|agentRegistry" src/orchestration/message-hub.ts | head -30
+</grep_command>
+</command>FINISHED"#
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_live_single_wrapper_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "auto"
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": false,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["metadata"]["deepseek"]["toolCallState"],
+        "text_tool_calls"
+    );
+    assert_eq!(
+        result.payload["metadata"]["deepseek"]["toolCallSource"],
+        "fallback"
+    );
+
+    let tool_calls = result.payload["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(tool_calls.len(), 3);
+    let args0: Value = serde_json::from_str(
+        tool_calls[0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    let args1: Value = serde_json::from_str(
+        tool_calls[1]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    let args2: Value = serde_json::from_str(
+        tool_calls[2]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    assert_eq!(
+        args0["cmd"],
+        r#"cd /Volumes/extension/code/finger && grep -n "hasModule\|getModule" src/orchestration/message-hub.ts | head -30"#
+    );
+    assert_eq!(
+        args1["cmd"],
+        r#"cd /Volumes/extension/code/finger && grep -n "resolveAgentToModule" src/orchestration/message-hub.ts"#
+    );
+    assert_eq!(
+        args2["cmd"],
+        r#"cd /Volumes/extension/code/finger && grep -n "moduleRegistry\|agentRegistry" src/orchestration/message-hub.ts | head -30"#
+    );
+    let content = result.payload["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("");
+    assert!(content.contains("让我查看 message-hub 如何查找 target agent"));
+    assert!(!content.contains("<command>"));
+    assert!(!content.contains("<grep_command>"));
+}
+
+#[test]
+fn test_resp_profile_chat_qwenchat_web_harvests_real_failed_command_wrappers() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [],
+                    "content": r#"根据你的描述，system agent 重启后无法向 project agent 派发任务，问题出在 agent 注册表在重启后未重建。
+让我定位具体代码：
+<command>
+  <grep_command>
+  cd /Volumes/extension/code/finger && grep -n "agentRegistry\|registerAgent\|getAgent" src/orchestration/message-hub.ts | head -30
+  </grep_command>
+</command>
+<command>
+  <grep_command>
+  cd /Volumes/extension/code/finger && grep -n "resolveTargetModule\|moduleLookup" src/blocks/agent-runtime-block/index.ts | head -30
+  </grep_command>
+</command>
+<command>
+  <grep_command>
+  cd /Volumes/extension/code/finger && ls -la src/agents/finger-system-agent/registry.ts
+  </grep_command>
+</command>"#
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:qwenchat-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_qwenchat_resp_real_failed_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}, "workdir": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "auto"
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": false,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(
+        result.applied_profile,
+        Some("chat:qwenchat-web".to_string())
+    );
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["metadata"]["deepseek"]["toolCallState"],
+        "text_tool_calls"
+    );
+    assert_eq!(
+        result.payload["metadata"]["deepseek"]["toolCallSource"],
+        "fallback"
+    );
+
+    let tool_calls = result.payload["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(tool_calls.len(), 3);
+    for entry in &tool_calls {
+        assert_eq!(entry["function"]["name"], "exec_command");
+    }
+    let args0: Value = serde_json::from_str(
+        tool_calls[0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    let args1: Value = serde_json::from_str(
+        tool_calls[1]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    let args2: Value = serde_json::from_str(
+        tool_calls[2]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    assert_eq!(
+        args0["cmd"],
+        r#"cd /Volumes/extension/code/finger && grep -n "agentRegistry\|registerAgent\|getAgent" src/orchestration/message-hub.ts | head -30"#
+    );
+    assert_eq!(
+        args1["cmd"],
+        r#"cd /Volumes/extension/code/finger && grep -n "resolveTargetModule\|moduleLookup" src/blocks/agent-runtime-block/index.ts | head -30"#
+    );
+    assert_eq!(
+        args2["cmd"],
+        "cd /Volumes/extension/code/finger && ls -la src/agents/finger-system-agent/registry.ts"
+    );
+    let content = result.payload["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("");
+    assert!(content.contains("system agent 重启后无法向 project agent 派发任务"));
+    assert!(content.contains("让我定位具体代码"));
+    assert!(!content.contains("<command>"));
+    assert!(!content.contains("<grep_command>"));
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_preserves_compact_exec_command_arguments() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [],
+                    "content": format!(
+                        "{{\"tool_calls\":[\
+                            {{\"name\":\"exec_command\",\"input\":{{\"cmd\":\"catdocs/design/project-dispatch-operation-architecture.md\"}}}},\
+                            {{\"name\":\"exec_command\",\"input\":{{\"cmd\":\"ls -la /Volumes/extension/code/finger/docs/design/project-dispatch-operation-architecture.md2>&1 &&head -200 /Volumes/extension/code/finger/docs/design/project-dispatch-operation-architecture.md\"}}}}\
+                        ]}}"
+                    )
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_compact_exec_repair_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}, "workdir": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "auto"
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": false,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(
+        result.applied_profile,
+        Some("chat:deepseek-web".to_string())
+    );
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+
+    let tool_calls = result.payload["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(tool_calls.len(), 2);
+
+    let args0: Value = serde_json::from_str(
+        tool_calls[0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    assert_eq!(
+        args0["cmd"],
+        "catdocs/design/project-dispatch-operation-architecture.md"
+    );
+    assert!(args0.get("workdir").is_none());
+
+    let args1: Value = serde_json::from_str(
+        tool_calls[1]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    assert_eq!(
+        args1["cmd"],
+        "ls -la /Volumes/extension/code/finger/docs/design/project-dispatch-operation-architecture.md2>&1 &&head -200 /Volumes/extension/code/finger/docs/design/project-dispatch-operation-architecture.md"
+    );
+    assert_eq!(
+        result.payload["metadata"]["deepseek"]["toolCallState"],
+        "text_tool_calls"
+    );
+}
+
+#[test]
+fn test_resp_profile_chat_qwenchat_web_harvests_execute_command_masked_args_sample() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [],
+                    "content": "现在我需要查看关键的项目管理文件。\n让我先检查项目根目录是否有 HEARTBEAT.md 和 DELIVERY.md：\n<execute_command>\n<command>ls -la /Volumes/extension/code/finger/HEARTBEAT.md /Volumes/extension/code/finger/DELIVERY.md /Volumes/extension/code/finger/MEMORY.md /Volumes/extension/code/finger/CACHE.md 2>&1</command>\n<workdir>/Volumes/extension/code/finger</workdir>\n</execute_command>"
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:qwenchat-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_qwenchat_resp_real_failed_2".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}, "workdir": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }]
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": false,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    let args = result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+        .as_str()
+        .unwrap_or("{}");
+    let parsed: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+    assert_eq!(
+        parsed["cmd"],
+        "ls -la /Volumes/extension/code/finger/HEARTBEAT.md /Volumes/extension/code/finger/DELIVERY.md /Volumes/extension/code/finger/MEMORY.md /Volumes/extension/code/finger/CACHE.md 2>&1"
+    );
+    assert_eq!(parsed["workdir"], "/Volumes/extension/code/finger");
+    let content = result.payload["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("");
+    assert!(content.contains("现在我需要查看关键的项目管理文件"));
+    assert!(!content.contains("<execute_command>"));
 }
 
 #[test]

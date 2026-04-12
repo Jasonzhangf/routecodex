@@ -37,7 +37,9 @@ function createEmptyRoutingInstructionState(): RoutingInstructionState {
    reasoningStopSummary: undefined,
    reasoningStopUpdatedAt: undefined,
     reasoningStopFailCount: undefined,
-   preCommandSource: undefined,
+    reasoningStopGuardTriggerCount: undefined,
+    reasoningStopGuardTriggerAt: undefined,
+    preCommandSource: undefined,
     preCommandScriptPath: undefined,
     preCommandUpdatedAt: undefined
   };
@@ -328,27 +330,33 @@ function extractStoplessDirectiveModeFromAdapterContext(adapterContext: unknown)
   return mode;
 }
 
-export function readReasoningStopMode(adapterContext: unknown): ReasoningStopMode {
+export function readReasoningStopMode(
+  adapterContext: unknown,
+  fallbackMode: ReasoningStopMode = 'off'
+): ReasoningStopMode {
   const stickyKey = resolveStickyKey(adapterContext);
   if (!stickyKey) {
-    return 'off';
+    return fallbackMode;
   }
   let state: RoutingInstructionState | null = null;
   try {
     state = loadRoutingInstructionStateSync(stickyKey);
   } catch {
-    return 'off';
+    return fallbackMode;
   }
-  return normalizeReasoningStopMode(state?.reasoningStopMode) ?? 'off';
+  return normalizeReasoningStopMode(state?.reasoningStopMode) ?? fallbackMode;
 }
 
-export function syncReasoningStopModeFromRequest(adapterContext: unknown): ReasoningStopMode {
+export function syncReasoningStopModeFromRequest(
+  adapterContext: unknown,
+  fallbackMode: ReasoningStopMode = 'off'
+): ReasoningStopMode {
   const stickyKey = resolveStickyKey(adapterContext);
   const directiveMode = extractStoplessDirectiveModeFromAdapterContext(adapterContext);
   if (!stickyKey) {
     // stopless switch is strictly session-bound. If we cannot bind a session scope,
     // the directive must be ignored.
-    return 'off';
+    return fallbackMode;
   }
 
   let state: RoutingInstructionState | null = null;
@@ -358,7 +366,7 @@ export function syncReasoningStopModeFromRequest(adapterContext: unknown): Reaso
     state = null;
   }
 
-  const persistedMode = normalizeReasoningStopMode(state?.reasoningStopMode) ?? 'off';
+  const persistedMode = normalizeReasoningStopMode(state?.reasoningStopMode) ?? fallbackMode;
   if (!directiveMode) {
     return persistedMode;
   }
@@ -502,6 +510,74 @@ export function resetReasoningStopFailCount(adapterContext: unknown): void {
     return;
   }
   state.reasoningStopFailCount = undefined;
+  if (isStateEmpty(state)) {
+    saveRoutingInstructionStateSync(stickyKey, null);
+    return;
+  }
+  saveRoutingInstructionStateSync(stickyKey, state);
+}
+
+// Storm protection: guard trigger tracking
+export function readReasoningStopGuardTriggerCount(adapterContext: unknown): { count: number; lastTriggerAt: number | undefined } {
+  const stickyKey = resolveStickyKey(adapterContext);
+  if (!stickyKey) {
+    return { count: 0, lastTriggerAt: undefined };
+  }
+  let state: RoutingInstructionState | null = null;
+  try {
+    state = loadRoutingInstructionStateSync(stickyKey);
+  } catch {
+    state = null;
+  }
+  if (!state) {
+    return { count: 0, lastTriggerAt: undefined };
+  }
+  const count = state.reasoningStopGuardTriggerCount;
+  const lastTriggerAt = state.reasoningStopGuardTriggerAt;
+  return {
+    count: typeof count === 'number' && Number.isFinite(count) ? count : 0,
+    lastTriggerAt: typeof lastTriggerAt === 'number' && Number.isFinite(lastTriggerAt) ? lastTriggerAt : undefined
+  };
+}
+
+export function incrementReasoningStopGuardTriggerCount(adapterContext: unknown): number {
+  const stickyKey = resolveStickyKey(adapterContext);
+  if (!stickyKey) {
+    return 0;
+  }
+  let state: RoutingInstructionState | null = null;
+  try {
+    state = loadRoutingInstructionStateSync(stickyKey);
+  } catch {
+    state = null;
+  }
+  const next = state ?? createEmptyRoutingInstructionState();
+  const currentCount = typeof next.reasoningStopGuardTriggerCount === 'number' && Number.isFinite(next.reasoningStopGuardTriggerCount)
+    ? next.reasoningStopGuardTriggerCount
+    : 0;
+  const newCount = currentCount + 1;
+  next.reasoningStopGuardTriggerCount = newCount;
+  next.reasoningStopGuardTriggerAt = Date.now();
+  saveRoutingInstructionStateSync(stickyKey, next);
+  return newCount;
+}
+
+export function resetReasoningStopGuardTriggerCount(adapterContext: unknown): void {
+  const stickyKey = resolveStickyKey(adapterContext);
+  if (!stickyKey) {
+    return;
+  }
+  let state: RoutingInstructionState | null = null;
+  try {
+    state = loadRoutingInstructionStateSync(stickyKey);
+  } catch {
+    state = null;
+  }
+  if (!state) {
+    return;
+  }
+  state.reasoningStopGuardTriggerCount = undefined;
+  state.reasoningStopGuardTriggerAt = undefined;
   if (isStateEmpty(state)) {
     saveRoutingInstructionStateSync(stickyKey, null);
     return;

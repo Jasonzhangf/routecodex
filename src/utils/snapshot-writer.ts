@@ -5,6 +5,12 @@ import { resolveRccSnapshotsDirFromEnv } from '../config/user-data-paths.js';
 import { runtimeFlags } from '../runtime/runtime-flags.js';
 import { shouldCaptureSnapshotStage } from './snapshot-stage-policy.js';
 import { canWriteSnapshotToLocalDisk } from './snapshot-local-disk-gate.js';
+import { coerceSnapshotPayloadForWrite } from './snapshot-payload-guard.js';
+import {
+  ensureSnapshotRuntimeMarker,
+  pruneSnapshotRequestDirsKeepRecent,
+  resolveSnapshotKeepRecentRequestDirs
+} from './snapshot-request-retention.js';
 
 export type ServerSnapshotPhase =
   | 'http-request'
@@ -96,8 +102,7 @@ function resolveServerSnapshotPruneMinWrites(): number {
 }
 
 function coerceServerSnapshotData(stage: string, data: unknown): unknown {
-  void stage;
-  return data;
+  return coerceSnapshotPayloadForWrite(stage, data);
 }
 
 function logServerSnapshotNonBlockingError(operation: string, error: unknown): void {
@@ -328,6 +333,11 @@ export async function writeServerSnapshot(options: {
     const requestToken = String(groupRequestId || `req_${Date.now()}`).replace(/[^A-Za-z0-9_.-]/g, '_');
     const dir = path.join(base, folder, requestToken);
     await ensureDir(dir);
+    await ensureSnapshotRuntimeMarker(dir, {
+      entryEndpoint: options.entryEndpoint || '/v1/chat/completions',
+      requestId: options.requestId,
+      groupRequestId
+    });
     const stageToken = String(options.phase).replace(/[^a-z0-9_.-]/gi, '_');
     const file = `${stageToken}_server.json`;
     const payload = {
@@ -340,6 +350,7 @@ export async function writeServerSnapshot(options: {
     };
     await writeUniqueFile(dir, file, JSON.stringify(payload, null, 2));
     scheduleSnapshotPrune(dir, resolveServerSnapshotKeepRecentFiles());
+    await pruneSnapshotRequestDirsKeepRecent(path.dirname(dir), resolveSnapshotKeepRecentRequestDirs());
   } catch (error) {
     logServerSnapshotNonBlockingError(`writeLocalSnapshot:${options.phase}`, error);
   }

@@ -383,6 +383,154 @@ const repairMissingHunkHeaderSafely = (patchText: string): string => {
   }
 };
 
+const repairLegacyContextDiffHunksInsideApplyPatchEnvelope = (patchText: string): string => {
+  try {
+    const lines = patchText.split('\n');
+    const out: string[] = [];
+    const legacyOldHeaderRe = /^\*\*\*\s+\d+(?:,\d+)?(?:\s+\*{3,4})?\s*$/;
+    const legacyNewHeaderRe = /^---\s+\d+(?:,\d+)?(?:\s+-{3,4})?\s*$/;
+    const decodeLegacyOldLine = (raw: string): { kind: 'context' | 'delete'; text: string } => {
+      const lineText = String(raw ?? '');
+      const lead = lineText[0] ?? '';
+      if (lead === '!' || lead === '-') {
+        let rest = lineText.slice(1);
+        if (rest.startsWith(' ')) rest = rest.slice(1);
+        return { kind: 'delete', text: rest };
+      }
+      if (lead === ' ') {
+        return { kind: 'context', text: lineText.slice(1) };
+      }
+      return { kind: 'context', text: lineText };
+    };
+    const decodeLegacyNewLine = (raw: string): { kind: 'context' | 'add'; text: string } => {
+      const lineText = String(raw ?? '');
+      const lead = lineText[0] ?? '';
+      if (lead === '!' || lead === '+') {
+        let rest = lineText.slice(1);
+        if (rest.startsWith(' ')) rest = rest.slice(1);
+        return { kind: 'add', text: rest };
+      }
+      if (lead === ' ') {
+        return { kind: 'context', text: lineText.slice(1) };
+      }
+      return { kind: 'add', text: lineText };
+    };
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i] ?? '';
+      const updateMatch = line.match(/^\*\*\* Update File:\s*(.+)$/);
+      if (!updateMatch) {
+        out.push(line);
+        i += 1;
+        continue;
+      }
+
+      const filePath = normalizeApplyPatchHeaderPath(String(updateMatch[1] ?? '').trim());
+      const sectionBody: string[] = [];
+      i += 1;
+      while (i < lines.length) {
+        const next = lines[i] ?? '';
+        if (
+          next.startsWith('*** Update File:') ||
+          next.startsWith('*** Add File:') ||
+          next.startsWith('*** Delete File:') ||
+          next.startsWith('*** End Patch')
+        ) {
+          break;
+        }
+        sectionBody.push(next);
+        i += 1;
+      }
+
+      const hasModernHunk = sectionBody.some((entry) => entry.startsWith('@@'));
+      const hasLegacyContextHeader = sectionBody.some((entry) => legacyOldHeaderRe.test(entry));
+      const hasLegacyContextOtherSide = sectionBody.some((entry) => legacyNewHeaderRe.test(entry));
+      if (!hasModernHunk && hasLegacyContextHeader && hasLegacyContextOtherSide && filePath && filePath !== '/dev/null') {
+        const convertedSectionBody: string[] = [];
+        let j = 0;
+        let convertedAny = false;
+        while (j < sectionBody.length) {
+          const current = sectionBody[j] ?? '';
+          if (!legacyOldHeaderRe.test(current)) {
+            convertedSectionBody.push(current);
+            j += 1;
+            continue;
+          }
+          j += 1;
+          const oldLines: string[] = [];
+          while (j < sectionBody.length && !legacyNewHeaderRe.test(sectionBody[j] ?? '')) {
+            if (legacyOldHeaderRe.test(sectionBody[j] ?? '')) break;
+            oldLines.push(sectionBody[j] ?? '');
+            j += 1;
+          }
+          if (j >= sectionBody.length || !legacyNewHeaderRe.test(sectionBody[j] ?? '')) {
+            convertedSectionBody.push(current, ...oldLines);
+            break;
+          }
+          j += 1;
+          const newLines: string[] = [];
+          while (j < sectionBody.length && !legacyOldHeaderRe.test(sectionBody[j] ?? '')) {
+            newLines.push(sectionBody[j] ?? '');
+            j += 1;
+          }
+
+          convertedSectionBody.push('@@');
+          const oldOps = oldLines.map(decodeLegacyOldLine);
+          const newOps = newLines.map(decodeLegacyNewLine);
+          let oi = 0;
+          let ni = 0;
+          while (oi < oldOps.length || ni < newOps.length) {
+            const o = oi < oldOps.length ? oldOps[oi] : null;
+            const n = ni < newOps.length ? newOps[ni] : null;
+            if (o && n && o.kind === 'context' && n.kind === 'context' && o.text === n.text) {
+              convertedSectionBody.push(` ${o.text}`);
+              oi += 1;
+              ni += 1;
+              continue;
+            }
+            if (o && o.kind === 'delete') {
+              convertedSectionBody.push(`-${o.text}`);
+              oi += 1;
+              if (n && n.kind === 'add') {
+                convertedSectionBody.push(`+${n.text}`);
+                ni += 1;
+              }
+              continue;
+            }
+            if (n && n.kind === 'add') {
+              convertedSectionBody.push(`+${n.text}`);
+              ni += 1;
+              continue;
+            }
+            if (o && o.kind === 'context') {
+              convertedSectionBody.push(` ${o.text}`);
+              oi += 1;
+              continue;
+            }
+            if (n && n.kind === 'context') {
+              convertedSectionBody.push(` ${n.text}`);
+              ni += 1;
+              continue;
+            }
+            if (o) oi += 1;
+            if (n) ni += 1;
+          }
+          convertedAny = true;
+        }
+        if (convertedAny) {
+          out.push(`*** Update File: ${filePath}`, ...convertedSectionBody);
+          continue;
+        }
+      }
+
+      out.push(line, ...sectionBody);
+    }
+    return out.join('\n');
+  } catch {
+    return patchText;
+  }
+};
+
 const isIgnorableGitMetadataLineInUpdateSection = (line: string): boolean => {
   return (
     line.startsWith('diff --git ') ||
@@ -484,6 +632,7 @@ export const normalizeApplyPatchText = (raw: string): string => {
     .split('\n')
     .map((line) => normalizeApplyPatchFileHeader(line))
     .join('\n');
+  text = repairLegacyContextDiffHunksInsideApplyPatchEnvelope(text);
 
   let hasBegin = text.includes('*** Begin Patch');
   const hasEnd = text.includes('*** End Patch');

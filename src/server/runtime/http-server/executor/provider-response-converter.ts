@@ -143,7 +143,37 @@ function compactFollowupLogReason(value: unknown): string | undefined {
   if (normalized.length <= FOLLOWUP_LOG_REASON_MAX_LEN) {
     return normalized;
   }
+
   return `${normalized.slice(0, FOLLOWUP_LOG_REASON_MAX_LEN)}…`;
+}
+
+function backfillCapturedChatRequestToolsFromRequestSemantics(
+  baseContext: Record<string, unknown>,
+  requestSemantics: unknown
+): void {
+  const capturedChatRequest =
+    baseContext.capturedChatRequest &&
+    typeof baseContext.capturedChatRequest === 'object' &&
+    !Array.isArray(baseContext.capturedChatRequest)
+      ? (baseContext.capturedChatRequest as Record<string, unknown>)
+      : undefined;
+  const semanticsRecord =
+    requestSemantics && typeof requestSemantics === 'object' && !Array.isArray(requestSemantics)
+      ? (requestSemantics as Record<string, unknown>)
+      : undefined;
+  const toolsRecord =
+    semanticsRecord?.tools && typeof semanticsRecord.tools === 'object' && !Array.isArray(semanticsRecord.tools)
+      ? (semanticsRecord.tools as Record<string, unknown>)
+      : undefined;
+  const clientToolsRaw = Array.isArray(toolsRecord?.clientToolsRaw) ? toolsRecord.clientToolsRaw : undefined;
+  if (!capturedChatRequest || !clientToolsRaw?.length) {
+    return;
+  }
+  const existingTools = Array.isArray(capturedChatRequest.tools) ? capturedChatRequest.tools : undefined;
+  if (existingTools?.length) {
+    return;
+  }
+  capturedChatRequest.tools = clientToolsRaw;
 }
 
 function shouldEnableHubStageRecorder(): boolean {
@@ -468,6 +498,7 @@ export async function convertProviderResponseIfNeeded(
     ) {
       baseContext.capturedChatRequest = options.originalRequest;
     }
+    backfillCapturedChatRequestToolsFromRequestSemantics(baseContext, options.requestSemantics);
     if (typeof (metadataBag as Record<string, unknown> | undefined)?.routeName === 'string') {
       baseContext.routeId = (metadataBag as Record<string, unknown>).routeName as string;
     }

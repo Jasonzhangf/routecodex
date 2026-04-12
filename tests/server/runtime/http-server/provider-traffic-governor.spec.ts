@@ -382,7 +382,7 @@ describe('provider-traffic-governor', () => {
           requestId: `down-${minute}`,
           success: minute < 5,
           statusCode: minute < 5 ? 200 : 429,
-          activeInFlight: 4,
+          activeInFlight: minute < 5 ? 2 : 4,
           configuredMaxInFlight: 4,
           observedAtMs: startMs + minute * 60_000
         });
@@ -395,6 +395,171 @@ describe('provider-traffic-governor', () => {
       });
       expect(acquired.policy.concurrency.maxInFlight).toBeLessThan(4);
       await governor.release(acquired.permit);
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('adaptive concurrency persists inside the current run root by default', async () => {
+    const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-adaptive-root-${process.pid}-${randomUUID()}`);
+    const adaptiveConfigPath = path.join(rootDir, 'dynamic-concurrency-overrides.json');
+    const runtimeKey = 'adaptive.root.runtime';
+    const providerKey = 'ali-coding-plan.key1.glm-5';
+    const runtime = createRuntime({
+      runtimeKey,
+      providerId: 'ali-coding-plan',
+      providerFamily: 'ali-coding-plan',
+      concurrency: {
+        maxInFlight: 2,
+        acquireTimeoutMs: 6000,
+        staleLeaseMs: 60000
+      },
+      rpm: {
+        requestsPerMinute: 240,
+        acquireTimeoutMs: 6000
+      }
+    });
+    try {
+      const governor = new ProviderTrafficGovernor(rootDir);
+      const startMs = Date.now();
+      for (let minute = 0; minute < 6; minute += 1) {
+        await governor.observeOutcome?.({
+          runtimeKey,
+          providerKey,
+          requestId: `root-${minute}`,
+          success: true,
+          statusCode: 200,
+          activeInFlight: 2,
+          configuredMaxInFlight: 2,
+          observedAtMs: startMs + minute * 60_000
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 650));
+      const persistedRaw = await fs.readFile(adaptiveConfigPath, 'utf8');
+      const persisted = JSON.parse(persistedRaw) as {
+        runtimes?: Record<string, { currentCap?: number }>;
+      };
+      expect((persisted.runtimes?.[runtimeKey]?.currentCap ?? 0)).toBeGreaterThanOrEqual(3);
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('adaptive concurrency scales down conservatively under sustained 429 pressure', async () => {
+    const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-adaptive-conservative-${process.pid}-${randomUUID()}`);
+    const adaptiveConfigPath = path.join(rootDir, 'adaptive', 'dynamic-concurrency-overrides.json');
+    process.env.ROUTECODEX_DYNAMIC_CONCURRENCY_CONFIG_PATH = adaptiveConfigPath;
+    const governor = new ProviderTrafficGovernor(rootDir);
+    const runtime = createRuntime({
+      runtimeKey: 'adaptive.conservative.runtime',
+      providerId: 'ali-coding-plan',
+      providerFamily: 'ali-coding-plan',
+      concurrency: {
+        maxInFlight: 6,
+        acquireTimeoutMs: 6000,
+        staleLeaseMs: 60000
+      },
+      rpm: {
+        requestsPerMinute: 360,
+        acquireTimeoutMs: 6000
+      }
+    });
+    const providerKey = 'ali-coding-plan.key1.qwen3.6-plus';
+    const startMs = Date.now();
+    try {
+      for (let minute = 0; minute < 10; minute += 1) {
+        await governor.observeOutcome?.({
+          runtimeKey: runtime.runtimeKey,
+          providerKey,
+          requestId: `conservative-${minute}`,
+          success: false,
+          statusCode: 429,
+          activeInFlight: 6,
+          configuredMaxInFlight: 6,
+          observedAtMs: startMs + minute * 60_000
+        });
+      }
+
+      const acquired = await governor.acquire({
+        runtimeKey: runtime.runtimeKey,
+        providerKey,
+        requestId: 'conservative-check',
+        runtime
+      });
+      expect(acquired.policy.concurrency.maxInFlight).toBe(5);
+      await governor.release(acquired.permit);
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('adaptive concurrency can recover upward toward safe cap after a cooled-down 429 window', async () => {
+    const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-adaptive-recover-${process.pid}-${randomUUID()}`);
+    const adaptiveConfigPath = path.join(rootDir, 'adaptive', 'dynamic-concurrency-overrides.json');
+    process.env.ROUTECODEX_DYNAMIC_CONCURRENCY_CONFIG_PATH = adaptiveConfigPath;
+    const governor = new ProviderTrafficGovernor(rootDir);
+    const runtime = createRuntime({
+      runtimeKey: 'adaptive.recover.runtime',
+      providerId: 'ali-coding-plan',
+      providerFamily: 'ali-coding-plan',
+      concurrency: {
+        maxInFlight: 6,
+        acquireTimeoutMs: 6000,
+        staleLeaseMs: 60000
+      },
+      rpm: {
+        requestsPerMinute: 360,
+        acquireTimeoutMs: 6000
+      }
+    });
+    const providerKey = 'ali-coding-plan.key1.qwen3.6-plus';
+    const startMs = Date.now();
+    try {
+      for (let minute = 0; minute < 10; minute += 1) {
+        await governor.observeOutcome?.({
+          runtimeKey: runtime.runtimeKey,
+          providerKey,
+          requestId: `recover-down-${minute}`,
+          success: false,
+          statusCode: 429,
+          activeInFlight: 6,
+          configuredMaxInFlight: 6,
+          observedAtMs: startMs + minute * 60_000
+        });
+      }
+
+      const afterDown = await governor.acquire({
+        runtimeKey: runtime.runtimeKey,
+        providerKey,
+        requestId: 'recover-down-check',
+        runtime
+      });
+      expect(afterDown.policy.concurrency.maxInFlight).toBe(5);
+      await governor.release(afterDown.permit);
+
+      const recoveryStartMs = startMs + 26 * 60_000;
+      for (let minute = 0; minute < 4; minute += 1) {
+        await governor.observeOutcome?.({
+          runtimeKey: runtime.runtimeKey,
+          providerKey,
+          requestId: `recover-up-${minute}`,
+          success: true,
+          statusCode: 200,
+          activeInFlight: 6,
+          configuredMaxInFlight: 6,
+          observedAtMs: recoveryStartMs + minute * 60_000
+        });
+      }
+
+      const afterRecovery = await governor.acquire({
+        runtimeKey: runtime.runtimeKey,
+        providerKey,
+        requestId: 'recover-up-check',
+        runtime
+      });
+      expect(afterRecovery.policy.concurrency.maxInFlight).toBeGreaterThan(5);
+      expect(afterRecovery.policy.concurrency.maxInFlight).toBeLessThanOrEqual(7);
+      await governor.release(afterRecovery.permit);
     } finally {
       await fs.rm(rootDir, { recursive: true, force: true });
     }

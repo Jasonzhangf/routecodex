@@ -18,6 +18,7 @@ import { buildAdapterContextFromNormalized } from "./hub-pipeline-adapter-contex
 import {
   deriveWorkingRequestFlags,
   estimateInputTokensForWorkingRequest,
+  prepareReasoningStopRequestTooling,
   propagateApplyPatchToolModeToRequestMetadata,
   resolveActiveProcessModeAndAudit,
   sanitizeStandardizedRequestMessages,
@@ -119,6 +120,10 @@ propagateApplyPatchToolModeToRequestMetadata(
 );
 
 const adapterContext = buildAdapterContextFromNormalized(normalized);
+prepareReasoningStopRequestTooling({
+  request: standardizedRequest,
+  adapterContext,
+});
 const stageRecorder = (() => {
   if (normalized.externalStageRecorder) {
     return normalized.externalStageRecorder;

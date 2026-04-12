@@ -5,6 +5,10 @@ import { HubRequestExecutor } from '../../../src/server/runtime/http-server/requ
 import type { ProviderRuntimeManager } from '../../../src/server/runtime/http-server/runtime-manager.js';
 import type { ProviderHandle } from '../../../src/server/runtime/http-server/types.js';
 import type { ModuleDependencies } from '../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
+import {
+  __resetSnapshotLocalDiskGateForTests,
+  canWriteSnapshotToLocalDisk
+} from '../../../src/utils/snapshot-local-disk-gate.js';
 
 function createRuntimeHandle(processImpl: () => Promise<unknown>): ProviderHandle {
   return {
@@ -70,6 +74,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
 
   beforeEach(() => {
     warnSpy.mockClear();
+    __resetSnapshotLocalDiskGateForTests();
   });
 
   afterAll(() => {
@@ -99,6 +104,21 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const response = await executor.execute(request);
 
     expect(response).toBeDefined();
+    expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
+  });
+
+  it('unlocks local snapshot gate before provider runtime starts writing snapshots', async () => {
+    const handle = createRuntimeHandle(async () => {
+      expect(canWriteSnapshotToLocalDisk('req_test')).toBe(true);
+      return { ok: true };
+    });
+    const { executor, request } = createExecutor(pipelineResult, handle);
+    jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValue({ status: 200, body: { output_text: 'ok' } });
+
+    await executor.execute(request);
+
     expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
   });
 

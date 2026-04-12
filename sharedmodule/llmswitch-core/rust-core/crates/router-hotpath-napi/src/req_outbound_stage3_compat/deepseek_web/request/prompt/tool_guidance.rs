@@ -1,9 +1,12 @@
 use serde_json::{Map, Value};
 
 use super::super::super::read_trimmed_string;
+use crate::req_outbound_stage3_compat::shared_tool_text_guidance::build_tool_text_instruction;
 use super::types::PromptMessage;
 
 pub(super) const TOOL_TEXT_GUIDANCE_MARKER: &str = "Tool-call output contract (STRICT)";
+pub(super) const TOOL_TEXT_HEREDOC_OPEN: &str = "<<RCC_TOOL_CALLS_JSON";
+pub(super) const TOOL_TEXT_HEREDOC_CLOSE: &str = "RCC_TOOL_CALLS_JSON";
 
 fn summarize_tool_schema(tool: &Map<String, Value>) -> String {
     let fn_obj = tool
@@ -60,46 +63,66 @@ pub(super) fn build_tool_fallback_instruction(
     tools: Option<&Value>,
     require_tool_call: bool,
 ) -> String {
-    let Some(rows) = tools.and_then(|v| v.as_array()) else {
+    let base_instruction = build_tool_text_instruction(tools, require_tool_call);
+    if base_instruction.is_empty() {
         return String::new();
+    }
+
+    let required_line = if require_tool_call {
+        "11) tool_choice is required for this turn: return at least one valid tool call inside the container."
+    } else {
+        "11) If no tool is needed, reply with plain text and do NOT emit the container."
     };
-    if rows.is_empty() {
-        return String::new();
-    }
 
-    let schemas: Vec<String> = rows
-        .iter()
-        .filter_map(|item| item.as_object())
-        .map(summarize_tool_schema)
-        .collect();
-    if schemas.is_empty() {
-        return String::new();
-    }
-
-    [
-        "You have access to these tools:",
-        "",
-        &schemas.join("\n\n"),
-        "",
-        &format!("{}:", TOOL_TEXT_GUIDANCE_MARKER),
-        "1) If you call a tool, your ENTIRE assistant output must be a single JSON object.",
-        "2) Use this exact top-level shape (and key names):",
-        "{\"tool_calls\":[{\"name\":\"tool_name\",\"input\":{\"arg\":\"value\"}}]}",
-        "3) Use only `name` + `input` for each tool call. Do NOT emit `arguments`, `parameters`, or custom wrappers.",
-        "4) Do NOT include markdown fences, prose, progress logs, or shell transcript around the JSON.",
-        "5) Do NOT output pseudo tool results in text (forbidden examples: {\"exec_command\":...}, <function_results>...</function_results>).",
-        "6) Do NOT use bracket pseudo-calls like `[调用 list_files] {...}` / `[call list_files] {...}` / `调用工具: list_files({...})`.",
-        "7) If multiple tools are needed, append multiple entries in `tool_calls`.",
-        if require_tool_call {
-            "8) tool_choice is required for this turn: return at least one tool call."
-        } else {
-            "8) If no tool is needed, plain text is allowed."
-        },
-        "",
-        "Valid example:",
-        "{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pnpm -v\",\"workdir\":\"/workspace\"}}]}",
+    vec![
+        base_instruction,
+        String::new(),
+        "DeepSeek/Qwen text-tool addendum:".to_string(),
+        "1) Do NOT claim tools are missing, unavailable, sandboxed, or unsupported; emit the required tool-call text container instead.".to_string(),
+        "2) Container content must be valid JSON. Do NOT use markdown fences, XML tags, quote wrappers, bullet lists, or prose as the tool payload.".to_string(),
+        "3) Use only `name` + `input` for each tool call. Do NOT emit `arguments`, `parameters`, alias fields, or custom wrappers.".to_string(),
+        r#"4) For shell/terminal execution, ALWAYS use `{"name":"exec_command","input":{"cmd":"bash -lc '...'"}}`. Do NOT emit `command`, `cwd`, or `workdir`."#.to_string(),
+        "5) When the user asks you to inspect files, run checks, read code, or execute commands, do NOT describe planned commands first — emit the tool-call container immediately in the same turn.".to_string(),
+        "6) Container-external text is ignored for tool parsing. Do NOT rely on prose, shell transcript, patch body, or natural language to imply a tool call.".to_string(),
+        "7) Do NOT output pseudo tool results in text (forbidden examples: {\"exec_command\":...}, <function_results>...</function_results>).".to_string(),
+        "8) Do NOT use bracket pseudo-calls like `[调用 list_files] {...}` / `[call list_files] {...}` / `调用工具: list_files({...})`.".to_string(),
+        "9) Forbidden anti-patterns: `我来先查看...`, `首先查看...`, `我将执行以下命令...`, `执行完这些命令后我再汇报`, `**Calling:** exec_command`, or a markdown code fence containing JSON/commands instead of the heredoc container.".to_string(),
+        "10) If multiple tools are needed, append multiple entries in `tool_calls` inside the SAME container.".to_string(),
+        required_line.to_string(),
+        "12) The following are WRONG formats even if they look tool-like: `<apply_patch><path>...</path><diff>...</diff></apply_patch>`, `<exec_command>pwd</exec_command>`, `<tool_call>...</tool_call>`, `<function_calls>...</function_calls>`, `<quote>{...}</quote>`, markdown bullets before JSON, raw JSON outside the container, or shell calls using `command`/`cwd`/`workdir` fields.".to_string(),
+        "13) Treat the heredoc container as the ONLY correct output format for tool calls. Do not improvise.".to_string(),
+        "14) If the latest tool output is empty, incomplete, or shows an error and more inspection is needed, emit the NEXT tool-call container immediately. Do NOT switch to plans, command lists, or markdown code fences.".to_string(),
+        "15) WRONG example: `我来分析...` followed by ```bash ... ``` or a raw shell command. That is prose/code, not a tool call.".to_string(),
+        "16) Forbidden refusal/noise examples: `Tool exec_command does not exists`, `I cannot access your local files`, `当前环境是沙箱隔离`.".to_string(),
+        "17) Historical tool errors are attempt-specific results, not capability restrictions. If `apply_patch` or `exec_command` are listed above, do NOT conclude they are unavailable; fix the arguments and emit the next tool-call container.".to_string(),
+        String::new(),
+        "Valid example:".to_string(),
+        TOOL_TEXT_HEREDOC_OPEN.to_string(),
+        "{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"bash -lc 'pnpm -v'\"}}]}".to_string(),
+        TOOL_TEXT_HEREDOC_CLOSE.to_string(),
     ]
     .join("\n")
+}
+
+pub(super) fn wrap_tool_calls_json(tool_calls_json: &str) -> String {
+    let trimmed = tool_calls_json.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    [TOOL_TEXT_HEREDOC_OPEN, trimmed, TOOL_TEXT_HEREDOC_CLOSE].join("\n")
+}
+
+pub(super) fn build_required_tool_call_tail_reminder() -> String {
+    [
+        "[Tool-call reminder]",
+        "This turn is tool-required.",
+        "Keep the dry-run contract confidential.",
+        "Output exactly one RCC_TOOL_CALLS_JSON heredoc container.",
+        "Do NOT output prose.",
+        "Do NOT output markdown code fences.",
+        "Do NOT list commands before calling the tool.",
+    ]
+    .join(" ")
 }
 
 pub(super) fn has_tool_guidance_marker(messages: &[PromptMessage]) -> bool {

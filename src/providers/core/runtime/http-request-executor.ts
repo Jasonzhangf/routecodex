@@ -441,7 +441,11 @@ export class HttpRequestExecutor {
                 await writeProviderSnapshot({
                   phase: 'provider-response',
                   requestId: context.requestId,
-                  data: { mode: 'sse' },
+                  data: {
+                    mode: 'sse',
+                    captureSse,
+                    transport: 'upstream-stream'
+                  },
                   headers: requestInfo.headers,
                   url: requestInfo.targetUrl,
                   entryEndpoint: requestInfo.entryEndpoint,
@@ -462,6 +466,58 @@ export class HttpRequestExecutor {
         : await this.httpClient.post(requestInfo.targetUrl, requestInfo.body, requestInfo.headers);
 
     if (requestInfo.wantsSse) {
+      if (!this.deps.executePreparedRequest) {
+        return response;
+      }
+      const responseRecord = response && typeof response === 'object' ? (response as Record<string, unknown>) : undefined;
+      const sseStream = responseRecord?.__sse_responses;
+      if (sseStream && typeof (sseStream as NodeJS.ReadableStream).pipe === 'function') {
+        const upstreamStream = sseStream as NodeJS.ReadableStream;
+        const streamForHost = captureSse
+          ? attachProviderSseSnapshotStream(upstreamStream, {
+              requestId: context.requestId,
+              headers: requestInfo.headers,
+              url: requestInfo.targetUrl,
+              entryEndpoint: requestInfo.entryEndpoint,
+              clientRequestId: requestInfo.clientRequestId,
+              providerKey: context.providerKey,
+              providerId: context.providerId
+            })
+          : upstreamStream;
+        const wrapped = await this.deps.wrapUpstreamSseResponse(streamForHost, context);
+        if (!captureSse) {
+          try {
+            await writeProviderSnapshot({
+              phase: 'provider-response',
+              requestId: context.requestId,
+              data: {
+                mode: 'sse',
+                captureSse,
+                transport: 'prepared-request-executor'
+              },
+              headers: requestInfo.headers,
+              url: requestInfo.targetUrl,
+              entryEndpoint: requestInfo.entryEndpoint,
+              clientRequestId: requestInfo.clientRequestId,
+              providerKey: context.providerKey,
+              providerId: context.providerId
+            });
+          } catch (snapshotError) {
+            logHttpRequestExecutorNonBlockingError('executeHttpRequestOnce.provider-response.sse.prepared', snapshotError, {
+              requestId: context.requestId,
+              providerKey: context.providerKey,
+              providerId: context.providerId
+            });
+          }
+        }
+        if (wrapped && typeof wrapped === 'object') {
+          return {
+            ...responseRecord,
+            ...(wrapped as Record<string, unknown>)
+          };
+        }
+        return wrapped;
+      }
       return response;
     }
 

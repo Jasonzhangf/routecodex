@@ -559,10 +559,35 @@ export function buildServerToolFollowupChatPayloadFromInjection(args: {
         typeof (op as { maxChars?: unknown }).maxChars === 'number'
           ? Math.max(64, Math.floor((op as { maxChars: number }).maxChars))
           : 1200;
-      messages = compactToolContentInMessages(messages, { maxChars });
+     messages = compactToolContentInMessages(messages, { maxChars });
+     continue;
+   }
+    if (op.op === 'append_tool_if_missing') {
+      const toolName = typeof (op as { toolName?: unknown }).toolName === 'string'
+        ? String((op as { toolName: string }).toolName).trim()
+        : '';
+      const toolDef = (op as { toolDefinition?: unknown }).toolDefinition;
+      if (!toolName || !toolDef || typeof toolDef !== 'object' || Array.isArray(toolDef)) {
+        continue;
+      }
+      // Check if tool already exists
+      const exists = Array.isArray(tools) && tools.some((t) => {
+        if (!t || typeof t !== 'object' || Array.isArray(t)) return false;
+        const fn = (t as any).function;
+        const name = fn && typeof fn === 'object' && typeof fn.name === 'string'
+          ? String(fn.name).trim()
+          : '';
+        return name === toolName;
+      });
+      if (!exists) {
+        if (!Array.isArray(tools)) {
+          tools = [];
+        }
+        tools.push(toolDef as JsonObject);
+      }
       continue;
     }
-    if (op.op === 'append_assistant_message') {
+   if (op.op === 'append_assistant_message') {
       const required = (op as { required?: unknown }).required !== false;
       const msg = extractAssistantMessageFromChatLike(args.chatResponse);
       if (!msg) {

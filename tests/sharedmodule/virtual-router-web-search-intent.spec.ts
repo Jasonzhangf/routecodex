@@ -28,14 +28,14 @@ describe('virtual-router web_search intent detection', () => {
     expect(route).not.toBe('web_search');
   });
 
-  it('classifies explicit Chinese web search request as web_search', () => {
+  it('does not auto-route explicit Chinese web search request without tool call', () => {
     const route = classifyRoute('请帮我联网搜索今天的 OpenAI 新闻。');
-    expect(route).toBe('web_search');
+    expect(route).not.toBe('web_search');
   });
 
-  it('classifies explicit English web search request as web_search', () => {
+  it('does not auto-route explicit English web search request without tool call', () => {
     const route = classifyRoute('Please search the web for the latest OpenAI API pricing.');
-    expect(route).toBe('web_search');
+    expect(route).not.toBe('web_search');
   });
 
   it('ignores system prompt text when user has no web search intent', () => {

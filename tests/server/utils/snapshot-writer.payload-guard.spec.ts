@@ -22,6 +22,7 @@ describe('server snapshot writer payload guard', () => {
   const originalKeepRecent = process.env.ROUTECODEX_SNAPSHOT_KEEP_RECENT_FILES;
   const originalPruneMinWrites = process.env.ROUTECODEX_SNAPSHOT_PRUNE_MIN_WRITES;
   const originalPruneIntervalMs = process.env.ROUTECODEX_SNAPSHOT_PRUNE_INTERVAL_MS;
+  const originalKeepRecentRequestDirs = process.env.ROUTECODEX_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS;
   const originalSnapshotFull = process.env.ROUTECODEX_SNAPSHOT_FULL;
   const originalForceDualWrite = process.env.ROUTECODEX_SERVER_SNAPSHOT_FORCE_DUAL_WRITE;
   const originalRuntimeSnapshotsEnabled = runtimeFlags.snapshotsEnabled;
@@ -33,6 +34,7 @@ describe('server snapshot writer payload guard', () => {
     process.env.ROUTECODEX_SNAPSHOT_STAGES = 'llm-switch-request*';
     process.env.ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES = '2048';
     process.env.ROUTECODEX_SNAPSHOT_KEEP_RECENT_FILES = '10';
+    process.env.ROUTECODEX_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS = '50';
     process.env.ROUTECODEX_SNAPSHOT_PRUNE_MIN_WRITES = '1';
     process.env.ROUTECODEX_SNAPSHOT_PRUNE_INTERVAL_MS = '0';
     process.env.ROUTECODEX_SERVER_SNAPSHOT_FORCE_DUAL_WRITE = '1';
@@ -71,6 +73,11 @@ describe('server snapshot writer payload guard', () => {
       delete process.env.ROUTECODEX_SNAPSHOT_PRUNE_INTERVAL_MS;
     } else {
       process.env.ROUTECODEX_SNAPSHOT_PRUNE_INTERVAL_MS = originalPruneIntervalMs;
+    }
+    if (originalKeepRecentRequestDirs === undefined) {
+      delete process.env.ROUTECODEX_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS;
+    } else {
+      process.env.ROUTECODEX_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS = originalKeepRecentRequestDirs;
     }
     if (originalSnapshotFull === undefined) {
       delete process.env.ROUTECODEX_SNAPSHOT_FULL;
@@ -151,6 +158,31 @@ describe('server snapshot writer payload guard', () => {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     expect(payloadFiles.length).toBeLessThanOrEqual(11);
+  });
+
+  it('keeps only the newest request directories in endpoint bucket', async () => {
+    const { writeServerSnapshot } = await import('../../../src/utils/snapshot-writer.js');
+    process.env.ROUTECODEX_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS = '3';
+
+    for (let i = 0; i < 8; i += 1) {
+      const requestId = `req_server_snapshot_dir_guard_${i}`;
+      allowSnapshotLocalDiskWrite(requestId);
+      await writeServerSnapshot({
+        phase: 'llm-switch-request',
+        requestId,
+        groupRequestId: requestId,
+        entryEndpoint: '/v1/openai',
+        providerKey: 'tabglm.key1.glm-5-turbo',
+        data: { index: i }
+      });
+    }
+
+    const endpointDir = path.join(tempDir, 'openai-chat');
+    const requestDirs = (await fs.readdir(endpointDir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith('req_server_snapshot_dir_guard_'))
+      .map((entry) => entry.name);
+
+    expect(requestDirs.length).toBeLessThanOrEqual(3);
   });
 
   it('does not enable full payload capture just because snapshots are on', async () => {

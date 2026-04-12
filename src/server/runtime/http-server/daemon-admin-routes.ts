@@ -66,6 +66,7 @@ export function isLocalRequest(req: Request): boolean {
 const DAEMON_ADMIN_AUTH_REQUIRED_LOCAL_KEY = '__routecodexDaemonAdminAuthRequired';
 const DAEMON_ADMIN_APIKEY_CONFIGURED_LOCAL_KEY = '__routecodexDaemonAdminApiKeyConfigured';
 const DAEMON_ADMIN_LOCAL_BYPASS_LOCAL_KEY = '__routecodexDaemonAdminLocalBypassEnabled';
+const DAEMON_ADMIN_EXPECTED_APIKEY_LOCAL_KEY = '__routecodexDaemonAdminExpectedApiKey';
 
 function normalizeHost(value: unknown): string {
   if (typeof value !== 'string') {
@@ -85,6 +86,10 @@ function setDaemonAdminAuthRequiredForApp(app: Application, required: boolean): 
 
 function setDaemonAdminLocalBypassForApp(app: Application, enabled: boolean): void {
   (app.locals as Record<string, unknown>)[DAEMON_ADMIN_LOCAL_BYPASS_LOCAL_KEY] = enabled;
+}
+
+function setDaemonAdminExpectedApiKeyForApp(app: Application, apiKey: string): void {
+  (app.locals as Record<string, unknown>)[DAEMON_ADMIN_EXPECTED_APIKEY_LOCAL_KEY] = apiKey;
 }
 
 function readBoolEnvFlag(keys: string[]): boolean {
@@ -126,8 +131,54 @@ export function isDaemonAdminApiKeyConfigured(req: Request): boolean {
   return typeof raw === 'boolean' ? raw : false;
 }
 
+function normalizeHeaderValue(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim();
+}
+
+function extractDaemonAdminApiKeyFromRequest(req: Request): string {
+  const direct =
+    normalizeHeaderValue(req.header('x-routecodex-api-key'))
+    || normalizeHeaderValue(req.header('x-api-key'))
+    || normalizeHeaderValue(req.header('x-routecodex-apikey'))
+    || normalizeHeaderValue(req.header('api-key'))
+    || normalizeHeaderValue(req.header('apikey'));
+  if (direct) {
+    return direct;
+  }
+  const auth = normalizeHeaderValue(req.header('authorization'));
+  if (!auth) {
+    return '';
+  }
+  const match = auth.match(/^(?:Bearer|ApiKey)\s+(.+)$/i);
+  return match ? normalizeHeaderValue(match[1]) : '';
+}
+
+function safeEqualApiKey(providedRaw: string, expectedRaw: string): boolean {
+  const provided = normalizeHeaderValue(providedRaw);
+  const expected = normalizeHeaderValue(expectedRaw);
+  if (!provided || !expected) {
+    return false;
+  }
+  return provided === expected;
+}
+
+export function isDaemonAdminApiKeyAuthenticated(req: Request): boolean {
+  const expected = (req.app?.locals as Record<string, unknown> | undefined)?.[DAEMON_ADMIN_EXPECTED_APIKEY_LOCAL_KEY];
+  if (typeof expected !== 'string' || !expected.trim()) {
+    return false;
+  }
+  const provided = extractDaemonAdminApiKeyFromRequest(req);
+  return safeEqualApiKey(provided, expected);
+}
+
 export function isDaemonAdminAuthenticated(req: Request): boolean {
   if (!isDaemonAdminAuthRequired(req)) {
+    return true;
+  }
+  if (isDaemonAdminApiKeyAuthenticated(req)) {
     return true;
   }
   return isDaemonSessionAuthenticated(req);
@@ -166,6 +217,7 @@ export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): voi
   const resolvedApiKey = resolveEnvSecretReference(typeof expectedApiKeyRaw === 'string' ? expectedApiKeyRaw : '');
   (app.locals as Record<string, unknown>)[DAEMON_ADMIN_APIKEY_CONFIGURED_LOCAL_KEY] =
     resolvedApiKey.ok && Boolean(resolvedApiKey.value);
+  setDaemonAdminExpectedApiKeyForApp(app, resolvedApiKey.ok ? resolvedApiKey.value : '');
 
   // Daemon admin password auth (setup/login/logout/status)
   registerDaemonAuthRoutes(app);

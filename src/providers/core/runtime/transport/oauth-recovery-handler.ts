@@ -154,7 +154,35 @@ export class OAuthRecoveryHandler {
             extra: { retry: true, authRefresh: true }
           })
           : upstreamStream;
-        return await wrapUpstreamSseResponse(streamForHost, context);
+        const wrapped = await wrapUpstreamSseResponse(streamForHost, context);
+        if (!captureSse) {
+          try {
+            await writeProviderSnapshot({
+              phase: 'provider-response',
+              requestId: context.requestId,
+              data: {
+                mode: 'sse',
+                retry: true,
+                authRefresh: true,
+                captureSse,
+                transport: 'upstream-stream'
+              },
+              headers: finalRetryHeaders,
+              url: requestInfo.targetUrl,
+              entryEndpoint: requestInfo.entryEndpoint,
+              clientRequestId: requestInfo.clientRequestId,
+              providerKey: context.providerKey,
+              providerId: context.providerId
+            });
+          } catch (snapshotError) {
+            this.logNonBlockingError('writeProviderSnapshot.sse_deepseek_retry', snapshotError, {
+              requestId: context.requestId,
+              providerKey: context.providerKey,
+              providerId: context.providerId
+            });
+          }
+        }
+        return wrapped;
       }
       const response = await this.context.httpClient.post(requestInfo.targetUrl, requestInfo.body, finalRetryHeaders);
       return response;
@@ -206,7 +234,12 @@ export class OAuthRecoveryHandler {
           await writeProviderSnapshot({
             phase: 'provider-response',
             requestId: context.requestId,
-            data: { mode: 'sse', retry: true },
+            data: {
+              mode: 'sse',
+              retry: true,
+              captureSse,
+              transport: 'upstream-stream'
+            },
             headers: finalRetryHeaders,
             url: requestInfo.targetUrl,
             entryEndpoint: requestInfo.entryEndpoint,

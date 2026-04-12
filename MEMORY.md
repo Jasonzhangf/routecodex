@@ -2,6 +2,26 @@
 
 ## Skills 与调试工作流
 
+- 2026-04-12: text-harvest 收口规则补充：文本工具兼容必须 **只解析顶层工具壳，不解析 shell 正文**。可复用规则：`exec_command / apply_patch / execute_command` 只按外层 `name/tag/wrapper/field alias` 做恢复，`bash -lc '...'` 内的 body 一律字符串透传，不拆命令、不修空格、不猜 shell 子命令；只要最终 payload 存在非空 `tool_calls`，`finish_reason` 就必须强制为 `tool_calls`，不得再被 metadata/status 覆盖成 `stop`。另外 qwenchat 与 deepseek-web 的 text guidance / harvest 必须共用同一套 chat-process 框架，差异只允许停留在 provider 通信层与路由配置。验证：Rust 回归 `responses_response_utils_resolve_finish_reason_prefers_tool_calls_then_metadata_then_status`、`response_codec_harvests_stop_heredoc_tool_calls_into_requires_action` 通过；5520/5555 在线样本恢复为 `finish_reason=tool_calls`。
+
+Tags: text-harvest, tool-wrapper-only, shell-body-transparent, finish-reason-tool-calls, qwenchat, deepseek-web, shared-framework, chat-process, rust-regression, online-verification
+
+- 2026-04-10: metadata/session 对称性补充：当 provider-request 里能看到 `session_id / conversation_id`，但 response/servertool/sticky scope 仍读不到时，根因通常不是“tmux 缺失”，而是 **metadata/runtime mapping 真层没有先产出 session identifiers**。可复用规则：不要在 transport 末端把 provider header 倒灌回 metadata；正确修复是先在 `buildProviderRequestHeaders` 前的 runtime metadata mapping 层生成/归一 `sessionId / conversationId`，再让 header builder 纯映射。native fallback 还要保证 **JSON 字符串先 parse 再 regex**，且 `user_id` 派生的 session 不要抢占 `conversationId`，否则会把 `codex_cli_conversation_*` 截断或覆盖，导致 stopless / stopMessage / sticky-session 读取错 scope。验证：定向 Jest `tests/providers/core/runtime/session-header-utils.unit.test.ts` + `tests/servertool/hub-pipeline-session-headers.spec.ts` 共 8/8 通过；在线 5520/5555 已升级到 `0.90.1035`。
+
+Tags: metadata-symmetry, session-id, conversation-id, stopless, sticky-session, runtime-mapping, provider-headers, codex-cli, json-parse-before-regex, 0.90.1035
+
+- 2026-04-10: qwen 偶发“聊一句就 stop”本轮已验证的主因之一是 **reasoning_content 在 Chat/Responses 映射链路里被清洗丢失**，既可能发生在请求侧历史 turn（assistant `reasoning_content` 被过滤），也可能发生在响应侧语义清洗/SSE 聚合（cleaned reasoning 未优先回填客户端 payload）。可复用规则：凡是思考型模型出现异常 stop、只嘴炮不调工具、或 Chat Completions 明显比 Responses 更容易断，先逐跳对比 inbound/outbound/replay 的完整 payload，确认 `reasoning_content`、system、history、tool_calls 没有在 compat/filter/cleanup 阶段被删改，再看 header / UA / session id。修复后验证：`0.90.1014` 在线 qwen `/v1/responses` 样本可见 `tool_calls=16`、`stop=0`，主动停下来的频率明显下降。
+
+Tags: qwen, reasoning-content, chat-completions, responses, stop, payload-transparency, sse-aggregation, cleanup, replay, online-verification, 0.90.1014
+
+- 2026-04-10: qwen/provider 排障的高收益动作不是先改提示词，而是先做 **全量 payload/工具面对比**。可复用规则：当 provider 看起来“没开 thinking”“不调工具”或“莫名 stop”时，先抓原始样本并比较客户端入站 tools 与 provider 出站 tools、system、历史上下文、finish_reason、tool_calls；禁止只看摘要快照下结论。尤其要确认真实传输 payload 不被裁剪：允许裁 debug/snapshot，但不允许裁真实 request/response 语义。若问题只在某协议面（如 Chat Completions）出现，优先做同请求 dry-run/replay 对比该协议与 Responses 的字段差异，再决定修 compat。 
+
+Tags: qwen, provider-debug, full-snapshot, tool-transparency, payload-audit, dry-run, replay, protocol-diff, no-semantic-trimming
+
+- 2026-04-11: stopless / reasoning.stop 继续失效时，先检查 **servertool guard 触发条件是否错误地读了 response 而不是 request/session state**。这次根因是 `reasoning-stop-guard` 在 post-hook 里用 `ctx.base.tools` 判定 `reasoning.stop` 是否存在，但 `ctx.base` 实际上是模型响应，不是原始请求，导致 guard 被误判为 miss、stopless 形同关闭。可复用规则：post-phase auto hook 需要读请求工具或会话开关时，优先用 `capturedChatRequest` / session sticky state；不要从 response payload 反推 request tools。验证：`tests/servertool/reasoning-stop-guard.spec.ts` + `tests/servertool/reasoning-only-continue.spec.ts` 21/21 通过；5520/5555 热重载后均为 `0.90.1044`。
+
+Tags: stopless, reasoning-stop, servertool, post-hook, request-vs-response, capturedChatRequest, sticky-state, qwen, 0.90.1044
+
 - 2026-04-10: qwen `finish_reason=stop` 深挖补充：若 headers/UA 已和 Qwen CLI 对齐，但工具场景仍异常 stop，优先检查 `chat:qwen` 是否**改写了非 system messages/history**。Qwen CLI 真正只做 system envelope 注入/合并；对 assistant/tool 历史的空 turn 删除、tool_call_id 回填、tool_calls id 改写都会破坏 proxy 透明性，并可能触发 qwen 在长上下文下更容易 stop。最小正确修复是：除首条 system envelope、provider 模型映射、`reasoning.effort -> reasoning_effort`、必要 token clamp 外，不动非 system history。验证：Jest qwen profile 回归通过，build:min + install:global + SIGUSR2 后 5555 升级到 0.90.998；在线 `qwen.qwen3.6-plus` 普通请求返回 `OK`，强制工具请求返回 `requires_action` + function_call。
 
 Tags: qwen, finish-reason-stop, proxy-transparency, message-history, system-envelope-only, qwen-cli-alignment, tool-calls, build-min, install-global, sigusr2, online-verification

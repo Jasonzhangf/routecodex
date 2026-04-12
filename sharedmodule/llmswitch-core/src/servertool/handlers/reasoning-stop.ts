@@ -17,6 +17,7 @@ type ReasoningStopPayload = {
   nextStep: string;
   userInputRequired?: boolean;
   userQuestion: string;
+  learning?: string;  // 可选。如果本轮任务有值得沉淀的经验（成功或反复失败的教训），用 2-3 句话总结。无则留空。
 };
 
 function parseToolArguments(toolCall: ToolCall): Record<string, unknown> {
@@ -132,6 +133,14 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>, mode: Reas
     'questionForUser'
   ]);
 
+  const learning = readText(args, [
+    'learning',
+    'experience',
+    'insight',
+    'lesson',
+    'lesson_learned'
+  ]);
+
   if (completed && !completionEvidence) {
     return {
       ok: false,
@@ -202,7 +211,8 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>, mode: Reas
       ...(typeof attemptsExhausted === 'boolean' ? { attemptsExhausted } : {}),
       nextStep,
       ...(typeof userInputRequired === 'boolean' ? { userInputRequired } : {}),
-      userQuestion
+      userQuestion,
+      ...(learning ? { learning } : {})
     }
   };
 }
@@ -233,6 +243,9 @@ function buildSummary(payload: ReasoningStopPayload): string {
     if (payload.nextStep) {
       lines.push(`下一步: ${payload.nextStep}`);
     }
+  }
+  if (payload.learning) {
+    lines.push(`经验沉淀: ${payload.learning}`);
   }
   return lines.join('\n');
 }
@@ -270,7 +283,7 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
   }
 
   const parsed = parseToolArguments(toolCall);
-  const mode = readReasoningStopMode(ctx.adapterContext);
+  const mode = readReasoningStopMode(ctx.adapterContext, 'on');
   const normalized = normalizeReasoningStopPayload(parsed, mode);
 
   if (normalized.ok === false) {

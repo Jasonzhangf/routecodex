@@ -1,6 +1,8 @@
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
+use regex::Regex;
 
 use super::super::super::read_trimmed_string;
+use super::tool_guidance::wrap_tool_calls_json;
 
 fn stringify_unknown(value: &Value) -> String {
     if let Some(raw) = value.as_str() {
@@ -10,6 +12,56 @@ fn stringify_unknown(value: &Value) -> String {
         return String::new();
     }
     serde_json::to_string(value).unwrap_or_else(|_| value.to_string())
+}
+
+fn read_trimmed_string_from_map(map: &Map<String, Value>, key: &str) -> Option<String> {
+    map.get(key)
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn canonicalize_tool_input_for_prompt(name: &str, input: Value) -> Value {
+    let normalized_name = name.trim().to_ascii_lowercase();
+    if normalized_name != "exec_command" {
+        return input;
+    }
+    let Some(obj) = input.as_object() else {
+        return input;
+    };
+
+    let mut next = Map::new();
+    if let Some(cmd) = read_trimmed_string_from_map(obj, "cmd")
+        .or_else(|| read_trimmed_string_from_map(obj, "command"))
+    {
+        next.insert("cmd".to_string(), Value::String(cmd));
+    }
+    if let Some(justification) = read_trimmed_string_from_map(obj, "justification") {
+        next.insert("justification".to_string(), Value::String(justification));
+    }
+    if next.is_empty() {
+        Value::Object(obj.clone())
+    } else {
+        Value::Object(next)
+    }
+}
+
+pub(super) fn strip_text_tool_wrapper_noise(raw: &str) -> String {
+    let mut text = raw.to_string();
+    let patterns = [
+        r"(?is)<\|ChunkingError\|>[\s\S]*?(?:<｜end▁of▁thinking｜>|<\|end▁of▁thinking\|>|$)",
+        r"(?is)<｜end▁of▁thinking｜>",
+        r"(?im)^\s*Tool\s+[A-Za-z0-9_.-]+\s+does\s+not\s+exists\.\s*$",
+        r"(?im)^\s*I cannot access your local files\.?\s*$",
+        r"(?im)^\s*当前环境是沙箱隔离.*$",
+    ];
+    for pattern in patterns {
+        let Ok(re) = Regex::new(pattern) else {
+            continue;
+        };
+        text = re.replace_all(text.as_str(), "").to_string();
+    }
+    text.trim().to_string()
 }
 
 pub(super) fn normalize_content_to_text(content: &Value) -> String {
@@ -86,11 +138,13 @@ pub(super) fn normalize_tool_calls_as_text(tool_calls_raw: Option<&Value>) -> St
         };
         tool_calls.push(json!({
             "name": name,
-            "input": input
+            "input": canonicalize_tool_input_for_prompt(name.as_str(), input)
         }));
     }
     if tool_calls.is_empty() {
         return String::new();
     }
-    serde_json::to_string(&json!({ "tool_calls": tool_calls })).unwrap_or_default()
+    let serialized =
+        serde_json::to_string(&json!({ "tool_calls": tool_calls })).unwrap_or_default();
+    wrap_tool_calls_json(serialized.as_str())
 }

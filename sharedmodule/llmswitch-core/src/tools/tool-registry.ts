@@ -5,7 +5,6 @@ import { validateApplyPatchArgs } from './apply-patch/validator.js';
 import { captureApplyPatchRegression } from './patch-regression-capturer.js';
 import { validateExecCommandArgs } from './exec-command/validator.js';
 import { captureExecCommandRegression } from './exec-command/regression-capturer.js';
-import { fixApplyPatchToolCallsWithNative } from '../router/virtual-router/engine-selection/native-compat-action-semantics.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -50,27 +49,6 @@ const toJson = (value: unknown): string => {
     return JSON.stringify(value ?? {});
   } catch {
     return '{}';
-  }
-};
-
-const tryNormalizeApplyPatchArgsWithNativeCompat = (argsString: string): string => {
-  const raw = typeof argsString === 'string' ? argsString : String(argsString ?? '');
-  if (!raw.trim()) return raw;
-  try {
-    const fixed = fixApplyPatchToolCallsWithNative({
-      messages: [],
-      input: [
-        {
-          type: 'function_call',
-          name: 'apply_patch',
-          arguments: raw
-        }
-      ]
-    });
-    const normalized = fixed.input?.[0]?.arguments;
-    return typeof normalized === 'string' && normalized.trim().length > 0 ? normalized : raw;
-  } catch {
-    return raw;
   }
 };
 
@@ -192,11 +170,7 @@ export function validateToolCall(
       return { ok: true, normalizedArgs: toJson(rawArgs) };
     }
     case 'apply_patch': {
-      const nativeNormalizedArgs = tryNormalizeApplyPatchArgsWithNativeCompat(argsString);
-      const nativeNormalizedRawArgsAny = parseToolArgsJson(
-        typeof nativeNormalizedArgs === 'string' ? nativeNormalizedArgs : '{}'
-      );
-      const validation = validateApplyPatchArgs(nativeNormalizedArgs, nativeNormalizedRawArgsAny);
+      const validation = validateApplyPatchArgs(argsString, rawArgsAny);
       if (!validation.ok) {
         const reason = validation.reason || 'unknown';
         // captureApplyPatchRegression({

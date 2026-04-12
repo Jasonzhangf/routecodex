@@ -215,11 +215,17 @@ fn harvest_tools_json_final_extracts_jsonish_tool_calls_from_text() {
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    assert_eq!(function.get("name").and_then(Value::as_str), Some("mailbox.status"));
+    assert_eq!(
+        function.get("name").and_then(Value::as_str),
+        Some("mailbox.status")
+    );
     let args = function
         .get("arguments")
         .and_then(Value::as_str)
         .unwrap_or("{}");
     let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
-    assert_eq!(args_json.get("target").and_then(Value::as_str), Some("finger-system-agent"));
+    assert_eq!(
+        args_json.get("target").and_then(Value::as_str),
+        Some("finger-system-agent")
+    );
 }

@@ -1,11 +1,6 @@
 const DEFAULT_SNAPSHOT_ALLOWED_STAGES = Object.freeze([
-  'client-request',
-  'http-request',
   'provider-request',
-  'provider-response',
-  'provider-error',
-  'provider-request.retry',
-  'provider-response.retry'
+  'provider-response'
 ]);
 
 type SnapshotStagePolicy = {
@@ -132,4 +127,3 @@ export function stageSelectorNeedsHubSnapshots(selectorRaw: string): boolean {
     return true;
   });
 }
-

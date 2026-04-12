@@ -11,10 +11,12 @@ describe('snapshot-stage-policy', () => {
     const prev = process.env.ROUTECODEX_SNAPSHOT_STAGES;
     delete process.env.ROUTECODEX_SNAPSHOT_STAGES;
     try {
-      expect(getDefaultSnapshotStageSelector()).toContain('client-request');
-      expect(shouldCaptureSnapshotStage('client-request')).toBe(true);
+      expect(getDefaultSnapshotStageSelector()).toBe('provider-request,provider-response');
+      expect(shouldCaptureSnapshotStage('client-request')).toBe(false);
       expect(shouldCaptureSnapshotStage('provider-request')).toBe(true);
       expect(shouldCaptureSnapshotStage('provider-response')).toBe(true);
+      expect(shouldCaptureSnapshotStage('provider-error')).toBe(false);
+      expect(shouldCaptureSnapshotStage('provider-request.retry')).toBe(false);
       expect(shouldCaptureSnapshotStage('chat_process.req.stage2.semantic_map')).toBe(false);
       expect(shouldCaptureSnapshotStage('client-response')).toBe(false);
     } finally {
@@ -43,4 +45,3 @@ describe('snapshot-stage-policy', () => {
     }
   });
 });
-

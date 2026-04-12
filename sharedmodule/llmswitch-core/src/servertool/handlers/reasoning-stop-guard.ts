@@ -10,8 +10,12 @@ import {
   readReasoningStopFailCount,
   incrementReasoningStopFailCount,
   resetReasoningStopFailCount,
+  readReasoningStopGuardTriggerCount,
+  incrementReasoningStopGuardTriggerCount,
+  resetReasoningStopGuardTriggerCount,
   syncReasoningStopModeFromRequest
 } from './reasoning-stop-state.js';
+import { appendLearningToMemory } from './memory-appender.js';
 import { extractStopMessageAutoResponseSnapshot } from './stop-message-auto/ai-followup.js';
 import { stripReasoningTransportNoise } from '../../conversion/shared/reasoning-normalizer.js';
 import { readStopMessageCompareContext } from '../stop-message-compare-context.js';
@@ -21,6 +25,8 @@ const FLOW_ID_FINALIZE = 'reasoning_stop_finalize_flow';
 const FLOW_ID_CONTINUE = 'reasoning_stop_continue_flow';
 const HOOK_ID = 'reasoning_stop_guard';
 const ON_MODE_MAX_FAIL_COUNT = 5;
+const GUARD_MAX_TRIGGER_COUNT = 3; // Storm protection: max guard triggers before auto-pass
+const GUARD_TRIGGER_WINDOW_MS = 10000; // 10 seconds window for storm detection
 
 const ON_CONTINUE_TEXT =
   '禁止直接停止。你当前处于 reasoning.stop 模式。每次停止前必须调用 reasoning.stop 工具并提供以下信息：\n' +
@@ -52,6 +58,7 @@ function parseReasoningStopSummary(summary: string): {
   userInputRequired?: boolean;
   userQuestion: string;
   attemptsExhausted?: boolean;
+  learning?: string;
 } {
   const normalized = typeof summary === 'string' ? summary.trim() : '';
   if (!normalized) {
@@ -63,6 +70,7 @@ function parseReasoningStopSummary(summary: string): {
   let userInputRequired: boolean | undefined;
   let userQuestion = '';
   let attemptsExhausted: boolean | undefined;
+  let learning = '';
   for (const line of lines) {
     if (line.startsWith('是否完成:')) {
       const value = line.slice('是否完成:'.length).trim();
@@ -98,9 +106,13 @@ function parseReasoningStopSummary(summary: string): {
         attemptsExhausted = false;
       }
       continue;
+    if (line.startsWith('经验沉淀:')) {
+      learning = line.slice('经验沉淀:'.length).trim();
+      continue;
+    }
     }
   }
-  return { completed, nextStep, userInputRequired, userQuestion, attemptsExhausted };
+  return { completed, nextStep, userInputRequired, userQuestion, attemptsExhausted, learning };
 }
 
 function buildExecuteNextStepText(nextStep: string): string {
@@ -115,6 +127,29 @@ function buildExecuteNextStepText(nextStep: string): string {
 function resolveGuardPromptByMode(mode: ReasoningStopMode): string {
   return mode === 'endless' ? ENDLESS_CONTINUE_TEXT : ON_CONTINUE_TEXT;
 }
+
+const REASONING_STOP_TOOL_DEF: JsonObject = {
+  type: 'function',
+  function: {
+    name: 'reasoning.stop',
+    description:
+      'Structured stop self-check gate. Stop is allowed only when either: (A) task is completed with completion_evidence; or (B) all feasible attempts are exhausted and blocked, with cannot_complete_reason + blocking_evidence + attempts_exhausted=true. Required: task_goal, is_completed. If not completed but a concrete next action exists, fill next_step and continue instead of stopping.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task_goal: { type: 'string' },
+        is_completed: { type: 'boolean' },
+        completion_evidence: { type: 'string' },
+        cannot_complete_reason: { type: 'string' },
+        blocking_evidence: { type: 'string' },
+        attempts_exhausted: { type: 'boolean' },
+        next_step: { type: 'string' }
+      },
+      required: ['task_goal', 'is_completed'],
+      additionalProperties: false
+    }
+  }
+} as unknown as JsonObject;
 
 function isReasoningStopGuardEnabled(): boolean {
   const envValue = process.env.LLMSWITCHCORE_REASONING_STOP_GUARD_ENABLED;
@@ -189,6 +224,20 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
   if (stoplessMode === 'off') {
     return null;
   }
+  // Storm protection: check if guard triggered too many times within window
+  const { count: guardTriggerCount, lastTriggerAt: lastGuardTriggerAt } = readReasoningStopGuardTriggerCount(ctx.adapterContext);
+  const now = Date.now();
+  if (guardTriggerCount >= GUARD_MAX_TRIGGER_COUNT) {
+    if (lastGuardTriggerAt && (now - lastGuardTriggerAt) < GUARD_TRIGGER_WINDOW_MS) {
+      // Storm detected: reset counter and pass through to prevent infinite loop
+      resetReasoningStopGuardTriggerCount(ctx.adapterContext);
+      return null;
+    }
+    // Outside window: reset counter
+    resetReasoningStopGuardTriggerCount(ctx.adapterContext);
+  }
+  // Increment guard trigger count
+  incrementReasoningStopGuardTriggerCount(ctx.adapterContext);
   if (!isStopEligibleForServerTool(ctx.base, ctx.adapterContext)) {
     return null;
   }
@@ -199,7 +248,7 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
     return null;
   }
   const stopState = readReasoningStopState(ctx.adapterContext);
-  if (!stopState.armed) {
+    if (!stopState.armed) {
     return {
       flowId: FLOW_ID_GUARD,
       finalize: async () => ({
@@ -211,8 +260,6 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
             entryEndpoint: ctx.entryEndpoint,
             injection: {
               ops: [
-                { op: 'preserve_tools' },
-                { op: 'ensure_standard_tools' },
                 { op: 'append_assistant_message', required: false },
                 { op: 'append_user_text', text: resolveGuardPromptByMode(stoplessMode) }
               ]
@@ -254,6 +301,14 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
         if (parsed.completed === true) {
           const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
           clearReasoningStopState(ctx.adapterContext);
+
+          if (parsed.learning) {
+            try {
+              appendLearningToMemory({ learning: parsed.learning, cwd: process.cwd() });
+            } catch (e) {
+              console.error("[reasoning-stop-guard] failed to append learning:", e);
+            }
+          }
           resetReasoningStopFailCount(ctx.adapterContext);
           return {
             chatResponse: patched,
@@ -298,8 +353,6 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
                 entryEndpoint: ctx.entryEndpoint,
                 injection: {
                   ops: [
-                    { op: 'preserve_tools' },
-                    { op: 'ensure_standard_tools' },
                     { op: 'append_assistant_message', required: false },
                     { op: 'append_user_text', text: buildExecuteNextStepText(parsed.nextStep) }
                   ]
@@ -341,8 +394,6 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
               entryEndpoint: ctx.entryEndpoint,
               injection: {
                 ops: [
-                  { op: 'preserve_tools' },
-                  { op: 'ensure_standard_tools' },
                   { op: 'append_assistant_message', required: false },
                   { op: 'append_user_text', text: ON_CONTINUE_TEXT }
                 ]
@@ -401,8 +452,6 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
                 entryEndpoint: ctx.entryEndpoint,
                 injection: {
                   ops: [
-                    { op: 'preserve_tools' },
-                    { op: 'ensure_standard_tools' },
                     { op: 'append_assistant_message', required: false },
                     { op: 'append_user_text', text: buildExecuteNextStepText(parsed.nextStep) }
                   ]
@@ -424,8 +473,6 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
               entryEndpoint: ctx.entryEndpoint,
               injection: {
                 ops: [
-                  { op: 'preserve_tools' },
-                  { op: 'ensure_standard_tools' },
                   { op: 'append_assistant_message', required: false },
                   { op: 'append_user_text', text: ENDLESS_CONTINUE_TEXT }
                 ]

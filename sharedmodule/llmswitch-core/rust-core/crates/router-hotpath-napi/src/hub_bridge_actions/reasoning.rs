@@ -684,8 +684,7 @@ fn normalize_responses_content_block(block: &mut Value, segments: &mut Vec<Strin
             let cleaned = strip_reasoning_from_text_value(text, segments);
             obj.insert("text".to_string(), Value::String(cleaned));
             if !segments.is_empty() {
-                if let Some(merged) = merge_reasoning_text(obj.get("reasoning_content"), segments)
-                {
+                if let Some(merged) = merge_reasoning_text(obj.get("reasoning_content"), segments) {
                     obj.insert("reasoning_content".to_string(), Value::String(merged));
                 }
             }
@@ -700,8 +699,7 @@ fn normalize_responses_content_block(block: &mut Value, segments: &mut Vec<Strin
             let cleaned = strip_reasoning_from_text_value(text, segments);
             *content = Value::String(cleaned);
             if !segments.is_empty() {
-                if let Some(merged) = merge_reasoning_text(obj.get("reasoning_content"), segments)
-                {
+                if let Some(merged) = merge_reasoning_text(obj.get("reasoning_content"), segments) {
                     obj.insert("reasoning_content".to_string(), Value::String(merged));
                 }
             }

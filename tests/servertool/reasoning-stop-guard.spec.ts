@@ -149,15 +149,23 @@ describe('servertool reasoning.stop guard', () => {
         }
       | undefined;
     expect(followup?.metadata?.clientInjectOnly).toBeUndefined();
-    expect(followup?.injection?.ops).toEqual([
-      { op: 'preserve_tools' },
-      { op: 'ensure_standard_tools' },
-      { op: 'append_assistant_message', required: false },
-      {
-        op: 'append_user_text',
-        text: '请尽量自行继续完成当前任务。若仍有可执行下一步，请先执行，不要直接停止。仅当你明确需要用户参与（例如高风险选择、关键信息缺失且无法自行确认）时，才调用 reasoning.stop，并在参数中提供 user_input_required=true 与 user_question。'
-      }
-    ]);
+    expect(followup?.injection?.ops).toEqual(
+      expect.arrayContaining([
+        { op: 'preserve_tools' },
+        { op: 'ensure_standard_tools' },
+        expect.objectContaining({
+          op: 'append_tool_if_missing',
+          toolName: 'reasoning.stop'
+        }),
+        { op: 'append_assistant_message', required: false },
+        expect.objectContaining({
+          op: 'append_user_text'
+        })
+      ])
+    );
+    const lastOp = followup?.injection?.ops?.[followup.injection.ops.length - 1];
+    expect(lastOp).toEqual(expect.objectContaining({ op: 'append_user_text' }));
+    expect(String((lastOp as any)?.text || '')).toContain('reasoning.stop');
   });
 
   test('endless mode injects strict anti-stop prompt', async () => {
@@ -181,14 +189,14 @@ describe('servertool reasoning.stop guard', () => {
           injection?: { ops?: Array<Record<string, unknown>> };
         }
       | undefined;
-    const lastOp = followup?.injection?.ops?.[3];
+    const lastOp = followup?.injection?.ops?.[followup.injection.ops.length - 1];
     expect(lastOp).toEqual(
       expect.objectContaining({
         op: 'append_user_text'
       })
     );
     expect(String((lastOp as any)?.text || '')).toContain('stopless:endless');
-    expect(String((lastOp as any)?.text || '')).toContain('禁止直接停止');
+    expect(String((lastOp as any)?.text || '')).toContain('绝对禁止停止');
   });
 
   test('fails fast when reasoning_stop_guard followup cannot build payload (missing seed)', async () => {
@@ -607,7 +615,7 @@ describe('servertool reasoning.stop guard', () => {
           injection?: { ops?: Array<Record<string, unknown>> };
         }
       | undefined;
-    const lastOp = followup?.injection?.ops?.[3];
+    const lastOp = followup?.injection?.ops?.[followup.injection.ops.length - 1];
     expect(lastOp).toEqual(
       expect.objectContaining({
         op: 'append_user_text'

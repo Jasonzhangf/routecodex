@@ -1,4 +1,13 @@
-import type { ProcessedRequest, StandardizedRequest } from "../types/standardized.js";
+import type { AdapterContext } from "../types/chat-envelope.js";
+import type { JsonObject } from "../types/json.js";
+import { jsonClone } from "../types/json.js";
+import type {
+  ProcessedRequest,
+  StandardizedMessage,
+  StandardizedParameters,
+  StandardizedRequest,
+  StandardizedTool
+} from "../types/standardized.js";
 import type { NormalizedRequest } from "./hub-pipeline.js";
 import {
   containsImageAttachment,
@@ -16,6 +25,64 @@ import {
   resolveHeavyInputTokenThreshold,
   roughEstimateInputTokensFromRequest,
 } from "./hub-pipeline-heavy-input-fastpath.js";
+import {
+  syncReasoningStopModeFromRequest,
+  type ReasoningStopMode
+} from "../../../servertool/handlers/reasoning-stop-state.js";
+
+const REASONING_STOP_TOOL_DEF: StandardizedTool = {
+  type: 'function',
+  function: {
+    name: 'reasoning.stop',
+    description:
+      'Structured stop self-check gate. Stop is allowed only when either: (A) task is completed with completion_evidence; or (B) all feasible attempts are exhausted and blocked, with cannot_complete_reason + blocking_evidence + attempts_exhausted=true. Required: task_goal, is_completed. If not completed but a concrete next action exists, fill next_step and continue instead of stopping.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task_goal: { type: 'string' },
+        is_completed: { type: 'boolean' },
+        completion_evidence: { type: 'string' },
+        cannot_complete_reason: { type: 'string' },
+        blocking_evidence: { type: 'string' },
+        attempts_exhausted: { type: 'boolean' },
+        next_step: { type: 'string' }
+      },
+      required: ['task_goal', 'is_completed'],
+      additionalProperties: false
+    }
+  }
+};
+
+function hasReasoningStopTool(tools: StandardizedTool[] | undefined): boolean {
+  return Boolean(
+    Array.isArray(tools) &&
+      tools.some((tool) => {
+        const name =
+          tool &&
+          typeof tool === 'object' &&
+          tool.function &&
+          typeof tool.function === 'object' &&
+          typeof tool.function.name === 'string'
+            ? tool.function.name.trim().toLowerCase()
+            : '';
+        return name === 'reasoning.stop';
+      })
+  );
+}
+
+function buildCapturedChatRequestFromStandardized(request: StandardizedRequest): JsonObject {
+  const out: JsonObject = {
+    model: request.model,
+    messages: jsonClone(request.messages as unknown as JsonObject[]) as unknown as JsonObject
+  };
+  if (Array.isArray(request.tools)) {
+    out.tools = jsonClone(request.tools as unknown as JsonObject[]) as unknown as JsonObject;
+  }
+  if (request.parameters && typeof request.parameters === 'object') {
+    out.parameters = jsonClone(request.parameters as unknown as JsonObject);
+  }
+  return out;
+}
 
 export function sanitizeStandardizedRequestMessages(
   standardizedRequest: StandardizedRequest,
@@ -146,4 +213,38 @@ export function deriveWorkingRequestFlags(
     hasImageAttachment,
     serverToolRequired,
   };
+}
+
+export function prepareReasoningStopRequestTooling(args: {
+  request: StandardizedRequest;
+  adapterContext: AdapterContext;
+}): ReasoningStopMode {
+  const captured = buildCapturedChatRequestFromStandardized(args.request);
+  (args.adapterContext as Record<string, unknown>).capturedChatRequest = captured;
+  const mode = syncReasoningStopModeFromRequest(args.adapterContext, 'on');
+  const capturedMessages = (captured as Record<string, unknown>).messages;
+  const strippedMessages = Array.isArray(capturedMessages)
+    ? (jsonClone(capturedMessages as unknown as JsonObject[]) as unknown as StandardizedMessage[])
+    : undefined;
+  if (strippedMessages) {
+    args.request.messages = strippedMessages;
+  }
+  if (mode === 'off') {
+    return mode;
+  }
+  if (!hasReasoningStopTool(args.request.tools)) {
+    const nextTools = Array.isArray(args.request.tools) ? [...args.request.tools] : [];
+    nextTools.push(jsonClone(REASONING_STOP_TOOL_DEF as unknown as JsonObject) as unknown as StandardizedTool);
+    args.request.tools = nextTools;
+  }
+  (captured as { messages?: StandardizedMessage[] }).messages = jsonClone(
+    args.request.messages as unknown as JsonObject[]
+  ) as unknown as StandardizedMessage[];
+  (captured as { tools?: StandardizedTool[] }).tools = jsonClone(
+    (args.request.tools ?? []) as unknown as JsonObject[]
+  ) as unknown as StandardizedTool[];
+  (captured as { parameters?: StandardizedParameters }).parameters = jsonClone(
+    args.request.parameters as unknown as JsonObject
+  ) as unknown as StandardizedParameters;
+  return mode;
 }

@@ -112,13 +112,13 @@ function testRequestTransform() {
   );
   assert.equal(
     out.prompt.includes('Tool-call output contract (STRICT):'),
-    false,
-    'strict tool-call guidance should no longer be injected at compat stage'
+    true,
+    'deepseek compat stage should inject strict tool-call guidance'
   );
   assert.equal(
     out.prompt.includes('RCC_TOOL_CALLS_JSON'),
-    false,
-    'tool-text request guidance should be handled in req_process stage, not compat stage'
+    true,
+    'deepseek compat stage should require RCC tool-call container guidance'
   );
 }
 
@@ -156,9 +156,19 @@ function testRequestTransformAutoToolChoiceHint() {
   }).payload;
 
   assert.equal(
-    out.prompt,
-    'Check README quickly',
-    'compat stage should keep prompt mapped from message text without tool guidance injection'
+    out.prompt.includes('Check README quickly'),
+    true,
+    'compat stage should keep user text in prompt'
+  );
+  assert.equal(
+    out.prompt.includes('Tool-call output contract (STRICT):'),
+    true,
+    'auto tool_choice still needs explicit deepseek tool-call guidance'
+  );
+  assert.equal(
+    out.prompt.includes('If no tool is needed, reply with plain text and do NOT emit the container.'),
+    true,
+    'auto tool_choice path should carry the non-required branch guidance'
   );
 }
 

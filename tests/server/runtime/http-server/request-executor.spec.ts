@@ -235,6 +235,7 @@ describe('HubRequestExecutor failover', () => {
     ).toBe(true);
   });
 
+
   test('retries with alternate provider after recoverable error', async () => {
     const firstProviderKey = 'antigravity.1-geetasamodgeetasamoda.claude-sonnet-4-5-thinking';
     const secondProviderKey = 'antigravity.2-geetasamodgeetasamoda.claude-sonnet-4-5-thinking';

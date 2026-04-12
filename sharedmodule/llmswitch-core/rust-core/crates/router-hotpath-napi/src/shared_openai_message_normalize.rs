@@ -495,7 +495,9 @@ pub fn normalize_openai_chat_messages_json(messages_json: String) -> NapiResult<
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_openai_chat_messages, normalize_openai_message, normalize_openai_tool_call};
+    use super::{
+        normalize_openai_chat_messages, normalize_openai_message, normalize_openai_tool_call,
+    };
     use serde_json::json;
 
     #[test]

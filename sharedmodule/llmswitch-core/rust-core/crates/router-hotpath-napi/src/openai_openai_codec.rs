@@ -3,6 +3,8 @@ use napi_derive::napi;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
+use crate::resp_process_stage1_tool_governance::{govern_response, ToolGovernanceInput};
+
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct OpenAiOpenAiRequestOptions {
@@ -144,10 +146,24 @@ pub fn run_openai_openai_response_codec_json(
             options.id_prefix_base.clone(),
         )?;
     let normalized = parse_value(&normalized_raw)?;
+    let governed = govern_response(ToolGovernanceInput {
+        payload: normalized,
+        client_protocol: "openai-chat".to_string(),
+        entry_endpoint: options
+            .endpoint
+            .clone()
+            .unwrap_or_else(|| "/v1/chat/completions".to_string()),
+        request_id: options
+            .request_id
+            .clone()
+            .unwrap_or_else(|| "req_openai_openai_response_codec".to_string()),
+    })
+    .map_err(napi::Error::from_reason)?
+    .governed_payload;
 
     let finalized_raw = crate::resp_process_stage2_finalize::finalize_chat_response_json(
         serde_json::to_string(&serde_json::json!({
-            "payload": normalized,
+            "payload": governed,
             "stream": options.stream,
             "reasoningMode": options.reasoning_mode,
             "endpoint": options.endpoint,
@@ -269,6 +285,59 @@ mod tests {
         assert_eq!(
             finalized["messages"][1]["content"],
             Value::String("{\"ok\":true}".to_string())
+        );
+    }
+
+    #[test]
+    fn response_codec_normalizes_existing_exec_command_shape_before_finalize() {
+        let raw = run_openai_openai_response_codec_json(
+            json!({
+                "choices": [
+                    {
+                        "finish_reason": null,
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [
+                                {
+                                    "id": "call_exec_shape",
+                                    "function": {
+                                        "name": "exec_command",
+                                        "arguments": {
+                                            "cmd": "git show 21805c9",
+                                            "command": "git show 21805c9",
+                                            "workdir": "/Volumes/extension/code/finger"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            })
+            .to_string(),
+            Some(
+                json!({
+                    "requestId": "req_openai_exec_shape",
+                    "endpoint": "/v1/responses"
+                })
+                .to_string(),
+            ),
+        )
+        .unwrap();
+
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        let finalized = value
+            .get("finalizedPayload")
+            .cloned()
+            .unwrap_or(value.clone());
+        assert_eq!(finalized["choices"][0]["finish_reason"], "tool_calls");
+        assert_eq!(
+            finalized["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            Value::String("exec_command".to_string())
+        );
+        assert_eq!(
+            finalized["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"],
+            Value::String("{\"cmd\":\"git show 21805c9\"}".to_string())
         );
     }
 }

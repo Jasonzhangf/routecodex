@@ -17,7 +17,11 @@ import {
   resolveExecCommandGuardValidationOptions,
   rewriteExecCommandApplyPatchCall
 } from './tool-governor-guards.js';
-import { normalizeChatResponseReasoningToolsWithNative } from '../../router/virtual-router/engine-selection/native-hub-bridge-action-semantics.js';
+import {
+  applyRespProcessToolGovernanceWithNative,
+  prepareRespProcessToolGovernancePayloadWithNative
+} from '../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
+import { normalizeChatResponseReasoningToolsWithNative as normalizeChatResponseReasoningToolsLegacy } from '../../router/virtual-router/engine-selection/native-hub-bridge-action-semantics.js';
 import {
   parseLenientJsonishWithNative as parseLenient,
   repairArgumentsToStringWithNative as repairArgumentsToString
@@ -68,6 +72,26 @@ function tryWriteSnapshot(options: ToolGovernanceOptions | undefined, stage: str
     fs.writeFileSync(file, payload, 'utf-8');
   } catch (error) {
     logToolGovernorNonBlocking(`snapshot_write:${stage}`, error);
+  }
+}
+
+function hasRecoveredResponseToolCalls(payload: Unknown): boolean {
+  const choices = Array.isArray((payload as any)?.choices) ? ((payload as any).choices as any[]) : [];
+  return choices.some((choice) => {
+    const toolCalls = Array.isArray(choice?.message?.tool_calls) ? choice.message.tool_calls : [];
+    return toolCalls.length > 0;
+  });
+}
+
+function shouldAttemptLegacyNamedToolSalvage(payload: Unknown): boolean {
+  try {
+    const raw = JSON.stringify(payload ?? {});
+    if (!raw) return false;
+    const hasToolCallsMarker = /"tool_calls"|'tool_calls'|\btool_calls\b/i.test(raw);
+    const hasExplicitNameMarker = /\\"name\\"\s*:|"name"\s*:|'name'\s*:|\bname\s*:/i.test(raw);
+    return hasToolCallsMarker && hasExplicitNameMarker;
+  } catch {
+    return false;
   }
 }
 
@@ -402,10 +426,26 @@ function enhanceResponseToolArguments(chat: Unknown): Unknown {
             }
           } else if (name === 'exec_command') {
             const validation = validateToolCall('exec_command', repaired, validationOptions);
-            if (validation.ok && typeof validation.normalizedArgs === 'string') {
-              finalStr = validation.normalizedArgs;
-            } else if (!validation.ok) {
+            if (!validation.ok) {
               finalStr = buildBlockedExecCommandArgs(repaired, validation.reason, validation.message);
+            } else {
+              let parsedArgs: any;
+              try {
+                parsedArgs = JSON.parse(repaired);
+              } catch (error) {
+                logToolGovernorNonBlocking('enhance_response_exec_command_parse_json', error);
+                parsedArgs = parseLenient(repaired);
+              }
+              const hasTopLevelCmd =
+                parsedArgs
+                && typeof parsedArgs === 'object'
+                && !Array.isArray(parsedArgs)
+                && typeof parsedArgs.cmd === 'string'
+                && parsedArgs.cmd.trim().length > 0;
+              finalStr =
+                hasTopLevelCmd || typeof validation.normalizedArgs !== 'string'
+                  ? repaired
+                  : validation.normalizedArgs;
             }
           }
           if (fn) fn.arguments = finalStr;
@@ -437,8 +477,22 @@ function enhanceResponseToolArguments(chat: Unknown): Unknown {
 export function processChatResponseTools(resp: Unknown): Unknown {
   if (!isObject(resp)) return resp;
   try {
-    const canon = normalizeChatResponseReasoningToolsWithNative(resp as any);
-    const withPatch = normalizeApplyPatchToolCallsOnResponse(canon as Unknown);
+    const requestId = `tool_governor_${Date.now()}`;
+    const prepared = prepareRespProcessToolGovernancePayloadWithNative(resp as Record<string, unknown>);
+    const governed = applyRespProcessToolGovernanceWithNative({
+      payload: prepared.preparedPayload as Record<string, unknown>,
+      clientProtocol: 'openai-chat',
+      entryEndpoint: '/v1/chat/completions',
+      requestId
+    });
+    let canonical = governed.governedPayload as Unknown;
+    if (!hasRecoveredResponseToolCalls(canonical) && shouldAttemptLegacyNamedToolSalvage(resp)) {
+      const salvaged = normalizeChatResponseReasoningToolsLegacy(resp as any);
+      if (hasRecoveredResponseToolCalls(salvaged as Unknown)) {
+        canonical = salvaged as Unknown;
+      }
+    }
+    const withPatch = normalizeApplyPatchToolCallsOnResponse(canonical as Unknown);
     return enhanceResponseToolArguments(withPatch as Unknown);
   } catch (error) {
     logToolGovernorNonBlocking('process_chat_response_tools', error);

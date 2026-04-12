@@ -40,6 +40,10 @@ export async function buildProviderRequestHeaders(options: {
   const baseHeaders: Record<string, string> = {
     'Content-Type': 'application/json'
   };
+  const codexUaMode = isCodexUaMode({ runtime: runtimeMetadata, providerType });
+  if (codexUaMode && !isAntigravity) {
+    SessionHeaderUtils.ensureCodexSessionMetadata(runtimeMetadata);
+  }
   const inboundMetadata = runtimeMetadata?.metadata;
   const inboundUserAgent =
     typeof inboundMetadata?.userAgent === 'string' && inboundMetadata.userAgent.trim()
@@ -49,7 +53,6 @@ export async function buildProviderRequestHeaders(options: {
     typeof inboundMetadata?.clientOriginator === 'string' && inboundMetadata.clientOriginator.trim()
       ? inboundMetadata.clientOriginator.trim()
       : undefined;
-  const codexUaMode = isCodexUaMode({ runtime: runtimeMetadata, providerType });
   const inboundClientHeaders = SessionHeaderUtils.extractClientHeaders(runtimeMetadata);
   const normalizedClientHeaders = SessionHeaderUtils.normalizeCodexClientHeaders(inboundClientHeaders, codexUaMode);
 

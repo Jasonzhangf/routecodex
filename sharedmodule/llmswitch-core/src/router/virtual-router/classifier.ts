@@ -16,26 +16,22 @@ export class RoutingClassifier {
 
   classify(features: RoutingFeatures): ClassificationResult {
     const lastToolCategory = features.lastAssistantToolCategory;
-    const webSearchIntent = detectWebSearchIntent(features.userTextSample);
-    const serverToolRequired = (features.metadata as any)?.serverToolRequired === true;
     const webSearchContinuation = lastToolCategory === 'websearch';
     const localToolContinuation =
       lastToolCategory === 'read' ||
       lastToolCategory === 'write' ||
       lastToolCategory === 'search' ||
       lastToolCategory === 'other';
-    const webSearchFromIntent = !localToolContinuation && webSearchIntent;
-    const webSearchRequired = !localToolContinuation && serverToolRequired;
     const reachedLongContext =
       features.estimatedTokens >= (this.config.longContextThresholdTokens ?? DEFAULT_LONG_CONTEXT_THRESHOLD);
     const latestMessageFromUser = features.latestMessageFromUser === true;
+    const hasToolActivity = features.hasTools || features.hasToolCallResponses;
     const thinkingContinuation = lastToolCategory === 'read';
-    const thinkingFromUser = latestMessageFromUser;
+    const thinkingFromUser = latestMessageFromUser && features.hasThinkingKeyword === true && !hasToolActivity;
     const thinkingFromRead = !thinkingFromUser && thinkingContinuation;
     const codingContinuation = lastToolCategory === 'write';
     const searchContinuation = lastToolCategory === 'search';
     const toolsContinuation = lastToolCategory === 'other';
-    const hasToolActivity = features.hasTools || features.hasToolCallResponses;
     const hasRemoteVideoAttachment = features.hasVideoAttachment === true && features.hasRemoteVideoAttachment === true;
 
     const evaluationMap: Record<string, { triggered: boolean; reason: string }> = {
@@ -60,22 +56,11 @@ export class RoutingClassifier {
         reason: 'coding:last-tool-write'
       },
       web_search: {
-        // web_search 路由触发条件（按优先级）：
-        // 1) 上一轮 assistant 已触发 websearch 类工具（续写命中）
-        // 2) 本轮已标记 serverToolRequired（例如 stage1 注入 websearch 工具）
-        // 3) 用户输入命中联网搜索意图关键词
-        // 注意：仅“声明了 web_search 工具”不应直接触发 web_search 路由，
-        // 以免把普通工具会话误路由到 web_search。
-        triggered:
-          webSearchContinuation ||
-          webSearchRequired ||
-          webSearchFromIntent,
-        reason:
-          webSearchContinuation
-            ? 'web_search:last-tool-websearch'
-            : webSearchRequired
-              ? 'web_search:servertool-required'
-              : 'web_search:intent-keyword'
+        // web_search 路由只允许由显式 web_search 工具链续写命中。
+        // 不再因为用户“想联网搜索”或 serverToolRequired 自动切到 web_search，
+        // 以避免产生隐式联网流量；首次显式工具请求仍走 tools 路由。
+        triggered: !localToolContinuation && webSearchContinuation,
+        reason: 'web_search:last-tool-websearch'
       },
       search: {
         // search 路由：仅在上一轮 assistant 使用 search 类工具时继续命中，
@@ -143,77 +128,6 @@ export class RoutingClassifier {
     const index = ROUTE_PRIORITY.indexOf(route);
     return index >= 0 ? index : ROUTE_PRIORITY.length;
   }
-}
-
-function detectWebSearchIntent(text: string): boolean {
-  if (!text || !text.trim()) {
-    return false;
-  }
-
-  const normalized = text.toLowerCase();
-  if (isNegativeWebSearchContext(normalized, text)) {
-    return false;
-  }
-
-  const directKeywords = [
-    'web search',
-    'web_search',
-    'websearch',
-    'search the web',
-    'internet search',
-    '搜索网页',
-    '联网搜索',
-    '上网搜索',
-    '上网查',
-    '网上搜',
-    '谷歌搜索',
-    'google search'
-  ];
-  if (directKeywords.some((keyword) => normalized.includes(keyword))) {
-    return true;
-  }
-
-  const enVerb = ['search', 'find', 'lookup', 'look up', 'google'];
-  const enNoun = ['web', 'internet', 'online', 'google', 'bing'];
-  const hasEnVerb = enVerb.some((keyword) => normalized.includes(keyword));
-  const hasEnNoun = enNoun.some((keyword) => normalized.includes(keyword));
-  if (hasEnVerb && hasEnNoun) {
-    return true;
-  }
-
-  const zhVerb = ['搜索', '查找', '搜', '上网查', '上网搜', '联网查', '联网搜'];
-  const zhNoun = ['网络', '联网', '网页', '网上', '互联网', '谷歌', '百度'];
-  const hasZhVerb = zhVerb.some((keyword) => text.includes(keyword));
-  const hasZhNoun = zhNoun.some((keyword) => text.includes(keyword));
-  if ((text.includes('上网') || text.includes('联网')) && (text.includes('搜') || text.includes('查'))) {
-    return true;
-  }
-  if (hasZhVerb && hasZhNoun) {
-    return true;
-  }
-
-  return false;
-}
-
-function isNegativeWebSearchContext(normalized: string, originalText: string): boolean {
-  const englishPatterns = [
-    /prefer\s+resources?\s+over\s+web[\s_-]?search/u,
-    /prefer[\s\S]{0,40}web[\s_-]?search/u,
-    /do\s+not[\s\S]{0,20}web[\s_-]?search/u,
-    /don't[\s\S]{0,20}web[\s_-]?search/u,
-    /without[\s\S]{0,20}web[\s_-]?search/u,
-    /cannot[\s\S]{0,20}web[\s_-]?search/u
-  ];
-  if (englishPatterns.some((pattern) => pattern.test(normalized))) {
-    return true;
-  }
-
-  const chinesePatterns = [
-    /不能.{0,20}(上网|联网|web[_ -]?search|搜索网页)/u,
-    /不要.{0,20}(上网|联网|web[_ -]?search|搜索网页)/u,
-    /避免.{0,20}(上网|联网|web[_ -]?search|搜索网页)/u
-  ];
-  return chinesePatterns.some((pattern) => pattern.test(originalText));
 }
 
 function normalizeList(source: string[] | undefined, fallback: string[]): string[] {

@@ -1,5 +1,6 @@
 import type { Application, Request, Response } from 'express';
 import {
+  isDaemonAdminApiKeyAuthenticated,
   isDaemonAdminApiKeyConfigured,
   isDaemonAdminAuthRequired,
   isLocalRequest
@@ -27,11 +28,15 @@ export function registerDaemonAuthRoutes(app: Application): void {
       return;
     }
     const local = isLocalRequest(req);
+    const authenticated =
+      !authRequired
+      || isDaemonSessionAuthenticated(req)
+      || isDaemonAdminApiKeyAuthenticated(req);
     res.status(200).json({
       ok: true,
       authRequired,
       hasPassword: Boolean(loaded.record),
-      authenticated: authRequired ? isDaemonSessionAuthenticated(req) : true,
+      authenticated,
       mustChangePassword: authRequired ? Boolean(loaded.record?.mustChangePassword) : false,
       apiKeyConfigured: isDaemonAdminApiKeyConfigured(req),
       isRemote: !local,

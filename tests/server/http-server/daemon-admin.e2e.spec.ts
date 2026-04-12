@@ -117,10 +117,13 @@ async function stopTestServer(server: RouteCodexHttpServer, configDir: string, r
   }
 }
 
-async function getJson(baseUrl: string, endpoint: string, cookie?: string): Promise<any> {
+async function getJson(baseUrl: string, endpoint: string, cookie?: string, extraHeaders?: Record<string, string>): Promise<any> {
   const res = await fetch(`${baseUrl}${endpoint}`, {
     method: 'GET',
-    headers: cookie ? { cookie } : undefined
+    headers: {
+      ...(cookie ? { cookie } : {}),
+      ...(extraHeaders ?? {})
+    }
   });
   const text = await res.text();
   let body: any = null;
@@ -132,12 +135,19 @@ async function getJson(baseUrl: string, endpoint: string, cookie?: string): Prom
   return { status: res.status, body };
 }
 
-async function postJson(baseUrl: string, endpoint: string, body?: unknown, cookie?: string): Promise<any> {
+async function postJson(
+  baseUrl: string,
+  endpoint: string,
+  body?: unknown,
+  cookie?: string,
+  extraHeaders?: Record<string, string>
+): Promise<any> {
   const res = await fetch(`${baseUrl}${endpoint}`, {
     method: 'POST',
     headers: {
       ...(body ? { 'content-type': 'application/json' } : {}),
-      ...(cookie ? { cookie } : {})
+      ...(cookie ? { cookie } : {}),
+      ...(extraHeaders ?? {})
     },
     body: body ? JSON.stringify(body) : undefined
   });

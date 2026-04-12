@@ -6,6 +6,13 @@ import {
   buildResponsesRequestFromChat,
   captureResponsesContext
 } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
+import {
+  captureResponsesRequestContext,
+  clearResponsesConversationByRequestId,
+  recordResponsesResponse,
+  rebindResponsesConversationRequestId,
+  resumeResponsesConversation
+} from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js';
 
 function createSubmitContext(overrides?: Partial<AdapterContext>): AdapterContext {
   return {
@@ -267,5 +274,98 @@ describe('ResponsesSemanticMapper submit tool outputs', () => {
         lines: ['focus.md', 'README.md']
       }
     });
+  });
+
+  it('can resume submit_tool_outputs after requestId rebind', () => {
+    const initialRequestId = `req-submit-rebind-${Date.now()}`;
+    const reboundRequestId = `${initialRequestId}-provider`;
+    const responseId = `resp-submit-rebind-${Date.now()}`;
+
+    captureResponsesRequestContext({
+      requestId: initialRequestId,
+      payload: { model: 'gpt-5.4', stream: false },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'text', text: 'run a command' }]
+          }
+        ],
+        toolsRaw: [
+          {
+            type: 'function',
+            name: 'exec_command',
+            description: 'Run a shell command',
+            parameters: {
+              type: 'object',
+              properties: { cmd: { type: 'string' } },
+              required: ['cmd']
+            }
+          }
+        ]
+      }
+    });
+
+    rebindResponsesConversationRequestId(initialRequestId, reboundRequestId);
+    recordResponsesResponse({
+      requestId: reboundRequestId,
+      response: {
+        id: responseId,
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            id: 'fc_call_exec_1',
+            type: 'function_call',
+            call_id: 'call_exec_1',
+            name: 'exec_command',
+            arguments: JSON.stringify({ cmd: 'bash -lc \'echo hello\'' }),
+            status: 'in_progress'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_exec_1',
+                type: 'function',
+                name: 'exec_command',
+                arguments: JSON.stringify({ cmd: 'bash -lc \'echo hello\'' })
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    const resumed = resumeResponsesConversation(
+      responseId,
+      {
+        response_id: responseId,
+        tool_outputs: [
+          {
+            tool_call_id: 'call_exec_1',
+            output: 'ok'
+          }
+        ]
+      },
+      { requestId: `${initialRequestId}-resume` }
+    );
+
+    expect((resumed.payload as any).previous_response_id).toBe(responseId);
+    expect(Array.isArray((resumed.payload as any).input)).toBe(true);
+    expect((resumed.payload as any).input).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'function_call_output',
+          call_id: 'call_exec_1',
+          output: 'ok'
+        })
+      ])
+    );
+
+    clearResponsesConversationByRequestId(reboundRequestId);
   });
 });

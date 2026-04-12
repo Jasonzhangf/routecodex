@@ -90,6 +90,7 @@ export type ServerToolFollowupInjectionOp =
   | { op: 'drop_tool_by_name'; name: string }
   | { op: 'inject_vision_summary'; summary: string }
   | { op: 'trim_openai_messages'; maxNonSystemMessages: number }
+  | { op: 'append_tool_if_missing'; toolName: string; toolDefinition: JsonObject }
   | { op: 'compact_tool_content'; maxChars: number };
 
 export type ServerToolFollowupInjectionPlan = {

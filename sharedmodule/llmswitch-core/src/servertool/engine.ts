@@ -25,6 +25,15 @@ import { resolveClockSessionScope } from './clock/session-scope.js';
 import { savePendingServerToolInjection } from './pending-session.js';
 import { appendServerToolProgressFileEvent } from './log/progress-file.js';
 import { attachStopGatewayContext, inspectStopGatewaySignal } from './stop-gateway-context.js';
+import { isStopEligibleForServerTool } from './stop-gateway-context.js';
+import {
+  type ReasoningStopMode,
+  readReasoningStopState,
+  readReasoningStopFailCount,
+  resetReasoningStopFailCount,
+  syncReasoningStopModeFromRequest
+} from './handlers/reasoning-stop-state.js';
+import { getServerToolHandler } from './registry.js';
 import { formatStopMessageCompareContext, readStopMessageCompareContext } from './stop-message-compare-context.js';
 
 // native-router-hotpath contract:
@@ -910,20 +919,65 @@ export async function runServerToolOrchestration(
         ...overrides
       }),
       effectiveServerToolTimeoutMs,
-      () =>
-        createServerToolTimeoutError({
-          requestId: options.requestId,
-          phase: 'engine',
-          timeoutMs: effectiveServerToolTimeoutMs || serverToolTimeoutMs
-        })
-    );
+     () =>
+       createServerToolTimeoutError({
+         requestId: options.requestId,
+         phase: 'engine',
+         timeoutMs: effectiveServerToolTimeoutMs || serverToolTimeoutMs
+       })
+   );
 
-  // StopMessage owns a dedicated orchestration skeleton:
-  // same trigger/processing semantics as before, but isolated from the generic servertool queue.
-  let engineResult = await runEngine({
-    disableToolCallHandlers: true,
-    includeAutoHookIds: ['stop_message_auto']
-  });
+  // ReasoningStopGuard: dedicated orchestration for finish_reason=stop (post-phase hook)
+  // Must run BEFORE stop_message_auto to enforce stopless mode constraints.
+  const reasoningStopMode = syncReasoningStopModeFromRequest(options.adapterContext);
+  const reasoningStopGuardHandler = getServerToolHandler('reasoning_stop_guard');
+ const reasoningStopGuardEnabled = reasoningStopGuardHandler && reasoningStopGuardHandler.trigger === 'auto';
+ const reasoningStopEligible = isStopEligibleForServerTool(options.chat, options.adapterContext);
+ const reasoningStopState = readReasoningStopState(options.adapterContext);
+
+  // Declare engineResult early so reasoning_stop_guard can assign it
+  let engineResult: Awaited<ReturnType<typeof runServerSideToolEngine>> | null = null;
+
+ if (stopSignal.observed && reasoningStopGuardEnabled && reasoningStopEligible && reasoningStopMode !== 'off') {
+    logProgress(0, 5, 'reasoning_stop_guard_check', { flowId: 'reasoning_stop_guard_flow' });
+    const guardResult = await runEngine({
+      disableToolCallHandlers: true,
+      includeAutoHookIds: ['reasoning_stop_guard'],
+      excludeAutoHookIds: ['stop_message_auto']
+    });
+    if (guardResult.execution && guardResult.execution.flowId) {
+      const guardFlowId = guardResult.execution.flowId;
+      logProgress(1, 5, 'matched', { flowId: guardFlowId });
+      logStopEntry('trigger', 'reasoning_stop_guard_activated', {
+        flowId: guardFlowId,
+        reason: stopSignal.reason,
+        source: stopSignal.source,
+        eligible: stopSignal.eligible
+      });
+      if (guardFlowId === 'reasoning_stop_guard_flow' || guardFlowId === 'reasoning_stop_continue_flow') {
+       // Guard wants to continue execution, return followup
+       const followup = guardResult.execution.followup;
+        // Guard has followup, let engine continue processing
+        engineResult = guardResult;
+     }
+     if (guardFlowId === 'reasoning_stop_finalize_flow') {
+        // Guard finalized, allow stop
+        logProgress(5, 5, 'completed (reasoning_stop_finalize)', { flowId: guardFlowId });
+        return {
+          chat: guardResult.finalChatResponse,
+          executed: true,
+          flowId: guardFlowId
+        };
+      }
+    }
+  }
+
+// StopMessage owns a dedicated orchestration skeleton:
+ // same trigger/processing semantics as before, but isolated from the generic servertool queue.
+  engineResult = await runEngine({
+   disableToolCallHandlers: true,
+   includeAutoHookIds: ['stop_message_auto']
+ });
   if (engineResult.mode === 'passthrough' || !engineResult.execution) {
     engineResult = await runEngine({
       excludeAutoHookIds: ['stop_message_auto']

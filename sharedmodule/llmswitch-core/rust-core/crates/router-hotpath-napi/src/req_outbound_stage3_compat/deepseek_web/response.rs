@@ -1,6 +1,8 @@
 use serde_json::Value;
 
-use crate::resp_process_stage1_tool_governance::{govern_response, ToolGovernanceInput};
+use crate::resp_process_stage1_tool_governance::{
+    govern_response, harvest_text_tool_calls_from_payload, ToolGovernanceInput,
+};
 
 use self::envelope::normalize_deepseek_business_envelope;
 use self::tool_state::{
@@ -16,6 +18,25 @@ use super::AdapterContext;
 mod envelope;
 mod tool_state;
 
+fn set_skip_global_text_harvest(payload: &mut Value) {
+    let Some(root) = payload.as_object_mut() else {
+        return;
+    };
+    root.insert(
+        "__rcc_tool_governance".to_string(),
+        serde_json::json!({
+            "skipTextHarvest": true
+        }),
+    );
+}
+
+fn strip_skip_global_text_harvest(payload: &mut Value) {
+    let Some(root) = payload.as_object_mut() else {
+        return;
+    };
+    root.remove("__rcc_tool_governance");
+}
+
 pub(crate) fn apply_deepseek_web_response_compat(
     payload: Value,
     adapter_context: &AdapterContext,
@@ -23,6 +44,8 @@ pub(crate) fn apply_deepseek_web_response_compat(
     let mut normalized = normalize_deepseek_business_envelope(payload)?;
     let harvested_function_results = harvest_function_results_markup(&mut normalized);
     let before_count = count_tool_calls_from_choices(&normalized);
+    harvest_text_tool_calls_from_payload(&mut normalized);
+    set_skip_global_text_harvest(&mut normalized);
 
     let request_id = adapter_context
         .request_id
@@ -38,7 +61,10 @@ pub(crate) fn apply_deepseek_web_response_compat(
         request_id,
     }) {
         Ok(output) => output.governed_payload,
-        Err(_) => normalized,
+        Err(_) => {
+            strip_skip_global_text_harvest(&mut normalized);
+            normalized
+        }
     };
     let (strict_tool_required, text_tool_fallback) = resolve_deepseek_options(adapter_context);
     ensure_finish_reason_tool_calls(&mut governed);

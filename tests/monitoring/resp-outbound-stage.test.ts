@@ -110,15 +110,57 @@ describe('resp_outbound stages snapshot payloads', () => {
     }) as any;
 
     const message = clientPayload?.choices?.[0]?.message;
-    expect(message?.reasoning).toBe('再检查代码路径');
+    expect(message?.reasoning).toEqual({
+      summary: [{ type: 'summary_text', text: '先确认目标' }],
+      content: [{ type: 'reasoning_text', text: '再检查代码路径' }],
+      encrypted_content: 'opaque-sig'
+    });
     expect(message?.reasoning_content).toBe('再检查代码路径');
+    expect(message?.reasoning_details).toEqual([
+      '[summary_text] 先确认目标',
+      '[reasoning_text] 再检查代码路径',
+      '[reasoning.encrypted_content] opaque-sig'
+    ]);
+    expect(message?.reasoning_details?.join('')).toContain('先确认目标');
+    expect(message?.reasoning_details?.join('')).toContain('再检查代码路径');
+    expect(clientPayload?.choices?.[0]?.finish_reason).toBe('stop');
+  });
+
+  it('keeps reasoning details joinable when legacy payload carried object entries', () => {
+    const clientPayload = runRespOutboundStage1ClientRemap({
+      payload: {
+        id: 'chatcmpl_reasoning_legacy_details',
+        object: 'chat.completion',
+        created: 1730000002,
+        model: 'qwen3.6-plus',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: '',
+              reasoning_content: '先确认目标再检查代码路径',
+              reasoning_details: [
+                { type: 'summary_text', text: '先确认目标' },
+                { type: 'reasoning_text', text: '再检查代码路径' }
+              ]
+            }
+          }
+        ]
+      } as any,
+      clientProtocol: 'openai-chat',
+      requestId: 'req-openai-chat-reasoning-legacy-details'
+    }) as any;
+
+    const message = clientPayload?.choices?.[0]?.message;
     expect(Array.isArray(message?.reasoning_details)).toBe(true);
     expect(message?.reasoning_details).toEqual([
-      { type: 'summary_text', text: '先确认目标' },
-      { type: 'reasoning_text', text: '再检查代码路径' },
-      { type: 'reasoning.encrypted_content', encrypted_content: 'opaque-sig' }
+      '[reasoning_text] 先确认目标再检查代码路径'
     ]);
-    expect(clientPayload?.choices?.[0]?.finish_reason).toBe('stop');
+    expect(message?.reasoning_details?.every((entry: unknown) => typeof entry === 'string')).toBe(true);
+    expect(() => message?.reasoning_details?.join('')).not.toThrow();
+    expect(message?.reasoning_details?.join('')).toContain('先确认目标再检查代码路径');
   });
 
   it('returns stream and records payload when streaming is enabled', async () => {
