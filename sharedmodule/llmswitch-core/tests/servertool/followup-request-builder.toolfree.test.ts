@@ -116,7 +116,7 @@ describe('servertool followup request builder', () => {
     expect(followup.messages[2]).toEqual({ role: 'user', content: '继续' });
   });
 
-  test('ensure_standard_tools injects review schema with strict required fields', () => {
+  test('ensure_standard_tools does not synthesize fake tools when captured seed has none', () => {
     const capturedChatRequest: any = {
       model: 'gpt-test',
       messages: [{ role: 'user', content: 'review this change' }]
@@ -130,11 +130,33 @@ describe('servertool followup request builder', () => {
 
     expect(followup).toBeTruthy();
     expect(Array.isArray(followup.tools)).toBe(true);
-    const reviewTool = (followup.tools as any[]).find(
-      (tool) => tool?.type === 'function' && tool?.function?.name === 'review'
-    );
-    expect(reviewTool).toBeTruthy();
-    expect(reviewTool.function.parameters?.required).toEqual(expect.arrayContaining(['goal', 'context', 'focus']));
+    expect(followup.tools).toHaveLength(0);
+  });
+
+  test('ensure_standard_tools only appends reasoning.stop onto existing real tools', () => {
+    const capturedChatRequest: any = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: '继续执行' }],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: { type: 'object', properties: { cmd: { type: 'string' } } }
+          }
+        }
+      ]
+    };
+
+    const followup: any = buildServerToolFollowupChatPayloadFromInjection({
+      adapterContext: { capturedChatRequest },
+      chatResponse: { id: 'resp', choices: [] } as any,
+      injection: { ops: [{ op: 'ensure_standard_tools' }, { op: 'append_user_text', text: '继续' }] } as any
+    });
+
+    expect(followup).toBeTruthy();
+    expect(Array.isArray(followup.tools)).toBe(true);
+    expect((followup.tools as any[]).map((tool) => tool?.function?.name)).toEqual(['exec_command']);
   });
 
   test('falls back to adapterContext.modelId when captured model is missing', () => {

@@ -188,6 +188,10 @@ function isReasoningStopContinueFlow(flowId: unknown): boolean {
   return typeof flowId === 'string' && flowId.trim() === 'reasoning_stop_continue_flow';
 }
 
+function isReasoningStopGuardFlow(flowId: unknown): boolean {
+  return typeof flowId === 'string' && flowId.trim() === 'reasoning_stop_guard_flow';
+}
+
 function shouldSoftSkipReasoningStopContinueFollowup(args: {
   flowId?: string;
   upstreamCode?: string;
@@ -195,24 +199,30 @@ function shouldSoftSkipReasoningStopContinueFollowup(args: {
   reason?: string;
   errorMessage?: string;
 }): boolean {
-  if (!isReasoningStopContinueFlow(args.flowId)) {
+  if (!isReasoningStopContinueFlow(args.flowId) && !isReasoningStopGuardFlow(args.flowId)) {
     return false;
   }
   const upstreamCode = typeof args.upstreamCode === 'string' ? args.upstreamCode.trim().toUpperCase() : '';
   const reason = typeof args.reason === 'string' ? args.reason.trim().toLowerCase() : '';
   const errorMessage = typeof args.errorMessage === 'string' ? args.errorMessage.trim().toLowerCase() : '';
   const upstreamStatus = typeof args.upstreamStatus === 'number' ? Math.floor(args.upstreamStatus) : undefined;
-  if (upstreamStatus === 400) {
+  // Soft skip on transient errors: HTTP_429 (rate limit), HTTP_5xx (server error), HTTP_400 (invalid params)
+  // These are typically quota/infrastructure issues that retrying won't solve
+  if (upstreamStatus === 400 || upstreamStatus === 429 || (upstreamStatus >= 500 && upstreamStatus < 600)) {
     return true;
   }
-  if (upstreamCode === 'INVALID_PARAMETER_ERROR' || upstreamCode === 'HTTP_400') {
+  if (upstreamCode === 'INVALID_PARAMETER_ERROR' || upstreamCode === 'HTTP_400' || upstreamCode === 'HTTP_429' || upstreamCode === 'INSUFFICIENT_QUOTA') {
     return true;
   }
   if (
     reason.includes('invalid_parameter_error')
     || reason.includes('http_400')
+    || reason.includes('http_429')
     || reason.includes('http 400')
+    || reason.includes('insufficient_quota')
+    || reason.includes('sse_to_json_error')
     || errorMessage.includes('invalid_parameter_error')
+    || errorMessage.includes('sse_to_json_error')
   ) {
     return true;
   }
@@ -667,7 +677,6 @@ export async function runServerToolOrchestration(
       reasoning_stop_flow: 'reasoning.stop',
       reasoning_stop_guard_flow: 'reasoning_stop_guard',
       reasoning_stop_finalize_flow: 'reasoning_stop_finalize',
-      review_flow: 'review',
       stop_message_flow: 'stop_message_auto',
       apply_patch_guard: 'apply_patch_guard',
       exec_command_guard: 'exec_command_guard',
@@ -1093,7 +1102,6 @@ export async function runServerToolOrchestration(
   const isStopMessageFlow = engineResult.execution.flowId === 'stop_message_flow';
   const isClockHoldFlow = engineResult.execution.flowId === 'clock_hold_flow';
   const isContinueExecutionFlow = engineResult.execution.flowId === 'continue_execution_flow';
-  const isReviewFlow = engineResult.execution.flowId === 'review_flow';
   const isApplyPatchGuard = engineResult.execution.flowId === 'apply_patch_guard';
   const isExecCommandGuard = engineResult.execution.flowId === 'exec_command_guard';
   const isReasoningOnlyContinueFlow = engineResult.execution.flowId === 'reasoning_only_continue_flow';
@@ -1214,28 +1222,8 @@ export async function runServerToolOrchestration(
     stream: false,
     ...(engineResult.execution.followup.metadata ?? {})
   };
-  const forceReenterFollowup = isReviewFlow;
   const forceTmuxClientInjectFollowup =
     isClockHoldFlow || engineResult.execution.flowId === 'heartbeat_flow';
-
-  if (forceReenterFollowup && readClientInjectOnly(metadata)) {
-    const reenterText = normalizeClientInjectText(
-      (metadata as Record<string, unknown>).clientInjectText,
-      '继续执行'
-    );
-    followupPayloadRaw = buildServerToolFollowupChatPayloadFromInjection({
-      adapterContext: options.adapterContext,
-      chatResponse: engineResult.finalChatResponse,
-      injection: {
-        ops: [
-          { op: 'append_assistant_message', required: false },
-          { op: 'append_user_text', text: reenterText }
-        ]
-      }
-    });
-    delete (metadata as Record<string, unknown>).clientInjectOnly;
-    delete (metadata as Record<string, unknown>).clientInjectText;
-  }
 
   if (forceTmuxClientInjectFollowup && !readClientInjectOnly(metadata)) {
     const clientInjectText = normalizeClientInjectText(
@@ -1275,7 +1263,7 @@ export async function runServerToolOrchestration(
   // For stateful auto-followups (e.g. stop_message_flow / clock_hold_flow / continue_execution_flow),
   // keep the same providerKey/alias.
   // Otherwise the followup requestId suffix would cause round-robin alias switching and compatibility drift.
-  if (isStopMessageFlow || isClockHoldFlow || isContinueExecutionFlow || isReviewFlow) {
+  if (isStopMessageFlow || isClockHoldFlow || isContinueExecutionFlow) {
     const providerKeyRaw = (options.adapterContext as unknown as { providerKey?: unknown }).providerKey;
     const providerKey =
       typeof providerKeyRaw === 'string' && providerKeyRaw.trim().length ? providerKeyRaw.trim() : '';

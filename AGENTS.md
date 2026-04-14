@@ -2,10 +2,10 @@
 
 ## 索引概要
 - L1-L9 `purpose`：项目 AGENTS 仅保留入口和硬护栏。
-- L11-L25 `hard-guards`：不可违背的项目级底线。
-- L27-L42 `route-map`：分类路由（文档路径 + 作用）。
-- L44-L51 `execution-flow`：任务执行顺序。
-- L53-L57 `maintenance`：维护原则。
+- L11-L27 `hard-guards`：不可违背的项目级底线。
+- L29-L44 `route-map`：分类路由（文档路径 + 作用）。
+- L46-L53 `execution-flow`：任务执行顺序。
+- L55-L59 `maintenance`：维护原则。
 
 ## 项目硬护栏（Hard Guards）
 1. **单一路径真源**：`HTTP server -> llmswitch-core Hub Pipeline -> Provider V2 -> upstream`，禁止旁路。
@@ -19,6 +19,8 @@
 9. **真实 payload 不可裁剪**：请求/响应在传输链路中的真实 payload 不得被裁剪或改写语义；性能优化只能发生在算法/处理路径。允许裁剪内部调试、快照、观测数据，不得影响真实传输内容。
 10. **技能沉淀规则（按需精华更新）**：仅当出现新的可复用经验、或发现现有规则需要修正时，更新本项目 local skills（如 `.agents/skills/*/SKILL.md`）；内容必须是“经验精华”（可复用规则/反模式/触发信号/边界条件），可一两句，禁止流水账式过程记录。
 11. **文本 harvest 容器优先**：文本工具收割必须先锁定显式 wrapper/container（如 RCC heredoc / XML 顶层壳）并仅解析顶层工具壳；禁止解析 shell/patch 正文、禁止凭正文猜工具。
+12. **stopless / reasoning.stop 禁止伪造工具面**：严禁为了逼出 `reasoning.stop` 而缩减、替换或伪造 followup tools；禁止 `replace_tools`、`force_tool_choice`、`only reasoning.stop`、补“标准假工具”、注入“工具缺失/只允许自查”文案。只能保留真实 tools，并坚持“未调用 `reasoning.stop` 不得停止”。
+13. **禁止未授权扩 scope**：未获 Jason 明确要求，不主动附加额外目标或动作（如顺手加约束、加提示词、加兜底、加测试、build/install/restart、提交/清理等）；只做当前被要求的事，并先回报证据再推进下一步。
 
 ## 分类路由（路径 + 作用）
 1. 入口总览：`docs/agent-routing/00-entry-routing.md`

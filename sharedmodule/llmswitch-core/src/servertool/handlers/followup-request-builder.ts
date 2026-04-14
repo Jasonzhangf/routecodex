@@ -1,4 +1,4 @@
-import type { JsonObject } from '../../conversion/hub/types/json.js';
+import type { JsonObject, JsonValue } from '../../conversion/hub/types/json.js';
 import {
   buildChatRequestFromResponses,
   captureResponsesContext
@@ -365,90 +365,17 @@ function shouldIncludeReasoningStopToolFromOps(ops: ServerToolFollowupInjectionP
   return false;
 }
 
-function buildStandardFollowupTools(options?: { includeReasoningStopTool?: boolean }): JsonObject[] {
-  // Keep this list minimal and stable. Used only as a best-effort fallback when a followup hop
-  // would otherwise have no tools at all (which can cause tool-based clients to "break" mid-session).
-  const tools: JsonObject[] = [
-    {
-      type: 'function',
-      function: {
-        name: 'shell',
-        description: 'Runs a shell command and returns its output.',
-        parameters: {
-          type: 'object',
-          properties: {
-            command: { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
-            workdir: { type: 'string' }
-          },
-          required: ['command'],
-          additionalProperties: false
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'exec_command',
-        description: 'Execute a command in a PTY and return output.',
-        parameters: {
-          type: 'object',
-          properties: {
-            cmd: { type: 'string' },
-            workdir: { type: 'string' },
-            timeout_ms: { type: 'number' },
-            max_output_tokens: { type: 'number' },
-            yield_time_ms: { type: 'number' }
-          },
-          required: ['cmd'],
-          additionalProperties: false
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'review',
-        description:
-          'Independent reviewer handoff. Reviewer must first verify code against the current request (target files + relevant tests/commands + evidence), then provide actionable suggestions. Do not stop immediately after this tool.',
-        parameters: {
-          type: 'object',
-          properties: {
-            goal: { type: 'string' },
-            context: { type: 'string' },
-            focus: { type: 'string' }
-          },
-          required: ['goal', 'context', 'focus'],
-          additionalProperties: false
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'apply_patch',
-        description: 'Apply a patch to repository files.',
-        parameters: {
-          type: 'object',
-          properties: {
-            patch: { type: 'string' }
-          },
-          required: ['patch'],
-          additionalProperties: false
-        }
-      }
-    }
-  ] as unknown as JsonObject[];
-  if (options?.includeReasoningStopTool === true) {
-    tools.push(cloneJson(REASONING_STOP_TOOL_DEF) as JsonObject);
-  }
-  return tools;
-}
-
 function ensureStandardToolsIfMissing(
   current: JsonObject[] | undefined,
   options?: { includeReasoningStopTool?: boolean }
 ): JsonObject[] {
   const existing = Array.isArray(current) ? (cloneJson(current) as JsonObject[]) : [];
+  if (!existing.length) {
+    // Do not synthesize a fake fallback tool surface for followup hops.
+    // Followups must preserve the real client tool set; otherwise provider-specific
+    // schema incompatibilities and fake "tool missing/tool exists" states appear.
+    return existing;
+  }
   const seen = new Set<string>();
   for (const tool of existing) {
     if (!tool || typeof tool !== 'object' || Array.isArray(tool)) continue;
@@ -456,13 +383,8 @@ function ensureStandardToolsIfMissing(
     const name = fn && typeof fn === 'object' && typeof fn.name === 'string' ? String(fn.name).trim() : '';
     if (name) seen.add(name);
   }
-  for (const tool of buildStandardFollowupTools(options)) {
-    const fn = (tool as any).function;
-    const name = fn && typeof fn === 'object' && typeof fn.name === 'string' ? String(fn.name).trim() : '';
-    if (!name) continue;
-    if (seen.has(name)) continue;
-    existing.push(tool);
-    seen.add(name);
+  if (options?.includeReasoningStopTool === true && !seen.has('reasoning.stop')) {
+    existing.push(cloneJson(REASONING_STOP_TOOL_DEF) as JsonObject);
   }
   return existing;
 }
@@ -514,16 +436,44 @@ export function buildServerToolFollowupChatPayloadFromInjection(args: {
         return name === 'reasoning.stop';
       })
     );
-  const parameters = seed.parameters ? (cloneJson(seed.parameters) as Record<string, unknown>) : undefined;
+  let parameters = seed.parameters ? (cloneJson(seed.parameters) as Record<string, unknown>) : undefined;
 
   for (const op of ops) {
     if (!op || typeof op !== 'object') continue;
+    if (op.op === 'replace_tools') {
+      const nextTools = Array.isArray((op as { tools?: unknown }).tools)
+        ? (cloneJson((op as { tools: JsonObject[] }).tools) as JsonObject[])
+        : [];
+      tools = nextTools;
+      continue;
+    }
     if (op.op === 'preserve_tools') {
       // No-op: tools are preserved by default. Kept for backward compatibility.
       continue;
     }
     if (op.op === 'ensure_standard_tools') {
       tools = ensureStandardToolsIfMissing(tools, { includeReasoningStopTool });
+      continue;
+    }
+    if (op.op === 'force_tool_choice') {
+      const rawValue = (op as { value?: unknown }).value;
+      if (!parameters) {
+        parameters = {};
+      }
+      if (rawValue === undefined) {
+        delete (parameters as { tool_choice?: unknown }).tool_choice;
+      } else {
+        (parameters as { tool_choice?: unknown }).tool_choice = cloneJson(rawValue as JsonValue);
+        if (
+          rawValue
+          && typeof rawValue === 'object'
+          && !Array.isArray(rawValue)
+          && typeof (rawValue as { type?: unknown }).type === 'string'
+          && String((rawValue as { type?: unknown }).type).trim().toLowerCase() === 'function'
+        ) {
+          (parameters as { parallel_tool_calls?: unknown }).parallel_tool_calls = false;
+        }
+      }
       continue;
     }
     if (op.op === 'trim_openai_messages') {

@@ -83,6 +83,8 @@ export interface ServerSideToolEngineOptions {
 export type ServerToolFollowupInjectionOp =
   | { op: 'preserve_tools' }
   | { op: 'ensure_standard_tools' }
+  | { op: 'replace_tools'; tools: JsonObject[] }
+  | { op: 'force_tool_choice'; value: JsonValue }
   | { op: 'append_assistant_message'; required?: boolean }
   | { op: 'append_tool_messages_from_tool_outputs'; required?: boolean }
   | { op: 'inject_system_text'; text: string }

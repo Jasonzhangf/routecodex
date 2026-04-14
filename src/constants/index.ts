@@ -56,7 +56,7 @@ export const DEFAULT_TIMEOUTS = {
 
   // Host → client (SSE bridge)
   HTTP_SSE_IDLE_MS: 900_000,               // 15 min（与 provider idle cap 对齐）
-  HTTP_SSE_TOTAL_MS: 300_000,              // 5 min（默认更激进，避免长时间占用并发与内存）
+ HTTP_SSE_TOTAL_MS: 900_000,              // 15 min（与 HTTP_SSE_IDLE_MS 对齐，避免 servertool followup 超时）
 } as const;
 
 // HTTP 协议前缀

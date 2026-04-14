@@ -18,7 +18,7 @@ export const REASONING_STOP_TOOL_DEF: JsonObject = {
   function: {
     name: 'reasoning.stop',
     description:
-      'Structured stop self-check gate. Stop is allowed only when either: (A) task is completed with completion_evidence; or (B) all feasible attempts are exhausted and the task is irrecoverably blocked, with cannot_complete_reason + blocking_evidence + attempts_exhausted=true. If user input is required, also provide user_input_required=true and user_question. Required: task_goal, is_completed. If not completed but a concrete next action exists, fill next_step and continue instead of stopping.',
+      'Structured stop self-check gate. Stop is allowed only when either: (A) task is completed with completion_evidence; or (B) all feasible attempts are exhausted and the task is irrecoverably blocked, with cannot_complete_reason + blocking_evidence + attempts_exhausted=true; or (C) is_simple_question=true (simple factual question that can be answered directly). If user input is required, also provide user_input_required=true and user_question. Required: task_goal, is_completed. If not completed but a concrete next action exists, fill next_step and continue instead of stopping.',
     parameters: {
       type: 'object',
       properties: {
@@ -30,9 +30,10 @@ export const REASONING_STOP_TOOL_DEF: JsonObject = {
         attempts_exhausted: { type: 'boolean' },
         next_step: { type: 'string' },
         user_input_required: { type: 'boolean' },
-        user_question: { type: 'string' },
-        learning: { type: 'string' }
-      },
+       user_question: { type: 'string' },
+       learning: { type: 'string' },
+        is_simple_question: { type: 'boolean', description: 'True if this is a simple factual question that can be answered directly without further execution' }
+     },
       required: ['task_goal', 'is_completed'],
       additionalProperties: false
     }

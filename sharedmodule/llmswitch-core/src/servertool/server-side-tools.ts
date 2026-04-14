@@ -27,7 +27,6 @@ import './handlers/clock-auto.js';
 import './handlers/exec-command-guard.js';
 import './handlers/apply-patch-guard.js';
 import './handlers/continue-execution.js';
-import './handlers/review.js';
 import { runPreCommandHooks } from './pre-command-hooks.js';
 import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import { loadRoutingInstructionStateSync } from '../router/virtual-router/sticky-session-store.js';

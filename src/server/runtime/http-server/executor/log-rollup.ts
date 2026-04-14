@@ -120,6 +120,8 @@ type SessionRollupAgg = {
 
 const DEFAULT_WINDOW_MS = 60_000;
 const DEFAULT_MAX_BUCKETS = 4096;
+const DEFAULT_MAX_SESSION_EVENTS = 50;
+const DEFAULT_SESSION_TTL_MS = 300_000; // 5 minutes
 const DEFAULT_TOP_N = 20;
 const ANSI_RESET = '\x1b[0m';
 const ANSI_DIM = '\x1b[90m';
@@ -132,6 +134,7 @@ const ANSI_BAR = '\x1b[38;5;240m';
 const ANSI_WHITE = '\x1b[97m';
 let flushTimer: NodeJS.Timeout | undefined;
 let windowStartedAtMs = Date.now();
+let lastSessionTtlCleanAtMs = Date.now();
 
 const virtualRouterHits = new Map<string, VirtualRouterHitAgg>();
 const usageRollups = new Map<string, UsageRollupAgg>();
@@ -171,6 +174,25 @@ function resolveMaxBuckets(): number {
     return parsed;
   }
   return DEFAULT_MAX_BUCKETS;
+}
+
+
+function resolveMaxSessionEvents(): number {
+  const raw = process.env.ROUTECODEX_LOG_ROLLUP_MAX_SESSION_EVENTS ?? process.env.RCC_LOG_ROLLUP_MAX_SESSION_EVENTS;
+  const parsed = Number.parseInt(String(raw ?? '').trim(), 10);
+  if (Number.isFinite(parsed) && parsed >= 10) {
+    return parsed;
+  }
+  return DEFAULT_MAX_SESSION_EVENTS;
+}
+
+function resolveSessionTtlMs(): number {
+  const raw = process.env.ROUTECODEX_LOG_ROLLUP_SESSION_TTL_MS ?? process.env.RCC_LOG_ROLLUP_SESSION_TTL_MS;
+  const parsed = Number.parseInt(String(raw ?? '').trim(), 10);
+  if (Number.isFinite(parsed) && parsed >= 60_000) {
+    return parsed;
+  }
+  return DEFAULT_SESSION_TTL_MS;
 }
 
 function resolveTopN(): number {
@@ -224,6 +246,30 @@ function bindExitHooksOnce(): void {
   exitHookBound = true;
   process.once('beforeExit', () => flushLogRollup('beforeExit'));
   process.once('exit', () => flushLogRollup('exit'));
+}
+
+
+function cleanStaleSessions(): void {
+  const nowMs = Date.now();
+  const ttlMs = resolveSessionTtlMs();
+  const ttlThreshold = nowMs - ttlMs;
+  if (nowMs - lastSessionTtlCleanAtMs < ttlMs / 2) {
+    return;
+  }
+  lastSessionTtlCleanAtMs = nowMs;
+  for (const [sessionId, agg] of sessionRollups.entries()) {
+    const events = sessionRequestEvents.get(sessionId);
+    if (!events || events.length === 0) {
+      sessionRollups.delete(sessionId);
+      sessionRequestEvents.delete(sessionId);
+      continue;
+    }
+    const lastEventMs = events[events.length - 1]?.atMs ?? 0;
+    if (lastEventMs < ttlThreshold) {
+      sessionRollups.delete(sessionId);
+      sessionRequestEvents.delete(sessionId);
+    }
+  }
 }
 
 function clearWindow(nowMs: number): void {
@@ -454,6 +500,7 @@ function updateSessionProjectPath(sessionId: string, incomingProjectPath?: strin
 
 export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): void {
   ensureStarted();
+  cleanStaleSessions();
   if (!isRollupEnabled()) {
     return;
   }
@@ -553,6 +600,7 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
 
 export function recordUsageRollup(event: UsageRollupRecord): void {
   ensureStarted();
+  cleanStaleSessions();
   if (!isRollupEnabled()) {
     return;
   }

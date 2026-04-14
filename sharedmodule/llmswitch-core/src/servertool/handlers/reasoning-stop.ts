@@ -18,6 +18,7 @@ type ReasoningStopPayload = {
   userInputRequired?: boolean;
   userQuestion: string;
   learning?: string;  // 可选。如果本轮任务有值得沉淀的经验（成功或反复失败的教训），用 2-3 句话总结。无则留空。
+  isSimpleQuestion?: boolean;  // 可选。如果是简单事实性问题，可以直接回答，不需要进一步执行。
 };
 
 function parseToolArguments(toolCall: ToolCall): Record<string, unknown> {
@@ -239,6 +240,9 @@ function buildSummary(payload: ReasoningStopPayload): string {
   }
   if (payload.learning) {
     lines.push(`经验沉淀: ${payload.learning}`);
+  }
+  if (typeof payload.isSimpleQuestion === 'boolean') {
+    lines.push(`是否简单问题: ${payload.isSimpleQuestion ? '是' : '否'}`);
   }
   return lines.join('\n');
 }

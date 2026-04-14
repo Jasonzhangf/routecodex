@@ -1,6 +1,7 @@
 import type { JsonObject } from '../../conversion/hub/types/json.js';
 import type { ServerToolHandler, ServerToolHandlerPlan } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
+import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
 import { isStopEligibleForServerTool } from '../stop-gateway-context.js';
 import { cloneJson } from '../server-side-tools.js';
 import {
@@ -58,7 +59,8 @@ function parseReasoningStopSummary(summary: string): {
   attemptsExhausted?: boolean;
   cannotCompleteReason: string;
   blockingEvidence: string;
-  learning?: string;
+ learning?: string;
+  isSimpleQuestion?: boolean;
 } {
   const normalized = typeof summary === 'string' ? summary.trim() : '';
   if (!normalized) {
@@ -82,6 +84,7 @@ function parseReasoningStopSummary(summary: string): {
   let cannotCompleteReason = '';
   let blockingEvidence = '';
   let learning = '';
+  let isSimpleQuestion: boolean | undefined;
   for (const line of lines) {
     if (line.startsWith('用户任务目标:')) {
       taskGoal = line.slice('用户任务目标:'.length).trim();
@@ -135,8 +138,18 @@ function parseReasoningStopSummary(summary: string): {
       blockingEvidence = line.slice('阻塞证据:'.length).trim();
       continue;
     }
-    if (line.startsWith('经验沉淀:')) {
-      learning = line.slice('经验沉淀:'.length).trim();
+   if (line.startsWith('经验沉淀:')) {
+     learning = line.slice('经验沉淀:'.length).trim();
+     continue;
+   }
+    if (line.startsWith('是否简单问题:') || line.startsWith('简单问题:')) {
+      const prefix = line.startsWith('是否简单问题:') ? '是否简单问题:' : '简单问题:';
+      const value = line.slice(prefix.length).trim();
+      if (value === '是' || value === 'yes' || value === 'true') {
+        isSimpleQuestion = true;
+      } else if (value === '否' || value === 'no' || value === 'false') {
+        isSimpleQuestion = false;
+      }
       continue;
     }
   }
@@ -150,7 +163,8 @@ function parseReasoningStopSummary(summary: string): {
     attemptsExhausted,
     cannotCompleteReason,
     blockingEvidence,
-    learning
+    learning,
+    isSimpleQuestion
   };
 }
 
@@ -224,12 +238,15 @@ function buildReasoningStopFinalizedMarker(summary: string): string {
 }
 
 function buildReasoningStopFollowupOps(promptText: string): Array<Record<string, unknown>> {
-  return [
+  const ops: Array<Record<string, unknown>> = [
     { op: 'preserve_tools' },
-    { op: 'ensure_standard_tools' },
+    { op: 'ensure_standard_tools' }
+  ];
+  ops.push(
     { op: 'append_assistant_message', required: false },
     { op: 'append_user_text', text: promptText }
-  ];
+  );
+  return ops;
 }
 
 function isReasoningStopGuardEnabled(): boolean {
@@ -311,7 +328,8 @@ function logReasoningStopFinalizedMarker(args: {
     | 'completed'
     | 'blocked'
     | 'fail_count_exceeded'
-    | 'finalized_fallback';
+    | 'finalized_fallback'
+    | 'simple_question';
 }): void {
   const marker = buildReasoningStopFinalizedMarker(args.summary);
   console.log(
@@ -323,6 +341,12 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
   if (!isReasoningStopGuardEnabled()) {
     return null;
   }
+  // Skip if this is already a servertool followup (prevent infinite loop)
+  const rt = readRuntimeMetadata(ctx.adapterContext as unknown as Record<string, unknown>);
+  if ((rt as Record<string, unknown>)?.serverToolFollowup === true) {
+    return null;
+  }
+
   const stoplessMode = syncReasoningStopModeFromRequest(ctx.adapterContext);
   if (stoplessMode === 'off') {
     return null;
@@ -359,14 +383,14 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
         execution: {
           flowId: FLOW_ID_GUARD,
           followup: {
-            requestIdSuffix: ':reasoning_stop_guard',
-            entryEndpoint: ctx.entryEndpoint,
-            injection: {
+              requestIdSuffix: ':reasoning_stop_guard',
+              entryEndpoint: ctx.entryEndpoint,
+              injection: {
               ops: buildReasoningStopFollowupOps(resolveGuardPromptByMode(stoplessMode))
-            },
-            metadata: {
-              clientInjectSource: 'servertool.reasoning_stop_guard'
-            }
+              },
+              metadata: {
+                clientInjectSource: 'servertool.reasoning_stop_guard'
+              }
           }
         }
       })
@@ -404,7 +428,31 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
           };
         }
         
-        if (parsed.completed === true) {
+       if (parsed.completed === true) {
+          // Allow stop for simple questions
+          if (parsed.isSimpleQuestion === true) {
+            const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
+            logReasoningStopFinalizedMarker({
+              requestId: ctx.requestId,
+              mode: stoplessMode,
+              summary: stopState.summary,
+              reason: 'simple_question'
+            });
+            clearReasoningStopState(ctx.adapterContext);
+            resetReasoningStopFailCount(ctx.adapterContext);
+            return {
+              chatResponse: patched,
+              execution: {
+                flowId: FLOW_ID_FINALIZE,
+                context: {
+                  reasoning_stop: {
+                    finalized: true,
+                    simple_question: true
+                  }
+                }
+              }
+            };
+          }
           const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
           logReasoningStopFinalizedMarker({
             requestId: ctx.requestId,
