@@ -1,0 +1,213 @@
+import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-policy.js';
+import { parseJson, parseRecord, readNativeFunction, safeStringify } from './native-shared-conversion-semantics-core.js';
+function parseResponsesConversationResumeResult(raw) {
+    const parsed = parseRecord(raw);
+    if (!parsed) {
+        return null;
+    }
+    const payload = parsed.payload;
+    const meta = parsed.meta;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return null;
+    }
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+        return null;
+    }
+    return {
+        payload: payload,
+        meta: meta
+    };
+}
+export function pickResponsesPersistedFieldsWithNative(payload) {
+    const capability = 'pickResponsesPersistedFieldsJson';
+    const fail = (reason) => failNativeRequired(capability, reason);
+    if (isNativeDisabledByEnv()) {
+        return fail('native disabled');
+    }
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+        return fail();
+    }
+    const payloadJson = safeStringify(payload ?? null);
+    if (!payloadJson) {
+        return fail('json stringify failed');
+    }
+    try {
+        const raw = fn(payloadJson);
+        if (typeof raw !== 'string' || !raw) {
+            return fail('empty result');
+        }
+        const parsed = parseRecord(raw);
+        return parsed ?? fail('invalid payload');
+    }
+    catch (error) {
+        const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+        return fail(reason);
+    }
+}
+export function convertResponsesOutputToInputItemsWithNative(response) {
+    const capability = 'convertResponsesOutputToInputItemsJson';
+    const fail = (reason) => failNativeRequired(capability, reason);
+    if (isNativeDisabledByEnv()) {
+        return fail('native disabled');
+    }
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+        return fail();
+    }
+    const responseJson = safeStringify(response ?? null);
+    if (!responseJson) {
+        return fail('json stringify failed');
+    }
+    try {
+        const raw = fn(responseJson);
+        if (typeof raw !== 'string' || !raw) {
+            return fail('empty result');
+        }
+        const parsed = parseJson(raw);
+        if (!Array.isArray(parsed)) {
+            return fail('invalid payload');
+        }
+        return parsed.filter((entry) => !!entry && typeof entry === 'object' && !Array.isArray(entry));
+    }
+    catch (error) {
+        const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+        return fail(reason);
+    }
+}
+export function prepareResponsesConversationEntryWithNative(payload, context) {
+    const capability = 'prepareResponsesConversationEntryJson';
+    const fail = (reason) => failNativeRequired(capability, reason);
+    if (isNativeDisabledByEnv()) {
+        return fail('native disabled');
+    }
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+        return fail();
+    }
+    const payloadJson = safeStringify(payload ?? null);
+    const contextJson = safeStringify(context ?? null);
+    if (!payloadJson || !contextJson) {
+        return fail('json stringify failed');
+    }
+    try {
+        const raw = fn(payloadJson, contextJson);
+        if (typeof raw !== 'string' || !raw) {
+            return fail('empty result');
+        }
+        const parsed = parseRecord(raw);
+        if (!parsed) {
+            return fail('invalid payload');
+        }
+        const basePayload = parsed.basePayload;
+        const input = parsed.input;
+        const tools = parsed.tools;
+        if (!basePayload || typeof basePayload !== 'object' || Array.isArray(basePayload) || !Array.isArray(input)) {
+            return fail('invalid payload');
+        }
+        return {
+            basePayload: basePayload,
+            input: input.filter((entry) => !!entry && typeof entry === 'object' && !Array.isArray(entry)),
+            tools: Array.isArray(tools)
+                ? tools.filter((entry) => !!entry && typeof entry === 'object' && !Array.isArray(entry))
+                : undefined
+        };
+    }
+    catch (error) {
+        const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+        return fail(reason);
+    }
+}
+export function resumeResponsesConversationPayloadWithNative(entry, responseId, submitPayload, requestId) {
+    const capability = 'resumeResponsesConversationPayloadJson';
+    const fail = (reason) => failNativeRequired(capability, reason);
+    if (isNativeDisabledByEnv()) {
+        return fail('native disabled');
+    }
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+        return fail();
+    }
+    const entryJson = safeStringify(entry ?? null);
+    const submitPayloadJson = safeStringify(submitPayload ?? null);
+    if (!entryJson || !submitPayloadJson) {
+        return fail('json stringify failed');
+    }
+    try {
+        const raw = fn(entryJson, String(responseId ?? ''), submitPayloadJson, requestId);
+        if (typeof raw !== 'string' || !raw) {
+            return fail('empty result');
+        }
+        const parsed = parseResponsesConversationResumeResult(raw);
+        return parsed ?? fail('invalid payload');
+    }
+    catch (error) {
+        const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+        return fail(reason);
+    }
+}
+export function enforceChatBudgetWithNative(chat, allowedBytes, systemTextLimit) {
+    const capability = 'enforceChatBudgetJson';
+    const fail = (reason) => failNativeRequired(capability, reason);
+    if (isNativeDisabledByEnv()) {
+        return fail('native disabled');
+    }
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+        return fail();
+    }
+    const chatJson = safeStringify(chat ?? null);
+    if (!chatJson) {
+        return fail('json stringify failed');
+    }
+    try {
+        const raw = fn(chatJson, Number(allowedBytes), Number(systemTextLimit));
+        if (typeof raw !== 'string' || !raw) {
+            return fail('empty result');
+        }
+        const parsed = parseJson(raw);
+        return parsed ?? fail('invalid payload');
+    }
+    catch (error) {
+        const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+        return fail(reason);
+    }
+}
+export function resolveBudgetForModelWithNative(modelId, fallback) {
+    const capability = 'resolveBudgetForModelJson';
+    const fail = (reason) => failNativeRequired(capability, reason);
+    if (isNativeDisabledByEnv()) {
+        return fail('native disabled');
+    }
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+        return fail();
+    }
+    const fallbackJson = safeStringify(fallback ?? null);
+    if (!fallbackJson) {
+        return fail('json stringify failed');
+    }
+    try {
+        const raw = fn(String(modelId ?? ''), fallbackJson);
+        if (typeof raw !== 'string' || !raw) {
+            return fail('empty result');
+        }
+        const parsed = parseRecord(raw);
+        if (!parsed) {
+            return fail('invalid payload');
+        }
+        const maxBytes = Number(parsed.maxBytes);
+        const safetyRatio = Number(parsed.safetyRatio);
+        const allowedBytes = Number(parsed.allowedBytes);
+        const source = typeof parsed.source === 'string' ? parsed.source : 'unknown';
+        if (!Number.isFinite(maxBytes) || !Number.isFinite(safetyRatio) || !Number.isFinite(allowedBytes)) {
+            return fail('invalid payload');
+        }
+        return { maxBytes, safetyRatio, allowedBytes, source };
+    }
+    catch (error) {
+        const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+        return fail(reason);
+    }
+}
+//# sourceMappingURL=native-shared-conversion-semantics-responses.js.map

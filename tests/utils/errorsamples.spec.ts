@@ -4,7 +4,11 @@ import path from 'node:path';
 
 import { describe, expect, it } from '@jest/globals';
 
-import { writeErrorsampleJson } from '../../src/utils/errorsamples.js';
+import {
+  __flushErrorsampleQueueForTests,
+  __resetErrorsampleQueueForTests,
+  writeErrorsampleJson
+} from '../../src/utils/errorsamples.js';
 
 const ENV_KEYS = [
   'RCC_ERRORSAMPLES_DIR',
@@ -22,7 +26,11 @@ const ENV_KEYS = [
   'ROUTECODEX_ERRORSAMPLE_CLIENT_TOOL_MAX_SAMPLE_BYTES',
   'RCC_ERRORSAMPLE_CLIENT_TOOL_MAX_SAMPLE_BYTES',
   'ROUTECODEX_ERRORSAMPLE_PRUNE_INTERVAL_MS',
-  'RCC_ERRORSAMPLE_PRUNE_INTERVAL_MS'
+  'RCC_ERRORSAMPLE_PRUNE_INTERVAL_MS',
+  'ROUTECODEX_ERRORSAMPLE_QUEUE_MAX_ITEMS',
+  'RCC_ERRORSAMPLE_QUEUE_MAX_ITEMS',
+  'ROUTECODEX_ERRORSAMPLE_QUEUE_MEMORY_BUDGET_BYTES',
+  'RCC_ERRORSAMPLE_QUEUE_MEMORY_BUDGET_BYTES'
 ] as const;
 
 async function listFiles(dir: string): Promise<string[]> {
@@ -48,6 +56,7 @@ describe('errorsample writer safeguards', () => {
         kind: 'chat_process.req.stage2.semantic_map.exec_command',
         payload: { text: 'x'.repeat(40_000) }
       });
+      await __flushErrorsampleQueueForTests();
       const text = await fs.readFile(file, 'utf8');
       const json = JSON.parse(text) as Record<string, unknown>;
 
@@ -63,6 +72,7 @@ describe('errorsample writer safeguards', () => {
           process.env[key] = value;
         }
       }
+      __resetErrorsampleQueueForTests();
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
@@ -86,6 +96,7 @@ describe('errorsample writer safeguards', () => {
           payload: { i, msg: `sample-${i}` }
         });
       }
+      await __flushErrorsampleQueueForTests();
 
       const groupDir = path.join(tmp, 'client-tool-error');
       const files = await listFiles(groupDir);
@@ -99,6 +110,7 @@ describe('errorsample writer safeguards', () => {
           process.env[key] = value;
         }
       }
+      __resetErrorsampleQueueForTests();
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
@@ -122,6 +134,7 @@ describe('errorsample writer safeguards', () => {
           payload: { i, msg: `sample-${i}` }
         });
       }
+      await __flushErrorsampleQueueForTests();
 
       const groupDir = path.join(tmp, 'provider-error');
       const files = await listFiles(groupDir);
@@ -135,6 +148,7 @@ describe('errorsample writer safeguards', () => {
           process.env[key] = value;
         }
       }
+      __resetErrorsampleQueueForTests();
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
@@ -160,6 +174,7 @@ describe('errorsample writer safeguards', () => {
           note: 'api_key=raw-secret-key-value'
         }
       });
+      await __flushErrorsampleQueueForTests();
 
       const text = await fs.readFile(file, 'utf8');
       expect(text).not.toContain('raw-secret-key-value');
@@ -175,7 +190,108 @@ describe('errorsample writer safeguards', () => {
           process.env[key] = value;
         }
       }
+      __resetErrorsampleQueueForTests();
       await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('skips transient 429/502 errorsamples', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-errorsamples-skip-transient-'));
+    const envBackup = new Map<string, string | undefined>();
+    for (const key of ENV_KEYS) {
+      envBackup.set(key, process.env[key]);
+    }
+    try {
+      process.env.RCC_ERRORSAMPLES_DIR = tmp;
+      process.env.ROUTECODEX_ERRORSAMPLE_PRUNE_INTERVAL_MS = '0';
+
+      const first = await writeErrorsampleJson({
+        group: 'provider-error',
+        kind: 'provider-error.429',
+        payload: {
+          statusCode: 429,
+          error: { message: 'rate limited' }
+        }
+      });
+      const second = await writeErrorsampleJson({
+        group: 'provider-error',
+        kind: 'provider-error.502',
+        payload: {
+          error: { status: 502, message: 'bad gateway' }
+        }
+      });
+
+      expect(first).toBeNull();
+      expect(second).toBeNull();
+      const files = await listFiles(path.join(tmp, 'provider-error'));
+      expect(files).toHaveLength(0);
+    } finally {
+      for (const key of ENV_KEYS) {
+        const value = envBackup.get(key);
+        if (value == null) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+      __resetErrorsampleQueueForTests();
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('drops oldest pending errorsamples when the queue is full', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-errorsamples-queue-'));
+    const envBackup = new Map<string, string | undefined>();
+    for (const key of ENV_KEYS) {
+      envBackup.set(key, process.env[key]);
+    }
+    try {
+      process.env.RCC_ERRORSAMPLES_DIR = tmp;
+      process.env.ROUTECODEX_ERRORSAMPLE_PRUNE_INTERVAL_MS = '0';
+      process.env.ROUTECODEX_ERRORSAMPLE_QUEUE_MAX_ITEMS = '2';
+      process.env.ROUTECODEX_ERRORSAMPLE_QUEUE_MEMORY_BUDGET_BYTES = '1048576';
+
+      const p1 = writeErrorsampleJson({
+        group: 'provider-error',
+        kind: 'provider-error.1',
+        payload: { seq: 1 }
+      });
+      const p2 = writeErrorsampleJson({
+        group: 'provider-error',
+        kind: 'provider-error.2',
+        payload: { seq: 2 }
+      });
+      const p3 = writeErrorsampleJson({
+        group: 'provider-error',
+        kind: 'provider-error.3',
+        payload: { seq: 3 }
+      });
+      const p4 = writeErrorsampleJson({
+        group: 'provider-error',
+        kind: 'provider-error.4',
+        payload: { seq: 4 }
+      });
+
+      const [r1, r2, r3, r4] = await Promise.all([p1, p2, p3, p4]);
+      await __flushErrorsampleQueueForTests();
+
+      expect(r1).toBeNull();
+      expect(r2).toBeNull();
+      expect(typeof r3).toBe('string');
+      expect(typeof r4).toBe('string');
+      const files = await listFiles(path.join(tmp, 'provider-error'));
+      expect(files).toHaveLength(2);
+    } finally {
+      for (const key of ENV_KEYS) {
+        const value = envBackup.get(key);
+        if (value == null) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+      await fs.rm(tmp, { recursive: true, force: true });
+      __resetErrorsampleQueueForTests();
     }
   });
 });

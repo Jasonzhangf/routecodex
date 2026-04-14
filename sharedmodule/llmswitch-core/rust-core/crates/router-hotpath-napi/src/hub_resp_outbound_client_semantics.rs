@@ -1401,18 +1401,6 @@ fn repair_tool_args_by_schema_keys(
     let wants = properties.iter().cloned().collect::<HashSet<String>>();
     let mut out = record.clone();
 
-    if tool_name == "exec_command" {
-        if wants.contains("cmd") && out.get("command").is_some() && out.get("cmd").is_none() {
-            if let Some(value) = out.get("command").cloned() {
-                out.insert("cmd".to_string(), value);
-            }
-        }
-        if wants.contains("command") && out.get("cmd").is_some() && out.get("command").is_none() {
-            if let Some(value) = out.get("cmd").cloned() {
-                out.insert("command".to_string(), value);
-            }
-        }
-    }
     if tool_name == "write_stdin" {
         if wants.contains("chars") && out.get("text").is_some() && out.get("chars").is_none() {
             if let Some(value) = out.get("text").cloned() {
@@ -1611,14 +1599,19 @@ fn normalize_call_args(tool_name: &str, args_raw: &Value, spec: &ClientToolDefin
     let Some(record) = parsed.as_object() else {
         return args_raw.clone();
     };
-    let Some(repaired) = repair_tool_args_by_schema_keys(
-        tool_name,
-        record,
-        required.as_slice(),
-        properties.as_slice(),
-        additional_properties,
-    ) else {
-        return args_raw.clone();
+    let repaired = if tool_name == "exec_command" {
+        record.clone()
+    } else {
+        let Some(repaired) = repair_tool_args_by_schema_keys(
+            tool_name,
+            record,
+            required.as_slice(),
+            properties.as_slice(),
+            additional_properties,
+        ) else {
+            return args_raw.clone();
+        };
+        repaired
     };
     Value::String(
         serde_json::to_string(&Value::Object(repaired)).unwrap_or_else(|_| "{}".to_string()),
@@ -3465,6 +3458,50 @@ mod tests {
             normalized["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
                 ["name"],
             Value::String("mailbox.status".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_responses_tool_call_arguments_for_client_does_not_guess_exec_command_aliases() {
+        let responses_payload = serde_json::json!({
+            "required_action": {
+                "type": "submit_tool_outputs",
+                "submit_tool_outputs": {
+                    "tool_calls": [
+                        {
+                            "name": "exec_command",
+                            "arguments": "{\"command\":\"pwd\"}",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"command\":\"pwd\"}"
+                            }
+                        }
+                    ]
+                }
+            }
+        });
+        let tools_raw = serde_json::json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "exec_command",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "cmd": { "type": "string" }
+                        },
+                        "required": ["cmd"],
+                        "additionalProperties": false
+                    }
+                }
+            }
+        ]);
+        let normalized =
+            normalize_responses_tool_call_arguments_for_client(&responses_payload, &tools_raw);
+        assert_eq!(
+            normalized["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
+                ["arguments"],
+            Value::String("{\"command\":\"pwd\"}".to_string())
         );
     }
 

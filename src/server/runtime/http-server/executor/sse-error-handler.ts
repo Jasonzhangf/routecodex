@@ -39,6 +39,10 @@ function findSseWrapperError(
     if (normalized) {
       return normalized;
     }
+    const rawNormalized = normalizeSseWrapperRawValue(record.raw, depth);
+    if (rawNormalized) {
+      return rawNormalized;
+    }
   }
 
   const nestedKeys = ['body', 'data', 'payload', 'response'];
@@ -54,6 +58,43 @@ function findSseWrapperError(
   }
 
   return undefined;
+}
+
+function normalizeSseWrapperRawValue(
+  value: unknown,
+  depth: number
+): SseWrapperErrorInfo | undefined {
+  if (typeof value !== 'string' || depth < 0) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.startsWith('data:')) {
+    return undefined;
+  }
+  if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return undefined;
+    }
+    const record = parsed as Record<string, unknown>;
+    const success = record.success;
+    const hasErrorSignals =
+      success === false ||
+      record.error !== undefined ||
+      record.code !== undefined ||
+      record.message !== undefined ||
+      record.status !== undefined ||
+      record.statusCode !== undefined;
+    if (!hasErrorSignals) {
+      return undefined;
+    }
+    return normalizeSseWrapperErrorValue(record, depth - 1);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

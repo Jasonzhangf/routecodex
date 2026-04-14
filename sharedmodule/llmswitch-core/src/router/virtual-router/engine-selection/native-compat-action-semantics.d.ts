@@ -1,0 +1,33 @@
+export declare function normalizeResponsePayloadWithNative(payload: Record<string, unknown>, config?: Record<string, unknown>): Record<string, unknown>;
+export declare function validateResponsePayloadWithNative(payload: Record<string, unknown>): void;
+export declare function applyRequestRulesWithNative(payload: Record<string, unknown>, config?: Record<string, unknown>): Record<string, unknown>;
+export declare function applyFieldMappingsWithNative(payload: Record<string, unknown>, mappings: unknown[]): Record<string, unknown>;
+export declare function sanitizeToolSchemaGlmShellWithNative(payload: Record<string, unknown>): Record<string, unknown>;
+export declare function fixApplyPatchToolCallsWithNative(payload: {
+    messages?: Array<Record<string, unknown>>;
+    input?: Array<Record<string, unknown>>;
+}): {
+    messages: Array<Record<string, unknown>>;
+    input?: Array<Record<string, unknown>>;
+};
+export declare function applyResponseBlacklistWithNative(payload: Record<string, unknown>, config?: Record<string, unknown>): Record<string, unknown>;
+export declare function normalizeToolCallIdsWithNative(payload: Record<string, unknown>): Record<string, unknown>;
+export declare function enforceLmstudioResponsesFcToolCallIdsWithNative(payload: Record<string, unknown>): Record<string, unknown>;
+export declare function applyAnthropicClaudeCodeUserIdWithNative(payload: Record<string, unknown>, adapterContext?: Record<string, unknown>): Record<string, unknown>;
+export declare function applyGeminiWebSearchRequestCompatWithNative(payload: Record<string, unknown>, adapterContext?: Record<string, unknown>): Record<string, unknown>;
+export declare function prepareAntigravityThoughtSignatureForGeminiRequestWithNative(payload: Record<string, unknown>, adapterContext?: Record<string, unknown>): Record<string, unknown>;
+export declare function applyIflowToolTextFallbackWithNative(payload: Record<string, unknown>, adapterContext?: Record<string, unknown>, models?: string[]): Record<string, unknown>;
+export declare function applyLmstudioResponsesInputStringifyWithNative(payload: Record<string, unknown>, adapterContext?: Record<string, unknown>): Record<string, unknown>;
+export declare function applyToolTextRequestGuidanceWithNative(payload: Record<string, unknown>, config?: Record<string, unknown>): Record<string, unknown>;
+export declare function harvestToolCallsFromTextWithNative(payload: Record<string, unknown>, options?: Record<string, unknown>): Record<string, unknown>;
+export declare function applyUniversalShapeRequestFilterWithNative(payload: Record<string, unknown>, config?: Record<string, unknown>): Record<string, unknown>;
+export declare function applyUniversalShapeResponseFilterWithNative(payload: Record<string, unknown>, config?: Record<string, unknown>, adapterContext?: Record<string, unknown>): Record<string, unknown>;
+export declare function buildOpenAIChatFromAnthropicWithNative(payload: Record<string, unknown>, options?: Record<string, unknown>): Record<string, unknown>;
+export declare function buildAnthropicFromOpenAIChatWithNative(payload: Record<string, unknown>, options?: Record<string, unknown>): Record<string, unknown>;
+export declare function runOpenAIRequestCodecWithNative(payload: Record<string, unknown>, options?: Record<string, unknown>): Record<string, unknown>;
+export declare function runOpenAIResponseCodecWithNative(payload: Record<string, unknown>, options?: Record<string, unknown>): Record<string, unknown>;
+export declare function runResponsesOpenAIRequestCodecWithNative(payload: Record<string, unknown>, options?: Record<string, unknown>): Record<string, unknown>;
+export declare function runResponsesOpenAIResponseCodecWithNative(payload: Record<string, unknown>, context: Record<string, unknown>): Record<string, unknown>;
+export declare function runGeminiOpenAIRequestCodecWithNative(payload: Record<string, unknown>, options?: Record<string, unknown>): Record<string, unknown>;
+export declare function runGeminiOpenAIResponseCodecWithNative(payload: Record<string, unknown>, options?: Record<string, unknown>): Record<string, unknown>;
+export declare function runGeminiFromOpenAIChatCodecWithNative(payload: Record<string, unknown>, options?: Record<string, unknown>): Record<string, unknown>;

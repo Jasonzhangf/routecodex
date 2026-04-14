@@ -1,3 +1,4 @@
+use super::tool_definitions::normalize_qwen_family_tool_definitions;
 use serde_json::{Map, Value};
 
 fn coerce_text(value: &Value) -> String {
@@ -190,6 +191,9 @@ pub(crate) fn apply_qwen_request_compat(root: &Map<String, Value>) -> Value {
             "tool_choice".to_string(),
             normalize_qwen_tool_choice(tool_choice),
         );
+    }
+    if let Some(normalized_tools) = normalize_qwen_family_tool_definitions(root) {
+        qwen_request.insert("tools".to_string(), normalized_tools);
     }
     Value::Object(qwen_request)
 }

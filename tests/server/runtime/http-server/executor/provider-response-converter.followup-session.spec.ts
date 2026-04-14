@@ -2,9 +2,11 @@ import { describe, expect, it, jest } from '@jest/globals';
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
+const mockSyncReasoningStopModeFromRequest = jest.fn(() => 'off');
 const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
+  syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
 });
 
@@ -195,5 +197,67 @@ describe('provider-response-converter serverTool followup metadata', () => {
       messages: [{ role: 'user', content: 'audit project' }],
       tools: clientToolsRaw
     });
+  });
+
+  it('backfills session identifiers from originalRequest metadata before syncing stopless state', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+    mockSyncReasoningStopModeFromRequest.mockReset();
+    mockSyncReasoningStopModeFromRequest.mockImplementation(() => 'on');
+
+    mockConvertProviderResponse.mockImplementation(async ({ context }) => ({
+      body: {
+        id: 'msg_ok',
+        observedSessionId: context?.sessionId,
+        observedConversationId: context?.conversationId
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        requestId: 'req_stopless_session_backfill_1',
+        wantsStream: false,
+        response: { body: { id: 'upstream_body', choices: [] } } as any,
+        originalRequest: {
+          model: 'qwen3.6-plus',
+          input: '<**stopless:on**> hi',
+          metadata: {
+            sessionId: 'sess_stopless_1',
+            conversationId: 'conv_stopless_1'
+          }
+        },
+        pipelineMetadata: {
+          capturedChatRequest: {
+            model: 'qwen3.6-plus',
+            messages: [{ role: 'user', content: '<**stopless:on**> hi' }]
+          }
+        }
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect(mockSyncReasoningStopModeFromRequest).toHaveBeenCalledTimes(1);
+    const syncArgs = mockSyncReasoningStopModeFromRequest.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(syncArgs?.sessionId).toBe('sess_stopless_1');
+    expect(syncArgs?.conversationId).toBe('conv_stopless_1');
+    expect(mockSyncReasoningStopModeFromRequest.mock.calls[0]?.[1]).toBe('on');
+
+    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
+    const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, any>;
+    expect(bridgeArgs?.context?.sessionId).toBe('sess_stopless_1');
+    expect(bridgeArgs?.context?.conversationId).toBe('conv_stopless_1');
   });
 });

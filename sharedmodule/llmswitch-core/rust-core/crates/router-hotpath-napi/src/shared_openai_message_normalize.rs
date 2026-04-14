@@ -144,18 +144,13 @@ fn normalize_exec_like_args(fn_name: &str, args_obj: &mut Map<String, Value>) {
         return;
     }
 
+    if lowered == "exec_command" {
+        return;
+    }
+
     let normalized_cmd = read_exec_command_candidate(args_obj);
 
-    if lowered == "exec_command" {
-        if let Some(cmd) = normalized_cmd.clone() {
-            if !args_obj.contains_key("cmd") {
-                args_obj.insert("cmd".to_string(), Value::String(cmd.clone()));
-            }
-            if !args_obj.contains_key("command") {
-                args_obj.insert("command".to_string(), Value::String(cmd));
-            }
-        }
-    } else if lowered == "shell_command"
+    if lowered == "shell_command"
         && !args_obj.contains_key("command")
         && normalized_cmd.is_some()
     {
@@ -501,7 +496,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn normalize_exec_command_fills_cmd_from_command() {
+    fn normalize_exec_command_preserves_command_only_shape() {
         let tool_call = json!({
           "id": "call_1",
           "type": "function",
@@ -518,12 +513,12 @@ mod tests {
             .and_then(|v| v.as_str())
             .expect("normalized arguments");
         let args: serde_json::Value = serde_json::from_str(args_text).expect("parse args");
-        assert_eq!(args.get("cmd").and_then(|v| v.as_str()), Some("ls -la"));
+        assert_eq!(args.get("cmd").and_then(|v| v.as_str()), None);
         assert_eq!(args.get("command").and_then(|v| v.as_str()), Some("ls -la"));
     }
 
     #[test]
-    fn normalize_exec_command_fills_command_from_cmd() {
+    fn normalize_exec_command_preserves_cmd_only_shape() {
         let tool_call = json!({
           "id": "call_2",
           "type": "function",
@@ -541,7 +536,7 @@ mod tests {
             .expect("normalized arguments");
         let args: serde_json::Value = serde_json::from_str(args_text).expect("parse args");
         assert_eq!(args.get("cmd").and_then(|v| v.as_str()), Some("pwd"));
-        assert_eq!(args.get("command").and_then(|v| v.as_str()), Some("pwd"));
+        assert_eq!(args.get("command").and_then(|v| v.as_str()), None);
     }
 
     #[test]
@@ -569,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_exec_command_fills_cmd_from_input_string() {
+    fn normalize_exec_command_preserves_input_string_shape() {
         let tool_call = json!({
           "id": "call_4",
           "type": "function",
@@ -586,11 +581,8 @@ mod tests {
             .and_then(|v| v.as_str())
             .expect("normalized arguments");
         let args: serde_json::Value = serde_json::from_str(args_text).expect("parse args");
-        assert_eq!(args.get("cmd").and_then(|v| v.as_str()), Some("git status"));
-        assert_eq!(
-            args.get("command").and_then(|v| v.as_str()),
-            Some("git status")
-        );
+        assert_eq!(args.get("cmd").and_then(|v| v.as_str()), None);
+        assert_eq!(args.get("input").and_then(|v| v.as_str()), Some("git status"));
     }
 
     #[test]

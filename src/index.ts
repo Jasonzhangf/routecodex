@@ -243,6 +243,9 @@ function shouldSuppressRuntimeLogLine(text: string): boolean {
   if (text.includes('[servertool][ai-followup]')) {
     return false;
   }
+  if (text.includes('[servertool][reasoning.stop.finalized]')) {
+    return false;
+  }
   if (text.includes('[servertool][stop_compare]') || text.includes('[servertool][stop_watch]')) {
     return false;
   }

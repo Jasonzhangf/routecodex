@@ -32,8 +32,6 @@
               },
               "argumentAliases": {
                 "exec_command": {
-                  "cmd": ["cmd", "command", "input.command", "script"],
-                  "command": ["cmd", "command", "input.command", "script"],
                   "workdir": ["workdir", "cwd", "input.cwd"]
                 }
               }

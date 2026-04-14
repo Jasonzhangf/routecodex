@@ -49,6 +49,7 @@ describe('provider snapshot writer local mirror', () => {
 
   it('materializes provider-response.json locally even when hook succeeds without writing files', async () => {
     const { writeProviderSnapshot } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
+    const { __flushProviderSnapshotQueueForTests } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
     const requestId = 'req_provider_snapshot_local_mirror';
     const providerKey = 'ali-coding-plan.key1.glm-5';
 
@@ -66,6 +67,7 @@ describe('provider snapshot writer local mirror', () => {
         transport: 'upstream-stream'
       }
     });
+    await __flushProviderSnapshotQueueForTests();
 
     const filePath = path.join(
       tempDir,

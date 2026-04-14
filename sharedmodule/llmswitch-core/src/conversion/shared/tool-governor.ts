@@ -189,7 +189,7 @@ export function normalizeApplyPatchToolCallsOnResponse(chat: Unknown): Unknown {
           if (validation && validation.ok && typeof validation.normalizedArgs === 'string') {
             (fn as any).arguments = validation.normalizedArgs;
           } else if (validation && !validation.ok) {
-            (fn as any).arguments = buildBlockedApplyPatchArgs(rawArgs, validation.reason, validation.message);
+            (fn as any).arguments = argsStr;
             try {
               const reason = validation.reason ?? 'unknown';
               captureApplyPatchRegression({
@@ -425,28 +425,11 @@ function enhanceResponseToolArguments(chat: Unknown): Unknown {
               }
             }
           } else if (name === 'exec_command') {
-            const validation = validateToolCall('exec_command', repaired, validationOptions);
-            if (!validation.ok) {
-              finalStr = buildBlockedExecCommandArgs(repaired, validation.reason, validation.message);
-            } else {
-              let parsedArgs: any;
-              try {
-                parsedArgs = JSON.parse(repaired);
-              } catch (error) {
-                logToolGovernorNonBlocking('enhance_response_exec_command_parse_json', error);
-                parsedArgs = parseLenient(repaired);
-              }
-              const hasTopLevelCmd =
-                parsedArgs
-                && typeof parsedArgs === 'object'
-                && !Array.isArray(parsedArgs)
-                && typeof parsedArgs.cmd === 'string'
-                && parsedArgs.cmd.trim().length > 0;
-              finalStr =
-                hasTopLevelCmd || typeof validation.normalizedArgs !== 'string'
-                  ? repaired
-                  : validation.normalizedArgs;
-            }
+            // Response-side canonical rule:
+            // keep provider arguments shape lossless and let host/client validation
+            // reject missing canonical fields like `cmd`; do not alias-repair
+            // `command -> cmd` here.
+            finalStr = repaired;
           }
           if (fn) fn.arguments = finalStr;
         } catch (error) {

@@ -1,5 +1,5 @@
-use serde_json::{json, Map, Value};
 use regex::Regex;
+use serde_json::{json, Map, Value};
 
 use super::super::super::read_trimmed_string;
 use super::tool_guidance::wrap_tool_calls_json;
@@ -51,9 +51,15 @@ pub(super) fn strip_text_tool_wrapper_noise(raw: &str) -> String {
     let patterns = [
         r"(?is)<\|ChunkingError\|>[\s\S]*?(?:<｜end▁of▁thinking｜>|<\|end▁of▁thinking\|>|$)",
         r"(?is)<｜end▁of▁thinking｜>",
+        r"(?i)<｜Assistant｜>",
+        r"(?i)<｜User｜>",
+        r"(?i)<｜end▁of▁sentence｜>",
+        r"(?i)</turn_aborted>",
+        r"(?i)<turn_aborted>",
         r"(?im)^\s*Tool\s+[A-Za-z0-9_.-]+\s+does\s+not\s+exists\.\s*$",
         r"(?im)^\s*I cannot access your local files\.?\s*$",
         r"(?im)^\s*当前环境是沙箱隔离.*$",
+        r"(?im)^\s*\[Tool-call reminder\].*$",
     ];
     for pattern in patterns {
         let Ok(re) = Regex::new(pattern) else {
@@ -66,7 +72,7 @@ pub(super) fn strip_text_tool_wrapper_noise(raw: &str) -> String {
 
 pub(super) fn normalize_content_to_text(content: &Value) -> String {
     if let Some(raw) = content.as_str() {
-        return raw.trim().to_string();
+        return strip_text_tool_wrapper_noise(raw);
     }
     if content.is_null() {
         return String::new();
@@ -100,7 +106,7 @@ pub(super) fn normalize_content_to_text(content: &Value) -> String {
             ));
         }
     }
-    out.join("\n").trim().to_string()
+    strip_text_tool_wrapper_noise(out.join("\n").as_str())
 }
 
 pub(super) fn normalize_tool_calls_as_text(tool_calls_raw: Option<&Value>) -> String {

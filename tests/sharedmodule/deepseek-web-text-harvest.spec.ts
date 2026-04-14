@@ -114,7 +114,7 @@ describe('deepseek-web text tool-call harvest', () => {
     "tool_calls": [
       {
         "function": {
-          "arguments": "{"command":"bd --no-db ready","cmd":"bd --no-db ready"}",
+          "arguments": "{"cmd":"bd --no-db ready","command":"bd --no-db ready"}",
           "name": "exec_command",
         },
         "id": "<tool_call_id>",

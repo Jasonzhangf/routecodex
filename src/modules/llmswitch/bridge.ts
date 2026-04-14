@@ -60,6 +60,7 @@ export {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateAsync,
   saveRoutingInstructionStateSync,
+  syncReasoningStopModeFromRequest,
   extractSessionIdentifiersFromMetadata,
   getStatsCenterSafe,
   getLlmsStatsSnapshot,

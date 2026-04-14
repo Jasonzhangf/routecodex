@@ -1,4 +1,3 @@
-use regex::Regex;
 use serde_json::Value;
 
 use super::features::RoutingFeatures;
@@ -63,28 +62,17 @@ impl RoutingClassifier {
             .last_assistant_tool_category
             .clone()
             .unwrap_or_default();
-        let web_search_intent = detect_web_search_intent(&features.user_text_sample);
-        let server_tool_required = features
-            .metadata
-            .get("serverToolRequired")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let has_web_search_tool_declared = features.has_web_search_tool_declared;
         let web_search_continuation = last_tool_category == "websearch";
         let local_tool_continuation = matches!(
             last_tool_category.as_str(),
             "read" | "write" | "search" | "other"
         );
-        let web_search_from_intent = !local_tool_continuation && web_search_intent;
-        let web_search_declared_or_required =
-            !local_tool_continuation && (server_tool_required || has_web_search_tool_declared);
         let reached_long_context = features.estimated_tokens >= self.long_context_threshold_tokens;
         let latest_message_from_user = features.latest_message_from_user;
         let has_tool_activity = features.has_tools || features.has_tool_call_responses;
         let thinking_continuation = last_tool_category == "read";
-        let thinking_from_user = latest_message_from_user
-            && features.has_thinking_keyword
-            && !has_tool_activity;
+        let thinking_from_user =
+            latest_message_from_user && features.has_thinking_keyword && !has_tool_activity;
         let thinking_from_read = !thinking_from_user && thinking_continuation;
         let coding_continuation = last_tool_category == "write";
         let search_continuation = last_tool_category == "search";
@@ -124,16 +112,8 @@ impl RoutingClassifier {
         ));
         evaluation.push((
             "web_search".to_string(),
-            web_search_continuation || web_search_declared_or_required || web_search_from_intent,
-            if web_search_continuation {
-                "web_search:last-tool-websearch".to_string()
-            } else if web_search_declared_or_required && server_tool_required {
-                "web_search:servertool-required".to_string()
-            } else if web_search_declared_or_required && has_web_search_tool_declared {
-                "web_search:tool-declared".to_string()
-            } else {
-                "web_search:intent-keyword".to_string()
-            },
+            !local_tool_continuation && web_search_continuation,
+            "web_search:last-tool-websearch".to_string(),
         ));
         evaluation.push((
             "search".to_string(),
@@ -216,81 +196,6 @@ fn contains_keywords(text: &str, keywords: &[String]) -> bool {
     keywords.iter().any(|keyword| normalized.contains(keyword))
 }
 
-fn detect_web_search_intent(text: &str) -> bool {
-    if text.trim().is_empty() {
-        return false;
-    }
-    let normalized = text.to_lowercase();
-    if is_negative_web_search_context(&normalized, text) {
-        return false;
-    }
-    let direct_keywords = [
-        "web search",
-        "web_search",
-        "websearch",
-        "search the web",
-        "internet search",
-        "搜索网页",
-        "联网搜索",
-        "上网搜索",
-        "上网查",
-        "网上搜",
-        "谷歌搜索",
-        "google search",
-    ];
-    if direct_keywords
-        .iter()
-        .any(|keyword| normalized.contains(keyword))
-    {
-        return true;
-    }
-    let en_verb = ["search", "find", "lookup", "look up", "google"];
-    let en_noun = ["web", "internet", "online", "google", "bing"];
-    let has_en_verb = en_verb.iter().any(|keyword| normalized.contains(keyword));
-    let has_en_noun = en_noun.iter().any(|keyword| normalized.contains(keyword));
-    if has_en_verb && has_en_noun {
-        return true;
-    }
-    let zh_verb = ["搜索", "查找", "搜", "上网查", "上网搜", "联网查", "联网搜"];
-    let zh_noun = ["网络", "联网", "网页", "网上", "互联网", "谷歌", "百度"];
-    let has_zh_verb = zh_verb.iter().any(|keyword| text.contains(keyword));
-    let has_zh_noun = zh_noun.iter().any(|keyword| text.contains(keyword));
-    if (text.contains("上网") || text.contains("联网"))
-        && (text.contains("搜") || text.contains("查"))
-    {
-        return true;
-    }
-    if has_zh_verb && has_zh_noun {
-        return true;
-    }
-    false
-}
-
-fn is_negative_web_search_context(normalized: &str, original_text: &str) -> bool {
-    let english_patterns = [
-        Regex::new(r"prefer\s+resources?\s+over\s+web[\s_-]?search").unwrap(),
-        Regex::new(r"prefer[\s\S]{0,40}web[\s_-]?search").unwrap(),
-        Regex::new(r"do\s+not[\s\S]{0,20}web[\s_-]?search").unwrap(),
-        Regex::new(r"don't[\s\S]{0,20}web[\s_-]?search").unwrap(),
-        Regex::new(r"without[\s\S]{0,20}web[\s_-]?search").unwrap(),
-        Regex::new(r"cannot[\s\S]{0,20}web[\s_-]?search").unwrap(),
-    ];
-    if english_patterns
-        .iter()
-        .any(|pattern| pattern.is_match(normalized))
-    {
-        return true;
-    }
-    let chinese_patterns = [
-        Regex::new(r"不能.{0,20}(上网|联网|web[_ -]?search|搜索网页)").unwrap(),
-        Regex::new(r"不要.{0,20}(上网|联网|web[_ -]?search|搜索网页)").unwrap(),
-        Regex::new(r"避免.{0,20}(上网|联网|web[_ -]?search|搜索网页)").unwrap(),
-    ];
-    chinese_patterns
-        .iter()
-        .any(|pattern| pattern.is_match(original_text))
-}
-
 pub(crate) const DEFAULT_ROUTE: &str = "default";
 
 pub(crate) const ROUTE_PRIORITY: [&str; 10] = [
@@ -344,5 +249,37 @@ mod tests {
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
+    }
+
+    #[test]
+    fn server_tool_required_does_not_force_web_search_route() {
+        let features = RoutingFeatures {
+            latest_message_from_user: true,
+            has_tools: true,
+            metadata: json!({ "serverToolRequired": true }),
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_eq!(result.route_name, "tools");
+        assert!(result.reasoning.contains("tools:tool-request-detected"));
+        assert!(!result.reasoning.contains("web_search:servertool-required"));
+    }
+
+    #[test]
+    fn declared_web_search_tool_does_not_force_web_search_route_on_first_turn() {
+        let features = RoutingFeatures {
+            latest_message_from_user: true,
+            has_tools: true,
+            has_web_search_tool_declared: true,
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_eq!(result.route_name, "tools");
+        assert!(result.reasoning.contains("tools:tool-request-detected"));
+        assert!(!result.reasoning.contains("web_search:tool-declared"));
     }
 }

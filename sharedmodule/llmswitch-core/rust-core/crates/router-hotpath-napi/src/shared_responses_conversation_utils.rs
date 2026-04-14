@@ -55,30 +55,17 @@ fn read_command_from_args_map(args: &Map<String, Value>) -> Option<String> {
         read_trimmed_text(value).or_else(|| read_string_array_command(value))
     };
 
-    let direct = read_value(args.get("cmd"))
-        .or_else(|| read_value(args.get("command")))
-        .or_else(|| read_value(args.get("script")))
-        .or_else(|| read_value(args.get("toon")))
-        .or_else(|| read_value(args.get("input")))
-        .or_else(|| read_value(args.get("text")));
+    let direct = read_value(args.get("cmd"));
     if direct.is_some() {
         return direct;
     }
 
     args.get("input")
         .and_then(Value::as_object)
-        .and_then(|row| {
-            read_value(row.get("cmd"))
-                .or_else(|| read_value(row.get("command")))
-                .or_else(|| read_value(row.get("script")))
-                .or_else(|| read_value(row.get("toon")))
-        })
+        .and_then(|row| read_value(row.get("cmd")))
         .or_else(|| {
             args.get("args").and_then(Value::as_object).and_then(|row| {
                 read_value(row.get("cmd"))
-                    .or_else(|| read_value(row.get("command")))
-                    .or_else(|| read_value(row.get("script")))
-                    .or_else(|| read_value(row.get("toon")))
             })
         })
 }
@@ -191,14 +178,13 @@ fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
             let args = parse_arguments_record(raw_arguments)?;
             let cmd = read_command_from_args_map(&args)?;
             let mut normalized = Map::new();
-            normalized.insert("cmd".to_string(), Value::String(cmd.clone()));
-            normalized.insert("command".to_string(), Value::String(cmd));
+            normalized.insert("cmd".to_string(), Value::String(cmd));
             if let Some(workdir) = read_workdir_from_args_map(&args) {
                 normalized.insert("workdir".to_string(), Value::String(workdir));
             }
             let serialized = serde_json::to_string(&Value::Object(normalized))
                 .ok()
-                .unwrap_or_else(|| "{\"cmd\":\"\",\"command\":\"\"}".to_string());
+                .unwrap_or_else(|| "{\"cmd\":\"\"}".to_string());
             normalized_shell_args = Some(Value::String(serialized));
         }
 
@@ -615,7 +601,7 @@ mod tests {
                     "id": "fc_good",
                     "call_id": "call_good",
                     "name": "exec_command",
-                    "arguments": "{\"command\":\"pwd\",\"cwd\":\"/tmp\"}"
+                    "arguments": "{\"cmd\":\"pwd\",\"cwd\":\"/tmp\"}"
                 }
             ]
         });
@@ -629,7 +615,27 @@ mod tests {
         let args_text = items[0]["arguments"].as_str().unwrap_or("{}");
         let args: Value = serde_json::from_str(args_text).expect("args object");
         assert_eq!(args["cmd"], "pwd");
-        assert_eq!(args["command"], "pwd");
         assert_eq!(args["workdir"], "/tmp");
+    }
+
+    #[test]
+    fn drops_command_only_exec_command_when_converting_output_items() {
+        let response = json!({
+            "output": [
+                {
+                    "type": "function_call",
+                    "id": "fc_bad",
+                    "call_id": "call_bad",
+                    "name": "exec_command",
+                    "arguments": "{\"command\":\"pwd\",\"cwd\":\"/tmp\"}"
+                }
+            ]
+        });
+
+        let items = convert_responses_output_to_input_items(&response)
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert!(items.is_empty());
     }
 }

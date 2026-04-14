@@ -1645,6 +1645,83 @@ fn test_resp_profile_chat_qwenchat_web_harvests_real_failed_command_wrappers() {
 }
 
 #[test]
+fn test_resp_profile_chat_deepseek_web_does_not_guess_exec_command_from_command_line_prose() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [],
+                    "content": "<command-line><command-line>继续</command-line></command-line>FINISHED"
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_command_line_prose_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }, {
+                    "type": "function",
+                    "function": {
+                        "name": "apply_patch",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"patch": {"type": "string"}},
+                            "required": ["patch"]
+                        }
+                    }
+                }],
+                "tool_choice": "auto"
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": false,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "stop");
+    assert!(
+        result.payload["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .map(|rows| rows.is_empty())
+            .unwrap_or(true)
+    );
+}
+
+#[test]
 fn test_resp_profile_chat_deepseek_web_preserves_compact_exec_command_arguments() {
     let input = ReqOutboundCompatInput {
         payload: json!({
@@ -1823,6 +1900,90 @@ fn test_resp_profile_chat_qwenchat_web_harvests_execute_command_masked_args_samp
         .unwrap_or("");
     assert!(content.contains("现在我需要查看关键的项目管理文件"));
     assert!(!content.contains("<execute_command>"));
+}
+
+#[test]
+fn test_resp_profile_chat_qwenchat_web_normalizes_legacy_function_call_into_tool_calls() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "function_call": {
+                        "id": "call_qwenchat_legacy_1",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"bash -lc 'pwd'\",\"workdir\":\"/Volumes/extension/code/finger\"}"
+                    }
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:qwenchat-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_qwenchat_legacy_function_call_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}, "workdir": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "auto"
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": false,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(
+        result.applied_profile,
+        Some("chat:qwenchat-web".to_string())
+    );
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    assert!(
+        result.payload["choices"][0]["message"]
+            .get("function_call")
+            .is_none()
+    );
+    let args = result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+        .as_str()
+        .unwrap_or("{}");
+    let parsed: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+    assert_eq!(parsed["cmd"], "bash -lc 'pwd'");
+    assert_eq!(parsed["workdir"], "/Volumes/extension/code/finger");
 }
 
 #[test]

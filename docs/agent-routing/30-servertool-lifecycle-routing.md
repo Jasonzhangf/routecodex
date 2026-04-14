@@ -29,4 +29,6 @@
 ## 权威文档
 - `docs/stop-message-auto.md`
 - `docs/design/servertool-stopmessage-lifecycle.md`
+- `docs/design/reasoning-stop-lifecycle.md`
+- `docs/design/servertool-unified-skeleton.md`
 - `docs/routing-instructions.md`

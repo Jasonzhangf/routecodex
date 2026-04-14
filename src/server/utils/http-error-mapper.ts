@@ -11,6 +11,10 @@ export interface HttpErrorPayload {
       upstream_status?: number;
       upstream_code?: string;
       upstream_message?: string;
+      tool_name?: string;
+      validation_reason?: string;
+      validation_message?: string;
+      missing_fields?: string[];
     };
   };
 }
@@ -24,6 +28,10 @@ type RawErrorDetails = {
   routeName?: string;
   upstreamCode?: string;
   upstreamMessage?: string;
+  toolName?: string;
+  validationReason?: string;
+  validationMessage?: string;
+  missingFields?: unknown;
 };
 
 type RawErrorPayload = {
@@ -36,6 +44,10 @@ type RawErrorPayload = {
   providerKey?: string;
   providerType?: string;
   routeName?: string;
+  toolName?: string;
+  validationReason?: string;
+  validationMessage?: string;
+  missingFields?: unknown;
   details?: RawErrorDetails;
   response?: {
     data?: {
@@ -117,6 +129,18 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   const nestedJson = tryExtractNestedJsonErrorMessage(upstreamMessage || baseMessage);
   const effectiveUpstreamMessage = nestedJson?.message || upstreamMessage;
   const effectiveCode = upstream.code || extractString(error.code) || 'upstream_error';
+  const toolName = extractString(error.toolName) || extractString(error.details?.toolName);
+  const validationReason =
+    extractString(error.validationReason) || extractString(error.details?.validationReason);
+  const validationMessage =
+    extractString(error.validationMessage) || extractString(error.details?.validationMessage);
+  const missingFields = normalizeStringArray(error.missingFields ?? error.details?.missingFields);
+  const validationFields = {
+    ...(toolName ? { tool_name: toolName } : {}),
+    ...(validationReason ? { validation_reason: validationReason } : {}),
+    ...(validationMessage ? { validation_message: validationMessage } : {}),
+    ...(missingFields?.length ? { missing_fields: missingFields } : {})
+  };
 
   // Protocol/shape errors produced by our bridge/pipeline should be treated as client errors.
   // (e.g. /v1/responses with invalid payload shape)
@@ -131,7 +155,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
       provider_type: providerType,
       upstream_status: upstream.status,
       upstream_code: upstreamCode,
-      upstream_message: effectiveUpstreamMessage
+      upstream_message: effectiveUpstreamMessage,
+      ...validationFields
     });
   }
 
@@ -151,7 +176,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
       provider_type: providerType,
       upstream_status: upstream.status,
       upstream_code: upstreamCode,
-      upstream_message: effectiveUpstreamMessage
+      upstream_message: effectiveUpstreamMessage,
+      ...validationFields
     });
   }
 
@@ -165,7 +191,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
       provider_type: providerType,
       upstream_status: upstream.status,
       upstream_code: upstreamCode,
-      upstream_message: effectiveUpstreamMessage
+      upstream_message: effectiveUpstreamMessage,
+      ...validationFields
     });
   }
 
@@ -179,7 +206,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
       provider_type: providerType,
       upstream_status: upstream.status,
       upstream_code: upstreamCode,
-      upstream_message: effectiveUpstreamMessage
+      upstream_message: effectiveUpstreamMessage,
+      ...validationFields
     });
   }
 
@@ -193,7 +221,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
       provider_type: providerType,
       upstream_status: upstream.status,
       upstream_code: upstreamCode,
-      upstream_message: effectiveUpstreamMessage
+      upstream_message: effectiveUpstreamMessage,
+      ...validationFields
     });
   }
 
@@ -206,7 +235,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
     provider_type: providerType,
     upstream_status: upstream.status,
     upstream_code: upstreamCode,
-    upstream_message: effectiveUpstreamMessage
+    upstream_message: effectiveUpstreamMessage,
+    ...validationFields
   });
 }
 
@@ -266,6 +296,16 @@ function extractUpstreamError(err: RawErrorPayload): {
 
 function extractString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function normalizeStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const normalized = value
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter((entry): entry is string => Boolean(entry));
+  return normalized.length ? normalized : undefined;
 }
 
 function normalizeStatus(primary?: number, secondary?: number): number {

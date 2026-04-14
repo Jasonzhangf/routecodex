@@ -20,6 +20,7 @@ import { isRateLimitLikeError } from './request-retry-helpers.js';
 import { extractUsageFromResult } from './usage-aggregator.js';
 import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../../../utils/finish-reason.js';
 import { logPipelineStage } from '../../../utils/stage-logger.js';
+import { syncReasoningStopModeFromRequest } from '../../../../modules/llmswitch/bridge.js';
 
 const FOLLOWUP_SESSION_HEADER_KEYS = new Set([
   'sessionid',
@@ -90,6 +91,1159 @@ const truthy = new Set(['1', 'true', 'yes', 'on']);
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
 const FOLLOWUP_LOG_REASON_MAX_LEN = 180;
+const KNOWN_QWEN_HIDDEN_NATIVE_TOOLS = new Set([
+  'web_extractor',
+  'tool_code_interpreter',
+  'code_interpreter',
+  'python',
+  'browser',
+  'web_search',
+  'read_file',
+  'file_read',
+  'cat',
+  'bash'
+]);
+
+const FATAL_CONVERSION_ERROR_CODES = new Set([
+  'CLIENT_TOOL_ARGS_INVALID',
+  'QWENCHAT_INVALID_TOOL_ARGS'
+]);
+const STOPLESS_DIRECTIVE_PATTERN = /<\*\*stopless:[^*]+\*\*>/i;
+
+function isImagePathLike(value: string): boolean {
+  return /\.(png|jpg|jpeg|gif|webp|bmp|svg|tiff?|ico|heic|jxl)$/i.test(value);
+}
+
+function parseToolArgsRecord(argsString: string): Record<string, unknown> | null {
+  const trimmed = String(argsString || '').trim();
+  if (!trimmed || !(trimmed.startsWith('{') || trimmed.startsWith('['))) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    return asFlatRecord(parsed) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function buildMissingFields(fields: Array<string | undefined>): string[] | undefined {
+  const normalized = fields
+    .map((field) => (typeof field === 'string' ? field.trim() : ''))
+    .filter((field): field is string => Boolean(field));
+  return normalized.length ? normalized : undefined;
+}
+
+function buildToolValidationFailure(args: {
+  reason: string;
+  message: string;
+  missingFields?: string[];
+}): {
+  ok: false;
+  reason: string;
+  message: string;
+  missingFields?: string[];
+} {
+  return {
+    ok: false,
+    reason: args.reason,
+    message: args.message,
+    ...(args.missingFields?.length ? { missingFields: args.missingFields } : {})
+  };
+}
+
+function readReasoningStopBoolean(value: unknown): boolean | undefined {
+  if (value === true) {
+    return true;
+  }
+  if (value === false) {
+    return false;
+  }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true') {
+    return true;
+  }
+  if (normalized === 'false') {
+    return false;
+  }
+  return undefined;
+}
+
+function validateCanonicalClientToolCall(
+  name: string,
+  argsString: string,
+  declaredToolNames?: Set<string>
+): {
+  ok: boolean;
+  reason?: string;
+  message?: string;
+  missingFields?: string[];
+  normalizedArgs?: string;
+} {
+  const parsed = parseToolArgsRecord(argsString);
+  const normalizedName = name.trim().toLowerCase();
+  switch (normalizedName) {
+    case 'exec_command': {
+      const cmd = typeof parsed?.cmd === 'string' ? parsed.cmd.trim() : '';
+      if (!cmd) {
+        return buildToolValidationFailure({
+          reason: 'missing_cmd',
+          message: 'exec_command requires input.cmd as a non-empty string.',
+          missingFields: ['cmd']
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify({ ...parsed, cmd }) };
+    }
+    case 'view_image': {
+      const pathValue = typeof parsed?.path === 'string' ? parsed.path.trim() : '';
+      if (!pathValue || !isImagePathLike(pathValue)) {
+        return buildToolValidationFailure({
+          reason: 'invalid_image_path',
+          message: 'view_image requires input.path pointing to an image file.'
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify({ path: pathValue }) };
+    }
+    case 'apply_patch': {
+      const patch =
+        typeof parsed?.patch === 'string' && parsed.patch.trim()
+          ? parsed.patch
+          : typeof parsed?.input === 'string' && parsed.input.trim()
+            ? parsed.input
+            : '';
+      if (!patch) {
+        return buildToolValidationFailure({
+          reason: 'missing_patch',
+          message: 'apply_patch requires patch content in input.patch or input.input.',
+          missingFields: ['patch']
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify({ patch, input: patch }) };
+    }
+    case 'update_plan': {
+      if (!Array.isArray(parsed?.plan)) {
+        return buildToolValidationFailure({
+          reason: 'missing_plan',
+          message: 'update_plan requires input.plan as an array.',
+          missingFields: ['plan']
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify({ explanation: parsed?.explanation, plan: parsed.plan }) };
+    }
+    case 'shell_command':
+    case 'bash': {
+      const command = typeof parsed?.command === 'string' ? parsed.command.trim() : '';
+      if (!command) {
+        return buildToolValidationFailure({
+          reason: 'missing_command',
+          message: `${normalizedName} requires input.command as a non-empty string.`,
+          missingFields: ['command']
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify(parsed) };
+    }
+    case 'shell': {
+      const command = parsed?.command;
+      if (!(Array.isArray(command) && command.every((entry) => typeof entry === 'string' && entry.trim().length > 0))) {
+        return buildToolValidationFailure({
+          reason: 'invalid_command',
+          message: 'shell requires input.command as a non-empty string array.'
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify(parsed) };
+    }
+    case 'read_mcp_resource': {
+      const server = typeof parsed?.server === 'string' ? parsed.server.trim() : '';
+      const uri = typeof parsed?.uri === 'string' ? parsed.uri.trim() : '';
+      if (!server || !uri) {
+        return buildToolValidationFailure({
+          reason: 'missing_server_or_uri',
+          message: 'read_mcp_resource requires both input.server and input.uri.',
+          missingFields: buildMissingFields([
+            !server ? 'server' : undefined,
+            !uri ? 'uri' : undefined
+          ])
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify({ server, uri }) };
+    }
+    case 'reasoning.stop': {
+      if (!parsed) {
+        return buildToolValidationFailure({
+          reason: 'invalid_reasoning_stop_arguments',
+          message: 'reasoning.stop requires a JSON object arguments payload.'
+        });
+      }
+      const taskGoal = typeof parsed.task_goal === 'string'
+        ? parsed.task_goal.trim()
+        : typeof parsed.taskGoal === 'string'
+          ? parsed.taskGoal.trim()
+          : typeof parsed.goal === 'string'
+            ? parsed.goal.trim()
+            : '';
+      if (!taskGoal) {
+        return buildToolValidationFailure({
+          reason: 'invalid_reasoning_stop_arguments',
+          message: 'reasoning.stop requires task_goal.',
+          missingFields: ['task_goal']
+        });
+      }
+      const completed = readReasoningStopBoolean(parsed.is_completed ?? parsed.isCompleted ?? parsed.completed);
+      if (typeof completed !== 'boolean') {
+        return buildToolValidationFailure({
+          reason: 'invalid_reasoning_stop_arguments',
+          message: 'reasoning.stop requires is_completed(boolean).',
+          missingFields: ['is_completed']
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify(parsed) };
+    }
+    case 'list_mcp_resources':
+    case 'list_mcp_resource_templates':
+      return { ok: true, normalizedArgs: JSON.stringify(parsed ?? {}) };
+    default:
+      if (declaredToolNames?.has(normalizedName)) {
+        if (!parsed) {
+          return buildToolValidationFailure({
+            reason: 'invalid_declared_tool_arguments',
+            message: `Tool "${name.trim()}" requires JSON object arguments.`
+          });
+        }
+        return { ok: true, normalizedArgs: JSON.stringify(parsed) };
+      }
+      const declaredList = declaredToolNames && declaredToolNames.size > 0
+        ? Array.from(declaredToolNames).sort().join(', ')
+        : '';
+      return buildToolValidationFailure({
+        reason: 'unknown_tool',
+        message: declaredList
+          ? `Tool "${name.trim()}" is not declared for this request. Declared tools: ${declaredList}.`
+          : `Tool "${name.trim()}" is not declared for this request.`
+      });
+  }
+}
+
+function readSessionLikeToken(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function tryParseJsonLikeString(raw: string): unknown {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (
+    !(trimmed.startsWith('{') || trimmed.startsWith('['))
+    && !trimmed.includes('{"')
+    && !trimmed.includes("{'")
+  ) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const balanced = extractFirstBalancedJsonObject(trimmed);
+    if (!balanced) {
+      return undefined;
+    }
+    try {
+      return JSON.parse(balanced);
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+function backfillAdapterContextSessionIdentifiersFromOriginalRequest(
+  baseContext: Record<string, unknown>,
+  originalRequest: unknown
+): void {
+  const original = asFlatRecord(originalRequest);
+  if (!original) {
+    return;
+  }
+  const requestMetadata = asFlatRecord(original.metadata);
+  const capturedRequest = asFlatRecord(baseContext.capturedChatRequest);
+  const capturedMetadata = asFlatRecord(capturedRequest?.metadata);
+
+  const sessionId =
+    readSessionLikeToken(baseContext.sessionId) ??
+    readSessionLikeToken(original.sessionId) ??
+    readSessionLikeToken(original.session_id) ??
+    readSessionLikeToken(requestMetadata?.sessionId) ??
+    readSessionLikeToken(requestMetadata?.session_id) ??
+    readSessionLikeToken(capturedRequest?.sessionId) ??
+    readSessionLikeToken(capturedRequest?.session_id) ??
+    readSessionLikeToken(capturedMetadata?.sessionId) ??
+    readSessionLikeToken(capturedMetadata?.session_id);
+  const conversationId =
+    readSessionLikeToken(baseContext.conversationId) ??
+    readSessionLikeToken(original.conversationId) ??
+    readSessionLikeToken(original.conversation_id) ??
+    readSessionLikeToken(requestMetadata?.conversationId) ??
+    readSessionLikeToken(requestMetadata?.conversation_id) ??
+    readSessionLikeToken(capturedRequest?.conversationId) ??
+    readSessionLikeToken(capturedRequest?.conversation_id) ??
+    readSessionLikeToken(capturedMetadata?.conversationId) ??
+    readSessionLikeToken(capturedMetadata?.conversation_id);
+
+  if (sessionId && !readSessionLikeToken(baseContext.sessionId)) {
+    baseContext.sessionId = sessionId;
+  }
+  if (conversationId && !readSessionLikeToken(baseContext.conversationId)) {
+    baseContext.conversationId = conversationId;
+  }
+}
+
+function extractContentTextForStoplessScan(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return '';
+  }
+  const parts: string[] = [];
+  for (const item of content) {
+    if (typeof item === 'string') {
+      parts.push(item);
+      continue;
+    }
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      continue;
+    }
+    const text = typeof (item as Record<string, unknown>).text === 'string'
+      ? String((item as Record<string, unknown>).text)
+      : '';
+    if (text) {
+      parts.push(text);
+    }
+  }
+  return parts.join('\n');
+}
+
+function extractLatestUserTextForStoplessScan(source: unknown): string {
+  const record = asFlatRecord(source);
+  if (!record) {
+    return '';
+  }
+  const rows = Array.isArray(record.messages)
+    ? record.messages
+    : Array.isArray(record.input)
+      ? record.input
+      : [];
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = asFlatRecord(rows[i]);
+    if (!row) {
+      continue;
+    }
+    const role = typeof row.role === 'string' ? row.role.trim().toLowerCase() : '';
+    if (role !== 'user') {
+      continue;
+    }
+    const text = extractContentTextForStoplessScan(row.content).trim();
+    if (text) {
+      return text;
+    }
+  }
+  return '';
+}
+
+function hasStoplessDirectiveInRequestPayload(source: unknown): boolean {
+  return STOPLESS_DIRECTIVE_PATTERN.test(extractLatestUserTextForStoplessScan(source));
+}
+
+function collectDeclaredToolNames(baseContext: Record<string, unknown>): Set<string> {
+  const capturedRequest = asFlatRecord(baseContext.capturedChatRequest);
+  const tools = Array.isArray(capturedRequest?.tools) ? capturedRequest.tools : [];
+  const names = new Set<string>();
+  for (const tool of tools) {
+    if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+      continue;
+    }
+    const row = tool as Record<string, unknown>;
+    const fn = row.function && typeof row.function === 'object' && !Array.isArray(row.function)
+      ? (row.function as Record<string, unknown>)
+      : row;
+    const name = typeof fn.name === 'string' ? fn.name.trim().toLowerCase() : '';
+    if (name) {
+      names.add(name);
+    }
+  }
+  return names;
+}
+
+function findNestedRawString(payload: unknown, depth = 3): string {
+  if (depth < 0 || payload === null || payload === undefined) {
+    return '';
+  }
+  if (typeof payload === 'string') {
+    return payload;
+  }
+  if (typeof payload !== 'object' || Array.isArray(payload)) {
+    return '';
+  }
+  const record = payload as Record<string, unknown>;
+  const directRaw = typeof record.raw === 'string' ? record.raw : '';
+  if (directRaw) {
+    return directRaw;
+  }
+  for (const key of ['body', 'data', 'payload', 'response', 'error']) {
+    const nested = findNestedRawString(record[key], depth - 1);
+    if (nested) {
+      return nested;
+    }
+  }
+  return '';
+}
+
+function findNestedErrorMarker(payload: unknown, depth = 3): string {
+  if (depth < 0 || payload === null || payload === undefined) {
+    return '';
+  }
+  if (typeof payload === 'string') {
+    return payload;
+  }
+  if (typeof payload !== 'object' || Array.isArray(payload)) {
+    return '';
+  }
+  const record = payload as Record<string, unknown>;
+  const directError = typeof record.error === 'string' ? record.error.trim() : '';
+  if (directError) {
+    return directError;
+  }
+  for (const key of ['body', 'data', 'payload', 'response']) {
+    const nested = findNestedErrorMarker(record[key], depth - 1);
+    if (nested) {
+      return nested;
+    }
+  }
+  return '';
+}
+
+function inferQwenChatBusinessStatusCode(reason: string, code: string): number {
+  const normalized = `${code} ${reason}`.trim().toLowerCase();
+  if (
+    normalized.includes('ratelimit') ||
+    normalized.includes('rate_limit') ||
+    normalized.includes('daily usage limit') ||
+    normalized.includes('allocated quota exceeded') ||
+    normalized.includes('quota exceeded') ||
+    normalized.includes('quota limit') ||
+    normalized.includes('insufficient quota') ||
+    normalized.includes('no resource') ||
+    normalized.includes('resource exhausted') ||
+    normalized.includes('too many request') ||
+    normalized.includes('达到今日的使用上限') ||
+    normalized.includes('请求过于频繁')
+  ) {
+    return 429;
+  }
+  if (
+    normalized.includes('forbidden') ||
+    normalized.includes('permission denied') ||
+    normalized.includes('没有权限') ||
+    normalized.includes('无权限') ||
+    normalized.includes('permission')
+  ) {
+    return 403;
+  }
+  if (
+    normalized.includes('unauthorized') ||
+    normalized.includes('invalid token') ||
+    normalized.includes('login') ||
+    normalized.includes('auth') ||
+    normalized.includes('未登录')
+  ) {
+    return 401;
+  }
+  return 502;
+}
+
+function extractQwenChatBusinessRejection(payload: unknown): {
+  message: string;
+  statusCode: number;
+  code: string;
+} | undefined {
+  const record = asFlatRecord(payload);
+  if (!record) {
+    return undefined;
+  }
+  const data = asFlatRecord(record.data);
+  const error = asFlatRecord(record.error);
+  const success = record.success;
+  const rawCode =
+    (typeof record.code === 'string' ? record.code : '') ||
+    (typeof data?.code === 'string' ? data.code : '') ||
+    (typeof error?.code === 'string' ? error.code : '');
+  const rawMessage =
+    (typeof record.message === 'string' ? record.message : '') ||
+    (typeof data?.details === 'string' ? data.details : '') ||
+    (typeof data?.message === 'string' ? data.message : '') ||
+    (typeof error?.details === 'string' ? error.details : '') ||
+    (typeof error?.message === 'string' ? error.message : '');
+  const hasFailureSignal = success === false || Boolean(rawCode) || Boolean(error);
+  if (!hasFailureSignal) {
+    return undefined;
+  }
+  const reason = rawMessage.trim() || rawCode.trim() || 'upstream rejected request';
+  const statusCode = inferQwenChatBusinessStatusCode(reason, rawCode);
+  return {
+    message: `QwenChat upstream rejected completion request: ${reason}`,
+    statusCode,
+    code: statusCode === 429 ? 'QWENCHAT_RATE_LIMITED' : 'QWENCHAT_COMPLETION_REJECTED'
+  };
+}
+
+function findQwenChatBusinessRejectionDeep(
+  payload: unknown,
+  depth = 6,
+  seen = new Set<unknown>()
+): {
+  message: string;
+  statusCode: number;
+  code: string;
+} | undefined {
+  if (depth < 0 || payload === null || payload === undefined) {
+    return undefined;
+  }
+  if (typeof payload === 'string') {
+    const parsed = tryParseJsonLikeString(payload);
+    if (parsed !== undefined) {
+      return findQwenChatBusinessRejectionDeep(parsed, depth - 1, seen);
+    }
+    return undefined;
+  }
+  if (typeof payload !== 'object') {
+    return undefined;
+  }
+  if (seen.has(payload)) {
+    return undefined;
+  }
+  seen.add(payload);
+
+  const direct = extractQwenChatBusinessRejection(payload);
+  if (direct) {
+    return direct;
+  }
+
+  if (Array.isArray(payload)) {
+    for (const entry of payload) {
+      const nested = findQwenChatBusinessRejectionDeep(entry, depth - 1, seen);
+      if (nested) {
+        return nested;
+      }
+    }
+    return undefined;
+  }
+
+  const record = payload as Record<string, unknown>;
+  for (const key of ['body', 'data', 'payload', 'response', 'error', 'raw']) {
+    const nested = findQwenChatBusinessRejectionDeep(record[key], depth - 1, seen);
+    if (nested) {
+      return nested;
+    }
+  }
+  for (const value of Object.values(record)) {
+    const nested = findQwenChatBusinessRejectionDeep(value, depth - 1, seen);
+    if (nested) {
+      return nested;
+    }
+  }
+  return undefined;
+}
+
+function extractQwenChatSseAssistantText(raw: string): string {
+  if (!raw.trim()) {
+    return '';
+  }
+  const chunks: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data:')) {
+      continue;
+    }
+    const payloadText = trimmed.slice(5).trim();
+    if (!payloadText || payloadText === '[DONE]') {
+      continue;
+    }
+    try {
+      const payload = JSON.parse(payloadText) as Record<string, unknown>;
+      const choices = Array.isArray(payload.choices) ? payload.choices : [];
+      for (const choice of choices) {
+        if (!choice || typeof choice !== 'object' || Array.isArray(choice)) {
+          continue;
+        }
+        const delta = asFlatRecord((choice as Record<string, unknown>).delta);
+        const content = typeof delta?.content === 'string' ? delta.content : '';
+        if (content) {
+          chunks.push(content);
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+  return chunks.join('');
+}
+
+function extractFirstBalancedJsonObject(raw: string): string | undefined {
+  const start = raw.indexOf('{');
+  if (start < 0) {
+    return undefined;
+  }
+  let depth = 0;
+  let inString = false;
+  let escaping = false;
+  for (let i = start; i < raw.length; i += 1) {
+    const ch = raw[i];
+    if (inString) {
+      if (escaping) {
+        escaping = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaping = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') {
+      depth += 1;
+      continue;
+    }
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return raw.slice(start, i + 1);
+      }
+    }
+  }
+  return undefined;
+}
+
+function normalizeRecoveredToolCalls(
+  value: unknown,
+  declaredToolNames: Set<string>
+): {
+  toolCalls: Array<{ name: string; input: Record<string, unknown> }>;
+  invalidCall?: {
+    name: string;
+    reason: string;
+    message?: string;
+    missingFields?: string[];
+  };
+} {
+  const rows = Array.isArray(value) ? value : [];
+  const normalized: Array<{ name: string; input: Record<string, unknown> }> = [];
+  for (const row of rows) {
+    const item = asFlatRecord(row);
+    const functionRecord = asFlatRecord(item?.function);
+    const nameRaw =
+      (typeof item?.name === 'string' ? item.name : '') ||
+      (typeof functionRecord?.name === 'string' ? functionRecord.name : '');
+    const name = nameRaw.trim();
+    if (!name) {
+      continue;
+    }
+    if (declaredToolNames.size > 0 && !declaredToolNames.has(name.toLowerCase())) {
+      continue;
+    }
+    const inputRecord =
+      asFlatRecord(item?.input)
+      ?? asFlatRecord(item?.arguments)
+      ?? asFlatRecord(functionRecord?.arguments)
+      ?? {};
+    const validation = validateCanonicalClientToolCall(name, JSON.stringify(inputRecord ?? {}), declaredToolNames);
+    if (!validation.ok) {
+      return {
+        toolCalls: normalized,
+        invalidCall: {
+          name,
+          reason: validation.reason || 'invalid_tool_arguments',
+          message: validation.message,
+          ...(validation.missingFields?.length ? { missingFields: validation.missingFields } : {})
+        }
+      };
+    }
+    let normalizedInput = inputRecord;
+    if (typeof validation.normalizedArgs === 'string') {
+      try {
+        const parsed = JSON.parse(validation.normalizedArgs);
+        if (asFlatRecord(parsed)) {
+          normalizedInput = parsed;
+        }
+      } catch {
+        // keep validated original
+      }
+    }
+    normalized.push({ name, input: normalizedInput });
+  }
+  return { toolCalls: normalized };
+}
+
+function analyzeQwenChatRecoveredToolCalls(args: {
+  body: unknown;
+  baseContext?: Record<string, unknown>;
+}): {
+  toolCalls: Array<{ name: string; input: Record<string, unknown> }>;
+  invalidCall?: {
+    name: string;
+    reason: string;
+    message?: string;
+    missingFields?: string[];
+  };
+} {
+  const raw = findNestedRawString(args.body);
+  const assistantText = extractQwenChatSseAssistantText(raw);
+  const declaredToolNames = collectDeclaredToolNames(args.baseContext ?? {});
+  const carrier = assistantText || raw;
+  const markerMatch = carrier.match(/<<RCC_TOOL_CALLS(?:_JSON)?/i);
+  if (!markerMatch) {
+    return { toolCalls: [] };
+  }
+  const tail = carrier.slice(markerMatch.index ?? 0);
+  const jsonBody = extractFirstBalancedJsonObject(tail);
+  if (jsonBody) {
+    try {
+      const parsed = JSON.parse(jsonBody) as Record<string, unknown>;
+      return normalizeRecoveredToolCalls(parsed.tool_calls, declaredToolNames);
+    } catch {
+      return { toolCalls: [] };
+    }
+  }
+  const partialNameMatch = tail.match(/"name"\s*:\s*"([^"]+)"/i);
+  const partialInputMatch = tail.match(/"input"\s*:\s*(\{[\s\S]*\})/i);
+  if (partialNameMatch?.[1] && partialInputMatch?.[1]) {
+    const inputJson = extractFirstBalancedJsonObject(partialInputMatch[1]);
+    if (inputJson) {
+      try {
+        const parsedInput = JSON.parse(inputJson);
+        return normalizeRecoveredToolCalls(
+          [{ name: partialNameMatch[1], input: parsedInput }],
+          declaredToolNames
+        );
+      } catch {
+        return { toolCalls: [] };
+      }
+    }
+  }
+  return { toolCalls: [] };
+}
+
+function tryRecoverQwenChatToolCalls(args: {
+  body: unknown;
+  baseContext?: Record<string, unknown>;
+}): Array<{ name: string; input: Record<string, unknown> }> {
+  return analyzeQwenChatRecoveredToolCalls(args).toolCalls;
+}
+
+function buildRecoveredQwenChatProviderResponse(args: {
+  toolCalls: Array<{ name: string; input: Record<string, unknown> }>;
+  model?: string;
+  requestId: string;
+}): Record<string, unknown> | undefined {
+  if (!args.toolCalls.length) {
+    return undefined;
+  }
+  return {
+    id: `${args.requestId}:qwenchat-recovered`,
+    object: 'chat.completion',
+    model: args.model || 'qwenchat-recovered',
+    choices: [
+      {
+        index: 0,
+        finish_reason: 'tool_calls',
+        message: {
+          role: 'assistant',
+          content: '',
+          tool_calls: args.toolCalls.map((toolCall, index) => ({
+            id: `call_qwenchat_recovered_${index + 1}`,
+            type: 'function',
+            function: {
+              name: toolCall.name,
+              arguments: JSON.stringify(toolCall.input ?? {})
+            }
+          }))
+        }
+      }
+    ]
+  };
+}
+
+function extractIncompleteQwenChatToolPrelude(raw: string): string | undefined {
+  const markerMatch = raw.match(/<<RCC_TOOL_CALLS(?:_JSON)?/i);
+  if (!markerMatch) {
+    return undefined;
+  }
+  const tail = raw.slice(markerMatch.index ?? 0);
+  const hasToolCallJson = /"tool_calls"\s*:/i.test(tail);
+  const hasBalancedJsonObject = Boolean(extractFirstBalancedJsonObject(tail));
+  const bodyWithoutOpener = tail.slice(markerMatch[0].length);
+  const hasClosingLine = /(?:^|\r?\n)RCC_TOOL_CALLS(?:_JSON)?(?:\r?\n|$)/i.test(bodyWithoutOpener);
+  if (hasToolCallJson && hasBalancedJsonObject && hasClosingLine) {
+    return undefined;
+  }
+  return markerMatch[0];
+}
+
+function stringifyToolCallArgumentsForValidation(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  try {
+    return JSON.stringify(value ?? {});
+  } catch {
+    return '{}';
+  }
+}
+
+function collectConvertedProviderToolCalls(payload: unknown): Array<{
+  name: string;
+  argumentsText: string;
+  path: string;
+}> {
+  const result: Array<{ name: string; argumentsText: string; path: string }> = [];
+  const record = asFlatRecord(payload);
+  if (!record) {
+    return result;
+  }
+
+  const choices = Array.isArray(record.choices) ? record.choices : [];
+  for (let i = 0; i < choices.length; i += 1) {
+    const choice = asFlatRecord(choices[i]);
+    const message = asFlatRecord(choice?.message);
+    const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+    for (let j = 0; j < toolCalls.length; j += 1) {
+      const toolCall = asFlatRecord(toolCalls[j]);
+      const fn = asFlatRecord(toolCall?.function);
+      const name =
+        (typeof fn?.name === 'string' ? fn.name : '')
+        || (typeof toolCall?.name === 'string' ? toolCall.name : '');
+      if (!name.trim()) {
+        continue;
+      }
+      result.push({
+        name: name.trim(),
+        argumentsText: stringifyToolCallArgumentsForValidation(fn?.arguments ?? toolCall?.arguments ?? toolCall?.input),
+        path: `choices[${i}].message.tool_calls[${j}]`
+      });
+    }
+  }
+
+  const requiredAction = asFlatRecord(record.required_action);
+  const submitToolOutputs = asFlatRecord(requiredAction?.submit_tool_outputs);
+  const submitToolCalls = Array.isArray(submitToolOutputs?.tool_calls) ? submitToolOutputs.tool_calls : [];
+  for (let i = 0; i < submitToolCalls.length; i += 1) {
+    const toolCall = asFlatRecord(submitToolCalls[i]);
+    const fn = asFlatRecord(toolCall?.function);
+    const name =
+      (typeof fn?.name === 'string' ? fn.name : '')
+      || (typeof toolCall?.name === 'string' ? toolCall.name : '');
+    if (!name.trim()) {
+      continue;
+    }
+    result.push({
+      name: name.trim(),
+      argumentsText: stringifyToolCallArgumentsForValidation(fn?.arguments ?? toolCall?.arguments ?? toolCall?.input),
+      path: `required_action.submit_tool_outputs.tool_calls[${i}]`
+    });
+  }
+
+  return result;
+}
+
+function validateConvertedProviderToolCallsOrThrow(
+  payload: unknown,
+  declaredToolNames?: Set<string>
+): void {
+  const toolCalls = collectConvertedProviderToolCalls(payload);
+  for (const toolCall of toolCalls) {
+    const validation = validateCanonicalClientToolCall(toolCall.name, toolCall.argumentsText, declaredToolNames);
+    if (validation.ok) {
+      continue;
+    }
+    const err = new Error(
+      validation.message
+        ? `Converted provider tool call has invalid client arguments at ${toolCall.path}: ${toolCall.name}. ${validation.message}`
+        : `Converted provider tool call has invalid client arguments at ${toolCall.path}: ${toolCall.name} (${validation.reason || 'invalid_tool_arguments'})`
+    ) as Error & {
+      code?: string;
+      status?: number;
+      statusCode?: number;
+      retryable?: boolean;
+      toolName?: string;
+      validationReason?: string;
+      validationMessage?: string;
+      missingFields?: string[];
+      upstreamCode?: string;
+      details?: Record<string, unknown>;
+    };
+    err.code = 'CLIENT_TOOL_ARGS_INVALID';
+    err.status = 502;
+    err.statusCode = 502;
+    err.retryable = false;
+    err.upstreamCode = 'CLIENT_TOOL_ARGS_INVALID';
+    err.toolName = toolCall.name;
+    err.validationReason = validation.reason || 'invalid_tool_arguments';
+    err.validationMessage = validation.message;
+    if (validation.missingFields?.length) {
+      err.missingFields = validation.missingFields;
+    }
+    err.details = {
+      ...(err.details ?? {}),
+      toolName: toolCall.name,
+      validationReason: validation.reason || 'invalid_tool_arguments',
+      ...(validation.message ? { validationMessage: validation.message } : {}),
+      ...(validation.missingFields?.length ? { missingFields: validation.missingFields } : {})
+    };
+    throw err;
+  }
+}
+
+function extractQwenChatTerminalStreamError(payload: unknown): {
+  message: string;
+  code?: string;
+  statusCode?: number;
+  retryable?: boolean;
+  toolName?: string;
+  phase?: string;
+} | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  const streamLike =
+    record.__sse_responses && typeof record.__sse_responses === 'object' && !Array.isArray(record.__sse_responses)
+      ? (record.__sse_responses as Record<string, unknown>)
+      : undefined;
+  const terminalError =
+    streamLike &&
+    streamLike.__routecodexTerminalError &&
+    typeof streamLike.__routecodexTerminalError === 'object' &&
+    !Array.isArray(streamLike.__routecodexTerminalError)
+      ? (streamLike.__routecodexTerminalError as Record<string, unknown>)
+      : undefined;
+  if (!terminalError) {
+    return undefined;
+  }
+  const message = typeof terminalError.message === 'string' ? terminalError.message.trim() : '';
+  if (!message) {
+    return undefined;
+  }
+  return {
+    message,
+    ...(typeof terminalError.code === 'string' && terminalError.code.trim()
+      ? { code: terminalError.code.trim() }
+      : {}),
+    ...(typeof terminalError.statusCode === 'number' && Number.isFinite(terminalError.statusCode)
+      ? { statusCode: terminalError.statusCode }
+      : typeof terminalError.status === 'number' && Number.isFinite(terminalError.status)
+        ? { statusCode: terminalError.status }
+        : {}),
+    ...(typeof terminalError.retryable === 'boolean' ? { retryable: terminalError.retryable } : {}),
+    ...(typeof terminalError.toolName === 'string' && terminalError.toolName.trim()
+      ? { toolName: terminalError.toolName.trim() }
+      : {}),
+    ...(typeof terminalError.phase === 'string' && terminalError.phase.trim()
+      ? { phase: terminalError.phase.trim() }
+      : {})
+  };
+}
+
+function remapMalformedQwenChatError(args: {
+  error: Record<string, unknown>;
+  body: unknown;
+  baseContext?: Record<string, unknown>;
+}): Error | undefined {
+  const code = typeof args.error.code === 'string' ? args.error.code.trim() : '';
+  const message = typeof args.error.message === 'string' ? args.error.message : '';
+  if (code !== 'MALFORMED_RESPONSE' && !message.toLowerCase().includes('canonicalize response payload')) {
+    return undefined;
+  }
+
+  const terminalStreamError = extractQwenChatTerminalStreamError(args.body);
+  if (terminalStreamError?.code === 'QWENCHAT_HIDDEN_NATIVE_TOOL') {
+    const err = new Error(terminalStreamError.message) as Error & {
+      code?: string;
+      status?: number;
+      statusCode?: number;
+      retryable?: boolean;
+      upstreamCode?: string;
+      toolName?: string;
+      phase?: string;
+    };
+    err.code = 'QWENCHAT_HIDDEN_NATIVE_TOOL';
+    err.status = terminalStreamError.statusCode ?? 502;
+    err.statusCode = terminalStreamError.statusCode ?? 502;
+    err.retryable = terminalStreamError.retryable ?? false;
+    err.upstreamCode = 'QWENCHAT_HIDDEN_NATIVE_TOOL';
+    err.toolName = terminalStreamError.toolName;
+    err.phase = terminalStreamError.phase;
+    return err;
+  }
+
+  const raw = findNestedRawString(args.body);
+  const errorMarker = findNestedErrorMarker(args.body).toUpperCase();
+  const rawUpper = raw.toUpperCase();
+  const declaredToolNames = collectDeclaredToolNames(args.baseContext ?? {});
+  const functionNameMatch =
+    raw.match(/"function_call"\s*:\s*\{\s*"name"\s*:\s*"([^"]+)"/i) ||
+    raw.match(/"tool_calls"\s*:\s*\[[\s\S]*?"name"\s*:\s*"([^"]+)"/i);
+  const phaseMatch = raw.match(/"phase"\s*:\s*"([^"]+)"/i);
+  const functionName = functionNameMatch?.[1]?.trim() || '';
+  const phase = phaseMatch?.[1]?.trim() || '';
+  const isKnownQwenHiddenNativeTool = KNOWN_QWEN_HIDDEN_NATIVE_TOOLS.has(functionName.toLowerCase());
+  if (
+    functionName &&
+    (
+      (declaredToolNames.size > 0 && !declaredToolNames.has(functionName.toLowerCase()))
+      || isKnownQwenHiddenNativeTool
+    )
+  ) {
+    const err = new Error(
+      `QwenChat upstream emitted undeclared native tool "${functionName}"${phase ? ` (phase=${phase})` : ''}`
+    ) as Error & {
+      code?: string;
+      status?: number;
+      statusCode?: number;
+      retryable?: boolean;
+      upstreamCode?: string;
+      toolName?: string;
+      phase?: string;
+    };
+    err.code = 'QWENCHAT_HIDDEN_NATIVE_TOOL';
+    err.status = 502;
+    err.statusCode = 502;
+    err.retryable = false;
+    err.upstreamCode = 'QWENCHAT_HIDDEN_NATIVE_TOOL';
+    err.toolName = functionName;
+    err.phase = phase || undefined;
+    return err;
+  }
+
+  if (
+    errorMarker === 'UPSTREAM_STREAM_TIMEOUT' ||
+    rawUpper.includes('UPSTREAM_STREAM_TIMEOUT')
+  ) {
+    const err = new Error('QwenChat upstream stream timed out before producing a canonical assistant payload') as Error & {
+      code?: string;
+      status?: number;
+      statusCode?: number;
+      retryable?: boolean;
+      upstreamCode?: string;
+    };
+    err.code = 'QWENCHAT_UPSTREAM_STREAM_TIMEOUT';
+    err.status = 502;
+    err.statusCode = 502;
+    err.retryable = true;
+    err.upstreamCode = 'UPSTREAM_STREAM_TIMEOUT';
+    return err;
+  }
+
+  const businessRejection = findQwenChatBusinessRejectionDeep(args.body);
+  if (businessRejection) {
+    const err = new Error(businessRejection.message) as Error & {
+      code?: string;
+      status?: number;
+      statusCode?: number;
+      retryable?: boolean;
+      upstreamCode?: string;
+    };
+    err.code = businessRejection.code;
+    err.status = businessRejection.statusCode;
+    err.statusCode = businessRejection.statusCode;
+    err.retryable = businessRejection.statusCode === 429;
+    err.upstreamCode = businessRejection.code;
+    return err;
+  }
+
+  const recoveredToolAnalysis = analyzeQwenChatRecoveredToolCalls({
+    body: args.body,
+    baseContext: args.baseContext
+  });
+  if (recoveredToolAnalysis.invalidCall) {
+    const err = new Error(
+      recoveredToolAnalysis.invalidCall.message
+        ? `QwenChat upstream emitted invalid client tool arguments for "${recoveredToolAnalysis.invalidCall.name}": ${recoveredToolAnalysis.invalidCall.message}`
+        : `QwenChat upstream emitted invalid client tool arguments for "${recoveredToolAnalysis.invalidCall.name}" (${recoveredToolAnalysis.invalidCall.reason})`
+    ) as Error & {
+      code?: string;
+      status?: number;
+      statusCode?: number;
+      retryable?: boolean;
+      upstreamCode?: string;
+      toolName?: string;
+      validationReason?: string;
+      validationMessage?: string;
+      missingFields?: string[];
+      details?: Record<string, unknown>;
+    };
+    err.code = 'QWENCHAT_INVALID_TOOL_ARGS';
+    err.status = 502;
+    err.statusCode = 502;
+    err.retryable = false;
+    err.upstreamCode = 'QWENCHAT_INVALID_TOOL_ARGS';
+    err.toolName = recoveredToolAnalysis.invalidCall.name;
+    err.validationReason = recoveredToolAnalysis.invalidCall.reason;
+    err.validationMessage = recoveredToolAnalysis.invalidCall.message;
+    if (recoveredToolAnalysis.invalidCall.missingFields?.length) {
+      err.missingFields = recoveredToolAnalysis.invalidCall.missingFields;
+    }
+    err.details = {
+      ...(err.details ?? {}),
+      toolName: recoveredToolAnalysis.invalidCall.name,
+      validationReason: recoveredToolAnalysis.invalidCall.reason,
+      ...(recoveredToolAnalysis.invalidCall.message
+        ? { validationMessage: recoveredToolAnalysis.invalidCall.message }
+        : {}),
+      ...(recoveredToolAnalysis.invalidCall.missingFields?.length
+        ? { missingFields: recoveredToolAnalysis.invalidCall.missingFields }
+        : {})
+    };
+    return err;
+  }
+
+  const incompletePrelude = extractIncompleteQwenChatToolPrelude(raw);
+  if (incompletePrelude) {
+    const err = new Error(
+      `QwenChat upstream emitted incomplete dry-run tool container starting with ${incompletePrelude}; retry required`
+    ) as Error & {
+      code?: string;
+      status?: number;
+      statusCode?: number;
+      retryable?: boolean;
+      upstreamCode?: string;
+    };
+    err.code = 'QWENCHAT_INCOMPLETE_TOOL_DRYRUN';
+    err.status = 502;
+    err.statusCode = 502;
+    err.retryable = true;
+    err.upstreamCode = 'QWENCHAT_INCOMPLETE_TOOL_DRYRUN';
+    return err;
+  }
+
+  return undefined;
+}
 
 function formatUnknownError(error: unknown): string {
   if (error instanceof Error) {
@@ -174,6 +1328,35 @@ function backfillCapturedChatRequestToolsFromRequestSemantics(
     return;
   }
   capturedChatRequest.tools = clientToolsRaw;
+}
+
+function preferOriginalRequestForReasoningStopSync(
+  baseContext: Record<string, unknown>,
+  originalRequest: unknown
+): void {
+  if (!asFlatRecord(originalRequest)) {
+    return;
+  }
+  if (!hasStoplessDirectiveInRequestPayload(originalRequest)) {
+    return;
+  }
+  if (hasStoplessDirectiveInRequestPayload(baseContext.capturedChatRequest)) {
+    return;
+  }
+  baseContext.capturedChatRequest = originalRequest as Record<string, unknown>;
+}
+
+function seedReasoningStopStateFromCapturedRequest(
+  baseContext: Record<string, unknown>
+): void {
+  try {
+    syncReasoningStopModeFromRequest(baseContext, 'on');
+  } catch (error) {
+    logProviderResponseConverterNonBlockingError(
+      'seedReasoningStopStateFromCapturedRequest',
+      error
+    );
+  }
 }
 
 function shouldEnableHubStageRecorder(): boolean {
@@ -468,6 +1651,7 @@ export async function convertProviderResponseIfNeeded(
       }
     };
   };
+  let adapterContext: Record<string, unknown> | undefined;
   try {
     const metadataBag = asRecord(options.pipelineMetadata);
     const originalModelId = extractClientModelId(metadataBag, options.originalRequest);
@@ -498,7 +1682,10 @@ export async function convertProviderResponseIfNeeded(
     ) {
       baseContext.capturedChatRequest = options.originalRequest;
     }
+    preferOriginalRequestForReasoningStopSync(baseContext, options.originalRequest);
+    backfillAdapterContextSessionIdentifiersFromOriginalRequest(baseContext, options.originalRequest);
     backfillCapturedChatRequestToolsFromRequestSemantics(baseContext, options.requestSemantics);
+    seedReasoningStopStateFromCapturedRequest(baseContext);
     if (typeof (metadataBag as Record<string, unknown> | undefined)?.routeName === 'string') {
       baseContext.routeId = (metadataBag as Record<string, unknown>).routeName as string;
     }
@@ -510,7 +1697,7 @@ export async function convertProviderResponseIfNeeded(
       baseContext.modelId = assignedModelId.trim();
     }
     applyClientConnectionStateToContext(metadataBag, baseContext);
-    const adapterContext = baseContext;
+    adapterContext = baseContext;
     const stopMessageInjectReadiness = resolveStopMessageClientInjectReadiness(baseContext);
     {
       const rt = asRecord((adapterContext as Record<string, unknown>).__rt) ?? {};
@@ -821,6 +2008,7 @@ export async function convertProviderResponseIfNeeded(
       hasBody: converted.body !== undefined && converted.body !== null,
       elapsedMs: Date.now() - bridgeStartMs
     });
+    validateConvertedProviderToolCallsOrThrow(converted.body ?? body, collectDeclaredToolNames(baseContext));
     if (converted.__sse_responses) {
       const usage = converted.body
         ? extractUsageFromResult({ body: converted.body })
@@ -864,7 +2052,38 @@ export async function convertProviderResponseIfNeeded(
         : typeof (detailRecord as Record<string, unknown> | undefined)?.error === 'string'
           ? String((detailRecord as Record<string, unknown>).error)
         : undefined;
+    const malformedQwenFallbackContext = (() => {
+      const metadataBag = asRecord(options.pipelineMetadata);
+      const fallbackContext: Record<string, unknown> = {
+        ...(metadataBag ?? {})
+      };
+      if (
+        !fallbackContext.capturedChatRequest &&
+        options.originalRequest &&
+        typeof options.originalRequest === 'object' &&
+        !Array.isArray(options.originalRequest)
+      ) {
+        fallbackContext.capturedChatRequest = options.originalRequest;
+      }
+      preferOriginalRequestForReasoningStopSync(fallbackContext, options.originalRequest);
+      backfillAdapterContextSessionIdentifiersFromOriginalRequest(fallbackContext, options.originalRequest);
+      backfillCapturedChatRequestToolsFromRequestSemantics(fallbackContext, options.requestSemantics);
+      return fallbackContext;
+    })();
     const normalizedUpstreamCode = (upstreamCode || detailUpstreamCode || '').trim().toLowerCase();
+    const fatalConversionCode =
+      (typeof errCode === 'string' && FATAL_CONVERSION_ERROR_CODES.has(errCode) ? errCode : undefined)
+      ?? (typeof upstreamCode === 'string' && FATAL_CONVERSION_ERROR_CODES.has(upstreamCode) ? upstreamCode : undefined)
+      ?? (typeof detailUpstreamCode === 'string' && FATAL_CONVERSION_ERROR_CODES.has(detailUpstreamCode) ? detailUpstreamCode : undefined);
+    if (fatalConversionCode) {
+      logPipelineStage('convert.bridge.error', options.requestId, {
+        code: errCode,
+        upstreamCode: upstreamCode || detailUpstreamCode,
+        reason: detailReason,
+        message
+      });
+      throw error;
+    }
     const isSseDecodeError =
       errCode === 'SSE_DECODE_ERROR' ||
       errCode === 'HTTP_502' ||
@@ -880,6 +2099,70 @@ export async function convertProviderResponseIfNeeded(
       upstreamCode || detailUpstreamCode,
       detailReason
     );
+    const remappedMalformedQwenChatError = remapMalformedQwenChatError({
+      error: errRecord,
+      body,
+      baseContext: malformedQwenFallbackContext
+    });
+    const recoveredQwenChatToolCalls = tryRecoverQwenChatToolCalls({
+      body,
+      baseContext: malformedQwenFallbackContext
+    });
+
+    if (recoveredQwenChatToolCalls.length > 0) {
+      const recoveredProviderResponse = buildRecoveredQwenChatProviderResponse({
+        toolCalls: recoveredQwenChatToolCalls,
+        model:
+          typeof options.originalRequest?.model === 'string'
+            ? String(options.originalRequest.model)
+            : undefined,
+        requestId: options.requestId
+      });
+      if (recoveredProviderResponse) {
+        try {
+          const convertedRecovered = await bridgeConvertProviderResponse({
+            providerProtocol: options.providerProtocol,
+            providerResponse: recoveredProviderResponse,
+            context: adapterContext ?? malformedQwenFallbackContext,
+            entryEndpoint: options.entryEndpoint || entry,
+            wantsStream: options.wantsStream,
+            requestSemantics: options.requestSemantics
+          });
+          validateConvertedProviderToolCallsOrThrow(
+            convertedRecovered.body ?? recoveredProviderResponse,
+            collectDeclaredToolNames(malformedQwenFallbackContext)
+          );
+          logPipelineStage('convert.bridge.recovered_partial_tool_container', options.requestId, {
+            recoveredToolCalls: recoveredQwenChatToolCalls.length,
+            toolNames: recoveredQwenChatToolCalls.map((item) => item.name).join(',')
+          });
+          if (convertedRecovered.__sse_responses) {
+            return attachTimingBreakdown({
+              ...options.response,
+              body: { __sse_responses: convertedRecovered.__sse_responses }
+            });
+          }
+          return attachTimingBreakdown({
+            ...options.response,
+            body: convertedRecovered.body ?? body
+          });
+        } catch (recoveryError) {
+          logProviderResponseConverterNonBlockingError('recoverQwenChatToolCalls', recoveryError, {
+            requestId: options.requestId,
+            recoveredToolCalls: recoveredQwenChatToolCalls.length
+          });
+        }
+      }
+    }
+
+    if (remappedMalformedQwenChatError) {
+      logPipelineStage('convert.bridge.error', options.requestId, {
+        code: (remappedMalformedQwenChatError as { code?: string }).code,
+        upstreamCode: (remappedMalformedQwenChatError as { upstreamCode?: string }).upstreamCode,
+        message: remappedMalformedQwenChatError.message
+      });
+      throw remappedMalformedQwenChatError;
+    }
 
     if (isSseDecodeError || isServerToolFollowupError || isContextLengthExceeded) {
       if (isSseDecodeError || isContextLengthExceeded) {

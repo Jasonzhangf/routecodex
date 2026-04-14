@@ -208,9 +208,14 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
           flowId: FLOW_ID,
           followup: {
             requestIdSuffix: ':review_followup',
+            injection: {
+              ops: [
+                { op: 'append_assistant_message', required: false },
+                { op: 'append_tool_messages_from_tool_outputs', required: true },
+                { op: 'append_user_text', text: followupText }
+              ]
+            },
             metadata: {
-              clientInjectOnly: true,
-              clientInjectText: followupText,
               clientInjectSource: 'servertool.review',
               ...(workingDirectory
                 ? {

@@ -30,6 +30,27 @@ type GroupFileMeta = {
 
 const pruneState = new Map<string, { lastRunAt: number; pending: Promise<void> | null }>();
 
+const ERRORSAMPLE_SKIP_HTTP_STATUSES = new Set([429, 502]);
+const DEFAULT_ERRORSAMPLE_QUEUE_MAX_ITEMS = 32;
+const DEFAULT_ERRORSAMPLE_QUEUE_MEMORY_BUDGET_BYTES = 8 * MB;
+
+type ErrorsampleQueueItem = {
+  dir: string;
+  file: string;
+  serialized: string;
+  budget: ErrorsampleGroupBudget;
+  sizeBytes: number;
+  resolve: (value: string | null) => void;
+  reject: (reason?: unknown) => void;
+};
+
+const ERRORSAMPLE_QUEUE: ErrorsampleQueueItem[] = [];
+let errorsampleQueueBytes = 0;
+let errorsampleDrainScheduled = false;
+let errorsampleDrainInFlight = false;
+let errorsampleDroppedCount = 0;
+let errorsampleLastDropLogAt = 0;
+
 function resolveErrorsamplesRoot(): string {
   const envOverride =
     process.env.ROUTECODEX_ERRORSAMPLES_DIR ||
@@ -66,6 +87,20 @@ function parseEnvPositiveInt(keys: string[], fallback: number, min = 1): number 
     }
   }
   return fallback;
+}
+
+function resolveErrorsampleQueueMaxItems(): number {
+  return parseEnvPositiveInt(
+    ['ROUTECODEX_ERRORSAMPLE_QUEUE_MAX_ITEMS', 'RCC_ERRORSAMPLE_QUEUE_MAX_ITEMS'],
+    DEFAULT_ERRORSAMPLE_QUEUE_MAX_ITEMS
+  );
+}
+
+function resolveErrorsampleQueueMemoryBudgetBytes(): number {
+  return parseEnvPositiveInt(
+    ['ROUTECODEX_ERRORSAMPLE_QUEUE_MEMORY_BUDGET_BYTES', 'RCC_ERRORSAMPLE_QUEUE_MEMORY_BUDGET_BYTES'],
+    DEFAULT_ERRORSAMPLE_QUEUE_MEMORY_BUDGET_BYTES
+  );
 }
 
 function resolveGroupBudget(group: string): ErrorsampleGroupBudget {
@@ -260,31 +295,218 @@ function isEnospc(error: unknown): boolean {
   return typeof code === 'string' && code.toUpperCase() === 'ENOSPC';
 }
 
+function readNumericLike(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.floor(value);
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed)) {
+      return Math.floor(parsed);
+    }
+  }
+  return null;
+}
+
+function shouldSkipErrorsamplePayload(payload: unknown): boolean {
+  const queue: unknown[] = [payload];
+  const seen = new WeakSet<object>();
+  let steps = 0;
+
+  while (queue.length > 0 && steps < 400) {
+    steps += 1;
+    const current = queue.shift();
+    if (!current || typeof current !== 'object') {
+      continue;
+    }
+    if (seen.has(current as object)) {
+      continue;
+    }
+    seen.add(current as object);
+
+    const record = current as Record<string, unknown>;
+    const errorRecord =
+      record.error && typeof record.error === 'object' && !Array.isArray(record.error)
+        ? (record.error as Record<string, unknown>)
+        : undefined;
+    const candidates = [
+      readNumericLike(record.status),
+      readNumericLike(record.statusCode),
+      readNumericLike(record.httpStatus),
+      readNumericLike(record.code),
+      readNumericLike(record.upstreamStatus),
+      readNumericLike(record.upstreamCode),
+      readNumericLike(errorRecord?.status),
+      readNumericLike(errorRecord?.statusCode),
+      readNumericLike(errorRecord?.code)
+    ];
+    if (candidates.some((value) => value !== null && ERRORSAMPLE_SKIP_HTTP_STATUSES.has(value))) {
+      return true;
+    }
+
+    for (const child of Object.values(record)) {
+      if (child && typeof child === 'object') {
+        queue.push(child);
+      }
+    }
+  }
+
+  return false;
+}
+
+function flushErrorsampleDropLog(force = false): void {
+  if (errorsampleDroppedCount <= 0) {
+    return;
+  }
+  const now = Date.now();
+  if (!force && now - errorsampleLastDropLogAt < 10_000) {
+    return;
+  }
+  const dropped = errorsampleDroppedCount;
+  errorsampleDroppedCount = 0;
+  errorsampleLastDropLogAt = now;
+  console.warn(
+    `[errorsamples] queue overflow: dropped ${dropped} old pending sample(s) ` +
+    `(pending=${ERRORSAMPLE_QUEUE.length}, bytes=${errorsampleQueueBytes})`
+  );
+}
+
+async function persistErrorsampleItem(item: ErrorsampleQueueItem): Promise<void> {
+  await fs.mkdir(item.dir, { recursive: true });
+  try {
+    await fs.writeFile(item.file, item.serialized, 'utf8');
+  } catch (error) {
+    if (!isEnospc(error)) {
+      throw error;
+    }
+    await maybePruneGroupDirectory(item.dir, item.budget, { force: true });
+    await fs.writeFile(item.file, item.serialized, 'utf8');
+  }
+  await maybePruneGroupDirectory(item.dir, item.budget);
+}
+
+async function drainErrorsampleQueue(): Promise<void> {
+  while (ERRORSAMPLE_QUEUE.length > 0) {
+    const item = ERRORSAMPLE_QUEUE.shift();
+    if (!item) {
+      continue;
+    }
+    errorsampleQueueBytes = Math.max(0, errorsampleQueueBytes - Math.max(1, item.sizeBytes));
+    try {
+      await persistErrorsampleItem(item);
+      item.resolve(item.file);
+    } catch (error) {
+      item.reject(error);
+    }
+  }
+  flushErrorsampleDropLog();
+}
+
+function scheduleErrorsampleDrain(): void {
+  if (errorsampleDrainScheduled || errorsampleDrainInFlight) {
+    return;
+  }
+  errorsampleDrainScheduled = true;
+  setImmediate(() => {
+    errorsampleDrainScheduled = false;
+    if (errorsampleDrainInFlight) {
+      return;
+    }
+    errorsampleDrainInFlight = true;
+    void drainErrorsampleQueue()
+      .catch((error) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(`[errorsamples] queue drain failed (non-blocking): ${reason}`);
+      })
+      .finally(() => {
+        errorsampleDrainInFlight = false;
+        if (ERRORSAMPLE_QUEUE.length > 0) {
+          scheduleErrorsampleDrain();
+        } else {
+          flushErrorsampleDropLog(true);
+        }
+      });
+  });
+}
+
+function enqueueErrorsampleItem(item: ErrorsampleQueueItem): Promise<string | null> {
+  const queueMaxItems = resolveErrorsampleQueueMaxItems();
+  const queueBudgetBytes = resolveErrorsampleQueueMemoryBudgetBytes();
+  while (
+    ERRORSAMPLE_QUEUE.length > 0
+    && (ERRORSAMPLE_QUEUE.length >= queueMaxItems || errorsampleQueueBytes + item.sizeBytes > queueBudgetBytes)
+  ) {
+    const dropped = ERRORSAMPLE_QUEUE.shift();
+    if (!dropped) {
+      break;
+    }
+    errorsampleQueueBytes = Math.max(0, errorsampleQueueBytes - Math.max(1, dropped.sizeBytes));
+    errorsampleDroppedCount += 1;
+    dropped.resolve(null);
+  }
+  ERRORSAMPLE_QUEUE.push(item);
+  errorsampleQueueBytes += item.sizeBytes;
+  scheduleErrorsampleDrain();
+  return new Promise<string | null>((resolve, reject) => {
+    item.resolve = resolve;
+    item.reject = reject;
+  });
+}
+
 export async function writeErrorsampleJson(options: {
   group: string;
   kind: string;
   payload: unknown;
-}): Promise<string> {
+}): Promise<string | null> {
+  if (shouldSkipErrorsamplePayload(options.payload)) {
+    return null;
+  }
   const root = resolveErrorsamplesRoot();
   const dir = path.join(root, safeName(options.group));
   const budget = resolveGroupBudget(options.group);
-  await fs.mkdir(dir, { recursive: true });
   const file = path.join(
     dir,
     `${safeName(options.kind)}-${safeStamp()}-${Math.random().toString(16).slice(2)}.json`
   );
   const sanitizedPayload = redactSensitiveData(options.payload);
   const serialized = serializePayloadForWrite(sanitizedPayload, budget.maxSampleBytes);
+  const sizeBytes = Math.max(1, Buffer.byteLength(serialized, 'utf8'));
 
-  try {
-    await fs.writeFile(file, serialized, 'utf8');
-  } catch (error) {
-    if (!isEnospc(error)) {
-      throw error;
+  return enqueueErrorsampleItem({
+    dir,
+    file,
+    serialized,
+    budget,
+    sizeBytes,
+    resolve: () => undefined,
+    reject: () => undefined
+  });
+}
+
+export async function __flushErrorsampleQueueForTests(): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (
+      ERRORSAMPLE_QUEUE.length === 0
+      && errorsampleQueueBytes === 0
+      && !errorsampleDrainScheduled
+      && !errorsampleDrainInFlight
+    ) {
+      flushErrorsampleDropLog(true);
+      return;
     }
-    await maybePruneGroupDirectory(dir, budget, { force: true });
-    await fs.writeFile(file, serialized, 'utf8');
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
-  await maybePruneGroupDirectory(dir, budget);
-  return file;
+  throw new Error('errorsample queue did not flush in time');
+}
+
+export function __resetErrorsampleQueueForTests(): void {
+  while (ERRORSAMPLE_QUEUE.length > 0) {
+    const item = ERRORSAMPLE_QUEUE.shift();
+    item?.resolve(null);
+  }
+  errorsampleQueueBytes = 0;
+  errorsampleDrainScheduled = false;
+  errorsampleDrainInFlight = false;
+  errorsampleDroppedCount = 0;
+  errorsampleLastDropLogAt = 0;
 }

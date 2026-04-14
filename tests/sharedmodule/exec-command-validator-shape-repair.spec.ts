@@ -23,4 +23,24 @@ describe('exec_command validator shape repair', () => {
       expect(normalized.yield_time_ms).toBe(500);
     }
   });
+
+  it('rejects command alias in canonical schema mode', () => {
+    const result = validateToolCall(
+      'exec_command',
+      JSON.stringify({ command: 'ls -la', yield_time_ms: 500 }),
+      { schemaMode: 'canonical' }
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('missing_cmd');
+  });
+
+  it('rejects nested input.cmd shape in canonical schema mode', () => {
+    const result = validateToolCall(
+      'exec_command',
+      JSON.stringify({ input: { cmd: 'pwd', workdir: '/workspace' } }),
+      { schemaMode: 'canonical' }
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('missing_cmd');
+  });
 });

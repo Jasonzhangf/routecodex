@@ -1,4 +1,5 @@
 import type { RoutingInstructionState } from '../../router/virtual-router/routing-instructions.js';
+import type { JsonObject } from '../../conversion/hub/types/json.js';
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
@@ -12,6 +13,35 @@ const STOPLESS_DIRECTIVE_PATTERN = /<\*\*stopless:([a-z0-9_-]+)\*\*>/gi;
 const STOPLESS_DIRECTIVE_STRIP_PATTERN = /<\*\*stopless:[^*]+\*\*>/gi;
 
 export type ReasoningStopMode = 'on' | 'off' | 'endless';
+export const REASONING_STOP_TOOL_DEF: JsonObject = {
+  type: 'function',
+  function: {
+    name: 'reasoning.stop',
+    description:
+      'Structured stop self-check gate. Stop is allowed only when either: (A) task is completed with completion_evidence; or (B) all feasible attempts are exhausted and the task is irrecoverably blocked, with cannot_complete_reason + blocking_evidence + attempts_exhausted=true. If user input is required, also provide user_input_required=true and user_question. Required: task_goal, is_completed. If not completed but a concrete next action exists, fill next_step and continue instead of stopping.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task_goal: { type: 'string' },
+        is_completed: { type: 'boolean' },
+        completion_evidence: { type: 'string' },
+        cannot_complete_reason: { type: 'string' },
+        blocking_evidence: { type: 'string' },
+        attempts_exhausted: { type: 'boolean' },
+        next_step: { type: 'string' },
+        user_input_required: { type: 'boolean' },
+        user_question: { type: 'string' },
+        learning: { type: 'string' }
+      },
+      required: ['task_goal', 'is_completed'],
+      additionalProperties: false
+    }
+  }
+} as const satisfies JsonObject;
+const REASONING_STOP_DIRECTIVE_MODE_KEYS = [
+  'reasoningStopDirectiveMode',
+  '__reasoningStopDirectiveMode'
+] as const;
 
 function createEmptyRoutingInstructionState(): RoutingInstructionState {
   return {
@@ -137,6 +167,30 @@ function normalizeReasoningStopMode(value: unknown): ReasoningStopMode | undefin
     return normalized;
   }
   return undefined;
+}
+
+function readStoredReasoningStopDirectiveMode(source: unknown): ReasoningStopMode | undefined {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    return undefined;
+  }
+  const record = source as Record<string, unknown>;
+  for (const key of REASONING_STOP_DIRECTIVE_MODE_KEYS) {
+    const mode = normalizeReasoningStopMode(record[key]);
+    if (mode) {
+      return mode;
+    }
+  }
+  return undefined;
+}
+
+function storeReasoningStopDirectiveMode(source: unknown, mode: ReasoningStopMode | undefined): void {
+  if (!source || typeof source !== 'object' || Array.isArray(source) || !mode) {
+    return;
+  }
+  const record = source as Record<string, unknown>;
+  for (const key of REASONING_STOP_DIRECTIVE_MODE_KEYS) {
+    record[key] = mode;
+  }
 }
 
 function extractMessageContentText(content: unknown): string {
@@ -322,8 +376,16 @@ function extractStoplessDirectiveModeFromAdapterContext(adapterContext: unknown)
   }
   const record = adapterContext as Record<string, unknown>;
   const captured = record.capturedChatRequest;
+  const storedMode = readStoredReasoningStopDirectiveMode(captured) ?? readStoredReasoningStopDirectiveMode(record);
+  if (storedMode) {
+    return storedMode;
+  }
   const text = extractLatestUserTextFromCapturedRequest(captured);
   const mode = extractStoplessDirectiveModeFromText(text);
+  if (mode) {
+    storeReasoningStopDirectiveMode(record, mode);
+    storeReasoningStopDirectiveMode(captured, mode);
+  }
   // Marker is transport control signal and must never leak into followup payloads,
   // regardless of whether parsing succeeds.
   stripStoplessDirectiveMarkersFromCapturedRequest(captured);
@@ -332,7 +394,7 @@ function extractStoplessDirectiveModeFromAdapterContext(adapterContext: unknown)
 
 export function readReasoningStopMode(
   adapterContext: unknown,
-  fallbackMode: ReasoningStopMode = 'off'
+  fallbackMode: ReasoningStopMode = 'on'
 ): ReasoningStopMode {
   const stickyKey = resolveStickyKey(adapterContext);
   if (!stickyKey) {
@@ -349,7 +411,7 @@ export function readReasoningStopMode(
 
 export function syncReasoningStopModeFromRequest(
   adapterContext: unknown,
-  fallbackMode: ReasoningStopMode = 'off'
+  fallbackMode: ReasoningStopMode = 'on'
 ): ReasoningStopMode {
   const stickyKey = resolveStickyKey(adapterContext);
   const directiveMode = extractStoplessDirectiveModeFromAdapterContext(adapterContext);

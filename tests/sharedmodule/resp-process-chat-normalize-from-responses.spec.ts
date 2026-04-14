@@ -119,6 +119,38 @@ tool:exec_command (tool:exec_command)
     expect(calls[0]?.function?.name).toBe('apply_patch');
   });
 
+  it('strips empty tool_calls json noise from assistant content', async () => {
+    const payload: any = {
+      id: 'chat_test_strip_empty_tool_calls_noise',
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: 'qwen3.6-plus',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: ['done', '• {"tool_calls":[]}'].join('\n')
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const result = await runRespProcessStage1ToolGovernance({
+      payload,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req_test_strip_empty_tool_calls_noise',
+      clientProtocol: 'openai-responses'
+    });
+
+    const governed: any = result.governedPayload;
+    const choice = governed?.choices?.[0];
+    expect(choice?.finish_reason).toBe('stop');
+    expect(choice?.message?.tool_calls ?? []).toHaveLength(0);
+    expect(String(choice?.message?.content ?? '')).toBe('done');
+  });
+
   it('harvests reasoning_content native tool call without [思考] wrapper and strips time tag noise', async () => {
     const payload: any = {
       id: 'chat_test_reasoning_native_tool',

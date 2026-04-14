@@ -57,8 +57,10 @@ describe('tool-text-request-guidance native wrapper', () => {
       { includeToolNames: true },
     ) as any;
 
-    expect(result.messages[0].content).toContain('Tool exec_command does not exists');
-    expect(result.messages[0].content).toContain('当前环境是沙箱隔离');
+    expect(result.messages[0].content).toContain(
+      'Any tool name not explicitly declared for this turn is invalid.',
+    );
+    expect(result.messages[0].content).toContain('read_file');
     expect(result.messages[0].content).toContain('Allowed tool names this turn: exec_command, apply_patch');
     expect(result.messages[0].content).toContain('use tool name `exec_command`');
     expect(result.messages[0].content).toContain('Do NOT emit `command`, `cwd`, or `workdir`');

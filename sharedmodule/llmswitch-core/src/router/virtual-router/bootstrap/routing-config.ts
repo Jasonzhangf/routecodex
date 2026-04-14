@@ -181,7 +181,10 @@ function normalizeRoutePoolEntry(
   const priority = normalizePriorityValue(record.priority, total - index);
   const loadBalancing = normalizeRoutePoolLoadBalancing(record.loadBalancing);
   const targets = normalizeRouteTargets(record, loadBalancing);
-  const mode = normalizeRoutePoolMode(record.mode ?? (record as any).strategy ?? (record as any).routingMode);
+  const explicitMode = normalizeRoutePoolMode(record.mode ?? (record as any).strategy ?? (record as any).routingMode);
+  const mode =
+    explicitMode ??
+    inferRoutePoolModeFromConfig(record, targets, loadBalancing);
   const force =
     record.force === true ||
     (typeof record.force === 'string' && record.force.trim().toLowerCase() === 'true');
@@ -196,6 +199,36 @@ function normalizeRoutePoolEntry(
         ...(loadBalancing ? { loadBalancing } : {})
       }
     : null;
+}
+
+function inferRoutePoolModeFromConfig(
+  record: Record<string, unknown>,
+  targets: string[],
+  loadBalancing?: RoutePoolLoadBalancingPolicy
+): 'priority' | undefined {
+  if (!targets.length) {
+    return undefined;
+  }
+  if (hasExplicitRouteTargets(record)) {
+    return undefined;
+  }
+  const nested = asLoadBalancingRecord(record.loadBalancing);
+  const hasNestedOrderedTargets =
+    normalizeTargetList(nested?.targets).length > 0 ||
+    normalizeTargetList(nested?.providers).length > 0 ||
+    normalizeTargetList(nested?.order).length > 0 ||
+    normalizeTargetList(nested?.entries).length > 0 ||
+    normalizeTargetList(nested?.items).length > 0 ||
+    normalizeTargetList(nested?.routes).length > 0 ||
+    normalizeTargetList(nested?.target).length > 0 ||
+    normalizeTargetList(nested?.provider).length > 0;
+  if (hasNestedOrderedTargets) {
+    return 'priority';
+  }
+  if (loadBalancing?.weights && Object.keys(loadBalancing.weights).length > 0) {
+    return 'priority';
+  }
+  return undefined;
 }
 
 function normalizeRoutePoolLoadBalancing(input: unknown): RoutePoolLoadBalancingPolicy | undefined {
@@ -265,7 +298,21 @@ function normalizeRoutePoolMode(value: unknown): 'round-robin' | 'priority' | un
 }
 
 function normalizeRouteTargets(record: Record<string, unknown>, loadBalancing?: RoutePoolLoadBalancingPolicy): string[] {
-  const buckets = [record.targets, record.providers, record.pool, record.entries, record.items, record.routes];
+  const loadBalancingRecord = asLoadBalancingRecord(record.loadBalancing);
+  const buckets = [
+    record.targets,
+    record.providers,
+    record.pool,
+    record.entries,
+    record.items,
+    record.routes,
+    loadBalancingRecord?.targets,
+    loadBalancingRecord?.providers,
+    loadBalancingRecord?.order,
+    loadBalancingRecord?.entries,
+    loadBalancingRecord?.items,
+    loadBalancingRecord?.routes
+  ];
   const normalized: string[] = [];
   for (const bucket of buckets) {
     for (const target of normalizeTargetList(bucket)) {
@@ -274,7 +321,7 @@ function normalizeRouteTargets(record: Record<string, unknown>, loadBalancing?: 
       }
     }
   }
-  const singular = [record.target, record.provider];
+  const singular = [record.target, record.provider, loadBalancingRecord?.target, loadBalancingRecord?.provider];
   for (const candidate of singular) {
     for (const target of normalizeTargetList(candidate)) {
       if (!normalized.includes(target)) {
@@ -291,6 +338,21 @@ function normalizeRouteTargets(record: Record<string, unknown>, loadBalancing?: 
     }
   }
   return normalized;
+}
+
+function asLoadBalancingRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function hasExplicitRouteTargets(record: Record<string, unknown>): boolean {
+  const explicitBuckets = [record.targets, record.providers, record.pool, record.entries, record.items, record.routes];
+  if (explicitBuckets.some((bucket) => normalizeTargetList(bucket).length > 0)) {
+    return true;
+  }
+  return normalizeTargetList(record.target).length > 0 || normalizeTargetList(record.provider).length > 0;
 }
 
 function normalizeTargetList(value: unknown): string[] {

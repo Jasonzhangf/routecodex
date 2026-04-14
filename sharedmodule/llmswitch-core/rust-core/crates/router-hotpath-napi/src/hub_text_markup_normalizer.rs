@@ -63,7 +63,6 @@ fn allowed_keys_for_tool(name: &str) -> Option<&'static [&'static str]> {
         ]),
         "exec_command" => Some(&[
             "cmd",
-            "command",
             "workdir",
             "justification",
             "login",
@@ -330,13 +329,12 @@ fn salvage_tool_args_from_raw_text(tool_name: &str, raw_args: &str) -> Option<Ma
     };
     let mut out = Map::new();
     if lname == "exec_command" {
-        let cmd_re = Regex::new(r#"\"(?:cmd|command)\"\s*:\s*\"([\s\S]*?)\"\s*(?:,|})"#).unwrap();
+        let cmd_re = Regex::new(r#"\"cmd\"\s*:\s*\"([\s\S]*?)\"\s*(?:,|})"#).unwrap();
         let workdir_re =
             Regex::new(r#"\"(?:workdir|cwd)\"\s*:\s*\"([\s\S]*?)\"\s*(?:,|})"#).unwrap();
         let timeout_re = Regex::new(r#"\"(?:timeout_ms|timeout)\"\s*:\s*(\d+)\s*(?:,|})"#).unwrap();
         if let Some(cmd) = pick_string(&cmd_re) {
-            out.insert("cmd".to_string(), Value::String(cmd.clone()));
-            out.insert("command".to_string(), Value::String(cmd));
+            out.insert("cmd".to_string(), Value::String(cmd));
         }
         if let Some(wd) = pick_string(&workdir_re) {
             out.insert("workdir".to_string(), Value::String(wd));
@@ -398,38 +396,7 @@ fn resolve_json_tool_arg_aliases(
     let lname = tool_name.to_lowercase();
     let mut merged: HashMap<String, Vec<String>> = HashMap::new();
     let base: HashMap<&str, Vec<&str>> = if lname == "exec_command" {
-        HashMap::from([
-            (
-                "cmd",
-                vec![
-                    "cmd",
-                    "command",
-                    "script",
-                    "toon",
-                    "input.command",
-                    "input.cmd",
-                    "input.script",
-                    "input.toon",
-                ],
-            ),
-            (
-                "command",
-                vec![
-                    "cmd",
-                    "command",
-                    "script",
-                    "toon",
-                    "input.command",
-                    "input.cmd",
-                    "input.script",
-                    "input.toon",
-                ],
-            ),
-            (
-                "workdir",
-                vec!["workdir", "cwd", "input.workdir", "input.cwd"],
-            ),
-        ])
+        HashMap::from([("workdir", vec!["workdir", "cwd", "input.workdir", "input.cwd"])])
     } else if lname == "write_stdin" {
         HashMap::from([
             (
@@ -627,8 +594,7 @@ fn normalize_json_tool_args(
         if cmd_value.is_empty() {
             return None;
         }
-        args_obj.insert("cmd".to_string(), Value::String(cmd_value.clone()));
-        args_obj.insert("command".to_string(), Value::String(cmd_value));
+        args_obj.insert("cmd".to_string(), Value::String(cmd_value));
         if let Some(Value::String(wd)) = args_obj.get("workdir") {
             args_obj.insert("workdir".to_string(), Value::String(wd.trim().to_string()));
         }
@@ -863,13 +829,10 @@ fn salvage_tool_call_from_broken_json_text(
     let canonical = canonicalize_json_tool_name(&name_val, options)?;
     let mut args: Option<Map<String, Value>> = None;
     if canonical == "exec_command" {
-        if let Some(cmd) =
-            extract_possibly_broken_quoted_value(candidate, &["cmd", "command", "script", "toon"])
-        {
+        if let Some(cmd) = extract_possibly_broken_quoted_value(candidate, &["cmd"]) {
             if !cmd.trim().is_empty() {
                 let mut map = Map::new();
-                map.insert("cmd".to_string(), Value::String(cmd.clone()));
-                map.insert("command".to_string(), Value::String(cmd));
+                map.insert("cmd".to_string(), Value::String(cmd));
                 args = Some(map);
             }
         }
@@ -1148,11 +1111,10 @@ fn apply_tool_inner_field(
     let raw_val = raw_val_input.to_string();
     let value = try_parse_primitive_value(raw_val.as_str());
 
-    if lname == "exec_command" && (key == "command" || key == "cmd") {
+    if lname == "exec_command" && key == "cmd" {
         let cmd = coerce_command_value_to_string(&value);
         if !cmd.trim().is_empty() {
-            args_obj.insert("cmd".to_string(), Value::String(cmd.clone()));
-            args_obj.insert("command".to_string(), Value::String(cmd));
+            args_obj.insert("cmd".to_string(), Value::String(cmd));
         }
         return;
     }

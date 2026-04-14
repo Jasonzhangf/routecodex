@@ -26,32 +26,10 @@ import {
   roughEstimateInputTokensFromRequest,
 } from "./hub-pipeline-heavy-input-fastpath.js";
 import {
+  REASONING_STOP_TOOL_DEF,
   syncReasoningStopModeFromRequest,
   type ReasoningStopMode
 } from "../../../servertool/handlers/reasoning-stop-state.js";
-
-const REASONING_STOP_TOOL_DEF: StandardizedTool = {
-  type: 'function',
-  function: {
-    name: 'reasoning.stop',
-    description:
-      'Structured stop self-check gate. Stop is allowed only when either: (A) task is completed with completion_evidence; or (B) all feasible attempts are exhausted and blocked, with cannot_complete_reason + blocking_evidence + attempts_exhausted=true. Required: task_goal, is_completed. If not completed but a concrete next action exists, fill next_step and continue instead of stopping.',
-    parameters: {
-      type: 'object',
-      properties: {
-        task_goal: { type: 'string' },
-        is_completed: { type: 'boolean' },
-        completion_evidence: { type: 'string' },
-        cannot_complete_reason: { type: 'string' },
-        blocking_evidence: { type: 'string' },
-        attempts_exhausted: { type: 'boolean' },
-        next_step: { type: 'string' }
-      },
-      required: ['task_goal', 'is_completed'],
-      additionalProperties: false
-    }
-  }
-};
 
 function hasReasoningStopTool(tools: StandardizedTool[] | undefined): boolean {
   return Boolean(
@@ -82,6 +60,47 @@ function buildCapturedChatRequestFromStandardized(request: StandardizedRequest):
     out.parameters = jsonClone(request.parameters as unknown as JsonObject);
   }
   return out;
+}
+
+function readSessionLikeToken(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function backfillAdapterContextSessionIdentifiersFromRequest(
+  request: StandardizedRequest,
+  adapterContext: AdapterContext,
+): void {
+  const adapterRecord = adapterContext as Record<string, unknown>;
+  const requestMetadata =
+    request.metadata && typeof request.metadata === "object"
+      ? (request.metadata as Record<string, unknown>)
+      : undefined;
+  if (!requestMetadata) {
+    return;
+  }
+
+  const sessionId =
+    readSessionLikeToken(adapterRecord.sessionId) ??
+    readSessionLikeToken(requestMetadata.sessionId) ??
+    readSessionLikeToken(requestMetadata.session_id);
+  const conversationId =
+    readSessionLikeToken(adapterRecord.conversationId) ??
+    readSessionLikeToken(requestMetadata.conversationId) ??
+    readSessionLikeToken(requestMetadata.conversation_id);
+
+  if (sessionId && !readSessionLikeToken(adapterRecord.sessionId)) {
+    adapterRecord.sessionId = sessionId;
+  }
+  if (
+    conversationId &&
+    !readSessionLikeToken(adapterRecord.conversationId)
+  ) {
+    adapterRecord.conversationId = conversationId;
+  }
 }
 
 export function sanitizeStandardizedRequestMessages(
@@ -219,6 +238,10 @@ export function prepareReasoningStopRequestTooling(args: {
   request: StandardizedRequest;
   adapterContext: AdapterContext;
 }): ReasoningStopMode {
+  backfillAdapterContextSessionIdentifiersFromRequest(
+    args.request,
+    args.adapterContext,
+  );
   const captured = buildCapturedChatRequestFromStandardized(args.request);
   (args.adapterContext as Record<string, unknown>).capturedChatRequest = captured;
   const mode = syncReasoningStopModeFromRequest(args.adapterContext, 'on');
@@ -234,7 +257,7 @@ export function prepareReasoningStopRequestTooling(args: {
   }
   if (!hasReasoningStopTool(args.request.tools)) {
     const nextTools = Array.isArray(args.request.tools) ? [...args.request.tools] : [];
-    nextTools.push(jsonClone(REASONING_STOP_TOOL_DEF as unknown as JsonObject) as unknown as StandardizedTool);
+    nextTools.push(jsonClone(REASONING_STOP_TOOL_DEF) as unknown as StandardizedTool);
     args.request.tools = nextTools;
   }
   (captured as { messages?: StandardizedMessage[] }).messages = jsonClone(

@@ -11,7 +11,10 @@ import {
   ensureClientHeadersOnPayload,
   resolveClientRequestId
 } from './executor-metadata.js';
-import { rebindResponsesConversationRequestId } from '../../../modules/llmswitch/bridge.js';
+import {
+  loadRoutingInstructionStateSync,
+  rebindResponsesConversationRequestId
+} from '../../../modules/llmswitch/bridge.js';
 import {
   type ConvertProviderResponseOptions,
   convertProviderResponseIfNeeded as convertProviderResponseWithBridge
@@ -181,6 +184,64 @@ function readString(value: unknown): string | undefined {
   }
   const normalized = value.trim();
   return normalized || undefined;
+}
+
+type StoplessLogMode = 'on' | 'off' | 'endless';
+
+function normalizeStoplessLogMode(value: unknown): StoplessLogMode | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'on' || normalized === 'off' || normalized === 'endless') {
+    return normalized;
+  }
+  return undefined;
+}
+
+function readPersistedStoplessLogState(stickyKey: string): {
+  mode?: StoplessLogMode;
+  armed?: boolean;
+} {
+  if (!stickyKey) {
+    return {};
+  }
+  const state = loadRoutingInstructionStateSync(stickyKey);
+  if (!state || typeof state !== 'object' || Array.isArray(state)) {
+    return {};
+  }
+  const record = state as Record<string, unknown>;
+  const mode = normalizeStoplessLogMode(record.reasoningStopMode);
+  return {
+    ...(mode ? { mode } : {}),
+    ...(typeof record.reasoningStopArmed === 'boolean'
+      ? { armed: record.reasoningStopArmed }
+      : {})
+  };
+}
+
+function resolveStoplessLogState(metadata: Record<string, unknown>): {
+  mode?: StoplessLogMode;
+  armed?: boolean;
+} {
+  const sessionId = readString(metadata.sessionId);
+  const conversationId = readString(metadata.conversationId);
+  const persistedBySession = readPersistedStoplessLogState(sessionId ? `session:${sessionId}` : '');
+  const persistedByConversation = readPersistedStoplessLogState(
+    conversationId ? `conversation:${conversationId}` : ''
+  );
+  const mode =
+    persistedBySession.mode ??
+    persistedByConversation.mode ??
+    ((sessionId || conversationId) ? 'on' : undefined);
+  if (!mode) {
+    return {};
+  }
+  const armed =
+    persistedBySession.armed ??
+    persistedByConversation.armed ??
+    false;
+  return { mode, armed };
 }
 
 function readStatusCodeCandidate(value: unknown): number | undefined {
@@ -1190,6 +1251,8 @@ function emitVirtualRouterConcurrencyLog(args: {
   providerKey?: string;
   model?: string;
   reason?: string;
+  stoplessMode?: StoplessLogMode;
+  stoplessArmed?: boolean;
   activeInFlight: number;
   maxInFlight: number;
 }): void {
@@ -1201,6 +1264,8 @@ function emitVirtualRouterConcurrencyLog(args: {
     sessionId: args.sessionId,
     projectPath: args.projectPath,
     reason: args.reason,
+    stoplessMode: args.stoplessMode,
+    stoplessArmed: args.stoplessArmed,
     activeInFlight: args.activeInFlight,
     maxInFlight: args.maxInFlight
   });
@@ -2188,6 +2253,7 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt
           });
 
+          const stoplessLogState = resolveStoplessLogState(mergedMetadata);
           emitVirtualRouterConcurrencyLog({
             sessionId: readString(mergedMetadata.sessionId) ?? readString(mergedMetadata.conversationId),
             projectPath:
@@ -2200,6 +2266,8 @@ export class HubRequestExecutor implements RequestExecutor {
             providerKey: target.providerKey,
             model: providerModel,
             reason: readString(routingDecisionRecord?.reasoning),
+            stoplessMode: stoplessLogState.mode,
+            stoplessArmed: stoplessLogState.armed,
             activeInFlight: trafficActiveInFlightAtAcquire,
             maxInFlight: trafficPolicyMaxInFlight || trafficAcquired.policy.concurrency.maxInFlight
           });

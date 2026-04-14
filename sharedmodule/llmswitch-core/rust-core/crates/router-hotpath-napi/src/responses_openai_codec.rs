@@ -387,7 +387,10 @@ mod tests {
         .unwrap();
 
         let value: Value = serde_json::from_str(&raw).unwrap();
-        assert_eq!(value["status"], Value::String("requires_action".to_string()));
+        assert_eq!(
+            value["status"],
+            Value::String("requires_action".to_string())
+        );
         assert_eq!(
             value["required_action"]["submit_tool_outputs"]["tool_calls"][0]["name"],
             Value::String("exec_command".to_string())

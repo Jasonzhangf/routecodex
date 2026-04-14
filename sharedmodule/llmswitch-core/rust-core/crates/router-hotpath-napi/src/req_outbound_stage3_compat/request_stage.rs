@@ -10,10 +10,11 @@ use super::lmstudio::apply_lmstudio_request_compat;
 use super::profile::{
     build_compat_result, has_request_stage, is_claude_code_profile, is_deepseek_web_profile,
     is_gemini_cli_profile, is_gemini_profile, is_glm_profile, is_iflow_profile,
-    is_lmstudio_profile, is_qwen_profile, is_responses_c4m_profile, is_responses_crs_profile,
-    pick_compat_profile, provider_protocol_matches,
+    is_lmstudio_profile, is_qwen_profile, is_qwenchat_web_profile, is_responses_c4m_profile,
+    is_responses_crs_profile, pick_compat_profile, provider_protocol_matches,
 };
 use super::qwen::apply_qwen_request_compat;
+use super::qwenchat::apply_qwenchat_request_compat;
 use super::responses::{apply_responses_c4m_request_compat, apply_responses_crs_request_compat};
 use super::{CompatResult, ReqOutboundCompatInput};
 
@@ -152,6 +153,26 @@ pub fn run_req_outbound_stage3_compat(
                         input.payload,
                         &input.adapter_context,
                     ),
+                    applied_profile: Some(profile_id.to_string()),
+                    native_applied: true,
+                    rate_limit_detected: None,
+                });
+            }
+            return Ok(build_compat_result(input.payload, None));
+        }
+
+        if is_qwenchat_web_profile(profile_id) {
+            if provider_protocol_matches(
+                input.adapter_context.provider_protocol.as_ref(),
+                "openai-chat",
+            ) {
+                let payload = if let Some(root) = input.payload.as_object() {
+                    apply_qwenchat_request_compat(root)
+                } else {
+                    input.payload
+                };
+                return Ok(CompatResult {
+                    payload,
                     applied_profile: Some(profile_id.to_string()),
                     native_applied: true,
                     rate_limit_detected: None,

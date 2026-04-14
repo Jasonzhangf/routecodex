@@ -2,7 +2,7 @@ import type { JsonObject, JsonValue } from '../../conversion/hub/types/json.js';
 import type { ServerToolHandler, ServerToolHandlerPlan, ToolCall } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
 import { cloneJson } from '../server-side-tools.js';
-import { armReasoningStopState, readReasoningStopMode, type ReasoningStopMode } from './reasoning-stop-state.js';
+import { armReasoningStopState } from './reasoning-stop-state.js';
 
 const FLOW_ID = 'reasoning_stop_flow';
 const TOOL_NAME = 'reasoning.stop';
@@ -69,7 +69,7 @@ function readBool(record: Record<string, unknown>, keys: string[]): boolean | un
   return undefined;
 }
 
-function normalizeReasoningStopPayload(args: Record<string, unknown>, mode: ReasoningStopMode): {
+function normalizeReasoningStopPayload(args: Record<string, unknown>): {
   ok: true;
   payload: ReasoningStopPayload;
 } | {
@@ -156,13 +156,6 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>, mode: Reas
     };
   }
   if (!completed && userInputRequired === true) {
-    if (mode === 'endless') {
-      return {
-        ok: false,
-        code: 'USER_INPUT_NOT_ALLOWED_IN_ENDLESS',
-        message: 'reasoning.stop in stopless:endless mode cannot stop for user_input_required=true.'
-      };
-    }
     if (!cannotCompleteReason) {
       return {
         ok: false,
@@ -185,14 +178,14 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>, mode: Reas
       message: 'reasoning.stop requires next_step or cannot_complete_reason when is_completed=false.'
     };
   }
-  if (!completed && userInputRequired !== true && cannotCompleteReason && !nextStep && attemptsExhausted !== true) {
+  if (!completed && cannotCompleteReason && !nextStep && attemptsExhausted !== true) {
     return {
       ok: false,
       code: 'ATTEMPTS_EXHAUSTED_REQUIRED',
       message: 'reasoning.stop requires attempts_exhausted=true when stopping with cannot_complete_reason.'
     };
   }
-  if (!completed && userInputRequired !== true && cannotCompleteReason && !nextStep && !blockingEvidence) {
+  if (!completed && cannotCompleteReason && !nextStep && !blockingEvidence) {
     return {
       ok: false,
       code: 'BLOCKING_EVIDENCE_REQUIRED',
@@ -283,8 +276,7 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
   }
 
   const parsed = parseToolArguments(toolCall);
-  const mode = readReasoningStopMode(ctx.adapterContext, 'on');
-  const normalized = normalizeReasoningStopPayload(parsed, mode);
+  const normalized = normalizeReasoningStopPayload(parsed);
 
   if (normalized.ok === false) {
     return {

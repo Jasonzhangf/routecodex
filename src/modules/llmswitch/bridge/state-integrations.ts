@@ -55,6 +55,45 @@ export function saveRoutingInstructionStateSync(key: string, state: unknown | nu
   fn(key, state);
 }
 
+type ReasoningStopStateExports = {
+  syncReasoningStopModeFromRequest?: (
+    adapterContext: unknown,
+    fallbackMode?: 'on' | 'off' | 'endless'
+  ) => 'on' | 'off' | 'endless';
+};
+
+let cachedReasoningStopStateModule: ReasoningStopStateExports | null | undefined = undefined;
+
+function getReasoningStopStateExports(): ReasoningStopStateExports | null {
+  if (cachedReasoningStopStateModule !== undefined) {
+    return cachedReasoningStopStateModule;
+  }
+  try {
+    cachedReasoningStopStateModule = requireCoreDist<ReasoningStopStateExports>(
+      'servertool/handlers/reasoning-stop-state'
+    );
+  } catch {
+    cachedReasoningStopStateModule = null;
+  }
+  return cachedReasoningStopStateModule;
+}
+
+export function syncReasoningStopModeFromRequest(
+  adapterContext: unknown,
+  fallbackMode: 'on' | 'off' | 'endless' = 'on'
+): 'on' | 'off' | 'endless' {
+  const mod = getReasoningStopStateExports();
+  const fn = mod?.syncReasoningStopModeFromRequest;
+  if (typeof fn !== 'function') {
+    return fallbackMode;
+  }
+  try {
+    return fn(adapterContext, fallbackMode);
+  } catch {
+    return fallbackMode;
+  }
+}
+
 type SessionIdentifiers = { sessionId?: string; conversationId?: string };
 
 type SessionIdentifiersModule = {

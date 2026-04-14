@@ -3,9 +3,11 @@ import { STREAM_LOG_FINISH_REASON_KEY } from '../../../../../src/server/utils/fi
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
+const mockSyncReasoningStopModeFromRequest = jest.fn(() => 'off');
 const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
+  syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
 });
 

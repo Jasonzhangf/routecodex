@@ -6,6 +6,7 @@ import {
 import { cloneJson } from '../server-side-tools.js';
 import { trimOpenAiMessagesForFollowup } from './followup-message-trimmer.js';
 import type { ServerToolFollowupInjectionPlan } from '../types.js';
+import { REASONING_STOP_TOOL_DEF } from './reasoning-stop-state.js';
 
 export type CapturedChatSeed = {
   model?: string;
@@ -438,28 +439,7 @@ function buildStandardFollowupTools(options?: { includeReasoningStopTool?: boole
     }
   ] as unknown as JsonObject[];
   if (options?.includeReasoningStopTool === true) {
-    tools.push({
-      type: 'function',
-      function: {
-        name: 'reasoning.stop',
-        description:
-          'Structured stop self-check gate. Stop is allowed only when either: (A) task is completed with completion_evidence; or (B) all feasible attempts are exhausted and blocked, with cannot_complete_reason + blocking_evidence + attempts_exhausted=true. Required: task_goal, is_completed. If not completed but a concrete next action exists, fill next_step and continue instead of stopping.',
-        parameters: {
-          type: 'object',
-          properties: {
-            task_goal: { type: 'string' },
-            is_completed: { type: 'boolean' },
-            completion_evidence: { type: 'string' },
-            cannot_complete_reason: { type: 'string' },
-            blocking_evidence: { type: 'string' },
-            attempts_exhausted: { type: 'boolean' },
-            next_step: { type: 'string' }
-          },
-          required: ['task_goal', 'is_completed'],
-          additionalProperties: false
-        }
-      }
-    } as unknown as JsonObject);
+    tools.push(cloneJson(REASONING_STOP_TOOL_DEF) as JsonObject);
   }
   return tools;
 }

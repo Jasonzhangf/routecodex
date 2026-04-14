@@ -585,6 +585,30 @@ fn parse_lenient_string(value: &str) -> Value {
     Value::Object(object)
 }
 
+fn parse_lenient_string_preserving_shell(value: &str) -> Value {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Value::Object(Map::new());
+    }
+
+    if let Some(parsed) = try_parse_command_json_preserving_shell(trimmed) {
+        return join_command_array(parsed);
+    }
+
+    let fence_pattern =
+        Regex::new(r"(?is)```(?:json)?\s*([\s\S]*?)\s*```").expect("valid fence pattern");
+    if let Some(inner) = fence_pattern
+        .captures(trimmed)
+        .and_then(|caps| caps.get(1).map(|m| m.as_str().trim().to_string()))
+    {
+        if let Some(parsed) = try_parse_command_json_preserving_shell(inner.as_str()) {
+            return join_command_array(parsed);
+        }
+    }
+
+    parse_lenient_string(trimmed)
+}
+
 fn escape_unescaped_quotes_inside_json_strings(raw: &str) -> String {
     let chars: Vec<char> = raw.chars().collect();
     let mut out = String::with_capacity(raw.len() + 8);
@@ -640,6 +664,78 @@ fn escape_unescaped_quotes_inside_json_strings(raw: &str) -> String {
     out
 }
 
+fn escape_newlines_inside_json_strings(raw: &str) -> String {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut out = String::with_capacity(raw.len() + 8);
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut idx = 0usize;
+
+    while idx < chars.len() {
+        let ch = chars[idx];
+        if in_string {
+            if escaped {
+                escaped = false;
+                out.push(ch);
+                idx += 1;
+                continue;
+            }
+            if ch == '\\' {
+                escaped = true;
+                out.push(ch);
+                idx += 1;
+                continue;
+            }
+            if ch == '"' {
+                in_string = false;
+                out.push(ch);
+                idx += 1;
+                continue;
+            }
+            if ch == '\n' {
+                out.push_str("\\n");
+                idx += 1;
+                continue;
+            }
+            if ch == '\r' {
+                out.push_str("\\r");
+                idx += 1;
+                continue;
+            }
+            out.push(ch);
+            idx += 1;
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+        }
+        out.push(ch);
+        idx += 1;
+    }
+
+    out
+}
+
+fn try_parse_command_json_preserving_shell(raw: &str) -> Option<Value> {
+    if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
+        return Some(parsed);
+    }
+    let escaped_quotes = escape_unescaped_quotes_inside_json_strings(raw);
+    if let Ok(parsed) = serde_json::from_str::<Value>(escaped_quotes.as_str()) {
+        return Some(parsed);
+    }
+    let escaped_newlines = escape_newlines_inside_json_strings(raw);
+    if let Ok(parsed) = serde_json::from_str::<Value>(escaped_newlines.as_str()) {
+        return Some(parsed);
+    }
+    let escaped_mix = escape_newlines_inside_json_strings(escaped_quotes.as_str());
+    if let Ok(parsed) = serde_json::from_str::<Value>(escaped_mix.as_str()) {
+        return Some(parsed);
+    }
+    None
+}
+
 fn join_command_array(mut obj: Value) -> Value {
     if let Value::Object(row) = &mut obj {
         if let Some(command_value) = row.get_mut("command") {
@@ -675,8 +771,9 @@ pub(crate) fn repair_arguments_to_string(value: &Value) -> String {
                 return "{}".to_string();
             }
 
-            if serde_json::from_str::<Value>(s.as_str()).is_ok() {
-                return s;
+            if let Some(parsed) = try_parse_command_json_preserving_shell(s.as_str()) {
+                return serde_json::to_string(&join_command_array(parsed))
+                    .unwrap_or_else(|_| "{}".to_string());
             }
 
             let fence_pattern =
@@ -685,6 +782,11 @@ pub(crate) fn repair_arguments_to_string(value: &Value) -> String {
                 if let Some(inner) = caps.get(1) {
                     s = inner.as_str().trim().to_string();
                 }
+            }
+
+            if let Some(parsed) = try_parse_command_json_preserving_shell(s.as_str()) {
+                return serde_json::to_string(&join_command_array(parsed))
+                    .unwrap_or_else(|_| "{}".to_string());
             }
 
             let line_comment_pattern =
@@ -713,16 +815,16 @@ pub(crate) fn repair_arguments_to_string(value: &Value) -> String {
                 .replace_all(s.as_str(), r#"$1"$2":"#)
                 .to_string();
 
-            if let Ok(obj) = serde_json::from_str::<Value>(s.as_str()) {
-                return serde_json::to_string(&join_command_array(obj))
+            if let Some(parsed) = try_parse_command_json_preserving_shell(s.as_str()) {
+                return serde_json::to_string(&join_command_array(parsed))
                     .unwrap_or_else(|_| "{}".to_string());
             }
 
             let first_block_pattern =
                 Regex::new(r"(?s)\{[\s\S]*\}|\[[\s\S]*\]").expect("valid first block pattern");
             if let Some(matched) = first_block_pattern.find(s.as_str()) {
-                if let Ok(obj) = serde_json::from_str::<Value>(matched.as_str()) {
-                    return serde_json::to_string(&join_command_array(obj))
+                if let Some(parsed) = try_parse_command_json_preserving_shell(matched.as_str()) {
+                    return serde_json::to_string(&join_command_array(parsed))
                         .unwrap_or_else(|_| "{}".to_string());
                 }
             }
@@ -792,7 +894,7 @@ fn parse_markup_argument_value(raw: &str) -> Value {
     if (trimmed.starts_with('{') && trimmed.ends_with('}'))
         || (trimmed.starts_with('[') && trimmed.ends_with(']'))
     {
-        let parsed = parse_lenient_string(trimmed.as_str());
+        let parsed = parse_lenient_string_preserving_shell(trimmed.as_str());
         if !matches!(parsed, Value::Object(ref row) if row.is_empty()) {
             return parsed;
         }
@@ -1151,7 +1253,7 @@ fn normalize_reasoning_harvested_arguments(
     }
 
     if lowered == "exec_command" {
-        let parsed_args = parse_lenient_string(args_text.as_str());
+        let parsed_args = parse_lenient_string_preserving_shell(args_text.as_str());
         let command = read_command_from_args_value(Some(args_source))
             .or_else(|| read_command_from_args_value(Some(&parsed_args)));
         let command = command?;
@@ -1197,7 +1299,7 @@ fn normalize_shell_like_args_text_for_tool_name(
         return args_text;
     }
 
-    let parsed_args = parse_lenient_string(args_text.as_str());
+    let parsed_args = parse_lenient_string_preserving_shell(args_text.as_str());
     let mut args_obj = parse_args_record(Some(&parsed_args)).unwrap_or_default();
     let inferred_command = read_command_from_args_value(Some(args_source))
         .or_else(|| read_command_from_args_value(Some(&parsed_args)));
@@ -1416,7 +1518,7 @@ fn parse_markup_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedTo
     }
 
     if args_obj.is_empty() {
-        let parsed = parse_lenient_string(trimmed);
+        let parsed = parse_lenient_string_preserving_shell(trimmed);
         if let Some(row) = parsed.as_object() {
             if !row.is_empty() {
                 args_obj = row.clone();
@@ -1471,7 +1573,7 @@ fn parse_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedToolCall>
         return None;
     }
 
-    let parsed = parse_lenient_string(trimmed);
+    let parsed = parse_lenient_string_preserving_shell(trimmed);
     if let Some(row) = parsed.as_object() {
         let empty_obj = Value::Object(Map::new());
         let args_source = pick_tool_call_args_source(row).unwrap_or(&empty_obj);
@@ -1913,7 +2015,7 @@ fn auto_close_jsonish_shape(raw: &str) -> String {
 fn parse_tool_calls_shape_from_text(text: &str) -> Option<Value> {
     let candidate = build_tool_calls_shape_candidate(text)?;
     let repaired = auto_close_jsonish_shape(candidate.as_str());
-    let parsed = parse_lenient_string(repaired.as_str());
+    let parsed = parse_lenient_string_preserving_shell(repaired.as_str());
     if matches!(parsed, Value::Null) {
         None
     } else {
@@ -1927,7 +2029,7 @@ fn parse_explicit_json_tool_calls(text: &str, id_prefix: &str) -> Vec<Value> {
 
     for candidate in collect_explicit_tool_calls_json_candidates(text) {
         let parsed_initial = serde_json::from_str::<Value>(candidate.as_str())
-            .unwrap_or_else(|_| parse_lenient_string(candidate.as_str()));
+            .unwrap_or_else(|_| parse_lenient_string_preserving_shell(candidate.as_str()));
         let parsed = match &parsed_initial {
             Value::Object(row) if row.is_empty() => {
                 parse_tool_calls_shape_from_text(candidate.as_str()).unwrap_or(parsed_initial)
@@ -4148,5 +4250,54 @@ exec_command
             "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-foo\n+bar\n*** End Patch\n";
         let repaired = repair_arguments_to_string(&Value::String(patch.to_string()));
         assert_eq!(repaired, patch);
+    }
+
+    #[test]
+    fn repair_arguments_preserves_shell_with_inner_rg_quotes() {
+        let raw = r#"{"cmd":"bash -lc 'cd /Volumes/extension/code/finger && rg "approx_token|token_usage|compact|rebuild" src/ --type ts -l'"}"#;
+        let repaired = repair_arguments_to_string(&Value::String(raw.to_string()));
+        let repaired_json: Value =
+            serde_json::from_str(&repaired).expect("repaired arguments should stay valid json");
+        let cmd = repaired_json
+            .get("cmd")
+            .and_then(Value::as_str)
+            .expect("cmd should stay string");
+        assert_eq!(
+            cmd,
+            "bash -lc 'cd /Volumes/extension/code/finger && rg \"approx_token|token_usage|compact|rebuild\" src/ --type ts -l'"
+        );
+    }
+
+    #[test]
+    fn normalize_assistant_text_preserves_shell_with_inner_rg_quotes() {
+        let message = json!({
+            "role": "assistant",
+            "content": r#"{"tool_calls":[{"input":{"cmd":"bash -lc 'cd /Volumes/extension/code/finger && rg "approx_token|token_usage|compact|rebuild" src/ --type ts -l'"},"name":"exec_command"}]}"#
+        });
+
+        let output_json = normalize_assistant_text_to_tool_calls_json(message.to_string(), None)
+            .expect("normalize_assistant_text_to_tool_calls_json failed");
+
+        let output: Value =
+            serde_json::from_str(&output_json).expect("failed to parse output json");
+        let tool_calls = output
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(tool_calls.len(), 1);
+        let args = tool_calls[0]
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|row| row.get("arguments"))
+            .and_then(Value::as_str)
+            .expect("arguments should exist");
+        let args_json: Value = serde_json::from_str(args).expect("arguments should stay valid json");
+        assert_eq!(
+            args_json.get("cmd").and_then(Value::as_str),
+            Some(
+                "bash -lc 'cd /Volumes/extension/code/finger && rg \"approx_token|token_usage|compact|rebuild\" src/ --type ts -l'"
+            )
+        );
     }
 }

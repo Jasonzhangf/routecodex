@@ -94,6 +94,7 @@ fn build_default_instruction(
     let required = is_tool_choice_required(root);
     let marker = read_trimmed_string(config.and_then(|row| row.get("marker")))
         .unwrap_or_else(|| DEFAULT_MARKER.to_string());
+    let has_exec_command = tool_names.iter().any(|name| name == "exec_command");
 
     let mut lines = vec![format!("{}:", marker)];
     let mut step = 1usize;
@@ -103,41 +104,48 @@ fn build_default_instruction(
     };
 
     push_line(
-        "This is a text-tool runtime. Tool JSON you emit will be executed by the outer system; do NOT say tools are missing, unavailable, sandboxed, or unsupported."
+        "This is a text-tool runtime. When a tool is needed, emit the tool-call container directly instead of explaining a plan first."
             .to_string(),
     );
-    push_line(
-        "If calling tools, output exactly one heredoc container: <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"tool_name\",\"input\":{...}}]}\\nRCC_TOOL_CALLS_JSON"
-            .to_string(),
-    );
-    push_line("Use only keys: `tool_calls` + each call `name` and `input`.".to_string());
+    if has_exec_command {
+        push_line(
+            "If calling tools, output exactly one heredoc container: <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"bash -lc 'pwd'\"}}]}\\nRCC_TOOL_CALLS_JSON"
+                .to_string(),
+        );
+    } else {
+        push_line(
+            "If calling tools, output exactly one RCC_TOOL_CALLS_JSON heredoc container whose JSON body contains `tool_calls`, and for each call only `name` plus `input`."
+                .to_string(),
+        );
+    }
+    push_line("Use only keys: `tool_calls`, and for each call `name` plus `input`.".to_string());
     push_line(
         "Container content must be valid JSON. Do not output markdown fences, XML tags, prose, or tool transcripts around the JSON."
             .to_string(),
     );
     push_line(
-        "When the user asks you to inspect files, run checks, read code, or execute commands, do NOT describe planned commands first — emit the tool-call container immediately in the same turn."
+        "When the user asks you to inspect files, run checks, read code, or execute commands, do not narrate planned commands first — emit the tool call immediately in the same turn."
             .to_string(),
     );
     push_line(
-        "Forbidden refusal/noise examples: `Tool exec_command does not exists`, `I cannot access your local files`, `当前环境是沙箱隔离`."
+        "Any tool name not explicitly declared for this turn is invalid. Shell words like `bash`/`cat`, pseudo tools like `read_file`/`file_read`/`read`, and skill names are not tools unless declared."
             .to_string(),
     );
     push_line(
-        "Do NOT output pseudo tool results in text (forbidden examples: {\"exec_command\":...}, <function_results>...</function_results>)."
+        "Do not output pseudo tool results, bracket pseudo-calls, or code fences instead of the heredoc container."
             .to_string(),
     );
     push_line(
-        "Do NOT use bracket pseudo-calls like `[调用 list_files] {...}` / `[call list_files] {...}` / `调用工具: list_files({...})`."
-            .to_string(),
-    );
-    push_line(
-        "Forbidden anti-patterns: `我来先查看...`, `首先查看...`, `我将执行以下命令...`, `执行完这些命令后我再汇报`, `**Calling:** exec_command`, or a markdown code fence containing JSON/commands instead of the heredoc container."
+        "If earlier history contains malformed tool text or planning chatter, ignore it and emit only the next valid tool-call container."
             .to_string(),
     );
     if tool_names.iter().any(|name| name == "exec_command") {
         push_line(
             "For shell/terminal execution, ALWAYS use tool name `exec_command` with exactly `input.cmd`, and make `cmd` a single string like `bash -lc 'pwd'`. Do NOT emit `command`, `cwd`, or `workdir`."
+                .to_string(),
+        );
+        push_line(
+            "If `cmd` starts with `bash -lc '`, the closing single quote at the very end is mandatory; `bash-lc` or a missing final `'` is invalid."
                 .to_string(),
         );
     }
@@ -412,8 +420,8 @@ mod tests {
         apply_tool_text_request_guidance(&mut payload, None);
 
         let content = payload["messages"][0]["content"].as_str().unwrap_or("");
-        assert!(content.contains("Tool exec_command does not exists"));
-        assert!(content.contains("当前环境是沙箱隔离"));
+        assert!(content.contains("Any tool name not explicitly declared for this turn is invalid."));
+        assert!(content.contains("read_file"));
         assert!(content.contains("Allowed tool names this turn: exec_command, apply_patch"));
         assert!(content.contains("use tool name `exec_command`"));
         assert!(content.contains("Do NOT emit `command`, `cwd`, or `workdir`"));

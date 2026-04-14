@@ -424,13 +424,41 @@ export async function convertProviderResponse(
     }
   );
 
+  const followupServertoolResult = isFollowup
+    ? await measureHubStage(
+      requestId,
+      'resp_process.stage3_servertool_orchestration.post_governance',
+      () => runRespProcessStage3ServerToolOrchestration({
+        payload: governanceResult.governedPayload as ChatCompletionLike,
+        adapterContext: options.context,
+        requestId: options.context.requestId,
+        entryEndpoint: options.entryEndpoint,
+        providerProtocol: options.providerProtocol,
+        allowFollowup: true,
+        stageRecorder: options.stageRecorder,
+        providerInvoker: options.providerInvoker,
+        reenterPipeline: options.reenterPipeline,
+        clientInjectDispatch: options.clientInjectDispatch
+      }),
+      {
+        mapCompletedDetails: (value) => ({
+          executed: value.executed,
+          flowId: value.flowId
+        })
+      }
+    )
+    : null;
+  const finalizedInputPayload =
+    followupServertoolResult?.payload && typeof followupServertoolResult.payload === 'object'
+      ? (followupServertoolResult.payload as JsonObject)
+      : governanceResult.governedPayload;
+
   const finalizeResult = await measureHubStage(
     requestId,
     'resp_process.stage2_finalize',
     () => runRespProcessStage2Finalize({
-      payload: governanceResult.governedPayload,
+      payload: finalizedInputPayload,
       originalPayload: effectiveChatResponse as JsonObject,
-      skipServerToolStrip: isFollowup,
       entryEndpoint: options.entryEndpoint,
       requestId: options.context.requestId,
       wantsStream,

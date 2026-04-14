@@ -27,6 +27,8 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
     } else {
       process.env.RCC_SNAPSHOT_DIR = prevSnapshotDirCompat;
     }
+    const gate = await import('../../src/utils/snapshot-local-disk-gate.ts');
+    gate.__resetSnapshotLocalDiskGateForTests();
     await fsp.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -45,10 +47,12 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
   }
 
   test('host provider snapshot buckets by entry endpoint, not upstream url', async () => {
-    const { writeProviderSnapshot } = await loadSnapshotWriterWithBridgeFailure();
+    const { writeProviderSnapshot, __flushProviderSnapshotQueueForTests } = await loadSnapshotWriterWithBridgeFailure();
 
+    const gate = await import('../../src/utils/snapshot-local-disk-gate.ts');
     const groupRequestId = 'req_snapshot_bucket_messages_1';
     const providerKey = 'iflow.1-186.minimax-m2.5';
+    gate.allowSnapshotLocalDiskWrite(groupRequestId);
     await writeProviderSnapshot({
       phase: 'provider-request',
       requestId: groupRequestId,
@@ -58,6 +62,7 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
       providerKey,
       data: { test: true }
     });
+    await __flushProviderSnapshotQueueForTests();
 
     const messagesDir = path.join(tempDir, 'anthropic-messages', providerKey, groupRequestId);
     const chatDir = path.join(tempDir, 'openai-chat', providerKey, groupRequestId);
@@ -67,10 +72,12 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
   });
 
   test('fallback snapshot bucket ignores nested endpoint fields and keeps entry bucket', async () => {
-    const { writeProviderSnapshot } = await loadSnapshotWriterWithBridgeFailure();
+    const { writeProviderSnapshot, __flushProviderSnapshotQueueForTests } = await loadSnapshotWriterWithBridgeFailure();
 
+    const gate = await import('../../src/utils/snapshot-local-disk-gate.ts');
     const groupRequestId = 'req_snapshot_bucket_messages_2';
     const providerKey = 'iflow.2-173.minimax-m2.5';
+    gate.allowSnapshotLocalDiskWrite(groupRequestId);
     await writeProviderSnapshot({
       phase: 'provider-request',
       requestId: groupRequestId,
@@ -86,6 +93,7 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
         }
       }
     });
+    await __flushProviderSnapshotQueueForTests();
 
     const messagesDir = path.join(tempDir, 'anthropic-messages', providerKey, groupRequestId);
     const chatDir = path.join(tempDir, 'openai-chat', providerKey, groupRequestId);

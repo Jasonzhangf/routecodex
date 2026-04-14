@@ -1,6 +1,5 @@
 import type { Filter, FilterContext, FilterResult, JsonObject } from '../types.js';
 import { repairFindMeta } from '../../conversion/shared/tooling.js';
-import { normalizeExecCommandArgs } from '../../tools/exec-command/normalize.js';
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -96,9 +95,11 @@ export class ResponseToolArgumentsStringifyFilter implements Filter<JsonObject> 
                 (parsed as any).command = packShellCommand(cmd);
                 try { (fn as any).arguments = JSON.stringify(parsed ?? {}); } catch { (fn as any).arguments = '{}'; }
               } else if (name === 'exec_command' && isObject(parsed)) {
-                const normalized = normalizeExecCommandArgs(parsed as Record<string, unknown>);
-                const next = normalized.ok ? normalized.normalized : (parsed as Record<string, unknown>);
-                try { (fn as any).arguments = JSON.stringify(next ?? {}); } catch { (fn as any).arguments = '{}'; }
+                // Response-side contract:
+                // preserve the upstream/client-visible argument shape losslessly.
+                // Do not alias-repair `command -> cmd` here; host validation must
+                // see the original shape and raise CLIENT_TOOL_ARGS_INVALID.
+                try { (fn as any).arguments = JSON.stringify(parsed ?? {}); } catch { (fn as any).arguments = '{}'; }
               } else if ((name === 'shell_command' || name === 'bash') && isObject(parsed)) {
                 try { (fn as any).arguments = JSON.stringify(parsed ?? {}); } catch { (fn as any).arguments = '{}'; }
               } else {

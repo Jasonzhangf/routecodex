@@ -8,8 +8,8 @@ function collectExecutedServerToolCallIds(payload: JsonObject): Set<string> {
     const name = typeof (entry as any).name === 'string' ? String((entry as any).name).trim() : '';
     const toolCallId = typeof (entry as any).tool_call_id === 'string' ? String((entry as any).tool_call_id).trim() : '';
     if (!name || !toolCallId) continue;
-    // Only strip executed servertool-only control tool calls.
-    if (name !== 'continue_execution' && name !== 'reasoning.stop') continue;
+    // tool_outputs at this stage are emitted by executed servertool handlers.
+    // Strip every executed servertool call id so client remap only sees client-declared tools.
     ids.add(toolCallId);
   }
   return ids;

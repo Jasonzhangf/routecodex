@@ -43,14 +43,183 @@ pub struct ToolGovernanceOutput {
 }
 
 fn resolve_text_harvest_enabled(payload: &Value) -> bool {
-    payload
+    let governance = payload
+        .as_object()
+        .and_then(|row| row.get("__rcc_tool_governance"))
+        .and_then(Value::as_object);
+    if governance
+        .and_then(|row| row.get("skipTextHarvest"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    if let Some(enabled) = governance
+        .and_then(|row| row.get("enableTextHarvest"))
+        .and_then(Value::as_bool)
+    {
+        return enabled;
+    }
+    detect_text_tool_provider_family(payload) != TextToolProviderFamily::Other
+        || payload_contains_explicit_text_tool_markup(payload)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextToolProviderFamily {
+    Other,
+    DeepSeek,
+    Qwen,
+}
+
+fn read_text_tool_provider_family_from_governance(payload: &Value) -> Option<TextToolProviderFamily> {
+    let family = payload
         .as_object()
         .and_then(|row| row.get("__rcc_tool_governance"))
         .and_then(Value::as_object)
-        .and_then(|row| row.get("skipTextHarvest"))
-        .and_then(Value::as_bool)
-        .map(|skip| !skip)
-        .unwrap_or(true)
+        .and_then(|row| row.get("providerFamily"))
+        .and_then(Value::as_str)
+        .map(|raw| raw.trim().to_ascii_lowercase())?;
+    match family.as_str() {
+        "deepseek" | "deepseek-web" => Some(TextToolProviderFamily::DeepSeek),
+        "qwen" | "qwenchat" | "qwenchat-web" => Some(TextToolProviderFamily::Qwen),
+        _ => Some(TextToolProviderFamily::Other),
+    }
+}
+
+fn looks_like_text_tool_provider_token(raw: &str) -> TextToolProviderFamily {
+    let normalized = raw.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return TextToolProviderFamily::Other;
+    }
+    if normalized.contains("deepseek") {
+        return TextToolProviderFamily::DeepSeek;
+    }
+    if normalized.contains("qwen") {
+        return TextToolProviderFamily::Qwen;
+    }
+    TextToolProviderFamily::Other
+}
+
+fn detect_text_tool_provider_family(payload: &Value) -> TextToolProviderFamily {
+    if let Some(explicit) = read_text_tool_provider_family_from_governance(payload) {
+        return explicit;
+    }
+    let Some(root) = payload.as_object() else {
+        return TextToolProviderFamily::Other;
+    };
+
+    let mut candidates: Vec<String> = Vec::new();
+    for key in ["model", "providerKey", "providerId", "runtimeKey"] {
+        if let Some(raw) = read_trimmed_string(root.get(key)) {
+            candidates.push(raw);
+        }
+    }
+    if let Some(metadata) = root.get("metadata").and_then(Value::as_object) {
+        for key in ["model", "providerKey", "providerId", "runtimeKey"] {
+            if let Some(raw) = read_trimmed_string(metadata.get(key)) {
+                candidates.push(raw);
+            }
+        }
+        if metadata.get("deepseek").is_some() {
+            candidates.push("deepseek".to_string());
+        }
+        if let Some(provider) = metadata.get("provider").and_then(Value::as_object) {
+            for key in ["key", "id", "runtimeKey"] {
+                if let Some(raw) = read_trimmed_string(provider.get(key)) {
+                    candidates.push(raw);
+                }
+            }
+        }
+    }
+
+    for candidate in candidates {
+        let family = looks_like_text_tool_provider_token(candidate.as_str());
+        if family != TextToolProviderFamily::Other {
+            return family;
+        }
+    }
+    TextToolProviderFamily::Other
+}
+
+fn text_contains_explicit_tool_markup(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let lowered = trimmed.to_ascii_lowercase();
+    if lowered.contains("<<rcc_tool_calls")
+        || lowered.contains("<function_calls>")
+        || lowered.contains("<tool_call>")
+        || lowered.contains("<|tool_call_begin|>")
+        || lowered.contains("<|tool_calls_section_begin|>")
+        || lowered.contains("<invoke")
+        || lowered.contains("\"tool_calls\"")
+        || lowered.contains("'tool_calls'")
+        || lowered.contains("tool_calls:")
+    {
+        return true;
+    }
+
+    if lowered.contains("tool:") {
+        let has_xml_body = lowered.contains("</tool:")
+            || lowered.contains("<command>")
+            || lowered.contains("<arg_key>")
+            || lowered.contains("<arg_value>")
+            || lowered.contains("<parameter>");
+        if has_xml_body {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn contains_explicit_tool_wrapper_marker(raw: &str) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    if lowered.is_empty() {
+        return false;
+    }
+    if lowered.contains("<<rcc_tool_calls")
+        || lowered.contains("<function_calls>")
+        || lowered.contains("</function_calls>")
+        || lowered.contains("<tool_call>")
+        || lowered.contains("</tool_call>")
+        || lowered.contains("<|tool_call_begin|>")
+        || lowered.contains("<|tool_calls_section_begin|>")
+    {
+        return true;
+    }
+
+    let Ok(tag_re) = Regex::new(r"(?is)</?\s*tool:[a-z0-9_.-]+") else {
+        return false;
+    };
+    if tag_re.is_match(raw) {
+        return true;
+    }
+
+    let Ok(named_re) = Regex::new(r"(?is)</?\s*(exec_command|execute_command|apply_patch|write_stdin|update_plan|request_user_input|spawn_agent|send_input|resume_agent|wait_agent|close_agent|view_image|shell_command|shell|bash|terminal)\b") else {
+        return false;
+    };
+    named_re.is_match(raw)
+}
+
+fn payload_contains_explicit_text_tool_markup(payload: &Value) -> bool {
+    let Some(choices) = payload.get("choices").and_then(Value::as_array) else {
+        return false;
+    };
+
+    choices.iter().any(|choice| {
+        choice
+            .get("message")
+            .and_then(Value::as_object)
+            .map(|message| {
+                read_message_text_candidates(message)
+                    .iter()
+                    .any(|text| text_contains_explicit_tool_markup(text))
+            })
+            .unwrap_or(false)
+    })
 }
 
 fn strip_internal_tool_governance_state(payload: &mut Value) {
@@ -470,6 +639,68 @@ fn read_command_from_args(args: &Map<String, Value>) -> Option<String> {
         })
 }
 
+fn repair_shell_wrapper_shape(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let mut current = trimmed.to_string();
+    if let Some(rest) = current.strip_prefix("bash-lc") {
+        let next = rest.chars().next();
+        if next.is_none() || next.is_some_and(|ch| ch.is_whitespace() || ch == '\'' || ch == '"') {
+            current = format!("bash -lc{}", rest);
+        }
+    }
+    if let Some(rest) = current.strip_prefix("bash -lc\"") {
+        current = format!("bash -lc \"{}", rest);
+    } else if let Some(rest) = current.strip_prefix("bash -lc'") {
+        current = format!("bash -lc '{}", rest);
+    }
+
+    if let Some(body) = current.strip_prefix("bash -lc '") {
+        if !body.ends_with('\'') && !body.contains('\'') {
+            current.push('\'');
+        }
+    }
+
+    current
+}
+
+fn looks_like_python_heredoc_command(raw: &str) -> bool {
+    let lowered = raw.to_ascii_lowercase();
+    if !lowered.contains("python") {
+        return false;
+    }
+    lowered.contains("<<")
+        || lowered.contains("pyeof")
+        || lowered.contains("with open\\(")
+        || lowered.contains("print\\(")
+        || lowered.contains("read\\(")
+        || lowered.contains("write\\(")
+}
+
+fn strip_python_heredoc_pseudo_escapes(raw: &str) -> String {
+    if !looks_like_python_heredoc_command(raw) {
+        return raw.to_string();
+    }
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            if let Some(next) = chars.peek().copied() {
+                if matches!(next, '(' | ')' | '\'' | '"') {
+                    out.push(next);
+                    chars.next();
+                    continue;
+                }
+            }
+        }
+        out.push(ch);
+    }
+    out
+}
+
 fn read_workdir_from_args(args: &Map<String, Value>) -> Option<String> {
     let input = args.get("input").and_then(|v| v.as_object());
     read_trimmed_string(args.get("workdir"))
@@ -667,6 +898,48 @@ fn normalize_shell_command_text(raw: &str, workdir: Option<&str>) -> String {
     current
 }
 
+fn looks_like_exec_command_candidate(raw: &str) -> bool {
+    let normalized = normalize_shell_command_text(raw, None);
+    let mut tokens = normalized.split_whitespace().peekable();
+    while let Some(token) = tokens.peek().copied() {
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            tokens.next();
+            continue;
+        }
+        let Some(eq_idx) = trimmed.find('=') else {
+            break;
+        };
+        let key = trimmed[..eq_idx].trim();
+        if key.is_empty()
+            || !key
+                .chars()
+                .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
+        {
+            break;
+        }
+        tokens.next();
+    }
+
+    let Some(command_token) = tokens.next().map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+
+    if !command_token
+        .chars()
+        .next()
+        .map(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '~' | '$' | '_' | '-'))
+        .unwrap_or(false)
+    {
+        return false;
+    }
+
+    command_token.chars().all(|ch| {
+        ch.is_ascii_alphanumeric()
+            || matches!(ch, '/' | '.' | '_' | '-' | '~' | '$' | ':' | '+' | '=')
+    })
+}
+
 fn decode_escaped_newlines_if_needed(raw: &str) -> String {
     if raw.contains('\n') || !raw.contains("\\n") {
         return raw.to_string();
@@ -784,6 +1057,31 @@ fn extract_apply_patch_text(raw_args: Option<&Value>) -> Option<String> {
             .or_else(|| {
                 row.get("arguments")
                     .and_then(|value| extract_apply_patch_text(Some(value)))
+            })
+            .or_else(|| {
+                let path = read_trimmed_string(row.get("path").or_else(|| row.get("file")))?;
+                let content = read_trimmed_string(
+                    row.get("content")
+                        .or_else(|| row.get("contents"))
+                        .or_else(|| row.get("body")),
+                )?;
+                let normalized_path = normalize_apply_patch_header_path(path.as_str());
+                if normalized_path.trim().is_empty() {
+                    return None;
+                }
+                let normalized_content = decode_escaped_newlines_if_needed(content.as_str());
+                let mut lines: Vec<String> = normalized_content
+                    .split('\n')
+                    .map(|line| format!("+{}", line))
+                    .collect();
+                if normalized_content.is_empty() {
+                    lines.push("+".to_string());
+                }
+                Some(format!(
+                    "*** Begin Patch\n*** Add File: {}\n{}\n*** End Patch",
+                    normalized_path,
+                    lines.join("\n")
+                ))
             }),
         Some(Value::Array(items)) => items
             .iter()
@@ -1113,12 +1411,34 @@ fn infer_tool_name_from_args(raw_args: Option<&Value>) -> Option<String> {
     None
 }
 
-fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> Option<String> {
+pub(crate) fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> Option<String> {
+    let source_tool_name = tool_name.trim().to_ascii_lowercase();
+    let source_is_shell_alias = matches!(
+        source_tool_name.as_str(),
+        "shell_command" | "shell" | "bash" | "terminal" | "execute_command" | "execute-command"
+    );
     let name = normalize_tool_name(tool_name)?;
     let args = parse_json_record(raw_args).unwrap_or_default();
     if name == "exec_command" {
-        let cmd = read_command_from_args(&args)?;
+        let cmd = strip_python_heredoc_pseudo_escapes(
+            repair_shell_wrapper_shape(read_command_from_args(&args)?.as_str()).as_str(),
+        );
         let mut out = Map::new();
+        let preserve_command_alias = source_is_shell_alias
+            || args.contains_key("command")
+            || args
+                .get("input")
+                .and_then(Value::as_object)
+                .map(|row| row.contains_key("command"))
+                .unwrap_or(false)
+            || args
+                .get("args")
+                .and_then(Value::as_object)
+                .map(|row| row.contains_key("command"))
+                .unwrap_or(false);
+        if preserve_command_alias {
+            out.insert("command".to_string(), Value::String(cmd.clone()));
+        }
         out.insert("cmd".to_string(), Value::String(cmd));
         if let Some(workdir) = read_workdir_from_args(&args) {
             out.insert("workdir".to_string(), Value::String(workdir));
@@ -1253,6 +1573,62 @@ fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> Option<Stri
         return serde_json::to_string(&Value::Object(out)).ok();
     }
 
+    if name == "update_plan" {
+        let mut out = Map::new();
+        if let Some(explanation) = args
+            .get("explanation")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            out.insert(
+                "explanation".to_string(),
+                Value::String(explanation.to_string()),
+            );
+        }
+        let source_plan = args
+            .get("plan")
+            .and_then(Value::as_array)
+            .or_else(|| args.get("steps").and_then(Value::as_array));
+        if let Some(rows) = source_plan {
+            let normalized_rows: Vec<Value> = rows
+                .iter()
+                .filter_map(|row| {
+                    if let Some(step_text) = row.as_str().map(str::trim).filter(|value| !value.is_empty()) {
+                        return Some(json!({
+                            "step": step_text,
+                            "status": "pending",
+                        }));
+                    }
+                    let obj = row.as_object()?;
+                    let step = obj
+                        .get("step")
+                        .or_else(|| obj.get("name"))
+                        .or_else(|| obj.get("title"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())?;
+                    let status = obj
+                        .get("status")
+                        .or_else(|| obj.get("state"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())?;
+                    Some(json!({
+                        "step": step,
+                        "status": status,
+                    }))
+                })
+                .collect();
+            if !normalized_rows.is_empty() {
+                out.insert("plan".to_string(), Value::Array(normalized_rows));
+            }
+        }
+        if out.contains_key("plan") {
+            return serde_json::to_string(&Value::Object(out)).ok();
+        }
+    }
+
     if name == "apply_patch" {
         let patch = extract_apply_patch_text(raw_args)?;
         let patch = normalize_apply_patch_text(&patch);
@@ -1266,6 +1642,33 @@ fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> Option<Stri
     }
 
     serde_json::to_string(&Value::Object(args)).ok()
+}
+
+fn stringify_tool_args_losslessly(raw_args: Option<&Value>) -> Option<String> {
+    match raw_args {
+        None => None,
+        Some(Value::Null) => Some("{}".to_string()),
+        Some(Value::String(raw)) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                Some("{}".to_string())
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        Some(other) => serde_json::to_string(other).ok(),
+    }
+}
+
+pub(crate) fn normalize_tool_args_preserving_raw_shape(
+    tool_name: &str,
+    raw_args: Option<&Value>,
+) -> Option<String> {
+    let canonical_name = normalize_tool_name(tool_name)?;
+    if canonical_name != "exec_command" {
+        return normalize_tool_args(tool_name, raw_args);
+    }
+    stringify_tool_args_losslessly(raw_args)
 }
 
 fn extract_balanced_json_object_at(text: &str, start_index: usize) -> Option<String> {
@@ -1570,6 +1973,10 @@ fn looks_like_apply_patch_wrapper_name(raw_name: &str) -> bool {
             || normalized.contains("diff"))
 }
 
+fn is_xml_named_tool_container_tag(raw_name: &str) -> bool {
+    matches!(raw_name, "tool_calls")
+}
+
 fn should_attempt_xml_wrapper_harvest(raw_name: &str) -> bool {
     is_supported_xml_named_tool_name(raw_name)
         || is_generic_xml_wrapper_tag(raw_name)
@@ -1594,13 +2001,32 @@ fn resolve_xml_wrapper_tool_name(raw_name: &str) -> Option<String> {
     None
 }
 
+fn normalize_preserved_text_whitespace(raw: &str) -> String {
+    let normalized = raw.replace("\r\n", "\n");
+    let mut lines: Vec<String> = Vec::new();
+    let mut previous_blank = false;
+    for line in normalized.lines() {
+        let collapsed = line.split_whitespace().collect::<Vec<&str>>().join(" ");
+        if collapsed.is_empty() {
+            if !previous_blank && !lines.is_empty() {
+                lines.push(String::new());
+            }
+            previous_blank = true;
+            continue;
+        }
+        lines.push(collapsed);
+        previous_blank = false;
+    }
+    lines.join("\n").trim().to_string()
+}
+
 fn strip_xml_tags_preserve_text(raw: &str) -> String {
     let Ok(tag_pattern) = Regex::new(r"(?is)</?[A-Za-z_][A-Za-z0-9_.-]*>") else {
         return raw.trim().to_string();
     };
     let decoded = decode_basic_xml_entities(raw);
     let text = tag_pattern.replace_all(decoded.as_str(), " ").to_string();
-    text.split_whitespace().collect::<Vec<&str>>().join(" ")
+    normalize_preserved_text_whitespace(text.as_str())
 }
 
 fn canonicalize_xml_named_tool_arg_key(raw_key: &str, tool_name: &str) -> String {
@@ -1630,6 +2056,72 @@ fn canonicalize_xml_named_tool_arg_key(raw_key: &str, tool_name: &str) -> String
     }
 }
 
+fn parse_xml_tag_attributes(raw_tag: &str) -> Vec<(String, String)> {
+    let Ok(attr_pattern) = Regex::new(
+        r#"([A-Za-z_][A-Za-z0-9_.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))"#,
+    ) else {
+        return Vec::new();
+    };
+    attr_pattern
+        .captures_iter(raw_tag)
+        .filter_map(|caps| {
+            let key = caps.get(1)?.as_str().trim().to_ascii_lowercase();
+            if key.is_empty() {
+                return None;
+            }
+            let value = caps
+                .get(2)
+                .or_else(|| caps.get(3))
+                .or_else(|| caps.get(4))
+                .map(|m| decode_basic_xml_entities(m.as_str()).trim().to_string())
+                .unwrap_or_default();
+            Some((key, value))
+        })
+        .collect()
+}
+
+fn read_xml_tag_attribute<'a>(attrs: &'a [(String, String)], keys: &[&str]) -> Option<&'a str> {
+    for key in keys {
+        if let Some((_, value)) = attrs.iter().find(|(name, _)| name == key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed);
+            }
+        }
+    }
+    None
+}
+
+fn resolve_xml_wrapper_tool_name_from_attrs(
+    raw_tool_name: &str,
+    attrs: &[(String, String)],
+) -> Option<String> {
+    let attr_tool_name = read_xml_tag_attribute(attrs, &["name", "tool", "tool_name", "call", "action"]);
+    if let Some(candidate) = attr_tool_name {
+        if let Some(canonical) = normalize_tool_name(candidate) {
+            return Some(canonical);
+        }
+    }
+    resolve_xml_wrapper_tool_name(raw_tool_name)
+}
+
+fn resolve_xml_named_child_arg_key(
+    raw_key: &str,
+    attrs: &[(String, String)],
+    tool_name: &str,
+) -> String {
+    let normalized = raw_key.trim().to_ascii_lowercase();
+    if matches!(
+        normalized.as_str(),
+        "parameter" | "param" | "arg" | "argument" | "field" | "property" | "item" | "value"
+    ) {
+        if let Some(attr_name) = read_xml_tag_attribute(attrs, &["name", "key", "field", "property"]) {
+            return canonicalize_xml_named_tool_arg_key(attr_name, tool_name);
+        }
+    }
+    canonicalize_xml_named_tool_arg_key(raw_key, tool_name)
+}
+
 fn merge_xml_named_tool_arg(args: &mut Map<String, Value>, key: String, value: Value) {
     if let Some(existing) = args.get_mut(&key) {
         match existing {
@@ -1647,10 +2139,12 @@ fn merge_xml_named_tool_arg(args: &mut Map<String, Value>, key: String, value: V
 fn build_xml_named_tool_call_entry(
     raw_tool_name: &str,
     body: &str,
+    wrapper_attrs: &[(String, String)],
     fallback_id: usize,
 ) -> Option<Value> {
-    let canonical_name = resolve_xml_wrapper_tool_name(raw_tool_name)?;
-    let child_open_pattern = Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.-]*)>").ok()?;
+    let canonical_name = resolve_xml_wrapper_tool_name_from_attrs(raw_tool_name, wrapper_attrs)?;
+    let child_open_pattern =
+        Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.-]*)(?:\s+[^<>]*?)?>").ok()?;
     let body_lower = body.to_ascii_lowercase();
 
     let mut args = Map::new();
@@ -1663,6 +2157,7 @@ fn build_xml_named_tool_call_entry(
         let Some(raw_key) = caps.get(1).map(|m| m.as_str().trim()) else {
             break;
         };
+        let attrs = parse_xml_tag_attributes(whole.as_str());
         let open_start = cursor + whole.start();
         let open_end = cursor + whole.end();
         let close_tag = format!("</{}>", raw_key.to_ascii_lowercase());
@@ -1678,11 +2173,21 @@ fn build_xml_named_tool_call_entry(
             .unwrap_or(value_end);
         let raw_value = body[open_end..value_end].trim();
         if !raw_key.is_empty() && !raw_value.is_empty() {
-            let key = canonicalize_xml_named_tool_arg_key(raw_key, canonical_name.as_str());
+            let key = resolve_xml_named_child_arg_key(raw_key, &attrs, canonical_name.as_str());
             let decoded = decode_basic_xml_entities(raw_value).trim().to_string();
-            if !decoded.is_empty() {
-                let value = try_parse_json_value_lenient(decoded.as_str())
-                    .unwrap_or_else(|| Value::String(decoded));
+            let cleaned_value = if decoded.contains('<') && decoded.contains('>') {
+                let stripped = strip_xml_tags_preserve_text(decoded.as_str());
+                if stripped.trim().is_empty() {
+                    decoded.clone()
+                } else {
+                    stripped
+                }
+            } else {
+                decoded.clone()
+            };
+            if !cleaned_value.is_empty() {
+                let value = try_parse_json_value_lenient(cleaned_value.as_str())
+                    .unwrap_or_else(|| Value::String(cleaned_value));
                 merge_xml_named_tool_arg(&mut args, key, value);
                 masked_ranges.push((open_start, full_end.max(open_start)));
             }
@@ -1754,6 +2259,16 @@ fn build_xml_named_tool_call_entry(
         return None;
     }
 
+    if matches!(
+        canonical_name.as_str(),
+        "exec_command" | "shell_command" | "shell" | "bash" | "terminal"
+    ) {
+        let command = read_command_from_args(&args)?;
+        if !looks_like_exec_command_candidate(command.as_str()) {
+            return None;
+        }
+    }
+
     let entry = json!({
         "name": canonical_name,
         "input": Value::Object(args)
@@ -1762,7 +2277,7 @@ fn build_xml_named_tool_call_entry(
 }
 
 fn extract_xml_named_tool_call_blocks(text: &str, fallback_start_id: usize) -> Vec<Value> {
-    let Ok(open_pattern) = Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.-]*)>") else {
+    let Ok(open_pattern) = Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.-]*)(?:\s+[^<>]*?)?>") else {
         return Vec::new();
     };
     let text_lower = text.to_ascii_lowercase();
@@ -1778,8 +2293,16 @@ fn extract_xml_named_tool_call_blocks(text: &str, fallback_start_id: usize) -> V
         let Some(raw_name) = caps.get(1).map(|m| m.as_str().trim()) else {
             break;
         };
+        let wrapper_attrs = parse_xml_tag_attributes(whole.as_str());
         let open_end = cursor + whole.end();
         let raw_name_lower = raw_name.to_ascii_lowercase();
+        if is_xml_named_tool_container_tag(raw_name_lower.as_str()) {
+            if open_end <= cursor {
+                break;
+            }
+            cursor = open_end;
+            continue;
+        }
         let close_tag = format!("</{}>", raw_name_lower);
         let body_end = text_lower[open_end..]
             .find(close_tag.as_str())
@@ -1799,8 +2322,12 @@ fn extract_xml_named_tool_call_blocks(text: &str, fallback_start_id: usize) -> V
             let body = text[open_end..body_end].trim();
             if !body.is_empty() {
                 index += 1;
-                if let Some(entry) =
-                    build_xml_named_tool_call_entry(raw_name, body, fallback_start_id + index - 1)
+                if let Some(entry) = build_xml_named_tool_call_entry(
+                    raw_name,
+                    body,
+                    &wrapper_attrs,
+                    fallback_start_id + index - 1,
+                )
                 {
                     if let Ok(key) = serde_json::to_string(&entry) {
                         if seen.insert(key) {
@@ -1819,7 +2346,7 @@ fn extract_xml_named_tool_call_blocks(text: &str, fallback_start_id: usize) -> V
 }
 
 fn strip_supported_xml_named_tool_blocks(raw: &str) -> String {
-    let Ok(open_pattern) = Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.-]*)>") else {
+    let Ok(open_pattern) = Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.-]*)(?:\s+[^<>]*?)?>") else {
         return raw.to_string();
     };
     let raw_lower = raw.to_ascii_lowercase();
@@ -1983,6 +2510,328 @@ fn extract_tool_argument_label_blocks(text: &str, fallback_start_id: usize) -> V
     recovered
 }
 
+fn extract_balanced_parenthesized_body_at(text: &str, open_paren_index: usize) -> Option<String> {
+    let bytes = text.as_bytes();
+    if open_paren_index >= bytes.len() || bytes[open_paren_index] != b'(' {
+        return None;
+    }
+
+    let mut depth = 0i64;
+    let mut in_string = false;
+    let mut quote_char = b'"';
+    let mut escaped = false;
+
+    for idx in open_paren_index..bytes.len() {
+        let ch = bytes[idx];
+        if in_string {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if ch == b'\\' {
+                escaped = true;
+                continue;
+            }
+            if ch == quote_char {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if ch == b'"' || ch == b'\'' {
+            in_string = true;
+            quote_char = ch;
+            continue;
+        }
+
+        if ch == b'(' {
+            depth += 1;
+            continue;
+        }
+        if ch == b')' {
+            depth -= 1;
+            if depth == 0 {
+                return Some(text[open_paren_index + 1..idx].to_string());
+            }
+        }
+    }
+
+    None
+}
+
+fn split_top_level_function_style_args(raw: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut brace_depth = 0i64;
+    let mut bracket_depth = 0i64;
+    let mut paren_depth = 0i64;
+    let mut in_string = false;
+    let mut quote_char = '\0';
+    let mut escaped = false;
+
+    for ch in raw.chars() {
+        if in_string {
+            current.push(ch);
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if ch == '\\' {
+                escaped = true;
+                continue;
+            }
+            if ch == quote_char {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' | '\'' => {
+                in_string = true;
+                quote_char = ch;
+                current.push(ch);
+            }
+            '{' => {
+                brace_depth += 1;
+                current.push(ch);
+            }
+            '}' => {
+                brace_depth -= 1;
+                current.push(ch);
+            }
+            '[' => {
+                bracket_depth += 1;
+                current.push(ch);
+            }
+            ']' => {
+                bracket_depth -= 1;
+                current.push(ch);
+            }
+            '(' => {
+                paren_depth += 1;
+                current.push(ch);
+            }
+            ')' => {
+                paren_depth -= 1;
+                current.push(ch);
+            }
+            ',' if brace_depth == 0 && bracket_depth == 0 && paren_depth == 0 => {
+                let trimmed = current.trim();
+                if !trimmed.is_empty() {
+                    parts.push(trimmed.to_string());
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        parts.push(trimmed.to_string());
+    }
+    parts
+}
+
+fn decode_function_style_string(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.len() < 2 {
+        return trimmed.to_string();
+    }
+    let mut chars = trimmed.chars();
+    let quote = chars.next().unwrap_or('"');
+    if (quote != '"' && quote != '\'') || !trimmed.ends_with(quote) {
+        return trimmed.to_string();
+    }
+    let inner = &trimmed[1..trimmed.len() - 1];
+    let mut out = String::new();
+    let mut escaped = false;
+    for ch in inner.chars() {
+        if escaped {
+            out.push(match ch {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '\\' => '\\',
+                '"' => '"',
+                '\'' => '\'',
+                other => other,
+            });
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        out.push(ch);
+    }
+    if escaped {
+        out.push('\\');
+    }
+    out
+}
+
+fn parse_function_style_argument_value(raw: &str) -> Option<Value> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if (trimmed.starts_with('{') && trimmed.ends_with('}'))
+        || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+    {
+        if let Some(parsed) = try_parse_json_value_lenient(trimmed) {
+            return Some(parsed);
+        }
+    }
+    if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+    {
+        return Some(Value::String(decode_function_style_string(trimmed)));
+    }
+    match trimmed.to_ascii_lowercase().as_str() {
+        "true" => return Some(Value::Bool(true)),
+        "false" => return Some(Value::Bool(false)),
+        "null" => return Some(Value::Null),
+        _ => {}
+    }
+    if let Ok(parsed) = trimmed.parse::<i64>() {
+        return Some(Value::Number(parsed.into()));
+    }
+    if let Ok(parsed) = trimmed.parse::<f64>() {
+        if let Some(num) = serde_json::Number::from_f64(parsed) {
+            return Some(Value::Number(num));
+        }
+    }
+    Some(Value::String(trimmed.to_string()))
+}
+
+fn resolve_allowlisted_function_style_name(
+    raw_name: &str,
+    allowed_names: &HashSet<String>,
+) -> Option<String> {
+    let trimmed = raw_name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut candidates: Vec<String> = vec![trimmed.to_string()];
+    let lowered = trimmed.to_ascii_lowercase();
+    if let Some(stripped) = lowered.strip_prefix("tool") {
+        if !stripped.trim().is_empty() {
+            candidates.push(stripped.trim().to_string());
+        }
+    }
+
+    for candidate in candidates {
+        let Some(canonical_name) = normalize_tool_name(candidate.as_str()) else {
+            continue;
+        };
+        if allowed_names.contains(canonical_name.as_str()) {
+            return Some(canonical_name);
+        }
+    }
+
+    None
+}
+
+fn extract_allowlisted_function_style_calls(
+    text: &str,
+    requested_tool_name_keys: &HashSet<String>,
+    fallback_start_id: usize,
+) -> Vec<Value> {
+    let standalone_fallback_allowlist: HashSet<String> = [
+        "exec_command",
+        "write_stdin",
+        "update_plan",
+        "apply_patch",
+        "view_image",
+        "request_user_input",
+        "spawn_agent",
+        "send_input",
+        "resume_agent",
+        "wait_agent",
+        "close_agent",
+    ]
+    .iter()
+    .map(|name| name.to_string())
+    .collect();
+    let restrict_to_standalone_call = requested_tool_name_keys.is_empty();
+    let allowed_names: HashSet<String> = if restrict_to_standalone_call {
+        standalone_fallback_allowlist
+    } else {
+        requested_tool_name_keys
+            .iter()
+            .filter_map(|name| normalize_tool_name(name))
+            .collect()
+    };
+    if allowed_names.is_empty() {
+        return Vec::new();
+    }
+
+    let Ok(pattern) = Regex::new(r"([A-Za-z_][A-Za-z0-9_.-]*)\s*\(") else {
+        return Vec::new();
+    };
+
+    let mut recovered = Vec::new();
+    for caps in pattern.captures_iter(text) {
+        let Some(name_match) = caps.get(1) else {
+            continue;
+        };
+        let Some(whole) = caps.get(0) else {
+            continue;
+        };
+        let Some(canonical_name) =
+            resolve_allowlisted_function_style_name(name_match.as_str().trim(), &allowed_names)
+        else {
+            continue;
+        };
+        let open_paren_index = whole.end().saturating_sub(1);
+        let Some(body) = extract_balanced_parenthesized_body_at(text, open_paren_index) else {
+            continue;
+        };
+        if restrict_to_standalone_call {
+            let candidate = format!("{}({})", name_match.as_str().trim(), body);
+            if text.trim() != candidate {
+                continue;
+            }
+        }
+        let mut args = Map::new();
+        let mut valid = true;
+        for segment in split_top_level_function_style_args(body.as_str()) {
+            let Some(eq_idx) = segment.find('=') else {
+                valid = false;
+                break;
+            };
+            let key = segment[..eq_idx].trim();
+            if key.is_empty() {
+                valid = false;
+                break;
+            }
+            let Some(value) = parse_function_style_argument_value(&segment[eq_idx + 1..]) else {
+                valid = false;
+                break;
+            };
+            args.insert(key.to_string(), value);
+        }
+        if !valid || args.is_empty() {
+            continue;
+        }
+        let entry = json!({
+            "name": canonical_name,
+            "arguments": Value::Object(args),
+        });
+        if let Some(normalized) =
+            normalize_tool_call_entry(&entry, fallback_start_id + recovered.len())
+        {
+            recovered.push(normalized);
+        }
+    }
+
+    recovered
+}
+
 fn collect_line_spans(text: &str) -> Vec<(usize, usize)> {
     let mut spans = Vec::new();
     let mut start = 0usize;
@@ -2097,6 +2946,19 @@ fn extract_allowlisted_calling_label_blocks(
         }
 
         if direct_recovered.is_empty() {
+            if segment.contains('<') && segment.contains('>') {
+                if let Some(normalized) = build_xml_named_tool_call_entry(
+                    tool_name.as_str(),
+                    segment,
+                    &[],
+                    fallback_start_id + recovered.len(),
+                ) {
+                    direct_recovered.push(normalized);
+                }
+            }
+        }
+
+        if direct_recovered.is_empty() {
             continue;
         }
         recovered.extend(direct_recovered);
@@ -2118,15 +2980,29 @@ fn collect_harvest_text_variants(raw: &str) -> Vec<String> {
         }
     };
 
+    let masked_wrapper_variant = mask_tool_wrapper_markup(raw);
+    if !masked_wrapper_variant.is_empty() && masked_wrapper_variant != raw.trim() {
+        push_variant(masked_wrapper_variant.as_str());
+    }
+
+    if raw.contains("\\\"tool_calls\\\"") {
+        let unescaped = raw
+            .replace("\\\"", "\"")
+            .replace("\\n", "\n")
+            .replace("\\r", "\r");
+        push_variant(unescaped.as_str());
+    }
+
     let rcc_patterns = [
-        r"(?s)<<RCC_TOOL_CALLS_JSON\s*\n([\s\S]*?)(?:\nRCC_TOOL_CALLS_JSON\b|$)",
-        r"(?s)<<RCC_TOOL_CALLS\s*\n([\s\S]*?)(?:\nRCC_TOOL_CALLS\b|$)",
+        r"(?s)<<RCC_TOOL_CALLS_JSON(?:\s*\n|\s+)([\s\S]*?)(?:\n?\s*RCC_TOOL_CALLS_JSON\b|$)",
+        r"(?s)<<RCC_TOOL_CALLS(?:\s*\n|\s+)([\s\S]*?)(?:\n?\s*RCC_TOOL_CALLS\b|$)",
     ];
     for pattern in rcc_patterns {
         let Ok(re) = Regex::new(pattern) else {
             continue;
         };
-        for caps in re.captures_iter(raw) {
+        let captures: Vec<_> = re.captures_iter(raw).collect();
+        for caps in captures.into_iter().rev() {
             if let Some(inner) = caps.get(1) {
                 push_variant(inner.as_str());
             }
@@ -2136,6 +3012,34 @@ fn collect_harvest_text_variants(raw: &str) -> Vec<String> {
     push_variant(raw);
 
     out
+}
+
+fn mask_tool_wrapper_markup(raw: &str) -> String {
+    let mut masked = raw.replace('\u{feff}', "");
+
+    let wrapper_line_patterns = [
+        r"(?im)^[ \t]*```(?:json|javascript|js)?[ \t]*\r?\n?",
+        r"(?im)^[ \t]*```[ \t]*\r?\n?",
+        r"(?im)^[ \t]*<<RCC_TOOL_CALLS_JSON[ \t]*\r?\n?",
+        r"(?im)^[ \t]*RCC_TOOL_CALLS_JSON[ \t]*\r?\n?",
+        r"(?im)^[ \t]*<<RCC_TOOL_CALLS[ \t]*\r?\n?",
+        r"(?im)^[ \t]*RCC_TOOL_CALLS[ \t]*\r?\n?",
+        r"(?im)^[ \t]*<\\|tool_calls_begin\\|>[ \t]*\r?\n?",
+        r"(?im)^[ \t]*<\\|tool_calls_end\\|>[ \t]*\r?\n?",
+        r"(?im)^[ \t]*<function_calls>[ \t]*\r?\n?",
+        r"(?im)^[ \t]*</function_calls>[ \t]*\r?\n?",
+    ];
+    for pattern in wrapper_line_patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            masked = re.replace_all(masked.as_str(), "\n").into_owned();
+        }
+    }
+
+    if let Ok(re) = Regex::new(r#"(?m)^[ \t]*[•·*]\s+(?=(?:\{|\[|<<RCC_TOOL_CALLS|<\|tool_call))"#) {
+        masked = re.replace_all(masked.as_str(), "").into_owned();
+    }
+
+    masked.trim().to_string()
 }
 
 fn is_jsonish_value_boundary(next: Option<char>) -> bool {
@@ -2268,26 +3172,55 @@ fn parse_tool_calls_shape_from_text(text: &str) -> Option<Value> {
     try_parse_json_value_lenient(repaired.as_str())
 }
 
+fn maybe_parse_tool_call_text_value(raw: &str) -> Option<Value> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(parsed) = try_parse_json_value_lenient(trimmed) {
+        return Some(parsed);
+    }
+    if trimmed.contains("\\\"") {
+        let unescaped = trimmed
+            .replace("\\\"", "\"")
+            .replace("\\n", "\n")
+            .replace("\\r", "\r");
+        if let Some(parsed) = try_parse_json_value_lenient(unescaped.as_str()) {
+            return Some(parsed);
+        }
+        if let Some(parsed) = parse_tool_calls_shape_from_text(unescaped.as_str()) {
+            return Some(parsed);
+        }
+    }
+    parse_tool_calls_shape_from_text(trimmed)
+}
+
 fn normalize_tool_call_entry(entry: &Value, fallback_id: usize) -> Option<Value> {
     let row = entry.as_object()?;
     let fn_row = row.get("function").and_then(|v| v.as_object());
-    let args_source = row
+    let args_source_with_mode = row
         .get("input")
-        .or_else(|| row.get("arguments"))
-        .or_else(|| row.get("params"))
-        .or_else(|| row.get("parameters"))
-        .or_else(|| row.get("payload"))
-        .or_else(|| fn_row.and_then(|f| f.get("arguments")))
-        .or_else(|| fn_row.and_then(|f| f.get("input")))
-        .or_else(|| fn_row.and_then(|f| f.get("params")))
-        .or_else(|| fn_row.and_then(|f| f.get("parameters")))
-        .or_else(|| fn_row.and_then(|f| f.get("payload")));
+        .map(|value| (value, false))
+        .or_else(|| row.get("arguments").map(|value| (value, true)))
+        .or_else(|| row.get("params").map(|value| (value, true)))
+        .or_else(|| row.get("parameters").map(|value| (value, true)))
+        .or_else(|| row.get("payload").map(|value| (value, true)))
+        .or_else(|| fn_row.and_then(|f| f.get("arguments")).map(|value| (value, true)))
+        .or_else(|| fn_row.and_then(|f| f.get("input")).map(|value| (value, false)))
+        .or_else(|| fn_row.and_then(|f| f.get("params")).map(|value| (value, true)))
+        .or_else(|| fn_row.and_then(|f| f.get("parameters")).map(|value| (value, true)))
+        .or_else(|| fn_row.and_then(|f| f.get("payload")).map(|value| (value, true)));
+    let (args_source, preserve_raw_shape) = args_source_with_mode?;
 
     let raw_name = read_trimmed_string(row.get("name"))
         .or_else(|| fn_row.and_then(|f| read_trimmed_string(f.get("name"))))
-        .or_else(|| infer_tool_name_from_args(args_source))?;
+        .or_else(|| infer_tool_name_from_args(Some(args_source)))?;
     let canonical_name = normalize_tool_name(&raw_name)?;
-    let normalized_args = normalize_tool_args(&canonical_name, args_source)?;
+    let normalized_args = if preserve_raw_shape {
+        normalize_tool_args_preserving_raw_shape(&raw_name, Some(args_source))?
+    } else {
+        normalize_tool_args(&raw_name, Some(args_source))?
+    };
 
     let call_id = read_trimmed_string(row.get("call_id"))
         .or_else(|| read_trimmed_string(row.get("id")))
@@ -2304,6 +3237,13 @@ fn normalize_tool_call_entry(entry: &Value, fallback_id: usize) -> Option<Value>
 }
 
 fn extract_tool_call_entries_from_unknown(value: &Value) -> Vec<Value> {
+    if let Some(raw) = value.as_str() {
+        if let Some(parsed) = maybe_parse_tool_call_text_value(raw) {
+            return extract_tool_call_entries_from_unknown(&parsed);
+        }
+        return Vec::new();
+    }
+
     if let Some(rows) = value.as_array() {
         return rows
             .iter()
@@ -2317,7 +3257,15 @@ fn extract_tool_call_entries_from_unknown(value: &Value) -> Vec<Value> {
     };
 
     if let Some(tool_calls) = row.get("tool_calls") {
-        return extract_tool_call_entries_from_unknown(tool_calls);
+        let direct = extract_tool_call_entries_from_unknown(tool_calls);
+        if !direct.is_empty() {
+            return direct;
+        }
+        if let Some(raw) = tool_calls.as_str() {
+            if let Some(parsed) = maybe_parse_tool_call_text_value(raw) {
+                return extract_tool_call_entries_from_unknown(&parsed);
+            }
+        }
     }
 
     normalize_tool_call_entry(value, 1)
@@ -2595,11 +3543,114 @@ fn normalize_thinking_only_reasoning_content(payload: &mut Value) -> i64 {
     normalized
 }
 
+fn strip_leading_bullet_prefix(raw: &str) -> &str {
+    raw.trim_start_matches(|ch: char| matches!(ch, ' ' | '\t' | '\r' | '\n' | '•' | '·' | '*'))
+}
+
+fn is_empty_tool_calls_payload(value: &Value) -> bool {
+    value
+        .as_object()
+        .and_then(|obj| obj.get("tool_calls"))
+        .and_then(Value::as_array)
+        .map(|rows| rows.is_empty())
+        .unwrap_or(false)
+}
+
+fn looks_like_empty_tool_calls_payload_text(raw: &str) -> bool {
+    let trimmed = strip_leading_bullet_prefix(raw).trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let starts_like_direct_payload = trimmed.starts_with('{')
+        || trimmed.starts_with('[')
+        || trimmed.starts_with("```")
+        || trimmed.starts_with("<<RCC_TOOL_CALLS");
+    if !starts_like_direct_payload {
+        return false;
+    }
+    try_parse_json_value_lenient(trimmed)
+        .as_ref()
+        .map(is_empty_tool_calls_payload)
+        .unwrap_or(false)
+}
+
+fn strip_empty_tool_calls_payload_noise(raw: &str) -> String {
+    if looks_like_empty_tool_calls_payload_text(raw) {
+        return String::new();
+    }
+
+    let mut lines: Vec<&str> = Vec::new();
+    let mut changed = false;
+    for line in raw.lines() {
+        if looks_like_empty_tool_calls_payload_text(line) {
+            changed = true;
+            continue;
+        }
+        lines.push(line);
+    }
+    let mut text = if changed {
+        lines.join("\n")
+    } else {
+        raw.to_string()
+    };
+
+    let rcc_patterns = [
+        r"(?s)<<RCC_TOOL_CALLS_JSON(?:\s*\n|\s+)([\s\S]*?)(?:\n?\s*RCC_TOOL_CALLS_JSON\b|$)",
+        r"(?s)<<RCC_TOOL_CALLS(?:\s*\n|\s+)([\s\S]*?)(?:\n?\s*RCC_TOOL_CALLS\b|$)",
+    ];
+    for pattern in rcc_patterns {
+        let Ok(re) = Regex::new(pattern) else {
+            continue;
+        };
+        text = re
+            .replace_all(text.as_str(), |caps: &regex::Captures| {
+                let inner = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                if looks_like_empty_tool_calls_payload_text(inner) {
+                    String::new()
+                } else {
+                    caps.get(0)
+                        .map(|m| m.as_str().to_string())
+                        .unwrap_or_default()
+                }
+            })
+            .to_string();
+    }
+
+    text
+}
+
 fn strip_tool_call_marker_payload(raw: &str) -> String {
+    fn looks_like_direct_tool_payload_text(raw: &str) -> bool {
+        let trimmed = strip_leading_bullet_prefix(raw).trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        let starts_like_payload = trimmed.starts_with('{')
+            || trimmed.starts_with('[')
+            || trimmed.starts_with("```")
+            || trimmed.starts_with("<<RCC_TOOL_CALLS");
+        if !starts_like_payload {
+            return false;
+        }
+        maybe_parse_tool_call_text_value(trimmed)
+            .as_ref()
+            .map(|parsed| !extract_tool_call_entries_from_unknown(parsed).is_empty())
+            .unwrap_or(false)
+    }
+
+    fn wrapper_contains_harvestable_tool_payload(raw: &str) -> bool {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        maybe_parse_tool_call_text_value(trimmed)
+            .as_ref()
+            .map(|parsed| !extract_tool_call_entries_from_unknown(parsed).is_empty())
+            .unwrap_or(false)
+    }
+
     fn find_first_tool_wrapper_start(raw: &str) -> Option<usize> {
         let mut earliest = [
-            "<<RCC_TOOL_CALLS_JSON",
-            "<<RCC_TOOL_CALLS",
             "<function_calls>",
             "<tool_call>",
             "<|tool_calls_section_begin|>",
@@ -2642,18 +3693,56 @@ fn strip_tool_call_marker_payload(raw: &str) -> String {
         earliest
     }
 
-    let rcc_start = ["<<RCC_TOOL_CALLS_JSON", "<<RCC_TOOL_CALLS"]
-        .iter()
-        .filter_map(|marker| raw.find(marker))
-        .min();
-    if let Some(start) = rcc_start {
-        return raw[..start].trim().to_string();
+    let raw = strip_empty_tool_calls_payload_noise(raw);
+    if raw.trim().is_empty() {
+        return String::new();
+    }
+    if looks_like_direct_tool_payload_text(raw.as_str()) {
+        return String::new();
     }
 
+    let mut direct_payload_lines_changed = false;
+    let mut filtered_lines: Vec<&str> = Vec::new();
+    for line in raw.lines() {
+        if looks_like_direct_tool_payload_text(line) {
+            direct_payload_lines_changed = true;
+            continue;
+        }
+        filtered_lines.push(line);
+    }
+    let raw = if direct_payload_lines_changed {
+        filtered_lines.join("\n")
+    } else {
+        raw
+    };
+
     let mut text = raw.to_string();
+    let rcc_patterns = [
+        r"(?s)<<RCC_TOOL_CALLS_JSON(?:\s*\n|\s+)([\s\S]*?)(?:\n?\s*RCC_TOOL_CALLS_JSON\b|$)",
+        r"(?s)<<RCC_TOOL_CALLS(?:\s*\n|\s+)([\s\S]*?)(?:\n?\s*RCC_TOOL_CALLS\b|$)",
+    ];
+    for pattern in rcc_patterns {
+        let Ok(re) = Regex::new(pattern) else {
+            continue;
+        };
+        text = re
+            .replace_all(text.as_str(), |caps: &regex::Captures| {
+                let inner = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                if wrapper_contains_harvestable_tool_payload(inner) {
+                    String::new()
+                } else {
+                    caps.get(0)
+                        .map(|m| m.as_str().to_string())
+                        .unwrap_or_default()
+                }
+            })
+            .to_string();
+    }
+
     let patterns = [
         r"(?is)<\|tool_calls_section_begin\|>[\s\S]*?<\|tool_calls_section_end\|>",
         r"(?is)<\|tool_call_begin\|>[\s\S]*?<\|tool_call_end\|>",
+        r"(?is)<tool_calls>[\s\S]*?</tool_calls>",
         r"(?is)<tool_call>[\s\S]*?</tool_call>",
         r"(?is)<function_calls>[\s\S]*?</function_calls>",
         r"(?is)<quote>\s*[\s\S]*?\btool_calls\b[\s\S]*?</quote>",
@@ -2667,6 +3756,7 @@ fn strip_tool_call_marker_payload(raw: &str) -> String {
     if let Some(start) = find_first_tool_wrapper_start(text.as_str()) {
         text = text[..start].to_string();
     }
+    text = strip_known_non_tool_xml_tags_preserve_text(text.as_str());
     text.trim().to_string()
 }
 
@@ -2679,6 +3769,9 @@ fn strip_orphan_tool_markup_lines(raw: &str) -> String {
         r"(?im)^[ \t]*</parameter>[ \t]*\r?\n?",
         r"(?im)^[ \t]*</arg_key>[ \t]*\r?\n?",
         r"(?im)^[ \t]*</arg_value>[ \t]*\r?\n?",
+        r"(?im)^[ \t<|/_-]*tool_calls?(?:_section)?_?begin[a-z_]*[ \t>|/_-]*\r?\n?",
+        r"(?im)^[ \t<|/_-]*tool_call_argument_begin[a-z_]*[ \t>|/_-]*\r?\n?",
+        r"(?im)^[ \t<|/_-]*tool_calls?(?:_section)?_?end[a-z_]*[ \t>|/_-]*\r?\n?",
     ];
     for pattern in patterns {
         if let Ok(re) = Regex::new(pattern) {
@@ -2686,6 +3779,17 @@ fn strip_orphan_tool_markup_lines(raw: &str) -> String {
         }
     }
     text.trim().to_string()
+}
+
+fn strip_known_non_tool_xml_tags_preserve_text(raw: &str) -> String {
+    let Ok(tag_re) = Regex::new(r"(?is)</?(search|query)>") else {
+        return raw.trim().to_string();
+    };
+    if !tag_re.is_match(raw) {
+        return raw.to_string();
+    }
+    let replaced = tag_re.replace_all(raw, " ").to_string();
+    normalize_preserved_text_whitespace(replaced.as_str())
 }
 
 fn strip_text_tool_wrapper_noise(raw: &str) -> String {
@@ -2703,7 +3807,87 @@ fn strip_text_tool_wrapper_noise(raw: &str) -> String {
         };
         text = re.replace_all(text.as_str(), "").to_string();
     }
+    text = strip_known_non_tool_xml_tags_preserve_text(text.as_str());
     text.trim().to_string()
+}
+
+fn fallback_preserve_inner_text_when_cleaned_empty(raw: &str, cleaned: &str) -> Option<String> {
+    if !cleaned.trim().is_empty() {
+        return None;
+    }
+    if looks_like_empty_tool_calls_payload_text(raw) {
+        return None;
+    }
+    if contains_explicit_tool_wrapper_marker(raw) {
+        return None;
+    }
+    let rcc_patterns = [
+        r"(?s)<<RCC_TOOL_CALLS_JSON(?:\s*\n|\s+)([\s\S]*?)(?:\n?\s*RCC_TOOL_CALLS_JSON\b|$)",
+        r"(?s)<<RCC_TOOL_CALLS(?:\s*\n|\s+)([\s\S]*?)(?:\n?\s*RCC_TOOL_CALLS\b|$)",
+    ];
+    for pattern in rcc_patterns {
+        let Ok(re) = Regex::new(pattern) else {
+            continue;
+        };
+        let captures: Vec<_> = re.captures_iter(raw).collect();
+        for caps in captures.into_iter().rev() {
+            let Some(full) = caps.get(0) else {
+                continue;
+            };
+            let inner = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            if looks_like_empty_tool_calls_payload_text(inner) {
+                continue;
+            }
+            let prefix = normalize_preserved_text_whitespace(&raw[..full.start()]);
+            let suffix = normalize_preserved_text_whitespace(&raw[full.end()..]);
+            let mut outside: Vec<String> = Vec::new();
+            if !prefix.is_empty() {
+                outside.push(prefix);
+            }
+            if !suffix.is_empty() {
+                outside.push(suffix);
+            }
+            if !outside.is_empty() {
+                return Some(outside.join("\n\n"));
+            }
+        }
+    }
+    if raw.contains('<') && raw.contains('>') {
+        let preserved = strip_xml_tags_preserve_text(raw);
+        if !preserved.trim().is_empty() {
+            return Some(preserved);
+        }
+    }
+    if let Some(inner) = extract_rcc_tool_call_inner_payload(raw) {
+        return Some(inner);
+    }
+    None
+}
+
+fn extract_rcc_tool_call_inner_payload(raw: &str) -> Option<String> {
+    let patterns = [
+        r"(?s)<<RCC_TOOL_CALLS_JSON(?:\s*\n|\s+)([\s\S]*?)(?:\n?\s*RCC_TOOL_CALLS_JSON\b|$)",
+        r"(?s)<<RCC_TOOL_CALLS(?:\s*\n|\s+)([\s\S]*?)(?:\n?\s*RCC_TOOL_CALLS\b|$)",
+    ];
+    for pattern in patterns {
+        let Ok(re) = Regex::new(pattern) else {
+            continue;
+        };
+        let captures: Vec<_> = re.captures_iter(raw).collect();
+        for caps in captures.into_iter().rev() {
+            let Some(inner) = caps.get(1).map(|m| m.as_str().trim()) else {
+                continue;
+            };
+            if inner.is_empty() {
+                continue;
+            }
+            if looks_like_empty_tool_calls_payload_text(inner) {
+                continue;
+            }
+            return Some(inner.to_string());
+        }
+    }
+    None
 }
 
 fn sanitize_textual_noise_field_in_message(message: &mut Map<String, Value>, key: &str) -> bool {
@@ -2718,7 +3902,9 @@ fn sanitize_textual_noise_field_in_message(message: &mut Map<String, Value>, key
     if cleaned == raw {
         return false;
     }
-    if cleaned.is_empty() {
+    if let Some(preserved) = fallback_preserve_inner_text_when_cleaned_empty(raw.as_str(), cleaned.as_str()) {
+        message.insert(key.to_string(), Value::String(preserved));
+    } else if cleaned.is_empty() {
         message.remove(key);
     } else {
         message.insert(key.to_string(), Value::String(cleaned));
@@ -2738,7 +3924,9 @@ fn sanitize_textual_marker_field_in_message(message: &mut Map<String, Value>, ke
     if cleaned == raw {
         return false;
     }
-    if cleaned.is_empty() {
+    if let Some(preserved) = fallback_preserve_inner_text_when_cleaned_empty(raw.as_str(), cleaned.as_str()) {
+        message.insert(key.to_string(), Value::String(preserved));
+    } else if cleaned.is_empty() {
         message.remove(key);
     } else {
         message.insert(key.to_string(), Value::String(cleaned));
@@ -2746,7 +3934,40 @@ fn sanitize_textual_marker_field_in_message(message: &mut Map<String, Value>, ke
     true
 }
 
-fn sanitize_content_field_after_tool_markup(message: &mut Map<String, Value>) -> i64 {
+fn sanitize_textual_marker_field_in_message_with_policy(
+    message: &mut Map<String, Value>,
+    key: &str,
+    allow_empty_removal: bool,
+) -> bool {
+    let Some(raw) = message
+        .get(key)
+        .and_then(Value::as_str)
+        .map(|v| v.to_string())
+    else {
+        return false;
+    };
+    let cleaned = strip_tool_call_marker_payload(raw.as_str());
+    if cleaned == raw {
+        return false;
+    }
+    if let Some(preserved) = fallback_preserve_inner_text_when_cleaned_empty(raw.as_str(), cleaned.as_str()) {
+        message.insert(key.to_string(), Value::String(preserved));
+    } else if cleaned.is_empty() {
+        if allow_empty_removal {
+            message.remove(key);
+        } else {
+            message.insert(key.to_string(), Value::String(String::new()));
+        }
+    } else {
+        message.insert(key.to_string(), Value::String(cleaned));
+    }
+    true
+}
+
+fn sanitize_content_field_after_tool_markup(
+    message: &mut Map<String, Value>,
+    _allow_empty_clear: bool,
+) -> i64 {
     let Some(content) = message.get_mut("content") else {
         return 0;
     };
@@ -2758,7 +3979,11 @@ fn sanitize_content_field_after_tool_markup(message: &mut Map<String, Value>) ->
             if cleaned == raw.as_str() {
                 return 0;
             }
-            if cleaned.is_empty() {
+            if let Some(preserved) =
+                fallback_preserve_inner_text_when_cleaned_empty(raw.as_str(), cleaned.as_str())
+            {
+                *content = Value::String(preserved);
+            } else if cleaned.is_empty() {
                 *content = Value::String(String::new());
             } else {
                 *content = Value::String(cleaned);
@@ -2785,7 +4010,12 @@ fn sanitize_content_field_after_tool_markup(message: &mut Map<String, Value>) ->
                         continue;
                     }
                     changed += 1;
-                    if cleaned.is_empty() {
+                    if let Some(preserved) = fallback_preserve_inner_text_when_cleaned_empty(
+                        raw,
+                        cleaned.as_str(),
+                    ) {
+                        part_row.insert(key.to_string(), Value::String(preserved));
+                    } else if cleaned.is_empty() {
                         part_row.remove(key);
                     } else {
                         part_row.insert(key.to_string(), Value::String(cleaned));
@@ -2819,7 +4049,11 @@ fn sanitize_content_field_after_tool_markup(message: &mut Map<String, Value>) ->
                     continue;
                 }
                 changed += 1;
-                if cleaned.is_empty() {
+                if let Some(preserved) =
+                    fallback_preserve_inner_text_when_cleaned_empty(raw, cleaned.as_str())
+                {
+                    part_row.insert(key.to_string(), Value::String(preserved));
+                } else if cleaned.is_empty() {
                     part_row.remove(key);
                 } else {
                     part_row.insert(key.to_string(), Value::String(cleaned));
@@ -2838,82 +4072,90 @@ fn sanitize_reasoning_fields_after_tool_harvest(message: &mut Map<String, Value>
         .and_then(Value::as_array)
         .map(|rows| !rows.is_empty())
         .unwrap_or(false);
-    changed += sanitize_content_field_after_tool_markup(message);
-    if sanitize_textual_marker_field_in_message(message, "reasoning_content") {
+    changed += sanitize_content_field_after_tool_markup(message, has_tool_calls);
+    if sanitize_textual_marker_field_in_message_with_policy(
+        message,
+        "reasoning_content",
+        has_tool_calls,
+    ) {
         changed += 1;
     }
-    if sanitize_textual_marker_field_in_message(message, "thinking") {
+    if sanitize_textual_marker_field_in_message_with_policy(message, "thinking", has_tool_calls) {
         changed += 1;
     }
 
     let mut should_remove_reasoning = false;
-    if let Some(reasoning) = message.get_mut("reasoning") {
-        match reasoning {
-            Value::String(raw) => {
-                let cleaned = strip_tool_call_marker_payload(raw);
-                if cleaned != raw.as_str() {
-                    changed += 1;
-                    if cleaned.is_empty() {
-                        should_remove_reasoning = true;
-                    } else {
-                        *reasoning = Value::String(cleaned);
-                    }
-                }
-            }
-            Value::Object(row) => {
-                if let Some(content) = row.get_mut("content").and_then(Value::as_array_mut) {
-                    let original = std::mem::take(content);
-                    let mut next: Vec<Value> = Vec::new();
-                    for mut entry in original {
-                        let Some(entry_row) = entry.as_object_mut() else {
-                            continue;
-                        };
-                        let text_key = if entry_row.get("text").and_then(Value::as_str).is_some() {
-                            Some("text")
-                        } else if entry_row.get("content").and_then(Value::as_str).is_some() {
-                            Some("content")
+    if has_tool_calls {
+        if let Some(reasoning) = message.get_mut("reasoning") {
+            match reasoning {
+                Value::String(raw) => {
+                    let cleaned = strip_tool_call_marker_payload(raw);
+                    if cleaned != raw.as_str() {
+                        changed += 1;
+                        if cleaned.is_empty() {
+                            should_remove_reasoning = true;
                         } else {
-                            None
-                        };
-
-                        if let Some(key) = text_key {
-                            let raw = entry_row
-                                .get(key)
-                                .and_then(Value::as_str)
-                                .unwrap_or("")
-                                .to_string();
-                            let cleaned = strip_tool_call_marker_payload(raw.as_str());
-                            if cleaned != raw {
-                                changed += 1;
-                            }
-                            if cleaned.is_empty() {
-                                continue;
-                            }
-                            entry_row.insert(key.to_string(), Value::String(cleaned));
+                            *reasoning = Value::String(cleaned);
                         }
-                        next.push(entry);
-                    }
-                    *content = next;
-                    if content.is_empty() {
-                        row.remove("content");
                     }
                 }
-                let has_content = row
-                    .get("content")
-                    .and_then(Value::as_array)
-                    .map(|entries| !entries.is_empty())
-                    .unwrap_or(false);
-                let has_summary = row
-                    .get("summary")
-                    .and_then(Value::as_array)
-                    .map(|entries| !entries.is_empty())
-                    .unwrap_or(false);
-                let has_encrypted = row.get("encrypted_content").is_some();
-                if !has_content && !has_summary && !has_encrypted {
-                    should_remove_reasoning = true;
+                Value::Object(row) => {
+                    if let Some(content) = row.get_mut("content").and_then(Value::as_array_mut) {
+                        let original = std::mem::take(content);
+                        let mut next: Vec<Value> = Vec::new();
+                        for mut entry in original {
+                            let Some(entry_row) = entry.as_object_mut() else {
+                                continue;
+                            };
+                            let text_key =
+                                if entry_row.get("text").and_then(Value::as_str).is_some() {
+                                    Some("text")
+                                } else if entry_row.get("content").and_then(Value::as_str).is_some()
+                                {
+                                    Some("content")
+                                } else {
+                                    None
+                                };
+
+                            if let Some(key) = text_key {
+                                let raw = entry_row
+                                    .get(key)
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("")
+                                    .to_string();
+                                let cleaned = strip_tool_call_marker_payload(raw.as_str());
+                                if cleaned != raw {
+                                    changed += 1;
+                                }
+                                if cleaned.is_empty() {
+                                    continue;
+                                }
+                                entry_row.insert(key.to_string(), Value::String(cleaned));
+                            }
+                            next.push(entry);
+                        }
+                        *content = next;
+                        if content.is_empty() {
+                            row.remove("content");
+                        }
+                    }
+                    let has_content = row
+                        .get("content")
+                        .and_then(Value::as_array)
+                        .map(|entries| !entries.is_empty())
+                        .unwrap_or(false);
+                    let has_summary = row
+                        .get("summary")
+                        .and_then(Value::as_array)
+                        .map(|entries| !entries.is_empty())
+                        .unwrap_or(false);
+                    let has_encrypted = row.get("encrypted_content").is_some();
+                    if !has_content && !has_summary && !has_encrypted {
+                        should_remove_reasoning = true;
+                    }
                 }
+                _ => {}
             }
-            _ => {}
         }
     }
 
@@ -2986,6 +4228,8 @@ pub fn strip_orphan_function_calls_tag_json(payload_json: String) -> napi::Resul
 pub(crate) fn harvest_text_tool_calls_from_payload(payload: &mut Value) -> i64 {
     let mut harvested = 0i64;
     let requested_tool_name_keys = collect_requested_tool_name_keys(payload);
+    let provider_family = detect_text_tool_provider_family(payload);
+    let enable_qwen_specific_harvest = provider_family == TextToolProviderFamily::Qwen;
     let Some(choices) = payload.get_mut("choices").and_then(|v| v.as_array_mut()) else {
         return harvested;
     };
@@ -3052,11 +4296,24 @@ pub(crate) fn harvest_text_tool_calls_from_payload(payload: &mut Value) -> i64 {
                     recovered = allowlisted_calling_blocks;
                     break;
                 }
-                let qwen_markers =
-                    extract_tool_calls_from_qwen_markers(&candidate_text, (harvested as usize) + 1);
-                if !qwen_markers.is_empty() {
-                    recovered = qwen_markers;
-                    break;
+                if enable_qwen_specific_harvest {
+                    let function_style_calls = extract_allowlisted_function_style_calls(
+                        &candidate_text,
+                        &requested_tool_name_keys,
+                        (harvested as usize) + 1,
+                    );
+                    if !function_style_calls.is_empty() {
+                        recovered = function_style_calls;
+                        break;
+                    }
+                    let qwen_markers = extract_tool_calls_from_qwen_markers(
+                        &candidate_text,
+                        (harvested as usize) + 1,
+                    );
+                    if !qwen_markers.is_empty() {
+                        recovered = qwen_markers;
+                        break;
+                    }
                 }
                 let has_tool_marker = candidate_text.contains(TOOL_CALL_JSON_MARKER)
                     || candidate_text.contains("'tool_calls'")
@@ -3068,6 +4325,23 @@ pub(crate) fn harvest_text_tool_calls_from_payload(payload: &mut Value) -> i64 {
                     || candidate_text.contains("<tool_call")
                     || candidate_text.contains("<|tool_call_begin|>");
                 if !has_tool_marker {
+                    if requested_tool_name_keys.contains("apply_patch")
+                        && candidate_text.contains("*** Begin Patch")
+                    {
+                        let patch_entry = json!({
+                            "name": "apply_patch",
+                            "input": {
+                                "patch": candidate_text
+                            }
+                        });
+                        if let Some(normalized_patch) = normalize_tool_call_entry(
+                            &patch_entry,
+                            (harvested as usize) + 1,
+                        ) {
+                            recovered = vec![normalized_patch];
+                            break;
+                        }
+                    }
                     continue;
                 }
 
@@ -3263,9 +4537,9 @@ fn remap_tool_calls_for_client_protocol(payload: &mut Value, client_protocol: &s
                 continue;
             };
             let normalized_args = if wants_anthropic_shell && is_shell_alias {
-                normalize_tool_args("shell_command", Some(&arguments))
+                normalize_tool_args_preserving_raw_shape("shell_command", Some(&arguments))
             } else {
-                normalize_tool_args("exec_command", Some(&arguments))
+                normalize_tool_args_preserving_raw_shape(name.as_str(), Some(&arguments))
             };
             if let Some(normalized_args) = normalized_args {
                 function.insert("arguments".to_string(), Value::String(normalized_args));
@@ -3300,8 +4574,11 @@ fn prepare_payload_for_governance(
 ) -> Result<ToolGovernancePreparationOutput, String> {
     let (mut prepared_payload, converted) = coerce_to_canonical_chat_completion(payload);
     copy_internal_tool_governance_state(payload, &mut prepared_payload);
-    let harvested_tool_calls =
-        maybe_harvest_empty_tool_calls_from_json_content(&mut prepared_payload);
+    let harvested_tool_calls = if resolve_text_harvest_enabled(&prepared_payload) {
+        maybe_harvest_empty_tool_calls_from_json_content(&mut prepared_payload)
+    } else {
+        0
+    };
     let thinking_reasoning_normalized =
         normalize_thinking_only_reasoning_content(&mut prepared_payload);
     let sanitized_tool_markup = sanitize_payload_tool_markup_fields(&mut prepared_payload);
@@ -3455,6 +4732,52 @@ mod tests {
                     .as_str()
                     .map(|value| value.is_empty())
                     .unwrap_or(false)
+        );
+    }
+
+    #[test]
+    fn test_prepare_payload_for_governance_harvests_function_style_apply_patch_from_responses() {
+        let payload = serde_json::json!({
+            "object": "response",
+            "id": "resp_stage1_apply_patch",
+            "model": "qwenchat.qwen3.6-plus",
+            "status": "completed",
+            "output_text": "apply_patch(path=\"hello.txt\", content=\"hello\")",
+            "output": []
+        });
+
+        let prepared = prepare_payload_for_governance(&payload).unwrap();
+        assert!(prepared.summary.converted);
+        assert_eq!(prepared.summary.harvested_tool_calls, 1);
+        let args = prepared.prepared_payload["choices"][0]["message"]["tool_calls"][0]["function"]
+            ["arguments"]
+            .as_str()
+            .unwrap();
+        let args_json: Value = serde_json::from_str(args).unwrap();
+        let patch = args_json["patch"].as_str().unwrap();
+        assert!(patch.contains("*** Add File: hello.txt"));
+        assert!(patch.contains("+hello"));
+    }
+
+    #[test]
+    fn test_prepare_payload_for_governance_strips_empty_tool_calls_json_noise_from_content() {
+        let payload = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "done\n• {\"tool_calls\":[]}"
+                },
+                "finish_reason": "stop"
+            }]
+        });
+
+        let prepared = prepare_payload_for_governance(&payload).unwrap();
+        assert_eq!(
+            prepared.prepared_payload["choices"][0]["message"]["content"],
+            "done"
+        );
+        assert_eq!(
+            prepared.prepared_payload["choices"][0]["finish_reason"],
+            "stop"
         );
     }
 
@@ -3981,10 +5304,7 @@ mod tests {
 
         let result = govern_response(input).unwrap();
         let message = &result.governed_payload["choices"][0]["message"];
-        assert_eq!(
-            message["tool_calls"][0]["function"]["name"],
-            "exec_command"
-        );
+        assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
         assert!(message.get("content").is_none() || message["content"] == "");
         assert!(message.get("reasoning_content").is_none());
         assert!(message.get("thinking").is_none());
@@ -4108,6 +5428,31 @@ mod tests {
         assert_eq!(
             result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
             "write_stdin"
+        );
+    }
+
+    #[test]
+    fn test_strip_orphan_qwen_end_marker_lines_from_content() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "tool_calls": [],
+                        "content": "继续执行\n<tool_calls_endl>\n"
+                    },
+                    "finish_reason": "stop"
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            request_id: "req_qwen_orphan_end_line_1".to_string(),
+        };
+
+        let result = govern_response(input).unwrap();
+        assert_eq!(result.summary.tool_calls_normalized, 0);
+        assert_eq!(
+            result.governed_payload["choices"][0]["message"]["content"],
+            "继续执行"
         );
     }
 
@@ -4322,6 +5667,48 @@ console.log('ok')"#;
         assert!(parsed.get("command").is_none());
         assert_eq!(parsed["workdir"], "/tmp");
 
+        let raw_args = json!({"command": "bash-lc 'pwd'"});
+        let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["cmd"], "bash -lc 'pwd'");
+
+        let raw_args = json!({"command": "bash -lc 'which memsearch && memsearch --help 2>&1 | head -20 || echo \"memsearch not found\""});
+        let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            parsed["cmd"],
+            "bash -lc 'which memsearch && memsearch --help 2>&1 | head -20 || echo \"memsearch not found\"'"
+        );
+
+        let raw_args = json!({"command": "bash -lc\"cd /Volumes/extension/code/finger && memsearch index MEMORY.md memory/ --force 2>&1\""});
+        let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            parsed["cmd"],
+            "bash -lc \"cd /Volumes/extension/code/finger && memsearch index MEMORY.md memory/ --force 2>&1\""
+        );
+
+        let raw_args = json!({"command": "bash -lc'cd /Volumes/extension/code/finger && pwd'"});
+        let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            parsed["cmd"],
+            "bash -lc 'cd /Volumes/extension/code/finger && pwd'"
+        );
+
+        let raw_args = json!({"command": "bash -lc 'printf 'oops'"});
+        let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["cmd"], "bash -lc 'printf 'oops'");
+
+        let raw_args = json!({"command": "cd /Volumes/extension/code/finger && python3 << 'PYEOF'\nwith open\\('src/blocks/agent-runtime-block/index.ts', 'r'\\) as f:\n    content = f.read\\(\\)\nPYEOF"});
+        let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            parsed["cmd"],
+            "cd /Volumes/extension/code/finger && python3 << 'PYEOF'\nwith open('src/blocks/agent-runtime-block/index.ts', 'r') as f:\n    content = f.read()\nPYEOF"
+        );
+
         let raw_args = json!({"sessionId": "123", "text": 42});
         let out = normalize_tool_args("write_stdin", Some(&raw_args)).unwrap();
         let parsed: Value = serde_json::from_str(&out).unwrap();
@@ -4333,6 +5720,22 @@ console.log('ok')"#;
 
         let raw_args = json!({"command": "pwd"});
         assert!(normalize_tool_args("bash", Some(&raw_args)).is_some());
+    }
+
+    #[test]
+    fn test_normalize_tool_args_preserving_raw_shape_does_not_guess_exec_command_aliases() {
+        let raw_args = json!({"command": "pwd", "workdir": "/workspace"});
+        let out = normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["command"], "pwd");
+        assert_eq!(parsed["workdir"], "/workspace");
+        assert!(parsed.get("cmd").is_none());
+
+        let raw_args = Value::String("{\"command\":\"pwd\"}".to_string());
+        let out = normalize_tool_args_preserving_raw_shape("shell_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["command"], "pwd");
+        assert!(parsed.get("cmd").is_none());
     }
 
     #[test]
@@ -4662,6 +6065,20 @@ console.log('ok')"#;
     }
 
     #[test]
+    fn test_strip_python_heredoc_pseudo_escapes_only_for_python_like_commands() {
+        let repaired = strip_python_heredoc_pseudo_escapes(
+            "python3 << 'PYEOF'\nwith open\\('a.py', 'r'\\) as f:\n    print\\(f.read\\(\\)\\)\nPYEOF",
+        );
+        assert!(repaired.contains("with open('a.py', 'r') as f:"));
+        assert!(repaired.contains("print(f.read())"));
+
+        let untouched = strip_python_heredoc_pseudo_escapes(
+            "grep -E \"foo\\(bar\\)\" src/file.ts",
+        );
+        assert_eq!(untouched, "grep -E \"foo\\(bar\\)\" src/file.ts");
+    }
+
+    #[test]
     fn test_extract_apply_patch_text_variants() {
         let stars = "*".repeat(3);
         let raw_text = format!("{} {} {}", stars, "Begin", "Patch");
@@ -4863,8 +6280,16 @@ console.log('ok')"#;
         let out = normalize_tool_call_entry(&entry, 1).unwrap();
         assert_eq!(out["function"]["name"], "exec_command");
 
+        let entry = json!({"function": {"name": "exec_command", "arguments": {"command": "pwd"}}});
+        let out = normalize_tool_call_entry(&entry, 1).unwrap();
+        let args = out["function"]["arguments"].as_str().unwrap_or("{}");
+        let parsed: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+        assert_eq!(parsed["command"], "pwd");
+        assert!(parsed.get("cmd").is_none());
+
         let entry = json!({"function": {"name": "exec_command", "arguments": {}}});
-        assert!(normalize_tool_call_entry(&entry, 1).is_none());
+        let out = normalize_tool_call_entry(&entry, 1).unwrap();
+        assert_eq!(out["function"]["arguments"], "{}");
 
         let entry = Value::String("not an object".to_string());
         assert!(normalize_tool_call_entry(&entry, 1).is_none());
@@ -5074,6 +6499,25 @@ console.log('ok')"#;
     }
 
     #[test]
+    fn test_extract_xml_named_tool_call_blocks_invoke_parameter_attribute_wrapper_inside_tool_calls() {
+        let text = r#"<tool_calls>
+<invoke name="exec_command">
+<parameter name="cmd" string="true">tail -100 ~/.finger/logs/daemon.log | tail -20</parameter>
+</invoke>
+</tool_calls>"#;
+        let out = extract_xml_named_tool_call_blocks(text, 1);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["function"]["name"], "exec_command");
+        let args: Value =
+            serde_json::from_str(out[0]["function"]["arguments"].as_str().unwrap_or("{}"))
+                .unwrap_or(Value::Null);
+        assert_eq!(
+            args["cmd"].as_str().unwrap_or(""),
+            "tail -100 ~/.finger/logs/daemon.log | tail -20"
+        );
+    }
+
+    #[test]
     fn test_harvest_tool_calls_from_generic_command_wrappers() {
         let input = ToolGovernanceInput {
             payload: serde_json::json!({
@@ -5133,6 +6577,165 @@ console.log('ok')"#;
         assert!(content.contains("system agent 重启后无法向 project agent 派发任务"));
         assert!(!content.contains("<command>"));
         assert!(!content.contains("<grep_command>"));
+    }
+
+    #[test]
+    fn test_extract_allowlisted_function_style_calls_exec_command() {
+        let requested = HashSet::from(["exec_command".to_string()]);
+        let out = extract_allowlisted_function_style_calls(
+            r#"exec_command(cmd="bash -lc'pwd'")"#,
+            &requested,
+            1,
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["function"]["name"], "exec_command");
+        let args: Value =
+            serde_json::from_str(out[0]["function"]["arguments"].as_str().unwrap_or("{}"))
+                .unwrap_or(Value::Null);
+        assert_eq!(args["cmd"], "bash -lc 'pwd'");
+    }
+
+    #[test]
+    fn test_extract_allowlisted_function_style_calls_tool_prefixed_exec_command() {
+        let requested = HashSet::from(["exec_command".to_string()]);
+        let out = extract_allowlisted_function_style_calls(
+            r#"```toolexec_command(command="head -n3 docs/ARCHITECTURE.md")```"#,
+            &requested,
+            1,
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["function"]["name"], "exec_command");
+        let args: Value =
+            serde_json::from_str(out[0]["function"]["arguments"].as_str().unwrap_or("{}"))
+                .unwrap_or(Value::Null);
+        assert_eq!(args["cmd"], "head -n3 docs/ARCHITECTURE.md");
+    }
+
+    #[test]
+    fn test_extract_allowlisted_function_style_calls_apply_patch_without_requested_tools() {
+        let requested = HashSet::new();
+        let out = extract_allowlisted_function_style_calls(
+            r#"apply_patch(path="hello.txt", content="hello")"#,
+            &requested,
+            1,
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["function"]["name"], "apply_patch");
+        let args: Value =
+            serde_json::from_str(out[0]["function"]["arguments"].as_str().unwrap_or("{}"))
+                .unwrap_or(Value::Null);
+        let patch = args["patch"].as_str().unwrap_or("");
+        assert!(patch.contains("*** Add File: hello.txt"));
+        assert!(patch.contains("+hello"));
+    }
+
+    #[test]
+    fn test_harvest_tool_calls_from_allowlisted_function_style_blocks() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "tool_calls": [],
+                        "content": r#"exec_command(cmd="bash -lc'pwd'")"#
+                    },
+                    "finish_reason": "stop"
+                }],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": { "cmd": { "type": "string" } },
+                            "required": ["cmd"]
+                        }
+                    }
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            request_id: "req_function_style_exec_command_harvest_1".to_string(),
+        };
+
+        let result = govern_response(input).unwrap();
+        let message = &result.governed_payload["choices"][0]["message"];
+        assert_eq!(result.summary.tool_calls_normalized, 1);
+        assert_eq!(
+            result.governed_payload["choices"][0]["finish_reason"],
+            "tool_calls"
+        );
+        assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
+        let args: Value = serde_json::from_str(
+            message["tool_calls"][0]["function"]["arguments"]
+                .as_str()
+                .unwrap_or("{}"),
+        )
+        .unwrap_or(Value::Null);
+        assert_eq!(args["cmd"], "bash -lc 'pwd'");
+    }
+
+    #[test]
+    fn test_harvest_tool_calls_from_tool_prefixed_function_style_blocks() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "tool_calls": [],
+                        "content": r#"```toolexec_command(command="head -n3 docs/ARCHITECTURE.md")```"#
+                    },
+                    "finish_reason": "stop"
+                }],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": { "cmd": { "type": "string" } },
+                            "required": ["cmd"]
+                        }
+                    }
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            request_id: "req_function_style_exec_command_tool_prefixed".to_string(),
+        };
+
+        let result = govern_response(input).unwrap();
+        let message = &result.governed_payload["choices"][0]["message"];
+        assert_eq!(result.summary.tool_calls_normalized, 1);
+        assert_eq!(
+            result.governed_payload["choices"][0]["finish_reason"],
+            "tool_calls"
+        );
+        assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
+        let args: Value = serde_json::from_str(
+            message["tool_calls"][0]["function"]["arguments"]
+                .as_str()
+                .unwrap_or("{}"),
+        )
+        .unwrap_or(Value::Null);
+        assert_eq!(args["cmd"], "head -n3 docs/ARCHITECTURE.md");
+    }
+
+    #[test]
+    fn test_normalize_tool_args_update_plan_steps_alias() {
+        let normalized = normalize_tool_args(
+            "update_plan",
+            Some(&serde_json::json!({
+                "steps": [
+                    {"name": "inspect", "status": "in_progress"},
+                    {"name": "report", "status": "pending"}
+                ]
+            })),
+        )
+        .unwrap_or_default();
+        let args: Value = serde_json::from_str(normalized.as_str()).unwrap_or(Value::Null);
+        assert_eq!(args["plan"][0]["step"], "inspect");
+        assert_eq!(args["plan"][0]["status"], "in_progress");
+        assert_eq!(args["plan"][1]["step"], "report");
+        assert_eq!(args["plan"][1]["status"], "pending");
     }
 
     #[test]
@@ -5399,6 +7002,10 @@ Arguments:
     fn test_harvest_tool_calls_from_xml_named_tool_blocks() {
         let input = ToolGovernanceInput {
             payload: serde_json::json!({
+                "__rcc_tool_governance": {
+                    "enableTextHarvest": true,
+                    "providerFamily": "deepseek"
+                },
                 "choices": [{
                     "message": {
                         "tool_calls": [],
@@ -5437,10 +7044,105 @@ Arguments:
     }
 
     #[test]
+    fn test_harvest_tool_calls_from_xml_invoke_parameter_attribute_blocks() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "__rcc_tool_governance": {
+                    "enableTextHarvest": true,
+                    "providerFamily": "deepseek"
+                },
+                "choices": [{
+                    "message": {
+                        "tool_calls": [],
+                        "content": "我先检查 dispatch 日志。\n<tool_calls>\n<invoke name=\"exec_command\">\n<parameter name=\"cmd\" string=\"true\">tail -100 ~/.finger/logs/daemon.log | grep -E \"finger-system-agent.*complete|finger-project-agent.*complete|dispatch.*complete\" | tail -20</parameter>\n</invoke>\n</tool_calls>"
+                    },
+                    "finish_reason": "stop"
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            request_id: "req_xml_invoke_attr_harvest_1".to_string(),
+        };
+
+        let result = govern_response(input).unwrap();
+        let message = &result.governed_payload["choices"][0]["message"];
+        assert_eq!(result.summary.tool_calls_normalized, 1);
+        assert_eq!(
+            result.governed_payload["choices"][0]["finish_reason"],
+            "tool_calls"
+        );
+        assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
+        let args: Value = serde_json::from_str(
+            message["tool_calls"][0]["function"]["arguments"]
+                .as_str()
+                .unwrap_or("{}"),
+        )
+        .unwrap_or(Value::Null);
+        assert_eq!(
+            args["cmd"],
+            "tail -100 ~/.finger/logs/daemon.log | grep -E \"finger-system-agent.*complete|finger-project-agent.*complete|dispatch.*complete\" | tail -20"
+        );
+        let content = message["content"].as_str().unwrap_or("");
+        assert!(content.contains("我先检查 dispatch 日志"));
+        assert!(!content.contains("<tool_calls>"));
+        assert!(!content.contains("<invoke name=\"exec_command\">"));
+        assert!(!content.contains("<parameter name=\"cmd\""));
+    }
+
+    #[test]
     fn test_extract_json_candidates_unclosed_fence() {
         let text = "```json\n{\"a\":1}\n";
         let out = extract_json_candidates_from_text(text);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn test_collect_harvest_text_variants_masks_wrapper_lines_and_bullet_prefix() {
+        let text = "• <<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"apply_patch\",\"input\":{\"patch\":\"*** Begin Patch\\n*** Add File: demo.txt\\n+hi\\n*** End Patch\"}}]}\nRCC_TOOL_CALLS_JSON";
+        let variants = collect_harvest_text_variants(text);
+        assert!(!variants.is_empty());
+        assert!(variants
+            .iter()
+            .any(|item| item.contains("\"tool_calls\"") && !item.contains("<<RCC_TOOL_CALLS_JSON")));
+    }
+
+    #[test]
+    fn test_harvest_text_tool_calls_recovers_bullet_prefixed_apply_patch_json_wrapper() {
+        let mut payload = json!({
+            "__rcc_tool_governance": {
+                "providerFamily": "qwen",
+                "requestedToolNames": ["apply_patch"]
+            },
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "apply_patch"
+                }
+            }],
+            "choices": [{
+                "message": {
+                    "tool_calls": [],
+                    "content": "• {\"tool_calls\":[{\"name\":\"apply_patch\",\"input\":{\"patch\":\"*** Begin Patch\\n*** Add File: demo.txt\\n+hi\\n*** End Patch\"}}]}"
+                },
+                "finish_reason": "stop"
+            }]
+        });
+        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 1);
+        assert_eq!(
+            payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            "apply_patch"
+        );
+        let args: Value = serde_json::from_str(
+            payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+                .as_str()
+                .unwrap_or("{}"),
+        )
+        .unwrap_or(Value::Null);
+        assert!(args["patch"]
+            .as_str()
+            .unwrap_or("")
+            .contains("*** Begin Patch"));
+        assert_eq!(payload["choices"][0]["finish_reason"], "tool_calls");
     }
 
     #[test]
@@ -5603,10 +7305,175 @@ Arguments:
     }
 
     #[test]
+    fn test_govern_response_keeps_wrapper_only_content_when_no_tool_calls_recovered() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "__rcc_tool_governance": {
+                    "requestedToolNames": ["exec_command"]
+                },
+                "choices": [{
+                    "message": {
+                        "tool_calls": [],
+                        "content": r#"<function_calls>{"tool_calls":[{"name":"mailbox.status","input":{"target":"finger-system-agent"}}]}</function_calls>"#
+                    },
+                    "finish_reason": "stop"
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            request_id: "req_preserve_wrapper_only_when_unharvested".to_string(),
+        };
+
+        let result = govern_response(input).unwrap();
+        assert_eq!(result.summary.tool_calls_normalized, 0);
+        assert_eq!(
+            result.governed_payload["choices"][0]["finish_reason"],
+            "stop"
+        );
+        let content = result.governed_payload["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("");
+        assert!(content.contains("\"mailbox.status\""));
+        assert!(content.contains("<function_calls>"));
+    }
+
+    #[test]
     fn test_strip_tool_call_marker_payload_preserves_trailing_prose_for_closed_function_calls() {
         let raw = "<function_calls>```bash\npwd\n```</function_calls>\n保留正文";
         assert_eq!(strip_tool_call_marker_payload(raw), "保留正文");
     }
+
+    #[test]
+    fn test_strip_text_tool_wrapper_noise_strips_search_query_tags_but_preserves_text() {
+        let raw = "<search>\n<query>context rebuild rebuild_context</query>\n</search>";
+        assert_eq!(
+            strip_text_tool_wrapper_noise(raw),
+            "context rebuild rebuild_context"
+        );
+    }
+
+    #[test]
+    fn test_strip_xml_tags_preserve_text_keeps_line_breaks() {
+        let raw = "<review>\n第一行\n\n第二行 <search>query</search>\n</review>";
+        assert_eq!(
+            strip_xml_tags_preserve_text(raw),
+            "第一行\n\n第二行 query"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_textual_marker_field_preserves_inner_text_when_wrapper_only_content_would_empty() {
+        let mut message = serde_json::json!({
+            "content": "<function_calls>保留内部文本</function_calls>"
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+        assert!(sanitize_textual_marker_field_in_message(&mut message, "content"));
+        assert_eq!(message["content"], "保留内部文本");
+    }
+
+    #[test]
+    fn test_sanitize_textual_marker_field_preserves_trailing_text_when_rcc_wrapper_starts_first() {
+        let mut message = serde_json::json!({
+            "content": "<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}\nRCC_TOOL_CALLS_JSON\n保留正文"
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+        assert!(sanitize_textual_marker_field_in_message(&mut message, "content"));
+        assert_eq!(message["content"], "保留正文");
+    }
+
+    #[test]
+    fn test_sanitize_textual_marker_field_preserves_malformed_rcc_wrapper_without_name() {
+        let raw = "<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"cmd\":\"pwd\"}}]}\nRCC_TOOL_CALLS_JSON";
+        let mut message = serde_json::json!({
+            "content": raw
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+        assert!(!sanitize_textual_marker_field_in_message(&mut message, "content"));
+        assert_eq!(message["content"], raw);
+    }
+
+    #[test]
+    fn test_sanitize_textual_marker_field_preserves_malformed_rcc_wrapper_multiline_whitespace() {
+        let raw = "<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"cmd\":\"bash -lc 'cat << \\\"EOF\\\"\\n  line1\\n    line2\\nEOF\\n'\"}}]}\nRCC_TOOL_CALLS_JSON";
+        let mut message = serde_json::json!({
+            "content": raw
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+        assert!(!sanitize_textual_marker_field_in_message(&mut message, "content"));
+        assert_eq!(message["content"], raw);
+    }
+
+    #[test]
+    fn test_govern_response_keeps_malformed_rcc_wrapper_when_name_missing() {
+        let raw = "<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"cmd\":\"pwd\"}}]}\nRCC_TOOL_CALLS_JSON";
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "__rcc_tool_governance": {
+                    "requestedToolNames": ["exec_command"]
+                },
+                "choices": [{
+                    "message": {
+                        "tool_calls": [],
+                        "content": raw
+                    },
+                    "finish_reason": "stop"
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            request_id: "req_preserve_malformed_rcc_missing_name".to_string(),
+        };
+
+        let result = govern_response(input).unwrap();
+        assert_eq!(result.summary.tool_calls_normalized, 0);
+        assert_eq!(
+            result.governed_payload["choices"][0]["finish_reason"],
+            "stop"
+        );
+        assert_eq!(
+            result.governed_payload["choices"][0]["message"]["content"],
+            raw
+        );
+    }
+
+    #[test]
+    fn test_govern_response_keeps_malformed_rcc_wrapper_multiline_whitespace_when_name_missing() {
+        let raw = "<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"cmd\":\"bash -lc 'cat << \\\"EOF\\\"\\n  line1\\n    line2\\nEOF\\n'\"}}]}\nRCC_TOOL_CALLS_JSON";
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "__rcc_tool_governance": {
+                    "providerFamily": "deepseek-web",
+                    "requestedToolNames": ["exec_command"]
+                },
+                "choices": [{
+                    "message": {
+                        "tool_calls": [],
+                        "content": raw
+                    },
+                    "finish_reason": "stop"
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            request_id: "req_preserve_malformed_rcc_multiline_whitespace".to_string(),
+        };
+
+        let result = govern_response(input).unwrap();
+        assert_eq!(result.summary.tool_calls_normalized, 0);
+        assert_eq!(
+            result.governed_payload["choices"][0]["message"]["content"],
+            raw
+        );
+    }
+
 
     #[test]
     fn test_rcc_heredoc_tail_is_stripped_even_when_nonstandard_tool_call_is_recovered() {

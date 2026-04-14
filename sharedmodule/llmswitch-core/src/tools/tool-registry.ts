@@ -96,6 +96,7 @@ export interface ToolValidationOptions {
     enabled?: boolean;
     policyFile?: string;
   };
+  schemaMode?: 'compat' | 'canonical';
 }
 
 export function getAllowedToolNames(): string[] {
@@ -143,7 +144,10 @@ export function validateToolCall(
       const validation = validateExecCommandArgs(
         argsString,
         rawArgsAny,
-        guard && guard.enabled ? { policyFile: guard.policyFile } : undefined
+        {
+          ...(guard && guard.enabled ? { policyFile: guard.policyFile } : {}),
+          ...(options?.schemaMode ? { schemaMode: options.schemaMode } : {})
+        }
       );
       if (!validation.ok) {
         const reason = validation.reason || 'unknown';

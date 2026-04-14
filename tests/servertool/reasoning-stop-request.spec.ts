@@ -80,6 +80,11 @@ describe('reasoning stop request tooling', () => {
     expect(request.tools?.some((tool) => tool.function.name === 'reasoning.stop')).toBe(true);
     const captured = (adapterContext as any).capturedChatRequest;
     expect(captured?.tools?.some((tool: any) => tool?.function?.name === 'reasoning.stop')).toBe(true);
+    const reasoningStopTool = request.tools?.find((tool) => tool.function.name === 'reasoning.stop');
+    const properties = reasoningStopTool?.function.parameters?.properties as Record<string, unknown> | undefined;
+    expect(properties?.user_input_required).toBeDefined();
+    expect(properties?.user_question).toBeDefined();
+    expect(properties?.learning).toBeDefined();
   });
 
   test('parses directive, strips marker, persists mode, and injects reasoning.stop', () => {
@@ -105,5 +110,22 @@ describe('reasoning stop request tooling', () => {
 
     expect(mode).toBe('off');
     expect(request.tools?.some((tool) => tool.function.name === 'reasoning.stop')).toBe(false);
+  });
+
+  test('backfills adapterContext sessionId from request metadata before syncing stopless mode', () => {
+    const request = buildRequest('开启 stopless <**stopless:on**>');
+    request.metadata = {
+      ...request.metadata,
+      sessionId: 'reasoning-stop-request-metadata-session'
+    };
+    const adapterContext = {} as unknown as AdapterContext;
+
+    const mode = prepareReasoningStopRequestTooling({ request, adapterContext });
+
+    expect(mode).toBe('on');
+    expect((adapterContext as any).sessionId).toBe('reasoning-stop-request-metadata-session');
+    expect(
+      loadRoutingInstructionStateSync('session:reasoning-stop-request-metadata-session')?.reasoningStopMode
+    ).toBe('on');
   });
 });

@@ -2,6 +2,15 @@
 
 ## Skills 与调试工作流
 
+- 2026-04-13: client canonical 响应链又补一条闭环：**resp_process/filter 层不能把 `exec_command` 的 `command` 偷修成 `cmd`，host converter 也不能把 `CLIENT_TOOL_ARGS_INVALID` 静默吞回原始 payload**。可复用规则：响应侧 `exec_command` 只做字符串化/保形，不做 alias-repair；一旦桥接后校验命中 `missing_cmd` 这类客户端契约错误，必须直接上浮明确错误，不允许 fallback 成“看起来成功”的 chat/response body。
+
+- 2026-04-13: 文本工具 harvest 本轮验证出一个高收益稳定策略：**wrapper/container 先行，正文永不猜工具**。可复用规则：先在 Rust chat-process 响应侧统一 mask 掉 `RCC_TOOL_CALLS(_JSON)` heredoc、XML 顶层壳、bullet/fence 等 wrapper，再只解析容器内的顶层 tool shell；`bash -lc`、patch body、解释性 prose 一律当字符串/正文处理，不允许从正文反推 tool。请求侧则反过来配合：要求模型把文本工具调用放在**输出末尾**、放进**单独容器**、参数保持**原始肌肉记忆形状**（shell 单字符串、patch 原文），这样半截时也容易“补边界 / 整段切掉 / 明确 retryable”，不污染上下文。这个策略对 qwenchat 已体现出明显成功率提升，且适合作为 deepseek / qwen 共享的**响应侧收割框架**；差异只保留在 provider 级 guidance 强弱，不要把 Qwen 的强覆盖整包灌给 DeepSeek。
+- 2026-04-13: 文本 harvest 还要守住一个负样本边界：**空容器不算成功**。`{"tool_calls":[]}`、只有 heredoc opener/closer、或容器内没有有效 tool name / arguments 时，不能把它视为“已经完成一轮工具调用”；应回落为正文、invalid 或 retryable。否则最容易造成 finish_reason 假 stop、空回复、以及“看起来格式对了但实际上啥也没收割到”的假成功。
+- 2026-04-13: qwenchat 5520 真样本再补一条：**隐藏原生工具要双层 fail-fast，且 helper 不能依赖 allowlist 非空**。真实 SSE `mode=sse/raw` 里会直接吐 `web_search` / `web_extractor` 之类内建工具；如果 helper 只在 declaredToolNames 非空时才拦截，就会把原始流交给 bridge，进一步掉成 `MALFORMED_RESPONSE + finish_reason=unknown`。修法：helper 与 `provider-response-converter` 两边都把已知隐藏原生工具直接抛成 `QWENCHAT_HIDDEN_NATIVE_TOOL`。
+- 2026-04-13: 主链取舍确认：**真实工具调用是主链，文本 dry-run/harvest 是兼容补救链**。系统目标不是“彻底禁止模型原生工具”，而是 RouteCodex 自己不依赖它，并在模型偷跑到原生工具、半截 dry-run 容器、或 malformed wrapper 时给显式错误/恢复，不要吞成成功响应。
+
+Tags: text-harvest, wrapper-first, container-first, mask-wrapper, no-body-guessing, shell-transparent, patch-transparent, retryable-malformed, qwenchat, deepseek, shared-resp-harvest, provider-specific-guidance
+
 - 2026-04-12: text-harvest 收口规则补充：文本工具兼容必须 **只解析顶层工具壳，不解析 shell 正文**。可复用规则：`exec_command / apply_patch / execute_command` 只按外层 `name/tag/wrapper/field alias` 做恢复，`bash -lc '...'` 内的 body 一律字符串透传，不拆命令、不修空格、不猜 shell 子命令；只要最终 payload 存在非空 `tool_calls`，`finish_reason` 就必须强制为 `tool_calls`，不得再被 metadata/status 覆盖成 `stop`。另外 qwenchat 与 deepseek-web 的 text guidance / harvest 必须共用同一套 chat-process 框架，差异只允许停留在 provider 通信层与路由配置。验证：Rust 回归 `responses_response_utils_resolve_finish_reason_prefers_tool_calls_then_metadata_then_status`、`response_codec_harvests_stop_heredoc_tool_calls_into_requires_action` 通过；5520/5555 在线样本恢复为 `finish_reason=tool_calls`。
 
 Tags: text-harvest, tool-wrapper-only, shell-body-transparent, finish-reason-tool-calls, qwenchat, deepseek-web, shared-framework, chat-process, rust-regression, online-verification
@@ -1309,3 +1318,11 @@ Tags: opencode-zen, auth-header-alignment, x-opencode-headers, bearer-apikey, no
 - 2026-04-10: qwen 多账号 provider 的配置真源是**单一** `~/.rcc/provider/qwen/config.v2.json` 的 `provider.auth.entries[]`；把账号拆成多份 `config.v2.<alias>.json` 不会替代主配置。`tokenFile: "default"` 只会钉住单 token，而 `auth.entries[]` 才会在 bootstrap 阶段展开成 `qwen.<alias>.<model>` 多 runtime（本次验证为 6 个：`1 / 2-135 / 3-geetasamoda / 4-jasonqueque / 5-antonsoltan / 6-xfour8605`）。验证链：bootstrap 产物出现 6 个 `qwen.*.qwen3.6-plus` runtime，5555 SIGUSR2 热重载成功，`qwen.qwen3.6-plus` 在线请求返回 200，日志命中多个 qwen alias。
 
 Tags: qwen, multi-token, auth.entries, provider-config-v2, bootstrap-runtime, hot-reload
+
+- 2026-04-12: 文本工具收割里，shell 兼容只能修**外层 wrapper 形状**，不能改 shell body 语义。本轮有效做法：仅把 `bash-lc` 归一成 `bash -lc`，并在 `bash -lc '...` 这类**简单缺失闭合单引号**、且 body 内无额外单引号时自动补尾引号；`cmd` 正文内容、空格、参数、内部 quoting 一律透传，不做“聪明解析”。验证链：`router-hotpath-napi` 定向单测通过，5520 live `/v1/responses` 已返回可执行的 `exec_command {"cmd":"bash -lc 'pwd'"}`，并确认最近 DeepSeek provider 样本里的 heredoc tool call 可被正常收割。
+
+Tags: text-harvest, exec-command, shell-wrapper, bash-lc, compat, no-semantic-trim
+
+- 2026-04-12: RouteCodex 系统内**所有时间相关口径都按本地时间**，不要默认按 UTC 推断；包括 reset 编号、quota/reset 窗口、以及同类的“今天/本轮/重置点”计算与展示。排查/实现这类逻辑时，先确认本地时区语义，再看日志与编号。
+
+Tags: local-time, timezone, quota, reset, numbering, project-rule

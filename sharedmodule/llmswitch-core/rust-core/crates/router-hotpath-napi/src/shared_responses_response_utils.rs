@@ -67,7 +67,12 @@ fn normalize_tool_call(entry: &Map<String, Value>, fallback_prefix: &str) -> Opt
         .or_else(|| entry.get("arguments"))
         .cloned()
         .unwrap_or_else(|| Value::Object(Map::new()));
-    let args_str = stringify_args(&args_value);
+    let args_str =
+        crate::resp_process_stage1_tool_governance::normalize_tool_args_preserving_raw_shape(
+            normalized_name.as_str(),
+            Some(&args_value),
+        )
+        .unwrap_or_else(|| stringify_args(&args_value));
 
     let call_id_raw = select_call_id(entry);
     let fallback = format!("{}_native", fallback_prefix);
@@ -500,7 +505,40 @@ mod tests {
     }
 
     #[test]
-    fn responses_response_utils_resolve_finish_reason_prefers_tool_calls_then_metadata_then_status() {
+    fn responses_response_utils_normalizes_update_plan_native_arguments() {
+        let response = serde_json::json!({
+            "required_action": {
+                "submit_tool_outputs": {
+                    "tool_calls": [
+                        {
+                            "call_id": "call_required",
+                            "function": {
+                                "name": "update_plan",
+                                "arguments": { "steps": ["审计", "修复"] }
+                            }
+                        }
+                    ]
+                }
+            }
+        });
+        let output = collect_tool_calls_from_responses_impl(&response);
+        assert_eq!(output.len(), 1);
+        let args = output[0]
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|row| row.get("arguments"))
+            .and_then(Value::as_str)
+            .unwrap();
+        let args_json: Value = serde_json::from_str(args).unwrap();
+        assert_eq!(args_json["plan"][0]["step"], "审计");
+        assert_eq!(args_json["plan"][0]["status"], "pending");
+        assert_eq!(args_json["plan"][1]["step"], "修复");
+        assert_eq!(args_json["plan"][1]["status"], "pending");
+    }
+
+    #[test]
+    fn responses_response_utils_resolve_finish_reason_prefers_tool_calls_then_metadata_then_status()
+    {
         let response = serde_json::json!({
             "metadata": { "finish_reason": "custom_stop" },
             "status": "requires_action"

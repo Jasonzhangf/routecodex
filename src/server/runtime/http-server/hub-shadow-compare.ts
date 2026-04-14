@@ -194,8 +194,10 @@ export async function recordHubShadowCompareDiff(options: {
       kind: 'route-drift',
       payload: record
     });
-    // eslint-disable-next-line no-console
-    console.error(`[unified-hub-shadow-runtime] wrote routing drift errorsample: ${file}`);
+    if (file) {
+      // eslint-disable-next-line no-console
+      console.error(`[unified-hub-shadow-runtime] wrote routing drift errorsample: ${file}`);
+    }
     return;
   }
   if (!diffs.length) {return;}
@@ -236,6 +238,8 @@ export async function recordHubShadowCompareDiff(options: {
     kind: 'diff',
     payload: record
   });
-  // eslint-disable-next-line no-console
-  console.error(`[unified-hub-shadow-runtime] wrote errorsample: ${file}`);
+  if (file) {
+    // eslint-disable-next-line no-console
+    console.error(`[unified-hub-shadow-runtime] wrote errorsample: ${file}`);
+  }
 }

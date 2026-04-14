@@ -154,6 +154,7 @@ mod iflow;
 mod lmstudio;
 mod profile;
 mod qwen;
+mod qwenchat;
 mod request_stage;
 mod response_stage;
 mod responses;

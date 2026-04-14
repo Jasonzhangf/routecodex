@@ -33,11 +33,13 @@ describe('snapshot writer error spill in release mode', () => {
     const previousSnapshotFlag = runtimeFlags.snapshotsEnabled;
     const previousSnapshotDir = process.env.ROUTECODEX_SNAPSHOT_DIR;
     const previousErrorsamplesDir = process.env.ROUTECODEX_ERRORSAMPLES_DIR;
+    const previousStages = process.env.ROUTECODEX_SNAPSHOT_STAGES;
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-snapshot-error-spill-'));
     const errorsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-errorsamples-provider-'));
 
     process.env.ROUTECODEX_SNAPSHOT_DIR = tempDir;
     process.env.ROUTECODEX_ERRORSAMPLES_DIR = errorsDir;
+    process.env.ROUTECODEX_SNAPSHOT_STAGES = 'provider-request,provider-response,provider-error';
     setRuntimeFlag('snapshotsEnabled', false);
     __resetProviderSnapshotErrorBufferForTests();
 
@@ -90,6 +92,11 @@ describe('snapshot writer error spill in release mode', () => {
         delete process.env.ROUTECODEX_ERRORSAMPLES_DIR;
       } else {
         process.env.ROUTECODEX_ERRORSAMPLES_DIR = previousErrorsamplesDir;
+      }
+      if (previousStages === undefined) {
+        delete process.env.ROUTECODEX_SNAPSHOT_STAGES;
+      } else {
+        process.env.ROUTECODEX_SNAPSHOT_STAGES = previousStages;
       }
       await fs.rm(tempDir, { recursive: true, force: true });
       await fs.rm(errorsDir, { recursive: true, force: true });

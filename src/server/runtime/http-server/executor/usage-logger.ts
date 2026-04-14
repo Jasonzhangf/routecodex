@@ -99,15 +99,15 @@ export function logUsageSummary(
   const externalLatencyMs = Number.isFinite(info.externalLatencyMs as number)
     ? Math.max(0, Number(info.externalLatencyMs))
     : 0;
-  const internalLatencyMs = Math.max(0, info.latencyMs - externalLatencyMs);
+  const sseDecodeMs = Number.isFinite(info.sseDecodeMs as number)
+    ? Math.max(0, Number(info.sseDecodeMs))
+    : 0;
+  const internalLatencyMs = Math.max(0, info.latencyMs - externalLatencyMs - sseDecodeMs);
   const trafficWaitMs = Number.isFinite(info.trafficWaitMs as number)
     ? Math.max(0, Number(info.trafficWaitMs))
     : 0;
   const clientInjectWaitMs = Number.isFinite(info.clientInjectWaitMs as number)
     ? Math.max(0, Number(info.clientInjectWaitMs))
-    : 0;
-  const sseDecodeMs = Number.isFinite(info.sseDecodeMs as number)
-    ? Math.max(0, Number(info.sseDecodeMs))
     : 0;
   const codecDecodeMs = Number.isFinite(info.codecDecodeMs as number)
     ? Math.max(0, Number(info.codecDecodeMs))

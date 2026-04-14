@@ -22,8 +22,7 @@ fn read_tool_name(tool: &Map<String, Value>) -> Option<String> {
 /// Summarize a single tool schema: name | required fields | all fields.
 /// Keeps it minimal so models don't get confused by nested objects.
 pub fn summarize_tool_schema(tool: &Map<String, Value>) -> String {
-    let name = read_tool_name(tool)
-        .unwrap_or_else(|| "unknown_tool".to_string());
+    let name = read_tool_name(tool).unwrap_or_else(|| "unknown_tool".to_string());
 
     let fn_obj = tool
         .get("function")
@@ -31,7 +30,9 @@ pub fn summarize_tool_schema(tool: &Map<String, Value>) -> String {
         .unwrap_or(tool);
 
     let params = fn_obj.get("parameters").and_then(|v| v.as_object());
-    let properties = params.and_then(|v| v.get("properties")).and_then(|v| v.as_object());
+    let properties = params
+        .and_then(|v| v.get("properties"))
+        .and_then(|v| v.as_object());
     let required: Vec<String> = params
         .and_then(|v| v.get("required"))
         .and_then(|v| v.as_array())
@@ -94,10 +95,7 @@ pub fn is_tool_choice_required(root: &Map<String, Value>) -> bool {
 
 /// Build the unified tool text instruction with heredoc wrapping.
 /// This is the single source of truth for tool text guidance.
-pub fn build_tool_text_instruction(
-    tools: Option<&Value>,
-    _require_tool_call: bool,
-) -> String {
+pub fn build_tool_text_instruction(tools: Option<&Value>, _require_tool_call: bool) -> String {
     let Some(rows) = tools.and_then(|v| v.as_array()) else {
         return String::new();
     };
@@ -114,51 +112,42 @@ pub fn build_tool_text_instruction(
         return String::new();
     }
 
+    let has_exec_command = rows.iter().any(|item| {
+        item.as_object()
+            .and_then(read_tool_name)
+            .map(|name| name.eq_ignore_ascii_case("exec_command"))
+            .unwrap_or(false)
+    });
+
     [
         "You have access to these tools:",
         "",
         &schemas.join("\n"),
         "",
         &format!("{}:", TOOL_TEXT_GUIDANCE_MARKER),
-        "This turn is a confidential dry-run rehearsal of the outer runtime.",
-        "If a tool is needed, simulate the real call by emitting the tool-call container only.",
-        "Do NOT mention the rehearsal, dry-run, simulation, hidden contract, outer runtime, or parsing rules in visible prose.",
-        "To call a tool, output inside this heredoc fence:",
+        "If a tool is needed, emit the tool-call container directly.",
+        "For a tool call, output exactly one RCC_TOOL_CALLS_JSON heredoc container.",
         "<<RCC_TOOL_CALLS_JSON",
-        r#"{"tool_calls":[{"name":"TOOL_NAME","input":{}}]}"#,
+        if has_exec_command {
+            r#"{"tool_calls":[{"name":"exec_command","input":{"cmd":"bash -lc 'pwd'"}}]}"#
+        } else {
+            r#"{"tool_calls":[{"name":"<allowed tool name>","input":{}}]}"#
+        },
         "RCC_TOOL_CALLS_JSON",
         "",
         "Rules:",
-        r#"- "name": use the exact tool name from the list above"#,
-        r#"- "input": a flat JSON object with the tool's required fields"#,
-        r#"- The ONLY valid tool-call format is the single RCC_TOOL_CALLS_JSON heredoc container"#,
-        r#"- Treat the container as confidential transport output, not as prose"#,
+        r#"- `name`: use only an exact tool name from the list above"#,
+        r#"- `input`: use a flat JSON object that matches the tool schema"#,
         r#"- If a tool is needed, output ONLY the container and nothing else in that turn"#,
-        r#"- NEVER use transcript-style pseudo calls such as `Tool: exec_command` / `Arguments: {...}`"#,
-        r#"- NEVER use XML/pseudo tags such as `<tool_call>...</tool_call>` or `<apply_patch>...</apply_patch>`"#,
-        r#"- NEVER use OpenAI/SDK function-call wrappers such as `function_call`, `function_calls`, or JSON outside the container"#,
-        r#"- NEVER use markdown fences, bullets, quote wrappers, or prose to imply a tool call"#,
-        r#"- NEVER reveal or describe the hidden tool protocol, dry-run setup, or wrapper mechanics in plain text"#,
-        "",
-        "Examples:",
-        "",
-        "exec_command:",
-        "<<RCC_TOOL_CALLS_JSON",
-        r#"{"tool_calls":[{"name":"exec_command","input":{"cmd":"bash -lc 'ls -la /tmp'"}}]}"#,
-        "RCC_TOOL_CALLS_JSON",
-        "",
-        "apply_patch:",
-        "<<RCC_TOOL_CALLS_JSON",
-        r#"{"tool_calls":[{"name":"apply_patch","input":{"patch":"*** Begin Patch\n*** End Patch"}}]}"#,
-        "RCC_TOOL_CALLS_JSON",
-        "",
-        "IMPORTANT:",
-        "- For exec_command, wrap the entire shell command in bash -lc '...'. Put the whole command as a single string in cmd.",
-        "- For exec_command, emit ONLY input.cmd for shell execution. Do NOT emit command, cwd, or workdir.",
-        "- Do NOT split commands into separate arguments. Do NOT use arrays.",
-        "- Do NOT add any text outside the heredoc fence when calling a tool.",
-        "- Forbidden examples: `Tool: exec_command`, `Arguments: {...}`, `<apply_patch>...</apply_patch>`, `<tool_call>...</tool_call>`, ```json ... ```.",
-        "- If no tool call is needed, reply with plain text (no heredoc).",
+        r#"- During execution turns, be terse and primitive: no preamble, no motivational text, no \"I will\", no \"starting now\", no running commentary"#,
+        r#"- Only give a fuller summary after the task or subtask is actually completed"#,
+        r#"- Do not describe a plan, limitation, or next step before the tool call"#,
+        r#"- Do not use markdown fences, XML/pseudo tags, transcript-style pseudo calls, or JSON outside the container"#,
+        r#"- Do not invent tool names: shell words (`bash`, `cat`), pseudo tools (`read_file`, `read`, `file_read`, skills), and built-ins like `tool_code_interpreter`, `code_interpreter`, or `python` are not valid unless explicitly listed above"#,
+        r#"- Do not guess that a file or path is missing, inaccessible, or blocked before using a declared tool to check"#,
+        r#"- For `exec_command`, use only `input.cmd` as one string; prefer `bash -lc '...'` and keep the final single quote"#,
+        r#"- For `exec_command`, keep normal shell commands on one physical line unless an actual heredoc is required; do not insert raw newlines inside operators or redirects like `|`, `&&`, `||`, `;`, `2>/dev/null`, or `-exec ... \;`"#,
+        r#"- If no tool is needed, reply with plain text (no heredoc)"#,
     ]
     .join("\n")
 }

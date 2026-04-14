@@ -191,6 +191,11 @@ describe('tool governor exec_command guard', () => {
     const toolCalls = choice?.message?.tool_calls || [];
     expect(toolCalls.length).toBe(0);
     expect(choice?.finish_reason).toBe('stop');
+    expect(choice?.message?.content).toBe([
+      '<<RCC_TOOL_CALLS_JSON',
+      '{"tool_calls":[{"input":{"cmd":"pwd"}}]}',
+      'RCC_TOOL_CALLS_JSON'
+    ].join('\n'));
   });
 
   it('harvests explicit execute_command alias without touching shell body', () => {

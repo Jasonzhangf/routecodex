@@ -1,5 +1,4 @@
 import { readRuntimeMetadata } from '../runtime-metadata.js';
-import { validateToolCall } from '../../tools/tool-registry.js';
 import type { ToolValidationOptions } from '../../tools/tool-registry.js';
 import {
   parseLenientJsonishWithNative as parseLenient,
@@ -245,56 +244,10 @@ export function repairCommandNameAsExecToolCall(
   fn: Record<string, unknown> | undefined,
   validationOptions?: ToolValidationOptions
 ): boolean {
-  try {
-    if (!fn) return false;
-    const rawName = typeof fn.name === 'string' ? String(fn.name).trim() : '';
-    if (!rawName) return false;
-    const lowered = rawName.toLowerCase();
-    if (lowered === 'exec_command' || lowered === 'shell_command' || lowered === 'shell' || lowered === 'bash') {
-      return false;
-    }
-    if (!EXEC_COMMAND_NAME_AS_COMMAND_PATTERN.test(rawName)) {
-      return false;
-    }
-
-    const repaired = repairArgumentsToString((fn as any).arguments);
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(repaired);
-    } catch {
-      parsed = parseLenient(repaired);
-    }
-    const argsObj =
-      parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? ({ ...(parsed as Record<string, unknown>) } as Record<string, unknown>)
-        : ({} as Record<string, unknown>);
-
-    const existingCmd =
-      typeof argsObj.cmd === 'string' && String(argsObj.cmd).trim().length
-        ? String(argsObj.cmd).trim()
-        : typeof argsObj.command === 'string' && String(argsObj.command).trim().length
-          ? String(argsObj.command).trim()
-          : '';
-    const cmd = existingCmd || rawName;
-    argsObj.cmd = cmd;
-    argsObj.command = cmd;
-    if (typeof argsObj.cwd === 'string' && (!argsObj.workdir || typeof argsObj.workdir !== 'string')) {
-      argsObj.workdir = String(argsObj.cwd);
-    }
-
-    const validation = validateToolCall('exec_command', JSON.stringify(argsObj), validationOptions);
-    if (validation.ok && typeof validation.normalizedArgs === 'string') {
-      (fn as any).arguments = validation.normalizedArgs;
-    } else {
-      const fallback: Record<string, unknown> = { cmd, command: cmd };
-      if (typeof argsObj.workdir === 'string' && String(argsObj.workdir).trim().length > 0) {
-        fallback.workdir = String(argsObj.workdir).trim();
-      }
-      (fn as any).arguments = JSON.stringify(fallback);
-    }
-    (fn as any).name = 'exec_command';
-    return true;
-  } catch {
-    return false;
-  }
+  void fn;
+  void validationOptions;
+  // Client-canonical response rule:
+  // do not reinterpret a free-form command-looking function name as exec_command,
+  // and do not synthesize cmd/command during response repair.
+  return false;
 }

@@ -208,6 +208,8 @@ describe('log rollup', () => {
       model: 'glm-5',
       sessionId: 'sid-rt-1',
       projectPath: '/tmp/project-rt',
+      stoplessMode: 'on',
+      stoplessArmed: false,
       activeInFlight: 2,
       maxInFlight: 6
     });
@@ -218,6 +220,7 @@ describe('log rollup', () => {
     expect(lines.some((line) => line.includes('tools/tools-primary -> ali-coding-plan.key1.glm-5.glm-5'))).toBe(true);
     expect(lines.some((line) => line.includes('[concurrency:2/6]'))).toBe(true);
     expect(lines.some((line) => line.includes('session.virtual_hits=1'))).toBe(true);
+    expect(lines.some((line) => line.includes('stopless=on armed=no'))).toBe(true);
     expect(lines.some((line) => line.includes('[rollup][1m]'))).toBe(false);
     expect(lines.some((line) => line.includes('[virtual-router-hit][1m]'))).toBe(false);
     expect(lines.some((line) => line.includes('[usage][1m]'))).toBe(false);

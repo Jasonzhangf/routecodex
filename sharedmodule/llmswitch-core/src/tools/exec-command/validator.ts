@@ -26,6 +26,7 @@ export type ExecCommandValidationResult = {
 
 export type ExecCommandValidationOptions = {
   policyFile?: string;
+  schemaMode?: 'compat' | 'canonical';
 };
 
 type PolicyViolation = {
@@ -294,7 +295,9 @@ export function validateExecCommandArgs(
           ? { cmd: rawTrimmed }
           : parsed);
 
-  const normalized = normalizeExecCommandArgs(parsedRecord);
+  const normalized = normalizeExecCommandArgs(parsedRecord, {
+    schemaMode: options?.schemaMode === 'canonical' ? 'canonical' : 'compat'
+  });
   if (normalized.ok === false) {
     return { ok: false, reason: normalized.reason };
   }

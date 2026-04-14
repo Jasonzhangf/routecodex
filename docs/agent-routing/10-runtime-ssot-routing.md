@@ -14,6 +14,9 @@
 2. Host 仅做编排与桥接，不重写 llmswitch 语义。
 3. Provider 仅做 transport/auth/retry/compat，不解析业务语义。
 4. 禁止 fallback 兜底和“跨层补一版逻辑”。
+5. 文本工具 harvest 必须容器优先：先识别并 mask wrapper/fence，再解析内部顶层工具壳；正文 prose/shell/patch body 只保留或透传，不得参与猜测式恢复。
+6. Provider-specific 提示词只允许调整“上游怎么吐”，不能在 Provider 层重写 harvest 语义；真正的收割边界仍在 chat-process Rust 真源。
+7. DeepSeek tools 的当前主路径真源仍是**文本 fence / 文本工具壳**；不要把“要求 upstream 直接输出原生标准 function call”当成主策略。允许客户端侧桥接成标准 `function_call`，但 provider upstream 仍按文本协议治理与验收。
 
 ## 三层职责（Block / App / UI）
 - Block：基础能力唯一真源。

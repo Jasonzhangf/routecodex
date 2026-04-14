@@ -242,10 +242,7 @@ fn normalize_apply_patch_header_line(line: &str) -> String {
             if new_file_hint {
                 return format!("*** Add File: {}", normalized_path);
             }
-            return format!(
-                "*** Update File: {}",
-                normalized_path
-            );
+            return format!("*** Update File: {}", normalized_path);
         }
     }
     let delete_re = Regex::new(r"^\*\*\* Delete File:\s*(.+?)(?:\s+\*\*\*)?\s*$").unwrap();
@@ -722,6 +719,26 @@ fn extract_patch_text_from_argument(raw: &str) -> Option<String> {
     Some(trimmed.to_string())
 }
 
+fn build_add_file_patch_from_path_and_content(path: &str, content: &str) -> Option<String> {
+    let normalized_path = normalize_apply_patch_header_path(path);
+    if normalized_path.trim().is_empty() {
+        return None;
+    }
+    let normalized_content = decode_escaped_newlines_if_needed(content);
+    let mut lines: Vec<String> = normalized_content
+        .split('\n')
+        .map(|line| format!("+{}", line))
+        .collect();
+    if normalized_content.is_empty() {
+        lines.push("+".to_string());
+    }
+    Some(format!(
+        "*** Begin Patch\n*** Add File: {}\n{}\n*** End Patch",
+        normalized_path,
+        lines.join("\n")
+    ))
+}
+
 fn extract_patch_text_from_value(value: &Value) -> Option<String> {
     fn extract_patch_text_from_object(obj: &Map<String, Value>) -> Option<String> {
         read_trimmed_string(obj.get("patch"))
@@ -740,6 +757,15 @@ fn extract_patch_text_from_value(value: &Value) -> Option<String> {
             })
             .or_else(|| obj.get("toolInput").and_then(extract_patch_text_from_value))
             .or_else(|| obj.get("arguments").and_then(extract_patch_text_from_value))
+            .or_else(|| {
+                let path = read_trimmed_string(obj.get("path").or_else(|| obj.get("file")))?;
+                let content = read_trimmed_string(
+                    obj.get("content")
+                        .or_else(|| obj.get("contents"))
+                        .or_else(|| obj.get("body")),
+                )?;
+                build_add_file_patch_from_path_and_content(&path, &content)
+            })
     }
 
     match value {
@@ -1206,6 +1232,38 @@ mod tests {
     }
 
     #[test]
+    fn fixes_apply_patch_path_content_shape_into_add_file_patch() {
+        let payload = json!({
+          "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+              "type": "function",
+              "function": {
+                "name": "apply_patch",
+                "arguments": {
+                  "path": "hello.txt",
+                  "content": "hello"
+                }
+              }
+            }]
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        let args = output["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments string");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert!(patch.contains("*** Add File: hello.txt"));
+        assert!(patch.contains("+hello"));
+        assert_eq!(
+            output["messages"][0]["tool_calls"][0]["_fixed_apply_patch"],
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
     fn drops_empty_update_file_section_when_no_hunk_body_present() {
         let payload = json!({
           "messages": [{
@@ -1356,6 +1414,7 @@ mod tests {
         let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
         let patch = parsed["patch"].as_str().expect("patch");
         assert!(patch.contains("*** Add File: tests/unit/runtime/track-metadata.test.ts"));
-        assert!(!patch.contains("*** Update File: File: tests/unit/runtime/track-metadata.test.ts is new"));
+        assert!(!patch
+            .contains("*** Update File: File: tests/unit/runtime/track-metadata.test.ts is new"));
     }
 }

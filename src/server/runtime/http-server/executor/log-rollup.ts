@@ -10,6 +10,8 @@ type VirtualRouterHitRecord = {
   sessionId?: string;
   projectPath?: string;
   reason?: string;
+  stoplessMode?: 'on' | 'off' | 'endless';
+  stoplessArmed?: boolean;
   activeInFlight?: number;
   maxInFlight?: number;
 };
@@ -257,6 +259,26 @@ function formatPerSecond(value: number, seconds: number): string {
   return `${(value / seconds).toFixed(2)}/s`;
 }
 
+function computeDecodeResidualMs(sseDecodeMs: number, codecDecodeMs: number): number {
+  return Math.max(0, codecDecodeMs - sseDecodeMs);
+}
+
+function computeCoreInternalMs(
+  internalLatencyMs: number,
+  trafficWaitMs: number,
+  clientInjectWaitMs: number,
+  sseDecodeMs: number,
+  codecDecodeMs: number
+): number {
+  return Math.max(
+    0,
+    internalLatencyMs
+      - trafficWaitMs
+      - clientInjectWaitMs
+      - computeDecodeResidualMs(sseDecodeMs, codecDecodeMs)
+  );
+}
+
 function colorize(text: string, color: string): string {
   return `${color}${text}${ANSI_RESET}`;
 }
@@ -343,6 +365,8 @@ function emitRealtimeVirtualRouterHitLog(args: {
   providerKey: string;
   model: string;
   reason?: string;
+  stoplessMode?: 'on' | 'off' | 'endless';
+  stoplessArmed?: boolean;
   activeInFlight: number;
   maxInFlight: number;
   sessionVirtualHits: number;
@@ -355,6 +379,9 @@ function emitRealtimeVirtualRouterHitLog(args: {
   const provider = formatProvider(args.providerKey, args.model);
   const active = Math.max(0, Math.floor(args.activeInFlight));
   const max = Math.max(0, Math.floor(args.maxInFlight));
+  const stoplessSuffix = args.stoplessMode
+    ? ` stopless=${args.stoplessMode} armed=${args.stoplessArmed === true ? 'yes' : 'no'}`
+    : '';
   console.log(
     colorize(
       `[virtual-router-hit][rt] session=${sessionLabel} project=${project} session_source=${projectResolution.source}`,
@@ -363,7 +390,7 @@ function emitRealtimeVirtualRouterHitLog(args: {
   );
   console.log(
     colorize(
-      `  ${routePool} -> ${provider} [concurrency:${active}/${max}] session.virtual_hits=${Math.max(0, Math.floor(args.sessionVirtualHits))}${args.reason ? ` reason=${args.reason}` : ''}`,
+      `  ${routePool} -> ${provider} [concurrency:${active}/${max}] session.virtual_hits=${Math.max(0, Math.floor(args.sessionVirtualHits))}${args.reason ? ` reason=${args.reason}` : ''}${stoplessSuffix}`,
       sessionColor
     )
   );
@@ -472,6 +499,8 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
         providerKey,
         model,
         reason: normalizeLabel(event.reason, ''),
+        stoplessMode: event.stoplessMode,
+        stoplessArmed: event.stoplessArmed,
         activeInFlight: Math.max(0, Math.floor(event.activeInFlight ?? 0)),
         maxInFlight: Math.max(0, Math.floor(event.maxInFlight ?? 0)),
         sessionVirtualHits: sessionExisting.virtualHits
@@ -513,6 +542,8 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
       providerKey,
       model,
       reason: normalizeLabel(event.reason, ''),
+      stoplessMode: event.stoplessMode,
+      stoplessArmed: event.stoplessArmed,
       activeInFlight: Math.max(0, Math.floor(event.activeInFlight ?? 0)),
       maxInFlight: Math.max(0, Math.floor(event.maxInFlight ?? 0)),
       sessionVirtualHits: 1
@@ -534,18 +565,18 @@ export function recordUsageRollup(event: UsageRollupRecord): void {
     return;
   }
   const externalLatencyMs = Math.max(0, Number.isFinite(event.externalLatencyMs as number) ? Number(event.externalLatencyMs) : 0);
+  const sseDecodeMs = Math.max(0, Number.isFinite(event.sseDecodeMs as number) ? Number(event.sseDecodeMs) : 0);
   const internalLatencyMs = Math.max(
     0,
     Number.isFinite(event.internalLatencyMs as number)
       ? Number(event.internalLatencyMs)
-      : Math.max(0, event.latencyMs - externalLatencyMs)
+      : Math.max(0, event.latencyMs - externalLatencyMs - sseDecodeMs)
   );
   const trafficWaitMs = Math.max(0, Number.isFinite(event.trafficWaitMs as number) ? Number(event.trafficWaitMs) : 0);
   const clientInjectWaitMs = Math.max(
     0,
     Number.isFinite(event.clientInjectWaitMs as number) ? Number(event.clientInjectWaitMs) : 0
   );
-  const sseDecodeMs = Math.max(0, Number.isFinite(event.sseDecodeMs as number) ? Number(event.sseDecodeMs) : 0);
   const codecDecodeMs = Math.max(
     0,
     Number.isFinite(event.codecDecodeMs as number) ? Number(event.codecDecodeMs) : 0
@@ -793,9 +824,12 @@ export function flushLogRollup(trigger: 'interval' | 'beforeExit' | 'exit' | 'ma
     const avgSseDecodeMs = row.calls > 0 ? row.totalSseDecodeMs / row.calls : 0;
     const avgCodecDecodeMs = row.calls > 0 ? row.totalCodecDecodeMs / row.calls : 0;
     const avgDecodeEffectiveMs = Math.max(avgSseDecodeMs, avgCodecDecodeMs);
-    const avgCoreInternalMs = Math.max(
-      0,
-      avgInternalMs - avgTrafficWaitMs - avgInjectWaitMs - avgDecodeEffectiveMs
+    const avgCoreInternalMs = computeCoreInternalMs(
+      avgInternalMs,
+      avgTrafficWaitMs,
+      avgInjectWaitMs,
+      avgSseDecodeMs,
+      avgCodecDecodeMs
     );
     const avgAttempts = row.calls > 0 ? row.totalProviderAttemptCount / row.calls : 1;
     const avgRetries = row.calls > 0 ? row.totalRetryCount / row.calls : 0;
@@ -852,9 +886,12 @@ export function flushLogRollup(trigger: 'interval' | 'beforeExit' | 'exit' | 'ma
     const avgSseDecode = otherCalls > 0 ? otherSseDecode / otherCalls : 0;
     const avgCodecDecode = otherCalls > 0 ? otherCodecDecode / otherCalls : 0;
     const avgDecodeEffective = Math.max(avgSseDecode, avgCodecDecode);
-    const avgCoreInternal = Math.max(
-      0,
-      avgInternal - avgTrafficWait - avgInjectWait - avgDecodeEffective
+    const avgCoreInternal = computeCoreInternalMs(
+      avgInternal,
+      avgTrafficWait,
+      avgInjectWait,
+      avgSseDecode,
+      avgCodecDecode
     );
     const avgAttempts = otherCalls > 0 ? otherAttempts / otherCalls : 1;
     const avgRetries = otherCalls > 0 ? otherRetries / otherCalls : 0;
@@ -907,9 +944,12 @@ export function flushLogRollup(trigger: 'interval' | 'beforeExit' | 'exit' | 'ma
     const avgSseDecode = row.usageCalls > 0 ? row.totalSseDecodeMs / row.usageCalls : 0;
     const avgCodecDecode = row.usageCalls > 0 ? row.totalCodecDecodeMs / row.usageCalls : 0;
     const avgDecodeEffective = Math.max(avgSseDecode, avgCodecDecode);
-    const avgCoreInternal = Math.max(
-      0,
-      avgInternal - avgTrafficWait - avgInjectWait - avgDecodeEffective
+    const avgCoreInternal = computeCoreInternalMs(
+      avgInternal,
+      avgTrafficWait,
+      avgInjectWait,
+      avgSseDecode,
+      avgCodecDecode
     );
     const avgAttempts = row.usageCalls > 0 ? row.totalProviderAttemptCount / row.usageCalls : 1;
     const avgRetries = row.usageCalls > 0 ? row.totalRetryCount / row.usageCalls : 0;
@@ -965,9 +1005,12 @@ export function flushLogRollup(trigger: 'interval' | 'beforeExit' | 'exit' | 'ma
     const avgSseDecode = otherUsageCalls > 0 ? otherSseDecode / otherUsageCalls : 0;
     const avgCodecDecode = otherUsageCalls > 0 ? otherCodecDecode / otherUsageCalls : 0;
     const avgDecodeEffective = Math.max(avgSseDecode, avgCodecDecode);
-    const avgCoreInternal = Math.max(
-      0,
-      avgInternal - avgTrafficWait - avgInjectWait - avgDecodeEffective
+    const avgCoreInternal = computeCoreInternalMs(
+      avgInternal,
+      avgTrafficWait,
+      avgInjectWait,
+      avgSseDecode,
+      avgCodecDecode
     );
     const avgAttempts = otherUsageCalls > 0 ? otherAttempts / otherUsageCalls : 1;
     const avgRetries = otherUsageCalls > 0 ? otherRetries / otherUsageCalls : 0;

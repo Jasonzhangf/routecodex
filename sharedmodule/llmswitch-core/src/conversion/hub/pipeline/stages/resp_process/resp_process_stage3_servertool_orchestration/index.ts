@@ -29,6 +29,7 @@ export interface RespProcessStage3ServerToolOrchestrationOptions {
   requestId: string;
   entryEndpoint: string;
   providerProtocol: ProviderProtocol;
+  allowFollowup?: boolean;
   stageRecorder?: StageRecorder;
   providerInvoker?: ProviderInvoker;
   reenterPipeline?: ReenterPipeline;
@@ -52,9 +53,10 @@ export async function runRespProcessStage3ServerToolOrchestration(
     !Array.isArray(options.adapterContext)
       ? ((options.adapterContext as Record<string, unknown>).__rt as Record<string, unknown> | undefined)
       : undefined;
-  if (runtimeMeta?.serverToolFollowup === true) {
+  if (runtimeMeta?.serverToolFollowup === true && options.allowFollowup !== true) {
     recordStage(options.stageRecorder, 'chat_process.resp.stage5.servertool_orchestration', {
       executed: false,
+      skipReason: 'followup_bypass',
       inputShape: detectProviderResponseShapeWithNative(options.payload)
     });
     return {

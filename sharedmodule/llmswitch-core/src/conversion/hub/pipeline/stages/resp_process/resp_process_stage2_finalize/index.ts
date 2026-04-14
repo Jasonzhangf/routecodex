@@ -41,8 +41,11 @@ export async function runRespProcessStage2Finalize(
   )) as JsonObject;
 
   // Strip executed servertool calls before returning to client (single source of truth).
+  // This must also run for internal servertool followups: reasoning.stop/review/clock
+  // handlers append tool_outputs first, and skipping this strip leaks consumed internal
+  // tool_calls into client required_action/output surfaces.
   const stripSource = options.originalPayload ?? options.payload;
-  if (!options.skipServerToolStrip && stripSource && typeof stripSource === 'object') {
+  if (stripSource && typeof stripSource === 'object') {
     finalized = filterOutExecutedServerToolCalls(finalized, stripSource as JsonObject);
   }
   logHubStageTiming(options.requestId, 'resp_process.stage2_native_finalize', 'completed', {
