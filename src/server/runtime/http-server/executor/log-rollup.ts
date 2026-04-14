@@ -120,7 +120,7 @@ type SessionRollupAgg = {
 
 const DEFAULT_WINDOW_MS = 60_000;
 const DEFAULT_MAX_BUCKETS = 4096;
-const DEFAULT_MAX_SESSION_EVENTS = 50;
+const DEFAULT_MAX_SESSION_EVENTS = 10;
 const DEFAULT_SESSION_TTL_MS = 300_000; // 5 minutes
 const DEFAULT_TOP_N = 20;
 const ANSI_RESET = '\x1b[0m';
