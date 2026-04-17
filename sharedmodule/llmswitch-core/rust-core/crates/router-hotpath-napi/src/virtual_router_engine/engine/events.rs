@@ -1,4 +1,5 @@
 use serde_json::Value;
+use chrono::{Datelike, Local, TimeZone};
 
 use super::VirtualRouterEngineCore;
 use crate::virtual_router_engine::time_utils::now_ms;
@@ -8,6 +9,13 @@ struct SeriesCooldownDetail {
     provider_key: Option<String>,
     series: String,
     cooldown_ms: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProviderErrorClassification {
+    Unrecoverable,
+    Recoverable,
+    Special400,
 }
 
 impl VirtualRouterEngineCore {
@@ -38,26 +46,30 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn handle_provider_failure(&mut self, event: &Value) {
-        let provider_key = event
-            .get("runtime")
-            .and_then(|v| v.get("providerKey"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let provider_key = resolve_provider_key(event).unwrap_or_default();
         if provider_key.is_empty() {
             return;
         }
-        let reason = event
-            .get("error")
-            .and_then(|v| v.get("message"))
-            .and_then(|v| v.as_str())
-            .map(|v| v.to_string());
+        let reason = extract_error_reason(event);
         self.health_manager
-            .record_failure(provider_key, reason, now_ms());
+            .record_failure(&provider_key, reason, now_ms());
     }
 
     pub(crate) fn handle_provider_error(&mut self, event: &Value) {
         if self.quota_view.is_some() {
             return;
+        }
+        if !event_affects_health(event) {
+            return;
+        }
+        let classification = extract_provider_error_classification(event);
+        if matches!(classification, Some(ProviderErrorClassification::Special400)) {
+            return;
+        }
+        if let Some(classification) = classification {
+            if self.apply_classified_provider_error(event, classification) {
+                return;
+            }
         }
         self.handle_provider_failure(event);
         if self.apply_antigravity_auth_verify_blacklist(event) {
@@ -93,6 +105,45 @@ impl VirtualRouterEngineCore {
             );
         }
         true
+    }
+
+    fn apply_classified_provider_error(
+        &mut self,
+        event: &Value,
+        classification: ProviderErrorClassification,
+    ) -> bool {
+        let provider_key = resolve_provider_key(event);
+        let Some(provider_key) = provider_key.as_deref() else {
+            return false;
+        };
+        let reason = extract_error_reason(event);
+        let now = now_ms();
+        match classification {
+            ProviderErrorClassification::Special400 => true,
+            ProviderErrorClassification::Recoverable => {
+                let cooldown_ms = extract_recoverable_cooldown_ms(event).unwrap_or(DEFAULT_RECOVERABLE_COOLDOWN_MS);
+                self.health_manager.cooldown_provider(
+                    provider_key,
+                    reason,
+                    Some(cooldown_ms.max(DEFAULT_RECOVERABLE_COOLDOWN_MS)),
+                    now,
+                );
+                self.apply_series_cooldown(event);
+                true
+            }
+            ProviderErrorClassification::Unrecoverable => {
+                let cooldown_ms = compute_cooldown_until_next_local_midnight_ms(now)
+                    .max(DEFAULT_UNRECOVERABLE_MIN_COOLDOWN_MS);
+                self.health_manager.trip_provider(
+                    provider_key,
+                    reason,
+                    Some(cooldown_ms),
+                    now,
+                );
+                let _ = self.apply_antigravity_auth_verify_blacklist(event);
+                true
+            }
+        }
     }
 
     fn apply_series_cooldown(&mut self, event: &Value) {
@@ -140,6 +191,137 @@ impl VirtualRouterEngineCore {
             );
         }
     }
+}
+
+const DEFAULT_RECOVERABLE_COOLDOWN_MS: i64 = 30_000;
+const DEFAULT_UNRECOVERABLE_MIN_COOLDOWN_MS: i64 = 5 * 60_000;
+
+fn event_affects_health(event: &Value) -> bool {
+    !matches!(event.get("affectsHealth").and_then(|v| v.as_bool()), Some(false))
+}
+
+fn resolve_provider_key(event: &Value) -> Option<String> {
+    event
+        .get("runtime")
+        .and_then(|v| v.get("providerKey"))
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            event
+                .get("runtime")
+                .and_then(|v| v.get("target"))
+                .and_then(|v| v.get("providerKey"))
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        })
+}
+
+fn extract_error_reason(event: &Value) -> Option<String> {
+    event
+        .get("message")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            event
+                .get("error")
+                .and_then(|v| v.get("message"))
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        })
+}
+
+fn extract_provider_error_classification(event: &Value) -> Option<ProviderErrorClassification> {
+    let value = event
+        .get("details")
+        .and_then(|v| v.get("errorClassification"))
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_lowercase())?;
+    match value.as_str() {
+        "unrecoverable" => Some(ProviderErrorClassification::Unrecoverable),
+        "recoverable" => Some(ProviderErrorClassification::Recoverable),
+        "special_400" => Some(ProviderErrorClassification::Special400),
+        _ => None,
+    }
+}
+
+fn extract_recoverable_cooldown_ms(event: &Value) -> Option<i64> {
+    let status = event.get("status").and_then(|v| {
+        v.as_i64()
+            .or_else(|| v.as_u64().map(|value| value as i64))
+            .or_else(|| v.as_f64().map(|value| value.round() as i64))
+    });
+    if status == Some(429) && is_daily_limit_exceeded(event) {
+        return Some(compute_cooldown_until_next_local_midnight_ms(now_ms()));
+    }
+    if let Some(cooldown_ms) = extract_series_cooldown_detail(event).map(|detail| detail.cooldown_ms) {
+        return Some(cooldown_ms);
+    }
+    None
+}
+
+fn is_daily_limit_exceeded(event: &Value) -> bool {
+    let mut candidates: Vec<String> = Vec::new();
+    collect_string_candidate(event.get("code"), &mut candidates);
+    collect_string_candidate(
+        event
+            .get("error")
+            .and_then(|v| v.get("message")),
+        &mut candidates,
+    );
+    if let Some(details) = event.get("details").and_then(|v| v.as_object()) {
+        collect_string_candidate(details.get("reason"), &mut candidates);
+        collect_string_candidate(details.get("message"), &mut candidates);
+        collect_string_candidate(details.get("code"), &mut candidates);
+        collect_string_candidate(details.get("upstreamCode"), &mut candidates);
+        collect_string_candidate(details.get("upstreamMessage"), &mut candidates);
+        if let Some(meta) = details.get("meta").and_then(|v| v.as_object()) {
+            collect_string_candidate(meta.get("reason"), &mut candidates);
+            collect_string_candidate(meta.get("message"), &mut candidates);
+            collect_string_candidate(meta.get("code"), &mut candidates);
+            collect_string_candidate(meta.get("upstreamCode"), &mut candidates);
+            collect_string_candidate(meta.get("upstreamMessage"), &mut candidates);
+        }
+    }
+    candidates.into_iter().any(|candidate| {
+        let lowered = candidate.to_lowercase();
+        lowered.contains("daily_limit_exceeded")
+            || lowered.contains("daily usage limit exceeded")
+            || lowered.contains("daily limit exceeded")
+            || lowered.contains("daily usage quota exceeded")
+    })
+}
+
+fn collect_string_candidate(value: Option<&Value>, output: &mut Vec<String>) {
+    let Some(value) = value.and_then(|v| v.as_str()) else {
+        return;
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    output.push(trimmed.to_string());
+}
+
+fn compute_cooldown_until_next_local_midnight_ms(now_ms: i64) -> i64 {
+    if now_ms <= 0 {
+        return 24 * 60 * 60_000;
+    }
+    let Some(current) = Local.timestamp_millis_opt(now_ms).single() else {
+        return 24 * 60 * 60_000;
+    };
+    let Some(next_midnight) = Local
+        .with_ymd_and_hms(current.year(), current.month(), current.day(), 0, 0, 0)
+        .single()
+        .and_then(|dt| dt.checked_add_days(chrono::Days::new(1)))
+    else {
+        return 24 * 60 * 60_000;
+    };
+    let ttl = next_midnight.timestamp_millis() - now_ms;
+    if ttl > 0 { ttl } else { 24 * 60 * 60_000 }
 }
 
 fn is_google_account_verification_required(event: &Value) -> bool {
@@ -267,3 +449,113 @@ fn resolve_model_series(model_id: &str) -> String {
 }
 
 const ANTIGRAVITY_AUTH_VERIFY_BAN_MS: i64 = 24 * 60 * 60_000;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{json, Map, Value};
+
+    fn build_test_core(provider_key: &str, model_id: &str) -> VirtualRouterEngineCore {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            provider_key.to_string(),
+            json!({
+                "providerKey": provider_key,
+                "providerType": "openai",
+                "modelId": model_id,
+                "enabled": true
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let provider_keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&provider_keys);
+        core
+    }
+
+    fn build_error_event(provider_key: &str, classification: &str) -> Value {
+        json!({
+            "code": "HTTP_502",
+            "message": "upstream failed",
+            "stage": "provider.send",
+            "status": 502,
+            "runtime": {
+                "requestId": "req-1",
+                "providerKey": provider_key
+            },
+            "details": {
+                "errorClassification": classification
+            }
+        })
+    }
+
+    fn provider_state(core: &VirtualRouterEngineCore, provider_key: &str) -> crate::virtual_router_engine::health::ProviderHealthState {
+        core.health_manager
+            .snapshot()
+            .into_iter()
+            .find(|state| state.provider_key == provider_key)
+            .expect("provider state")
+    }
+
+    #[test]
+    fn special_400_does_not_mutate_provider_health() {
+        let provider_key = "test.key1.model";
+        let mut core = build_test_core(provider_key, "gpt-test");
+
+        core.handle_provider_error(&build_error_event(provider_key, "special_400"));
+
+        let state = provider_state(&core, provider_key);
+        assert_eq!(state.state, "healthy");
+        assert_eq!(state.failure_count, 0);
+        assert_eq!(state.cooldown_expires_at, None);
+    }
+
+    #[test]
+    fn affects_health_false_skips_health_mutation_even_with_classification() {
+        let provider_key = "test.key1.model";
+        let mut core = build_test_core(provider_key, "gpt-test");
+        let mut event = build_error_event(provider_key, "recoverable");
+        event["affectsHealth"] = Value::Bool(false);
+
+        core.handle_provider_error(&event);
+
+        let state = provider_state(&core, provider_key);
+        assert_eq!(state.state, "healthy");
+        assert_eq!(state.failure_count, 0);
+        assert_eq!(state.cooldown_expires_at, None);
+    }
+
+    #[test]
+    fn recoverable_error_enters_short_provider_cooldown() {
+        let provider_key = "test.key1.model";
+        let mut core = build_test_core(provider_key, "gpt-test");
+        let started_at = now_ms();
+
+        core.handle_provider_error(&build_error_event(provider_key, "recoverable"));
+
+        let state = provider_state(&core, provider_key);
+        assert_eq!(state.state, "tripped");
+        assert_eq!(state.failure_count, 1);
+        let expiry = state.cooldown_expires_at.expect("recoverable cooldown expiry");
+        let ttl = expiry - started_at;
+        assert!(ttl >= DEFAULT_RECOVERABLE_COOLDOWN_MS - 2_000, "ttl={ttl}");
+        assert!(ttl <= DEFAULT_RECOVERABLE_COOLDOWN_MS + 5_000, "ttl={ttl}");
+    }
+
+    #[test]
+    fn unrecoverable_error_trips_provider_until_local_midnight_window() {
+        let provider_key = "test.key1.model";
+        let mut core = build_test_core(provider_key, "gpt-test");
+        let started_at = now_ms();
+
+        core.handle_provider_error(&build_error_event(provider_key, "unrecoverable"));
+
+        let state = provider_state(&core, provider_key);
+        assert_eq!(state.state, "tripped");
+        assert!(state.failure_count >= 3);
+        let expiry = state.cooldown_expires_at.expect("unrecoverable cooldown expiry");
+        let ttl = expiry - started_at;
+        assert!(ttl >= DEFAULT_UNRECOVERABLE_MIN_COOLDOWN_MS - 2_000, "ttl={ttl}");
+        assert!(ttl <= 24 * 60 * 60_000 + 5_000, "ttl={ttl}");
+    }
+}

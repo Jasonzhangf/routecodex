@@ -1,4 +1,4 @@
-import { applyAntigravityRiskPolicyImpl } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-health.js';
+import { applyAntigravityRiskPolicyImpl } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine/health/index.js';
 
 describe('antigravity risk policy: VALIDATION_REQUIRED (403)', () => {
   it('treats VALIDATION_REQUIRED as Google verification required and only trips the affected runtimeKey', () => {
@@ -61,4 +61,3 @@ describe('antigravity risk policy: VALIDATION_REQUIRED (403)', () => {
     expect(cooldowns.map((c) => c.key).sort()).toEqual(trippedKeys);
   });
 });
-

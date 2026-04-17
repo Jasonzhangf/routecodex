@@ -618,6 +618,7 @@ fn resolves_responses_request_bridge_decisions_prefers_route_style_and_force_web
                 "combinedSystemInstruction": " extra keep ",
                 "originalSystemMessages": [" first ", "   ", "second "]
             })),
+            request_semantics: None,
         });
     assert!(output.force_web_search);
     assert_eq!(output.tool_call_id_style.as_deref(), Some("fc"));
@@ -656,6 +657,7 @@ fn resolves_responses_request_bridge_decisions_falls_back_to_context_history_see
             envelope_metadata: Some(json!({})),
             bridge_metadata: None,
             extra_bridge_history: None,
+            request_semantics: None,
         });
     assert!(!output.force_web_search);
     assert_eq!(output.tool_call_id_style.as_deref(), Some("fc"));

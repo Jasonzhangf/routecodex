@@ -2,7 +2,7 @@ import { describe, expect, test } from '@jest/globals';
 
 import { ProviderHealthManager } from '../../src/router/virtual-router/health-manager.js';
 import { ProviderRegistry } from '../../src/router/virtual-router/provider-registry.js';
-import { applyAntigravityRiskPolicyImpl } from '../../src/router/virtual-router/engine-health.js';
+import { applyAntigravityRiskPolicyImpl } from '../../src/router/virtual-router/engine/health/index.js';
 
 function mkRegistry(): ProviderRegistry {
   const auth = { type: 'oauth' as const, tokenFile: '/tmp/fake.json' };
