@@ -149,6 +149,43 @@ function filterResponsesInboundActionsByPayloadHints(
   });
 }
 
+function readPreviousResponseIdFromChatSemantics(chat: Record<string, unknown>): string {
+  const semantics =
+    chat?.semantics && typeof chat.semantics === 'object' && !Array.isArray(chat.semantics)
+      ? (chat.semantics as Record<string, unknown>)
+      : undefined;
+  if (!semantics) {
+    return '';
+  }
+  const continuation =
+    semantics.continuation && typeof semantics.continuation === 'object' && !Array.isArray(semantics.continuation)
+      ? (semantics.continuation as Record<string, unknown>)
+      : undefined;
+  const resumeFrom =
+    continuation?.resumeFrom && typeof continuation.resumeFrom === 'object' && !Array.isArray(continuation.resumeFrom)
+      ? (continuation.resumeFrom as Record<string, unknown>)
+      : undefined;
+  const responses =
+    semantics.responses && typeof semantics.responses === 'object' && !Array.isArray(semantics.responses)
+      ? (semantics.responses as Record<string, unknown>)
+      : undefined;
+  const responsesResume =
+    responses?.resume && typeof responses.resume === 'object' && !Array.isArray(responses.resume)
+      ? (responses.resume as Record<string, unknown>)
+      : undefined;
+  const candidates = [
+    resumeFrom?.previousResponseId,
+    responsesResume?.restoredFromResponseId,
+    resumeFrom?.responseId
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return '';
+}
+
 export function captureResponsesContext(
   payload: Record<string, unknown>,
   dto?: { route?: { requestId?: string } }
@@ -342,11 +379,19 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
     requestMetadata: buildSlimBridgeDecisionMetadata(requestMetadata),
     envelopeMetadata: buildSlimBridgeDecisionMetadata(envelopeMetadata),
     bridgeMetadata: buildSlimBridgeDecisionMetadata(bridgeMetadata),
-    extraBridgeHistory: extras?.bridgeHistory as unknown as Record<string, unknown> | undefined
+    extraBridgeHistory: extras?.bridgeHistory as unknown as Record<string, unknown> | undefined,
+    requestSemantics:
+      chat?.semantics && typeof chat.semantics === 'object' && !Array.isArray(chat.semantics)
+        ? (chat.semantics as Record<string, unknown>)
+        : undefined
   });
   const forceWebSearch = bridgeDecisions.forceWebSearch === true;
   const toolCallIdStyle = bridgeDecisions.toolCallIdStyle;
   const historySeed = bridgeDecisions.historySeed as unknown as BridgeInputBuildResult | undefined;
+  const previousResponseId =
+    typeof bridgeDecisions.previousResponseId === 'string' && bridgeDecisions.previousResponseId.trim().length > 0
+      ? bridgeDecisions.previousResponseId.trim()
+      : readPreviousResponseIdFromChatSemantics(chat as Record<string, unknown>);
 
   // tools: 反向映射为 ResponsesToolDefinition 形状
   const chatTools: ChatToolDefinition[] = Array.isArray(chat.tools) ? (chat.tools as ChatToolDefinition[]) : [];
@@ -377,7 +422,7 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   }
 
   const history =
-    historySeed ??
+    (previousResponseId ? undefined : historySeed) ??
     (buildBridgeHistoryWithNative({
       messages,
       tools: Array.isArray(out.tools) ? (out.tools as Array<Record<string, unknown>>) : undefined
@@ -399,6 +444,9 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   }).input as BridgeInputItem[];
   if (upstreamInput.length) {
     out.input = upstreamInput;
+  }
+  if (previousResponseId.length > 0) {
+    out.previous_response_id = previousResponseId;
   }
   const streamFromChat = typeof (chat as any).stream === 'boolean' ? ((chat as any).stream as boolean) : undefined;
   const streamFromParameters = (chat as any)?.parameters && typeof ((chat as any).parameters as any)?.stream === 'boolean'

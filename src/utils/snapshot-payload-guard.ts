@@ -1,5 +1,99 @@
 const DEFAULT_SNAPSHOT_PAYLOAD_MAX_BYTES = 256 * 1024;
 
+function previewText(value: string, maxChars = 160): string {
+  return value.length > maxChars ? `${value.slice(0, maxChars)}…` : value;
+}
+
+function summarizeResponsesInputItems(items: unknown[]): Record<string, unknown> {
+  const roleCounts: Record<string, number> = {};
+  let textChars = 0;
+  const sampleTexts: string[] = [];
+  for (const item of items.slice(0, 64)) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const role = typeof record.role === 'string' && record.role.trim() ? record.role.trim() : 'unknown';
+    roleCounts[role] = (roleCounts[role] || 0) + 1;
+    const content = record.content;
+    if (typeof content === 'string') {
+      textChars += content.length;
+      if (sampleTexts.length < 2 && content.trim()) {
+        sampleTexts.push(previewText(content.trim(), 120));
+      }
+      continue;
+    }
+    if (!Array.isArray(content)) {
+      continue;
+    }
+    for (const part of content) {
+      if (!part || typeof part !== 'object' || Array.isArray(part)) {
+        continue;
+      }
+      const text =
+        typeof (part as Record<string, unknown>).text === 'string'
+          ? ((part as Record<string, unknown>).text as string)
+          : typeof (part as Record<string, unknown>).input_text === 'string'
+            ? ((part as Record<string, unknown>).input_text as string)
+            : undefined;
+      if (!text) {
+        continue;
+      }
+      textChars += text.length;
+      if (sampleTexts.length < 2 && text.trim()) {
+        sampleTexts.push(previewText(text.trim(), 120));
+      }
+    }
+  }
+  return {
+    itemCount: items.length,
+    roleCounts,
+    estimatedTextChars: textChars,
+    sampleTexts
+  };
+}
+
+function summarizeProviderRequestSnapshot(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const body = record.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return null;
+  }
+  const request = body as Record<string, unknown>;
+  const input = Array.isArray(request.input) ? request.input : [];
+  const instructions = typeof request.instructions === 'string' ? request.instructions : '';
+  const requestShape: Record<string, unknown> = {
+    model: typeof request.model === 'string' ? request.model : null,
+    previous_response_id:
+      typeof request.previous_response_id === 'string' && request.previous_response_id.trim()
+        ? request.previous_response_id.trim()
+        : null,
+    input: summarizeResponsesInputItems(input),
+    instructions: instructions
+      ? {
+          chars: instructions.length,
+          preview: previewText(instructions.trim(), 120)
+        }
+      : null,
+    toolsCount: Array.isArray(request.tools) ? request.tools.length : 0,
+    stream:
+      typeof request.stream === 'boolean'
+        ? request.stream
+        : typeof request.stream === 'object' && request.stream && !Array.isArray(request.stream)
+          ? request.stream
+          : null
+  };
+  return {
+    type: 'provider-request',
+    keyCount: Object.keys(record).length,
+    keys: Object.keys(record).slice(0, 24),
+    requestShape
+  };
+}
+
 function resolvePositiveIntegerFromEnv(names: string[], fallback: number): number {
   for (const name of names) {
     const raw = process.env[name];
@@ -95,6 +189,10 @@ function estimateSnapshotPayloadBytes(
 }
 
 function summarizeSnapshotPayload(value: unknown): Record<string, unknown> {
+  const providerRequestSummary = summarizeProviderRequestSnapshot(value);
+  if (providerRequestSummary) {
+    return providerRequestSummary;
+  }
   if (Array.isArray(value)) {
     return {
       type: 'array',
@@ -115,7 +213,7 @@ function summarizeSnapshotPayload(value: unknown): Record<string, unknown> {
     return {
       type: 'string',
       length: value.length,
-      preview: value.length > 160 ? `${value.slice(0, 160)}…` : value
+      preview: previewText(value)
     };
   }
   return {

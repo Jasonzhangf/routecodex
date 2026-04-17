@@ -40,7 +40,11 @@ export async function buildResponsesFormatEnvelopeFromChat(
     ...(chat.parameters || {}),
     model: modelValue,
     messages: chat.messages,
-    tools: chat.tools
+    tools: chat.tools,
+    semantics:
+      chat.semantics && typeof chat.semantics === 'object'
+        ? (chat.semantics as JsonObject)
+        : undefined
   };
   if (!Array.isArray(responsesContext.originalSystemMessages) || responsesContext.originalSystemMessages.length === 0) {
     const originalSystemMessages = (chat.messages || [])

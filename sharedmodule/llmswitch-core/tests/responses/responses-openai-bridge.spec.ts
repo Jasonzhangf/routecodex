@@ -842,4 +842,40 @@ describe('responses-openai-bridge history seed normalization', () => {
     expect(retained.output[0].summary).toEqual([{ type: 'summary_text', text: 'filled summary' }]);
     expect(retained.output[0].encrypted_content).toBe('encrypted');
   });
+
+  test('preserves previous_response_id from continuation semantics and avoids stale context replay', () => {
+    const result = buildResponsesRequestFromChat(
+      {
+        model: 'gpt-5.3-codex',
+        messages: [{ role: 'user', content: '继续' }],
+        semantics: {
+          continuation: {
+            resumeFrom: {
+              protocol: 'openai-responses',
+              previousResponseId: 'resp_prev_turn'
+            }
+          }
+        }
+      },
+      {
+        requestId: 'req_prev_response',
+        input: [
+          {
+            role: 'user',
+            content: [{ type: 'input_text', text: '先配置好路由器如何用 ssh 访问' }]
+          }
+        ],
+        originalSystemMessages: ['old-system']
+      } as any
+    );
+
+    expect(result.request.previous_response_id).toBe('resp_prev_turn');
+    expect(result.request.instructions).toBeUndefined();
+    expect(result.request.input).toEqual([
+      {
+        role: 'user',
+        content: [{ type: 'input_text', text: '继续' }]
+      }
+    ]);
+  });
 });

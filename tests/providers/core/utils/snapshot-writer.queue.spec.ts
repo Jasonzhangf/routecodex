@@ -90,4 +90,66 @@ describe('provider snapshot writer queue', () => {
       'req_queue_4'
     ]);
   });
+
+  it('keeps request-shape summary when oversized provider-request payload is truncated', async () => {
+    const runtimeFlagsModule = await import('../../../../src/runtime/runtime-flags.js');
+    previousSnapshotFlag = runtimeFlagsModule.runtimeFlags.snapshotsEnabled;
+    runtimeFlagsModule.setRuntimeFlag('snapshotsEnabled', true);
+    const {
+      __flushProviderSnapshotQueueForTests,
+      __resetProviderSnapshotErrorBufferForTests,
+      __resetProviderSnapshotQueueForTests,
+      writeProviderSnapshot
+    } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
+    __resetProviderSnapshotErrorBufferForTests();
+    __resetProviderSnapshotQueueForTests();
+    process.env.ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES = '1024';
+
+    await writeProviderSnapshot({
+      phase: 'provider-request',
+      requestId: 'req_queue_summary_1',
+      clientRequestId: 'req_queue_summary_1',
+      providerKey: 'crs.key2.gpt-5.3-codex',
+      entryEndpoint: '/v1/responses',
+      data: {
+        model: 'gpt-5.3-codex',
+        previous_response_id: 'resp_prev_turn',
+        instructions: 'You are Codex. '.repeat(80),
+        input: [
+          {
+            role: 'user',
+            content: [{ type: 'input_text', text: '继续' }]
+          },
+          {
+            role: 'user',
+            content: [{ type: 'input_text', text: '先配置好路由器如何用 ssh 访问' }]
+          }
+        ],
+        tools: Array.from({ length: 32 }, (_, idx) => ({
+          type: 'function',
+          name: `tool_${idx}`,
+          description: 'd'.repeat(256)
+        }))
+      }
+    });
+
+    await __flushProviderSnapshotQueueForTests();
+
+    const payload = writeSnapshotViaHooksMock.mock.calls[0]?.[0]?.data as Record<string, unknown>;
+    expect(payload?.__snapshot_truncated).toBe(true);
+    expect(payload?.summary).toMatchObject({
+      type: 'provider-request',
+      requestShape: {
+        model: 'gpt-5.3-codex',
+        previous_response_id: 'resp_prev_turn',
+        toolsCount: 32,
+        input: {
+          itemCount: 2,
+          roleCounts: {
+            user: 2
+          }
+        }
+      }
+    });
+  });
 });
