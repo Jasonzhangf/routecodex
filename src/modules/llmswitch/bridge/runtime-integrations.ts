@@ -42,6 +42,12 @@ type ResponsesConversationModule = {
     submitPayload: AnyRecord,
     options?: { requestId?: string }
   ) => Promise<{ payload: AnyRecord; meta: AnyRecord }>;
+  resumeLatestResponsesContinuationByScope?: (args: {
+    payload: AnyRecord;
+    sessionId?: string;
+    conversationId?: string;
+    requestId?: string;
+  }) => { payload: AnyRecord; meta: AnyRecord } | null;
   rebindResponsesConversationRequestId?: (oldId: string, newId: string) => void;
 };
 
@@ -67,6 +73,20 @@ export async function rebindResponsesConversationRequestId(oldId?: string, newId
   if (typeof fn === 'function') {
     fn(oldId, newId);
   }
+}
+
+export async function resumeLatestResponsesContinuationByScope(args: {
+  payload: AnyRecord;
+  sessionId?: string;
+  conversationId?: string;
+  requestId?: string;
+}): Promise<{ payload: AnyRecord; meta: AnyRecord } | null> {
+  const mod = await importCoreDist<ResponsesConversationModule>('conversion/shared/responses-conversation-store');
+  const fn = mod.resumeLatestResponsesContinuationByScope;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] resumeLatestResponsesContinuationByScope not available');
+  }
+  return fn(args);
 }
 
 type ResponsesSseModule = {

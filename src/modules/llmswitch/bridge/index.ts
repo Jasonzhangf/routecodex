@@ -34,6 +34,7 @@ export { createCoreQuotaManager } from './quota-manager.js';
 export {
   writeSnapshotViaHooks,
   resumeResponsesConversation,
+  resumeLatestResponsesContinuationByScope,
   rebindResponsesConversationRequestId,
   createResponsesSseToJsonConverter,
   reportProviderErrorToRouterPolicy,

@@ -22,7 +22,7 @@ function formatUnknownError(error: unknown): string {
   }
 }
 
-function logStateIntegrationsNonBlockingError(
+function logStateIntegrationsNonBlocking(
   stage: string,
   error: unknown,
   details?: Record<string, unknown>
@@ -62,7 +62,7 @@ function getStickySessionStoreExports(): StickySessionStoreExports | null {
   try {
     cachedStickySessionStore = requireCoreDist<StickySessionStoreExports>('router/virtual-router/sticky-session-store');
   } catch (error) {
-    logStateIntegrationsNonBlockingError('sticky_session_store.load', error);
+    logStateIntegrationsNonBlocking('sticky_session_store.load', error);
     cachedStickySessionStore = null;
   }
   return cachedStickySessionStore;
@@ -73,14 +73,14 @@ export function loadRoutingInstructionStateSync(key: string): unknown | null {
   const fn = mod?.loadRoutingInstructionStateSync;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('sticky_session_store.load_state.api_unavailable', 'loadRoutingInstructionStateSync not available');
+      logStateIntegrationsNonBlocking('sticky_session_store.load_state.api_unavailable', 'loadRoutingInstructionStateSync not available');
     }
     return null;
   }
   try {
     return fn(key);
   } catch (error) {
-    logStateIntegrationsNonBlockingError('sticky_session_store.load_state.invoke', error, { key });
+    logStateIntegrationsNonBlocking('sticky_session_store.load_state.invoke', error, { key });
     return null;
   }
 }
@@ -90,14 +90,14 @@ export function saveRoutingInstructionStateAsync(key: string, state: unknown | n
   const fn = mod?.saveRoutingInstructionStateAsync;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('sticky_session_store.save_async.api_unavailable', 'saveRoutingInstructionStateAsync not available');
+      logStateIntegrationsNonBlocking('sticky_session_store.save_async.api_unavailable', 'saveRoutingInstructionStateAsync not available');
     }
     return;
   }
   try {
     fn(key, state);
   } catch (error) {
-    logStateIntegrationsNonBlockingError('sticky_session_store.save_async.invoke', error, { key });
+    logStateIntegrationsNonBlocking('sticky_session_store.save_async.invoke', error, { key });
   }
 }
 
@@ -106,14 +106,14 @@ export function saveRoutingInstructionStateSync(key: string, state: unknown | nu
   const fn = mod?.saveRoutingInstructionStateSync;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('sticky_session_store.save_sync.api_unavailable', 'saveRoutingInstructionStateSync not available');
+      logStateIntegrationsNonBlocking('sticky_session_store.save_sync.api_unavailable', 'saveRoutingInstructionStateSync not available');
     }
     return;
   }
   try {
     fn(key, state);
   } catch (error) {
-    logStateIntegrationsNonBlockingError('sticky_session_store.save_sync.invoke', error, { key });
+    logStateIntegrationsNonBlocking('sticky_session_store.save_sync.invoke', error, { key });
   }
 }
 
@@ -135,7 +135,7 @@ function getReasoningStopStateExports(): ReasoningStopStateExports | null {
       'servertool/handlers/reasoning-stop-state'
     );
   } catch (error) {
-    logStateIntegrationsNonBlockingError('reasoning_stop_state.load', error);
+    logStateIntegrationsNonBlocking('reasoning_stop_state.load', error);
     cachedReasoningStopStateModule = null;
   }
   return cachedReasoningStopStateModule;
@@ -143,13 +143,13 @@ function getReasoningStopStateExports(): ReasoningStopStateExports | null {
 
 export function syncReasoningStopModeFromRequest(
   adapterContext: unknown,
-  fallbackMode: 'on' | 'off' | 'endless' = 'on'
+  fallbackMode: 'on' | 'off' | 'endless' = 'off'
 ): 'on' | 'off' | 'endless' {
   const mod = getReasoningStopStateExports();
   const fn = mod?.syncReasoningStopModeFromRequest;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError(
+      logStateIntegrationsNonBlocking(
         'reasoning_stop_state.sync_mode.api_unavailable',
         'syncReasoningStopModeFromRequest not available',
         { fallbackMode }
@@ -160,7 +160,7 @@ export function syncReasoningStopModeFromRequest(
   try {
     return fn(adapterContext, fallbackMode);
   } catch (error) {
-    logStateIntegrationsNonBlockingError('reasoning_stop_state.sync_mode.invoke', error, { fallbackMode });
+    logStateIntegrationsNonBlocking('reasoning_stop_state.sync_mode.invoke', error, { fallbackMode });
     return fallbackMode;
   }
 }
@@ -180,7 +180,7 @@ function getSessionIdentifiersModule(): SessionIdentifiersModule | null {
   try {
     cachedSessionIdentifiersModule = requireCoreDist<SessionIdentifiersModule>('conversion/hub/pipeline/session-identifiers');
   } catch (error) {
-    logStateIntegrationsNonBlockingError('session_identifiers.load', error);
+    logStateIntegrationsNonBlocking('session_identifiers.load', error);
     cachedSessionIdentifiersModule = null;
   }
   return cachedSessionIdentifiersModule;
@@ -191,7 +191,7 @@ export function extractSessionIdentifiersFromMetadata(meta: Record<string, unkno
   const fn = mod?.extractSessionIdentifiersFromMetadata;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError(
+      logStateIntegrationsNonBlocking(
         'session_identifiers.extract.api_unavailable',
         'extractSessionIdentifiersFromMetadata not available'
       );
@@ -201,7 +201,7 @@ export function extractSessionIdentifiersFromMetadata(meta: Record<string, unkno
   try {
     return fn(meta);
   } catch (error) {
-    logStateIntegrationsNonBlockingError('session_identifiers.extract.invoke', error);
+    logStateIntegrationsNonBlocking('session_identifiers.extract.invoke', error);
     return {};
   }
 }
@@ -231,9 +231,9 @@ export function getStatsCenterSafe(): StatsCenterLike {
       cachedStatsCenter = center;
       return center;
     }
-    logStateIntegrationsNonBlockingError('stats_center.api_unavailable', 'getStatsCenter not available');
+    logStateIntegrationsNonBlocking('stats_center.api_unavailable', 'getStatsCenter not available');
   } catch (error) {
-    logStateIntegrationsNonBlockingError('stats_center.load', error);
+    logStateIntegrationsNonBlocking('stats_center.load', error);
   }
   cachedStatsCenter = null;
   return NOOP_STATS_CENTER;
@@ -247,7 +247,7 @@ export function getLlmsStatsSnapshot(): unknown | null {
     const snap = center && typeof center === 'object' ? (center as any).getSnapshot : null;
     return typeof snap === 'function' ? snap.call(center) : null;
   } catch (error) {
-    logStateIntegrationsNonBlockingError('stats_center.snapshot', error);
+    logStateIntegrationsNonBlocking('stats_center.snapshot', error);
     return null;
   }
 }
@@ -343,7 +343,7 @@ async function tryLoadClockTaskStoreModule(): Promise<ClockTaskStoreModule | nul
   try {
     return await importCoreDist<ClockTaskStoreModule>('servertool/clock/task-store');
   } catch (error) {
-    logStateIntegrationsNonBlockingError('clock_task_store.load.primary', error);
+    logStateIntegrationsNonBlocking('clock_task_store.load.primary', error);
   }
 
   try {
@@ -353,7 +353,7 @@ async function tryLoadClockTaskStoreModule(): Promise<ClockTaskStoreModule | nul
     ]);
     return { ...tasksModule, resolveClockConfig: configModule.resolveClockConfig };
   } catch (error) {
-    logStateIntegrationsNonBlockingError('clock_task_store.load.legacy', error);
+    logStateIntegrationsNonBlocking('clock_task_store.load.legacy', error);
     return null;
   }
 }
@@ -391,7 +391,7 @@ async function tryLoadHeartbeatTaskStoreModule(): Promise<HeartbeatTaskStoreModu
   try {
     return await importCoreDist<HeartbeatTaskStoreModule>('servertool/heartbeat/task-store');
   } catch (error) {
-    logStateIntegrationsNonBlockingError('heartbeat_task_store.load', error);
+    logStateIntegrationsNonBlocking('heartbeat_task_store.load', error);
     return null;
   }
 }
@@ -432,14 +432,14 @@ export async function resolveClockConfigSnapshot(input: unknown): Promise<unknow
   const fn = mod?.resolveClockConfig;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('clock_task_store.resolve_config.api_unavailable', 'resolveClockConfig not available');
+      logStateIntegrationsNonBlocking('clock_task_store.resolve_config.api_unavailable', 'resolveClockConfig not available');
     }
     return null;
   }
   try {
     return fn(input) ?? null;
   } catch (error) {
-    logStateIntegrationsNonBlockingError('clock_task_store.resolve_config.invoke', error);
+    logStateIntegrationsNonBlocking('clock_task_store.resolve_config.invoke', error);
     return null;
   }
 }
@@ -457,7 +457,7 @@ export async function setClockRuntimeHooksSnapshot(hooks?: {
   const fn = mod?.setClockRuntimeHooks;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('clock_task_store.set_runtime_hooks.api_unavailable', 'setClockRuntimeHooks not available');
+      logStateIntegrationsNonBlocking('clock_task_store.set_runtime_hooks.api_unavailable', 'setClockRuntimeHooks not available');
     }
     return false;
   }
@@ -465,7 +465,7 @@ export async function setClockRuntimeHooksSnapshot(hooks?: {
     await fn(hooks);
     return true;
   } catch (error) {
-    logStateIntegrationsNonBlockingError('clock_task_store.set_runtime_hooks.invoke', error);
+    logStateIntegrationsNonBlocking('clock_task_store.set_runtime_hooks.invoke', error);
     return false;
   }
 }
@@ -475,7 +475,7 @@ export async function startClockDaemonIfNeededSnapshot(config: unknown): Promise
   const fn = mod?.startClockDaemonIfNeeded;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('clock_task_store.start_daemon.api_unavailable', 'startClockDaemonIfNeeded not available');
+      logStateIntegrationsNonBlocking('clock_task_store.start_daemon.api_unavailable', 'startClockDaemonIfNeeded not available');
     }
     return false;
   }
@@ -483,7 +483,7 @@ export async function startClockDaemonIfNeededSnapshot(config: unknown): Promise
     await fn(config);
     return true;
   } catch (error) {
-    logStateIntegrationsNonBlockingError('clock_task_store.start_daemon.invoke', error);
+    logStateIntegrationsNonBlocking('clock_task_store.start_daemon.invoke', error);
     return false;
   }
 }
@@ -498,14 +498,14 @@ export async function reserveClockDueTasks(args: {
   const fn = mod?.reserveDueTasksForRequest;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('clock_task_store.reserve_due_tasks.api_unavailable', 'reserveDueTasksForRequest not available');
+      logStateIntegrationsNonBlocking('clock_task_store.reserve_due_tasks.api_unavailable', 'reserveDueTasksForRequest not available');
     }
     return { reservation: null };
   }
   try {
     return await fn(args);
   } catch (error) {
-    logStateIntegrationsNonBlockingError('clock_task_store.reserve_due_tasks.invoke', error, {
+    logStateIntegrationsNonBlocking('clock_task_store.reserve_due_tasks.invoke', error, {
       sessionId: args.sessionId,
       requestId: args.requestId
     });
@@ -518,14 +518,14 @@ export async function commitClockDueReservation(args: { reservation: unknown; co
   const fn = mod?.commitClockReservation;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('clock_task_store.commit_reservation.api_unavailable', 'commitClockReservation not available');
+      logStateIntegrationsNonBlocking('clock_task_store.commit_reservation.api_unavailable', 'commitClockReservation not available');
     }
     return;
   }
   try {
     await fn(args.reservation, args.config);
   } catch (error) {
-    logStateIntegrationsNonBlockingError('clock_task_store.commit_reservation.invoke', error);
+    logStateIntegrationsNonBlocking('clock_task_store.commit_reservation.invoke', error);
   }
 }
 
@@ -534,7 +534,7 @@ export async function listClockSessionIdsSnapshot(): Promise<string[]> {
   const fn = mod?.listClockSessionIds;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('clock_task_store.list_session_ids.api_unavailable', 'listClockSessionIds not available');
+      logStateIntegrationsNonBlocking('clock_task_store.list_session_ids.api_unavailable', 'listClockSessionIds not available');
     }
     return [];
   }
@@ -544,7 +544,7 @@ export async function listClockSessionIdsSnapshot(): Promise<string[]> {
       ? out.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
       : [];
   } catch (error) {
-    logStateIntegrationsNonBlockingError('clock_task_store.list_session_ids.invoke', error);
+    logStateIntegrationsNonBlocking('clock_task_store.list_session_ids.invoke', error);
     return [];
   }
 }
@@ -554,7 +554,7 @@ export async function listClockTasksSnapshot(args: { sessionId: string; config: 
   const fn = mod?.listClockTasks;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('clock_task_store.list_tasks.api_unavailable', 'listClockTasks not available');
+      logStateIntegrationsNonBlocking('clock_task_store.list_tasks.api_unavailable', 'listClockTasks not available');
     }
     return [];
   }
@@ -562,7 +562,7 @@ export async function listClockTasksSnapshot(args: { sessionId: string; config: 
     const out = await fn(args.sessionId, args.config);
     return Array.isArray(out) ? out : [];
   } catch (error) {
-    logStateIntegrationsNonBlockingError('clock_task_store.list_tasks.invoke', error, { sessionId: args.sessionId });
+    logStateIntegrationsNonBlocking('clock_task_store.list_tasks.invoke', error, { sessionId: args.sessionId });
     return [];
   }
 }
@@ -576,7 +576,7 @@ export async function scheduleClockTasksSnapshot(args: {
   const fn = mod?.scheduleClockTasks;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('clock_task_store.schedule_tasks.api_unavailable', 'scheduleClockTasks not available');
+      logStateIntegrationsNonBlocking('clock_task_store.schedule_tasks.api_unavailable', 'scheduleClockTasks not available');
     }
     return [];
   }
@@ -584,7 +584,7 @@ export async function scheduleClockTasksSnapshot(args: {
     const out = await fn(args.sessionId, Array.isArray(args.items) ? args.items : [], args.config);
     return Array.isArray(out) ? out : [];
   } catch (error) {
-    logStateIntegrationsNonBlockingError('clock_task_store.schedule_tasks.invoke', error, { sessionId: args.sessionId });
+    logStateIntegrationsNonBlocking('clock_task_store.schedule_tasks.invoke', error, { sessionId: args.sessionId });
     return [];
   }
 }
@@ -599,14 +599,14 @@ export async function updateClockTaskSnapshot(args: {
   const fn = mod?.updateClockTask;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('clock_task_store.update_task.api_unavailable', 'updateClockTask not available');
+      logStateIntegrationsNonBlocking('clock_task_store.update_task.api_unavailable', 'updateClockTask not available');
     }
     return null;
   }
   try {
     return await fn(args.sessionId, args.taskId, args.patch, args.config);
   } catch (error) {
-    logStateIntegrationsNonBlockingError('clock_task_store.update_task.invoke', error, {
+    logStateIntegrationsNonBlocking('clock_task_store.update_task.invoke', error, {
       sessionId: args.sessionId,
       taskId: args.taskId
     });
@@ -623,14 +623,14 @@ export async function cancelClockTaskSnapshot(args: {
   const fn = mod?.cancelClockTask;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('clock_task_store.cancel_task.api_unavailable', 'cancelClockTask not available');
+      logStateIntegrationsNonBlocking('clock_task_store.cancel_task.api_unavailable', 'cancelClockTask not available');
     }
     return false;
   }
   try {
     return Boolean(await fn(args.sessionId, args.taskId, args.config));
   } catch (error) {
-    logStateIntegrationsNonBlockingError('clock_task_store.cancel_task.invoke', error, {
+    logStateIntegrationsNonBlocking('clock_task_store.cancel_task.invoke', error, {
       sessionId: args.sessionId,
       taskId: args.taskId
     });
@@ -643,7 +643,7 @@ export async function clearClockTasksSnapshot(args: { sessionId: string; config:
   const fn = mod?.clearClockTasks;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('clock_task_store.clear_tasks.api_unavailable', 'clearClockTasks not available');
+      logStateIntegrationsNonBlocking('clock_task_store.clear_tasks.api_unavailable', 'clearClockTasks not available');
     }
     return 0;
   }
@@ -651,7 +651,7 @@ export async function clearClockTasksSnapshot(args: { sessionId: string; config:
     const removed = await fn(args.sessionId, args.config);
     return Number.isFinite(Number(removed)) ? Math.max(0, Math.floor(Number(removed))) : 0;
   } catch (error) {
-    logStateIntegrationsNonBlockingError('clock_task_store.clear_tasks.invoke', error, { sessionId: args.sessionId });
+    logStateIntegrationsNonBlocking('clock_task_store.clear_tasks.invoke', error, { sessionId: args.sessionId });
     return 0;
   }
 }
@@ -661,14 +661,14 @@ export async function resolveHeartbeatConfigSnapshot(input: unknown): Promise<un
   const fn = mod?.resolveHeartbeatConfig;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('heartbeat_task_store.resolve_config.api_unavailable', 'resolveHeartbeatConfig not available');
+      logStateIntegrationsNonBlocking('heartbeat_task_store.resolve_config.api_unavailable', 'resolveHeartbeatConfig not available');
     }
     return null;
   }
   try {
     return fn(input) ?? null;
   } catch (error) {
-    logStateIntegrationsNonBlockingError('heartbeat_task_store.resolve_config.invoke', error);
+    logStateIntegrationsNonBlocking('heartbeat_task_store.resolve_config.invoke', error);
     return null;
   }
 }
@@ -678,7 +678,7 @@ export async function buildHeartbeatInjectTextSnapshot(): Promise<string | null>
   const fn = mod?.buildHeartbeatInjectText;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('heartbeat_task_store.build_inject_text.api_unavailable', 'buildHeartbeatInjectText not available');
+      logStateIntegrationsNonBlocking('heartbeat_task_store.build_inject_text.api_unavailable', 'buildHeartbeatInjectText not available');
     }
     return null;
   }
@@ -686,7 +686,7 @@ export async function buildHeartbeatInjectTextSnapshot(): Promise<string | null>
     const text = fn();
     return typeof text === 'string' && text.trim() ? text : null;
   } catch (error) {
-    logStateIntegrationsNonBlockingError('heartbeat_task_store.build_inject_text.invoke', error);
+    logStateIntegrationsNonBlocking('heartbeat_task_store.build_inject_text.invoke', error);
     return null;
   }
 }
@@ -703,7 +703,7 @@ export async function setHeartbeatRuntimeHooksSnapshot(hooks?: {
   const fn = mod?.setHeartbeatRuntimeHooks;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('heartbeat_task_store.set_runtime_hooks.api_unavailable', 'setHeartbeatRuntimeHooks not available');
+      logStateIntegrationsNonBlocking('heartbeat_task_store.set_runtime_hooks.api_unavailable', 'setHeartbeatRuntimeHooks not available');
     }
     return false;
   }
@@ -711,7 +711,7 @@ export async function setHeartbeatRuntimeHooksSnapshot(hooks?: {
     await fn(hooks);
     return true;
   } catch (error) {
-    logStateIntegrationsNonBlockingError('heartbeat_task_store.set_runtime_hooks.invoke', error);
+    logStateIntegrationsNonBlocking('heartbeat_task_store.set_runtime_hooks.invoke', error);
     return false;
   }
 }
@@ -721,7 +721,7 @@ export async function startHeartbeatDaemonIfNeededSnapshot(config: unknown): Pro
   const fn = mod?.startHeartbeatDaemonIfNeeded;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('heartbeat_task_store.start_daemon.api_unavailable', 'startHeartbeatDaemonIfNeeded not available');
+      logStateIntegrationsNonBlocking('heartbeat_task_store.start_daemon.api_unavailable', 'startHeartbeatDaemonIfNeeded not available');
     }
     return false;
   }
@@ -729,7 +729,7 @@ export async function startHeartbeatDaemonIfNeededSnapshot(config: unknown): Pro
     await fn(config);
     return true;
   } catch (error) {
-    logStateIntegrationsNonBlockingError('heartbeat_task_store.start_daemon.invoke', error);
+    logStateIntegrationsNonBlocking('heartbeat_task_store.start_daemon.invoke', error);
     return false;
   }
 }
@@ -739,14 +739,14 @@ export async function loadHeartbeatStateSnapshot(tmuxSessionId: string): Promise
   const fn = mod?.loadHeartbeatState;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('heartbeat_task_store.load_state.api_unavailable', 'loadHeartbeatState not available');
+      logStateIntegrationsNonBlocking('heartbeat_task_store.load_state.api_unavailable', 'loadHeartbeatState not available');
     }
     return null;
   }
   try {
     return await fn(tmuxSessionId);
   } catch (error) {
-    logStateIntegrationsNonBlockingError('heartbeat_task_store.load_state.invoke', error, { tmuxSessionId });
+    logStateIntegrationsNonBlocking('heartbeat_task_store.load_state.invoke', error, { tmuxSessionId });
     return null;
   }
 }
@@ -756,7 +756,7 @@ export async function listHeartbeatStatesSnapshot(): Promise<unknown[]> {
   const fn = mod?.listHeartbeatStates;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('heartbeat_task_store.list_states.api_unavailable', 'listHeartbeatStates not available');
+      logStateIntegrationsNonBlocking('heartbeat_task_store.list_states.api_unavailable', 'listHeartbeatStates not available');
     }
     return [];
   }
@@ -764,7 +764,7 @@ export async function listHeartbeatStatesSnapshot(): Promise<unknown[]> {
     const out = await fn();
     return Array.isArray(out) ? out : [];
   } catch (error) {
-    logStateIntegrationsNonBlockingError('heartbeat_task_store.list_states.invoke', error);
+    logStateIntegrationsNonBlocking('heartbeat_task_store.list_states.invoke', error);
     return [];
   }
 }
@@ -782,7 +782,7 @@ export async function setHeartbeatEnabledSnapshot(args: {
   const fn = mod?.setHeartbeatEnabled;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('heartbeat_task_store.set_enabled.api_unavailable', 'setHeartbeatEnabled not available');
+      logStateIntegrationsNonBlocking('heartbeat_task_store.set_enabled.api_unavailable', 'setHeartbeatEnabled not available');
     }
     return null;
   }
@@ -795,7 +795,7 @@ export async function setHeartbeatEnabledSnapshot(args: {
       ...(args.details && typeof args.details === 'object' ? { details: args.details } : {})
     });
   } catch (error) {
-    logStateIntegrationsNonBlockingError('heartbeat_task_store.set_enabled.invoke', error, {
+    logStateIntegrationsNonBlocking('heartbeat_task_store.set_enabled.invoke', error, {
       tmuxSessionId: args.tmuxSessionId,
       enabled: args.enabled
     });
@@ -811,7 +811,7 @@ export async function listHeartbeatHistorySnapshot(args: {
   const fn = mod?.listHeartbeatHistory;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError('heartbeat_task_store.list_history.api_unavailable', 'listHeartbeatHistory not available');
+      logStateIntegrationsNonBlocking('heartbeat_task_store.list_history.api_unavailable', 'listHeartbeatHistory not available');
     }
     return [];
   }
@@ -819,7 +819,7 @@ export async function listHeartbeatHistorySnapshot(args: {
     const out = await fn(args);
     return Array.isArray(out) ? out : [];
   } catch (error) {
-    logStateIntegrationsNonBlockingError('heartbeat_task_store.list_history.invoke', error, {
+    logStateIntegrationsNonBlocking('heartbeat_task_store.list_history.invoke', error, {
       tmuxSessionId: args.tmuxSessionId
     });
     return [];
@@ -839,7 +839,7 @@ export async function appendHeartbeatHistoryEventSnapshot(input: {
   const fn = mod?.appendHeartbeatHistoryEvent;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError(
+      logStateIntegrationsNonBlocking(
         'heartbeat_task_store.append_history_event.api_unavailable',
         'appendHeartbeatHistoryEvent not available'
       );
@@ -849,7 +849,7 @@ export async function appendHeartbeatHistoryEventSnapshot(input: {
   try {
     return Boolean(await fn(input));
   } catch (error) {
-    logStateIntegrationsNonBlockingError('heartbeat_task_store.append_history_event.invoke', error, {
+    logStateIntegrationsNonBlocking('heartbeat_task_store.append_history_event.invoke', error, {
       tmuxSessionId: input.tmuxSessionId,
       source: input.source,
       action: input.action
@@ -863,7 +863,7 @@ export async function runHeartbeatDaemonTickSnapshot(): Promise<boolean> {
   const fn = mod?.runHeartbeatDaemonTickForTests;
   if (typeof fn !== 'function') {
     if (mod) {
-      logStateIntegrationsNonBlockingError(
+      logStateIntegrationsNonBlocking(
         'heartbeat_task_store.run_tick.api_unavailable',
         'runHeartbeatDaemonTickForTests not available'
       );
@@ -874,7 +874,7 @@ export async function runHeartbeatDaemonTickSnapshot(): Promise<boolean> {
     await fn();
     return true;
   } catch (error) {
-    logStateIntegrationsNonBlockingError('heartbeat_task_store.run_tick.invoke', error);
+    logStateIntegrationsNonBlocking('heartbeat_task_store.run_tick.invoke', error);
     return false;
   }
 }

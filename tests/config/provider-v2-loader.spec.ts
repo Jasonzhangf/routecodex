@@ -138,7 +138,7 @@ describe('buildVirtualRouterInputV2', () => {
     expect(input.routing.default[0].targets).toEqual(['demo.mock-1']);
   });
 
-  it('auto-synthesizes multimodal/web_search routes from provider model capabilities when route pools are absent', async () => {
+  it('does not auto-synthesize capability routes when route pools are absent', async () => {
     const root = await createTempDir('provider-v2-');
     const providerDir = path.join(root, 'ali-coding-plan');
     await fs.mkdir(providerDir, { recursive: true });
@@ -181,19 +181,11 @@ describe('buildVirtualRouterInputV2', () => {
     };
 
     const input = await buildVirtualRouterInputV2(userConfig, root);
-    expect(input.routing.multimodal).toHaveLength(1);
-    expect(input.routing.multimodal[0].targets).toEqual([
-      'ali-coding-plan.kimi-k2.5',
-      'ali-coding-plan.qwen3.5-plus'
-    ]);
-    expect(input.routing.web_search[0].targets).toEqual([
-      'ali-coding-plan.glm-5',
-      'ali-coding-plan.kimi-k2.5',
-      'ali-coding-plan.qwen3.5-plus'
-    ]);
+    expect(input.routing.multimodal).toBeUndefined();
+    expect(input.routing.web_search).toBeUndefined();
   });
 
-  it('keeps explicitly configured multimodal route without overwriting it', async () => {
+  it('keeps explicitly configured capability routes without injecting additional ones', async () => {
     const root = await createTempDir('provider-v2-');
     const providerDir = path.join(root, 'ali-coding-plan');
     await fs.mkdir(providerDir, { recursive: true });
@@ -232,6 +224,12 @@ describe('buildVirtualRouterInputV2', () => {
                   id: 'manual-multimodal',
                   targets: ['ali-coding-plan.manual-vl']
                 }
+              ],
+              web_search: [
+                {
+                  id: 'manual-web-search',
+                  targets: ['ali-coding-plan.manual-search']
+                }
               ]
             }
           }
@@ -243,18 +241,16 @@ describe('buildVirtualRouterInputV2', () => {
     expect(input.routing.multimodal).toHaveLength(1);
     expect(input.routing.multimodal[0].id).toBe('manual-multimodal');
     expect(input.routing.multimodal[0].targets).toEqual(['ali-coding-plan.manual-vl']);
-    expect(input.routing.web_search?.[0]?.targets).toEqual(['ali-coding-plan.qwen3.5-plus']);
+    expect(input.routing.web_search?.[0]?.targets).toEqual(['ali-coding-plan.manual-search']);
   });
 
-  it('only synthesizes multimodal targets for providers already referenced by current routing', async () => {
+  it('loads suffixed provider configs as standalone providers with explicit providerId', async () => {
     const root = await createTempDir('provider-v2-');
-    const aliDir = path.join(root, 'ali-coding-plan');
-    const otherDir = path.join(root, 'opencode-zen-free');
-    await fs.mkdir(aliDir, { recursive: true });
-    await fs.mkdir(otherDir, { recursive: true });
+    const providerDir = path.join(root, 'ali-coding-plan');
+    await fs.mkdir(providerDir, { recursive: true });
 
     await fs.writeFile(
-      path.join(aliDir, 'config.v2.json'),
+      path.join(providerDir, 'config.v2.json'),
       `${JSON.stringify(
         {
           version: '2.0.0',
@@ -275,13 +271,13 @@ describe('buildVirtualRouterInputV2', () => {
       'utf8'
     );
     await fs.writeFile(
-      path.join(otherDir, 'config.v2.json'),
+      path.join(providerDir, 'config.v2.duck.json'),
       `${JSON.stringify(
         {
           version: '2.0.0',
-          providerId: 'opencode-zen-free',
+          providerId: 'duck',
           provider: {
-            id: 'opencode-zen-free',
+            id: 'duck',
             type: 'openai',
             baseURL: 'https://example.test/openai',
             models: {
@@ -295,70 +291,44 @@ describe('buildVirtualRouterInputV2', () => {
       'utf8'
     );
 
-    const userConfig: UnknownRecord = {
-      virtualrouter: {
-        routingPolicyGroups: {
-          default: {
-            routing: {
-              default: [
-                {
-                  id: 'default-primary',
-                  targets: ['ali-coding-plan.glm-5']
-                }
-              ]
-            }
-          }
-        }
-      }
-    };
-
-    const input = await buildVirtualRouterInputV2(userConfig, root);
-    expect(input.routing.multimodal?.[0]?.targets).toEqual(['ali-coding-plan.qwen3.5-plus']);
-    expect(input.routing.web_search?.[0]?.targets).toEqual([
-      'ali-coding-plan.glm-5',
-      'ali-coding-plan.qwen3.5-plus'
-    ]);
+    const configs = await loadProviderConfigsV2(root);
+    expect(Object.keys(configs).sort()).toEqual(['ali-coding-plan', 'duck']);
+    expect(configs.duck.provider.id).toBe('duck');
   });
 
-  it('does not auto-inject web_search route when explicit search alias route exists', async () => {
+  it('rejects duplicate provider ids across suffixed config files', async () => {
     const root = await createTempDir('provider-v2-');
-    const providerDir = path.join(root, 'ali-coding-plan');
+    const providerDir = path.join(root, 'openai');
     await fs.mkdir(providerDir, { recursive: true });
 
-    const v2Payload = {
-      version: '2.0.0',
-      providerId: 'ali-coding-plan',
-      provider: {
-        id: 'ali-coding-plan',
-        type: 'anthropic',
-        baseURL: 'https://example.test/anthropic',
-        models: {
-          'glm-5': { capabilities: ['web_search'] }
-        }
-      }
-    };
     await fs.writeFile(
       path.join(providerDir, 'config.v2.json'),
-      `${JSON.stringify(v2Payload, null, 2)}\n`,
+      `${JSON.stringify({
+        version: '2.0.0',
+        providerId: 'openai',
+        provider: {
+          id: 'openai',
+          type: 'openai',
+          baseURL: 'https://example.test/openai'
+        }
+      }, null, 2)}\n`,
+      'utf8'
+    );
+    await fs.writeFile(
+      path.join(providerDir, 'config.v2.wuzu.json'),
+      `${JSON.stringify({
+        version: '2.0.0',
+        providerId: 'openai',
+        provider: {
+          id: 'openai',
+          type: 'openai',
+          baseURL: 'https://example.test/openai-wuzu'
+        }
+      }, null, 2)}\n`,
       'utf8'
     );
 
-    const userConfig: UnknownRecord = {
-      virtualrouter: {
-        routingPolicyGroups: {
-          default: {
-            routing: {
-              default: [{ id: 'default-primary', targets: ['ali-coding-plan.glm-5'] }],
-              search: [{ id: 'manual-search', targets: ['ali-coding-plan.manual-search-model'] }]
-            }
-          }
-        }
-      }
-    };
-
-    const input = await buildVirtualRouterInputV2(userConfig, root);
-    expect(input.routing.search?.[0]?.id).toBe('manual-search');
-    expect(input.routing.web_search).toBeUndefined();
+    await expect(loadProviderConfigsV2(root)).rejects.toThrow('duplicate providerId "openai"');
   });
 }
 );

@@ -1,10 +1,10 @@
 # Config Module
 
 ## Purpose
-Centralized config loading and path resolution for RouteCodex. Configs live in `~/.routecodex/`; this module only handles loading and validation.
+Centralized config loading and path resolution for RouteCodex. Runtime config is **V2-only** and lives in `~/.rcc/`; this module only handles loading and validation.
 
 ## Key Files
-- `routecodex-config-loader.ts`: Load user config, apply legacy defaults, generate provider profiles
+- `routecodex-config-loader.ts`: Load strict V2 user config, validate single-source layout, generate provider profiles
 - `auth-file-resolver.ts`: Resolve `authfile-*` references and cache key files
 - `config-paths.ts` + `unified-config-paths.ts`: Parse `ROUTECODEX_CONFIG*` env vars and default paths
 
@@ -21,7 +21,7 @@ User Config → Config Paths → routecodex-config-loader → bootstrapVirtualRo
 
 **Don't**
 - Store decrypted secrets back into config
-- Manually merge runtime data or patch configs on the fly
+- Cache stale config paths or patch config files on the fly
 - Implement provider-specific logic here
 
 ## CLI Usage
