@@ -11,7 +11,7 @@ import {
   isNativeDisabledByEnv,
   makeNativeRequiredError
 } from '../../../router/virtual-router/engine-selection/native-router-hotpath-policy.js';
-import { providerErrorCenter } from '../../../router/virtual-router/error-center.js';
+import { reportProviderErrorToRouterPolicy } from '../../../router/virtual-router/provider-runtime-ingress.js';
 
 type UnknownRecord = Record<string, unknown>;
 type DeepSeekToolProtocol = 'native' | 'text';
@@ -93,7 +93,7 @@ function emitCompatError(
   payload?: JsonObject,
   details?: Record<string, unknown>
 ): never {
-  providerErrorCenter.emit({
+  reportProviderErrorToRouterPolicy({
     code: 'DEEPSEEK_WEB_COMPAT_ERROR',
     message: error.message,
     stage: 'compat:deepseek-web-response',

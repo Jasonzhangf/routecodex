@@ -5,7 +5,7 @@ import {
   serializeRoutingInstructionState,
   deserializeRoutingInstructionState
 } from './routing-instructions.js';
-import { providerErrorCenter } from './error-center.js';
+import { reportProviderErrorToRouterPolicy } from './provider-runtime-ingress.js';
 import {
   resolveRccPath
 } from '../../runtime/user-data-paths.js';
@@ -52,7 +52,7 @@ function emitStickyStoreError(
   message: string,
   details: Record<string, unknown>
 ): void {
-  providerErrorCenter.emit({
+  reportProviderErrorToRouterPolicy({
     code,
     message,
     stage,
