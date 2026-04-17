@@ -108,6 +108,7 @@ function normalizeProviderErrorEvent(event: ProviderErrorEvent): ProviderErrorEv
     stage,
     status: event.status,
     recoverable: event.recoverable,
+    affectsHealth: event.affectsHealth,
     runtime,
     timestamp,
     details: event.details

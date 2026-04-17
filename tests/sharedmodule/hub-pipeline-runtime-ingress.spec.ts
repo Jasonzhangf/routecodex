@@ -27,7 +27,13 @@ jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/router/virtual-r
 }));
 
 jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.js', () => ({
-  setVirtualRouterPolicyRuntimeRouterHooks
+  setVirtualRouterPolicyRuntimeRouterHooks,
+  reportProviderErrorToRouterPolicy: jest.fn((event: unknown) => event),
+  reportProviderSuccessToRouterPolicy: jest.fn((event: unknown) => event),
+  setProviderRuntimeQuotaHooks: jest.fn(),
+  setProviderRuntimeProviderQuotaHooks: jest.fn(),
+  setProviderRuntimeObserverHooks: jest.fn(),
+  resetProviderRuntimeIngressForTests: jest.fn()
 }));
 
 jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/conversion/hub/policy/policy-engine.js', async () => {

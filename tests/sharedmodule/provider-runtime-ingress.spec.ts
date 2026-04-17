@@ -59,6 +59,7 @@ describe('provider runtime ingress', () => {
       code: 'HTTP_429',
       message: '',
       stage: '',
+      affectsHealth: false,
       runtime: undefined as any,
       timestamp: undefined as any,
       details: {
@@ -69,6 +70,7 @@ describe('provider runtime ingress', () => {
     expect(returned.code).toBe('HTTP_429');
     expect(returned.message).toBe('HTTP_429');
     expect(returned.stage).toBe('unknown');
+    expect(returned.affectsHealth).toBe(false);
     expect(returned.runtime).toEqual({});
     expect(returned.timestamp).toBeGreaterThanOrEqual(before);
 
