@@ -1,42 +1,22 @@
 import {
   VirtualRouterError,
   VirtualRouterErrorCode,
-  type AliasSelectionConfig,
-  type AliasSelectionStrategy,
-  type LoadBalancingPolicy,
-  type ProviderAuthConfig,
-  type ProviderHealthConfig,
-  type ProviderRuntimeProfile,
   type VirtualRouterBootstrapInput,
   type VirtualRouterBootstrapResult,
-  type VirtualRouterClassifierConfig,
-  type VirtualRouterConfig,
-  type VirtualRouterContextRoutingConfig
+  type VirtualRouterConfig
 } from './types.js';
 import {
-  DEFAULT_CLASSIFIER,
-  DEFAULT_CONTEXT_ROUTING,
-  DEFAULT_HEALTH,
   DEFAULT_LOAD_BALANCING
 } from './bootstrap/config-defaults.js';
 import { asRecord } from './bootstrap/utils.js';
-import { normalizeClock, normalizeContextRouting, normalizeExecCommandGuard } from './bootstrap/config-normalizers.js';
-import { normalizeHealth, buildProviderProfiles } from './bootstrap/profile-builder.js';
+import { bootstrapRoutingWithNative } from './engine-selection/native-virtual-router-bootstrap-routing.js';
 import {
-  normalizeRouting,
-  expandRoutingTable,
-  buildRuntimeKey,
-  type NormalizedRoutePoolConfig
-} from './bootstrap/routing-config.js';
-import { normalizeProvider, type NormalizedProvider } from './bootstrap/provider-normalization.js';
-import { extractProviderAuthEntries } from './bootstrap/auth-utils.js';
-import { normalizeWebSearch, validateWebSearchRouting } from './bootstrap/web-search-config.js';
+  bootstrapProviderProfilesWithNative,
+  bootstrapProvidersWithNative
+} from './engine-selection/native-virtual-router-bootstrap-providers.js';
+import { isNativeDisabledByEnv, makeNativeRequiredError } from './engine-selection/native-router-hotpath-policy.js';
+import { loadNativeRouterHotpathBinding } from './engine-selection/native-router-hotpath-loader.js';
 
-interface ProviderRuntimeBuildResult {
-  runtimeEntries: Record<string, ProviderRuntimeProfile>;
-  aliasIndex: Map<string, string[]>;
-  modelIndex: Map<string, { declared: boolean; models: string[] }>;
-}
 
 export function bootstrapVirtualRouterConfig(
   input: VirtualRouterBootstrapInput
@@ -50,47 +30,37 @@ export function bootstrapVirtualRouterConfig(
     );
   }
 
-  const routingSource = normalizeRouting(section.routing);
-  const webSearch = normalizeWebSearch(section.webSearch, routingSource);
-  validateWebSearchRouting(webSearch, routingSource);
-  const execCommandGuard = normalizeExecCommandGuard(section.execCommandGuard);
-  const clock = normalizeClock(section.clock);
+  const providersBootstrap = bootstrapProvidersWithNative({ providersSource });
+  const { runtimeEntries, aliasIndex, modelIndex } = providersBootstrap;
+  const routingBootstrap = bootstrapRoutingWithNative({
+    routingSource: section.routing,
+    aliasIndex,
+    modelIndex
+  });
+  const routingSource = routingBootstrap.routingSource;
+  const routing = routingBootstrap.routing;
 
-  const { runtimeEntries, aliasIndex, modelIndex } = buildProviderRuntimeEntries(providersSource);
-  const { routing, targetKeys } = expandRoutingTable(routingSource, aliasIndex, modelIndex);
-
-  const expandedTargetKeys = new Set(targetKeys);
-  for (const [providerId, aliases] of aliasIndex.entries()) {
-    const models = modelIndex.get(providerId)?.models ?? [];
-    if (!models.length || !aliases.length) {
-      continue;
-    }
-    for (const alias of aliases) {
-      const runtimeKey = buildRuntimeKey(providerId, alias);
-      for (const modelId of models) {
-        if (modelId && typeof modelId === 'string') {
-          expandedTargetKeys.add(`${runtimeKey}.${modelId}`);
-        }
-      }
-    }
-  }
-
-  const { profiles: providerProfiles, targetRuntime } = buildProviderProfiles(expandedTargetKeys, runtimeEntries);
-  const classifier = normalizeClassifier(section.classifier);
-  const loadBalancing = section.loadBalancing ?? DEFAULT_LOAD_BALANCING;
-  const health = section.health ?? DEFAULT_HEALTH;
-  const contextRouting = section.contextRouting ?? DEFAULT_CONTEXT_ROUTING;
+  const providerProfilesBootstrap = bootstrapProviderProfilesWithNative({
+    routedTargetKeys: routingBootstrap.targetKeys,
+    aliasIndex,
+    modelIndex,
+    runtimeEntries
+  });
+  const providerProfiles = providerProfilesBootstrap.profiles;
+  const targetRuntime = providerProfilesBootstrap.targetRuntime;
+  const configMeta = bootstrapConfigMetaWithNative(section, routingSource);
+  const loadBalancing = configMeta.loadBalancing ?? DEFAULT_LOAD_BALANCING;
 
   const config: VirtualRouterConfig = {
     routing,
     providers: providerProfiles,
-    classifier,
+    classifier: configMeta.classifier,
     loadBalancing,
-    health,
-    contextRouting,
-    ...(webSearch ? { webSearch } : {}),
-    ...(execCommandGuard ? { execCommandGuard } : {}),
-    ...(clock ? { clock } : {})
+    ...(configMeta.health ? { health: configMeta.health } : {}),
+    contextRouting: configMeta.contextRouting,
+    ...(configMeta.webSearch ? { webSearch: configMeta.webSearch } : {}),
+    ...(configMeta.execCommandGuard ? { execCommandGuard: configMeta.execCommandGuard } : {}),
+    ...(configMeta.clock ? { clock: configMeta.clock } : {})
   };
 
   return {
@@ -107,10 +77,10 @@ function extractVirtualRouterSection(
 ): {
   providers: Record<string, unknown>;
   routing: Record<string, unknown>;
-  classifier?: VirtualRouterClassifierConfig;
-  loadBalancing?: LoadBalancingPolicy;
-  health?: ProviderHealthConfig;
-  contextRouting?: VirtualRouterContextRoutingConfig;
+  classifier?: unknown;
+  loadBalancing?: unknown;
+  health?: unknown;
+  contextRouting?: unknown;
   webSearch?: unknown;
   execCommandGuard?: unknown;
   clock?: unknown;
@@ -119,10 +89,10 @@ function extractVirtualRouterSection(
   const section = root.virtualrouter && typeof root.virtualrouter === 'object' ? asRecord(root.virtualrouter) : root;
   const providers = asRecord(section.providers ?? root.providers);
   const routing = asRecord(section.routing ?? root.routing);
-  const classifier = (section.classifier ?? root.classifier) as VirtualRouterClassifierConfig | undefined;
-  const loadBalancing = normalizeLoadBalancing(section.loadBalancing ?? root.loadBalancing);
-  const health = normalizeHealth(section.health ?? root.health);
-  const contextRouting = normalizeContextRouting(section.contextRouting ?? root.contextRouting);
+  const classifier = section.classifier ?? root.classifier;
+  const loadBalancing = section.loadBalancing ?? root.loadBalancing;
+  const health = section.health ?? root.health;
+  const contextRouting = section.contextRouting ?? root.contextRouting;
   const webSearch = section.webSearch ?? (root as Record<string, unknown>).webSearch;
   const execCommandGuard =
     (section as Record<string, unknown>).execCommandGuard ?? (root as Record<string, unknown>).execCommandGuard;
@@ -131,289 +101,78 @@ function extractVirtualRouterSection(
   return { providers, routing, classifier, loadBalancing, health, contextRouting, webSearch, execCommandGuard, clock };
 }
 
-function buildProviderRuntimeEntries(providers: Record<string, unknown>): ProviderRuntimeBuildResult {
-  const runtimeEntries: Record<string, ProviderRuntimeProfile> = {};
-  const aliasIndex = new Map<string, string[]>();
-  const modelIndex = new Map<string, { declared: boolean; models: string[] }>();
+type NativeBootstrapConfigMeta = Pick<VirtualRouterConfig, 'classifier' | 'health' | 'contextRouting' | 'webSearch' | 'execCommandGuard' | 'clock' | 'loadBalancing'>;
 
-  for (const [providerId, providerRaw] of Object.entries(providers)) {
-    const normalizedProvider = normalizeProvider(providerId, providerRaw);
-    modelIndex.set(providerId, collectProviderModels(providerRaw, normalizedProvider));
-    const authEntries = extractProviderAuthEntries(providerId, providerRaw);
-    if (!authEntries.length) {
-      throw new VirtualRouterError(
-        `Provider ${providerId} requires at least one auth entry`,
-        VirtualRouterErrorCode.CONFIG_ERROR
-      );
-    }
-    aliasIndex.set(providerId, authEntries.map((entry) => entry.keyAlias));
-    for (const entry of authEntries) {
-      const runtimeKey = buildRuntimeKey(providerId, entry.keyAlias);
-      const runtimeAuth: ProviderAuthConfig = {
-        type: entry.auth.type,
-        rawType: entry.auth.rawType,
-        oauthProviderId: entry.auth.oauthProviderId,
-        secretRef: entry.auth.secretRef,
-        value: entry.auth.value,
-        tokenFile: entry.auth.tokenFile,
-        tokenUrl: entry.auth.tokenUrl,
-        deviceCodeUrl: entry.auth.deviceCodeUrl,
-        clientId: entry.auth.clientId,
-        clientSecret: entry.auth.clientSecret,
-        scopes: entry.auth.scopes && entry.auth.scopes.length ? [...entry.auth.scopes] : undefined,
-        authorizationUrl: entry.auth.authorizationUrl,
-        userInfoUrl: entry.auth.userInfoUrl,
-        refreshUrl: entry.auth.refreshUrl
-      };
+const VIRTUAL_ROUTER_ERROR_PREFIX = 'VIRTUAL_ROUTER_ERROR:';
 
-      if (!runtimeAuth.tokenFile && (runtimeAuth.rawType?.includes('oauth') || runtimeAuth.type === 'oauth')) {
-        runtimeAuth.tokenFile = entry.keyAlias;
-      }
-      if (runtimeAuth.type === 'apiKey' && !runtimeAuth.secretRef) {
-        runtimeAuth.secretRef = `${providerId}.${entry.keyAlias}`;
-      }
-        runtimeEntries[runtimeKey] = {
-          runtimeKey,
-          providerId,
-          keyAlias: entry.keyAlias,
-          providerType: normalizedProvider.providerType,
-          endpoint: normalizedProvider.endpoint,
-          headers: normalizedProvider.headers,
-          auth: runtimeAuth,
-          ...(normalizedProvider.enabled !== undefined ? { enabled: normalizedProvider.enabled } : {}),
-          outboundProfile: normalizedProvider.outboundProfile,
-          compatibilityProfile: normalizedProvider.compatibilityProfile,
-          processMode: normalizedProvider.processMode,
-          responsesConfig: normalizedProvider.responsesConfig,
-          streaming: normalizedProvider.streaming,
-          modelStreaming: normalizedProvider.modelStreaming,
-          modelOutputTokens: normalizedProvider.modelOutputTokens,
-          defaultOutputTokens: normalizedProvider.defaultOutputTokens,
-          modelContextTokens: normalizedProvider.modelContextTokens,
-          defaultContextTokens: normalizedProvider.defaultContextTokens,
-          modelAnthropicThinkingConfig: normalizedProvider.modelAnthropicThinkingConfig,
-          defaultAnthropicThinkingConfig: normalizedProvider.defaultAnthropicThinkingConfig,
-          modelAnthropicThinking: normalizedProvider.modelAnthropicThinking,
-          defaultAnthropicThinking: normalizedProvider.defaultAnthropicThinking,
-          modelAnthropicThinkingBudgets: normalizedProvider.modelAnthropicThinkingBudgets,
-          defaultAnthropicThinkingBudgets: normalizedProvider.defaultAnthropicThinkingBudgets,
-          ...(normalizedProvider.deepseek ? { deepseek: normalizedProvider.deepseek } : {}),
-          ...(normalizedProvider.serverToolsDisabled ? { serverToolsDisabled: true } : {}),
-          ...(normalizedProvider.modelCapabilities ? { modelCapabilities: normalizedProvider.modelCapabilities } : {})
-        };
-    }
+function requireNativeBootstrapConfigFunction(exportName: string): (...args: string[]) => unknown {
+  if (isNativeDisabledByEnv()) {
+    throw makeNativeRequiredError(exportName, 'native disabled');
   }
-
-  return { runtimeEntries, aliasIndex, modelIndex };
+  const binding = loadNativeRouterHotpathBinding() as Record<string, unknown> | null;
+  const fn = binding?.[exportName];
+  if (typeof fn !== 'function') {
+    throw makeNativeRequiredError(exportName);
+  }
+  return fn as (...args: string[]) => unknown;
 }
 
-function collectProviderModels(
-  providerRaw: unknown,
-  _normalizedProvider: NormalizedProvider
-): { declared: boolean; models: string[] } {
-  const rawModelsNode = (providerRaw as any).models;
-  const modelsDeclared = rawModelsNode !== undefined;
-  const collected = new Set<string>();
-
-  if (Array.isArray(rawModelsNode)) {
-    for (const model of rawModelsNode) {
-      if (!model || typeof model !== 'object') {
-        continue;
-      }
-      const modelObj = model as Record<string, unknown>;
-      const modelId = typeof modelObj.id === 'string' ? modelObj.id.trim() : '';
-      if (modelId) {
-        collected.add(modelId);
-      }
-      const aliasesNode = Array.isArray((modelObj as { aliases?: unknown }).aliases)
-        ? ((modelObj as { aliases: unknown[] }).aliases as unknown[])
-        : [];
-      for (const alias of aliasesNode) {
-        if (typeof alias !== 'string') {
-          continue;
-        }
-        const normalizedAlias = alias.trim();
-        if (normalizedAlias) {
-          collected.add(normalizedAlias);
-        }
-      }
-    }
-  } else {
-    const modelsNode = asRecord(rawModelsNode);
-    for (const [modelName, modelConfigRaw] of Object.entries(modelsNode)) {
-      const normalizedModelName = typeof modelName === 'string' ? modelName.trim() : '';
-      if (normalizedModelName) {
-        collected.add(normalizedModelName);
-      }
-      const modelConfig = asRecord(modelConfigRaw);
-      const aliasesNode = Array.isArray((modelConfig as { aliases?: unknown }).aliases)
-        ? ((modelConfig as { aliases: unknown[] }).aliases as unknown[])
-        : [];
-      for (const alias of aliasesNode) {
-        if (typeof alias !== 'string') {
-          continue;
-        }
-        const normalizedAlias = alias.trim();
-        if (normalizedAlias) {
-          collected.add(normalizedAlias);
-        }
-      }
-    }
+function extractNativeErrorMessage(error: unknown): string {
+  if (typeof error === 'string') return error;
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string') {
+    return (error as { message: string }).message;
   }
-
-  return { declared: modelsDeclared, models: Array.from(collected) };
+  return String(error ?? 'unknown error');
 }
 
-function normalizeClassifier(input?: VirtualRouterClassifierConfig): VirtualRouterClassifierConfig {
-  const normalized = asRecord(input) as VirtualRouterClassifierConfig;
-  return {
-    longContextThresholdTokens:
-      typeof normalized.longContextThresholdTokens === 'number'
-        ? normalized.longContextThresholdTokens
-        : DEFAULT_CLASSIFIER.longContextThresholdTokens,
-    thinkingKeywords: normalizeStringArray(normalized.thinkingKeywords, DEFAULT_CLASSIFIER.thinkingKeywords),
-    codingKeywords: normalizeStringArray(normalized.codingKeywords, DEFAULT_CLASSIFIER.codingKeywords),
-    backgroundKeywords: normalizeStringArray(normalized.backgroundKeywords, DEFAULT_CLASSIFIER.backgroundKeywords)
-  };
+function parseVirtualRouterNativeError(error: unknown): VirtualRouterError | null {
+  const message = extractNativeErrorMessage(error);
+  if (!message) return null;
+  const normalized = message.startsWith('Error:') ? message.replace(/^Error:\s*/, '') : message;
+  if (!normalized.startsWith(VIRTUAL_ROUTER_ERROR_PREFIX)) {
+    return null;
+  }
+  const remainder = normalized.slice(VIRTUAL_ROUTER_ERROR_PREFIX.length);
+  const index = remainder.indexOf(':');
+  if (index <= 0) return null;
+  const code = remainder.slice(0, index);
+  const detail = remainder.slice(index + 1).trim() || 'Virtual router error';
+  if (!Object.values(VirtualRouterErrorCode).includes(code as VirtualRouterErrorCode)) {
+    return null;
+  }
+  return new VirtualRouterError(detail, code as VirtualRouterErrorCode);
 }
 
-function normalizeStringArray(value: unknown, fallback: string[]): string[] {
-  if (!Array.isArray(value)) {
-    return [...fallback];
+function bootstrapConfigMetaWithNative(
+  section: Record<string, unknown>,
+  routingSource: Record<string, unknown>
+): NativeBootstrapConfigMeta {
+  const fn = requireNativeBootstrapConfigFunction('bootstrapVirtualRouterConfigMetaJson');
+  let raw: unknown;
+  try {
+    raw = fn(JSON.stringify(section), JSON.stringify(routingSource));
+  } catch (error) {
+    const virtualRouterError = parseVirtualRouterNativeError(error);
+    if (virtualRouterError) throw virtualRouterError;
+    throw error;
   }
-  const normalized = value.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean);
-  return normalized.length ? normalized : [...fallback];
-}
-
-function normalizeLoadBalancing(input: unknown): LoadBalancingPolicy | undefined {
-  if (!input || typeof input !== 'object') return undefined;
-  const record = input as Record<string, unknown>;
-  const strategyRaw = typeof record.strategy === 'string' ? record.strategy.trim().toLowerCase() : '';
-  const weightsRaw = asRecord(record.weights);
-  const weightsEntries: Record<string, number> = {};
-  for (const [key, value] of Object.entries(weightsRaw)) {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      weightsEntries[key] = value;
-    }
+  const returnedVirtualRouterError = parseVirtualRouterNativeError(raw);
+  if (returnedVirtualRouterError) {
+    throw returnedVirtualRouterError;
   }
-  const healthWeightedRaw = asRecord(record.healthWeighted);
-  const healthWeighted =
-    Object.keys(healthWeightedRaw).length > 0
-      ? {
-          ...(typeof healthWeightedRaw.enabled === 'boolean' ? { enabled: healthWeightedRaw.enabled } : {}),
-          ...(typeof healthWeightedRaw.recoverToBestOnRetry === 'boolean'
-            ? { recoverToBestOnRetry: healthWeightedRaw.recoverToBestOnRetry }
-            : {}),
-          ...(typeof healthWeightedRaw.baseWeight === 'number' && Number.isFinite(healthWeightedRaw.baseWeight)
-            ? { baseWeight: healthWeightedRaw.baseWeight }
-            : {}),
-          ...(typeof healthWeightedRaw.minMultiplier === 'number' && Number.isFinite(healthWeightedRaw.minMultiplier)
-            ? { minMultiplier: healthWeightedRaw.minMultiplier }
-            : {}),
-          ...(typeof healthWeightedRaw.beta === 'number' && Number.isFinite(healthWeightedRaw.beta)
-            ? { beta: healthWeightedRaw.beta }
-            : {}),
-          ...(typeof healthWeightedRaw.halfLifeMs === 'number' && Number.isFinite(healthWeightedRaw.halfLifeMs)
-            ? { halfLifeMs: healthWeightedRaw.halfLifeMs }
-            : {})
-        }
-      : undefined;
-
-  const contextWeightedRaw = asRecord((record as any).contextWeighted);
-  const contextWeighted =
-    Object.keys(contextWeightedRaw).length > 0
-      ? {
-          ...(typeof contextWeightedRaw.enabled === 'boolean' ? { enabled: contextWeightedRaw.enabled } : {}),
-          ...(typeof contextWeightedRaw.clientCapTokens === 'number' && Number.isFinite(contextWeightedRaw.clientCapTokens)
-            ? { clientCapTokens: contextWeightedRaw.clientCapTokens }
-            : {}),
-          ...(typeof contextWeightedRaw.gamma === 'number' && Number.isFinite(contextWeightedRaw.gamma)
-            ? { gamma: contextWeightedRaw.gamma }
-            : {}),
-          ...(typeof contextWeightedRaw.maxMultiplier === 'number' && Number.isFinite(contextWeightedRaw.maxMultiplier)
-            ? { maxMultiplier: contextWeightedRaw.maxMultiplier }
-            : {})
-        }
-      : undefined;
-
-  const aliasSelection = normalizeAliasSelection(record.aliasSelection);
-
-  const hasNonStrategyConfig =
-    Object.keys(weightsEntries).length > 0 ||
-    Boolean(healthWeighted) ||
-    Boolean(contextWeighted) ||
-    Boolean(aliasSelection);
-  if (!strategyRaw && !hasNonStrategyConfig) {
-    return undefined;
+  if (typeof raw !== 'string' || !raw) {
+    throw new VirtualRouterError(
+      'Virtual router native config bootstrap returned empty payload',
+      VirtualRouterErrorCode.CONFIG_ERROR
+    );
   }
-
-  const strategy: LoadBalancingPolicy['strategy'] =
-    strategyRaw === 'weighted' || strategyRaw === 'sticky' ? strategyRaw : 'round-robin';
-
-  return {
-    strategy,
-    ...(Object.keys(weightsEntries).length ? { weights: weightsEntries } : {}),
-    ...(aliasSelection ? { aliasSelection } : {}),
-    ...(healthWeighted ? { healthWeighted } : {}),
-    ...(contextWeighted ? { contextWeighted } : {})
-  };
-}
-
-function normalizeAliasSelection(raw: unknown): AliasSelectionConfig | undefined {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return undefined;
+  try {
+    return JSON.parse(raw) as NativeBootstrapConfigMeta;
+  } catch {
+    throw new VirtualRouterError(
+      'Virtual router native config bootstrap returned invalid payload',
+      VirtualRouterErrorCode.CONFIG_ERROR
+    );
   }
-  const record = raw as Record<string, unknown>;
-  const enabled = typeof record.enabled === 'boolean' ? record.enabled : undefined;
-  const defaultStrategy = coerceAliasSelectionStrategy(record.defaultStrategy);
-  const sessionLeaseCooldownMs =
-    typeof record.sessionLeaseCooldownMs === 'number' && Number.isFinite(record.sessionLeaseCooldownMs)
-      ? Math.max(0, Math.floor(record.sessionLeaseCooldownMs))
-      : typeof (record as any).sessionLease_cooldown_ms === 'number' &&
-          Number.isFinite((record as any).sessionLease_cooldown_ms)
-        ? Math.max(0, Math.floor((record as any).sessionLease_cooldown_ms))
-        : undefined;
-  const antigravitySessionBindingRaw =
-    typeof record.antigravitySessionBinding === 'string'
-      ? record.antigravitySessionBinding.trim().toLowerCase()
-      : typeof (record as any).antigravity_session_binding === 'string'
-        ? String((record as any).antigravity_session_binding).trim().toLowerCase()
-        : '';
-  const antigravitySessionBinding =
-    antigravitySessionBindingRaw === 'strict'
-      ? 'strict'
-      : antigravitySessionBindingRaw === 'lease'
-        ? 'lease'
-        : undefined;
-  const providersRaw = asRecord(record.providers);
-  const providers: Record<string, AliasSelectionStrategy> = {};
-  for (const [providerId, value] of Object.entries(providersRaw)) {
-    const strategy = coerceAliasSelectionStrategy(value);
-    if (strategy) {
-      providers[providerId] = strategy;
-    }
-  }
-  const out: AliasSelectionConfig = {
-    ...(enabled !== undefined ? { enabled } : {}),
-    ...(defaultStrategy ? { defaultStrategy } : {}),
-    ...(sessionLeaseCooldownMs !== undefined ? { sessionLeaseCooldownMs } : {}),
-    ...(antigravitySessionBinding ? { antigravitySessionBinding } : {}),
-    ...(Object.keys(providers).length ? { providers } : {})
-  };
-  return Object.keys(out).length ? out : undefined;
-}
-
-function coerceAliasSelectionStrategy(value: unknown): AliasSelectionStrategy | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) {
-    return undefined;
-  }
-  if (normalized === 'none') return 'none';
-  if (normalized === 'sticky-queue' || normalized === 'sticky_queue' || normalized === 'stickyqueue') {
-    return 'sticky-queue';
-  }
-  return undefined;
 }

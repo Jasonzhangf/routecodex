@@ -1224,4 +1224,52 @@ pub fn normalizeReasoningInOpenAIPayloadJson(input_json: String) -> NapiResult<S
     hub_bridge_actions::normalize_reasoning_in_openai_payload_json(input_json)
 }
 
+#[napi(js_name = "bootstrapVirtualRouterRoutingJson")]
+pub fn bootstrap_virtual_router_routing_json_bridge(
+    routing_json: String,
+    alias_index_json: String,
+    model_index_json: String,
+) -> NapiResult<String> {
+    virtual_router_engine::routing::bootstrap_virtual_router_routing_json(
+        routing_json,
+        alias_index_json,
+        model_index_json,
+    )
+}
+
+#[napi(js_name = "bootstrapVirtualRouterProvidersJson")]
+pub fn bootstrap_virtual_router_providers_json_bridge(
+    providers_json: String,
+) -> NapiResult<String> {
+    virtual_router_engine::provider_bootstrap::bootstrap_virtual_router_providers_json(
+        providers_json,
+    )
+}
+
+#[napi(js_name = "bootstrapVirtualRouterProviderProfilesJson")]
+pub fn bootstrap_virtual_router_provider_profiles_json_bridge(
+    routed_target_keys_json: String,
+    alias_index_json: String,
+    model_index_json: String,
+    runtime_entries_json: String,
+) -> NapiResult<String> {
+    virtual_router_engine::provider_bootstrap::bootstrap_virtual_router_provider_profiles_json(
+        routed_target_keys_json,
+        alias_index_json,
+        model_index_json,
+        runtime_entries_json,
+    )
+}
+
+#[napi(js_name = "bootstrapVirtualRouterConfigMetaJson")]
+pub fn bootstrap_virtual_router_config_meta_json_bridge(
+    section_json: String,
+    routing_source_json: String,
+) -> NapiResult<String> {
+    virtual_router_engine::config_bootstrap::bootstrap_virtual_router_config_meta_json(
+        section_json,
+        routing_source_json,
+    )
+}
+
 mod hub_req_inbound_unified_fastpath;

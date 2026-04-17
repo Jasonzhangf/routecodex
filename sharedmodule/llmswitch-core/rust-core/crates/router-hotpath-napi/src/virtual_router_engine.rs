@@ -1,4 +1,5 @@
 mod classifier;
+pub(crate) mod config_bootstrap;
 mod engine;
 mod error;
 mod features;
@@ -8,9 +9,10 @@ pub(crate) mod instructions;
 mod load_balancer;
 mod message_utils;
 mod napi_proxy;
+pub(crate) mod provider_bootstrap;
 mod provider_registry;
 mod quota;
-mod routing;
+pub(crate) mod routing;
 mod routing_state_store;
 mod time_utils;
 
