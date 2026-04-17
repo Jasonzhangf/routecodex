@@ -98,6 +98,19 @@ type CamoufoxFingerprintSnapshot = {
   platform?: string;
 };
 
+function logDeepSeekAccountNonBlocking(
+  operation: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  const detailPairs = Object.entries(details || {})
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(' ');
+  const suffix = detailPairs ? ` ${detailPairs}` : '';
+  console.warn(`[DeepSeekAccount] ${operation} failed (non-blocking): ${reason}${suffix}`);
+}
+
 function normalizeString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -124,10 +137,11 @@ function createDeepSeekAuthError(params: {
   return error;
 }
 
-function tryParseJson(raw: string): unknown {
+function tryParseJson(raw: string, context?: string): unknown {
   try {
     return JSON.parse(raw);
-  } catch {
+  } catch (error) {
+    logDeepSeekAccountNonBlocking('tryParseJson', error, { context: context || 'unknown' });
     return undefined;
   }
 }
@@ -252,7 +266,8 @@ function parseCamoufoxConfig(payload: unknown): CamoufoxFingerprintSnapshot | nu
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawConfig);
-  } catch {
+  } catch (error) {
+    logDeepSeekAccountNonBlocking('parseCamoufoxConfig', error, { reason: 'CAMOU_CONFIG_1' });
     return null;
   }
   if (!isRecord(parsed)) {
@@ -316,7 +331,12 @@ async function loadCamoufoxFingerprint(providerFamily: string, alias: string): P
     const raw = await fs.readFile(filePath, 'utf8');
     const payload = raw.trim() ? JSON.parse(raw) : null;
     return parseCamoufoxConfig(payload);
-  } catch {
+  } catch (error) {
+    logDeepSeekAccountNonBlocking('loadCamoufoxFingerprint', error, {
+      providerFamily,
+      alias,
+      filePath
+    });
     return null;
   }
 }
@@ -377,9 +397,10 @@ function parseCredentialNode(raw: unknown): DeepSeekCredential | null {
 async function resolveCredentialFromFile(filePath: string): Promise<DeepSeekCredential | null> {
   try {
     const raw = await fs.readFile(filePath, 'utf8');
-    const parsed = tryParseJson(raw);
+    const parsed = tryParseJson(raw, `credentialFile:${filePath}`);
     return parseCredentialNode(parsed);
-  } catch {
+  } catch (error) {
+    logDeepSeekAccountNonBlocking('resolveCredentialFromFile', error, { filePath });
     return null;
   }
 }
@@ -416,7 +437,7 @@ async function resolveDeepSeekCredential(
   const indexFilePath = path.join(authDir, 'deepseek-account-credentials.json');
   try {
     const raw = await fs.readFile(indexFilePath, 'utf8');
-    const parsed = tryParseJson(raw);
+    const parsed = tryParseJson(raw, `credentialIndex:${indexFilePath}`);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const node = parsed as Record<string, unknown>;
       const accountsNode = node.accounts;
@@ -433,8 +454,11 @@ async function resolveDeepSeekCredential(
         return aliasCredential;
       }
     }
-  } catch {
-    // ignore index file failures
+  } catch (error) {
+    logDeepSeekAccountNonBlocking('resolveDeepSeekCredential.indexFile', error, {
+      alias,
+      indexFilePath
+    });
   }
 
   return null;
@@ -443,7 +467,7 @@ async function resolveDeepSeekCredential(
 async function readTokenFileSnapshot(tokenFilePath: string): Promise<TokenFileSnapshot> {
   try {
     const raw = await fs.readFile(tokenFilePath, 'utf8');
-    const parsed = tryParseJson(raw);
+    const parsed = tryParseJson(raw, `tokenFile:${tokenFilePath}`);
     if (parsed !== undefined) {
       if (isRecord(parsed)) {
         return {
@@ -463,7 +487,8 @@ async function readTokenFileSnapshot(tokenFilePath: string): Promise<TokenFileSn
       credential: null,
       sourceObject: null
     };
-  } catch {
+  } catch (error) {
+    logDeepSeekAccountNonBlocking('readTokenFileSnapshot', error, { tokenFilePath });
     return {
       token: undefined,
       credential: null,
@@ -519,8 +544,11 @@ async function runShellCommand(command: string, stdin: string, timeoutMs: number
     const timer = setTimeout(() => {
       try {
         child.kill('SIGKILL');
-      } catch {
-        // ignore
+      } catch (error) {
+        logDeepSeekAccountNonBlocking('runShellCommand.killOnTimeout', error, {
+          command,
+          timeoutMs
+        });
       }
       reject(new Error(`DeepSeek token helper timed out after ${timeoutMs}ms`));
     }, timeoutMs);
@@ -802,3 +830,10 @@ export async function ensureDeepSeekAccountToken(
     }
   });
 }
+
+export const __deepSeekAccountTokenAcquirerTestables = {
+  loadCamoufoxFingerprint,
+  readTokenFileSnapshot,
+  resolveCredentialFromFile,
+  tryParseJson
+};

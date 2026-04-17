@@ -263,4 +263,53 @@ describe('cli heartbeat command', () => {
     expect(payload.ok).toBe(true);
     expect(payload.events[0].reason).toBe('tmux_session_not_found');
   });
+
+  it('logs config load failures instead of swallowing them silently', async () => {
+    const warnings: string[] = [];
+    const printed: string[] = [];
+
+    const program = new Command();
+    createHeartbeatCommand(program, {
+      isDevPackage: true,
+      defaultDevPort: 5555,
+      logger: {
+        info: () => {},
+        warning: (msg) => warnings.push(msg),
+        success: () => {},
+        error: () => {}
+      },
+      log: (line) => printed.push(line),
+      loadConfig: async () => {
+        throw new Error('config boom');
+      },
+      fetch: (async (url: string) => {
+        if (url === 'http://127.0.0.1:5555/health') {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ status: 'ok', ready: true }),
+            text: async () => JSON.stringify({ status: 'ok', ready: true })
+          } as any;
+        }
+        if (url === 'http://127.0.0.1:5555/daemon/heartbeat/list') {
+          return {
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({ ok: true, states: [] })
+          } as any;
+        }
+        throw new Error(`unexpected url: ${url}`);
+      }) as any,
+      env: {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'heartbeat', 'list', '--json'], { from: 'node' });
+
+    expect(warnings.join('\n')).toContain('stage=config');
+    expect(warnings.join('\n')).toContain('operation=load_config');
+    expect(JSON.parse(printed.join('\n')).ok).toBe(true);
+  });
 });

@@ -38,8 +38,66 @@ type HeartbeatCommandOptions = {
   limit?: string;
 };
 
+const NON_BLOCKING_WARN_THROTTLE_MS = 60_000;
+const nonBlockingWarnByStage = new Map<string, number>();
+
 function normalizeString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error ?? 'unknown');
+  }
+}
+
+function shouldLogNonBlockingStage(stage: string): boolean {
+  const now = Date.now();
+  const lastAt = nonBlockingWarnByStage.get(stage) ?? 0;
+  if (now - lastAt < NON_BLOCKING_WARN_THROTTLE_MS) {
+    return false;
+  }
+  nonBlockingWarnByStage.set(stage, now);
+  return true;
+}
+
+function logHeartbeatNonBlocking(
+  ctx: HeartbeatCommandContext,
+  stage: string,
+  operation: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  if (!shouldLogNonBlockingStage(stage)) {
+    return;
+  }
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    ctx.logger.warning(
+      `[heartbeat-command] stage=${stage} operation=${operation} failed (non-blocking): ${formatUnknownError(error)}${suffix}`
+    );
+  } catch {
+    void 0;
+  }
+}
+
+async function loadConfigBestEffort(
+  ctx: HeartbeatCommandContext,
+  explicitPath?: string
+): Promise<LoadedRouteCodexConfig | null> {
+  try {
+    return await ctx.loadConfig(explicitPath);
+  } catch (error) {
+    logHeartbeatNonBlocking(ctx, 'config', 'load_config', error, {
+      configPath: explicitPath || '(default)'
+    });
+    return null;
+  }
 }
 
 function resolveConfigApiKeyValue(raw: unknown, env: NodeJS.ProcessEnv): string {
@@ -105,11 +163,7 @@ async function resolveBaseUrl(ctx: HeartbeatCommandContext, options: HeartbeatCo
   }
 
   let loaded: LoadedRouteCodexConfig | null = null;
-  try {
-    loaded = await ctx.loadConfig(typeof options.config === 'string' ? options.config : undefined);
-  } catch {
-    loaded = null;
-  }
+  loaded = await loadConfigBestEffort(ctx, typeof options.config === 'string' ? options.config : undefined);
 
   const configPick = readPortHostFromConfig(loaded);
   const host = normalizeConnectHost(options.host || configPick.host || LOCAL_HOSTS.LOCALHOST, LOCAL_HOSTS.IPV4);
@@ -172,11 +226,7 @@ async function probeServerHealth(
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      try {
-        controller.abort();
-      } catch {
-        // ignore
-      }
+      controller.abort();
     }, 800);
     const response = await ctx.fetch(`http://${host}:${port}/health`, {
       method: 'GET',
@@ -184,20 +234,35 @@ async function probeServerHealth(
     });
     clearTimeout(timer);
     if (!response.ok) {
+      logHeartbeatNonBlocking(ctx, 'health_probe', 'probe_server_health', `bad_status:${response.status}`, {
+        host,
+        port,
+        status: response.status
+      });
       return false;
     }
-    const payload = await response.json().catch(() => null);
+    let payload: any = null;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      logHeartbeatNonBlocking(ctx, 'health_probe', 'parse_health_json', error, { host, port });
+      payload = null;
+    }
     const status = typeof payload?.status === 'string' ? payload.status.toLowerCase() : '';
     return Boolean(
       payload &&
       (status === 'healthy' || status === 'ready' || status === 'ok' || payload?.ready === true || payload?.pipelineReady === true)
     );
-  } catch {
+  } catch (error) {
+    logHeartbeatNonBlocking(ctx, 'health_probe', 'probe_server_health', error, { host, port });
     return false;
   }
 }
 
-async function collectCandidatePortsFromUserDir(userDir: string): Promise<number[]> {
+async function collectCandidatePortsFromUserDir(
+  ctx: HeartbeatCommandContext,
+  userDir: string
+): Promise<number[]> {
   const out = new Set<number>();
   try {
     const entries = await fs.readdir(userDir, { withFileTypes: true });
@@ -214,8 +279,14 @@ async function collectCandidatePortsFromUserDir(userDir: string): Promise<number
         out.add(parsed);
       }
     }
-  } catch {
-    // ignore
+  } catch (error) {
+    logHeartbeatNonBlocking(
+      ctx,
+      'port_discovery',
+      'read_server_pid_dir',
+      error,
+      { userDir }
+    );
   }
 
   try {
@@ -234,8 +305,14 @@ async function collectCandidatePortsFromUserDir(userDir: string): Promise<number
         out.add(parsed);
       }
     }
-  } catch {
-    // ignore
+  } catch (error) {
+    logHeartbeatNonBlocking(
+      ctx,
+      'port_discovery',
+      'read_runtime_lifecycle_dir',
+      error,
+      { lifecycleDir: path.join(userDir, 'state', 'runtime-lifecycle') }
+    );
   }
 
   return Array.from(out);
@@ -247,7 +324,7 @@ async function resolveDiscoveredActiveServerPort(
   excludePorts?: Set<number>
 ): Promise<number | undefined> {
   const userDir = resolveRccUserDir();
-  const candidates = await collectCandidatePortsFromUserDir(userDir);
+  const candidates = await collectCandidatePortsFromUserDir(ctx, userDir);
   for (const port of candidates) {
     if (excludePorts?.has(port)) {
       continue;
@@ -274,7 +351,13 @@ async function callJson(
     },
     ...(body ? { body: JSON.stringify(body) } : {})
   });
-  const text = await response.text().catch(() => '');
+  let text = '';
+  try {
+    text = await response.text();
+  } catch (error) {
+    logHeartbeatNonBlocking(ctx, 'http_call', 'read_response_text', error, { url, method });
+    text = '';
+  }
   const data = text ? JSON.parse(text) : null;
   if (!response.ok) {
     throw new Error(`heartbeat request failed (${response.status}): ${text}`);
@@ -316,7 +399,7 @@ export function createHeartbeatCommand(program: Command, ctx: HeartbeatCommandCo
   const command = program.command('heartbeat').description('Manage tmux heartbeat state and trigger heartbeat injections');
 
   base(command.command('list').description('List all heartbeat states')).action(async (options: HeartbeatCommandOptions) => {
-    const loaded = await ctx.loadConfig(typeof options.config === 'string' ? options.config : undefined).catch(() => null);
+    const loaded = await loadConfigBestEffort(ctx, typeof options.config === 'string' ? options.config : undefined);
     const baseUrl = await resolveBaseUrl(ctx, options);
     const apiKey = resolveApiKeyFromConfig(ctx, loaded);
     const payload = await callJson(ctx, `${baseUrl}/daemon/heartbeat/list`, 'GET', apiKey);
@@ -324,7 +407,7 @@ export function createHeartbeatCommand(program: Command, ctx: HeartbeatCommandCo
   });
 
   base(command.command('status').description('Show one heartbeat state')).action(async (options: HeartbeatCommandOptions) => {
-    const loaded = await ctx.loadConfig(typeof options.config === 'string' ? options.config : undefined).catch(() => null);
+    const loaded = await loadConfigBestEffort(ctx, typeof options.config === 'string' ? options.config : undefined);
     const baseUrl = await resolveBaseUrl(ctx, options);
     const apiKey = resolveApiKeyFromConfig(ctx, loaded);
     const params = new URLSearchParams();
@@ -339,7 +422,7 @@ export function createHeartbeatCommand(program: Command, ctx: HeartbeatCommandCo
   });
 
   base(command.command('on').description('Enable heartbeat and attempt immediate trigger')).action(async (options: HeartbeatCommandOptions) => {
-    const loaded = await ctx.loadConfig(typeof options.config === 'string' ? options.config : undefined).catch(() => null);
+    const loaded = await loadConfigBestEffort(ctx, typeof options.config === 'string' ? options.config : undefined);
     const baseUrl = await resolveBaseUrl(ctx, options);
     const apiKey = resolveApiKeyFromConfig(ctx, loaded);
     const payload = await callJson(ctx, `${baseUrl}/daemon/heartbeat`, 'POST', apiKey, {
@@ -350,7 +433,7 @@ export function createHeartbeatCommand(program: Command, ctx: HeartbeatCommandCo
   });
 
   base(command.command('off').description('Disable heartbeat')).action(async (options: HeartbeatCommandOptions) => {
-    const loaded = await ctx.loadConfig(typeof options.config === 'string' ? options.config : undefined).catch(() => null);
+    const loaded = await loadConfigBestEffort(ctx, typeof options.config === 'string' ? options.config : undefined);
     const baseUrl = await resolveBaseUrl(ctx, options);
     const apiKey = resolveApiKeyFromConfig(ctx, loaded);
     const payload = await callJson(ctx, `${baseUrl}/daemon/heartbeat`, 'POST', apiKey, {
@@ -366,7 +449,7 @@ export function createHeartbeatCommand(program: Command, ctx: HeartbeatCommandCo
       .description('Trigger one heartbeat dispatch immediately')
       .option('--dry-run', 'Evaluate gating without injecting')
   ).action(async (options: HeartbeatCommandOptions) => {
-    const loaded = await ctx.loadConfig(typeof options.config === 'string' ? options.config : undefined).catch(() => null);
+    const loaded = await loadConfigBestEffort(ctx, typeof options.config === 'string' ? options.config : undefined);
     const baseUrl = await resolveBaseUrl(ctx, options);
     const apiKey = resolveApiKeyFromConfig(ctx, loaded);
     const payload = await callJson(ctx, `${baseUrl}/daemon/heartbeat`, 'POST', apiKey, {
@@ -383,7 +466,7 @@ export function createHeartbeatCommand(program: Command, ctx: HeartbeatCommandCo
       .description('Show heartbeat execution history for a tmux session')
       .option('--limit <limit>', 'Max number of records (default: 100)')
   ).action(async (options: HeartbeatCommandOptions) => {
-    const loaded = await ctx.loadConfig(typeof options.config === 'string' ? options.config : undefined).catch(() => null);
+    const loaded = await loadConfigBestEffort(ctx, typeof options.config === 'string' ? options.config : undefined);
     const baseUrl = await resolveBaseUrl(ctx, options);
     const apiKey = resolveApiKeyFromConfig(ctx, loaded);
     const params = new URLSearchParams();

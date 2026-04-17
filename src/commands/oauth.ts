@@ -6,6 +6,56 @@ import {
 } from '../token-daemon/index.js';
 import { clearAntigravityReauthRequired, readAntigravityReauthRequiredState } from '../providers/auth/antigravity-reauth-state.js';
 
+const NON_BLOCKING_WARN_THROTTLE_MS = 60_000;
+const nonBlockingWarnByStage = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error ?? 'unknown');
+  }
+}
+
+function shouldLogNonBlockingStage(stage: string): boolean {
+  const now = Date.now();
+  const lastAt = nonBlockingWarnByStage.get(stage) ?? 0;
+  if (now - lastAt < NON_BLOCKING_WARN_THROTTLE_MS) {
+    return false;
+  }
+  nonBlockingWarnByStage.set(stage, now);
+  return true;
+}
+
+function logOauthNonBlocking(
+  stage: string,
+  operation: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  if (!shouldLogNonBlockingStage(stage)) {
+    return;
+  }
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[oauth-command] stage=${stage} operation=${operation} failed (non-blocking): ${formatUnknownError(error)}${suffix}`);
+  } catch {
+    void 0;
+  }
+}
+
+async function findTokenBySelectorBestEffort(selector: string): Promise<any | null> {
+  try {
+    return await TokenDaemon.findTokenBySelector(selector);
+  } catch (error) {
+    logOauthNonBlocking('selector_resolution', 'find_token_by_selector', error, { selector });
+    return null;
+  }
+}
+
 async function safeInteractiveRefresh(
   selector: string,
   options: { force?: boolean; mode?: 'manual' | 'auto'; noAutoFallback?: boolean }
@@ -21,10 +71,13 @@ async function safeInteractiveRefresh(
   }
 }
 
-function resolveAutoModeByProvider(provider?: string | null): 'gemini' | 'qwen' | 'antigravity' | null {
+function resolveAutoModeByProvider(provider?: string | null): 'gemini' | 'qwen' | 'antigravity' | 'iflow' | null {
   const raw = String(provider || '').trim().toLowerCase();
   if (!raw) {
     return null;
+  }
+  if (raw === 'iflow') {
+    return 'iflow';
   }
   if (raw === 'gemini-cli') {
     return 'gemini';
@@ -79,7 +132,7 @@ export function createOauthCommand(): Command {
         process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
       }
       try {
-        const token = await TokenDaemon.findTokenBySelector(first).catch(() => null);
+        const token = await findTokenBySelectorBestEffort(first);
         const autoMode = resolveAutoModeByProvider(token?.provider);
         if (autoMode) {
           process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = autoMode;
@@ -196,7 +249,7 @@ export function createOauthCommand(): Command {
     .option('--headful', 'Open Camoufox in headed mode (alias of --dev)')
     .option('--account-text <text>', 'Preferred Gemini account display text to auto-select')
     .action(async (selector: string, options: { dev?: boolean; headful?: boolean; accountText?: string }) => {
-      const token = await TokenDaemon.findTokenBySelector(selector).catch(() => null);
+      const token = await findTokenBySelectorBestEffort(selector);
       if (token?.provider === 'antigravity') {
         // User often calls gemini-auto with an antigravity token file; route to the correct mode.
         console.warn(
@@ -301,6 +354,49 @@ export function createOauthCommand(): Command {
     });
 
   cmd
+    .command('iflow-auto')
+    .description('Trigger IFlow OAuth re-auth using Camoufox automation (auto confirm on authorize page)')
+    .argument(
+      '<selector>',
+      'Token selector: file basename, full path, or provider id (e.g. "iflow-oauth-1-default.json" or "iflow")'
+    )
+    .option('--dev', 'Run Camoufox automation in headed debug mode (default headless)')
+    .option('--headful', 'Open Camoufox in headed mode (alias of --dev)')
+    .action(async (selector: string, options: { dev?: boolean; headful?: boolean }) => {
+      const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
+      const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+      process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
+      process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'iflow';
+      process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
+      if (options?.dev || options?.headful) {
+        process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+      } else {
+        delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+      }
+      try {
+        await safeInteractiveRefresh(selector, { force: true, mode: 'auto', noAutoFallback: true });
+      } finally {
+        if (prevBrowser === undefined) {
+          delete process.env.ROUTECODEX_OAUTH_BROWSER;
+        } else {
+          process.env.ROUTECODEX_OAUTH_BROWSER = prevBrowser;
+        }
+        if (prevAutoMode === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
+        }
+        if (prevDevMode === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
+        }
+        delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+      }
+    });
+
+  cmd
     .command('qwen-auto')
     .description('Trigger Qwen OAuth re-auth using Camoufox automation (auto confirm on authorize page)')
     .argument(
@@ -354,7 +450,7 @@ export function createOauthCommand(): Command {
     .option('--headful', 'Open Camoufox in headed mode (alias of --dev)')
     .option('--account-text <text>', 'Preferred Antigravity account display text/email to auto-select')
     .action(async (selector: string, options: { dev?: boolean; headful?: boolean; accountText?: string }) => {
-      const token = await TokenDaemon.findTokenBySelector(selector).catch(() => null);
+      const token = await findTokenBySelectorBestEffort(selector);
       const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
       const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
       const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;

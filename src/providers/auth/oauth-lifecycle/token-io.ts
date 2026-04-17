@@ -12,6 +12,19 @@ import {
   hasNonEmptyString
 } from './token-helpers.js';
 
+function logOAuthTokenIoNonBlocking(
+  operation: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  const detailPairs = Object.entries(details || {})
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(' ');
+  const suffix = detailPairs ? ` ${detailPairs}` : '';
+  logOAuthDebug(`[OAuth] ${operation} failed (non-blocking): ${reason}${suffix}`);
+}
+
 export function normalizeGeminiCliAccountToken(token: UnknownObject): StoredOAuthToken | null {
   const raw = token as { token?: UnknownObject };
   const tokenNode = raw.token;
@@ -81,7 +94,8 @@ export async function readTokenFromFile(file: string): Promise<StoredOAuthToken 
   try {
     const txt = await fs.readFile(file, 'utf-8');
     return sanitizeToken(JSON.parse(txt) as UnknownObject);
-  } catch {
+  } catch (error) {
+    logOAuthTokenIoNonBlocking('token.read', error, { file });
     return null;
   }
 }
@@ -105,9 +119,7 @@ export async function backupTokenFile(file: string): Promise<string | null> {
     logOAuthDebug(`[OAuth] token.backup: ${backup}`);
     return backup;
   } catch (error) {
-    logOAuthDebug(
-      `[OAuth] token.backup failed (${file}): ${error instanceof Error ? error.message : String(error)}`
-    );
+    logOAuthTokenIoNonBlocking('token.backup', error, { file, backup });
     return null;
   }
 }
@@ -120,14 +132,12 @@ export async function restoreTokenFileFromBackup(backupFile: string | null, targ
     await fs.copyFile(backupFile, target);
     logOAuthDebug(`[OAuth] token.restore: ${target}`);
   } catch (error) {
-    logOAuthDebug(
-      `[OAuth] token.restore failed (${target}): ${error instanceof Error ? error.message : String(error)}`
-    );
+    logOAuthTokenIoNonBlocking('token.restore', error, { target, backupFile });
   } finally {
     try {
       await fs.unlink(backupFile);
-    } catch {
-      // ignore cleanup failure
+    } catch (error) {
+      logOAuthTokenIoNonBlocking('token.restore.cleanupBackup', error, { backupFile, target });
     }
   }
 }
@@ -138,8 +148,8 @@ export async function discardBackupFile(backupFile: string | null): Promise<void
   }
   try {
     await fs.unlink(backupFile);
-  } catch {
-    // ignore
+  } catch (error) {
+    logOAuthTokenIoNonBlocking('token.discardBackup', error, { backupFile });
   }
 }
 
@@ -165,7 +175,8 @@ export async function readRawTokenFile(file: string): Promise<UnknownObject | nu
     const txt = await fs.readFile(file, 'utf-8');
     const parsed = JSON.parse(txt) as UnknownObject;
     return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
+  } catch (error) {
+    logOAuthTokenIoNonBlocking('token.readRaw', error, { file });
     return null;
   }
 }

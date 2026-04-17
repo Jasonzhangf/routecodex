@@ -110,12 +110,20 @@ type OAuthStrategy = {
 
 const TOKEN_REFRESH_SKEW_MS = 60_000;
 
-function logOAuthLifecycleNonBlockingError(
+function logOAuthLifecycleNonBlocking(
   operation: string,
   error: unknown,
   details?: Record<string, unknown>,
-  options?: { warn?: boolean }
+  options?: { warn?: boolean; throttleKey?: string; throttleMs?: number }
 ): void {
+  const throttleKey = options?.throttleKey;
+  if (throttleKey) {
+    const throttleMs = options?.throttleMs ?? OAUTH_THROTTLE_WINDOW_MS;
+    if (shouldThrottle(throttleKey, throttleMs)) {
+      return;
+    }
+    updateThrottle(throttleKey);
+  }
   const reason = error instanceof Error ? error.message : String(error);
   const detailPairs = Object.entries(details || {})
     .map(([key, value]) => `${key}=${String(value)}`)
@@ -156,7 +164,7 @@ async function openGoogleAccountVerificationInCamoufox(args: {
       console.warn(`[OAuth] Google account verification opened in Camoufox (provider=${providerType} alias=${alias}).`);
     }
   } catch (error) {
-    logOAuthLifecycleNonBlockingError(
+    logOAuthLifecycleNonBlocking(
       'openGoogleAccountVerificationInCamoufox',
       error,
       { providerType, alias, url },
@@ -277,7 +285,7 @@ async function runInteractiveRepairWithAutoFallback(args: {
     try {
       tokenFilePath = resolveTokenFilePath(auth as ExtendedOAuthAuth, providerType);
     } catch (error) {
-      logOAuthLifecycleNonBlockingError(
+      logOAuthLifecycleNonBlocking(
         'runInteractiveRepairWithAutoFallback.resolveTokenFilePath',
         error,
         { providerType }
@@ -509,7 +517,7 @@ function logTokenSnapshot(providerType: string, token: StoredOAuthToken | null, 
       logOAuthDebug(`[OAuth] iflow endpoints: deviceCodeUrl=${String(endpoints.deviceCodeUrl)} tokenUrl=${String(endpoints.tokenUrl)}`);
     }
   } catch (error) {
-    logOAuthLifecycleNonBlockingError('logTokenSnapshot', error, { providerType });
+    logOAuthLifecycleNonBlocking('logTokenSnapshot', error, { providerType });
   }
 }
 
@@ -596,7 +604,7 @@ async function ensureGeminiCLIServicesEnabled(accessToken: string, projectId: st
             continue;
           }
         } catch (error) {
-          logOAuthLifecycleNonBlockingError(
+          logOAuthLifecycleNonBlocking(
             'ensureGeminiCLIServicesEnabled.parseCheckResponse',
             error,
             { service, projectId }
@@ -611,8 +619,10 @@ async function ensureGeminiCLIServicesEnabled(accessToken: string, projectId: st
         });
       }
     } catch (error) {
-      logOAuthDebug(
-        `[OAuth] Gemini CLI: failed to check service ${service} for project ${projectId} - ${error instanceof Error ? error.message : String(error)}`
+      logOAuthLifecycleNonBlocking(
+        'ensureGeminiCLIServicesEnabled.checkService',
+        error,
+        { service, projectId }
       );
       // best-effort; continue to try enable
     }
@@ -646,7 +656,7 @@ async function ensureGeminiCLIServicesEnabled(accessToken: string, projectId: st
         errMessage = parsed.error.message;
       }
     } catch (error) {
-      logOAuthLifecycleNonBlockingError(
+      logOAuthLifecycleNonBlocking(
         'ensureGeminiCLIServicesEnabled.parseEnableResponse',
         error,
         { service, projectId }
@@ -800,10 +810,18 @@ async function maybeEnrichToken(
       const msg = formatOAuthErrorMessage(error);
       // If userInfo endpoint is unavailable (404), treat access_token as api_key to avoid repeated lookups.
       if (/\bHTTP\s+404\b/i.test(msg) || /\bnot\s+found\b/i.test(msg)) {
-        logOAuthDebug('[OAuth] Qwen: userInfo endpoint unavailable (404); using access_token as api_key fallback');
+        logOAuthLifecycleNonBlocking(
+          'maybeEnrichToken.qwenUserInfo404Fallback',
+          error,
+          { tokenFilePath, fallback: 'access_token_as_api_key' }
+        );
         return mergeQwenTokenData(tokenData, { apiKey: accessToken }) as unknown as UnknownObject;
       }
-      logOAuthDebug(`[OAuth] Qwen: failed to fetch user info - ${msg}`);
+      logOAuthLifecycleNonBlocking(
+        'maybeEnrichToken.qwenUserInfo',
+        error,
+        { tokenFilePath, fallback: 'keep_token_data' }
+      );
       return tokenData;
     }
   }
@@ -946,7 +964,7 @@ function logOAuthSetup(
       );
     }
   } catch (error) {
-    logOAuthLifecycleNonBlockingError('logEnsureContext', error, { providerType, tokenFilePath });
+    logOAuthLifecycleNonBlocking('logEnsureContext', error, { providerType, tokenFilePath });
   }
 }
 
@@ -1035,7 +1053,7 @@ function readInteractiveOAuthLock(): InteractiveOAuthLockRecord | null {
       callbackPort: typeof node.callbackPort === 'number' ? node.callbackPort : undefined
     };
   } catch (error) {
-    logOAuthLifecycleNonBlockingError('readInteractiveOAuthLock', error, {
+    logOAuthLifecycleNonBlocking('readInteractiveOAuthLock', error, {
       lockFile: OAUTH_INTERACTIVE_LOCK_FILE
     });
     return null;
@@ -1060,7 +1078,13 @@ function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
+  } catch (error) {
+    logOAuthLifecycleNonBlocking(
+      'isProcessAlive',
+      error,
+      { pid },
+      { throttleKey: keyFor('interactive-oauth-process-alive', String(pid)) }
+    );
     return false;
   }
 }
@@ -1077,7 +1101,7 @@ async function forceReclaimInteractiveOAuthLock(lock: InteractiveOAuthLockRecord
     );
     return true;
   } catch (error) {
-    logOAuthLifecycleNonBlockingError('forceReclaimInteractiveOAuthLock', error, {
+    logOAuthLifecycleNonBlocking('forceReclaimInteractiveOAuthLock', error, {
       pid: lock.pid,
       providerType: lock.providerType,
       tokenFile: lock.tokenFile
@@ -1122,7 +1146,7 @@ async function acquireInteractiveOAuthLock(providerType: string, tokenFilePath: 
             fsSync.unlinkSync(OAUTH_INTERACTIVE_LOCK_FILE);
           }
         } catch (error) {
-          logOAuthLifecycleNonBlockingError('acquireInteractiveOAuthLock.release', error, {
+          logOAuthLifecycleNonBlocking('acquireInteractiveOAuthLock.release', error, {
             lockFile: OAUTH_INTERACTIVE_LOCK_FILE,
             providerType,
             tokenFile: current.tokenFile
@@ -1143,7 +1167,7 @@ async function acquireInteractiveOAuthLock(providerType: string, tokenFilePath: 
         try {
           await fs.unlink(OAUTH_INTERACTIVE_LOCK_FILE);
         } catch (error) {
-          logOAuthLifecycleNonBlockingError('acquireInteractiveOAuthLock.removeStaleEmptyLock', error, {
+          logOAuthLifecycleNonBlocking('acquireInteractiveOAuthLock.removeStaleEmptyLock', error, {
             lockFile: OAUTH_INTERACTIVE_LOCK_FILE,
             providerType,
             tokenFile: current.tokenFile
@@ -1155,7 +1179,7 @@ async function acquireInteractiveOAuthLock(providerType: string, tokenFilePath: 
         try {
           await fs.unlink(OAUTH_INTERACTIVE_LOCK_FILE);
         } catch (error) {
-          logOAuthLifecycleNonBlockingError('acquireInteractiveOAuthLock.removeDeadProcessLock', error, {
+          logOAuthLifecycleNonBlocking('acquireInteractiveOAuthLock.removeDeadProcessLock', error, {
             lockFile: OAUTH_INTERACTIVE_LOCK_FILE,
             stalePid: existing.pid,
             providerType: existing.providerType,
@@ -1200,7 +1224,7 @@ function readIflowAutoFailureState(): Record<string, IflowAutoFailureRecord> {
     }
     return parsed as Record<string, IflowAutoFailureRecord>;
   } catch (error) {
-    logOAuthLifecycleNonBlockingError('readIflowAutoFailureState', error, {
+    logOAuthLifecycleNonBlocking('readIflowAutoFailureState', error, {
       file: IFLOW_AUTO_FAILURE_FILE
     });
     return {};
@@ -1212,7 +1236,7 @@ function writeIflowAutoFailureState(state: Record<string, IflowAutoFailureRecord
     fsSync.mkdirSync(path.dirname(IFLOW_AUTO_FAILURE_FILE), { recursive: true });
     fsSync.writeFileSync(IFLOW_AUTO_FAILURE_FILE, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
   } catch (error) {
-    logOAuthLifecycleNonBlockingError(
+    logOAuthLifecycleNonBlocking(
       'writeIflowAutoFailureState',
       error,
       { file: IFLOW_AUTO_FAILURE_FILE },
@@ -1636,6 +1660,7 @@ export async function handleUpstreamInvalidOAuthToken(
   const pt = providerType.toLowerCase();
   const allowBlocking = options?.allowBlocking !== false;
   const ensureValid = options?.ensureValidOAuthToken ?? ensureValidOAuthToken;
+  let tokenFilePath: string | undefined;
   try {
     if (!shouldTriggerInteractiveOAuthRepair(providerType, upstreamError)) {
       return false;
@@ -1648,7 +1673,7 @@ export async function handleUpstreamInvalidOAuthToken(
           : String(upstreamError || '');
     const lower = msg.toLowerCase();
     const statusCode = extractStatusCode(upstreamError);
-    const tokenFilePath = resolveTokenFilePath(auth as ExtendedOAuthAuth, providerType);
+    tokenFilePath = resolveTokenFilePath(auth as ExtendedOAuthAuth, providerType);
     const cooldownReason: OAuthRepairCooldownReason =
       statusCode === 403 && isGoogleAccountVerificationRequiredMessage(lower) ? 'google_verify' : 'generic';
     const gate = await shouldSkipInteractiveOAuthRepair({
@@ -1755,9 +1780,10 @@ export async function handleUpstreamInvalidOAuthToken(
     });
     return true;
   } catch (error) {
-    logOAuthDebug(
-      `[OAuth] interactive repair flow failed (provider=${providerType}) - ${error instanceof Error ? error.message : String(error)}`
-    );
+    logOAuthLifecycleNonBlocking('interactiveRepairFlow', error, {
+      providerType,
+      tokenFilePath
+    });
     return false;
   }
 }
@@ -1825,11 +1851,14 @@ export function shouldTriggerInteractiveOAuthRepair(providerType: string, upstre
 }
 
 async function inferIflowClientCredsFromLog(): Promise<{ clientId?: string; clientSecret?: string } | null> {
+  const file = path.join(resolveRccAuthDir(), 'iflow-oauth.log');
   try {
-    const file = path.join(resolveRccAuthDir(), 'iflow-oauth.log');
     const txt = await fs.readFile(file, 'utf-8').catch((error) => {
-      logOAuthDebug(
-        `[OAuth] failed to read iflow oauth log for client creds inference (non-blocking) file=${file}: ${error instanceof Error ? error.message : String(error)}`
+      logOAuthLifecycleNonBlocking(
+        'inferIflowClientCredsFromLog.readFile',
+        error,
+        { file },
+        { throttleKey: keyFor('iflow-client-creds-log-read', file) }
       );
       return '';
     });
@@ -1854,15 +1883,23 @@ async function inferIflowClientCredsFromLog(): Promise<{ clientId?: string; clie
         if (id && secret) {
           return { clientId: id, clientSecret: secret };
         }
-      } catch {
-        // skip parse errors
+      } catch (error) {
+        logOAuthLifecycleNonBlocking(
+          'inferIflowClientCredsFromLog.parseLine',
+          error,
+          { file, line: i + 1 },
+          { throttleKey: keyFor('iflow-client-creds-log-parse', file) }
+        );
       }
     }
     return null;
   } catch (error) {
-    logOAuthDebug(
-      `[OAuth] inferIflowClientCredsFromLog failed (non-blocking): ${error instanceof Error ? error.message : String(error)}`
-    );
+    logOAuthLifecycleNonBlocking('inferIflowClientCredsFromLog', error, { file });
     return null;
   }
 }
+
+export const __oauthLifecycleTestables = {
+  inferIflowClientCredsFromLog,
+  isProcessAlive
+};

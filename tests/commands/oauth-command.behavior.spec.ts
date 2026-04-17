@@ -333,4 +333,31 @@ describe('oauth command behavior', () => {
       }
     }
   });
+
+  it('logs selector lookup failure before falling back to manual mode', async () => {
+    jest.resetModules();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const interactiveRefresh = jest.fn(async () => {});
+
+    jest.unstable_mockModule('../../src/token-daemon/index.js', () => ({
+      interactiveRefresh,
+      validateOAuthTokens: jest.fn(async () => true),
+      TokenDaemon: {
+        findTokenBySelector: jest.fn(async () => {
+          throw new Error('selector boom');
+        })
+      }
+    }));
+
+    const { createOauthCommand } = await import('../../src/commands/oauth.js');
+    const cmd = createOauthCommand();
+
+    await cmd.parseAsync(['node', 'oauth', 'antigravity-oauth-1-test.json'], { from: 'node' });
+
+    expect(interactiveRefresh).toHaveBeenCalledWith('antigravity-oauth-1-test.json', { force: true, mode: 'manual' });
+    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('stage=selector_resolution');
+    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('operation=find_token_by_selector');
+
+    warnSpy.mockRestore();
+  });
 });

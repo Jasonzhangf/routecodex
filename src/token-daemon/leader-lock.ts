@@ -10,6 +10,53 @@ export interface TokenManagerLeaderInfo {
 
 const STATE_DIR = resolveRccPath('state', 'token-manager');
 const LEADER_FILE = path.join(STATE_DIR, 'leader.json');
+const NON_BLOCKING_WARN_THROTTLE_MS = 60_000;
+const nonBlockingWarnByStage = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function shouldLogNonBlockingStage(stage: string): boolean {
+  const now = Date.now();
+  const lastAt = nonBlockingWarnByStage.get(stage) ?? 0;
+  if (now - lastAt < NON_BLOCKING_WARN_THROTTLE_MS) {
+    return false;
+  }
+  nonBlockingWarnByStage.set(stage, now);
+  return true;
+}
+
+function readErrorCode(error: unknown): string {
+  const value = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
+  return typeof value === 'string' ? value : '';
+}
+
+function logLeaderLockNonBlockingError(
+  stage: string,
+  operation: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  if (!shouldLogNonBlockingStage(stage)) {
+    return;
+  }
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[leader-lock] stage=${stage} operation=${operation} failed (non-blocking): ${formatUnknownError(error)}${suffix}`
+    );
+  } catch {
+    void 0;
+  }
+}
 
 export function getTokenManagerLeaderFilePath(): string {
   return LEADER_FILE;
@@ -35,7 +82,11 @@ export async function tryAcquireTokenManagerLeader(
     const payload = JSON.stringify(info, null, 2);
     await fs.writeFile(LEADER_FILE, payload, 'utf8');
     return { isLeader: true, leader: info };
-  } catch {
+  } catch (error) {
+    logLeaderLockNonBlockingError('leader_acquire', 'write_leader', error, {
+      ownerId,
+      filepath: LEADER_FILE
+    });
     // Possible race: another process became leader in the meantime.
     const after = await readCurrentLeader();
     if (after && (await isPidAlive(after.pid))) {
@@ -52,16 +103,21 @@ export async function releaseTokenManagerLeader(ownerId: string): Promise<void> 
       return;
     }
     await fs.unlink(LEADER_FILE);
-  } catch {
-    // Best-effort cleanup; ignore failures.
+  } catch (error) {
+    logLeaderLockNonBlockingError('leader_release', 'release_leader', error, {
+      ownerId,
+      filepath: LEADER_FILE
+    });
   }
 }
 
 async function ensureStateDir(): Promise<void> {
   try {
     await fs.mkdir(STATE_DIR, { recursive: true });
-  } catch {
-    // ignore mkdir failures; subsequent file ops will surface real errors
+  } catch (error) {
+    logLeaderLockNonBlockingError('state_dir', 'ensure_state_dir', error, {
+      filepath: STATE_DIR
+    });
   }
 }
 
@@ -73,7 +129,12 @@ async function readCurrentLeader(): Promise<TokenManagerLeaderInfo | null> {
       return null;
     }
     return parsed;
-  } catch {
+  } catch (error) {
+    if (readErrorCode(error) !== 'ENOENT') {
+      logLeaderLockNonBlockingError('leader_read', 'read_current_leader', error, {
+        filepath: LEADER_FILE
+      });
+    }
     return null;
   }
 }
@@ -85,7 +146,13 @@ async function isPidAlive(pid: number): Promise<boolean> {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
+  } catch (error) {
+    const code = readErrorCode(error);
+    if (code && code !== 'ESRCH') {
+      logLeaderLockNonBlockingError('pid_probe', 'pid_alive_probe', error, {
+        pid
+      });
+    }
     return false;
   }
 }

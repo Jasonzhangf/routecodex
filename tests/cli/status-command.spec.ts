@@ -106,4 +106,30 @@ describe('cli status command', () => {
     expect(success.join('\n')).toContain('Server is running on 127.0.0.1:5520');
     expect(warn.join('\n')).toContain('Detected 1 zombie child process(es) under managed RouteCodex parent(s): 1234(ppid=777)');
   });
+
+  it('logs config load failure before falling back to config-not-found flow', async () => {
+    const warn: string[] = [];
+    const error: string[] = [];
+
+    const program = new Command();
+    createStatusCommand(program, {
+      logger: {
+        info: () => {},
+        warning: (msg) => warn.push(msg),
+        success: () => {},
+        error: (msg) => error.push(msg)
+      },
+      log: () => {},
+      loadConfig: async () => {
+        throw new Error('config missing');
+      },
+      fetch: (async () => ({ ok: true, json: async () => ({ status: 'healthy' }) }) as any) as any
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'status'], { from: 'node' });
+
+    expect(warn.join('\n')).toContain('stage=config');
+    expect(warn.join('\n')).toContain('operation=load_config');
+    expect(error.join('\n')).toContain('Configuration file not found');
+  });
 });

@@ -2,11 +2,18 @@ import path from 'path';
 const fetch = globalThis.fetch;
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
 import { resolveRccConfigFile } from '../config/user-data-paths.js';
+import {
+  describeHealthProbeFailure,
+  probeRouteCodexHealth,
+  type RouteCodexHealthProbeResult
+} from '../utils/http-health-probe.js';
 import type {
   ProviderProfileCollection,
 } from '../providers/profile/provider-profile.js';
 
 type UnknownRecord = Record<string, unknown>;
+const NON_BLOCKING_WARN_THROTTLE_MS = 60_000;
+const nonBlockingWarnByStage = new Map<string, number>();
 
 export interface ServerInstanceInfo {
   id: string;
@@ -43,6 +50,18 @@ export interface ServerAuthSnapshot {
   providers: ProviderAuthView[];
 }
 
+export type DetectLocalServerInstanceDetailedResult =
+  | {
+      ok: true;
+      server: ServerInstanceInfo;
+      probe: RouteCodexHealthProbeResult;
+    }
+  | {
+      ok: false;
+      kind: 'config_error';
+      errorMessage: string;
+    };
+
 // const SERVER_PID_FILE = path.join(homedir(), '.routecodex', 'server.cli.pid');
 
 // function tryReadNumber(value: string | null | undefined): number | null {
@@ -53,7 +72,43 @@ export interface ServerAuthSnapshot {
 //   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 // }
 
-export async function detectLocalServerInstance(): Promise<ServerInstanceInfo | null> {
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  return String(error ?? 'unknown');
+}
+
+function shouldLogNonBlockingStage(stage: string): boolean {
+  const now = Date.now();
+  const lastAt = nonBlockingWarnByStage.get(stage) ?? 0;
+  if (now - lastAt < NON_BLOCKING_WARN_THROTTLE_MS) {
+    return false;
+  }
+  nonBlockingWarnByStage.set(stage, now);
+  return true;
+}
+
+function logServerUtilsNonBlocking(
+  stage: string,
+  operation: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  if (!shouldLogNonBlockingStage(stage)) {
+    return;
+  }
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[token-daemon.server-utils] stage=${stage} operation=${operation} failed (non-blocking): ${formatUnknownError(error)}${suffix}`
+    );
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
+export async function detectLocalServerInstanceDetailed(): Promise<DetectLocalServerInstanceDetailedResult> {
   try {
     const cfgPath = await resolveUserConfigPath();
     const { userConfig } = await loadRouteCodexConfig(cfgPath);
@@ -74,28 +129,49 @@ export async function detectLocalServerInstance(): Promise<ServerInstanceInfo | 
       readNumber(cfg.port) ??
       5555;
     const baseUrl = `http://${host}:${port}`;
-
-    let status: ServerInstanceInfo['status'] = 'offline';
-    try {
-      const res = await fetch(`${baseUrl}/health`, { method: 'GET', timeout: 1500 } as any);
-      if (res.ok) {
-        status = 'online';
-      }
-    } catch {
-      status = 'offline';
+    const probe = await probeRouteCodexHealth({
+      fetchImpl: fetch,
+      host,
+      port,
+      timeoutMs: 1500
+    });
+    if (!probe.ok) {
+      logServerUtilsNonBlocking('detect_local_server', 'health_probe', describeHealthProbeFailure(probe), {
+        host,
+        port,
+        kind: probe.kind,
+        status: probe.status
+      });
     }
 
     return {
-      id: `local-${port}`,
-      baseUrl,
-      host,
-      port,
-      configPath: cfgPath,
-      status
+      ok: true,
+      server: {
+        id: `local-${port}`,
+        baseUrl,
+        host,
+        port,
+        configPath: cfgPath,
+        status: probe.ok ? 'online' : 'offline'
+      },
+      probe
     };
-  } catch {
+  } catch (error) {
+    logServerUtilsNonBlocking('detect_local_server', 'load_config', error);
+    return {
+      ok: false,
+      kind: 'config_error',
+      errorMessage: formatUnknownError(error)
+    };
+  }
+}
+
+export async function detectLocalServerInstance(): Promise<ServerInstanceInfo | null> {
+  const result = await detectLocalServerInstanceDetailed();
+  if (!result.ok) {
     return null;
   }
+  return result.server;
 }
 
 async function resolveUserConfigPath(): Promise<string> {
@@ -106,7 +182,10 @@ async function resolveUserConfigPath(): Promise<string> {
       return path.resolve(envPath.trim());
     }
     return resolveRccConfigFile();
-  } catch {
+  } catch (error) {
+    logServerUtilsNonBlocking('resolve_user_config_path', 'fallback_to_default_config_path', error, {
+      envPath: process.env.ROUTECODEX_CONFIG || process.env.ROUTECODEX_CONFIG_PATH || ''
+    });
     return resolveRccConfigFile();
   }
 }
