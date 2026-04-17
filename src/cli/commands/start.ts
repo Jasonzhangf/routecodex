@@ -5,6 +5,7 @@ import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { resolveRccConfigFile, resolveRccUserDir } from '../../config/user-data-paths.js';
+import { describeHealthProbeFailure, probeRouteCodexHealth } from '../../utils/http-health-probe.js';
 import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
 import { ensureDefaultPrecommandScriptBestEffort } from '../config/precommand-default-script.js';
 import {
@@ -582,16 +583,20 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         };
 
         const isChildHealthy = async (): Promise<boolean> => {
-          try {
-            const res = await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.HEALTH}`).catch(() => null);
-            if (!res || !res.ok) {
-              return false;
-            }
-            const data = await (res as any).json?.().catch(() => null);
-            return Boolean(data && typeof data === 'object' && (data as any).server === 'routecodex');
-          } catch {
-            return false;
+          const probe = await probeRouteCodexHealth({
+            fetchImpl: ctx.fetch,
+            host: LOCAL_HOSTS.IPV4,
+            port: resolvedPort,
+            timeoutMs: 800
+          });
+          if (!probe.ok) {
+            logStartNonBlocking(ctx, 'child_health_probe', describeHealthProbeFailure(probe), {
+              port: resolvedPort,
+              kind: probe.kind,
+              status: probe.status
+            });
           }
+          return probe.ok;
         };
 
         const waitForServerEntryReady = async (deadlineMs: number): Promise<boolean> => {

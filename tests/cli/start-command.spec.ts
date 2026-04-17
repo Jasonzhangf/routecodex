@@ -124,10 +124,11 @@ describe('cli start command', () => {
         if (activeGeneration >= 3) {
           return {
             ok: true,
-            json: async () => ({ server: 'routecodex' })
+            status: 200,
+            json: async () => ({ server: 'routecodex', status: 'ok' })
           } as any;
         }
-        return { ok: false, json: async () => ({}) } as any;
+        return { ok: false, status: 503, json: async () => ({}) } as any;
       }) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {

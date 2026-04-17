@@ -6,6 +6,11 @@ import type { Command } from 'commander';
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { resolveRccConfigFile, resolveRccSessionsDir, resolveRccUserDir } from '../../config/user-data-paths.js';
 import type { GuardianLifecycleEvent, GuardianRegistration } from '../guardian/types.js';
+import {
+  describeHealthProbeFailure,
+  probeRouteCodexHealth,
+  type RouteCodexHealthProbeResult
+} from '../../utils/http-health-probe.js';
 
 type Spinner = {
   start(text?: string): Spinner;
@@ -252,26 +257,17 @@ function getSessionCandidatePorts(ctx: RestartCommandContext): number[] {
   }
 }
 
-async function isRouteCodexServer(ctx: RestartCommandContext, host: string, port: number): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => {
-      try {
-        controller.abort();
-      } catch (error) {
-        logRestartNonBlocking(ctx, 'health_probe.abort_controller', error, { host, port });
-      }
-    }, 900);
-    const res = await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${host}:${port}${API_PATHS.HEALTH}`, { signal: controller.signal }).catch(() => null);
-    clearTimeout(timeout);
-    if (!res || !res.ok) {
-      return false;
-    }
-    const data = await (res as any).json?.().catch(() => null);
-    return Boolean(data && typeof data === 'object' && (data as any).server === 'routecodex');
-  } catch {
-    return false;
-  }
+async function probeRouteCodexServer(
+  ctx: RestartCommandContext,
+  host: string,
+  port: number
+): Promise<RouteCodexHealthProbeResult> {
+  return probeRouteCodexHealth({
+    fetchImpl: ctx.fetch,
+    host,
+    port,
+    timeoutMs: 900
+  });
 }
 
 function normalizeHostForHttp(host: string): string {
@@ -304,7 +300,7 @@ async function requestProcessRestartViaHttp(
       method: 'POST',
       headers: apiKey ? { 'x-api-key': apiKey } : undefined,
       signal: controller.signal
-    }).catch(() => null);
+    });
     clearTimeout(timeout);
     if (res && (res.status === 200 || res.status === 202 || res.status === 204)) {
       return 'http';
@@ -318,6 +314,10 @@ async function requestProcessRestartViaHttp(
     if (message.includes('restart endpoint rejected')) {
       throw error;
     }
+    logRestartNonBlocking(ctx, 'restart_process.http_probe', error, {
+      host,
+      port: target.port
+    });
   }
   if (isHttpOnlyRestartMode(ctx)) {
     throw new Error(`restart endpoint unavailable on ${host}:${target.port}; manual one-time restart required to adopt server-managed restart`);
@@ -339,12 +339,21 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
       spinner.fail(`No RouteCodex server found on ${host}:${explicitPort}`);
       ctx.exit(1);
     }
-    const ok = await isRouteCodexServer(ctx, host === LOCAL_HOSTS.LOCALHOST ? LOCAL_HOSTS.IPV4 : host, explicitPort)
-      || await isRouteCodexServer(ctx, host, explicitPort);
-    if (!ok) {
+    const primaryProbe = await probeRouteCodexServer(
+      ctx,
+      host === LOCAL_HOSTS.LOCALHOST ? LOCAL_HOSTS.IPV4 : host,
+      explicitPort
+    );
+    const secondaryProbe =
+      primaryProbe.ok || host === LOCAL_HOSTS.IPV4
+        ? primaryProbe
+        : await probeRouteCodexServer(ctx, host, explicitPort);
+    if (!secondaryProbe.ok) {
       // Allow explicit-port restart when managed PIDs are present but health probe
       // is timing out; SIGUSR2 restart is used as recovery in this degraded state.
-      spinner.warn(`Health probe timed out on ${host}:${explicitPort}; sending in-place restart signal to managed pid(s).`);
+      spinner.warn(
+        `Health probe degraded on ${host}:${explicitPort} (${describeHealthProbeFailure(secondaryProbe)}); sending in-place restart signal to managed pid(s).`
+      );
     }
     return [{ host, port: explicitPort, oldPids: pids }];
   }
@@ -385,11 +394,18 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
     let ok = false;
     let hostUsed: string = LOCAL_HOSTS.LOCALHOST;
     for (const h of healthHosts) {
-      if (await isRouteCodexServer(ctx, h, port)) {
+      const probe = await probeRouteCodexServer(ctx, h, port);
+      if (probe.ok) {
         ok = true;
         hostUsed = h;
         break;
       }
+      logRestartNonBlocking(ctx, 'resolve_targets.health_probe', describeHealthProbeFailure(probe), {
+        host: h,
+        port,
+        kind: probe.kind,
+        status: probe.status
+      });
     }
     if (!ok) {
       continue;
@@ -433,10 +449,16 @@ async function waitForRestart(ctx: RestartCommandContext, host: string, port: nu
     if (current.some((pid) => !old.has(pid))) {
       sawNewPid = true;
     }
-    const healthy = await isRouteCodexServer(ctx, host, port);
-    if (!healthy) {
+    const probe = await probeRouteCodexServer(ctx, host, port);
+    if (!probe.ok) {
       sawEndpointUnavailable = true;
       samePidHealthyStreak = 0;
+      logRestartNonBlocking(ctx, 'wait_for_restart.health_probe', describeHealthProbeFailure(probe), {
+        host,
+        port,
+        kind: probe.kind,
+        status: probe.status
+      });
       await ctx.sleep(sawNewPid ? 250 : 150);
       continue;
     }

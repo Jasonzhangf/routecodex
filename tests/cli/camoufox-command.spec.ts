@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 import { Command } from 'commander';
 
 import { createCamoufoxCommand } from '../../src/cli/commands/camoufox.js';
@@ -68,5 +68,40 @@ describe('cli camoufox command', () => {
     expect(env.ROUTECODEX_CAMOUFOX_AUTO_MODE).toBe('antigravity');
     expect(env.ROUTECODEX_CAMOUFOX_DEV_MODE).toBe('1');
   });
-});
 
+  it('logs selector lookup failures before falling back to path resolution', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const program = new Command();
+
+    createCamoufoxCommand(program, {
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        statSync: () => ({ isFile: () => true }) as any
+      },
+      pathImpl: {
+        resolve: (...p: string[]) => p.join('/'),
+        join: (...p: string[]) => p.join('/'),
+        basename: (p: string) => p.split('/').pop() || p,
+        isAbsolute: (p: string) => p.startsWith('/')
+      },
+      homedir: () => '/home/test',
+      findTokenBySelector: async () => {
+        throw new Error('selector boom');
+      },
+      openInCamoufox: async () => true,
+      log: () => {},
+      error: () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'rcc', 'camoufox', '/tmp/antigravity-oauth-3-antonsoltan.json'], { from: 'node' });
+
+    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('stage=selector_resolution');
+    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('operation=find_token_by_selector');
+
+    warnSpy.mockRestore();
+  });
+});

@@ -1,8 +1,6 @@
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { ProviderContext } from '../api/provider-types.js';
 import type { TargetMetadata } from '../../../modules/pipeline/orchestrator/pipeline-context.js';
-import { getRouteErrorHub, reportRouteError } from '../../../error-handling/route-error-hub.js';
-import { buildInfo } from '../../../build-info.js';
 import { reportProviderErrorToRouterPolicy } from '../../../modules/llmswitch/bridge.js';
 import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';
 
@@ -97,12 +95,14 @@ export function emitProviderError(options: EmitOptions): void {
     timestamp: Date.now(),
     details: mergedDetails
   };
-  // Default health impact: all errors affect health unless explicitly disabled.
-  // For non-recoverable errors (including 402) we always want health impact.
-  if (!recoverable) {
+  // Explicit affectsHealth from caller must win; otherwise default to
+  // "non-recoverable affects health, recoverable usually affects health".
+  if (typeof options.affectsHealth === 'boolean') {
+    event.affectsHealth = options.affectsHealth;
+  } else if (!recoverable) {
     event.affectsHealth = true;
   } else {
-    event.affectsHealth = options.affectsHealth !== false;
+    event.affectsHealth = true;
   }
   // Propagate recoverable flag back to original error for callers that want
   // to implement custom retry/failover behaviour.
@@ -112,42 +112,6 @@ export function emitProviderError(options: EmitOptions): void {
   void reportProviderErrorToRouterPolicy(event).catch((emitError) => {
     console.error('[provider-error-reporter] failed to report provider error to router policy', emitError);
   });
-
-  const hub = getRouteErrorHub();
-  if (hub) {
-    const targetModel =
-      options.runtime.target && typeof options.runtime.target === 'object'
-        ? (options.runtime.target as { clientModelId?: string }).clientModelId
-        : undefined;
-    void reportRouteError({
-      code,
-      message: err.message || code,
-      source: options.stage,
-      scope: 'provider',
-      severity: status && status >= 500 ? 'high' : 'medium',
-      requestId: options.runtime.requestId,
-      endpoint: options.runtime.routeName,
-      providerKey: options.runtime.providerKey,
-      providerType: options.runtime.providerType,
-      routeName: options.runtime.routeName,
-      model: targetModel,
-      details: {
-        status,
-        recoverable,
-        runtime: options.runtime,
-        details: mergedDetails
-      },
-      originalError: err
-    }).catch(reportError => {
-      // release 模式下避免在控制台输出完整错误对象，防止 raw 等大字段刷屏。
-      if (buildInfo.mode !== 'release') {
-        console.error(
-          '[provider-error-reporter] failed to route provider error via hub',
-          reportError instanceof Error ? reportError.message : String(reportError ?? 'Unknown error')
-        );
-      }
-    });
-  }
 }
 
 export function buildRuntimeFromProviderContext(ctx: ProviderContext): ExtendedRuntimeMetadata {

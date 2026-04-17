@@ -18,10 +18,12 @@ import {
 } from './provider-quota-daemon.cooldown.js';
 import { isModelCapacityExhausted429, ProviderModelBackoffTracker } from './provider-quota-daemon.model-backoff.js';
 import {
+  extractAntigravityAlias,
   extractProviderKey,
   isIflowAkBlocked434,
   isAntigravityReauthRequired403,
   isFatalForQuota,
+  listAntigravityProviderKeysByAlias,
   parseAntigravityGoogleAccountVerification
 } from './provider-quota-daemon.error-helpers.js';
 
@@ -225,28 +227,34 @@ export async function handleProviderQuotaErrorEvent(
     }
 
     // Antigravity: OAuth missing/expired (reauth required).
-    // Scope: current providerKey only (no alias fan-out).
+    // Scope: alias-wide fan-out, so the router rotates away from the broken token set.
     if (typeof event.status === 'number' && event.status === 403 && isAntigravityReauthRequired403(event)) {
       const cooldownUntil = nowMs + 30 * 60_000;
+      const alias = extractAntigravityAlias(providerKey);
+      const aliasKeys = alias ? listAntigravityProviderKeysByAlias(ctx, alias) : [];
+      const targetKeys = aliasKeys.length > 0 ? aliasKeys : [providerKey];
+      const errorCode = typeof event.code === 'string' && event.code.trim() ? event.code.trim() : 'HTTP_403';
 
-      const prevState =
-        ctx.quotaStates.get(providerKey) ?? createInitialQuotaState(providerKey, ctx.staticConfigs.get(providerKey), nowMs);
-      const nextState: QuotaState = {
-        ...prevState,
-        inPool: false,
-        reason: 'cooldown',
-        authIssue: null,
-        cooldownUntil,
-        blacklistUntil: null,
-        lastErrorSeries: 'EFATAL',
-        lastErrorCode: typeof event.code === 'string' && event.code.trim() ? event.code.trim() : 'HTTP_403',
-        lastErrorAtMs: nowMs,
-        consecutiveErrorCount:
-          typeof prevState.consecutiveErrorCount === 'number' && prevState.consecutiveErrorCount > 0
-            ? prevState.consecutiveErrorCount + 1
-            : 1
-      };
-      ctx.quotaStates.set(providerKey, nextState);
+      for (const targetKey of targetKeys) {
+        const prevState =
+          ctx.quotaStates.get(targetKey) ?? createInitialQuotaState(targetKey, ctx.staticConfigs.get(targetKey), nowMs);
+        const nextState: QuotaState = {
+          ...prevState,
+          inPool: false,
+          reason: 'cooldown',
+          authIssue: null,
+          cooldownUntil,
+          blacklistUntil: null,
+          lastErrorSeries: 'EFATAL',
+          lastErrorCode: errorCode,
+          lastErrorAtMs: nowMs,
+          consecutiveErrorCount:
+            typeof prevState.consecutiveErrorCount === 'number' && prevState.consecutiveErrorCount > 0
+              ? prevState.consecutiveErrorCount + 1
+              : 1
+        };
+        ctx.quotaStates.set(targetKey, nextState);
+      }
       ctx.schedulePersist(nowMs);
 
       const tsIso = new Date(nowMs).toISOString();

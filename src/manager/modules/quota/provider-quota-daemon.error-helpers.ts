@@ -1,4 +1,11 @@
 import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';
+import { canonicalizeProviderKey } from './provider-key-normalization.js';
+
+function normalizeAntigravityAlias(alias: string): string {
+  const canonical = canonicalizeProviderKey(`antigravity.${String(alias || '').trim()}.model`);
+  const parts = canonical.split('.').filter(Boolean);
+  return parts.length >= 2 ? String(parts[1] || '').trim().toLowerCase() : '';
+}
 
 export function extractProviderKey(event: ProviderErrorEvent): string | null {
   const runtime = event.runtime as { providerKey?: unknown; target?: unknown } | undefined;
@@ -20,7 +27,8 @@ export function extractProviderKey(event: ProviderErrorEvent): string | null {
 }
 
 export function extractAntigravityAlias(providerKey: string): string | null {
-  const parts = String(providerKey || '').trim().split('.').filter(Boolean);
+  const canonical = canonicalizeProviderKey(String(providerKey || ''));
+  const parts = canonical.split('.').filter(Boolean);
   if (parts.length < 3) {
     return null;
   }
@@ -35,16 +43,22 @@ export function listAntigravityProviderKeysByAlias(
   ctx: { quotaStates: Map<string, unknown>; staticConfigs: Map<string, unknown> },
   alias: string
 ): string[] {
-  const prefix = `antigravity.${alias}.`;
+  const normalizedAlias = normalizeAntigravityAlias(alias);
+  if (!normalizedAlias) {
+    return [];
+  }
+  const prefix = `antigravity.${normalizedAlias}.`;
   const keys = new Set<string>();
   for (const key of ctx.quotaStates.keys()) {
-    if (key.toLowerCase().startsWith(prefix)) {
-      keys.add(key);
+    const canonicalKey = canonicalizeProviderKey(key);
+    if (canonicalKey.toLowerCase().startsWith(prefix)) {
+      keys.add(canonicalKey);
     }
   }
   for (const key of ctx.staticConfigs.keys()) {
-    if (key.toLowerCase().startsWith(prefix)) {
-      keys.add(key);
+    const canonicalKey = canonicalizeProviderKey(key);
+    if (canonicalKey.toLowerCase().startsWith(prefix)) {
+      keys.add(canonicalKey);
     }
   }
   return Array.from(keys.values());

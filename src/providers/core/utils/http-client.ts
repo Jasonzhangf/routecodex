@@ -114,6 +114,19 @@ const formatUnknownError = (error: unknown): string => {
   }
 };
 
+const formatNonBlockingHttpClientError = (
+  stage: string,
+  error: unknown
+): string => {
+  if (
+    stage === 'sendSingleRequest.errorBodyParse' &&
+    error instanceof Error
+  ) {
+    return `${error.name}: ${error.message}`;
+  }
+  return formatUnknownError(error);
+};
+
 const logHttpClientNonBlockingError = (
   stage: string,
   error: unknown,
@@ -121,7 +134,7 @@ const logHttpClientNonBlockingError = (
 ): void => {
   try {
     const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
-    console.warn(`[http-client] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+    console.warn(`[http-client] ${stage} failed (non-blocking): ${formatNonBlockingHttpClientError(stage, error)}${detailSuffix}`);
   } catch {
     // Never throw from non-blocking logging.
   }

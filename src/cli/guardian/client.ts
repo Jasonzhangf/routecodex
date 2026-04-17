@@ -3,6 +3,10 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 
 import { resolveGuardianPaths } from './paths.js';
 import type { GuardianLifecycleEvent, GuardianRegistration, GuardianState, GuardianStopResult } from './types.js';
+import {
+  describeHealthProbeFailure,
+  probeGuardianHealth
+} from '../../utils/http-health-probe.js';
 
 type FsLike = Pick<typeof fs, 'existsSync' | 'readFileSync' | 'writeFileSync' | 'mkdirSync' | 'openSync' | 'closeSync' | 'unlinkSync'>;
 
@@ -42,6 +46,30 @@ type ReportGuardianLifecycleArgs = {
 
 const GUARDIAN_HEALTH_TIMEOUT_MS = 12000;
 const GUARDIAN_POLL_INTERVAL_MS = 150;
+const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
+const nonBlockingLogState = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  return String(error ?? 'unknown');
+}
+
+function logGuardianNonBlocking(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  const now = Date.now();
+  const last = nonBlockingLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingLogState.set(stage, now);
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[guardian-client] ${stage} failed (non-blocking): ${formatUnknownError(error)}${suffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
 
 function parseGuardianState(input: unknown): GuardianState | null {
   if (!input || typeof input !== 'object') {
@@ -82,28 +110,27 @@ function readGuardianState(fsImpl: FsLike, homeDir: string): GuardianState | nul
     const raw = fsImpl.readFileSync(paths.stateFile, 'utf8');
     const parsed = JSON.parse(raw) as unknown;
     return parseGuardianState(parsed);
-  } catch {
+  } catch (error) {
+    logGuardianNonBlocking('read_state', error, { stateFile: paths.stateFile });
     return null;
   }
 }
 
 async function isGuardianHealthy(fetchImpl: typeof fetch, state: GuardianState): Promise<boolean> {
-  const baseUrl = `http://127.0.0.1:${state.port}`;
-  try {
-    const response = await fetchImpl(`${baseUrl}/health`, {
-      method: 'GET',
-      headers: {
-        'x-rcc-guardian-token': state.token
-      }
+  const probe = await probeGuardianHealth({
+    fetchImpl,
+    port: state.port,
+    token: state.token,
+    timeoutMs: 1200
+  });
+  if (!probe.ok) {
+    logGuardianNonBlocking('health_probe', describeHealthProbeFailure(probe), {
+      port: state.port,
+      kind: probe.kind,
+      status: probe.status
     });
-    if (!response.ok) {
-      return false;
-    }
-    const body = await response.json().catch(() => null);
-    return body?.ok === true;
-  } catch {
-    return false;
   }
+  return probe.ok;
 }
 
 async function waitForHealthyGuardian(args: {
@@ -169,8 +196,8 @@ export async function ensureGuardianDaemon(args: EnsureGuardianArgs): Promise<Gu
 
   try {
     fsImpl.mkdirSync(paths.rootDir, { recursive: true });
-  } catch {
-    // follow-up operations will throw useful errors if directory is unusable
+  } catch (error) {
+    logGuardianNonBlocking('ensure_root_dir', error, { rootDir: paths.rootDir });
   }
 
   const existingState = readGuardianState(fsImpl, args.homeDir);

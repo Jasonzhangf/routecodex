@@ -13,7 +13,18 @@ export function canonicalizeProviderKey(providerKey: string): string {
   if (!key) {
     return '';
   }
-  return key;
+  const parts = key.split('.');
+  if (parts.length < 3 || parts[0].toLowerCase() !== 'antigravity') {
+    return key;
+  }
+
+  const alias = parts[1] ?? '';
+  const legacyMatch = /^(?:\d+)-(.+)$/.exec(alias);
+  if (!legacyMatch?.[1]) {
+    return key;
+  }
+
+  return ['antigravity', legacyMatch[1], ...parts.slice(2)].join('.');
 }
 
 export function mergeQuotaStates(providerKey: string, states: QuotaState[]): QuotaState {

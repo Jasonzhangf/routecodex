@@ -4,7 +4,13 @@ import path from 'path';
 import net from 'node:net';
 import { describe, expect, it, jest } from '@jest/globals';
 
-import { ensurePortAvailableImpl, findListeningPidsImpl, isServerHealthyQuickImpl, killPidBestEffortImpl } from '../../src/cli/server/port-utils.js';
+import {
+  ensurePortAvailableImpl,
+  findListeningPidsImpl,
+  isServerHealthyQuickImpl,
+  killPidBestEffortImpl,
+  probeServerHealthQuickImpl
+} from '../../src/cli/server/port-utils.js';
 import { flushProcessLifecycleLogQueue } from '../../src/utils/process-lifecycle-logger.js';
 
 describe('cli server port-utils', () => {
@@ -281,9 +287,26 @@ describe('cli server port-utils', () => {
       port: 5520,
       fetchImpl: (async () => ({
         ok: true,
-        json: async () => ({ status: 'ok' })
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'ok' })
       })) as any
     });
     expect(healthy).toBe(true);
+  });
+
+  it('probeServerHealthQuickImpl classifies auth_error explicitly', async () => {
+    const probe = await probeServerHealthQuickImpl({
+      port: 5520,
+      fetchImpl: (async () => ({
+        ok: false,
+        status: 401,
+        text: async () => '{"error":"unauthorized"}'
+      })) as any
+    });
+    expect(probe.ok).toBe(false);
+    if (!probe.ok) {
+      expect(probe.kind).toBe('auth_error');
+      expect(probe.status).toBe(401);
+    }
   });
 });

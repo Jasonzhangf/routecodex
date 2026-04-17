@@ -28,7 +28,12 @@ describe('cli restart command', () => {
       findListeningPids: () => [],
       sleep: async () => {},
       sendSignal: () => {},
-      fetch: (async () => ({ ok: true, json: async () => ({ server: 'routecodex', status: 'ok' }) })) as any,
+      fetch: (async (url: string) => {
+        if (String(url).includes('/health')) {
+          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) } as any;
+        }
+        return { ok: false, status: 404, text: async () => '' } as any;
+      }) as any,
       env: {},
       exit: (code) => {
         throw new Error(`exit:${code}`);
@@ -49,7 +54,12 @@ describe('cli restart command', () => {
       findListeningPids: () => [],
       sleep: async () => {},
       sendSignal: () => {},
-      fetch: (async () => ({ ok: true, json: async () => ({ server: 'routecodex', status: 'ok' }) })) as any,
+      fetch: (async (url: string) => {
+        if (String(url).includes('/health')) {
+          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) } as any;
+        }
+        return { ok: false, status: 404, text: async () => '' } as any;
+      }) as any,
       env: {},
       exit: (code) => {
         throw new Error(`exit:${code}`);
@@ -71,8 +81,11 @@ describe('cli restart command', () => {
       defaultDevPort: 5520,
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, error: () => {} },
-      findListeningPids: () => {
+      findListeningPids: (port) => {
         call += 1;
+        if (port !== 5520) {
+          return [];
+        }
         // first read => existing server pid; subsequent => restarted pid
         return call <= 1 ? [111] : [222];
       },
@@ -80,7 +93,12 @@ describe('cli restart command', () => {
       sendSignal: (pid, signal) => {
         signals.push({ pid, signal });
       },
-      fetch: (async () => ({ ok: true, json: async () => ({ server: 'routecodex', status: 'ok' }) })) as any,
+      fetch: (async (url: string) => {
+        if (String(url).includes('/health')) {
+          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) } as any;
+        }
+        return { ok: false, status: 404, text: async () => '' } as any;
+      }) as any,
       env: {},
       fsImpl: {
         existsSync: () => true,
@@ -122,7 +140,12 @@ describe('cli restart command', () => {
       sendSignal: (pid, signal) => {
         signals.push({ pid, signal });
       },
-      fetch: (async () => ({ ok: true, json: async () => ({ server: 'routecodex', status: 'ok' }) })) as any,
+      fetch: (async (url: string) => {
+        if (String(url).includes('/health')) {
+          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) } as any;
+        }
+        return { ok: false, status: 404, text: async () => '' } as any;
+      }) as any,
       env: {},
       exit: (code) => {
         throw new Error(`exit:${code}`);
@@ -155,12 +178,15 @@ describe('cli restart command', () => {
       sendSignal: (pid, signal) => {
         signals.push({ pid, signal });
       },
-      fetch: (async () => {
+      fetch: (async (url: string) => {
+        if (!String(url).includes('/health')) {
+          return { ok: false, status: 404, text: async () => '' } as any;
+        }
         healthCall += 1;
         if (healthCall <= 2) {
-          return { ok: false, json: async () => ({}) };
+          return { ok: false, status: 503, json: async () => ({}) };
         }
-        return { ok: true, json: async () => ({ server: 'routecodex', status: 'ok' }) };
+        return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) };
       }) as any,
       env: {},
       exit: (code) => {
@@ -181,12 +207,17 @@ describe('cli restart command', () => {
       defaultDevPort: 5520,
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, error: () => {} },
-      findListeningPids: () => [777],
+      findListeningPids: (port) => (port === 5520 ? [777] : []),
       sleep: async () => {},
       sendSignal: (pid, signal) => {
         signals.push({ pid, signal });
       },
-      fetch: (async () => ({ ok: true, json: async () => ({ server: 'routecodex', status: 'ok' }) })) as any,
+      fetch: (async (url: string) => {
+        if (String(url).includes('/health')) {
+          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) } as any;
+        }
+        return { ok: false, status: 404, text: async () => '' } as any;
+      }) as any,
       env: {},
       fsImpl: {
         existsSync: () => true,

@@ -3,6 +3,7 @@ import net from 'node:net';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { logProcessLifecycle } from '../../utils/process-lifecycle-logger.js';
+import { probeRouteCodexHealth, type RouteCodexHealthProbeResult } from '../../utils/http-health-probe.js';
 import { listManagedServerPidsByPort } from '../../utils/managed-server-pids.js';
 
 function formatUnknownError(error: unknown): string {
@@ -148,32 +149,21 @@ export function findListeningPidsImpl(args: {
   }
 }
 
+export async function probeServerHealthQuickImpl(args: {
+  port: number;
+  fetchImpl: typeof fetch;
+}): Promise<RouteCodexHealthProbeResult> {
+  return probeRouteCodexHealth({
+    fetchImpl: args.fetchImpl,
+    host: LOCAL_HOSTS.IPV4,
+    port: args.port,
+    timeoutMs: 800
+  });
+}
+
 export async function isServerHealthyQuickImpl(args: { port: number; fetchImpl: typeof fetch }): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const t = setTimeout(() => {
-      try {
-        controller.abort();
-      } catch (abortError) {
-        logPortUtilsNonBlockingError('isServerHealthyQuickImpl.abortController', abortError, {
-          port: args.port
-        });
-      }
-    }, 800);
-    const res = await args.fetchImpl(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${args.port}${API_PATHS.HEALTH}`, {
-      method: 'GET',
-      signal: controller.signal
-    });
-    clearTimeout(t);
-    if (!res.ok) {
-      return false;
-    }
-    const data = await res.json().catch(() => null);
-    const status = typeof data?.status === 'string' ? data.status.toLowerCase() : '';
-    return !!data && (status === 'healthy' || status === 'ready' || status === 'ok' || data?.ready === true || data?.pipelineReady === true);
-  } catch {
-    return false;
-  }
+  const probe = await probeServerHealthQuickImpl(args);
+  return probe.ok;
 }
 
 export async function ensurePortAvailableImpl(args: {

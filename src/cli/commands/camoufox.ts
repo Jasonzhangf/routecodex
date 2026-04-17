@@ -18,6 +18,49 @@ type PathLike = {
   isAbsolute: (p: string) => boolean;
 };
 
+const NON_BLOCKING_WARN_THROTTLE_MS = 60_000;
+const nonBlockingWarnByStage = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error ?? 'unknown');
+  }
+}
+
+function shouldLogNonBlockingStage(stage: string): boolean {
+  const now = Date.now();
+  const lastAt = nonBlockingWarnByStage.get(stage) ?? 0;
+  if (now - lastAt < NON_BLOCKING_WARN_THROTTLE_MS) {
+    return false;
+  }
+  nonBlockingWarnByStage.set(stage, now);
+  return true;
+}
+
+function logCamoufoxNonBlocking(
+  stage: string,
+  operation: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  if (!shouldLogNonBlockingStage(stage)) {
+    return;
+  }
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[camoufox-command] stage=${stage} operation=${operation} failed (non-blocking): ${formatUnknownError(error)}${suffix}`
+    );
+  } catch {
+    void 0;
+  }
+}
+
 function expandHome(pathLike: PathLike, homedir: () => string, raw: string): string {
   const trimmed = String(raw || '').trim();
   if (!trimmed) return trimmed;
@@ -59,7 +102,13 @@ async function resolveTokenForCamoufox(opts: {
   const trimmed = String(selector || '').trim();
   if (!trimmed) return null;
 
-  const fromDaemon = await findTokenBySelector(trimmed).catch(() => null);
+  let fromDaemon: TokenDescriptorLike | null = null;
+  try {
+    fromDaemon = await findTokenBySelector(trimmed);
+  } catch (error) {
+    logCamoufoxNonBlocking('selector_resolution', 'find_token_by_selector', error, { selector: trimmed });
+    fromDaemon = null;
+  }
   if (fromDaemon) {
     return fromDaemon;
   }
@@ -73,8 +122,8 @@ async function resolveTokenForCamoufox(opts: {
       if (!hint) return null;
       return { provider: hint.provider, alias: hint.alias, filePath };
     }
-  } catch {
-    // ignore stat failures
+  } catch (error) {
+    logCamoufoxNonBlocking('selector_resolution', 'stat_token_path', error, { filePath });
   }
 
   return null;
