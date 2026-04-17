@@ -13,8 +13,7 @@ const ANTHROPIC_STABLE_TOOL_SCHEMA_NAMES = new Set<string>([
   'view_image',
   'web_search',
   'clock',
-  'continue_execution',
-  'review'
+  'continue_execution'
 ]);
 
 const ANTHROPIC_STABLE_TOOL_SCHEMA_KEYS = new Map<string, Set<string>>([

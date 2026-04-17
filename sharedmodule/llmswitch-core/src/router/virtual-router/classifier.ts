@@ -27,7 +27,10 @@ export class RoutingClassifier {
     const latestMessageFromUser = features.latestMessageFromUser === true;
     const hasToolActivity = features.hasTools || features.hasToolCallResponses;
     const thinkingContinuation = lastToolCategory === 'read';
-    const thinkingFromUser = latestMessageFromUser && features.hasThinkingKeyword === true && !hasToolActivity;
+    // Jason 规则：只要当前轮仍是用户输入，就优先按 thinking 路由处理，
+    // 不再因为历史 tool 响应或本轮声明 tools/search 而降到 tools/search。
+    // tools/search/coding 续写只保留给非用户输入的 followup/tool 轮。
+    const thinkingFromUser = latestMessageFromUser;
     const thinkingFromRead = !thinkingFromUser && thinkingContinuation;
     const codingContinuation = lastToolCategory === 'write';
     const searchContinuation = lastToolCategory === 'search';

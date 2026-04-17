@@ -9,8 +9,8 @@ let cachedStageTimingSummaryFlag: boolean | null = null;
 let cachedUsageTimingOutputFlag: boolean | null = null;
 const DEFAULT_STAGE_TIMING_MIN_MS = 50;
 
-const REQUEST_STAGE_TIMELINE_TTL_MS = 30 * 60 * 1000;
-const REQUEST_STAGE_TIMELINE_MAX = 4096;
+const DEFAULT_REQUEST_STAGE_TIMELINE_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_REQUEST_STAGE_TIMELINE_MAX = 4096;
 type RequestStageTimeline = {
   startedAtMs: number;
   lastAtMs: number;
@@ -132,6 +132,30 @@ function resolveStageTimingMinMs(): number {
     return parsed;
   }
   return DEFAULT_STAGE_TIMING_MIN_MS;
+}
+
+function readPositiveIntegerFromEnv(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(String(value ?? '').trim(), 10);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return fallback;
+}
+
+function resolveRequestStageTimelineTtlMs(): number {
+  return readPositiveIntegerFromEnv(
+    process.env.ROUTECODEX_STAGE_TIMELINE_TTL_MS
+      ?? process.env.RCC_STAGE_TIMELINE_TTL_MS,
+    DEFAULT_REQUEST_STAGE_TIMELINE_TTL_MS
+  );
+}
+
+function resolveRequestStageTimelineMaxEntries(): number {
+  return readPositiveIntegerFromEnv(
+    process.env.ROUTECODEX_STAGE_TIMELINE_MAX_ENTRIES
+      ?? process.env.RCC_STAGE_TIMELINE_MAX_ENTRIES,
+    DEFAULT_REQUEST_STAGE_TIMELINE_MAX
+  );
 }
 
 function resolveRuntimeBuildMode(): 'dev' | 'release' {
@@ -276,7 +300,7 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
     return;
   }
   console.log(`${colorize(level, label)}${finishReasonTag}${providerTag}${suffix}`);
-  if (isTerminalStage(stage) && !timingSummaryEnabled) {
+  if (isTerminalStage(stage) && !timingSummaryEnabled && !isUsageTimingOutputEnabled()) {
     clearRequestStageState(requestId);
   }
 }
@@ -289,6 +313,7 @@ export function formatRequestTimingSummary(
     terminal?: boolean;
   }
 ): string {
+  pruneRequestStageTimelines(Date.now());
   if (!isUsageTimingOutputEnabled()) {
     if (options?.terminal) {
       clearRequestStageState(requestId);
@@ -482,17 +507,25 @@ function shouldShowHighlightedFinishReason(scope: string, action: string, finish
 }
 
 function pruneRequestStageTimelines(nowMs: number): void {
+  const evictedRequestIds = new Set<string>();
+  const ttlMs = resolveRequestStageTimelineTtlMs();
   for (const [key, timeline] of REQUEST_STAGE_TIMELINES.entries()) {
-    if (nowMs - timeline.lastAtMs >= REQUEST_STAGE_TIMELINE_TTL_MS) {
-      REQUEST_STAGE_TIMELINES.delete(key);
+    if (nowMs - timeline.lastAtMs >= ttlMs) {
+      evictedRequestIds.add(key);
     }
   }
-  while (REQUEST_STAGE_TIMELINES.size > REQUEST_STAGE_TIMELINE_MAX) {
-    const oldestKey = REQUEST_STAGE_TIMELINES.keys().next().value as string | undefined;
-    if (!oldestKey) {
-      break;
+  const maxEntries = resolveRequestStageTimelineMaxEntries();
+  if (REQUEST_STAGE_TIMELINES.size - evictedRequestIds.size > maxEntries) {
+    const overflow = Array.from(REQUEST_STAGE_TIMELINES.entries())
+      .filter(([requestId]) => !evictedRequestIds.has(requestId))
+      .sort((a, b) => a[1].lastAtMs - b[1].lastAtMs)
+      .slice(0, Math.max(0, REQUEST_STAGE_TIMELINES.size - evictedRequestIds.size - maxEntries));
+    for (const [requestId] of overflow) {
+      evictedRequestIds.add(requestId);
     }
-    REQUEST_STAGE_TIMELINES.delete(oldestKey);
+  }
+  for (const requestId of evictedRequestIds) {
+    clearRequestStageState(requestId);
   }
 }
 
@@ -730,6 +763,11 @@ function formatReleaseUsageTimingSummary(
 }
 
 function isTerminalStage(stage: string): boolean {
-  void stage;
-  return false;
+  const normalized = stage.trim().toLowerCase();
+  return normalized === 'response.completed'
+    || normalized === 'response.error'
+    || normalized === 'hub.response.completed'
+    || normalized === 'hub.response.error'
+    || normalized === 'request.completed'
+    || normalized === 'request.failed';
 }

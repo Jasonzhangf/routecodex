@@ -303,7 +303,6 @@ Examples:
               routingWithWebSearch.web_search = [
                 {
                   id: 'web_search-primary',
-                  targets: webSearchDefaults.routeTargets,
                   loadBalancing: {
                     strategy: 'weighted',
                     weights: Object.fromEntries(webSearchDefaults.routeTargets.map((target) => [target, 1]))

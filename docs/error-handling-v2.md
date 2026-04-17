@@ -1,8 +1,76 @@
-# RouteCodex 错误中心机制（V2）
+# RouteCodex 错误策略收口（Router Policy SSOT）
 
-本页记录当前 RouteCodex V2 的统一错误处理与熔断策略，覆盖 HTTP Server、Hub Pipeline、Provider 以及 Virtual Router 健康管理。所有细节以此为准，后续规则变动需同步更新此文档并在 `AGENTS.md` 追加引用。
+> 2026-04-15 决策更新  
+> **不再保留独立 `error-handling center` / event engine 作为中心。**  
+> 当前实现里，独立 center 仅承担 `emit/subscribe/normalize`，不掌握 retry/reroute/backoff/fail/cooldown policy，继续保留只会制造第二中心。  
+> **目标真源改为：`Virtual Router policy`。** 所有 provider/runtime/send/convert/followup 执行期错误，统一进入 Router policy 判定；`RequestExecutor` 与 `servertool engine` 只消费 Router 输出的 decision / policy state。
 
-## 1. 统一流程
+本页记录 RouteCodex 错误处理的**目标收口架构**与实现边界。历史 V2 机制中凡是“独立错误中心 / event bus”语义，均以本页的新决策为准，后续实现需同步删除旧中间层。
+
+## 0. 唯一真源与待删除项
+
+### 唯一策略真源
+- `Virtual Router policy`
+  - classify error
+  - decide retry / reroute / backoff / fail
+  - manage cooldown / health / quota / exclusion
+  - output unified error decision / policy state
+
+### Consumer
+- `RequestExecutor`
+  - 只执行 Router 返回的 decision plan
+- `servertool engine`
+  - 只保留 followup 编排前 / internal error 边界
+  - provider/runtime/send/convert 类错误不得再自定义第二套语义
+
+### 待移除
+- 独立 `error-handling center`
+- 独立 event engine / event bus
+- `RequestExecutor` 内部自带的第二套 retry/reroute/backoff 决策语义
+
+## 1. 统一流程（目标态）
+
+1. **HubPipeline** 做编排与向上抛错，不定义最终错误策略。
+2. **Virtual Router policy** 接收执行期错误输入，产出统一 decision：
+   - `retry_same_provider`
+   - `exclude_and_reroute`
+   - `wait_for_cooldown`
+   - `fail`
+3. **RequestExecutor** 消费该 decision 并执行实际 retry / reroute / sleep / fail。
+4. **servertool followup** 的 provider 类错误也走同一套 Router policy；只有 payload 缺失、reenter 不可用、client inject dispatcher 缺失等编排前/internal error 保留在 servertool 自身边界。
+
+## 2. 分层职责
+
+| 层 | 职责 | 不该做什么 |
+| --- | --- | --- |
+| HubPipeline | request/chat-process 编排、标准化、向上抛错 | 不定义最终 retry/reroute/backoff 策略 |
+| Virtual Router policy | 错误分类、路由/冷却/健康/额度策略、统一 decision 输出 | 不负责具体 sleep/retry 执行循环 |
+| RequestExecutor | 执行 Router decision、驱动 provider runtime/send/convert | 不再独立发明第二套 error policy |
+| servertool engine | followup 编排前/internal error 边界、followup reenter orchestration | 不再包一层独立 provider retry/error 语义 |
+
+## 3. 当前实现遗留问题（本 epic 要清掉）
+
+- followup 与普通请求没有共用唯一错误处理方案
+- followup 存在 `bypassTrafficGovernor`
+- provider-switch 日志出现 `attempt=max -> next=max+1`
+- `SERVERTOOL_FOLLOWUP_FAILED` 混入 provider 执行期错误语义
+- 独立 `error-handling center` / `providerErrorCenter` 继续形成第二中心错觉
+
+## 4. 收口验收信号
+
+- followup 与普通请求共用同一套 Router error policy
+- 不再存在独立 event bus / error center 中转层
+- `RequestExecutor` 只消费 Router decision
+- `SERVERTOOL_FOLLOWUP_FAILED` 只保留编排失败语义
+- provider-switch 不再出现 `7/6` 之类越界假下一跳
+
+---
+
+## Historical Reference: V2 旧机制（待迁出/待删除）
+
+以下内容保留为历史参考，帮助识别旧实现；如与上文冲突，以**上文 Router Policy SSOT** 为准。
+
+## H1. 统一流程
 
 1. **HTTP Server / CLI / Pipeline** 捕获异常后调用 `reportRouteError(payload)`，由 `RouteErrorHub` 统筹。
 2. `RouteErrorHub` 负责：
@@ -13,7 +81,7 @@
 3. Provider 侧在 `emitProviderError` 同时上报 `providerErrorCenter`（供 Virtual Router 熔断）与 `ErrorHandlingCenter`。
 4. `llmswitch-core` 的 Virtual Router 根据 `ProviderErrorEvent` 执行健康状态变更（回退、降级、拉黑）。
 
-## 2. 错误策略矩阵
+## H2. 错误策略矩阵
 
 | 错误来源 | 状态 / 错误码 | Error Center 处理 | Virtual Router / ProviderHealth 策略 | 说明 |
 | --- | --- | --- | --- | --- |
@@ -25,13 +93,13 @@
 
 > ⚠️ RateLimitTracker 只针对**相同 providerKey（provider.key / provider.key::model）**的连续 429 生效，中间出现成功或其他错误即会自动清零；冷却结束后会再次尝试，具体 TTL 由 `virtualrouter.health` 配置决定，且与使用的 route/routePool 无关。
 
-## 3. 日志与可观测性
+## H3. 日志与可观测性
 
 - **Release 输出最小化**：`error-center-payload` 会在 release 构建中移除 `stack`、`details.stack`，仅保留 message/code/requestId 等必要字段。若需排查，可在运行时设置 `ROUTECODEX_RELEASE_ERROR_VERBOSE=1`。
 - **OAuth 噪音削减**：所有 `[OAuth] ...` 信息级日志默认通过 `ROUTECODEX_OAUTH_DEBUG=1` 才会打印，错误（`console.error`) 仍保持输出。
 - **SSE 预览日志禁用**：Server 不再将 SSE chunk 内容写入 `stage-logger`，仅保留流开始/结束事件与统计，避免泄露响应片段。
 
-## 4. 回调挂载点
+## H4. 回调挂载点
 
 - `ErrorHandlerRegistry` 默认挂载以下 Hook，可按需扩展：
   - `rate_limit_error`：提供回退调度（切换 pipeline 或延迟重放）。
@@ -40,7 +108,7 @@
 
 如需新增策略（例如特定 provider 的 4xx 也触发冷却），建议在 `docs/error-handling-v2.md` 补充矩阵，并在 `virtualrouter.health` 配置中增加自定义参数。
 
-## 5. 工具协议错误（ProviderProtocolError）
+## H5. 工具协议错误（ProviderProtocolError）
 
 ServerTool 与工具调用相关的后端错误统一通过 `ProviderProtocolError` 表达，类型定义位于
 `sharedmodule/llmswitch-core/src/conversion/shared/errors.ts`。
@@ -68,7 +136,7 @@ ServerTool 与工具调用相关的后端错误统一通过 `ProviderProtocolErr
 2. 在此文档补充该错误 code 的含义与触发条件；
 3. 确保 provider runtime 捕获到该错误时仍通过 `emitProviderError` 上报，并映射为明确的 HTTP 错误响应。
 
-### 5.1 粗粒度错误类别（EXTERNAL / TOOL / INTERNAL）
+### H5.1 粗粒度错误类别（EXTERNAL / TOOL / INTERNAL）
 
 为方便统计与路由策略，`ProviderProtocolError` 还暴露一个粗粒度错误类别 `category`：
 

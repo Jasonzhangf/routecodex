@@ -1,5 +1,5 @@
 import type { ManagerContext, ManagerModule } from '../../types.js';
-import { getProviderErrorCenter } from '../../../modules/llmswitch/bridge.js';
+import { setProviderRuntimeProviderQuotaHooks } from '../../../modules/llmswitch/bridge.js';
 import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';
 import {
   applySuccessEvent as applyQuotaSuccessEvent,
@@ -35,7 +35,8 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   private quotaStates: Map<string, QuotaState> = new Map();
   private staticConfigs: Map<string, StaticQuotaConfig> = new Map();
   private readonly modelBackoff: ProviderModelBackoffTracker = new ProviderModelBackoffTracker();
-  private unsubscribe: (() => void) | null = null;
+  private readonly providerRuntimeHookOwner = Symbol('provider-quota-daemon');
+  private hooksRegistered = false;
   private maintenanceTimer: NodeJS.Timeout | null = null;
   private persistTimer: NodeJS.Timeout | null = null;
   private quotaRoutingEnabled = true;
@@ -197,26 +198,19 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     if (!this.quotaRoutingEnabled) {
       return;
     }
-
-    let center:
-      | { subscribe?: (handler: (event: ProviderErrorEvent) => void) => () => void }
-      | null
-      | undefined = null;
     try {
-      center = await getProviderErrorCenter();
-    } catch (error) {
-      logQuotaDaemonNonBlocking('start.get_provider_error_center', error);
-      center = null;
-    }
-
-    if (center && typeof center.subscribe === 'function') {
-      this.unsubscribe = center.subscribe((event: ProviderErrorEvent) => {
-        void this.handleProviderErrorEvent(event).catch((error) => {
-          logQuotaDaemonNonBlocking('start.handle_provider_error_event', error, {
-            providerKey: event?.runtime?.providerKey ?? null
+      this.hooksRegistered = await setProviderRuntimeProviderQuotaHooks(this.providerRuntimeHookOwner, {
+        onProviderError: (event: ProviderErrorEvent) => {
+          void this.handleProviderErrorEvent(event).catch((error) => {
+            logQuotaDaemonNonBlocking('start.handle_provider_error_event', error, {
+              providerKey: event?.runtime?.providerKey ?? null
+            });
           });
-        });
+        }
       });
+    } catch (error) {
+      this.hooksRegistered = false;
+      logQuotaDaemonNonBlocking('start.set_provider_runtime_provider_quota_hooks', error);
     }
 
     const intervalMs = readPositiveNumberFromEnv('ROUTECODEX_QUOTA_DAEMON_INTERVAL_MS', 60_000);
@@ -234,13 +228,13 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   }
 
   async stop(): Promise<void> {
-    if (this.unsubscribe) {
+    if (this.hooksRegistered) {
       try {
-        this.unsubscribe();
+        await setProviderRuntimeProviderQuotaHooks(this.providerRuntimeHookOwner, undefined);
       } catch (error) {
-        logQuotaDaemonNonBlocking('stop.unsubscribe', error);
+        logQuotaDaemonNonBlocking('stop.clear_provider_runtime_provider_quota_hooks', error);
       }
-      this.unsubscribe = null;
+      this.hooksRegistered = false;
     }
     if (this.maintenanceTimer) {
       clearInterval(this.maintenanceTimer);

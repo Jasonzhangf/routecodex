@@ -1,4 +1,7 @@
-import { providerErrorCenter } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/error-center.js';
+import {
+  resetProviderRuntimeIngressForTests,
+  setProviderRuntimeObserverHooks
+} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.js';
 import type { ProviderErrorEvent } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
 import {
   getRoutingInstructionState
@@ -6,18 +9,25 @@ import {
 
 describe('routing state store observability', () => {
   let events: ProviderErrorEvent[] = [];
-  let unsubscribe: (() => void) | null = null;
+  let observerOwner: object | null = null;
 
   beforeEach(() => {
     events = [];
-    unsubscribe = providerErrorCenter.subscribe((event) => {
-      events.push(event);
+    observerOwner = {};
+    resetProviderRuntimeIngressForTests();
+    setProviderRuntimeObserverHooks(observerOwner, {
+      onProviderErrorReported: (event) => {
+        events.push(event);
+      }
     });
   });
 
   afterEach(() => {
-    unsubscribe?.();
-    unsubscribe = null;
+    if (observerOwner) {
+      setProviderRuntimeObserverHooks(observerOwner, undefined);
+    }
+    observerOwner = null;
+    resetProviderRuntimeIngressForTests();
   });
 
   test('emits explicit error when refreshing existing persistent state fails', () => {

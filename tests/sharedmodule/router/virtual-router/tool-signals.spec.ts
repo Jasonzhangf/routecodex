@@ -123,14 +123,14 @@ describe('shell command classification', () => {
     expect(result?.category).toBe('read');
   });
 
-  it('prioritizes read over search and other in a multi-tool assistant message', () => {
+  it('prioritizes search over read when a multi-tool assistant message includes search commands', () => {
     const messages = buildMultiToolCallMessages([
       { name: 'exec_command', command: 'rg "RouteCodex" src' },
       { name: 'exec_command', command: 'cat README.md' },
       { name: 'exec_command', command: 'echo done' }
     ]);
     const result = detectLastAssistantToolCategory(messages);
-    expect(result?.category).toBe('read');
+    expect(result?.category).toBe('search');
   });
 
   it('classifies codex Read tool name as read even without shell command args', () => {

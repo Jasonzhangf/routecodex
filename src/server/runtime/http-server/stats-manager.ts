@@ -117,6 +117,8 @@ const DEFAULT_STATS_LOG_MAX_BACKUPS = 3;
 const DEFAULT_DAILY_PERIODS = 90;
 const DEFAULT_WEEKLY_PERIODS = 104;
 const DEFAULT_MONTHLY_PERIODS = 36;
+const DEFAULT_INFLIGHT_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_INFLIGHT_MAX_ENTRIES = 4096;
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
 
@@ -183,6 +185,22 @@ function resolvePositiveIntEnv(primary: string | undefined, secondary: string | 
     }
   }
   return fallback;
+}
+
+function resolveInflightTtlMs(): number {
+  return resolvePositiveIntEnv(
+    process.env.ROUTECODEX_STATS_INFLIGHT_TTL_MS,
+    process.env.RCC_STATS_INFLIGHT_TTL_MS,
+    DEFAULT_INFLIGHT_TTL_MS
+  );
+}
+
+function resolveInflightMaxEntries(): number {
+  return resolvePositiveIntEnv(
+    process.env.ROUTECODEX_STATS_INFLIGHT_MAX_ENTRIES,
+    process.env.RCC_STATS_INFLIGHT_MAX_ENTRIES,
+    DEFAULT_INFLIGHT_MAX_ENTRIES
+  );
 }
 
 async function rotateStatsLogIfNeeded(logPath: string, maxBytes: number, maxBackups: number): Promise<void> {
@@ -384,6 +402,8 @@ export class StatsManager {
   private readonly maxDailyPeriods: number;
   private readonly maxWeeklyPeriods: number;
   private readonly maxMonthlyPeriods: number;
+  private readonly inflightTtlMs: number;
+  private readonly inflightMaxEntries: number;
   private periodicPersistTimer: NodeJS.Timeout | null = null;
   private persistSeq = 0;
   private lastPeriodicSignature = '';
@@ -425,9 +445,42 @@ export class StatsManager {
       process.env.RCC_STATS_MONTHLY_MAX_PERIODS,
       DEFAULT_MONTHLY_PERIODS
     );
+    this.inflightTtlMs = resolveInflightTtlMs();
+    this.inflightMaxEntries = resolveInflightMaxEntries();
     if (this.enabled) {
       this.loadHistoricalFromDisk(this.statsLogPath, true);
       this.startPeriodicPersistence();
+    }
+  }
+
+  private pruneInflight(nowMs: number): void {
+    if (!this.enabled || this.inflight.size < 1) {
+      return;
+    }
+    const ttlMs = this.inflightTtlMs;
+    if (Number.isFinite(ttlMs) && ttlMs > 0) {
+      for (const [requestId, sample] of this.inflight.entries()) {
+        const startedAtMs = typeof sample.startTime === 'number' && Number.isFinite(sample.startTime)
+          ? sample.startTime
+          : nowMs;
+        if (nowMs - startedAtMs >= ttlMs) {
+          this.inflight.delete(requestId);
+        }
+      }
+    }
+    const maxEntries = this.inflightMaxEntries;
+    if (!Number.isFinite(maxEntries) || maxEntries < 1 || this.inflight.size <= maxEntries) {
+      return;
+    }
+    const ordered = Array.from(this.inflight.entries())
+      .sort((a, b) => {
+        const aStartedAt = typeof a[1].startTime === 'number' && Number.isFinite(a[1].startTime) ? a[1].startTime : 0;
+        const bStartedAt = typeof b[1].startTime === 'number' && Number.isFinite(b[1].startTime) ? b[1].startTime : 0;
+        return aStartedAt - bStartedAt;
+      });
+    const removeCount = Math.max(0, ordered.length - maxEntries);
+    for (let idx = 0; idx < removeCount; idx += 1) {
+      this.inflight.delete(ordered[idx]![0]);
     }
   }
 
@@ -435,13 +488,18 @@ export class StatsManager {
     if (!this.enabled || !requestId) {
       return;
     }
-    this.inflight.set(requestId, { startTime: Date.now() });
+    const nowMs = Date.now();
+    this.pruneInflight(nowMs);
+    this.inflight.set(requestId, { startTime: nowMs });
+    this.pruneInflight(nowMs);
   }
 
   bindProvider(requestId: string, meta: { providerKey?: string; providerType?: string; model?: string }): void {
     if (!this.enabled || !requestId) {
       return;
     }
+    const nowMs = Date.now();
+    this.pruneInflight(nowMs);
     const sample = this.inflight.get(requestId);
     if (sample) {
       if (meta.providerKey) {sample.providerKey = meta.providerKey;}
@@ -450,12 +508,14 @@ export class StatsManager {
       return;
     }
     this.inflight.set(requestId, { startTime: Date.now(), ...meta });
+    this.pruneInflight(nowMs);
   }
 
   recordCompletion(requestId: string, options?: { usage?: UsageShape; error?: boolean }): void {
     if (!this.enabled || !requestId) {
       return;
     }
+    this.pruneInflight(Date.now());
     const sample = this.inflight.get(requestId);
     this.inflight.delete(requestId);
     if (!sample?.providerKey) {

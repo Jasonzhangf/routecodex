@@ -397,6 +397,21 @@ function routeHasConfiguredTargets(routeNode: unknown): boolean {
     if (targets.some((target) => typeof target === 'string' && target.trim().length > 0)) {
       return true;
     }
+    const loadBalancing =
+      isRecord(pool.loadBalancing)
+        ? (pool.loadBalancing as UnknownRecord)
+        : undefined;
+    const order = Array.isArray(loadBalancing?.order) ? loadBalancing.order : [];
+    if (order.some((target) => typeof target === 'string' && target.trim().length > 0)) {
+      return true;
+    }
+    const weights =
+      isRecord(loadBalancing?.weights)
+        ? (loadBalancing?.weights as UnknownRecord)
+        : undefined;
+    if (weights && Object.keys(weights).some((target) => target.trim().length > 0)) {
+      return true;
+    }
   }
   return false;
 }

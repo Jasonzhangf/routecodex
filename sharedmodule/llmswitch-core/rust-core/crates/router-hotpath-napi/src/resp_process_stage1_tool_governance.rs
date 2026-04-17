@@ -1668,6 +1668,8 @@ pub(crate) fn normalize_tool_args_preserving_raw_shape(
     if canonical_name != "exec_command" {
         return normalize_tool_args(tool_name, raw_args);
     }
+    let args = parse_json_record(raw_args).unwrap_or_default();
+    read_command_from_args(&args)?;
     stringify_tool_args_losslessly(raw_args)
 }
 
@@ -5736,6 +5738,12 @@ console.log('ok')"#;
         let parsed: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed["command"], "pwd");
         assert!(parsed.get("cmd").is_none());
+
+        let raw_args = json!({});
+        assert!(normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).is_none());
+
+        let raw_args = Value::String("{}".to_string());
+        assert!(normalize_tool_args_preserving_raw_shape("shell_command", Some(&raw_args)).is_none());
     }
 
     #[test]
@@ -6288,8 +6296,7 @@ console.log('ok')"#;
         assert!(parsed.get("cmd").is_none());
 
         let entry = json!({"function": {"name": "exec_command", "arguments": {}}});
-        let out = normalize_tool_call_entry(&entry, 1).unwrap();
-        assert_eq!(out["function"]["arguments"], "{}");
+        assert!(normalize_tool_call_entry(&entry, 1).is_none());
 
         let entry = Value::String("not an object".to_string());
         assert!(normalize_tool_call_entry(&entry, 1).is_none());

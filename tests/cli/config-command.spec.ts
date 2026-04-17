@@ -2124,7 +2124,9 @@ describe('init-config', () => {
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('iflow:web_search');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].providerKey).toBe('iflow');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].targets[0]).toContain('iflow.');
+    expect(
+      Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights)[0]
+    ).toContain('iflow.');
   });
 
   it('writes qwen as fallback webSearch engine when iflow and qwen are selected', async () => {
@@ -2148,7 +2150,12 @@ describe('init-config', () => {
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[1].id).toBe('qwen:web_search');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['qwen:web_search'].providerKey).toBe('qwen.qwen3.5-plus');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].targets).toEqual([
+    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights).toMatchObject({
+      'qwen.qwen3.5-plus': 1
+    });
+    expect(
+      Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights)
+    ).toEqual([
       expect.stringContaining('iflow.'),
       'qwen.qwen3.5-plus'
     ]);
@@ -2174,7 +2181,9 @@ describe('init-config', () => {
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('deepseek:web_search');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].providerKey).toBe('deepseek-web.deepseek-chat');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-chat');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].targets[0]).toBe('deepseek-web.deepseek-chat');
+    expect(
+      Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights)[0]
+    ).toBe('deepseek-web.deepseek-chat');
   });
 
   it('prioritizes deepseek then falls back to iflow when both are selected', async () => {
@@ -2199,7 +2208,9 @@ describe('init-config', () => {
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[1].id).toBe('iflow:web_search');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-chat');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].targets).toEqual([
+    expect(
+      Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights)
+    ).toEqual([
       'deepseek-web.deepseek-chat',
       expect.stringContaining('iflow.')
     ]);

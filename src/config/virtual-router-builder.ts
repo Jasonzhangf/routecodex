@@ -292,7 +292,22 @@ function routeHasConfiguredTargets(routePools: VirtualRouterRoutingPool[] | unde
     if (!pool || typeof pool !== 'object') {
       return false;
     }
-    return Array.isArray(pool.targets) && pool.targets.some((target) => typeof target === 'string' && target.trim());
+    if (Array.isArray(pool.targets) && pool.targets.some((target) => typeof target === 'string' && target.trim())) {
+      return true;
+    }
+    const loadBalancing =
+      pool.loadBalancing && typeof pool.loadBalancing === 'object' && !Array.isArray(pool.loadBalancing)
+        ? (pool.loadBalancing as Record<string, unknown>)
+        : undefined;
+    const order = Array.isArray(loadBalancing?.order) ? loadBalancing.order : [];
+    if (order.some((target) => typeof target === 'string' && target.trim())) {
+      return true;
+    }
+    const weights =
+      loadBalancing?.weights && typeof loadBalancing.weights === 'object' && !Array.isArray(loadBalancing.weights)
+        ? (loadBalancing.weights as Record<string, unknown>)
+        : undefined;
+    return Boolean(weights && Object.keys(weights).some((target) => target.trim().length > 0));
   });
 }
 
@@ -306,8 +321,7 @@ function buildCapabilityRoutePool(
     priority: 180,
     targets: [...targets],
     loadBalancing: {
-      strategy: 'weighted',
-      weights: Object.fromEntries(targets.map((target) => [target, 1]))
+      order: [...targets]
     }
-  };
+  } as VirtualRouterRoutingPool;
 }

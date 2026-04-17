@@ -1271,6 +1271,14 @@ export async function runServerToolOrchestration(
       (metadata as any).__shadowCompareForcedProviderKey = providerKey;
     }
   }
+  if ((isReasoningStopGuardFlow || isReasoningStopContinueFlow) && !(metadata as any).__shadowCompareForcedProviderKey) {
+    const providerKeyRaw = (options.adapterContext as unknown as { providerKey?: unknown }).providerKey;
+    const providerKey =
+      typeof providerKeyRaw === 'string' && providerKeyRaw.trim().length ? providerKeyRaw.trim() : '';
+    if (providerKey) {
+      (metadata as any).__shadowCompareForcedProviderKey = providerKey;
+    }
+  }
 
   const retryEmptyFollowupOnce = isStopMessageFlow;
   const maxAttempts = retryEmptyFollowupOnce ? 2 : 1;

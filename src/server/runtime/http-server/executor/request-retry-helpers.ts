@@ -19,6 +19,7 @@ const RATE_LIMIT_MESSAGE_HINTS = [
   'rate limited',
   'quota exceeded',
   'slow down',
+  '访问量过大',
   '速率限制',
   '请求频率',
   '请求过于频繁',

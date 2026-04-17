@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { ProviderQuotaDaemonModule } from '../../../src/manager/modules/quota/index.js';
 import { createInitialQuotaState } from '../../../src/manager/quota/provider-quota-center.js';
-import { getProviderErrorCenter } from '../../../src/modules/llmswitch/bridge.js';
+import { reportProviderErrorToRouterPolicy } from '../../../src/modules/llmswitch/bridge.js';
 
 function setEnv(name: string, value: string | undefined): () => void {
   const original = process.env[name];
@@ -63,8 +63,7 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.init({ serverId: 'test' });
     await mod.start();
 
-    const center = await getProviderErrorCenter();
-    center.emit({
+    await reportProviderErrorToRouterPolicy({
       code: 'HTTP_429',
       message: 'HTTP 429: {"error":{"message":"You have exhausted your capacity on this model. Your quota will reset after 1s."}}',
       stage: 'provider.provider.http',
@@ -160,8 +159,7 @@ describe('ProviderQuotaDaemonModule', () => {
     mod.registerProviderStaticConfig('antigravity.alias1.claude-sonnet-4-5-thinking', { authType: 'oauth' });
     await mod.start();
 
-    const center = await getProviderErrorCenter();
-    center.emit({
+    await reportProviderErrorToRouterPolicy({
       code: 'HTTP_403',
       message: 'HTTP 403: Please authenticate with Google OAuth first',
       stage: 'provider.provider.http',
@@ -200,8 +198,7 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.init({ serverId: 'test' });
     await mod.start();
 
-    const center = await getProviderErrorCenter();
-    center.emit({
+    await reportProviderErrorToRouterPolicy({
       code: 'HTTP_429',
       message: 'HTTP 429: {"error":{"message":"No capacity available for model claude-sonnet-4-5-thinking on the server"}}',
       stage: 'provider.provider.http',
@@ -233,7 +230,7 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking'].reason).toBe('cooldown');
     expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking'].cooldownUntil).toBe(now + 15_000);
 
-    center.emit({
+    await reportProviderErrorToRouterPolicy({
       code: 'QUOTA_RECOVERY',
       message: 'Quota manager: provider quota refreshed',
       stage: 'quota',
@@ -282,8 +279,7 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(view1).not.toBeNull();
     expect(view1!('antigravity.alias1.claude-sonnet-4-5-thinking')?.inPool).toBe(false);
 
-    const center = await getProviderErrorCenter();
-    center.emit({
+    await reportProviderErrorToRouterPolicy({
       code: 'QUOTA_RECOVERY',
       message: 'Quota manager: provider quota refreshed',
       stage: 'quota',
@@ -322,10 +318,9 @@ describe('ProviderQuotaDaemonModule', () => {
     mod.registerProviderStaticConfig('tab.default.gpt-5.1', { authType: 'apikey' });
     await mod.start();
 
-    const center = await getProviderErrorCenter();
     const baseNow = Date.now();
     for (let i = 0; i < 3; i++) {
-      center.emit({
+      await reportProviderErrorToRouterPolicy({
         code: 'HTTP_429',
         message: 'HTTP 429: rate limited',
         stage: 'provider.provider.http',
@@ -370,10 +365,9 @@ describe('ProviderQuotaDaemonModule', () => {
       mod.registerProviderStaticConfig('tab.default.gpt-5.1', { authType: 'apikey' });
       await mod.start();
 
-      const center = await getProviderErrorCenter();
-      const baseNow = Date.now();
+        const baseNow = Date.now();
       for (let i = 0; i < 4; i += 1) {
-        center.emit({
+        await reportProviderErrorToRouterPolicy({
           code: 'HTTP_429',
           message: 'HTTP 429: MODEL_CAPACITY_EXHAUSTED',
           stage: 'provider.provider.http',
@@ -415,11 +409,10 @@ describe('ProviderQuotaDaemonModule', () => {
     mod.registerProviderStaticConfig('tab.default.gpt-5.1', { authType: 'apikey' });
     await mod.start();
 
-    const center = await getProviderErrorCenter();
     const baseNow = Date.now();
     const eventCount = 7; // reaches the last step in the schedule
     for (let i = 0; i < eventCount; i++) {
-      center.emit({
+      await reportProviderErrorToRouterPolicy({
         code: 'HTTP_429',
         message: 'HTTP 429: rate limited',
         stage: 'provider.provider.http',
@@ -452,7 +445,7 @@ describe('ProviderQuotaDaemonModule', () => {
 
     // Next 429 within the chain window stays at capped step.
     const afterCooldownNow = Date.now();
-    center.emit({
+    await reportProviderErrorToRouterPolicy({
       code: 'HTTP_429',
       message: 'HTTP 429: rate limited',
       stage: 'provider.provider.http',
@@ -517,8 +510,7 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.init({ serverId: 'test' });
     await mod.start();
 
-    const center = await getProviderErrorCenter();
-    center.emit({
+    await reportProviderErrorToRouterPolicy({
       code: 'HTTP_429',
       message: 'HTTP 429: {"error":{"message":"No capacity available for model gpt-5.1"}}',
       stage: 'provider.provider.http',
@@ -563,8 +555,7 @@ describe('ProviderQuotaDaemonModule', () => {
     mod.registerProviderStaticConfig('crs.key1.gpt-5.2', { authType: 'apikey' });
     await mod.start();
 
-    const center = await getProviderErrorCenter();
-    center.emit({
+    await reportProviderErrorToRouterPolicy({
       code: 'HTTP_402',
       message:
         'HTTP 402: {"error":{"type":"insufficient_quota","message":"daily limit","code":"daily_cost_limit_exceeded"},"resetAt":"2026-02-02T16:00:00.000Z"}',
@@ -601,8 +592,7 @@ describe('ProviderQuotaDaemonModule', () => {
     mod.registerProviderStaticConfig('crs.key1.gpt-5.2', { authType: 'apikey', apikeyDailyResetTime: '12:00Z' });
     await mod.start();
 
-    const center = await getProviderErrorCenter();
-    center.emit({
+    await reportProviderErrorToRouterPolicy({
       code: 'HTTP_402',
       message: 'HTTP 402: {"error":{"type":"insufficient_quota","message":"daily limit","code":"daily_cost_limit_exceeded"}}',
       stage: 'provider.provider.http',

@@ -140,4 +140,57 @@ describe('responses-openai-pipeline native shell', () => {
       arguments: '{"cmd":"pwd"}'
     });
   });
+
+  test('request meta store prunes expired request ids', async () => {
+    const codec = new ResponsesOpenAIPipelineCodec();
+    await codec.initialize();
+    const originalNow = Date.now;
+    let now = 1_000;
+    Date.now = () => now;
+    try {
+      await codec.convertRequest(
+        {
+          model: 'gpt-4.1',
+          input: [
+            {
+              type: 'message',
+              role: 'user',
+              content: [{ type: 'input_text', text: 'one' }]
+            }
+          ]
+        },
+        profile,
+        {
+          requestId: 'req_responses_pipeline_old',
+          entryEndpoint: '/v1/responses',
+          endpoint: '/v1/responses',
+          metadata: {}
+        } as any
+      );
+      now += 21 * 60_000;
+      await codec.convertRequest(
+        {
+          model: 'gpt-4.1',
+          input: [
+            {
+              type: 'message',
+              role: 'user',
+              content: [{ type: 'input_text', text: 'two' }]
+            }
+          ]
+        },
+        profile,
+        {
+          requestId: 'req_responses_pipeline_new',
+          entryEndpoint: '/v1/responses',
+          endpoint: '/v1/responses',
+          metadata: {}
+        } as any
+      );
+
+      expect(((codec as any).requestMetaStore as { size: () => number }).size()).toBe(1);
+    } finally {
+      Date.now = originalNow;
+    }
+  });
 });

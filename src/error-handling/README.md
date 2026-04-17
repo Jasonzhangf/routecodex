@@ -14,8 +14,8 @@ Routes errors to appropriate handlers based on error scope (http/server/pipeline
 Processes errors with intelligent filtering to reduce noise while maintaining visibility into critical issues.
 ## Error Flow
 ```
-Provider/Hub Pipeline → emitProviderError() → RouteErrorHub → 
-ErrorHandlerRegistry → providerErrorCenter → HTTP Response
+Provider/Hub Pipeline → emitProviderError() → Virtual Router provider-runtime-ingress → Router Policy / Quota hooks
+Provider-side HTTP/CLI errors → RouteErrorHub → ErrorHandlerRegistry → HTTP Response
 ```
 ## Do / Don't
 **Do**

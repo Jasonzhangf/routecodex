@@ -1639,6 +1639,61 @@ fn build_tool_call(parsed: &ParsedToolCall, prefix: &str, index: usize) -> Value
     })
 }
 
+fn normalize_structured_tool_call_entry(
+    call_obj: &Map<String, Value>,
+    fallback_id: Option<String>,
+) -> Option<Value> {
+    let function_node = call_obj.get("function").and_then(Value::as_object);
+    let raw_name = function_node
+        .and_then(|f| f.get("name"))
+        .and_then(Value::as_str)
+        .or_else(|| call_obj.get("name").and_then(Value::as_str))
+        .or_else(|| call_obj.get("tool_name").and_then(Value::as_str))
+        .or_else(|| call_obj.get("tool").and_then(Value::as_str))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())?;
+    let normalized_name = normalize_tool_name(raw_name.as_str());
+    if !is_structured_tool_name(normalized_name.as_str()) {
+        return None;
+    }
+
+    let args_source = function_node
+        .and_then(|f| f.get("arguments"))
+        .or_else(|| function_node.and_then(|f| f.get("args")))
+        .or_else(|| function_node.and_then(|f| f.get("input")))
+        .or_else(|| call_obj.get("arguments"))
+        .or_else(|| call_obj.get("args"))
+        .or_else(|| call_obj.get("input"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let args = normalize_reasoning_harvested_arguments(
+        normalized_name.as_str(),
+        &args_source,
+        repair_arguments_to_string(&args_source),
+    )?;
+
+    let id = call_obj
+        .get("id")
+        .or_else(|| call_obj.get("call_id"))
+        .or_else(|| call_obj.get("tool_call_id"))
+        .and_then(Value::as_str)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or(fallback_id);
+
+    let mut fn_obj = Map::new();
+    fn_obj.insert("name".to_string(), Value::String(normalized_name));
+    fn_obj.insert("arguments".to_string(), Value::String(args));
+
+    let mut normalized = Map::new();
+    if let Some(call_id) = id {
+        normalized.insert("id".to_string(), Value::String(call_id));
+    }
+    normalized.insert("type".to_string(), Value::String("function".to_string()));
+    normalized.insert("function".to_string(), Value::Object(fn_obj));
+    Some(Value::Object(normalized))
+}
+
 fn extract_balanced_json_object_at(text: &str, start_byte: usize) -> Option<(usize, String)> {
     if start_byte >= text.len() || !text[start_byte..].starts_with('{') {
         return None;
@@ -2529,22 +2584,21 @@ fn normalize_tool_calls_in_message(message_obj: &mut Map<String, Value>) -> bool
         return false;
     }
 
-    for call in tool_calls.iter_mut() {
-        let Some(call_obj) = call.as_object_mut() else {
+    let raw_calls = std::mem::take(tool_calls);
+    for (idx, call) in raw_calls.iter().enumerate() {
+        let Some(call_obj) = call.as_object() else {
             continue;
         };
-        let Some(func_val) = call_obj.get_mut("function") else {
+        let Some(normalized) = normalize_structured_tool_call_entry(
+            call_obj,
+            Some(format!("reasoning_call_{}", idx + 1)),
+        ) else {
             continue;
         };
-        let Some(func_obj) = func_val.as_object_mut() else {
-            continue;
-        };
-        let args_source = func_obj.get("arguments").cloned().unwrap_or(Value::Null);
-        let repaired = repair_arguments_to_string(&args_source);
-        func_obj.insert("arguments".to_string(), Value::String(repaired));
+        tool_calls.push(normalized);
     }
 
-    true
+    !tool_calls.is_empty()
 }
 
 fn collect_message_content_text_candidates(message_obj: &Map<String, Value>) -> Vec<String> {
@@ -2820,14 +2874,12 @@ pub fn normalize_assistant_text_to_tool_calls_json(
             .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)));
     }
 
-    let has_tool_calls = message
-        .get("tool_calls")
-        .and_then(|v| v.as_array())
-        .map(|arr| !arr.is_empty())
-        .unwrap_or(false);
-    if has_tool_calls {
-        return serde_json::to_string(&message)
-            .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)));
+    if let Some(message_obj) = message.as_object_mut() {
+        if normalize_tool_calls_in_message(message_obj) {
+            return serde_json::to_string(&message).map_err(|e| {
+                napi::Error::from_reason(format!("Failed to serialize output: {}", e))
+            });
+        }
     }
 
     let mut candidates: Vec<String> = Vec::new();
@@ -2907,52 +2959,13 @@ pub fn normalize_assistant_text_to_tool_calls_json(
         }
         for (entry_idx, entry) in tool_calls.iter().enumerate() {
             if let Value::Object(obj) = entry {
-                let function_node = obj.get("function").and_then(|v| v.as_object());
-                let name = function_node
-                    .and_then(|f| f.get("name"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .or_else(|| {
-                        obj.get("name")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.trim().to_string())
-                            .filter(|s| !s.is_empty())
-                    });
-                if name.is_none() {
+                let Some(normalized) = normalize_structured_tool_call_entry(
+                    obj,
+                    Some(format!("call_{}", idx + entry_idx + 1)),
+                ) else {
                     continue;
-                }
-                let args_candidate = function_node
-                    .and_then(|f| f.get("arguments"))
-                    .or_else(|| obj.get("arguments"))
-                    .or_else(|| obj.get("args"))
-                    .cloned()
-                    .unwrap_or(Value::String("{}".to_string()));
-                let args = match args_candidate {
-                    Value::String(s) => s,
-                    other => serde_json::to_string(&other).unwrap_or_else(|_| "{}".to_string()),
                 };
-                let id = obj
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .or_else(|| {
-                        obj.get("call_id")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.trim().to_string())
-                            .filter(|s| !s.is_empty())
-                    })
-                    .unwrap_or_else(|| format!("call_{}", idx + entry_idx + 1));
-
-                let mut fn_obj = Map::new();
-                fn_obj.insert("name".to_string(), Value::String(name.unwrap()));
-                fn_obj.insert("arguments".to_string(), Value::String(args));
-                let mut call_obj = Map::new();
-                call_obj.insert("id".to_string(), Value::String(id));
-                call_obj.insert("type".to_string(), Value::String("function".to_string()));
-                call_obj.insert("function".to_string(), Value::Object(fn_obj));
-                mapped_calls.push(Value::Object(call_obj));
+                mapped_calls.push(normalized);
             }
         }
         if !mapped_calls.is_empty() {
@@ -4184,6 +4197,76 @@ exec_command
     }
 
     #[test]
+    fn reasoning_tool_normalizer_drops_structured_exec_command_without_cmd() {
+        let response = json!({
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_bad",
+                                "type": "function",
+                                "function": {
+                                    "name": "exec_command",
+                                    "arguments": {}
+                                }
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls"
+                }
+            ]
+        });
+
+        let raw = normalize_chat_response_reasoning_tools_json(response.to_string(), None).unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        let choice = parsed
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|arr| arr.first())
+            .and_then(Value::as_object)
+            .unwrap();
+        let message = choice.get("message").and_then(Value::as_object).unwrap();
+        let tool_calls = message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert!(tool_calls.is_empty());
+    }
+
+    #[test]
+    fn normalize_assistant_text_sanitizes_existing_exec_command_without_cmd() {
+        let message = json!({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_bad",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": {}
+                    }
+                }
+            ]
+        });
+
+        let output_json = normalize_assistant_text_to_tool_calls_json(message.to_string(), None)
+            .expect("normalize_assistant_text_to_tool_calls_json failed");
+        let output: Value =
+            serde_json::from_str(&output_json).expect("failed to parse output json");
+        let tool_calls = output
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert!(tool_calls.is_empty());
+    }
+
+    #[test]
     fn reasoning_tool_normalizer_harvests_tool_calls_from_malformed_content_json() {
         let malformed = "{\"tool_calls\":[{\"name\":\"update_plan\",\"input\":{\"action\":\"create\",\"plan\":[{\"step\":\"A\",\"status\":\"pending\"}]}},{\"name\":\"agent.dispatch\",\"input\":{\"target_agent_id\":\"finger-project-agent\",\"task\":\"alpha\"},{\"name\":\"agent.dispatch\",\"input\":{\"target_agent_id\":\"finger-reviewer\",\"task\":\"beta\"}}]}";
         let response = json!({
@@ -4292,7 +4375,8 @@ exec_command
             .and_then(|row| row.get("arguments"))
             .and_then(Value::as_str)
             .expect("arguments should exist");
-        let args_json: Value = serde_json::from_str(args).expect("arguments should stay valid json");
+        let args_json: Value =
+            serde_json::from_str(args).expect("arguments should stay valid json");
         assert_eq!(
             args_json.get("cmd").and_then(Value::as_str),
             Some(

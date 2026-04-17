@@ -1,16 +1,12 @@
-import type { ErrorContext } from 'rcc-errorhandling';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { ProviderContext } from '../api/provider-types.js';
 import type { TargetMetadata } from '../../../modules/pipeline/orchestrator/pipeline-context.js';
-import { formatErrorForErrorCenter } from '../../../utils/error-center-payload.js';
 import { getRouteErrorHub, reportRouteError } from '../../../error-handling/route-error-hub.js';
 import { buildInfo } from '../../../build-info.js';
-import { getProviderErrorCenter } from '../../../modules/llmswitch/bridge.js';
+import { reportProviderErrorToRouterPolicy } from '../../../modules/llmswitch/bridge.js';
 import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';
 
 type ProviderErrorRuntimeMetadata = ProviderErrorEvent['runtime'];
-
-const providerErrorCenter = (await getProviderErrorCenter())!;
 
 type ExtendedRuntimeMetadata = ProviderErrorRuntimeMetadata & {
   providerFamily?: string;
@@ -113,13 +109,10 @@ export function emitProviderError(options: EmitOptions): void {
   if (typeof recoverable === 'boolean') {
     (err as ErrorWithMetadata).retryable = recoverable;
   }
-  try {
-    providerErrorCenter.emit(event);
-  } catch (emitError) {
-    console.error('[provider-error-reporter] failed to emit provider error', emitError);
-  }
+  void reportProviderErrorToRouterPolicy(event).catch((emitError) => {
+    console.error('[provider-error-reporter] failed to report provider error to router policy', emitError);
+  });
 
-  const center = options.dependencies.errorHandlingCenter;
   const hub = getRouteErrorHub();
   if (hub) {
     const targetModel =
@@ -151,42 +144,6 @@ export function emitProviderError(options: EmitOptions): void {
         console.error(
           '[provider-error-reporter] failed to route provider error via hub',
           reportError instanceof Error ? reportError.message : String(reportError ?? 'Unknown error')
-        );
-      }
-    });
-  } else if (center?.handleError) {
-    const severity: ErrorContext['severity'] = status && status >= 500 ? 'high' : 'medium';
-    const targetModel =
-      options.runtime.target && typeof options.runtime.target === 'object'
-        ? (options.runtime.target as { clientModelId?: string }).clientModelId
-        : undefined;
-    const sanitizedContext = formatErrorForErrorCenter({
-      requestId: options.runtime.requestId,
-      providerKey: options.runtime.providerKey,
-      model: targetModel,
-      providerType: options.runtime.providerType,
-      providerFamily: options.runtime.providerFamily,
-      routeName: options.runtime.routeName,
-      status,
-      code,
-      runtime: options.runtime,
-      details: mergedDetails
-    });
-    const payload: ErrorContext = {
-      error: err.message || code,
-      source: options.stage,
-      severity,
-      timestamp: Date.now(),
-      moduleId: options.runtime.providerId,
-      context: typeof sanitizedContext === 'object' && sanitizedContext
-        ? sanitizedContext as Record<string, unknown>
-        : { details: sanitizedContext }
-    };
-    void center.handleError(payload).catch((handlerError: unknown) => {
-      if (buildInfo.mode !== 'release') {
-        console.error(
-          '[provider-error-reporter] error center handleError failed',
-          handlerError instanceof Error ? handlerError.message : String(handlerError ?? 'Unknown error')
         );
       }
     });

@@ -15,16 +15,19 @@ pub(super) fn extract_tool_calls_from_text(
             if !name.is_empty() {
                 let block = &text[inline.end()..];
                 if let Some(args_record) = parse_tagged_arg_block(block) {
-                    let args = serde_json::to_string(&args_record).unwrap_or_else(|_| "{}".to_string());
-                    push_match(
-                        &mut matches,
-                        ToolCallMatch {
-                            start: 0,
-                            end: text.len(),
-                            name,
-                            args,
-                        },
-                    );
+                    if let Some(args) =
+                        stringify_tool_args_if_harvestable(name.as_str(), &Value::Object(args_record))
+                    {
+                        push_match(
+                            &mut matches,
+                            ToolCallMatch {
+                                start: 0,
+                                end: text.len(),
+                                name,
+                                args,
+                            },
+                        );
+                    }
                 }
             }
         }

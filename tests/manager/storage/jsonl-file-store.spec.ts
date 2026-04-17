@@ -34,4 +34,18 @@ describe('JsonlFileStore', () => {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('treats missing file compact as no-op without warning', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-jsonl-store-'));
+    const filePath = path.join(tempDir, 'missing.jsonl');
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const store = new JsonlFileStore<{ ok: boolean }>({ filePath });
+      await expect(store.compact()).resolves.toBeUndefined();
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });

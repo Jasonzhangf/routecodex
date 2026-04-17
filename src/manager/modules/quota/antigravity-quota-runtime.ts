@@ -57,7 +57,7 @@ export function handleQuotaPersistenceIssue(options: {
   return issue;
 }
 
-export async function subscribeToProviderCenters(options: {
+export async function subscribeToProviderIngress(options: {
   bridge: typeof llmsBridge;
   coreQuotaManager: CoreQuotaManagerLike | null;
 }): Promise<{ providerErrorUnsub: (() => void) | null; providerSuccessUnsub: (() => void) | null }> {
@@ -65,53 +65,41 @@ export async function subscribeToProviderCenters(options: {
   if (!mgr) {
     return { providerErrorUnsub: null, providerSuccessUnsub: null };
   }
-
-  let providerErrorUnsub: (() => void) | null = null;
-  let errorCenter: { subscribe?: (handler: (ev: ProviderErrorEvent) => void) => () => void } | null = null;
+  const owner = {};
+  const cleanup = () => {
+    void options.bridge.setProviderRuntimeQuotaHooks(owner, undefined).catch((error) => {
+      logQuotaRuntimeNonBlockingError('subscribeToProviderIngress.clearHooks', error);
+    });
+  };
   try {
-    errorCenter = (await options.bridge.getProviderErrorCenter()) as any;
-  } catch (error) {
-    logQuotaRuntimeNonBlockingError('subscribeToProviderCenters.getProviderErrorCenter', error);
-    errorCenter = null;
-  }
-  if (errorCenter && typeof errorCenter.subscribe === 'function' && typeof mgr.onProviderError === 'function') {
-    try {
-      providerErrorUnsub = errorCenter.subscribe((ev: ProviderErrorEvent) => {
-        try {
-          mgr.onProviderError?.(ev);
-        } catch (error) {
-          logQuotaRuntimeNonBlockingError('subscribeToProviderCenters.onProviderError', error);
-        }
-      });
-    } catch (error) {
-      logQuotaRuntimeNonBlockingError('subscribeToProviderCenters.errorCenterSubscribe', error);
-      providerErrorUnsub = null;
+    const registered = await options.bridge.setProviderRuntimeQuotaHooks(owner, {
+      onProviderError: typeof mgr.onProviderError === 'function'
+        ? (ev: ProviderErrorEvent) => {
+            try {
+              mgr.onProviderError?.(ev);
+            } catch (error) {
+              logQuotaRuntimeNonBlockingError('subscribeToProviderIngress.onProviderError', error);
+            }
+          }
+        : undefined,
+      onProviderSuccess: typeof mgr.onProviderSuccess === 'function'
+        ? (ev: ProviderSuccessEvent) => {
+            try {
+              mgr.onProviderSuccess?.(ev);
+            } catch (error) {
+              logQuotaRuntimeNonBlockingError('subscribeToProviderIngress.onProviderSuccess', error);
+            }
+          }
+        : undefined
+    });
+    if (!registered) {
+      return { providerErrorUnsub: null, providerSuccessUnsub: null };
     }
-  }
-
-  let providerSuccessUnsub: (() => void) | null = null;
-  let successCenter: { subscribe?: (handler: (ev: ProviderSuccessEvent) => void) => () => void } | null = null;
-  try {
-    successCenter = (await options.bridge.getProviderSuccessCenter()) as any;
   } catch (error) {
-    logQuotaRuntimeNonBlockingError('subscribeToProviderCenters.getProviderSuccessCenter', error);
-    successCenter = null;
+    logQuotaRuntimeNonBlockingError('subscribeToProviderIngress.setProviderRuntimeQuotaHooks', error);
+    return { providerErrorUnsub: null, providerSuccessUnsub: null };
   }
-  if (successCenter && typeof successCenter.subscribe === 'function' && typeof mgr.onProviderSuccess === 'function') {
-    try {
-      providerSuccessUnsub = successCenter.subscribe((ev: ProviderSuccessEvent) => {
-        try {
-          mgr.onProviderSuccess?.(ev);
-        } catch (error) {
-          logQuotaRuntimeNonBlockingError('subscribeToProviderCenters.onProviderSuccess', error);
-        }
-      });
-    } catch (error) {
-      logQuotaRuntimeNonBlockingError('subscribeToProviderCenters.successCenterSubscribe', error);
-      providerSuccessUnsub = null;
-    }
-  }
-  return { providerErrorUnsub, providerSuccessUnsub };
+  return { providerErrorUnsub: cleanup, providerSuccessUnsub: cleanup };
 }
 
 export function scheduleNextRefresh(options: {

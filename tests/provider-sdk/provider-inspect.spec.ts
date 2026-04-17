@@ -68,43 +68,64 @@ describe('provider inspect', () => {
       default: [
         {
           id: 'default-primary',
-          targets: ['qwen.qwen3-coder-plus']
+          loadBalancing: {
+            strategy: 'weighted',
+            weights: { 'qwen.qwen3-coder-plus': 1 }
+          }
         }
       ],
       thinking: [
         {
           id: 'thinking-primary',
-          targets: ['qwen.qwen3-coder-plus']
+          loadBalancing: {
+            strategy: 'weighted',
+            weights: { 'qwen.qwen3-coder-plus': 1 }
+          }
         }
       ],
       tools: [
         {
           id: 'tools-primary',
-          targets: ['qwen.qwen3-coder-plus']
+          loadBalancing: {
+            strategy: 'weighted',
+            weights: { 'qwen.qwen3-coder-plus': 1 }
+          }
         }
       ],
       coding: [
         {
           id: 'coding-primary',
-          targets: ['qwen.qwen3-coder-plus']
+          loadBalancing: {
+            strategy: 'weighted',
+            weights: { 'qwen.qwen3-coder-plus': 1 }
+          }
         }
       ],
       longcontext: [
         {
           id: 'longcontext-primary',
-          targets: ['qwen.qwen3-coder-plus']
+          loadBalancing: {
+            strategy: 'weighted',
+            weights: { 'qwen.qwen3-coder-plus': 1 }
+          }
         }
       ],
       multimodal: [
         {
           id: 'multimodal-primary',
-          targets: ['qwen.qwen3-coder-plus']
+          loadBalancing: {
+            strategy: 'weighted',
+            weights: { 'qwen.qwen3-coder-plus': 1 }
+          }
         }
       ],
       web_search: [
         {
           id: 'web_search-primary',
-          targets: ['qwen.qwen3.5-plus']
+          loadBalancing: {
+            strategy: 'weighted',
+            weights: { 'qwen.qwen3.5-plus': 1 }
+          }
         }
       ]
     });
@@ -152,7 +173,10 @@ describe('provider inspect', () => {
               default: [
                 {
                   id: 'default-primary',
-                  targets: ['qwen.qwen3-coder-plus']
+                  loadBalancing: {
+                    strategy: 'weighted',
+                    weights: { 'qwen.qwen3-coder-plus': 1 }
+                  }
                 }
               ]
             },

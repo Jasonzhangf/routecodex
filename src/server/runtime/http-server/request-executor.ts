@@ -100,6 +100,7 @@ export interface RequestExecutor {
 const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
+const requestDegradedLogState = new Set<string>();
 const RECOVERABLE_BACKOFF_TTL_MS = 5 * 60_000;
 const recoverableErrorBackoffState = new Map<string, { consecutive: number; updatedAtMs: number }>();
 const recoverableRetryGateState = new Map<string, Promise<void>>();
@@ -175,6 +176,20 @@ function logRequestExecutorNonBlockingError(stage: string, error: unknown, detai
     console.warn(`[request-executor] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
   } catch {
     // Never throw from non-blocking logging.
+  }
+}
+
+function logRequestExecutorDegraded(stage: string, requestId: string, details?: Record<string, unknown>): void {
+  const key = `${requestId}:${stage}`;
+  if (requestDegradedLogState.has(key)) {
+    return;
+  }
+  requestDegradedLogState.add(key);
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[request-executor][degraded] req=${requestId} stage=${stage}${detailSuffix}`);
+  } catch {
+    // Never throw from degraded logging.
   }
 }
 
@@ -484,6 +499,18 @@ function readHubStageTop(metadata: Record<string, unknown> | undefined): HubStag
   return normalized.length ? normalized : undefined;
 }
 
+function isServerToolFollowupRequest(metadata: Record<string, unknown> | undefined): boolean {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return false;
+  }
+  const rt =
+    metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+      ? (metadata.__rt as Record<string, unknown>)
+      : undefined;
+  const raw = rt?.serverToolFollowup;
+  return raw === true || (typeof raw === 'string' && raw.trim().toLowerCase() === 'true');
+}
+
 function readHubDecodeBreakdown(hubStageTop: HubStageTopEntry[] | undefined): HubDecodeBreakdown {
   if (!Array.isArray(hubStageTop) || hubStageTop.length === 0) {
     return { sseDecodeMs: 0, codecDecodeMs: 0 };
@@ -671,6 +698,13 @@ function restoreRequestPayloadFromRetrySeed(seed: RetryPayloadSeed): Record<stri
   return undefined;
 }
 
+function resolveOriginalRequestForResponseConversion(seed: RetryPayloadSeed): Record<string, unknown> | undefined {
+  if (seed.mode === 'snapshot') {
+    return seed.snapshotPayload;
+  }
+  return restoreRequestPayloadFromRetrySeed(seed);
+}
+
 function restoreRequestPayloadFromRetrySnapshot(
   serializedPayload?: string,
   fallbackPayload?: Record<string, unknown>
@@ -776,11 +810,20 @@ function shouldBlockRetryOnCurrentProvider(args: {
 }
 
 function buildRecoverableErrorBackoffKey(args: {
+  providerKey?: string;
+  runtimeKey?: string;
   statusCode?: number;
   errorCode?: string;
   upstreamCode?: string;
   reason?: string;
 }): string {
+  const providerScope = (() => {
+    const raw =
+      (typeof args.providerKey === 'string' && args.providerKey.trim())
+      || (typeof args.runtimeKey === 'string' && args.runtimeKey.trim())
+      || 'unknown';
+    return `provider:${raw}`;
+  })();
   const statusPart = typeof args.statusCode === 'number' ? `status:${args.statusCode}` : 'status:none';
   const errorPart = normalizeCodeKey(args.errorCode) ?? 'error:none';
   const upstreamPart = normalizeCodeKey(args.upstreamCode) ?? 'upstream:none';
@@ -798,7 +841,7 @@ function buildRecoverableErrorBackoffKey(args: {
     if (normalized.includes('timeout')) return 'reason:timeout';
     return 'reason:other';
   })();
-  return `${statusPart}|${errorPart}|${upstreamPart}|${reasonPart}`;
+  return `${providerScope}|${statusPart}|${errorPart}|${upstreamPart}|${reasonPart}`;
 }
 
 function resolveRecoverableBackoffCapMs(args: {
@@ -1045,6 +1088,7 @@ function consumeLogicalChainRecoverableRetry(key: string): {
 
 function resetRequestExecutorInternalStateForTests(): void {
   nonBlockingLogState.clear();
+  requestDegradedLogState.clear();
   recoverableErrorBackoffState.clear();
   recoverableRetryGateState.clear();
   recoverableRetryWaiterState.clear();
@@ -1133,6 +1177,43 @@ function routePoolHasAlternativeProvider(args: {
     return true;
   }
   return false;
+}
+
+function shouldHoldOnLastAvailable429(args: {
+  statusCode?: number;
+  routePool: string[];
+  excludedProviderKeys: Set<string>;
+  currentProviderKey?: string;
+}): boolean {
+  if (args.statusCode !== 429) {
+    return false;
+  }
+  // `routingDecision.pool` only reflects the currently selected tier/pool, not the
+  // entire route graph. A singleton pool cannot prove the whole route is exhausted:
+  // there may still be lower-priority fallback pools available on reroute.
+  if (!Array.isArray(args.routePool) || args.routePool.length <= 1) {
+    return false;
+  }
+  return !routePoolHasAlternativeProvider({
+    routePool: args.routePool,
+    excludedProviderKeys: args.excludedProviderKeys,
+    currentProviderKey: args.currentProviderKey
+  });
+}
+
+function isConfirmedSingleProviderPool(args: {
+  initialRoutePool: string[] | null;
+  currentProviderKey?: string;
+  statusCode?: number;
+}): boolean {
+  if (args.statusCode === 429) {
+    return false;
+  }
+  return Boolean(
+    args.initialRoutePool &&
+    args.initialRoutePool.length === 1 &&
+    args.initialRoutePool[0] === args.currentProviderKey
+  );
 }
 
 function excludeProvidersSharingRuntimeFromRoutePool(args: {
@@ -1451,7 +1532,10 @@ export class HubRequestExecutor implements RequestExecutor {
       );
     }
     providerSwitchLogState.set(dedupeKey, { lastAtMs: now, suppressed: 0 });
-    const retryTag = `[provider-switch] req=${args.requestId} attempt=${args.attempt}/${args.maxAttempts} -> ${args.nextAttempt}/${args.maxAttempts}`;
+    const boundedNextAttempt = Math.max(args.attempt, Math.min(args.maxAttempts, args.nextAttempt));
+    const retryTag =
+      `[provider-switch] req=${args.requestId} attempt=${args.attempt}/${args.maxAttempts} -> ` +
+      `${boundedNextAttempt}/${args.maxAttempts}`;
     const details = [
       `provider=${providerLabel}`,
       `switch=${args.switchAction}`,
@@ -1516,12 +1600,6 @@ export class HubRequestExecutor implements RequestExecutor {
         const excludedProviderKeys = new Set<string>();
         let maxAttempts = resolveMaxProviderAttempts();
         const retryPayloadSeed = prepareRequestPayloadRetrySeed(input.body);
-        const originalRequestSnapshot =
-          retryPayloadSeed.mode === 'snapshot'
-            ? retryPayloadSeed.snapshotPayload
-            : (retryPayloadSeed.mode === 'serialized'
-                ? restoreRequestPayloadFromRetrySnapshot(retryPayloadSeed.serializedPayload)
-                : undefined);
         let attempt = 0;
         let lastError: unknown;
         let initialRoutePool: string[] | null = null;
@@ -1539,7 +1617,7 @@ export class HubRequestExecutor implements RequestExecutor {
         // Ensure each attempt starts from the base requestId so pipeline snapshots
         // don't inherit a provider-specific id from a previous attempt.
         input.requestId = providerRequestId;
-        if (attempt > 1 && originalRequestSnapshot && typeof originalRequestSnapshot === 'object') {
+        if (attempt > 1 && retryPayloadSeed.mode !== 'none') {
           const cloned = restoreRequestPayloadFromRetrySeed(retryPayloadSeed);
           if (cloned && typeof cloned === 'object') {
             input.body = cloned;
@@ -1663,7 +1741,7 @@ export class HubRequestExecutor implements RequestExecutor {
           delete mergedMetadata.compatibilityProfile;
         }
 
-        let runtimeKey: string;
+        let runtimeKey: string = typeof target.runtimeKey === 'string' ? target.runtimeKey : '';
         let handle: ProviderHandle;
         let providerContext: ReturnType<typeof resolveProviderRequestContext>;
         try {
@@ -1731,7 +1809,7 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           const shouldRetry =
             blockingRecoverable
-              ? shouldRetryProviderError(error)
+              ? (attempt < maxAttempts && shouldRetryProviderError(error))
               : (attempt < maxAttempts && shouldRetryProviderError(error));
           if (!shouldRetry) {
             recordAttempt({ error: true });
@@ -1757,6 +1835,8 @@ export class HubRequestExecutor implements RequestExecutor {
               throw error;
             }
             const recoverableKey = buildRecoverableErrorBackoffKey({
+              providerKey: target.providerKey,
+              runtimeKey,
               statusCode: retryError.statusCode,
               errorCode: retryError.errorCode,
               upstreamCode: retryError.upstreamCode,
@@ -1773,16 +1853,17 @@ export class HubRequestExecutor implements RequestExecutor {
           } else {
             retryBackoffMs = await waitBeforeRetry(error, { attempt });
           }
-          const singleProviderPool =
-            Boolean(initialRoutePool && initialRoutePool.length === 1 && initialRoutePool[0] === target.providerKey);
-          const holdOnLastAvailable429 =
-            retryError.statusCode === 429 &&
-            routePoolForAttempt.length > 0 &&
-            !routePoolHasAlternativeProvider({
-              routePool: routePoolForAttempt,
-              excludedProviderKeys,
-              currentProviderKey: target.providerKey
-            });
+          const singleProviderPool = isConfirmedSingleProviderPool({
+            initialRoutePool,
+            currentProviderKey: target.providerKey,
+            statusCode: retryError.statusCode
+          });
+          const holdOnLastAvailable429 = shouldHoldOnLastAvailable429({
+            statusCode: retryError.statusCode,
+            routePool: routePoolForAttempt,
+            excludedProviderKeys,
+            currentProviderKey: target.providerKey
+          });
           const holdOnCurrentProvider = holdOnLastAvailable429;
           if (!singleProviderPool && !holdOnCurrentProvider && target.providerKey) {
             excludedProviderKeys.add(target.providerKey);
@@ -1794,7 +1875,7 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt,
             maxAttempts,
             providerKey: target.providerKey,
-            nextAttempt: attempt + 1,
+            nextAttempt: Math.min(maxAttempts, attempt + 1),
             reason: retryError.reason,
             backoffMs: retryBackoffMs,
             statusCode: retryError.statusCode,
@@ -1805,7 +1886,7 @@ export class HubRequestExecutor implements RequestExecutor {
           this.logStage('provider.retry', input.requestId, {
             providerKey: target.providerKey,
             attempt,
-            nextAttempt: attempt + 1,
+            nextAttempt: Math.min(maxAttempts, attempt + 1),
             excluded: Array.from(excludedProviderKeys),
             reason: retryError.reason,
             routeHint: forcedRouteHint,
@@ -1818,9 +1899,6 @@ export class HubRequestExecutor implements RequestExecutor {
             holdOnLastAvailable429,
             blockingRecoverable
           });
-          if (blockingRecoverable && attempt >= maxAttempts) {
-            attempt = Math.max(0, attempt - 1);
-          }
           continue;
         }
         const previousRequestId = input.requestId;
@@ -1832,6 +1910,11 @@ export class HubRequestExecutor implements RequestExecutor {
             logRequestExecutorNonBlockingError('responsesConversation.rebindRequestId', error, {
               previousRequestId,
               requestId: input.requestId,
+              providerKey: target.providerKey,
+              runtimeKey
+            });
+            logRequestExecutorDegraded('responsesConversation.rebindRequestId', input.requestId, {
+              previousRequestId,
               providerKey: target.providerKey,
               runtimeKey
             });
@@ -1902,42 +1985,52 @@ export class HubRequestExecutor implements RequestExecutor {
         let trafficActiveInFlightAtAcquire = 0;
         let providerSendStartedAtMs = 0;
         let providerSendElapsedMs = 0;
+        const bypassTrafficGovernor = isServerToolFollowupRequest(metadataForAttempt);
         try {
-          this.logStage('provider.traffic.acquire.start', input.requestId, {
-            providerKey: target.providerKey,
-            runtimeKey,
-            attempt
-          });
-          const trafficAcquired = await this.trafficGovernor.acquire({
-            runtimeKey,
-            providerKey: target.providerKey,
-            requestId: input.requestId,
-            runtime: resolveTrafficRuntimeProfile(runtimeKey, handle, target.providerKey),
-            // Hard rule (2026-04): local traffic saturation must block-wait/backoff instead of
-            // switch storm. Do not use soft timeout here.
-            softWaitTimeoutMs: undefined
-          });
-          trafficPermit = trafficAcquired.permit;
-          trafficPolicyMaxInFlight = trafficAcquired.policy.concurrency.maxInFlight;
-          trafficActiveInFlightAtAcquire = trafficAcquired.activeInFlight;
-          if (trafficAcquired.waitedMs > 0) {
-            cumulativeTrafficWaitMs += trafficAcquired.waitedMs;
-            this.logStage('provider.traffic.acquire.wait', input.requestId, {
+          if (bypassTrafficGovernor) {
+            this.logStage('provider.traffic.acquire.bypassed', input.requestId, {
               providerKey: target.providerKey,
               runtimeKey,
-              waitedMs: trafficAcquired.waitedMs,
+              reason: 'servertool_followup',
+              attempt
+            });
+          } else {
+            this.logStage('provider.traffic.acquire.start', input.requestId, {
+              providerKey: target.providerKey,
+              runtimeKey,
+              attempt
+            });
+            const trafficAcquired = await this.trafficGovernor.acquire({
+              runtimeKey,
+              providerKey: target.providerKey,
+              requestId: input.requestId,
+              runtime: resolveTrafficRuntimeProfile(runtimeKey, handle, target.providerKey),
+              // Hard rule (2026-04): local traffic saturation must block-wait/backoff instead of
+              // switch storm. Do not use soft timeout here.
+              softWaitTimeoutMs: undefined
+            });
+            trafficPermit = trafficAcquired.permit;
+            trafficPolicyMaxInFlight = trafficAcquired.policy.concurrency.maxInFlight;
+            trafficActiveInFlightAtAcquire = trafficAcquired.activeInFlight;
+            if (trafficAcquired.waitedMs > 0) {
+              cumulativeTrafficWaitMs += trafficAcquired.waitedMs;
+              this.logStage('provider.traffic.acquire.wait', input.requestId, {
+                providerKey: target.providerKey,
+                runtimeKey,
+                waitedMs: trafficAcquired.waitedMs,
+                attempt
+              });
+            }
+            this.logStage('provider.traffic.acquire.completed', input.requestId, {
+              providerKey: target.providerKey,
+              runtimeKey,
+              maxInFlight: trafficAcquired.policy.concurrency.maxInFlight,
+              requestsPerMinute: trafficAcquired.policy.rpm.requestsPerMinute,
+              activeInFlight: trafficAcquired.activeInFlight,
+              rpmInWindow: trafficAcquired.rpmInWindow,
               attempt
             });
           }
-          this.logStage('provider.traffic.acquire.completed', input.requestId, {
-            providerKey: target.providerKey,
-            runtimeKey,
-            maxInFlight: trafficAcquired.policy.concurrency.maxInFlight,
-            requestsPerMinute: trafficAcquired.policy.rpm.requestsPerMinute,
-            activeInFlight: trafficAcquired.activeInFlight,
-            rpmInWindow: trafficAcquired.rpmInWindow,
-            attempt
-          });
           const routingDecisionRecord =
             pipelineResult.routingDecision && typeof pipelineResult.routingDecision === 'object'
               ? (pipelineResult.routingDecision as Record<string, unknown>)
@@ -2034,7 +2127,7 @@ export class HubRequestExecutor implements RequestExecutor {
             requestId: input.requestId,
             serverToolsEnabled,
             wantsStream: wantsStreamBase,
-            originalRequest: originalRequestSnapshot,
+            originalRequest: resolveOriginalRequestForResponseConversion(retryPayloadSeed),
             requestSemantics,
             processMode: pipelineResult.processMode,
             response: normalized,
@@ -2183,26 +2276,28 @@ export class HubRequestExecutor implements RequestExecutor {
             convertedStatus,
             attempt
           });
-          try {
-            await this.trafficGovernor.observeOutcome?.({
-              runtimeKey,
-              providerKey: target.providerKey,
-              requestId: input.requestId,
-              success: true,
-              statusCode: convertedStatus,
-              activeInFlight: trafficActiveInFlightAtAcquire,
-              configuredMaxInFlight: trafficPolicyMaxInFlight || undefined
-            });
-          } catch (observeError) {
-            this.logStage('provider.traffic.observe_outcome.error', input.requestId, {
-              providerKey: target.providerKey,
-              runtimeKey,
-              message:
-                observeError instanceof Error
-                  ? observeError.message
-                  : String(observeError ?? 'Unknown observe outcome error'),
-              attempt
-            });
+          if (!bypassTrafficGovernor) {
+            try {
+              await this.trafficGovernor.observeOutcome?.({
+                runtimeKey,
+                providerKey: target.providerKey,
+                requestId: input.requestId,
+                success: true,
+                statusCode: convertedStatus,
+                activeInFlight: trafficActiveInFlightAtAcquire,
+                configuredMaxInFlight: trafficPolicyMaxInFlight || undefined
+              });
+            } catch (observeError) {
+              this.logStage('provider.traffic.observe_outcome.error', input.requestId, {
+                providerKey: target.providerKey,
+                runtimeKey,
+                message:
+                  observeError instanceof Error
+                    ? observeError.message
+                    : String(observeError ?? 'Unknown observe outcome error'),
+                attempt
+              });
+            }
           }
           const emptyAssistantSignal = detectRetryableEmptyAssistantResponse(converted.body);
           if (emptyAssistantSignal) {
@@ -2269,7 +2364,7 @@ export class HubRequestExecutor implements RequestExecutor {
             stoplessMode: stoplessLogState.mode,
             stoplessArmed: stoplessLogState.armed,
             activeInFlight: trafficActiveInFlightAtAcquire,
-            maxInFlight: trafficPolicyMaxInFlight || trafficAcquired.policy.concurrency.maxInFlight
+            maxInFlight: trafficPolicyMaxInFlight
           });
 
           recordAttempt({ usage: aggregatedUsage, error: false });
@@ -2320,29 +2415,31 @@ export class HubRequestExecutor implements RequestExecutor {
           }
           const errorMessage = error instanceof Error ? error.message : String(error ?? 'Unknown error');
           const retryError = extractRetryErrorSnapshot(error);
-          try {
-            await this.trafficGovernor.observeOutcome?.({
-              runtimeKey,
-              providerKey: target.providerKey,
-              requestId: input.requestId,
-              success: false,
-              statusCode: retryError.statusCode,
-              errorCode: retryError.errorCode,
-              upstreamCode: retryError.upstreamCode,
-              reason: retryError.reason,
-              activeInFlight: trafficActiveInFlightAtAcquire,
-              configuredMaxInFlight: trafficPolicyMaxInFlight || undefined
-            });
-          } catch (observeError) {
-            this.logStage('provider.traffic.observe_outcome.error', input.requestId, {
-              providerKey: target.providerKey,
-              runtimeKey,
-              message:
-                observeError instanceof Error
-                  ? observeError.message
-                  : String(observeError ?? 'Unknown observe outcome error'),
-              attempt
-            });
+          if (!bypassTrafficGovernor) {
+            try {
+              await this.trafficGovernor.observeOutcome?.({
+                runtimeKey,
+                providerKey: target.providerKey,
+                requestId: input.requestId,
+                success: false,
+                statusCode: retryError.statusCode,
+                errorCode: retryError.errorCode,
+                upstreamCode: retryError.upstreamCode,
+                reason: retryError.reason,
+                activeInFlight: trafficActiveInFlightAtAcquire,
+                configuredMaxInFlight: trafficPolicyMaxInFlight || undefined
+              });
+            } catch (observeError) {
+              this.logStage('provider.traffic.observe_outcome.error', input.requestId, {
+                providerKey: target.providerKey,
+                runtimeKey,
+                message:
+                  observeError instanceof Error
+                    ? observeError.message
+                    : String(observeError ?? 'Unknown observe outcome error'),
+                attempt
+              });
+            }
           }
           this.logStage('provider.send.error', input.requestId, {
             providerKey: target.providerKey,
@@ -2465,7 +2562,7 @@ export class HubRequestExecutor implements RequestExecutor {
                 reason: retryError.reason
               });
               if (blockingRecoverable) {
-                return shouldRetryProviderError(error);
+                return attempt < maxAttempts && shouldRetryProviderError(error);
               }
               return (
                 attempt < maxAttempts &&
@@ -2506,6 +2603,8 @@ export class HubRequestExecutor implements RequestExecutor {
               throw error;
             }
             const recoverableKey = buildRecoverableErrorBackoffKey({
+              providerKey: target.providerKey,
+              runtimeKey,
               statusCode: retryError.statusCode,
               errorCode: retryError.errorCode,
               upstreamCode: retryError.upstreamCode,
@@ -2522,20 +2621,21 @@ export class HubRequestExecutor implements RequestExecutor {
           } else {
             retryBackoffMs = await waitBeforeRetry(error, { attempt });
           }
-          const singleProviderPool =
-            Boolean(initialRoutePool && initialRoutePool.length === 1 && initialRoutePool[0] === target.providerKey);
+          const singleProviderPool = isConfirmedSingleProviderPool({
+            initialRoutePool,
+            currentProviderKey: target.providerKey,
+            statusCode: status
+          });
           const isProviderTrafficSaturated =
             retryError.errorCode === 'PROVIDER_TRAFFIC_SATURATED'
             || (typeof (error as { code?: unknown })?.code === 'string'
               && (error as { code?: string }).code === 'PROVIDER_TRAFFIC_SATURATED');
-          const holdOnLastAvailable429 =
-            status === 429 &&
-            routePoolForAttempt.length > 0 &&
-            !routePoolHasAlternativeProvider({
-              routePool: routePoolForAttempt,
-              excludedProviderKeys,
-              currentProviderKey: target.providerKey
-            });
+          const holdOnLastAvailable429 = shouldHoldOnLastAvailable429({
+            statusCode: status,
+            routePool: routePoolForAttempt,
+            excludedProviderKeys,
+            currentProviderKey: target.providerKey
+          });
           const holdOnCurrentProvider = holdOnLastAvailable429;
           if (promptTooLong && target.providerKey) {
             excludedProviderKeys.add(target.providerKey);
@@ -2584,7 +2684,7 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt,
             maxAttempts,
             providerKey: target.providerKey,
-            nextAttempt: attempt + 1,
+            nextAttempt: Math.min(maxAttempts, attempt + 1),
             reason: retryError.reason,
             backoffMs: retryBackoffMs,
             statusCode: retryError.statusCode,
@@ -2595,7 +2695,7 @@ export class HubRequestExecutor implements RequestExecutor {
           this.logStage('provider.retry', input.requestId, {
             providerKey: target.providerKey,
             attempt,
-            nextAttempt: attempt + 1,
+            nextAttempt: Math.min(maxAttempts, attempt + 1),
             excluded: Array.from(excludedProviderKeys),
             reason: retryError.reason,
             routeHint: forcedRouteHint,
@@ -2609,9 +2709,6 @@ export class HubRequestExecutor implements RequestExecutor {
             blockingRecoverable,
             ...(promptTooLong ? { contextOverflowRetries, maxContextOverflowRetries: MAX_CONTEXT_OVERFLOW_RETRIES } : {})
           });
-          if (blockingRecoverable && attempt >= maxAttempts) {
-            attempt = Math.max(0, attempt - 1);
-          }
           continue;
         } finally {
           if (trafficPermit) {
@@ -2681,9 +2778,12 @@ export const __requestExecutorTestables = {
   readString,
   extractRetryErrorSnapshot,
   truncateReason,
+  buildRecoverableErrorBackoffKey,
+  consumeRecoverableErrorBackoffMs,
   detectRetryableEmptyAssistantResponse,
   deriveLogicalRequestChainKey,
   prepareRequestPayloadRetrySeed,
+  resolveOriginalRequestForResponseConversion,
   resetRequestExecutorInternalStateForTests
 };
 

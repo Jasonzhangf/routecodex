@@ -1,8 +1,13 @@
 import type { LoadBalancingPolicy } from './types.js';
 
+type StickyRouteEntry = {
+  providerKey: string;
+  updatedAtMs: number;
+};
+
 interface RouteState {
   pointer: number;
-  stickyMap: Map<string, string>;
+  stickyMap: Map<string, StickyRouteEntry>;
   weighted: {
     currentWeights: Map<string, number>;
   };
@@ -24,12 +29,37 @@ export interface GroupedLoadBalancingOptions {
   availabilityCheck: (providerKey: string) => boolean;
 }
 
+const DEFAULT_STICKY_TTL_MS = 30 * 60_000;
+const DEFAULT_STICKY_MAX_ENTRIES = 4096;
+
+function resolveStickyTtlMs(): number {
+  const raw = process.env.ROUTECODEX_VR_STICKY_TTL_MS ?? process.env.RCC_VR_STICKY_TTL_MS;
+  const parsed = Number.parseInt(String(raw ?? '').trim(), 10);
+  if (Number.isFinite(parsed) && parsed >= 60_000) {
+    return parsed;
+  }
+  return DEFAULT_STICKY_TTL_MS;
+}
+
+function resolveStickyMaxEntries(): number {
+  const raw = process.env.ROUTECODEX_VR_STICKY_MAX_ENTRIES ?? process.env.RCC_VR_STICKY_MAX_ENTRIES;
+  const parsed = Number.parseInt(String(raw ?? '').trim(), 10);
+  if (Number.isFinite(parsed) && parsed >= 16) {
+    return parsed;
+  }
+  return DEFAULT_STICKY_MAX_ENTRIES;
+}
+
 export class RouteLoadBalancer {
   private policy: LoadBalancingPolicy;
   private readonly states: Map<string, RouteState> = new Map();
+  private readonly stickyTtlMs: number;
+  private readonly stickyMaxEntries: number;
 
   constructor(policy?: LoadBalancingPolicy) {
     this.policy = policy ?? { strategy: 'round-robin' };
+    this.stickyTtlMs = resolveStickyTtlMs();
+    this.stickyMaxEntries = resolveStickyMaxEntries();
   }
 
   updatePolicy(policy?: LoadBalancingPolicy): void {
@@ -160,16 +190,39 @@ export class RouteLoadBalancer {
       return this.selectRoundRobin(routeName, candidates);
     }
     const state = this.getState(routeName);
+    const nowMs = Date.now();
+    this.pruneStickyEntries(state, nowMs);
     const pinned = state.stickyMap.get(stickyKey);
-    if (pinned && candidates.includes(pinned)) {
-      return pinned;
+    if (pinned && candidates.includes(pinned.providerKey)) {
+      pinned.updatedAtMs = nowMs;
+      return pinned.providerKey;
     }
     const choice =
       weights && Object.keys(weights).length > 0
         ? this.selectWeighted(`${routeName}:sticky`, candidates, weights)
         : this.selectRoundRobin(routeName, candidates);
-    state.stickyMap.set(stickyKey, choice);
+    state.stickyMap.set(stickyKey, {
+      providerKey: choice,
+      updatedAtMs: nowMs
+    });
+    this.pruneStickyEntries(state, nowMs);
     return choice;
+  }
+
+  private pruneStickyEntries(state: RouteState, nowMs: number): void {
+    for (const [key, entry] of state.stickyMap.entries()) {
+      if (!entry || typeof entry.providerKey !== 'string' || nowMs - entry.updatedAtMs >= this.stickyTtlMs) {
+        state.stickyMap.delete(key);
+      }
+    }
+    if (state.stickyMap.size <= this.stickyMaxEntries) {
+      return;
+    }
+    const sorted = Array.from(state.stickyMap.entries()).sort((a, b) => a[1].updatedAtMs - b[1].updatedAtMs);
+    while (state.stickyMap.size > this.stickyMaxEntries && sorted.length > 0) {
+      const [oldestKey] = sorted.shift()!;
+      state.stickyMap.delete(oldestKey);
+    }
   }
 
   private getState(routeName: string): RouteState {

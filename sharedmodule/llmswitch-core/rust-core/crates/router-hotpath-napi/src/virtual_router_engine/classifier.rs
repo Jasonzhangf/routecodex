@@ -71,8 +71,10 @@ impl RoutingClassifier {
         let latest_message_from_user = features.latest_message_from_user;
         let has_tool_activity = features.has_tools || features.has_tool_call_responses;
         let thinking_continuation = last_tool_category == "read";
-        let thinking_from_user =
-            latest_message_from_user && features.has_thinking_keyword && !has_tool_activity;
+        // Jason 规则：只要当前轮仍是用户输入，就优先按 thinking 路由处理，
+        // 不再因为历史上已有 tool-call 响应或本轮声明 tools/search 而降到 tools/search。
+        // tools/search/coding 续写只保留给非用户输入的 followup/tool 轮。
+        let thinking_from_user = latest_message_from_user;
         let thinking_from_read = !thinking_from_user && thinking_continuation;
         let coding_continuation = last_tool_category == "write";
         let search_continuation = last_tool_category == "search";
@@ -221,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn tools_declared_without_thinking_keyword_route_to_tools() {
+    fn tools_declared_without_thinking_keyword_route_to_thinking_on_current_user_turn() {
         let features = RoutingFeatures {
             latest_message_from_user: true,
             has_tools: true,
@@ -231,9 +233,8 @@ mod tests {
 
         let result = classifier().classify(&features);
 
-        assert_eq!(result.route_name, "tools");
-        assert!(result.reasoning.contains("tools:tool-request-detected"));
-        assert!(!result.reasoning.contains("thinking:user-input"));
+        assert_eq!(result.route_name, "thinking");
+        assert!(result.reasoning.contains("thinking:user-input"));
     }
 
     #[test]
@@ -252,6 +253,73 @@ mod tests {
     }
 
     #[test]
+    fn explicit_thinking_keyword_with_only_declared_tools_still_routes_to_thinking() {
+        let features = RoutingFeatures {
+            latest_message_from_user: true,
+            has_thinking_keyword: true,
+            has_tools: true,
+            has_tool_call_responses: false,
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_eq!(result.route_name, "thinking");
+        assert!(result.reasoning.contains("thinking:user-input"));
+    }
+
+    #[test]
+    fn previous_turn_read_continuation_routes_to_thinking() {
+        let features = RoutingFeatures {
+            latest_message_from_user: false,
+            has_tools: true,
+            has_tool_call_responses: true,
+            last_assistant_tool_category: Some("read".to_string()),
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_eq!(result.route_name, "thinking");
+        assert!(result.reasoning.contains("thinking:last-tool-read"));
+    }
+
+    #[test]
+    fn previous_turn_other_tool_still_routes_to_tools() {
+        let features = RoutingFeatures {
+            latest_message_from_user: false,
+            has_tools: true,
+            has_tool_call_responses: true,
+            last_assistant_tool_category: Some("other".to_string()),
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_eq!(result.route_name, "tools");
+        assert!(result.reasoning.contains("tools:last-tool-other"));
+        assert!(!result.reasoning.contains("thinking:user-input"));
+    }
+
+    #[test]
+    fn current_user_turn_overrides_previous_search_continuation_to_thinking() {
+        let features = RoutingFeatures {
+            latest_message_from_user: true,
+            has_tools: true,
+            has_tool_call_responses: true,
+            last_assistant_tool_category: Some("search".to_string()),
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_eq!(result.route_name, "thinking");
+        assert!(result.reasoning.contains("thinking:user-input"));
+        assert!(!result.reasoning.starts_with("search:last-tool-search"));
+        assert!(!result.reasoning.starts_with("tools:tool-request-detected"));
+    }
+
+    #[test]
     fn server_tool_required_does_not_force_web_search_route() {
         let features = RoutingFeatures {
             latest_message_from_user: true,
@@ -262,8 +330,8 @@ mod tests {
 
         let result = classifier().classify(&features);
 
-        assert_eq!(result.route_name, "tools");
-        assert!(result.reasoning.contains("tools:tool-request-detected"));
+        assert_eq!(result.route_name, "thinking");
+        assert!(result.reasoning.contains("thinking:user-input"));
         assert!(!result.reasoning.contains("web_search:servertool-required"));
     }
 
@@ -278,8 +346,8 @@ mod tests {
 
         let result = classifier().classify(&features);
 
-        assert_eq!(result.route_name, "tools");
-        assert!(result.reasoning.contains("tools:tool-request-detected"));
+        assert_eq!(result.route_name, "thinking");
+        assert!(result.reasoning.contains("thinking:user-input"));
         assert!(!result.reasoning.contains("web_search:tool-declared"));
     }
 }

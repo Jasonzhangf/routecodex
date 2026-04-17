@@ -2,7 +2,10 @@ import { evaluateResponsesHostPolicy } from '../responses-host-policy.js';
 import { normalizeMessageReasoningTools } from '../../shared/reasoning-tool-normalizer.js';
 import { createBridgeActionState, runBridgeActionPipeline } from '../../bridge-actions.js';
 import { resolveBridgePolicy, resolvePolicyActions } from '../../bridge-policies.js';
-import { consumeResponsesPayloadSnapshot, consumeResponsesPassthrough } from '../../shared/responses-reasoning-registry.js';
+import {
+  consumeResponsesPayloadSnapshotByAliases,
+  consumeResponsesPassthroughByAliases
+} from '../../shared/responses-reasoning-registry.js';
 import {
   stripInternalToolingMetadata
 } from '../../shared/responses-tool-utils.js';
@@ -43,17 +46,18 @@ function unwrapData(value: Record<string, unknown>): Record<string, unknown> {
   return current as Record<string, unknown>;
 }
 
-function resolveSnapshotLookupKey(response: Record<string, unknown>, context?: ResponsesRequestContext): string | undefined {
+function resolveSnapshotLookupKeys(response: Record<string, unknown>, context?: ResponsesRequestContext): string[] {
+  const keys: string[] = [];
   if (typeof (response as any)?.request_id === 'string') {
-    return (response as any).request_id as string;
+    keys.push((response as any).request_id as string);
   }
   if (typeof context?.requestId === 'string') {
-    return context.requestId;
+    keys.push(context.requestId);
   }
   if (typeof (response as any)?.id === 'string') {
-    return (response as any).id as string;
+    keys.push((response as any).id as string);
   }
-  return undefined;
+  return Array.from(new Set(keys.map((value) => value.trim()).filter((value) => value.length > 0)));
 }
 
 function shouldStripHostManagedFields(context?: ResponsesRequestContext): boolean {
@@ -91,9 +95,9 @@ export function buildResponsesPayloadFromChat(payload: unknown, context?: Respon
     return response;
   }
 
-  const snapshotLookupKey = resolveSnapshotLookupKey(response as Record<string, unknown>, context);
-  const snapshotPayload = snapshotLookupKey ? consumeResponsesPayloadSnapshot(snapshotLookupKey) : undefined;
-  const passthroughPayload = snapshotLookupKey ? consumeResponsesPassthrough(snapshotLookupKey) : undefined;
+  const snapshotLookupKeys = resolveSnapshotLookupKeys(response as Record<string, unknown>, context);
+  const snapshotPayload = snapshotLookupKeys.length ? consumeResponsesPayloadSnapshotByAliases(snapshotLookupKeys) : undefined;
+  const passthroughPayload = snapshotLookupKeys.length ? consumeResponsesPassthroughByAliases(snapshotLookupKeys) : undefined;
   const sourceForRetention =
     (passthroughPayload && typeof passthroughPayload === 'object' ? passthroughPayload : undefined) ??
     readInlineRetentionPayload(response as Record<string, unknown>, '__responses_passthrough') ??

@@ -1330,4 +1330,84 @@ describe('HubRequestExecutor single attempt behaviour', () => {
 
     expect(acquireArgs[1]?.softWaitTimeoutMs).toBeUndefined();
   });
+
+  it('bypasses provider traffic governor for servertool followup hops', async () => {
+    const trafficGovernor = {
+      acquire: jest.fn(async () => {
+        throw new Error('traffic governor should be bypassed for servertool followup');
+      }),
+      release: jest.fn(async () => ({ released: true, activeInFlight: 0 })),
+      observeOutcome: jest.fn(async () => undefined)
+    };
+
+    const handle = createRuntimeHandle(async () => ({ ok: true }));
+    const pipelineResult: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'tab.key1',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:one',
+        processMode: 'standard'
+      },
+      routingDecision: {
+        routeName: 'tools',
+        pool: ['tab.key1']
+      } as unknown as { routeName?: string },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const fakePipeline: HubPipeline = {
+      execute: jest.fn().mockResolvedValue(pipelineResult)
+    };
+    const runtimeManager: ProviderRuntimeManager = {
+      resolveRuntimeKey: jest.fn().mockReturnValue('runtime:one'),
+      getHandleByRuntimeKey: jest.fn().mockReturnValue(handle),
+      getHandleByProviderKey: jest.fn(),
+      disposeAll: jest.fn(),
+      initialize: jest.fn()
+    } as unknown as ProviderRuntimeManager;
+    const stats = {
+      recordRequestStart: jest.fn(),
+      recordCompletion: jest.fn(),
+      bindProvider: jest.fn(),
+      recordToolUsage: jest.fn()
+    };
+    const deps = {
+      runtimeManager,
+      trafficGovernor,
+      getHubPipeline: () => fakePipeline,
+      getModuleDependencies: (): ModuleDependencies => ({
+        errorHandlingCenter: {
+          handleError: jest.fn().mockResolvedValue({ success: true })
+        }
+      } as ModuleDependencies),
+      logStage: jest.fn(),
+      stats
+    };
+    const executor = new HubRequestExecutor(deps);
+    jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValue({ status: 200, body: { output_text: 'ok' } });
+
+    const response = await executor.execute({
+      requestId: 'req_followup_root:reasoning_stop_guard',
+      entryEndpoint: '/v1/responses',
+      headers: {},
+      body: { messages: [{ role: 'user', content: 'continue' }] },
+      metadata: {
+        stream: false,
+        inboundStream: false,
+        __rt: {
+          serverToolFollowup: true
+        }
+      }
+    });
+
+    expect(response.status).toBe(200);
+    expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
+    expect(trafficGovernor.acquire).not.toHaveBeenCalled();
+    expect(trafficGovernor.observeOutcome).not.toHaveBeenCalled();
+    expect(trafficGovernor.release).not.toHaveBeenCalled();
+  });
 });

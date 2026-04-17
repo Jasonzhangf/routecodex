@@ -53,8 +53,10 @@ export {
   resumeResponsesConversation,
   rebindResponsesConversationRequestId,
   createResponsesSseToJsonConverter,
-  getProviderErrorCenter,
-  getProviderSuccessCenter
+  reportProviderErrorToRouterPolicy,
+  reportProviderSuccessToRouterPolicy,
+  setProviderRuntimeQuotaHooks,
+  setProviderRuntimeProviderQuotaHooks
 } from './bridge/runtime-integrations.js';
 export {
   loadRoutingInstructionStateSync,

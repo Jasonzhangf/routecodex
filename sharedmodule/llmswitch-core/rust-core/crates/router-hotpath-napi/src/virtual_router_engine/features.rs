@@ -7,8 +7,9 @@ use crate::virtual_router_engine::message_utils::{extract_message_text, get_late
 use crate::virtual_router_engine::routing::is_server_tool_followup_request;
 use media::analyze_media_attachments;
 use tools::{
-    detect_coding_tool, detect_last_assistant_tool_category, detect_vision_tool,
-    detect_web_search_tool_declared, detect_web_tool, extract_meaningful_declared_tool_names,
+    choose_higher_priority_tool_category, classify_tool_call_for_report, detect_coding_tool,
+    detect_last_assistant_tool_category, detect_vision_tool, detect_web_search_tool_declared, detect_web_tool,
+    extract_meaningful_declared_tool_names,
 };
 
 fn get_latest_responses_context_message(request: &Value) -> Option<(String, Value)> {
@@ -50,6 +51,175 @@ fn get_latest_responses_context_message(request: &Value) -> Option<(String, Valu
     None
 }
 
+fn get_latest_responses_context_user_message(request: &Value) -> Option<Value> {
+    let input = request
+        .get("semantics")
+        .and_then(|v| v.get("responses"))
+        .and_then(|v| v.get("context"))
+        .and_then(|v| v.get("input"))
+        .and_then(|v| v.as_array())?;
+
+    for entry in input.iter().rev() {
+        let obj = match entry.as_object() {
+            Some(value) => value,
+            None => continue,
+        };
+        let entry_type = obj
+            .get("type")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_ascii_lowercase())
+            .unwrap_or_else(|| "message".to_string());
+        if entry_type != "message" {
+            continue;
+        }
+        let role = obj
+            .get("role")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_ascii_lowercase())
+            .unwrap_or_default();
+        if role != "user" {
+            continue;
+        }
+        let content = match obj.get("content") {
+            Some(value) if value.is_string() || value.is_array() => value.clone(),
+            _ => continue,
+        };
+        return Some(json!({ "role": "user", "content": content }));
+    }
+
+    None
+}
+
+fn get_responses_context_input(request: &Value) -> Vec<Value> {
+    request
+        .get("semantics")
+        .and_then(|v| v.get("responses"))
+        .and_then(|v| v.get("context"))
+        .and_then(|v| v.get("input"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn get_message_previous_turn_tool_signals(
+    messages: &[Value],
+) -> (bool, Option<tools::ToolClassification>) {
+    let mut seen_latest_user = false;
+    let mut has_tool_call_responses = false;
+    let mut assistant_segment: Vec<Value> = Vec::new();
+
+    for msg in messages.iter().rev() {
+        let role = msg
+            .get("role")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_ascii_lowercase())
+            .unwrap_or_default();
+        if !seen_latest_user {
+            if role == "user" {
+                seen_latest_user = true;
+            }
+            continue;
+        }
+        if role == "user" {
+            break;
+        }
+        if role == "tool" {
+            has_tool_call_responses = true;
+            continue;
+        }
+        if role != "assistant" {
+            continue;
+        }
+        if msg
+            .get("tool_calls")
+            .and_then(|v| v.as_array())
+            .map(|arr| !arr.is_empty())
+            .unwrap_or(false)
+        {
+            has_tool_call_responses = true;
+        }
+        assistant_segment.push(msg.clone());
+    }
+
+    assistant_segment.reverse();
+    let last_assistant_tool = detect_last_assistant_tool_category(&assistant_segment);
+    (has_tool_call_responses, last_assistant_tool)
+}
+
+fn is_responses_message_with_role(entry: &Value, target_role: &str) -> bool {
+    let Some(obj) = entry.as_object() else {
+        return false;
+    };
+    let entry_type = obj
+        .get("type")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| "message".to_string());
+    if entry_type != "message" {
+        return false;
+    }
+    obj.get("role")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().eq_ignore_ascii_case(target_role))
+        .unwrap_or(false)
+}
+
+fn get_responses_previous_turn_tool_signals(
+    request: &Value,
+) -> (bool, Option<tools::ToolClassification>) {
+    let input = get_responses_context_input(request);
+    let mut has_tool_call_responses = false;
+    let mut last_assistant_tool = None;
+    let mut seen_latest_user = false;
+
+    for entry in input.iter().rev() {
+        if !seen_latest_user {
+            if is_responses_message_with_role(entry, "user") {
+                seen_latest_user = true;
+            }
+            continue;
+        }
+        if is_responses_message_with_role(entry, "user") {
+            break;
+        }
+        let obj = match entry.as_object() {
+            Some(value) => value,
+            None => continue,
+        };
+        let entry_type = obj
+            .get("type")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_ascii_lowercase())
+            .unwrap_or_default();
+        if matches!(
+            entry_type.as_str(),
+            "function_call" | "function_call_output" | "tool_result" | "tool_message"
+        ) {
+            has_tool_call_responses = true;
+        }
+        if entry_type != "function_call" {
+            continue;
+        }
+        let Some(name) = obj.get("name").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let synthesized = json!({
+            "type": "function",
+            "id": obj.get("id").cloned().unwrap_or(Value::Null),
+            "function": {
+                "name": name,
+                "arguments": obj.get("arguments").cloned().unwrap_or(Value::Null),
+            }
+        });
+        last_assistant_tool = choose_higher_priority_tool_category(
+            last_assistant_tool,
+            classify_tool_call_for_report(&synthesized),
+        );
+    }
+
+    (has_tool_call_responses, last_assistant_tool)
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RoutingFeatures {
     pub request_id: Option<String>,
@@ -82,29 +252,40 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
+    let latest_message_user = messages.last().filter(|msg| {
+        msg.get("role")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().eq_ignore_ascii_case("user"))
+            .unwrap_or(false)
+    });
+    let responses_latest_user_message = get_latest_responses_context_user_message(request);
     let responses_latest_message = get_latest_responses_context_message(request);
-
-    let latest_message_role = if !messages.is_empty() {
-        get_latest_message_role(&messages).unwrap_or_default()
+    let current_user_from_messages = latest_message_user.is_some();
+    let current_user_from_responses =
+        !current_user_from_messages && responses_latest_user_message.is_some();
+    let latest_message_role = if current_user_from_messages || current_user_from_responses {
+        "user".to_string()
     } else {
         responses_latest_message
             .as_ref()
             .map(|(role, _)| role.clone())
-            .unwrap_or_default()
+            .unwrap_or_else(|| get_latest_message_role(&messages).unwrap_or_default())
     };
 
-    let latest_message = if !messages.is_empty() {
-        messages.last()
+    let latest_message = if let Some(message) = latest_message_user {
+        Some(message)
+    } else if let Some(message) = responses_latest_user_message.as_ref() {
+        Some(message)
     } else {
         responses_latest_message
             .as_ref()
             .map(|(_, message)| message)
+            .or_else(|| messages.last())
     };
-    let assistant_messages: Vec<Value> = messages
-        .iter()
-        .filter(|msg| msg.get("role").and_then(|v| v.as_str()) == Some("assistant"))
-        .cloned()
-        .collect();
+    let (message_has_tool_call_responses, message_last_assistant_tool) =
+        get_message_previous_turn_tool_signals(&messages);
+    let (responses_has_tool_call_responses, responses_last_assistant_tool) =
+        get_responses_previous_turn_tool_signals(request);
     let latest_user_text = if latest_message_role == "user" {
         if let Some(msg) = latest_message {
             extract_message_text(msg)
@@ -117,12 +298,15 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
     let normalized_user_text = latest_user_text.to_lowercase();
     let meaningful_declared_tools = extract_meaningful_declared_tool_names(request.get("tools"));
     let has_tools = !meaningful_declared_tools.is_empty();
-    let has_tool_call_responses = assistant_messages.iter().any(|msg| {
-        msg.get("tool_calls")
-            .and_then(|v| v.as_array())
-            .map(|arr| !arr.is_empty())
-            .unwrap_or(false)
-    });
+    let (has_tool_call_responses, last_assistant_tool) = if current_user_from_messages {
+        (message_has_tool_call_responses, message_last_assistant_tool)
+    } else if current_user_from_responses {
+        (responses_has_tool_call_responses, responses_last_assistant_tool)
+    } else if !responses_latest_message.is_none() {
+        (responses_has_tool_call_responses, responses_last_assistant_tool)
+    } else {
+        (message_has_tool_call_responses, message_last_assistant_tool)
+    };
     let estimated_tokens = read_finite_floor_i64(metadata.get("estimatedInputTokens"))
         .or_else(|| read_finite_floor_i64(metadata.get("estimatedTokens")))
         .or_else(|| read_finite_floor_i64(metadata.get("estimated_tokens")))
@@ -139,7 +323,6 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
     let has_web_tool = detect_web_tool(request.get("tools"));
     let has_thinking_keyword =
         has_thinking || detect_extended_thinking_keyword(&normalized_user_text);
-    let last_assistant_tool = detect_last_assistant_tool_category(&assistant_messages);
     let last_assistant_tool_label = last_assistant_tool
         .as_ref()
         .and_then(|tool| tool.label.clone());
@@ -370,6 +553,174 @@ mod tests {
             "expected responses context payload to exceed longcontext threshold, got {}",
             features.estimated_tokens
         );
+    }
+
+    #[test]
+    fn previous_turn_tool_signals_ignore_older_message_history_before_latest_user_boundary() {
+        let request = json!({
+            "model": "glm-5",
+            "messages": [
+                { "role": "user", "content": "old request" },
+                {
+                    "role": "assistant",
+                    "content": "old tool turn",
+                    "tool_calls": [
+                        {
+                            "id": "call_old",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"rg needle src\"}"
+                            }
+                        }
+                    ]
+                },
+                { "role": "user", "content": "intermediate request" },
+                { "role": "assistant", "content": "plain answer" },
+                { "role": "user", "content": "Please think step by step now." }
+            ]
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+        assert!(!features.has_tool_call_responses);
+        assert_eq!(features.last_assistant_tool_category, None);
+        assert_eq!(features.user_text_sample, "Please think step by step now.");
+    }
+
+    #[test]
+    fn previous_turn_tool_signals_capture_only_adjacent_message_round() {
+        let request = json!({
+            "model": "glm-5",
+            "messages": [
+                { "role": "user", "content": "inspect file" },
+                {
+                    "role": "assistant",
+                    "content": "tool turn",
+                    "tool_calls": [
+                        {
+                            "id": "call_read",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"cat README.md\"}"
+                            }
+                        }
+                    ]
+                },
+                { "role": "user", "content": "Please think step by step before changing anything." }
+            ]
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+        assert!(features.has_tool_call_responses);
+        assert_eq!(features.last_assistant_tool_category.as_deref(), Some("read"));
+    }
+
+    #[test]
+    fn previous_turn_tool_signals_ignore_older_responses_context_history_before_latest_user_boundary() {
+        let request = json!({
+            "model": "glm-5",
+            "semantics": {
+                "responses": {
+                    "context": {
+                        "input": [
+                            { "type": "message", "role": "user", "content": "old request" },
+                            {
+                                "type": "function_call",
+                                "id": "call_old",
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"find . -name '*.rs'\"}"
+                            },
+                            { "type": "message", "role": "user", "content": "intermediate request" },
+                            { "type": "message", "role": "assistant", "content": "plain answer" },
+                            { "type": "message", "role": "user", "content": "latest request" }
+                        ]
+                    }
+                }
+            }
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+        assert!(!features.has_tool_call_responses);
+        assert_eq!(features.last_assistant_tool_category, None);
+        assert_eq!(features.user_text_sample, "latest request");
+    }
+
+    #[test]
+    fn previous_turn_tool_signals_prefer_search_over_read_in_responses_context() {
+        let request = json!({
+            "model": "glm-5",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "cmd": { "type": "string" }
+                            }
+                        }
+                    }
+                }
+            ],
+            "semantics": {
+                "responses": {
+                    "context": {
+                        "input": [
+                            { "type": "message", "role": "user", "content": "先搜再读" },
+                            {
+                                "type": "function_call",
+                                "id": "call_search",
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"rg -n routing sharedmodule/llmswitch-core\"}"
+                            },
+                            {
+                                "type": "function_call",
+                                "id": "call_read",
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"cat sharedmodule/llmswitch-core/src/router/virtual-router/classifier.ts\"}"
+                            },
+                            { "type": "function_call_output", "call_id": "call_search", "output": "..." },
+                            { "type": "function_call_output", "call_id": "call_read", "output": "..." },
+                            { "type": "message", "role": "user", "content": "继续" }
+                        ]
+                    }
+                }
+            }
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+        assert!(features.has_tool_call_responses);
+        assert_eq!(features.last_assistant_tool_category.as_deref(), Some("search"));
+    }
+
+    #[test]
+    fn exec_command_only_declared_tools_are_counted_as_tools() {
+        let request = json!({
+            "model": "glm-5",
+            "messages": [
+                { "role": "user", "content": "继续" }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "cmd": { "type": "string" }
+                            }
+                        }
+                    }
+                }
+            ]
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+        assert!(features.has_tools);
+        assert_eq!(features.tool_count, 1);
     }
 }
 

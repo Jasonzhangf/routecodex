@@ -887,7 +887,7 @@ async function maybeEnrichToken(
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
           logOAuthDebug(`[OAuth] ${label}: service enablement failed for project ${projectId} - ${msg}`);
-          // 服务启用失败不再视为致命错误，后续真实调用时再由 providerErrorCenter 处理。
+          // 服务启用失败不再视为致命错误，后续真实调用时再由 Virtual Router provider-runtime-ingress 处理。
         }
       }
       return merged;

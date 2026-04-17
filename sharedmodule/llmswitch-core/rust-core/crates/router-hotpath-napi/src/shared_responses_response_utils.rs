@@ -401,7 +401,6 @@ fn build_chat_response_from_responses_impl(payload: &Value) -> Value {
     {
         chat.insert("request_id".to_string(), Value::String(request_id));
     }
-    chat.insert("__responses_payload_snapshot".to_string(), response.clone());
 
     Value::Object(chat)
 }
@@ -601,6 +600,6 @@ mod tests {
             "enc"
         );
         assert_eq!(output["__responses_output_text_meta"]["hasField"], true);
-        assert!(output.get("__responses_payload_snapshot").is_some());
+        assert!(output.get("__responses_payload_snapshot").is_none());
     }
 }

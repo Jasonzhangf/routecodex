@@ -35,7 +35,7 @@ import {
   handleQuotaPersistenceIssue,
   reconcileProtectedStates,
   scheduleNextRefresh as scheduleNextQuotaRefresh,
-  subscribeToProviderCenters as subscribeQuotaProviderCenters
+  subscribeToProviderIngress as subscribeQuotaProviderIngress
 } from './antigravity-quota-runtime.js';
 
 export interface QuotaRecord {
@@ -151,14 +151,16 @@ export class QuotaManagerModule implements ManagerModule {
     if (!this.routingScopeResolved) {
       return;
     }
+    if (this.routedProviderKeys.size > 0 && (!this.providerErrorUnsub || !this.providerSuccessUnsub)) {
+      try {
+        void this.subscribeToProviderIngress();
+      } catch (error) {
+        logQuotaManagerNonBlockingError('start.subscribeToProviderIngress', error);
+      }
+    }
     if (this.routedOAuthProviderKeys.size === 0) {
       console.log('[quota-manager] skip background refresh: no routed oauth providers');
       return;
-    }
-    try {
-      void this.subscribeToProviderCenters();
-    } catch (error) {
-      logQuotaManagerNonBlockingError('start.subscribeToProviderCenters', error);
     }
     const refreshPromise = this.refreshAllAntigravityQuotas()
       .then((result) => {
@@ -221,7 +223,7 @@ export class QuotaManagerModule implements ManagerModule {
     if (!this.started) {
       return;
     }
-    if (!this.quotaRoutingEnabled || this.routedOAuthProviderKeys.size === 0) {
+    if (!this.quotaRoutingEnabled || this.routedProviderKeys.size === 0) {
       if (this.refreshTimer) {
         clearTimeout(this.refreshTimer);
         this.refreshTimer = null;
@@ -246,10 +248,17 @@ export class QuotaManagerModule implements ManagerModule {
     }
     if (!this.providerErrorUnsub || !this.providerSuccessUnsub) {
       try {
-        await this.subscribeToProviderCenters();
+        await this.subscribeToProviderIngress();
       } catch (error) {
-        logQuotaManagerNonBlockingError('updateRoutingScope.subscribeToProviderCenters', error);
+        logQuotaManagerNonBlockingError('updateRoutingScope.subscribeToProviderIngress', error);
       }
+    }
+    if (this.routedOAuthProviderKeys.size === 0) {
+      if (this.refreshTimer) {
+        clearTimeout(this.refreshTimer);
+        this.refreshTimer = null;
+      }
+      return;
     }
     try {
       const result = await this.refreshAllAntigravityQuotas();
@@ -532,8 +541,8 @@ export class QuotaManagerModule implements ManagerModule {
       clearSessionAliasPins: () => llmsBridge.clearAntigravitySessionAliasPins?.({ hydrate: true })
     });
   }
-  private async subscribeToProviderCenters(): Promise<void> {
-    const { providerErrorUnsub, providerSuccessUnsub } = await subscribeQuotaProviderCenters({
+  private async subscribeToProviderIngress(): Promise<void> {
+    const { providerErrorUnsub, providerSuccessUnsub } = await subscribeQuotaProviderIngress({
       bridge: llmsBridge,
       coreQuotaManager: this.coreQuotaManager
     });

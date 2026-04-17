@@ -2,7 +2,7 @@
  * Runtime Integrations Bridge
  *
  * Snapshot hooks, responses conversation helpers, SSE converter, and
- * provider error/success centers.
+ * provider runtime ingress hooks.
  */
 
 import type { ProviderErrorEvent, ProviderSuccessEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
@@ -14,12 +14,7 @@ type SnapshotHooksModule = {
 };
 
 export async function writeSnapshotViaHooks(channelOrOptions: string | AnyRecord, payload?: AnyRecord): Promise<void> {
-  let hooksModule: SnapshotHooksModule | null = null;
-  try {
-    hooksModule = await importCoreDist<SnapshotHooksModule>('conversion/snapshot-utils');
-  } catch {
-    hooksModule = null;
-  }
+  const hooksModule = await importCoreDist<SnapshotHooksModule>('conversion/snapshot-utils');
   const writer = hooksModule?.writeSnapshotViaHooks;
   if (typeof writer !== 'function') {
     throw new Error('[llmswitch-bridge] writeSnapshotViaHooks not available');
@@ -98,44 +93,80 @@ export async function createResponsesSseToJsonConverter(): Promise<{
   return cachedResponsesSseConverterFactory();
 }
 
-type ProviderErrorCenterExports = {
-  providerErrorCenter?: {
-    emit(event: ProviderErrorEvent): void;
-    subscribe?(handler: (event: ProviderErrorEvent) => void): () => void;
-  };
+type ProviderRuntimeIngressExports = {
+  reportProviderErrorToRouterPolicy?: (event: ProviderErrorEvent) => ProviderErrorEvent;
+  reportProviderSuccessToRouterPolicy?: (event: ProviderSuccessEvent) => ProviderSuccessEvent;
+  setProviderRuntimeQuotaHooks?: (
+    owner: unknown,
+    hooks?: {
+      onProviderError?: (event: ProviderErrorEvent) => void;
+      onProviderSuccess?: (event: ProviderSuccessEvent) => void;
+    }
+  ) => void;
+  setProviderRuntimeProviderQuotaHooks?: (
+    owner: unknown,
+    hooks?: {
+      onProviderError?: (event: ProviderErrorEvent) => void;
+    }
+  ) => void;
 };
 
-let cachedProviderErrorCenter: ProviderErrorCenterExports['providerErrorCenter'] | null = null;
+let cachedProviderRuntimeIngress: ProviderRuntimeIngressExports | null = null;
 
-export async function getProviderErrorCenter(): Promise<ProviderErrorCenterExports['providerErrorCenter']> {
-  if (!cachedProviderErrorCenter) {
-    const mod = await importCoreDist<ProviderErrorCenterExports>('router/virtual-router/error-center');
-    const center = mod.providerErrorCenter;
-    if (!center) {
-      throw new Error('[llmswitch-bridge] providerErrorCenter not available');
-    }
-    cachedProviderErrorCenter = center;
+async function getProviderRuntimeIngress(): Promise<ProviderRuntimeIngressExports> {
+  if (!cachedProviderRuntimeIngress) {
+    cachedProviderRuntimeIngress = await importCoreDist<ProviderRuntimeIngressExports>(
+      'router/virtual-router/provider-runtime-ingress'
+    );
   }
-  return cachedProviderErrorCenter;
+  return cachedProviderRuntimeIngress;
 }
 
-type ProviderSuccessCenterExports = {
-  providerSuccessCenter?: {
-    emit(event: ProviderSuccessEvent): void;
-    subscribe?(handler: (event: ProviderSuccessEvent) => void): () => void;
-  };
-};
-
-let cachedProviderSuccessCenter: ProviderSuccessCenterExports['providerSuccessCenter'] | null = null;
-
-export async function getProviderSuccessCenter(): Promise<ProviderSuccessCenterExports['providerSuccessCenter']> {
-  if (!cachedProviderSuccessCenter) {
-    const mod = await importCoreDist<ProviderSuccessCenterExports>('router/virtual-router/success-center');
-    const center = mod.providerSuccessCenter;
-    if (!center) {
-      throw new Error('[llmswitch-bridge] providerSuccessCenter not available');
-    }
-    cachedProviderSuccessCenter = center;
+export async function reportProviderErrorToRouterPolicy(event: ProviderErrorEvent): Promise<ProviderErrorEvent> {
+  const mod = await getProviderRuntimeIngress();
+  const fn = mod.reportProviderErrorToRouterPolicy;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] reportProviderErrorToRouterPolicy not available');
   }
-  return cachedProviderSuccessCenter;
+  return fn(event);
+}
+
+export async function reportProviderSuccessToRouterPolicy(event: ProviderSuccessEvent): Promise<ProviderSuccessEvent> {
+  const mod = await getProviderRuntimeIngress();
+  const fn = mod.reportProviderSuccessToRouterPolicy;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] reportProviderSuccessToRouterPolicy not available');
+  }
+  return fn(event);
+}
+
+export async function setProviderRuntimeQuotaHooks(
+  owner: unknown,
+  hooks?: {
+    onProviderError?: (event: ProviderErrorEvent) => void;
+    onProviderSuccess?: (event: ProviderSuccessEvent) => void;
+  }
+): Promise<boolean> {
+  const mod = await getProviderRuntimeIngress();
+  const fn = mod.setProviderRuntimeQuotaHooks;
+  if (typeof fn !== 'function') {
+    return false;
+  }
+  fn(owner, hooks);
+  return true;
+}
+
+export async function setProviderRuntimeProviderQuotaHooks(
+  owner: unknown,
+  hooks?: {
+    onProviderError?: (event: ProviderErrorEvent) => void;
+  }
+): Promise<boolean> {
+  const mod = await getProviderRuntimeIngress();
+  const fn = mod.setProviderRuntimeProviderQuotaHooks;
+  if (typeof fn !== 'function') {
+    return false;
+  }
+  fn(owner, hooks);
+  return true;
 }

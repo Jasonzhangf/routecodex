@@ -75,49 +75,8 @@ fn is_canonical_chat_completion_payload(payload: &Value) -> bool {
     first.get("message").and_then(|v| v.as_object()).is_some()
 }
 
-fn build_review_operations(metadata: &Value) -> Value {
-    let server_tool_followup = metadata
-        .as_object()
-        .and_then(|obj| obj.get("__rt"))
-        .and_then(|v| v.as_object())
-        .and_then(|rt| rt.get("serverToolFollowup"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    if server_tool_followup {
-        return Value::Array(Vec::new());
-    }
-
-    let parameters = json!({
-      "type": "object",
-      "properties": {
-        "goal": { "type": "string", "description": "Current short-term goal to review." },
-        "context": { "type": "string", "description": "Optional context/evidence to include for review." },
-        "focus": { "type": "string", "description": "Optional review focus (tests, build, behavior, etc)." }
-      },
-      "required": ["goal", "context", "focus"],
-      "additionalProperties": false
-    });
-    let review_tool = json!({
-      "type": "function",
-      "function": {
-        "name": "review",
-        "description": "Independent reviewer handoff. Use this when you need an external evidence-based code review before reporting completion. The review result will be injected back to the client for next-step execution guidance. Do not stop immediately after calling this tool; continue real actions.",
-        "parameters": parameters,
-        "strict": true
-      }
-    });
-
-    json!([
-      {
-        "op": "set_request_metadata_fields",
-        "fields": { "reviewToolEnabled": true }
-      },
-      {
-        "op": "append_tool_if_missing",
-        "toolName": "review",
-        "tool": review_tool
-      }
-    ])
+fn build_review_operations(_metadata: &Value) -> Value {
+    Value::Array(Vec::new())
 }
 
 fn build_continue_execution_operations(should_inject: bool) -> Value {

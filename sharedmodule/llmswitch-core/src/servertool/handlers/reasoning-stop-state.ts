@@ -13,17 +13,28 @@ const STOPLESS_DIRECTIVE_PATTERN = /<\*\*stopless:([a-z0-9_-]+)\*\*>/gi;
 const STOPLESS_DIRECTIVE_STRIP_PATTERN = /<\*\*stopless:[^*]+\*\*>/gi;
 
 export type ReasoningStopMode = 'on' | 'off' | 'endless';
+export type ReasoningStopReason =
+  | 'completed'
+  | 'blocked'
+  | 'user_input'
+  | 'simple_question'
+  | 'plan_mode';
 export const REASONING_STOP_TOOL_DEF: JsonObject = {
   type: 'function',
   function: {
     name: 'reasoning.stop',
     description:
-      'Structured stop self-check gate. Stop is allowed only when either: (A) task is completed with completion_evidence; or (B) all feasible attempts are exhausted and the task is irrecoverably blocked, with cannot_complete_reason + blocking_evidence + attempts_exhausted=true; or (C) is_simple_question=true (simple factual question that can be answered directly). If user input is required, also provide user_input_required=true and user_question. Required: task_goal, is_completed. If not completed but a concrete next action exists, fill next_step and continue instead of stopping.',
+      'Structured stop self-check gate. Stop is allowed only when either: (A) task is completed with completion_evidence; or (B) all feasible attempts are exhausted and the task is irrecoverably blocked, with cannot_complete_reason + blocking_evidence + attempts_exhausted=true; or (C) is_simple_question=true (simple factual question that can be answered directly). If the current task is plan mode / audit / other intentionally read-only work and the requested deliverable is already complete, set is_completed=true, stop_reason=plan_mode, and provide completion_evidence. If user input is required, also provide user_input_required=true and user_question. Required: task_goal, is_completed. If not completed but a concrete next action exists, fill next_step and continue instead of stopping.',
     parameters: {
       type: 'object',
       properties: {
         task_goal: { type: 'string' },
         is_completed: { type: 'boolean' },
+        stop_reason: {
+          type: 'string',
+          enum: ['completed', 'blocked', 'user_input', 'simple_question', 'plan_mode'],
+          description: 'Optional structured stop reason. Use plan_mode for plan/audit/other intentionally read-only tasks whose requested deliverable is already complete.'
+        },
         completion_evidence: { type: 'string' },
         cannot_complete_reason: { type: 'string' },
         blocking_evidence: { type: 'string' },

@@ -59,16 +59,19 @@ fn extract_tagged_sequence_calls(text: &str, matches: &mut Vec<ToolCallMatch>) {
 
         if !name.is_empty() {
             if let Some(args_record) = parse_tagged_arg_block(&block) {
-                let args = serde_json::to_string(&args_record).unwrap_or_else(|_| "{}".to_string());
-                push_match(
-                    matches,
-                    ToolCallMatch {
-                        start,
-                        end,
-                        name,
-                        args,
-                    },
-                );
+                if let Some(args) =
+                    stringify_tool_args_if_harvestable(name.as_str(), &Value::Object(args_record))
+                {
+                    push_match(
+                        matches,
+                        ToolCallMatch {
+                            start,
+                            end,
+                            name,
+                            args,
+                        },
+                    );
+                }
             }
         }
 

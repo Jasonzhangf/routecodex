@@ -99,8 +99,8 @@ describe('loadRouteCodexConfig v2 capability-route persistence', () => {
     const routing = persisted.virtualrouter.routingPolicyGroups.default.routing;
     expect(Array.isArray(routing.multimodal)).toBe(true);
     expect(Array.isArray(routing.web_search)).toBe(true);
-    expect(routing.multimodal[0].targets).toContain('ali-coding-plan.qwen3.5-plus');
-    expect(routing.web_search[0].targets).toEqual([
+    expect(routing.multimodal[0].loadBalancing.order).toContain('ali-coding-plan.qwen3.5-plus');
+    expect(routing.web_search[0].loadBalancing.order).toEqual([
       'ali-coding-plan.glm-5',
       'ali-coding-plan.qwen3.5-plus'
     ]);
@@ -151,13 +151,13 @@ describe('loadRouteCodexConfig v2 capability-route persistence', () => {
     expect(routing.multimodal[0].id).toBe('manual-multimodal');
     expect(routing.multimodal[0].targets).toEqual(['ali-coding-plan.manual-vl']);
     expect(Array.isArray(routing.web_search)).toBe(true);
-    expect(routing.web_search[0].targets).toEqual([
+    expect(routing.web_search[0].loadBalancing.order).toEqual([
       'ali-coding-plan.glm-5',
       'ali-coding-plan.qwen3.5-plus'
     ]);
   });
 
-  it('treats web_search weights-only pools as missing and injects concrete targets', async () => {
+  it('treats web_search weights-only pools as already configured', async () => {
     const root = await mkTmp('routecodex-v2-capability-');
     process.env.RCC_HOME = root;
     process.env.ROUTECODEX_USER_DIR = root;
@@ -200,10 +200,9 @@ describe('loadRouteCodexConfig v2 capability-route persistence', () => {
     const persisted = JSON.parse(await fs.readFile(configPath, 'utf8'));
     const routing = persisted.virtualrouter.routingPolicyGroups.default.routing;
     expect(Array.isArray(routing.web_search)).toBe(true);
-    expect(routing.web_search[0].id).toBe('web_search-auto-capability');
-    expect(routing.web_search[0].targets).toEqual([
-      'ali-coding-plan.glm-5',
-      'ali-coding-plan.qwen3.5-plus'
-    ]);
+    expect(routing.web_search[0].id).toBe('weights-only-websearch');
+    expect(routing.web_search[0].loadBalancing.weights).toEqual({
+      'ali-coding-plan.glm-5': 1
+    });
   });
 });

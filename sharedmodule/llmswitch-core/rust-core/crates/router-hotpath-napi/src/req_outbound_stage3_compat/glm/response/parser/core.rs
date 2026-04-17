@@ -18,6 +18,57 @@ fn push_match(matches: &mut Vec<ToolCallMatch>, candidate: ToolCallMatch) {
     }
 }
 
+fn parse_tool_args_object(args: &str) -> Option<Map<String, Value>> {
+    let parsed: Value = serde_json::from_str(args.trim()).ok()?;
+    parsed.as_object().cloned()
+}
+
+fn read_non_empty_string_arg(args: &Map<String, Value>, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn tool_call_args_are_harvestable(name: &str, args: &str) -> bool {
+    let lname = name.trim().to_ascii_lowercase();
+    match lname.as_str() {
+        "exec_command" => parse_tool_args_object(args)
+            .and_then(|row| read_non_empty_string_arg(&row, "cmd"))
+            .is_some(),
+        "apply_patch" => parse_tool_args_object(args)
+            .map(|row| {
+                read_non_empty_string_arg(&row, "patch").is_some()
+                    || read_non_empty_string_arg(&row, "input").is_some()
+            })
+            .unwrap_or(false),
+        "write_stdin" => parse_tool_args_object(args)
+            .map(|row| {
+                row.get("session_id")
+                    .map(|value| match value {
+                        Value::Number(number) => number.as_i64().is_some(),
+                        Value::String(text) => !text.trim().is_empty(),
+                        _ => false,
+                    })
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false),
+        "view_image" => parse_tool_args_object(args)
+            .and_then(|row| read_non_empty_string_arg(&row, "path"))
+            .is_some(),
+        _ => true,
+    }
+}
+
+fn stringify_tool_args_if_harvestable(name: &str, args_value: &Value) -> Option<String> {
+    let args = serde_json::to_string(args_value).unwrap_or_else(|_| "{}".to_string());
+    if tool_call_args_are_harvestable(name, args.as_str()) {
+        Some(args)
+    } else {
+        None
+    }
+}
+
 fn parse_tool_call_json(body: &str, name_hint: Option<&str>) -> Option<(String, String)> {
     let parsed: Value = serde_json::from_str(body.trim()).ok()?;
     let row = parsed.as_object()?;
@@ -40,6 +91,9 @@ fn parse_tool_call_json(body: &str, name_hint: Option<&str>) -> Option<(String, 
         Some(other) => serde_json::to_string(other).unwrap_or_else(|_| "{}".to_string()),
         None => "{}".to_string(),
     };
+    if !tool_call_args_are_harvestable(name.as_str(), args.as_str()) {
+        return None;
+    }
     Some((name, args))
 }
 

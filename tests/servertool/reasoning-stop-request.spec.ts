@@ -82,6 +82,7 @@ describe('reasoning stop request tooling', () => {
     expect(captured?.tools?.some((tool: any) => tool?.function?.name === 'reasoning.stop')).toBe(true);
     const reasoningStopTool = request.tools?.find((tool) => tool.function.name === 'reasoning.stop');
     const properties = reasoningStopTool?.function.parameters?.properties as Record<string, unknown> | undefined;
+    expect(properties?.stop_reason).toBeDefined();
     expect(properties?.user_input_required).toBeDefined();
     expect(properties?.user_question).toBeDefined();
     expect(properties?.learning).toBeDefined();

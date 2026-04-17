@@ -10,21 +10,27 @@ async function importModule(relativePath) {
   return import(path.resolve(repoRoot, 'dist', relativePath));
 }
 
-let providerErrorCenterRef;
+let reportProviderErrorToRouterPolicyRef;
+let setVirtualRouterPolicyRuntimeRouterHooksRef;
 let VirtualRouterErrorRef;
 
 async function main() {
   const { VirtualRouterEngine } = await importModule('router/virtual-router/engine.js');
-  const { providerErrorCenter } = await importModule('router/virtual-router/error-center.js');
+  const {
+    reportProviderErrorToRouterPolicy,
+    setVirtualRouterPolicyRuntimeRouterHooks
+  } = await importModule('router/virtual-router/provider-runtime-ingress.js');
   const { VirtualRouterError } = await importModule('router/virtual-router/types.js');
-  providerErrorCenterRef = providerErrorCenter;
+  reportProviderErrorToRouterPolicyRef = reportProviderErrorToRouterPolicy;
+  setVirtualRouterPolicyRuntimeRouterHooksRef = setVirtualRouterPolicyRuntimeRouterHooks;
   VirtualRouterErrorRef = VirtualRouterError;
 
   const engine = new VirtualRouterEngine();
   engine.initialize(buildTestConfig());
-
-  providerErrorCenter.subscribe((event) => {
-    engine.handleProviderError(event);
+  setVirtualRouterPolicyRuntimeRouterHooksRef(engine, {
+    handleProviderError: (event) => {
+      engine.handleProviderError(event);
+    }
   });
 
   const request = buildRequest();
@@ -154,7 +160,7 @@ function logRoute(engine, request, metadata, label) {
 }
 
 function emitProviderError(providerKey, override) {
-  providerErrorCenterRef.emit({
+  reportProviderErrorToRouterPolicyRef({
     code: override.code,
     message: override.code,
     stage: override.stage || 'http.response',

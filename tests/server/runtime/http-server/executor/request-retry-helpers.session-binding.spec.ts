@@ -97,3 +97,21 @@ describe('bindSessionConversationSession', () => {
     expect(mockBindConversationSession).not.toHaveBeenCalled();
   });
 });
+
+describe('isRateLimitLikeError', () => {
+  it('treats upstream overload text "访问量过大" as rate-limit-like', async () => {
+    jest.resetModules();
+
+    const { isRateLimitLikeError } = await import(
+      '../../../../../src/server/runtime/http-server/executor/request-retry-helpers.js'
+    );
+
+    expect(
+      isRateLimitLikeError(
+        'Anthropic SSE error event [1305] 该模型当前访问量过大，请您稍后再试',
+        'HTTP_502',
+        'ANTHROPIC_SSE_TO_JSON_FAILED'
+      )
+    ).toBe(true);
+  });
+});

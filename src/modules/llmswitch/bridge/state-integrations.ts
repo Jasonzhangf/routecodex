@@ -8,6 +8,45 @@
 import { importCoreDist, requireCoreDist } from './module-loader.js';
 import type { AnyRecord } from './module-loader.js';
 
+const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
+const nonBlockingLogState = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error ?? 'unknown');
+  }
+}
+
+function logStateIntegrationsNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  const now = Date.now();
+  const last = nonBlockingLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingLogState.set(stage, now);
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[llmswitch-bridge.state-integrations] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`
+    );
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
+const NOOP_STATS_CENTER: StatsCenterLike = {
+  recordProviderUsage: () => {}
+};
+
 type StickySessionStoreExports = {
   loadRoutingInstructionStateSync?: (key: string) => unknown | null;
   saveRoutingInstructionStateAsync?: (key: string, state: unknown | null) => void;
@@ -22,7 +61,8 @@ function getStickySessionStoreExports(): StickySessionStoreExports | null {
   }
   try {
     cachedStickySessionStore = requireCoreDist<StickySessionStoreExports>('router/virtual-router/sticky-session-store');
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('sticky_session_store.load', error);
     cachedStickySessionStore = null;
   }
   return cachedStickySessionStore;
@@ -32,27 +72,49 @@ export function loadRoutingInstructionStateSync(key: string): unknown | null {
   const mod = getStickySessionStoreExports();
   const fn = mod?.loadRoutingInstructionStateSync;
   if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('sticky_session_store.load_state.api_unavailable', 'loadRoutingInstructionStateSync not available');
+    }
     return null;
   }
-  return fn(key);
+  try {
+    return fn(key);
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('sticky_session_store.load_state.invoke', error, { key });
+    return null;
+  }
 }
 
 export function saveRoutingInstructionStateAsync(key: string, state: unknown | null): void {
   const mod = getStickySessionStoreExports();
   const fn = mod?.saveRoutingInstructionStateAsync;
   if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('sticky_session_store.save_async.api_unavailable', 'saveRoutingInstructionStateAsync not available');
+    }
     return;
   }
-  fn(key, state);
+  try {
+    fn(key, state);
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('sticky_session_store.save_async.invoke', error, { key });
+  }
 }
 
 export function saveRoutingInstructionStateSync(key: string, state: unknown | null): void {
   const mod = getStickySessionStoreExports();
   const fn = mod?.saveRoutingInstructionStateSync;
   if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('sticky_session_store.save_sync.api_unavailable', 'saveRoutingInstructionStateSync not available');
+    }
     return;
   }
-  fn(key, state);
+  try {
+    fn(key, state);
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('sticky_session_store.save_sync.invoke', error, { key });
+  }
 }
 
 type ReasoningStopStateExports = {
@@ -72,7 +134,8 @@ function getReasoningStopStateExports(): ReasoningStopStateExports | null {
     cachedReasoningStopStateModule = requireCoreDist<ReasoningStopStateExports>(
       'servertool/handlers/reasoning-stop-state'
     );
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('reasoning_stop_state.load', error);
     cachedReasoningStopStateModule = null;
   }
   return cachedReasoningStopStateModule;
@@ -85,11 +148,19 @@ export function syncReasoningStopModeFromRequest(
   const mod = getReasoningStopStateExports();
   const fn = mod?.syncReasoningStopModeFromRequest;
   if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError(
+        'reasoning_stop_state.sync_mode.api_unavailable',
+        'syncReasoningStopModeFromRequest not available',
+        { fallbackMode }
+      );
+    }
     return fallbackMode;
   }
   try {
     return fn(adapterContext, fallbackMode);
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('reasoning_stop_state.sync_mode.invoke', error, { fallbackMode });
     return fallbackMode;
   }
 }
@@ -108,7 +179,8 @@ function getSessionIdentifiersModule(): SessionIdentifiersModule | null {
   }
   try {
     cachedSessionIdentifiersModule = requireCoreDist<SessionIdentifiersModule>('conversion/hub/pipeline/session-identifiers');
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('session_identifiers.load', error);
     cachedSessionIdentifiersModule = null;
   }
   return cachedSessionIdentifiersModule;
@@ -118,11 +190,18 @@ export function extractSessionIdentifiersFromMetadata(meta: Record<string, unkno
   const mod = getSessionIdentifiersModule();
   const fn = mod?.extractSessionIdentifiersFromMetadata;
   if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError(
+        'session_identifiers.extract.api_unavailable',
+        'extractSessionIdentifiersFromMetadata not available'
+      );
+    }
     return {};
   }
   try {
     return fn(meta);
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('session_identifiers.extract.invoke', error);
     return {};
   }
 }
@@ -142,7 +221,7 @@ export function getStatsCenterSafe(): StatsCenterLike {
     return cachedStatsCenter;
   }
   if (cachedStatsCenter === null) {
-    return { recordProviderUsage: () => {} };
+    return NOOP_STATS_CENTER;
   }
   try {
     const mod = requireCoreDist<StatsCenterModule>('telemetry/stats-center');
@@ -152,11 +231,12 @@ export function getStatsCenterSafe(): StatsCenterLike {
       cachedStatsCenter = center;
       return center;
     }
-  } catch {
-    // fall through
+    logStateIntegrationsNonBlockingError('stats_center.api_unavailable', 'getStatsCenter not available');
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('stats_center.load', error);
   }
   cachedStatsCenter = null;
-  return { recordProviderUsage: () => {} };
+  return NOOP_STATS_CENTER;
 }
 
 export function getLlmsStatsSnapshot(): unknown | null {
@@ -166,7 +246,8 @@ export function getLlmsStatsSnapshot(): unknown | null {
     const center = typeof get === 'function' ? get() : null;
     const snap = center && typeof center === 'object' ? (center as any).getSnapshot : null;
     return typeof snap === 'function' ? snap.call(center) : null;
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('stats_center.snapshot', error);
     return null;
   }
 }
@@ -261,8 +342,8 @@ const CLOCK_TASK_STORE_RETRY_INTERVAL_MS = 30_000;
 async function tryLoadClockTaskStoreModule(): Promise<ClockTaskStoreModule | null> {
   try {
     return await importCoreDist<ClockTaskStoreModule>('servertool/clock/task-store');
-  } catch {
-    // fallback to legacy split exports
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('clock_task_store.load.primary', error);
   }
 
   try {
@@ -271,7 +352,8 @@ async function tryLoadClockTaskStoreModule(): Promise<ClockTaskStoreModule | nul
       importCoreDist<ClockTaskStoreLegacyConfigModule>('servertool/clock/config')
     ]);
     return { ...tasksModule, resolveClockConfig: configModule.resolveClockConfig };
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('clock_task_store.load.legacy', error);
     return null;
   }
 }
@@ -308,7 +390,8 @@ async function getClockTaskStoreModuleSafe(): Promise<ClockTaskStoreModule | nul
 async function tryLoadHeartbeatTaskStoreModule(): Promise<HeartbeatTaskStoreModule | null> {
   try {
     return await importCoreDist<HeartbeatTaskStoreModule>('servertool/heartbeat/task-store');
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('heartbeat_task_store.load', error);
     return null;
   }
 }
@@ -347,10 +430,16 @@ async function getHeartbeatTaskStoreModuleSafe(): Promise<HeartbeatTaskStoreModu
 export async function resolveClockConfigSnapshot(input: unknown): Promise<unknown | null> {
   const mod = await getClockTaskStoreModuleSafe();
   const fn = mod?.resolveClockConfig;
-  if (typeof fn !== 'function') return null;
+  if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('clock_task_store.resolve_config.api_unavailable', 'resolveClockConfig not available');
+    }
+    return null;
+  }
   try {
     return fn(input) ?? null;
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('clock_task_store.resolve_config.invoke', error);
     return null;
   }
 }
@@ -367,12 +456,16 @@ export async function setClockRuntimeHooksSnapshot(hooks?: {
   const mod = await getClockTaskStoreModuleSafe();
   const fn = mod?.setClockRuntimeHooks;
   if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('clock_task_store.set_runtime_hooks.api_unavailable', 'setClockRuntimeHooks not available');
+    }
     return false;
   }
   try {
     await fn(hooks);
     return true;
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('clock_task_store.set_runtime_hooks.invoke', error);
     return false;
   }
 }
@@ -381,12 +474,16 @@ export async function startClockDaemonIfNeededSnapshot(config: unknown): Promise
   const mod = await getClockTaskStoreModuleSafe();
   const fn = mod?.startClockDaemonIfNeeded;
   if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('clock_task_store.start_daemon.api_unavailable', 'startClockDaemonIfNeeded not available');
+    }
     return false;
   }
   try {
     await fn(config);
     return true;
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('clock_task_store.start_daemon.invoke', error);
     return false;
   }
 }
@@ -399,10 +496,19 @@ export async function reserveClockDueTasks(args: {
 }): Promise<{ reservation: unknown | null; injectText?: string }> {
   const mod = await getClockTaskStoreModuleSafe();
   const fn = mod?.reserveDueTasksForRequest;
-  if (typeof fn !== 'function') return { reservation: null };
+  if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('clock_task_store.reserve_due_tasks.api_unavailable', 'reserveDueTasksForRequest not available');
+    }
+    return { reservation: null };
+  }
   try {
     return await fn(args);
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('clock_task_store.reserve_due_tasks.invoke', error, {
+      sessionId: args.sessionId,
+      requestId: args.requestId
+    });
     return { reservation: null };
   }
 }
@@ -410,24 +516,35 @@ export async function reserveClockDueTasks(args: {
 export async function commitClockDueReservation(args: { reservation: unknown; config: unknown }): Promise<void> {
   const mod = await getClockTaskStoreModuleSafe();
   const fn = mod?.commitClockReservation;
-  if (typeof fn !== 'function') return;
+  if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('clock_task_store.commit_reservation.api_unavailable', 'commitClockReservation not available');
+    }
+    return;
+  }
   try {
     await fn(args.reservation, args.config);
-  } catch {
-    // best-effort only
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('clock_task_store.commit_reservation.invoke', error);
   }
 }
 
 export async function listClockSessionIdsSnapshot(): Promise<string[]> {
   const mod = await getClockTaskStoreModuleSafe();
   const fn = mod?.listClockSessionIds;
-  if (typeof fn !== 'function') return [];
+  if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('clock_task_store.list_session_ids.api_unavailable', 'listClockSessionIds not available');
+    }
+    return [];
+  }
   try {
     const out = await fn();
     return Array.isArray(out)
       ? out.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
       : [];
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('clock_task_store.list_session_ids.invoke', error);
     return [];
   }
 }
@@ -435,11 +552,17 @@ export async function listClockSessionIdsSnapshot(): Promise<string[]> {
 export async function listClockTasksSnapshot(args: { sessionId: string; config: unknown }): Promise<unknown[]> {
   const mod = await getClockTaskStoreModuleSafe();
   const fn = mod?.listClockTasks;
-  if (typeof fn !== 'function') return [];
+  if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('clock_task_store.list_tasks.api_unavailable', 'listClockTasks not available');
+    }
+    return [];
+  }
   try {
     const out = await fn(args.sessionId, args.config);
     return Array.isArray(out) ? out : [];
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('clock_task_store.list_tasks.invoke', error, { sessionId: args.sessionId });
     return [];
   }
 }
@@ -451,11 +574,17 @@ export async function scheduleClockTasksSnapshot(args: {
 }): Promise<unknown[]> {
   const mod = await getClockTaskStoreModuleSafe();
   const fn = mod?.scheduleClockTasks;
-  if (typeof fn !== 'function') return [];
+  if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('clock_task_store.schedule_tasks.api_unavailable', 'scheduleClockTasks not available');
+    }
+    return [];
+  }
   try {
     const out = await fn(args.sessionId, Array.isArray(args.items) ? args.items : [], args.config);
     return Array.isArray(out) ? out : [];
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('clock_task_store.schedule_tasks.invoke', error, { sessionId: args.sessionId });
     return [];
   }
 }
@@ -468,10 +597,19 @@ export async function updateClockTaskSnapshot(args: {
 }): Promise<unknown | null> {
   const mod = await getClockTaskStoreModuleSafe();
   const fn = mod?.updateClockTask;
-  if (typeof fn !== 'function') return null;
+  if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('clock_task_store.update_task.api_unavailable', 'updateClockTask not available');
+    }
+    return null;
+  }
   try {
     return await fn(args.sessionId, args.taskId, args.patch, args.config);
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('clock_task_store.update_task.invoke', error, {
+      sessionId: args.sessionId,
+      taskId: args.taskId
+    });
     return null;
   }
 }
@@ -483,10 +621,19 @@ export async function cancelClockTaskSnapshot(args: {
 }): Promise<boolean> {
   const mod = await getClockTaskStoreModuleSafe();
   const fn = mod?.cancelClockTask;
-  if (typeof fn !== 'function') return false;
+  if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('clock_task_store.cancel_task.api_unavailable', 'cancelClockTask not available');
+    }
+    return false;
+  }
   try {
     return Boolean(await fn(args.sessionId, args.taskId, args.config));
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('clock_task_store.cancel_task.invoke', error, {
+      sessionId: args.sessionId,
+      taskId: args.taskId
+    });
     return false;
   }
 }
@@ -494,11 +641,17 @@ export async function cancelClockTaskSnapshot(args: {
 export async function clearClockTasksSnapshot(args: { sessionId: string; config: unknown }): Promise<number> {
   const mod = await getClockTaskStoreModuleSafe();
   const fn = mod?.clearClockTasks;
-  if (typeof fn !== 'function') return 0;
+  if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('clock_task_store.clear_tasks.api_unavailable', 'clearClockTasks not available');
+    }
+    return 0;
+  }
   try {
     const removed = await fn(args.sessionId, args.config);
     return Number.isFinite(Number(removed)) ? Math.max(0, Math.floor(Number(removed))) : 0;
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('clock_task_store.clear_tasks.invoke', error, { sessionId: args.sessionId });
     return 0;
   }
 }
@@ -506,10 +659,16 @@ export async function clearClockTasksSnapshot(args: { sessionId: string; config:
 export async function resolveHeartbeatConfigSnapshot(input: unknown): Promise<unknown | null> {
   const mod = await getHeartbeatTaskStoreModuleSafe();
   const fn = mod?.resolveHeartbeatConfig;
-  if (typeof fn !== 'function') return null;
+  if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('heartbeat_task_store.resolve_config.api_unavailable', 'resolveHeartbeatConfig not available');
+    }
+    return null;
+  }
   try {
     return fn(input) ?? null;
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('heartbeat_task_store.resolve_config.invoke', error);
     return null;
   }
 }
@@ -517,11 +676,17 @@ export async function resolveHeartbeatConfigSnapshot(input: unknown): Promise<un
 export async function buildHeartbeatInjectTextSnapshot(): Promise<string | null> {
   const mod = await getHeartbeatTaskStoreModuleSafe();
   const fn = mod?.buildHeartbeatInjectText;
-  if (typeof fn !== 'function') return null;
+  if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('heartbeat_task_store.build_inject_text.api_unavailable', 'buildHeartbeatInjectText not available');
+    }
+    return null;
+  }
   try {
     const text = fn();
     return typeof text === 'string' && text.trim() ? text : null;
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('heartbeat_task_store.build_inject_text.invoke', error);
     return null;
   }
 }
@@ -537,12 +702,16 @@ export async function setHeartbeatRuntimeHooksSnapshot(hooks?: {
   const mod = await getHeartbeatTaskStoreModuleSafe();
   const fn = mod?.setHeartbeatRuntimeHooks;
   if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('heartbeat_task_store.set_runtime_hooks.api_unavailable', 'setHeartbeatRuntimeHooks not available');
+    }
     return false;
   }
   try {
     await fn(hooks);
     return true;
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('heartbeat_task_store.set_runtime_hooks.invoke', error);
     return false;
   }
 }
@@ -551,12 +720,16 @@ export async function startHeartbeatDaemonIfNeededSnapshot(config: unknown): Pro
   const mod = await getHeartbeatTaskStoreModuleSafe();
   const fn = mod?.startHeartbeatDaemonIfNeeded;
   if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('heartbeat_task_store.start_daemon.api_unavailable', 'startHeartbeatDaemonIfNeeded not available');
+    }
     return false;
   }
   try {
     await fn(config);
     return true;
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('heartbeat_task_store.start_daemon.invoke', error);
     return false;
   }
 }
@@ -564,10 +737,16 @@ export async function startHeartbeatDaemonIfNeededSnapshot(config: unknown): Pro
 export async function loadHeartbeatStateSnapshot(tmuxSessionId: string): Promise<unknown | null> {
   const mod = await getHeartbeatTaskStoreModuleSafe();
   const fn = mod?.loadHeartbeatState;
-  if (typeof fn !== 'function') return null;
+  if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('heartbeat_task_store.load_state.api_unavailable', 'loadHeartbeatState not available');
+    }
+    return null;
+  }
   try {
     return await fn(tmuxSessionId);
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('heartbeat_task_store.load_state.invoke', error, { tmuxSessionId });
     return null;
   }
 }
@@ -575,11 +754,17 @@ export async function loadHeartbeatStateSnapshot(tmuxSessionId: string): Promise
 export async function listHeartbeatStatesSnapshot(): Promise<unknown[]> {
   const mod = await getHeartbeatTaskStoreModuleSafe();
   const fn = mod?.listHeartbeatStates;
-  if (typeof fn !== 'function') return [];
+  if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('heartbeat_task_store.list_states.api_unavailable', 'listHeartbeatStates not available');
+    }
+    return [];
+  }
   try {
     const out = await fn();
     return Array.isArray(out) ? out : [];
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('heartbeat_task_store.list_states.invoke', error);
     return [];
   }
 }
@@ -595,7 +780,12 @@ export async function setHeartbeatEnabledSnapshot(args: {
 }): Promise<unknown | null> {
   const mod = await getHeartbeatTaskStoreModuleSafe();
   const fn = mod?.setHeartbeatEnabled;
-  if (typeof fn !== 'function') return null;
+  if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('heartbeat_task_store.set_enabled.api_unavailable', 'setHeartbeatEnabled not available');
+    }
+    return null;
+  }
   try {
     return await fn(args.tmuxSessionId, args.enabled, {
       ...(typeof args.intervalMs === 'number' ? { intervalMs: args.intervalMs } : {}),
@@ -604,7 +794,11 @@ export async function setHeartbeatEnabledSnapshot(args: {
       ...(typeof args.reason === 'string' && args.reason.trim() ? { reason: args.reason.trim() } : {}),
       ...(args.details && typeof args.details === 'object' ? { details: args.details } : {})
     });
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('heartbeat_task_store.set_enabled.invoke', error, {
+      tmuxSessionId: args.tmuxSessionId,
+      enabled: args.enabled
+    });
     return null;
   }
 }
@@ -616,12 +810,18 @@ export async function listHeartbeatHistorySnapshot(args: {
   const mod = await getHeartbeatTaskStoreModuleSafe();
   const fn = mod?.listHeartbeatHistory;
   if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError('heartbeat_task_store.list_history.api_unavailable', 'listHeartbeatHistory not available');
+    }
     return [];
   }
   try {
     const out = await fn(args);
     return Array.isArray(out) ? out : [];
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('heartbeat_task_store.list_history.invoke', error, {
+      tmuxSessionId: args.tmuxSessionId
+    });
     return [];
   }
 }
@@ -638,11 +838,22 @@ export async function appendHeartbeatHistoryEventSnapshot(input: {
   const mod = await getHeartbeatTaskStoreModuleSafe();
   const fn = mod?.appendHeartbeatHistoryEvent;
   if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError(
+        'heartbeat_task_store.append_history_event.api_unavailable',
+        'appendHeartbeatHistoryEvent not available'
+      );
+    }
     return false;
   }
   try {
     return Boolean(await fn(input));
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('heartbeat_task_store.append_history_event.invoke', error, {
+      tmuxSessionId: input.tmuxSessionId,
+      source: input.source,
+      action: input.action
+    });
     return false;
   }
 }
@@ -651,12 +862,19 @@ export async function runHeartbeatDaemonTickSnapshot(): Promise<boolean> {
   const mod = await getHeartbeatTaskStoreModuleSafe();
   const fn = mod?.runHeartbeatDaemonTickForTests;
   if (typeof fn !== 'function') {
+    if (mod) {
+      logStateIntegrationsNonBlockingError(
+        'heartbeat_task_store.run_tick.api_unavailable',
+        'runHeartbeatDaemonTickForTests not available'
+      );
+    }
     return false;
   }
   try {
     await fn();
     return true;
-  } catch {
+  } catch (error) {
+    logStateIntegrationsNonBlockingError('heartbeat_task_store.run_tick.invoke', error);
     return false;
   }
 }

@@ -149,6 +149,9 @@ export class JsonlFileStore<TSnapshot, TEvent = unknown>
       const payload = `${next.map((entry) => JSON.stringify(entry)).join('\n')  }\n`;
       await fs.writeFile(this.filePath, payload, 'utf8');
     } catch (error) {
+      if (isEnoentError(error)) {
+        return;
+      }
       logJsonlFileStoreNonBlockingError('compact', error, { filePath: this.filePath });
     }
   }

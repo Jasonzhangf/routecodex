@@ -2,6 +2,30 @@
 
 ## Skills 与调试工作流
 
+- 2026-04-15: 全局错误处理收口决策确认：**不要保留独立 `error-handling center` / event engine**。可复用规则：如果某个“中心”只做 `emit/subscribe/normalize`，却不掌握 retry/reroute/backoff/fail/cooldown policy，它就不是策略真源，只会制造第二中心。RouteCodex 这类请求执行错误语义应直接收口到 **Virtual Router policy**；`RequestExecutor` 与 `servertool engine` 只消费同一套 Router decision，前者负责执行，后者只保留 followup 编排前/internal error 边界。
+
+Tags: error-policy, virtual-router, no-second-center, no-event-bus, request-executor-consumer, servertool-boundary, 2026-04-15
+
+- 2026-04-15: 排查“**路由池未耗尽却把 429 直接漏给客户端**”时，先检查 `request-executor` 是否把 `routingDecision.pool` 误当成“整条 route 已耗尽”的证据。真实语义：`routingDecision.pool` 只代表**本次命中的当前 tier/pool**；若它是单元素 `[currentProvider]`，**不能据此认定全路由只剩当前 provider**，因为后面仍可能有低优先级 fallback pool。可复用规则：429 下的“last available / single provider”判断，必须至少排除“当前只是 singleton tier”这种情况；否则会错误 `retry_same_provider`，把本应 reroute 的 429 漏给客户端。
+
+- Tags: route-pool, 429-leak, singleton-tier, lower-priority-fallback, request-executor, retry_same_provider, 2026-04-15
+
+- 2026-04-15: `provider-response-converter` 里的 **QwenChat malformed/business-rejection remap 必须有 provider 作用域门**。可复用规则：不能仅凭 `MALFORMED_RESPONSE + 401/error.message` 就把 generic provider 错误改写成 `QWENCHAT_*`；至少要有 `compatibilityProfile/providerId/providerKey/raw` 里的 qwenchat 信号，否则会把普通 401 failover 链误短路。
+
+- Tags: qwenchat, malformed-remap, provider-scope, generic-401, failover-short-circuit, provider-response-converter, 2026-04-15
+
+- 2026-04-15: `reasoning.stop` 对 **plan mode / audit / 其它有意只读任务** 需要保留显式停止原因。可复用规则：工具定义里提供 `stop_reason=plan_mode`，并在说明中明确“若只读交付物已完成，则 `is_completed=true + stop_reason=plan_mode + completion_evidence` 即可停止”；不要把这类任务硬逼成“必须继续写动作”或伪装成 blocked。
+
+- Tags: reasoning-stop, stopless, plan-mode, audit, readonly-task, stop-reason, completion-evidence, 2026-04-15
+
+- 2026-04-15: RouteCodex 长时内存/虚拟内存继续上涨时，除了 `ctxMap / requestMetaStore`，还要优先查 **Responses retention 链**：`responses-reasoning-registry` 是否只有 consume 没有 TTL/max/prune，`buildChatResponseFromResponses` 是否在 registry + inline `__responses_*` + `id/request_id` 多 key 上重复保留同一大 payload。可复用规则：registry 必须有 **TTL + max + 读写前 prune**，多 key 必须 **alias 一次性 consume/clear**，并让同一 payload 在 registry / inline / alias key 间尽量**共享同一引用**，不要重复 deep clone。
+
+Tags: memory, vm-growth, responses-retention, registry-prune, alias-consume, payload-snapshot, no-duplicate-clone, 2026-04-15
+
+- 2026-04-14: stopless / reasoning.stop 再补一条硬规则：**不能为了逼出 `reasoning.stop` 而缩减真实工具面，也不能额外加一层“工具缺失/只能停机自查”的提示约束。** 正确做法是保持请求真实工具集合不变，只在 `reasoning.stop` 工具定义/校验上明确“未调用不得停止”；如果模型仍直接 stop，应继续修 guard/finalize/validator，不要用 `replace_tools` / `force_tool_choice` 这类越界手段改写真实能力面。验证信号：一旦 followup 出现“exec_command 不存在/工具不可用”之类自造阻塞，优先回查是否有人为砍掉工具面。
+
+Tags: stopless, reasoning-stop, tool-surface, no-tool-surface-shrinking, no-extra-followup-constraints, validator-first, guard-finalize, 2026-04-14
+
 - 2026-04-13: client canonical 响应链又补一条闭环：**resp_process/filter 层不能把 `exec_command` 的 `command` 偷修成 `cmd`，host converter 也不能把 `CLIENT_TOOL_ARGS_INVALID` 静默吞回原始 payload**。可复用规则：响应侧 `exec_command` 只做字符串化/保形，不做 alias-repair；一旦桥接后校验命中 `missing_cmd` 这类客户端契约错误，必须直接上浮明确错误，不允许 fallback 成“看起来成功”的 chat/response body。
 
 - 2026-04-13: 文本工具 harvest 本轮验证出一个高收益稳定策略：**wrapper/container 先行，正文永不猜工具**。可复用规则：先在 Rust chat-process 响应侧统一 mask 掉 `RCC_TOOL_CALLS(_JSON)` heredoc、XML 顶层壳、bullet/fence 等 wrapper，再只解析容器内的顶层 tool shell；`bash -lc`、patch body、解释性 prose 一律当字符串/正文处理，不允许从正文反推 tool。请求侧则反过来配合：要求模型把文本工具调用放在**输出末尾**、放进**单独容器**、参数保持**原始肌肉记忆形状**（shell 单字符串、patch 原文），这样半截时也容易“补边界 / 整段切掉 / 明确 retryable”，不污染上下文。这个策略对 qwenchat 已体现出明显成功率提升，且适合作为 deepseek / qwen 共享的**响应侧收割框架**；差异只保留在 provider 级 guidance 强弱，不要把 Qwen 的强覆盖整包灌给 DeepSeek。

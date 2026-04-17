@@ -1,12 +1,12 @@
 import { describe, expect, test, jest } from '@jest/globals';
 
 describe('Provider error reporting', () => {
-  test('emitProviderError emits ProviderErrorEvent and calls errorHandlingCenter', async () => {
+  test('emitProviderError reports ProviderErrorEvent to router policy and does not rely on errorHandlingCenter fallback', async () => {
     jest.resetModules();
 
-    const providerErrorEmit = jest.fn();
+    const reportProviderErrorToRouterPolicy = jest.fn(async (event) => event);
     await jest.unstable_mockModule('../../src/modules/llmswitch/bridge.ts', () => ({
-      getProviderErrorCenter: async () => ({ emit: providerErrorEmit }),
+      reportProviderErrorToRouterPolicy,
       extractAntigravityGeminiSessionId: () => undefined,
       cacheAntigravitySessionSignature: () => {},
       lookupAntigravitySessionSignatureEntry: () => undefined,
@@ -39,7 +39,7 @@ describe('Provider error reporting', () => {
       dependencies: deps
     });
 
-    expect(providerErrorEmit).toHaveBeenCalled();
-    expect(deps.errorHandlingCenter.handleError).toHaveBeenCalled();
+    expect(reportProviderErrorToRouterPolicy).toHaveBeenCalled();
+    expect(deps.errorHandlingCenter.handleError).not.toHaveBeenCalled();
   });
 });

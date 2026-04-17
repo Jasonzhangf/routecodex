@@ -1,4 +1,4 @@
-declare module '@jsonstudio/llms/dist/router/virtual-router/error-center.js' {
+declare module '@jsonstudio/llms/dist/router/virtual-router/provider-runtime-ingress.js' {
   export interface ProviderErrorEvent {
     code: string;
     message: string;
@@ -20,10 +20,53 @@ declare module '@jsonstudio/llms/dist/router/virtual-router/error-center.js' {
     target?: Record<string, unknown> | null;
     runtimeKey?: string;
   }
-  export const providerErrorCenter: {
-    emit(event: ProviderErrorEvent): void;
-    subscribe?(handler: (event: ProviderErrorEvent) => void): () => void;
-  };
+  export interface ProviderSuccessRuntimeMetadata {
+    requestId: string;
+    routeName?: string;
+    providerKey?: string;
+    providerId?: string;
+    providerType?: string;
+    providerProtocol?: string;
+    pipelineId?: string;
+    target?: Record<string, unknown> | null;
+    runtimeKey?: string;
+  }
+  export interface ProviderSuccessEvent {
+    runtime: ProviderSuccessRuntimeMetadata;
+    timestamp: number;
+    metadata?: Record<string, unknown>;
+    details?: Record<string, unknown>;
+  }
+  export function reportProviderErrorToRouterPolicy(event: ProviderErrorEvent): ProviderErrorEvent;
+  export function reportProviderSuccessToRouterPolicy(event: ProviderSuccessEvent): ProviderSuccessEvent;
+  export function setVirtualRouterPolicyRuntimeRouterHooks(
+    owner: unknown,
+    hooks?: {
+      handleProviderError?: (event: ProviderErrorEvent) => void;
+      handleProviderSuccess?: (event: ProviderSuccessEvent) => void;
+    }
+  ): void;
+  export function setProviderRuntimeQuotaHooks(
+    owner: unknown,
+    hooks?: {
+      onProviderError?: (event: ProviderErrorEvent) => void;
+      onProviderSuccess?: (event: ProviderSuccessEvent) => void;
+    }
+  ): void;
+  export function setProviderRuntimeProviderQuotaHooks(
+    owner: unknown,
+    hooks?: {
+      onProviderError?: (event: ProviderErrorEvent) => void;
+    }
+  ): void;
+  export function setProviderRuntimeObserverHooks(
+    owner: unknown,
+    hooks?: {
+      onProviderErrorReported?: (event: ProviderErrorEvent) => void;
+      onProviderSuccessReported?: (event: ProviderSuccessEvent) => void;
+    }
+  ): void;
+  export function resetProviderRuntimeIngressForTests(): void;
 }
 
 declare module '@jsonstudio/llms/dist/router/virtual-router/types.js' {

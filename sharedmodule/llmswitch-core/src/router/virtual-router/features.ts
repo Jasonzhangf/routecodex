@@ -12,6 +12,8 @@ import {
 } from './message-utils.js';
 import { extractAntigravityGeminiSessionIdWithNative } from './engine-selection/native-router-hotpath.js';
 import {
+  chooseHigherPriorityToolCategory,
+  classifyToolCallForReport,
   detectCodingTool,
   detectLastAssistantToolCategory,
   detectVisionTool,
@@ -66,6 +68,72 @@ function getLatestResponsesContextMessage(
   return null;
 }
 
+function getResponsesContextInput(request: StandardizedRequest | ProcessedRequest): Record<string, unknown>[] {
+  const contextInput = asRecord((request as { semantics?: unknown }).semantics)?.responses;
+  const context = asRecord(contextInput)?.context;
+  const input = Array.isArray(asRecord(context)?.input) ? (asRecord(context)?.input as unknown[]) : [];
+  return input
+    .map((entry) => asRecord(entry))
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+}
+
+function getResponsesContextToolSignals(request: StandardizedRequest | ProcessedRequest): {
+  hasToolCallResponses: boolean;
+  lastAssistantTool: ReturnType<typeof classifyToolCallForReport>;
+} {
+  const input = getResponsesContextInput(request);
+  let lastAssistantTool: ReturnType<typeof classifyToolCallForReport>;
+  let hasToolCallResponses = false;
+  let seenLatestUser = false;
+
+  for (let idx = input.length - 1; idx >= 0; idx -= 1) {
+    const entry = input[idx];
+    const entryType = typeof entry.type === 'string' ? entry.type.trim().toLowerCase() : '';
+    const entryRole = typeof entry.role === 'string' ? entry.role.trim().toLowerCase() : '';
+    if (!seenLatestUser) {
+      if (entryType === 'message' && entryRole === 'user') {
+        seenLatestUser = true;
+      }
+      continue;
+    }
+    if (entryType === 'message' && entryRole === 'user') {
+      break;
+    }
+    if (
+      entryType === 'function_call'
+      || entryType === 'function_call_output'
+      || entryType === 'tool_result'
+      || entryType === 'tool_message'
+    ) {
+      hasToolCallResponses = true;
+    }
+    if (entryType !== 'function_call') {
+      continue;
+    }
+    const toolName = typeof entry.name === 'string' ? entry.name.trim() : '';
+    if (!toolName) {
+      continue;
+    }
+    const candidate = classifyToolCallForReport({
+      type: 'function',
+      id: typeof entry.id === 'string' ? entry.id : undefined,
+      function: {
+        name: toolName,
+        arguments:
+          typeof entry.arguments === 'string' || typeof entry.arguments === 'object'
+            ? entry.arguments
+            : undefined
+      }
+    } as StandardizedRequest['messages'][number]['tool_calls'][number]);
+    lastAssistantTool = chooseHigherPriorityToolCategory(lastAssistantTool, candidate);
+  }
+
+  return {
+    hasToolCallResponses,
+    lastAssistantTool
+  };
+}
+
 export function buildRoutingFeatures(
   request: StandardizedRequest | ProcessedRequest,
   metadata: RouterMetadataInput
@@ -90,15 +158,17 @@ export function buildRoutingFeatures(
     ? request.messages[request.messages.length - 1]
     : undefined);
   const assistantMessages = request.messages.filter((msg) => msg.role === 'assistant');
+  const responsesToolSignals = getResponsesContextToolSignals(request);
   const latestUserText = latestMessageRole === 'user' && latestMessage
     ? extractMessageText(latestMessage)
     : '';
   const normalizedUserText = latestUserText.toLowerCase();
   const meaningfulDeclaredTools = extractMeaningfulDeclaredToolNames(request.tools);
   const hasTools = meaningfulDeclaredTools.length > 0;
-  const hasToolCallResponses = assistantMessages.some(
+  const messageToolCallResponses = assistantMessages.some(
     (msg) => Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0
   );
+  const hasToolCallResponses = messageToolCallResponses || responsesToolSignals.hasToolCallResponses;
 
   const estimatedTokens = computeRequestTokens(request, latestUserText);
   const hasThinking = detectKeyword(normalizedUserText, THINKING_KEYWORDS);
@@ -111,7 +181,7 @@ export function buildRoutingFeatures(
   const hasCodingTool = detectCodingTool(request);
   const hasWebTool = detectWebTool(request);
   const hasThinkingKeyword = hasThinking || detectExtendedThinkingKeyword(normalizedUserText);
-  const lastAssistantTool = detectLastAssistantToolCategory(assistantMessages);
+  const lastAssistantTool = responsesToolSignals.lastAssistantTool || detectLastAssistantToolCategory(assistantMessages);
   const lastAssistantToolLabel = (() => {
     if (!lastAssistantTool) {
       return undefined;

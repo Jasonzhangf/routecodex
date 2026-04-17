@@ -6,10 +6,12 @@ import { armReasoningStopState } from './reasoning-stop-state.js';
 
 const FLOW_ID = 'reasoning_stop_flow';
 const TOOL_NAME = 'reasoning.stop';
+const VALID_STOP_REASONS = new Set(['completed', 'blocked', 'user_input', 'simple_question', 'plan_mode']);
 
 type ReasoningStopPayload = {
   taskGoal: string;
   completed: boolean;
+  stopReason?: string;
   completionEvidence: string;
   cannotCompleteReason: string;
   blockingEvidence: string;
@@ -70,6 +72,14 @@ function readBool(record: Record<string, unknown>, keys: string[]): boolean | un
   return undefined;
 }
 
+function readStopReason(record: Record<string, unknown>, keys: string[]): string | undefined {
+  const raw = readText(record, keys).toLowerCase();
+  if (!raw) {
+    return undefined;
+  }
+  return VALID_STOP_REASONS.has(raw) ? raw : undefined;
+}
+
 function normalizeReasoningStopPayload(args: Record<string, unknown>): {
   ok: true;
   payload: ReasoningStopPayload;
@@ -94,6 +104,7 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>): {
       message: 'reasoning.stop requires is_completed(boolean).'
     };
   }
+  const stopReason = readStopReason(args, ['stop_reason', 'stopReason', 'reason_type', 'reasonType']);
   const completionEvidence = readText(args, [
     'completion_evidence',
     'completionEvidence',
@@ -199,6 +210,7 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>): {
     payload: {
       taskGoal,
       completed,
+      ...(stopReason ? { stopReason } : {}),
       completionEvidence,
       cannotCompleteReason,
       blockingEvidence,
@@ -216,6 +228,9 @@ function buildSummary(payload: ReasoningStopPayload): string {
     `用户任务目标: ${payload.taskGoal}`,
     `是否完成: ${payload.completed ? '是' : '否'}`
   ];
+  if (payload.stopReason) {
+    lines.push(`停止原因: ${payload.stopReason}`);
+  }
   if (payload.completed) {
     lines.push(`完成证据: ${payload.completionEvidence}`);
   } else {

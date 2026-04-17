@@ -33,6 +33,7 @@ const REASONING_STOP_FINALIZED_MARKER = '[app.finished:reasoning.stop]';
 const ON_CONTINUE_TEXT =
   '禁止直接停止。你当前处于 reasoning.stop 模式。每次停止前必须调用 reasoning.stop 工具并提供以下信息：\n' +
   '- 是否完成: 是/否\n' +
+  '- 停止原因(stop_reason): 可选。若当前是 plan mode / audit / 其他只读任务，且请求的交付物已经完成，可填 plan_mode\n' +
   '- 完成证据(completion_evidence): 如果任务完成，提供具体证据\n' +
   '- 未完成原因(cannot_complete_reason): 如果未完成，说明为什么\n' +
   '- 阻塞证据(blocking_evidence): 如果被阻塞，提供具体阻塞点\n' +
@@ -45,6 +46,7 @@ const ENDLESS_CONTINUE_TEXT =
   '你当前处于 stopless:endless 模式。默认必须继续执行，不要轻易停止。\n' +
   '只有满足以下任一条件才允许停止：\n' +
   'A. 任务已经完成，并提供 completion_evidence；\n' +
+  'A2. 如果这是 plan mode / audit / 其他有意只读任务，且请求的交付物已完成，可在 is_completed=true 的同时设置 stop_reason=plan_mode；\n' +
   'B. 你已经穷尽所有可行尝试，且遇到不可抗阻塞：next_step 为空、attempts_exhausted=true、cannot_complete_reason 非空、blocking_evidence 非空；若必须用户参与，再额外提供 user_input_required=true 与 user_question。\n' +
   '只要还有任何可执行的 next_step，你就必须继续执行，不得停止。\n' +
   '你现在立即继续执行；只有在“已完成”或“不可抗阻塞”时才允许停止。';
@@ -53,6 +55,7 @@ function parseReasoningStopSummary(summary: string): {
   taskGoal: string;
   completed?: boolean;
   completionEvidence: string;
+  stopReason?: string;
   nextStep: string;
   userInputRequired?: boolean;
   userQuestion: string;
@@ -77,6 +80,7 @@ function parseReasoningStopSummary(summary: string): {
   let taskGoal = '';
   let completed: boolean | undefined;
   let completionEvidence = '';
+  let stopReason: string | undefined;
   let nextStep = '';
   let userInputRequired: boolean | undefined;
   let userQuestion = '';
@@ -101,6 +105,11 @@ function parseReasoningStopSummary(summary: string): {
     }
     if (line.startsWith('完成证据:')) {
       completionEvidence = line.slice('完成证据:'.length).trim();
+      continue;
+    }
+    if (line.startsWith('停止原因:')) {
+      const value = line.slice('停止原因:'.length).trim();
+      stopReason = value || undefined;
       continue;
     }
     if (line.startsWith('下一步:')) {
@@ -157,6 +166,7 @@ function parseReasoningStopSummary(summary: string): {
     taskGoal,
     completed,
     completionEvidence,
+    stopReason,
     nextStep,
     userInputRequired,
     userQuestion,
@@ -215,6 +225,9 @@ function buildReasoningStopFinalizedMarker(summary: string): string {
   }
   if (parsed.completionEvidence) {
     payload.completion_evidence = parsed.completionEvidence;
+  }
+  if (parsed.stopReason) {
+    payload.stop_reason = parsed.stopReason;
   }
   if (parsed.cannotCompleteReason) {
     payload.cannot_complete_reason = parsed.cannotCompleteReason;

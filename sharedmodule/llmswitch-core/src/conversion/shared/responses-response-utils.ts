@@ -58,7 +58,7 @@ function registerPassthroughSnapshot(payload: Record<string, unknown>): void {
   if (requestId.length) ids.add(requestId);
   if (id.length) ids.add(id);
   for (const candidate of ids) {
-    registerResponsesPassthrough(candidate, payload);
+    registerResponsesPassthrough(candidate, payload, { clone: false });
   }
 }
 
@@ -130,15 +130,15 @@ export function buildChatResponseFromResponses(payload: unknown): Record<string,
   const requestId = typeof (chat as any).request_id === 'string'
     ? (chat as any).request_id
     : (typeof (response as any).request_id === 'string' ? (response as any).request_id : undefined);
-  if (id) {
-    registerResponsesPayloadSnapshot(id, response);
-  }
-  if (requestId) {
-    registerResponsesPayloadSnapshot(requestId, response);
-  }
-  const snapshot = cloneSnapshot(response);
-  if (snapshot) {
-    (chat as any).__responses_payload_snapshot = snapshot;
+  const inlineSnapshot = (chat as any).__responses_payload_snapshot;
+  const retainedSnapshot = inlineSnapshot && typeof inlineSnapshot === 'object' && !Array.isArray(inlineSnapshot)
+    ? (inlineSnapshot as Record<string, unknown>)
+    : response;
+  if (retainedSnapshot) {
+    (chat as any).__responses_payload_snapshot = retainedSnapshot;
+    for (const candidate of new Set([id, requestId].filter((value): value is string => typeof value === 'string' && value.length > 0))) {
+      registerResponsesPayloadSnapshot(candidate, retainedSnapshot, { clone: false });
+    }
   }
   return chat;
 }

@@ -1070,6 +1070,41 @@ function extractQwenChatTerminalStreamError(payload: unknown): {
   };
 }
 
+function isLikelyQwenChatContext(baseContext: Record<string, unknown> | undefined, body: unknown): boolean {
+  const candidates: string[] = [];
+  const push = (value: unknown): void => {
+    if (typeof value === 'string' && value.trim()) {
+      candidates.push(value.trim().toLowerCase());
+    }
+  };
+
+  const record =
+    baseContext && typeof baseContext === 'object' && !Array.isArray(baseContext)
+      ? baseContext
+      : undefined;
+  const target =
+    record?.target && typeof record.target === 'object' && !Array.isArray(record.target)
+      ? (record.target as Record<string, unknown>)
+      : undefined;
+
+  push(record?.compatibilityProfile);
+  push(record?.providerType);
+  push(record?.providerFamily);
+  push(record?.providerId);
+  push(target?.compatibilityProfile);
+  push(target?.providerType);
+  push(target?.providerFamily);
+  push(target?.providerId);
+  push(target?.providerKey);
+
+  const raw = findNestedRawString(body).toLowerCase();
+  if (raw.includes('qwenchat') || raw.includes('chat.qwen.ai')) {
+    return true;
+  }
+
+  return candidates.some((value) => value.includes('qwenchat') || value === 'chat:qwenchat-web');
+}
+
 function remapMalformedQwenChatError(args: {
   error: Record<string, unknown>;
   body: unknown;
@@ -1078,6 +1113,9 @@ function remapMalformedQwenChatError(args: {
   const code = typeof args.error.code === 'string' ? args.error.code.trim() : '';
   const message = typeof args.error.message === 'string' ? args.error.message : '';
   if (code !== 'MALFORMED_RESPONSE' && !message.toLowerCase().includes('canonicalize response payload')) {
+    return undefined;
+  }
+  if (!isLikelyQwenChatContext(args.baseContext, args.body)) {
     return undefined;
   }
 
@@ -2179,6 +2217,23 @@ export async function convertProviderResponseIfNeeded(
             (compactUpstreamCode ? ` upstreamCode=${compactUpstreamCode}` : '') +
             (compactReason ? ` reason=${JSON.stringify(compactReason)}` : '')
         );
+        // Soft skip on transient errors (HTTP_429, INSUFFICIENT_QUOTA, HTTP_5xx)
+        // These are quota/infrastructure issues that should not break the main assistant response
+        const isTransientFollowupError =
+          normalizedUpstreamCode === 'http_429' ||
+          normalizedUpstreamCode === 'insufficient_quota' ||
+          normalizedUpstreamCode === 'http_502' ||
+          normalizedUpstreamCode === 'http_503' ||
+          normalizedUpstreamCode === 'http_504' ||
+          (typeof upstreamCode === 'string' && upstreamCode.trim().toUpperCase() === 'HTTP_429') ||
+          (typeof detailUpstreamCode === 'string' && detailUpstreamCode.trim().toUpperCase() === 'HTTP_429') ||
+          (typeof upstreamCode === 'string' && upstreamCode.trim().toUpperCase() === 'INSUFFICIENT_QUOTA') ||
+          (typeof detailUpstreamCode === 'string' && detailUpstreamCode.trim().toUpperCase() === 'INSUFFICIENT_QUOTA') ||
+          (typeof compactReason === 'string' && compactReason.toLowerCase().includes('insufficient_quota'));
+        if (isTransientFollowupError) {
+          // Followup transient error (429/quota/5xx) should not break the main assistant response.
+          return options.response;
+        }
         if (normalizedUpstreamCode === 'client_inject_failed') {
           // Followup rejection should not break the main assistant response.
           return options.response;

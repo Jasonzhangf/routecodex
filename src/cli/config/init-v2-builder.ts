@@ -59,7 +59,6 @@ export function buildWeightedRoutePool(id: string, targets: string[]): Record<st
   const weights = Object.fromEntries(normalizedTargets.map((target) => [target, 1]));
   return {
     id,
-    targets: normalizedTargets,
     loadBalancing: {
       strategy: 'weighted',
       weights

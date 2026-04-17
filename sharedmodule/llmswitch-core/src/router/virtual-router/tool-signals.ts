@@ -47,7 +47,6 @@ const READ_TOOL_KEYWORDS = ['read', 'view', 'download', 'open', 'show', 'fetch',
 const WRITE_TOOL_KEYWORDS = ['write', 'patch', 'modify', 'edit', 'create', 'update', 'append', 'replace', 'save'];
 const SEARCH_TOOL_KEYWORDS = ['find', 'grep', 'glob', 'lookup', 'locate'];
 const SHELL_TOOL_NAMES = new Set(['shell_command', 'shell', 'bash']);
-const DECLARED_TOOL_IGNORE = new Set(['exec_command']);
 const SHELL_HEREDOC_PATTERN = /<<\s*['"]?[a-z0-9_-]+/i;
 const SHELL_WRITE_COMMANDS = new Set(['apply_patch', 'tee', 'touch', 'truncate', 'patch']);
 const SHELL_READ_COMMANDS = new Set(['cat', 'head', 'tail', 'awk', 'strings', 'less', 'more', 'nl']);
@@ -62,12 +61,7 @@ const SHELL_SEARCH_COMMANDS = new Set([
   'find',
   'fd',
   'locate',
-  'codesearch',
-  'ls',
-  'dir',
-  'tree',
-  'eza',
-  'exa'
+  'codesearch'
 ]);
 const SHELL_REDIRECT_WRITE_BINARIES = new Set(['cat', 'printf', 'python', 'node', 'perl', 'ruby', 'php', 'bash', 'sh', 'zsh', 'echo']);
 const SHELL_WRAPPER_COMMANDS = new Set(['sudo', 'env', 'time', 'nice', 'nohup', 'command', 'stdbuf']);
@@ -181,7 +175,7 @@ export function extractMeaningfulDeclaredToolNames(tools: StandardizedRequest['t
       continue;
     }
     const canonical = canonicalizeToolName(rawName).toLowerCase();
-    if (!canonical || DECLARED_TOOL_IGNORE.has(canonical)) {
+    if (!canonical) {
       continue;
     }
     names.push(rawName);
@@ -191,11 +185,26 @@ export function extractMeaningfulDeclaredToolNames(tools: StandardizedRequest['t
 
 const TOOL_CATEGORY_PRIORITY: Record<ToolCategory, number> = {
   websearch: 4,
-  read: 3,
-  write: 2,
-  search: 1,
+  write: 3,
+  search: 2,
+  read: 1,
   other: 0
 };
+
+export function chooseHigherPriorityToolCategory(
+  current: ToolClassification | undefined,
+  candidate: ToolClassification | undefined
+): ToolClassification | undefined {
+  if (!candidate) {
+    return current;
+  }
+  if (!current) {
+    return candidate;
+  }
+  const currentScore = TOOL_CATEGORY_PRIORITY[current.category] ?? 0;
+  const candidateScore = TOOL_CATEGORY_PRIORITY[candidate.category] ?? 0;
+  return candidateScore > currentScore ? candidate : current;
+}
 
 export function detectLastAssistantToolCategory(messages: StandardizedMessage[]): ToolClassification | undefined {
   for (let idx = messages.length - 1; idx >= 0; idx -= 1) {
@@ -216,17 +225,13 @@ export function detectLastAssistantToolCategory(messages: StandardizedMessage[])
       continue;
     }
 
-    let best = candidates[0];
-    let bestScore = TOOL_CATEGORY_PRIORITY[best.category] ?? 0;
-    for (let i = 1; i < candidates.length; i += 1) {
-      const candidate = candidates[i];
-      const score = TOOL_CATEGORY_PRIORITY[candidate.category] ?? 0;
-      if (score > bestScore) {
-        best = candidate;
-        bestScore = score;
-      }
+    let best: ToolClassification | undefined;
+    for (const candidate of candidates) {
+      best = chooseHigherPriorityToolCategory(best, candidate);
     }
-    return best;
+    if (best) {
+      return best;
+    }
   }
   return undefined;
 }
@@ -478,11 +483,11 @@ function classifyShellCommand(command: string): ToolCategory {
       }
     }
   }
-  if (sawRead) {
-    return 'read';
-  }
   if (sawSearch) {
     return 'search';
+  }
+  if (sawRead) {
+    return 'read';
   }
   return 'other';
 }

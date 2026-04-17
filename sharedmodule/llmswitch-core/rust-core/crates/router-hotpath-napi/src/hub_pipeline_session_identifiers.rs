@@ -274,9 +274,13 @@ fn extract_session_identifiers_from_metadata(metadata: Option<&Value>) -> Sessio
         };
     };
 
-    let direct_session = normalize_identifier(metadata_obj.get("sessionId"));
-    let direct_conversation = normalize_identifier(metadata_obj.get("conversationId"));
-    let headers = coerce_client_headers(metadata_obj.get("clientHeaders"));
+    let direct_session = normalize_identifier(metadata_obj.get("sessionId"))
+        .or_else(|| normalize_identifier(metadata_obj.get("session_id")));
+    let direct_conversation = normalize_identifier(metadata_obj.get("conversationId"))
+        .or_else(|| normalize_identifier(metadata_obj.get("conversation_id")));
+    let headers = coerce_client_headers(metadata_obj.get("clientHeaders"))
+        .or_else(|| coerce_client_headers(metadata_obj.get("normalizedClientHeaders")))
+        .or_else(|| coerce_client_headers(metadata_obj.get("headers")));
 
     let mut session_id = direct_session.clone();
     if session_id.is_none() {
@@ -405,6 +409,30 @@ mod tests {
         let result = extract_session_identifiers_from_metadata(Some(&metadata));
         assert_eq!(result.session_id.as_deref(), Some("sess-a"));
         assert_eq!(result.conversation_id.as_deref(), Some("conv-b"));
+    }
+
+    #[test]
+    fn resolves_from_direct_snake_case_identifiers() {
+        let metadata = json!({
+          "session_id": "sess-snake",
+          "conversation_id": "conv-snake"
+        });
+        let result = extract_session_identifiers_from_metadata(Some(&metadata));
+        assert_eq!(result.session_id.as_deref(), Some("sess-snake"));
+        assert_eq!(result.conversation_id.as_deref(), Some("conv-snake"));
+    }
+
+    #[test]
+    fn resolves_from_normalized_client_headers() {
+        let metadata = json!({
+          "normalizedClientHeaders": {
+            "x-session-id": "sess-norm",
+            "conversation_id": "conv-norm"
+          }
+        });
+        let result = extract_session_identifiers_from_metadata(Some(&metadata));
+        assert_eq!(result.session_id.as_deref(), Some("sess-norm"));
+        assert_eq!(result.conversation_id.as_deref(), Some("conv-norm"));
     }
 
     #[test]

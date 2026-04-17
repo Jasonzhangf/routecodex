@@ -10,9 +10,9 @@ import {
   consumeResponsesReasoning,
   registerResponsesOutputTextMeta,
   consumeResponsesOutputTextMeta,
-  consumeResponsesPayloadSnapshot,
+  consumeResponsesPayloadSnapshotByAliases,
   registerResponsesPayloadSnapshot,
-  consumeResponsesPassthrough,
+  consumeResponsesPassthroughByAliases,
   registerResponsesPassthrough
 } from '../../shared/responses-reasoning-registry.js';
 import { ProviderProtocolError } from '../../provider-protocol-error.js';
@@ -227,17 +227,22 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
   if (preservedOutputMeta) {
     (chatResponse as any).__responses_output_text_meta = preservedOutputMeta;
   }
-  const payloadSnapshot = consumeResponsesPayloadSnapshot(chatResponse.id);
+  const retentionAliases = [
+    chatResponse.id,
+    typeof (payload as any)?.request_id === 'string' ? (payload as any).request_id : undefined,
+    typeof (payload as any)?.id === 'string' ? (payload as any).id : undefined
+  ];
+  const payloadSnapshot = consumeResponsesPayloadSnapshotByAliases(retentionAliases);
   if (payloadSnapshot) {
-    registerResponsesPayloadSnapshot(chatResponse.id, payloadSnapshot);
+    registerResponsesPayloadSnapshot(chatResponse.id, payloadSnapshot, { clone: false });
     (chatResponse as any).__responses_payload_snapshot = payloadSnapshot;
     if (typeof (chatResponse as any).request_id !== 'string') {
       (chatResponse as any).request_id = chatResponse.id;
     }
   }
-  const passthroughPayload = consumeResponsesPassthrough(chatResponse.id);
+  const passthroughPayload = consumeResponsesPassthroughByAliases(retentionAliases);
   if (passthroughPayload) {
-    registerResponsesPassthrough(chatResponse.id, passthroughPayload);
+    registerResponsesPassthrough(chatResponse.id, passthroughPayload, { clone: false });
     (chatResponse as any).__responses_passthrough = passthroughPayload;
     if (typeof (chatResponse as any).request_id !== 'string') {
       (chatResponse as any).request_id = chatResponse.id;

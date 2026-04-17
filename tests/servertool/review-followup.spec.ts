@@ -136,6 +136,9 @@ describe('review servertool followup', () => {
     expect(followupText).toContain(
       '必须先根据本次请求逐条核验代码'
     );
+    const followupBodyJson = JSON.stringify(capturedFollowupBody);
+    expect(followupBodyJson).toContain('queued for servertool reenter');
+    expect(followupBodyJson).not.toContain('client injection');
     expect((capturedFollowupMeta as any)?.clientInjectSource).toBe('servertool.review');
     expect((capturedFollowupMeta as any)?.__shadowCompareForcedProviderKey).toBe('iflow.1-186.kimi-k2.5');
   });

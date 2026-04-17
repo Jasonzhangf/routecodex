@@ -2136,6 +2136,150 @@ fn test_resp_profile_chat_glm_extracts_tool_calls_from_bracketed_block() {
 }
 
 #[test]
+fn test_resp_profile_chat_glm_preserves_bracketed_exec_command_without_canonical_cmd() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "id": "glm_resp_invalid_exec_bracket_1",
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "reasoning_content": "[tool_call name=\"exec_command\"]{\"arguments\":{\"command\":\"pwd\"}}[/tool_call]"
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:glm".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_glm_resp_invalid_exec_bracket_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert!(result.payload["choices"][0]["message"]["tool_calls"].is_null());
+    assert_eq!(
+        result.payload["choices"][0]["message"]["reasoning_content"],
+        "[tool_call name=\"exec_command\"]{\"arguments\":{\"command\":\"pwd\"}}[/tool_call]"
+    );
+}
+
+#[test]
+fn test_resp_profile_chat_glm_preserves_fenced_exec_command_with_missing_cmd() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "id": "glm_resp_invalid_exec_fence_1",
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "reasoning_content": "```tool\n{\"name\":\"exec_command\",\"arguments\":{}}\n```"
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:glm".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_glm_resp_invalid_exec_fence_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert!(result.payload["choices"][0]["message"]["tool_calls"].is_null());
+    assert_eq!(
+        result.payload["choices"][0]["message"]["reasoning_content"],
+        "```tool\n{\"name\":\"exec_command\",\"arguments\":{}}\n```"
+    );
+}
+
+#[test]
+fn test_resp_profile_chat_glm_preserves_tagged_exec_command_with_blank_cmd() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "id": "glm_resp_invalid_exec_tagged_1",
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "reasoning_content": "exec_command<arg_key>cmd</arg_key><arg_value></arg_value></tool_call>"
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:glm".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_glm_resp_invalid_exec_tagged_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert!(result.payload["choices"][0]["message"]["tool_calls"].is_null());
+    assert_eq!(
+        result.payload["choices"][0]["message"]["reasoning_content"],
+        "exec_command<arg_key>cmd</arg_key><arg_value></arg_value></tool_call>"
+    );
+}
+
+#[test]
 fn test_resp_profile_chat_glm_extracts_tool_calls_from_inline_marker() {
     let input = ReqOutboundCompatInput {
         payload: json!({

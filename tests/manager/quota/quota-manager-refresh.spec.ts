@@ -26,6 +26,10 @@ jest.unstable_mockModule('../../../src/providers/auth/antigravity-userinfo-helpe
 }));
 
 const clearAntigravitySessionAliasPins = jest.fn(() => ({ clearedBySession: 0, clearedByAlias: 0 }));
+const setProviderRuntimeQuotaHooks = jest.fn(async () => true);
+const setProviderRuntimeProviderQuotaHooks = jest.fn(async () => true);
+const coreOnProviderError = jest.fn();
+const coreOnProviderSuccess = jest.fn();
 const hydratedStoreSnapshots: unknown[] = [];
 
 const mockLlmsBridgeModule = () => ({
@@ -41,8 +45,8 @@ const mockLlmsBridgeModule = () => ({
       registerProviderStaticConfig: (providerKey: string, cfg: unknown) => {
         staticCfg.set(providerKey, cfg);
       },
-      onProviderError: () => {},
-      onProviderSuccess: () => {},
+      onProviderError: coreOnProviderError,
+      onProviderSuccess: coreOnProviderSuccess,
       updateProviderPoolState: (options: { providerKey: string }) => {
         poolState.set(options.providerKey, options);
       },
@@ -65,7 +69,10 @@ const mockLlmsBridgeModule = () => ({
       }
     };
   },
-  getProviderErrorCenter: async () => ({ emit: () => {} }),
+  reportProviderErrorToRouterPolicy: async (event: any) => event,
+  reportProviderSuccessToRouterPolicy: async (event: any) => event,
+  setProviderRuntimeQuotaHooks,
+  setProviderRuntimeProviderQuotaHooks,
   extractAntigravityGeminiSessionId: () => undefined,
   cacheAntigravitySessionSignature: () => {},
   lookupAntigravitySessionSignatureEntry: () => undefined,
@@ -91,6 +98,10 @@ describe('QuotaManagerModule refresh behavior', () => {
     process.env.ROUTECODEX_QUOTA_DIR = path.join(tempHome, '.rcc', 'quota');
     process.env.RCC_QUOTA_DIR = process.env.ROUTECODEX_QUOTA_DIR;
     clearAntigravitySessionAliasPins.mockClear();
+    setProviderRuntimeQuotaHooks.mockClear();
+    setProviderRuntimeProviderQuotaHooks.mockClear();
+    coreOnProviderError.mockClear();
+    coreOnProviderSuccess.mockClear();
     hydratedStoreSnapshots.length = 0;
   });
 
@@ -165,11 +176,57 @@ describe('QuotaManagerModule refresh behavior', () => {
     const mod = new QuotaManagerModule();
     await mod.init({ serverId: 'test' } as any);
     mod.registerProviderStaticConfig('antigravity.a1.claude-sonnet-4-5', { authType: 'oauth' });
+    await mod.updateRoutingScope({
+      providerKeys: ['antigravity.a1.claude-sonnet-4-5'],
+      oauthProviderKeys: ['antigravity.a1.claude-sonnet-4-5']
+    });
     fetchAntigravityQuotaSnapshot.mockClear();
 
     try {
       await mod.start();
       expect(fetchAntigravityQuotaSnapshot).toHaveBeenCalledTimes(1);
+    } finally {
+      await mod.stop();
+    }
+  });
+
+  it('keeps provider ingress subscribed for non-oauth routed providers while skipping oauth refresh', async () => {
+    const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/index.js');
+    const mod = new QuotaManagerModule();
+    await mod.init({ serverId: 'test' } as any);
+    await mod.updateRoutingScope({
+      providerKeys: ['tabglm.key1.glm-5.1'],
+      oauthProviderKeys: []
+    });
+    fetchAntigravityQuotaSnapshot.mockClear();
+
+    try {
+      await mod.start();
+      expect(fetchAntigravityQuotaSnapshot).toHaveBeenCalledTimes(0);
+      expect(setProviderRuntimeQuotaHooks).toHaveBeenCalledTimes(1);
+
+      const registeredHooks = setProviderRuntimeQuotaHooks.mock.calls[0]?.[1] as
+        | { onProviderError?: (event: unknown) => void; onProviderSuccess?: (event: unknown) => void }
+        | undefined;
+      expect(typeof registeredHooks?.onProviderError).toBe('function');
+
+      registeredHooks?.onProviderError?.({
+        code: 'HTTP_429',
+        message: 'HTTP 429: Too many requests',
+        status: 429,
+        runtime: {
+          providerKey: 'tabglm.key1.glm-5.1'
+        }
+      });
+
+      expect(coreOnProviderError).toHaveBeenCalledTimes(1);
+      expect(coreOnProviderError.mock.calls[0]?.[0]).toMatchObject({
+        code: 'HTTP_429',
+        status: 429,
+        runtime: {
+          providerKey: 'tabglm.key1.glm-5.1'
+        }
+      });
     } finally {
       await mod.stop();
     }
@@ -304,11 +361,12 @@ describe('QuotaManagerModule refresh behavior', () => {
     }
   });
 
-  it('clears antigravity session bindings when quota store snapshot is missing at startup', async () => {
+  it('clears antigravity session bindings when quota store persistence issue is raised', async () => {
     const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/index.js');
     const mod = new QuotaManagerModule();
     await mod.init({ serverId: 'test' } as any);
     try {
+      (mod as any).handleSessionUnbindForQuotaPersistenceIssue('quota_store_missing');
       expect(clearAntigravitySessionAliasPins).toHaveBeenCalledTimes(1);
       expect(clearAntigravitySessionAliasPins).toHaveBeenCalledWith({ hydrate: true });
     } finally {
@@ -316,25 +374,16 @@ describe('QuotaManagerModule refresh behavior', () => {
     }
   });
 
-  it('clears antigravity session bindings when quota store persistence fails on save', async () => {
-    const quotaDir = resolveRccQuotaDir(tempHome as string);
-    await fs.mkdir(quotaDir, { recursive: true });
-    await fs.mkdir(path.join(quotaDir, 'quota-manager.json'), { recursive: true });
-    await fs.writeFile(
-      path.join(quotaDir, 'provider-quota.json'),
-      JSON.stringify({ savedAtMs: Date.now(), providers: {} }, null, 2),
-      'utf8'
-    );
-
+  it('deduplicates repeated quota store persistence issue cleanup', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
     const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/index.js');
     const mod = new QuotaManagerModule();
     await mod.init({ serverId: 'test' } as any);
-    const mgr = mod.getCoreQuotaManager() as { persistNow?: () => Promise<void> } | null;
     try {
       clearAntigravitySessionAliasPins.mockClear();
-      await mgr?.persistNow?.();
+      (mod as any).handleSessionUnbindForQuotaPersistenceIssue('quota_store_save_error');
+      (mod as any).handleSessionUnbindForQuotaPersistenceIssue('quota_store_save_error');
       expect(clearAntigravitySessionAliasPins).toHaveBeenCalledTimes(1);
       expect(clearAntigravitySessionAliasPins).toHaveBeenCalledWith({ hydrate: true });
       expect(warnSpy).toHaveBeenCalled();

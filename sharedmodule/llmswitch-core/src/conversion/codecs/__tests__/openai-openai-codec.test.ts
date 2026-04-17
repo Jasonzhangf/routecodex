@@ -167,4 +167,34 @@ describe('openai-openai-codec native wrapper', () => {
       }
     });
   });
+
+  test('request context store prunes expired request ids', async () => {
+    const codec = new OpenAIOpenAIConversionCodec({});
+    const originalNow = Date.now;
+    let now = 1_000;
+    Date.now = () => now;
+    try {
+      await codec.convertRequest(
+        { model: 'gpt-4.1', stream: true, messages: [{ role: 'user', content: 'one' }] },
+        profile,
+        {
+          requestId: 'req_openai_codec_leak_old',
+          entryEndpoint: '/v1/chat/completions'
+        } as any
+      );
+      now += 21 * 60_000;
+      await codec.convertRequest(
+        { model: 'gpt-4.1', stream: false, messages: [{ role: 'user', content: 'two' }] },
+        profile,
+        {
+          requestId: 'req_openai_codec_leak_new',
+          entryEndpoint: '/v1/chat/completions'
+        } as any
+      );
+
+      expect(((codec as any).ctxMap as { size: () => number }).size()).toBe(1);
+    } finally {
+      Date.now = originalNow;
+    }
+  });
 });
