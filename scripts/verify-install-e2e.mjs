@@ -130,8 +130,13 @@ async function main() {
   const baseUrl = `http://${HOST}:${port}`;
   const serverArgs = resolveServerEntryArgs();
   const customConfigPath = process.env.ROUTECODEX_INSTALL_CONFIG;
+  const customRootDir = process.env.ROUTECODEX_INSTALL_HOME || process.env.RCC_HOME || process.env.ROUTECODEX_USER_DIR || process.env.ROUTECODEX_HOME || null;
   const mockServer = customConfigPath ? null : await startMockProviderServer();
-  const verifyConfigPath = customConfigPath || await writeVerifyConfig(mockServer.baseUrl, HOST, port);
+  const verifyLayout = customConfigPath
+    ? { filePath: customConfigPath, rootDir: customRootDir }
+    : await writeVerifyConfig(mockServer.baseUrl, HOST, port);
+  const verifyConfigPath = verifyLayout.filePath;
+  const verifyRootDir = verifyLayout.rootDir;
   const env = {
     ...process.env,
     ROUTECODEX_BUILD_RESTART_ONLY: '0',
@@ -143,6 +148,13 @@ async function main() {
     ROUTECODEX_CONFIG: verifyConfigPath,
     ROUTECODEX_CONFIG_PATH: verifyConfigPath,
     RCC4_CONFIG_PATH: verifyConfigPath,
+    ...(verifyRootDir
+      ? {
+          RCC_HOME: verifyRootDir,
+          ROUTECODEX_USER_DIR: verifyRootDir,
+          ROUTECODEX_HOME: verifyRootDir
+        }
+      : {}),
     // Install verification uses a mock upstream; skip ManagerDaemon modules (token/quota) so startup
     // does not depend on external network availability.
     ROUTECODEX_USE_MOCK: '1',
@@ -302,44 +314,70 @@ function extractUserPrompt(payload) {
 }
 
 async function writeVerifyConfig(baseUrl, host, port) {
-  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'routecodex-verify-'));
-  const filePath = path.join(dir, 'config.json');
+  const rootDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'routecodex-verify-'));
+  const filePath = path.join(rootDir, 'config.json');
+  const providerDir = path.join(rootDir, 'provider', 'verify');
+  await fs.promises.mkdir(providerDir, { recursive: true });
+
+  const providerConfig = {
+    version: '2.0.0',
+    providerId: 'verify',
+    provider: {
+      id: 'verify',
+      enabled: true,
+      providerType: 'openai',
+      baseURL: baseUrl,
+      auth: {
+        type: 'apikey',
+        entries: [
+          { alias: 'default', value: 'verify-key' }
+        ]
+      },
+      models: {
+        'verify-mock': {
+          supportsStreaming: true
+        }
+      }
+    }
+  };
+
   const config = {
-    version: '1.0.0',
+    version: '2.0.0',
+    virtualrouterMode: 'v2',
     httpserver: {
       host,
       port
     },
     virtualrouter: {
-      inputProtocol: 'openai',
-      outputProtocol: 'openai',
-      providers: {
-        verify: {
-          id: 'verify',
-          enabled: true,
-          providerType: 'openai',
-          baseURL: baseUrl,
-          auth: {
-            type: 'apikey',
-            entries: [
-              { alias: 'default', value: 'verify-key' }
+      activeRoutingPolicyGroup: 'default',
+      routingPolicyGroups: {
+        default: {
+          routing: {
+            default: [
+              {
+                id: 'verify-default',
+                targets: ['verify.verify-mock']
+              }
+            ],
+            anthropic: [
+              {
+                id: 'verify-anthropic',
+                targets: ['verify.verify-mock']
+              }
             ]
-          },
-          models: {
-            'verify-mock': {
-              supportsStreaming: true
-            }
           }
         }
-      },
-      routing: {
-        default: ['verify.verify-mock'],
-        anthropic: ['verify.verify-mock']
       }
     }
   };
+
+  await fs.promises.writeFile(
+    path.join(providerDir, 'config.v2.json'),
+    JSON.stringify(providerConfig, null, 2),
+    'utf8'
+  );
   await fs.promises.writeFile(filePath, JSON.stringify(config, null, 2), 'utf8');
-  return filePath;
+  return { filePath, rootDir };
 }
 
 async function resolveVerifyPort(preferredPort, host) {
