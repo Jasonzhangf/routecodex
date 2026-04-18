@@ -466,7 +466,80 @@ const quotaView = (providerKey) => ({
   );
 }
 
-// 7) priority pools must stay inside the first available provider.model group instead of crossing groups by key count.
+// 7) weighted pools synthesized only from weights must still behave as weighted routing.
+{
+  const input = {
+    virtualrouter: {
+      providers: {
+        ag: {
+          type: 'openai',
+          endpoint: 'http://localhost',
+          auth: {
+            type: 'apikey',
+            keys: {
+              key1: { value: 'dummy1' },
+              key2: { value: 'dummy2' },
+              key3: { value: 'dummy3' }
+            }
+          }
+        },
+        tab: {
+          type: 'openai',
+          endpoint: 'http://localhost',
+          auth: {
+            type: 'apikey',
+            keys: {
+              key1: { value: 'dummy4' }
+            }
+          }
+        }
+      },
+      routing: {
+        default: [
+          {
+            id: 'default:weighted-from-weights-only',
+            priority: 100,
+            mode: 'weighted',
+            loadBalancing: {
+              strategy: 'weighted',
+              weights: {
+                'ag.claude-sonnet-4-6-thinking': 1,
+                'tab.glm-5': 1
+              }
+            }
+          }
+        ]
+      },
+      classifier: {}
+    }
+  };
+
+  const { config } = bootstrapVirtualRouterConfig(input);
+  const engine = new VirtualRouterEngine({ quotaView });
+  engine.initialize(config);
+
+  const sequence = [];
+  for (let i = 0; i < 6; i += 1) {
+    sequence.push(
+      engine.route(createRequest(`weights-only-${i}`), createMetadata(`req_weight_only_${i}`)).target.providerKey
+    );
+  }
+
+  assert.deepEqual(
+    sequence,
+    [
+      'ag.key1.claude-sonnet-4-6-thinking',
+      'tab.key1.glm-5',
+      'ag.key2.claude-sonnet-4-6-thinking',
+      'tab.key1.glm-5',
+      'ag.key3.claude-sonnet-4-6-thinking',
+      'tab.key1.glm-5'
+    ],
+    'weights-only pools must stay weighted instead of degrading into first-group priority selection'
+  );
+}
+
+// 8) priority pools must stay inside the first available provider.model group instead of crossing groups by key count.
 {
   const input = {
     virtualrouter: {

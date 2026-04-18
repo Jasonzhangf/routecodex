@@ -560,7 +560,7 @@ describe('ServerTool web_search engine (generic)', () => {
         engines: [
           {
             id: 'qwen-search',
-            providerKey: 'qwen.qwen3-coder-plus'
+            providerKey: 'qwen.coder-model'
           }
         ]
       } as any,

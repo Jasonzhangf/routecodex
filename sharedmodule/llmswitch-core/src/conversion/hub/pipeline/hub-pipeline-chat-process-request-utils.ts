@@ -15,7 +15,7 @@ import {
   stripHistoricalImageAttachments,
   stripHistoricalVisualToolOutputs,
 } from "../process/chat-process-media.js";
-import { buildPassthroughAuditWithNative, readResponsesResumeFromRequestSemanticsWithNative, resolveActiveProcessModeWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
+import { buildPassthroughAuditWithNative, resolveActiveProcessModeWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
 import { readRuntimeMetadata } from "../../runtime-metadata.js";
 import { computeRequestTokens } from "../../../router/virtual-router/token-estimator.js";
 import { estimateSessionBoundTokens } from "../process/chat-process-session-usage.js";
@@ -212,12 +212,9 @@ export function estimateInputTokensForWorkingRequest(args: {
 export function deriveWorkingRequestFlags(
   workingRequest: StandardizedRequest | ProcessedRequest,
 ): {
-  responsesResume?: Record<string, unknown>;
   hasImageAttachment: boolean;
   serverToolRequired: boolean;
 } {
-  const responsesResume =
-    readResponsesResumeFromRequestSemanticsWithNative(workingRequest);
   const stdMetadata = (
     workingRequest as StandardizedRequest | ProcessedRequest | undefined
   )?.metadata as Record<string, unknown> | undefined;
@@ -228,7 +225,6 @@ export function deriveWorkingRequestFlags(
     stdMetadata?.webSearchEnabled === true ||
     stdMetadata?.serverToolRequired === true;
   return {
-    responsesResume,
     hasImageAttachment,
     serverToolRequired,
   };
@@ -244,7 +240,7 @@ export function prepareReasoningStopRequestTooling(args: {
   );
   const captured = buildCapturedChatRequestFromStandardized(args.request);
   (args.adapterContext as Record<string, unknown>).capturedChatRequest = captured;
-  const mode = syncReasoningStopModeFromRequest(args.adapterContext, 'on');
+  const mode = syncReasoningStopModeFromRequest(args.adapterContext, 'off');
   const capturedMessages = (captured as Record<string, unknown>).messages;
   const strippedMessages = Array.isArray(capturedMessages)
     ? (jsonClone(capturedMessages as unknown as JsonObject[]) as unknown as StandardizedMessage[])

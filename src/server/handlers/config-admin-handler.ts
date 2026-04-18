@@ -5,7 +5,7 @@ import path from 'path';
 import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
 import { resolveRccProviderDir } from '../../config/user-data-paths.js';
 import { getBootstrapProviderTemplates, isManagedBootstrapTemplate } from '../../cli/config/bootstrap-provider-templates.js';
-import { loadRouteCodexConfig } from '../../config/routecodex-config-loader.js';
+import { collectV2ConfigSourceErrors, loadRouteCodexConfig } from '../../config/routecodex-config-loader.js';
 import { ServerFactory } from '../../server-factory.js';
 import type { ServerInstance } from '../../server-factory.js';
 
@@ -112,9 +112,7 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
       const content = await fs.readFile(userConfigPath, 'utf-8');
       const parsed = JSON.parse(content);
       const userConfig: JsonObject = isRecord(parsed) ? parsed : {};
-      const providersRoot = resolveProviders(userConfig);
       configuredProviderIds = new Set<string>([
-        ...Object.keys(providersRoot || {}),
         ...resolveReferencedProviderIds(userConfig)
       ]);
     } catch (error) {
@@ -273,50 +271,15 @@ function validateUserConfig(config: JsonObject): string[] {
     errors.push('Configuration must be an object');
     return errors;
   }
-  const v2Mode = resolveVirtualRouterMode(config) === 'v2';
-  const providers = resolveProviders(config);
-  const routing = resolveRouting(config);
-  if (!Object.keys(providers).length && !v2Mode) {
-    errors.push('virtualrouter.providers (or providers) must include at least one provider entry');
+  errors.push(...collectV2ConfigSourceErrors(config));
+  if (errors.length) {
+    return errors;
   }
-  if (!Object.keys(routing).length) {
-    errors.push('virtualrouter.routing (or routing) must define at least one route');
-  }
-  const shouldValidateProviderRefs = Object.keys(providers).length > 0;
-  for (const [routeName, entries] of Object.entries(routing)) {
-    if (!Array.isArray(entries) || !entries.length) {
-      errors.push(`Route "${routeName}" must list at least one provider key`);
-      continue;
-    }
-    for (const key of entries) {
-      if (typeof key !== 'string' || !key.trim()) {
-        errors.push(`Route "${routeName}" contains invalid provider key`);
-        continue;
-      }
-      const providerId = key.split('.')[0];
-      if (shouldValidateProviderRefs && !providers[providerId]) {
-        errors.push(`Route "${routeName}" references unknown provider "${providerId}"`);
-      }
-    }
+  const referencedProviderIds = resolveReferencedProviderIds(config);
+  if (!referencedProviderIds.length) {
+    errors.push('v2 config active routing must reference at least one provider target');
   }
   return errors;
-}
-
-function resolveVirtualRouterMode(config: JsonObject): 'v1' | 'v2' {
-  const raw = (config as { virtualrouterMode?: unknown }).virtualrouterMode;
-  const mode = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
-  return mode === 'v2' ? 'v2' : 'v1';
-}
-
-function resolveProviders(config: JsonObject): Record<string, unknown> {
-  const virtualRouter = getVirtualRouter(config);
-  if (virtualRouter?.providers && isRecord(virtualRouter.providers)) {
-    return virtualRouter.providers;
-  }
-  if (isRecord((config as { providers?: unknown }).providers)) {
-    return (config as { providers: Record<string, unknown> }).providers;
-  }
-  return {};
 }
 
 function resolveReferencedProviderIds(config: JsonObject): string[] {
@@ -366,21 +329,6 @@ function resolveReferencedProviderIds(config: JsonObject): string[] {
   }
   collectFromRoutingNode((config as { routing?: unknown }).routing);
   return [...providerIds];
-}
-
-function resolveRouting(config: JsonObject): Record<string, string[]> {
-  const virtualRouter = getVirtualRouter(config);
-  const routingNode = virtualRouter?.routing ?? (config as { routing?: unknown }).routing;
-  if (routingNode && isRecord(routingNode)) {
-    const normalized: Record<string, string[]> = {};
-    for (const [route, list] of Object.entries(routingNode)) {
-      normalized[route] = Array.isArray(list)
-        ? list.map((item) => String(item).trim()).filter(Boolean)
-        : [];
-    }
-    return normalized;
-  }
-  return {};
 }
 
 type VirtualRouterLike = JsonObject & {

@@ -42,6 +42,42 @@ type HubShadowCompareConfigOutput = {
   baselineMode: 'off' | 'observe' | 'enforce';
 };
 
+const NON_BLOCKING_METADATA_POLICY_LOG_THROTTLE_MS = 60_000;
+const nonBlockingMetadataPolicyLogState = new Map<string, number>();
+const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-orchestration-semantics-metadata-policy.parse-failed');
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error ?? 'unknown');
+  }
+}
+
+function logNativeMetadataPolicyNonBlocking(stage: string, error: unknown): void {
+  const now = Date.now();
+  const last = nonBlockingMetadataPolicyLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_METADATA_POLICY_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingMetadataPolicyLogState.set(stage, now);
+  console.warn(
+    `[native-hub-pipeline-orchestration-semantics-metadata-policy] ${stage} failed (non-blocking): ${formatUnknownError(error)}`
+  );
+}
+
+function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAILED {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    logNativeMetadataPolicyNonBlocking(stage, error);
+    return JSON_PARSE_FAILED;
+  }
+}
+
 
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
@@ -52,72 +88,61 @@ function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | n
 function safeStringify(value: unknown): string | undefined {
   try {
     return JSON.stringify(value);
-  } catch {
+  } catch (error) {
+    logNativeMetadataPolicyNonBlocking('safeStringify', error);
     return undefined;
   }
 }
 
 function parseRecord(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
+  const parsed = parseJson('parseRecord', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  return parsed as Record<string, unknown>;
 }
 
 function parseStopMessageRouterMetadata(raw: string): StopMessageRouterMetadataOutput | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    const out: StopMessageRouterMetadataOutput = {};
-    const assignIfNonEmpty = (key: keyof StopMessageRouterMetadataOutput): void => {
-      const rawValue = row[key];
-      if (typeof rawValue !== 'string') {
-        return;
-      }
-      const trimmed = rawValue.trim();
-      if (!trimmed) {
-        return;
-      }
-      out[key] = trimmed;
-    };
-    assignIfNonEmpty('stopMessageClientInjectSessionScope');
-    assignIfNonEmpty('stopMessageClientInjectScope');
-    assignIfNonEmpty('clientTmuxSessionId');
-    assignIfNonEmpty('client_tmux_session_id');
-    assignIfNonEmpty('tmuxSessionId');
-    assignIfNonEmpty('tmux_session_id');
-    return out;
-  } catch {
+  const parsed = parseJson('parseStopMessageRouterMetadata', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  const row = parsed as Record<string, unknown>;
+  const out: StopMessageRouterMetadataOutput = {};
+  const assignIfNonEmpty = (key: keyof StopMessageRouterMetadataOutput): void => {
+    const rawValue = row[key];
+    if (typeof rawValue !== 'string') {
+      return;
+    }
+    const trimmed = rawValue.trim();
+    if (!trimmed) {
+      return;
+    }
+    out[key] = trimmed;
+  };
+  assignIfNonEmpty('stopMessageClientInjectSessionScope');
+  assignIfNonEmpty('stopMessageClientInjectScope');
+  assignIfNonEmpty('clientTmuxSessionId');
+  assignIfNonEmpty('client_tmux_session_id');
+  assignIfNonEmpty('tmuxSessionId');
+  assignIfNonEmpty('tmux_session_id');
+  return out;
 }
 
 function parseRouterMetadataRuntimeFlags(raw: string): RouterMetadataRuntimeFlagsOutput | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    const out: RouterMetadataRuntimeFlagsOutput = {};
-    if (row.disableStickyRoutes === true) {
-      out.disableStickyRoutes = true;
-    }
-    if (typeof row.estimatedInputTokens === 'number' && Number.isFinite(row.estimatedInputTokens)) {
-      out.estimatedInputTokens = row.estimatedInputTokens;
-    }
-    return out;
-  } catch {
+  const parsed = parseJson('parseRouterMetadataRuntimeFlags', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  const row = parsed as Record<string, unknown>;
+  const out: RouterMetadataRuntimeFlagsOutput = {};
+  if (row.disableStickyRoutes === true) {
+    out.disableStickyRoutes = true;
+  }
+  if (typeof row.estimatedInputTokens === 'number' && Number.isFinite(row.estimatedInputTokens)) {
+    out.estimatedInputTokens = row.estimatedInputTokens;
+  }
+  return out;
 }
 
 function parseAdapterContextMetadataSignals(raw: string): AdapterContextMetadataSignalsOutput | null {
@@ -187,47 +212,45 @@ function parseAdapterContextObjectCarriers(raw: string): AdapterContextObjectCar
 }
 
 function parseHubPolicyOverride(raw: string): HubPolicyOverrideOutput | undefined | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return undefined;
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    const mode = typeof row.mode === 'string' ? row.mode.trim().toLowerCase() : '';
-    if (mode !== 'off' && mode !== 'observe' && mode !== 'enforce') {
-      return null;
-    }
-    const out: HubPolicyOverrideOutput = { mode };
-    if (typeof row.sampleRate === 'number' && Number.isFinite(row.sampleRate)) {
-      out.sampleRate = row.sampleRate;
-    }
-    return out;
-  } catch {
+  const parsed = parseJson('parseHubPolicyOverride', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  if (parsed === null) {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const row = parsed as Record<string, unknown>;
+  const mode = typeof row.mode === 'string' ? row.mode.trim().toLowerCase() : '';
+  if (mode !== 'off' && mode !== 'observe' && mode !== 'enforce') {
+    return null;
+  }
+  const out: HubPolicyOverrideOutput = { mode };
+  if (typeof row.sampleRate === 'number' && Number.isFinite(row.sampleRate)) {
+    out.sampleRate = row.sampleRate;
+  }
+  return out;
 }
 
 function parseHubShadowCompareConfig(raw: string): HubShadowCompareConfigOutput | undefined | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return undefined;
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    const baselineMode = typeof row.baselineMode === 'string' ? row.baselineMode.trim().toLowerCase() : '';
-    if (baselineMode !== 'off' && baselineMode !== 'observe' && baselineMode !== 'enforce') {
-      return null;
-    }
-    return { baselineMode };
-  } catch {
+  const parsed = parseJson('parseHubShadowCompareConfig', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  if (parsed === null) {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const row = parsed as Record<string, unknown>;
+  const baselineMode = typeof row.baselineMode === 'string' ? row.baselineMode.trim().toLowerCase() : '';
+  if (baselineMode !== 'off' && baselineMode !== 'observe' && baselineMode !== 'enforce') {
+    return null;
+  }
+  return { baselineMode };
 }
 
 export function resolveStopMessageRouterMetadataWithNative(

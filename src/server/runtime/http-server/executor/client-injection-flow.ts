@@ -48,6 +48,7 @@ function createClientInjectFailureError(args: {
   status?: number;
   statusCode?: number;
   retryable?: boolean;
+  requestExecutorProviderErrorStage?: string;
 } {
   const error = new Error(
     `[servertool.inject] client injection failed: ${args.reason}`
@@ -58,12 +59,15 @@ function createClientInjectFailureError(args: {
     status?: number;
     statusCode?: number;
     retryable?: boolean;
+    requestExecutorProviderErrorStage?: string;
   };
   error.code = args.code || 'SERVERTOOL_FOLLOWUP_FAILED';
   error.upstreamCode = args.upstreamCode || 'client_inject_failed';
+  error.requestExecutorProviderErrorStage = 'provider.followup';
   error.details = {
     reason: args.reason,
     source: args.source,
+    requestExecutorProviderErrorStage: 'provider.followup',
     requestId: args.requestId,
     sessionId: args.sessionId,
     tmuxSessionId: args.tmuxSessionId

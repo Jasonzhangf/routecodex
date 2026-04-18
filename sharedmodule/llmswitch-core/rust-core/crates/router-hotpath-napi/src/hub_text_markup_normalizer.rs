@@ -396,7 +396,10 @@ fn resolve_json_tool_arg_aliases(
     let lname = tool_name.to_lowercase();
     let mut merged: HashMap<String, Vec<String>> = HashMap::new();
     let base: HashMap<&str, Vec<&str>> = if lname == "exec_command" {
-        HashMap::from([("workdir", vec!["workdir", "cwd", "input.workdir", "input.cwd"])])
+        HashMap::from([(
+            "workdir",
+            vec!["workdir", "cwd", "input.workdir", "input.cwd"],
+        )])
     } else if lname == "write_stdin" {
         HashMap::from([
             (

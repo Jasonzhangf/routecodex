@@ -2,6 +2,8 @@
 
 > 目标：让 llmswitch-core 中的 Chat Process / Standardized 桥承接四种协议的语义，不再依赖 metadata 透传 “raw payload”，并按顺序分阶段完成。
 
+> continuation/state 统一真源见：`docs/chat-process-continuation-state-contract.md`
+
 > 术语约定：本文中的 “chat process” 指代码层面的 `chat_process` 阶段（工具治理/路由/协议重建的必经处理段）。
 
 ### 阶段 0：现状确认

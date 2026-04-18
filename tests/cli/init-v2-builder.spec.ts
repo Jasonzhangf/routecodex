@@ -7,20 +7,19 @@ describe('init-v2-builder', () => {
     const routing = buildInitRouting({
       defaultTarget: 'openai.gpt-5.2',
       thinkingTarget: 'tab.gpt-5.2',
-      webSearchTargets: ['iflow.qwen3-coder-plus', 'qwen.qwen3.5-plus']
+      webSearchTargets: ['ali-coding-plan.qwen3.6-plus', 'qwen.qwen3.5-plus']
     }) as Record<string, any>;
 
     expect(routing.default[0]).toEqual({
       id: 'primary',
-      targets: ['openai.gpt-5.2'],
       loadBalancing: {
         strategy: 'weighted',
         weights: { 'openai.gpt-5.2': 1 }
       }
     });
-    expect(routing.thinking[0].targets[0]).toBe('tab.gpt-5.2');
+    expect(routing.thinking[0].loadBalancing.weights['tab.gpt-5.2']).toBe(1);
     expect(routing.web_search[0].loadBalancing.weights).toEqual({
-      'iflow.qwen3-coder-plus': 1,
+      'ali-coding-plan.qwen3.6-plus': 1,
       'qwen.qwen3.5-plus': 1
     });
     expect(routing.web_search[0].mode).toBeUndefined();
@@ -54,7 +53,9 @@ describe('init-v2-builder', () => {
 
     expect(next.httpserver).toEqual({ host: '0.0.0.0', port: 7777 });
     expect(next.virtualrouter.activeRoutingPolicyGroup).toBe('default');
-    expect(next.virtualrouter.routingPolicyGroups.default.routing.default[0].targets[0]).toBe('tab.gpt-5.2');
+    expect(
+      next.virtualrouter.routingPolicyGroups.default.routing.default[0].loadBalancing.weights['tab.gpt-5.2']
+    ).toBe(1);
     expect(next.virtualrouter.routingPolicyGroups.default.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
     expect(next.routing).toBeUndefined();
     expect(next.providers).toBeUndefined();

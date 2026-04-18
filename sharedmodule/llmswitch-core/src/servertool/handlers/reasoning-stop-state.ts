@@ -13,6 +13,7 @@ const STOPLESS_DIRECTIVE_PATTERN = /<\*\*stopless:([a-z0-9_-]+)\*\*>/gi;
 const STOPLESS_DIRECTIVE_STRIP_PATTERN = /<\*\*stopless:[^*]+\*\*>/gi;
 
 export type ReasoningStopMode = 'on' | 'off' | 'endless';
+export const DEFAULT_REASONING_STOP_MODE: ReasoningStopMode = 'off';
 export type ReasoningStopReason =
   | 'completed'
   | 'blocked'
@@ -406,7 +407,7 @@ function extractStoplessDirectiveModeFromAdapterContext(adapterContext: unknown)
 
 export function readReasoningStopMode(
   adapterContext: unknown,
-  fallbackMode: ReasoningStopMode = 'on'
+  fallbackMode: ReasoningStopMode = DEFAULT_REASONING_STOP_MODE
 ): ReasoningStopMode {
   const stickyKey = resolveStickyKey(adapterContext);
   if (!stickyKey) {
@@ -423,7 +424,7 @@ export function readReasoningStopMode(
 
 export function syncReasoningStopModeFromRequest(
   adapterContext: unknown,
-  fallbackMode: ReasoningStopMode = 'on'
+  fallbackMode: ReasoningStopMode = DEFAULT_REASONING_STOP_MODE
 ): ReasoningStopMode {
   const stickyKey = resolveStickyKey(adapterContext);
   const directiveMode = extractStoplessDirectiveModeFromAdapterContext(adapterContext);

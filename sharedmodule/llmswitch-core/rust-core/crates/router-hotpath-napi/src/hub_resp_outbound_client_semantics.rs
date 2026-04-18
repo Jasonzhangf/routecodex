@@ -2396,6 +2396,13 @@ fn read_context_object<'a>(context: &'a Value, key: &str) -> Option<&'a Map<Stri
     context.as_object()?.get(key)?.as_object()
 }
 
+fn read_nested_object<'a>(
+    row: &'a Map<String, Value>,
+    key: &str,
+) -> Option<&'a Map<String, Value>> {
+    row.get(key)?.as_object()
+}
+
 fn context_value<'a>(context: &'a Value, key: &str) -> Option<&'a Value> {
     context.as_object()?.get(key)
 }
@@ -2404,6 +2411,19 @@ fn context_bool(context: &Value, key: &str) -> bool {
     context_value(context, key)
         .and_then(Value::as_bool)
         .unwrap_or(false)
+}
+
+fn read_response_continuation(context: &Value) -> Option<Map<String, Value>> {
+    let semantics = read_context_object(context, "responseSemantics")?;
+    let continuation = read_nested_object(semantics, "continuation")?;
+    Some(continuation.clone())
+}
+
+fn read_response_semantics_pointer_field(context: &Value, key: &str) -> Option<String> {
+    let continuation = read_response_continuation(context)?;
+    let resume_from = read_nested_object(&continuation, "resumeFrom");
+    read_object_string(&continuation, key)
+        .or_else(|| resume_from.and_then(|row| read_object_string(row, key)))
 }
 
 fn apply_context_passthrough(out: &mut Map<String, Value>, context: &Value) {
@@ -2771,6 +2791,14 @@ fn build_responses_payload_from_chat_core(
             "requires_action".to_string()
         }),
     );
+    if let Some(previous_response_id) =
+        read_response_semantics_pointer_field(context, "previousResponseId")
+    {
+        out.insert(
+            "previous_response_id".to_string(),
+            Value::String(previous_response_id),
+        );
+    }
     out.insert("output".to_string(), Value::Array(output_items.clone()));
 
     if let Some(output_text) = collect_responses_output_text(

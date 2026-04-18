@@ -417,7 +417,7 @@ fn test_req_profile_chat_qwen_native_applied() {
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.native_applied);
     assert_eq!(result.applied_profile, Some("chat:qwen".to_string()));
-    assert_eq!(result.payload["model"], "qwen3-coder-plus");
+    assert_eq!(result.payload["model"], "coder-model");
     assert_eq!(result.payload["messages"][0]["role"], "user");
     assert_eq!(result.payload["messages"][0]["content"], "hello qwen");
     assert_eq!(
@@ -1438,18 +1438,25 @@ fn test_req_profile_chat_deepseek_web_native_applied() {
     assert!(prompt.contains("DeepSeek text-tool addendum:"));
     assert!(!prompt.contains("DeepSeek/Qwen text-tool addendum:"));
     assert!(prompt.contains("If a tool is needed, emit the tool-call container directly."));
-    assert!(prompt.contains("Do not describe a plan, limitation, or next step before the tool call"));
+    assert!(
+        prompt.contains("Do not describe a plan, limitation, or next step before the tool call")
+    );
     assert!(prompt.contains("output ONLY the container and nothing else in that turn"));
     assert!(prompt.contains("Do not invent tool names"));
     assert!(prompt.contains("Do not output narrative tool calls"));
     assert!(prompt.contains("This is a strict dry-run tool-routing test."));
-    assert!(prompt.contains("Never leak tool intent, command text, patch text, or tool JSON into prose"));
+    assert!(prompt
+        .contains("Never leak tool intent, command text, patch text, or tool JSON into prose"));
     assert!(prompt.contains("Do not stop at analysis."));
-    assert!(prompt.contains("Do not output hidden-reasoning wrappers or MCP/tool-transport markup of any kind."));
+    assert!(prompt.contains(
+        "Do not output hidden-reasoning wrappers or MCP/tool-transport markup of any kind."
+    ));
     assert!(prompt.contains("Do not output any visible safety-review or moderation wrapper"));
     assert!(prompt.contains("<thinking>"));
     assert!(prompt.contains("<use_mcp_tool>"));
-    assert!(prompt.contains("Forbidden non-fence wrappers: <previous_tool_call>, <tool_call>, <invoke>, <parameter>"));
+    assert!(prompt.contains(
+        "Forbidden non-fence wrappers: <previous_tool_call>, <tool_call>, <invoke>, <parameter>"
+    ));
 }
 
 #[test]
@@ -1537,10 +1544,14 @@ fn test_req_profile_chat_deepseek_web_wraps_history_tool_calls_and_drops_empty_t
     assert!(prompt.contains("Return exactly one RCC_TOOL_CALLS_JSON heredoc container."));
     assert!(prompt.contains("Do not leak tool intent outside the container."));
     assert!(prompt.contains("Do not stop at analysis when a declared tool is needed."));
-    assert!(prompt.contains("Do not output thinking tags, MCP wrappers, or step-by-step preambles."));
+    assert!(
+        prompt.contains("Do not output thinking tags, MCP wrappers, or step-by-step preambles.")
+    );
     assert!(prompt.contains("Do not output ds_safety, safety wrappers, or Safe/Unsafe labels."));
     assert!(prompt.contains("No narrative tool call."));
-    assert!(prompt.contains("Do not use XML/reference wrappers like <previous_tool_call> or <invoke>."));
+    assert!(
+        prompt.contains("Do not use XML/reference wrappers like <previous_tool_call> or <invoke>.")
+    );
     assert!(prompt.contains("If a tool is needed, emit the tool-call container directly."));
     assert!(!prompt.contains("Historical tool errors are attempt-specific results"));
     assert!(!prompt.contains("Do NOT imitate earlier assistant chatter, repeated analysis, or failed command formatting from the history."));
@@ -1902,7 +1913,8 @@ fn test_req_profile_chat_qwenchat_web_injects_override_head_and_normalizes_tool_
     let apply_patch_desc = tools[1]["function"]["description"].as_str().unwrap_or("");
     assert!(apply_patch_desc.contains("Use only `patch`"));
     assert!(apply_patch_desc.contains("Treat file editing as available here."));
-    assert!(apply_patch_desc.contains("output exactly one RCC_TOOL_CALLS_JSON heredoc dry-run container"));
+    assert!(apply_patch_desc
+        .contains("output exactly one RCC_TOOL_CALLS_JSON heredoc dry-run container"));
     let patch_prop_desc = tools[1]["function"]["parameters"]["properties"]["patch"]["description"]
         .as_str()
         .unwrap_or("");
@@ -1917,7 +1929,8 @@ fn test_req_profile_chat_qwenchat_web_injects_override_head_and_normalizes_tool_
     let write_stdin_desc = tools[3]["function"]["description"].as_str().unwrap_or("");
     assert!(write_stdin_desc.contains("Use `session_id` as a number"));
     assert!(write_stdin_desc.contains("Keep the field names exact"));
-    let session_prop_desc = tools[3]["function"]["parameters"]["properties"]["session_id"]["description"]
+    let session_prop_desc = tools[3]["function"]["parameters"]["properties"]["session_id"]
+        ["description"]
         .as_str()
         .unwrap_or("");
     assert!(session_prop_desc.contains("Numeric exec session id only"));
@@ -1928,7 +1941,9 @@ fn test_req_profile_chat_qwenchat_web_injects_override_head_and_normalizes_tool_
     let dryrun_hint = tools[0]["function"]["parameters"]["x-routecodex-qwenchat-dryrun-hint"]
         .as_str()
         .unwrap_or("");
-    assert!(dryrun_hint.contains("output exactly one RCC_TOOL_CALLS_JSON heredoc dry-run container"));
+    assert!(
+        dryrun_hint.contains("output exactly one RCC_TOOL_CALLS_JSON heredoc dry-run container")
+    );
     assert!(dryrun_hint.contains("do not output sandbox/path refusal prose"));
     assert!(result.payload.get("prompt").is_none());
 }

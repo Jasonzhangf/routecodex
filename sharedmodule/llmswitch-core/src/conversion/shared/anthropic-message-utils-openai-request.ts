@@ -191,7 +191,7 @@ export function buildAnthropicRequestFromOpenAIChat(
           });
           continue;
         }
-        if (t === 'image_url') {
+        if (t === 'image_url' || t === 'input_image') {
           let url = '';
           const imageUrl = node.image_url as unknown;
           if (typeof imageUrl === 'string') {

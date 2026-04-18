@@ -220,7 +220,8 @@ export function resolveResponsesRequestBridgeDecisionsWithNative(
     requestMetadata: input.requestMetadata,
     envelopeMetadata: input.envelopeMetadata,
     bridgeMetadata: input.bridgeMetadata,
-    extraBridgeHistory: input.extraBridgeHistory
+    extraBridgeHistory: input.extraBridgeHistory,
+    requestSemantics: input.requestSemantics
   });
   if (!payloadJson) {
     return fail('json stringify failed');

@@ -28,6 +28,42 @@ type NativeBridgePolicyStage =
   | 'response_inbound'
   | 'response_outbound';
 
+const NON_BLOCKING_BRIDGE_POLICY_LOG_THROTTLE_MS = 60_000;
+const nonBlockingBridgePolicyLogState = new Map<string, number>();
+const JSON_PARSE_FAILED = Symbol('native-hub-bridge-policy-semantics.parse-failed');
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error ?? 'unknown');
+  }
+}
+
+function logNativeBridgePolicyNonBlocking(stage: string, error: unknown): void {
+  const now = Date.now();
+  const last = nonBlockingBridgePolicyLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_BRIDGE_POLICY_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingBridgePolicyLogState.set(stage, now);
+  console.warn(
+    `[native-hub-bridge-policy-semantics] ${stage} failed (non-blocking): ${formatUnknownError(error)}`
+  );
+}
+
+function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAILED {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    logNativeBridgePolicyNonBlocking(stage, error);
+    return JSON_PARSE_FAILED;
+  }
+}
+
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
   const fn = binding?.[name];
@@ -37,7 +73,8 @@ function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | n
 function safeStringify(value: unknown): string | undefined {
   try {
     return JSON.stringify(value);
-  } catch {
+  } catch (error) {
+    logNativeBridgePolicyNonBlocking('safeStringify', error);
     return undefined;
   }
 }
@@ -95,21 +132,20 @@ function parseActionDescriptor(candidate: unknown): NativeBridgeActionDescriptor
 }
 
 function parseActionDescriptors(raw: string): NativeBridgeActionDescriptor[] | undefined | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed == null) {
-      return undefined;
-    }
-    if (!Array.isArray(parsed)) {
-      return null;
-    }
-    const out = parsed
-      .map((entry) => parseActionDescriptor(entry))
-      .filter((entry): entry is NativeBridgeActionDescriptor => Boolean(entry));
-    return out;
-  } catch {
+  const parsed = parseJson('parseActionDescriptors', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  if (parsed == null) {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) {
+    return null;
+  }
+  const out = parsed
+    .map((entry) => parseActionDescriptor(entry))
+    .filter((entry): entry is NativeBridgeActionDescriptor => Boolean(entry));
+  return out;
 }
 
 function parsePhase(candidate: unknown): NativeBridgePhaseConfig | undefined | null {
@@ -149,43 +185,42 @@ function parsePhase(candidate: unknown): NativeBridgePhaseConfig | undefined | n
 }
 
 function parsePolicy(raw: string): NativeBridgePolicy | undefined | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed == null) {
-      return undefined;
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    const id = typeof row.id === 'string' ? row.id.trim() : '';
-    if (!id) {
-      return null;
-    }
-    const protocol = typeof row.protocol === 'string' && row.protocol.trim().length
-      ? row.protocol.trim()
-      : undefined;
-    const moduleType = typeof row.moduleType === 'string' && row.moduleType.trim().length
-      ? row.moduleType.trim()
-      : undefined;
-    const request = parsePhase(row.request);
-    if (request === null) {
-      return null;
-    }
-    const response = parsePhase(row.response);
-    if (response === null) {
-      return null;
-    }
-    return {
-      id,
-      ...(protocol ? { protocol } : {}),
-      ...(moduleType ? { moduleType } : {}),
-      ...(request ? { request } : {}),
-      ...(response ? { response } : {})
-    };
-  } catch {
+  const parsed = parseJson('parsePolicy', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  if (parsed == null) {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const row = parsed as Record<string, unknown>;
+  const id = typeof row.id === 'string' ? row.id.trim() : '';
+  if (!id) {
+    return null;
+  }
+  const protocol = typeof row.protocol === 'string' && row.protocol.trim().length
+    ? row.protocol.trim()
+    : undefined;
+  const moduleType = typeof row.moduleType === 'string' && row.moduleType.trim().length
+    ? row.moduleType.trim()
+    : undefined;
+  const request = parsePhase(row.request);
+  if (request === null) {
+    return null;
+  }
+  const response = parsePhase(row.response);
+  if (response === null) {
+    return null;
+  }
+  return {
+    id,
+    ...(protocol ? { protocol } : {}),
+    ...(moduleType ? { moduleType } : {}),
+    ...(request ? { request } : {}),
+    ...(response ? { response } : {})
+  };
 }
 
 export function resolveBridgePolicyWithNative(options: {
@@ -316,89 +351,85 @@ function parseFlattenRule(candidate: unknown): NativeProviderOutboundWrapperFlat
 }
 
 function parseProtocolSpec(raw: string): NativeProtocolSpec | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    const id = row.id;
-    if (
-      id !== 'openai-chat' &&
-      id !== 'openai-responses' &&
-      id !== 'anthropic-messages' &&
-      id !== 'gemini-chat'
-    ) {
-      return null;
-    }
-    const providerOutbound =
-      row.providerOutbound && typeof row.providerOutbound === 'object' && !Array.isArray(row.providerOutbound)
-        ? (row.providerOutbound as Record<string, unknown>)
-        : null;
-    if (!providerOutbound) {
-      return null;
-    }
-    const enforceEnabled = providerOutbound.enforceEnabled;
-    if (typeof enforceEnabled !== 'boolean') {
-      return null;
-    }
-    const allowedTopLevelKeys = Array.isArray(providerOutbound.allowedTopLevelKeys)
-      ? providerOutbound.allowedTopLevelKeys.filter((entry): entry is string => typeof entry === 'string')
-      : undefined;
-    const enforceAllowedTopLevelKeys =
-      typeof providerOutbound.enforceAllowedTopLevelKeys === 'boolean'
-        ? providerOutbound.enforceAllowedTopLevelKeys
-        : undefined;
-    const reservedKeyPrefixes = Array.isArray(providerOutbound.reservedKeyPrefixes)
-      ? providerOutbound.reservedKeyPrefixes.filter((entry): entry is string => typeof entry === 'string')
-      : [];
-    const forbidWrappers = Array.isArray(providerOutbound.forbidWrappers)
-      ? providerOutbound.forbidWrappers
-          .map((entry) => parseLayoutRule(entry))
-          .filter((entry): entry is NativeProviderOutboundLayoutRule => Boolean(entry))
-      : [];
-    const flattenWrappers = Array.isArray(providerOutbound.flattenWrappers)
-      ? providerOutbound.flattenWrappers
-          .map((entry) => parseFlattenRule(entry))
-          .filter((entry): entry is NativeProviderOutboundWrapperFlattenRule => Boolean(entry))
-      : [];
-    const toolSurface =
-      row.toolSurface && typeof row.toolSurface === 'object' && !Array.isArray(row.toolSurface)
-        ? (row.toolSurface as Record<string, unknown>)
-        : null;
-    if (!toolSurface) {
-      return null;
-    }
-    const expectedToolFormat = toolSurface.expectedToolFormat;
-    if (
-      expectedToolFormat !== 'openai' &&
-      expectedToolFormat !== 'anthropic' &&
-      expectedToolFormat !== 'gemini'
-    ) {
-      return null;
-    }
-    const expectedHistoryCarrier =
-      toolSurface.expectedHistoryCarrier === 'messages' || toolSurface.expectedHistoryCarrier === 'input'
-        ? toolSurface.expectedHistoryCarrier
-        : undefined;
-    return {
-      id,
-      providerOutbound: {
-        enforceEnabled,
-        ...(allowedTopLevelKeys ? { allowedTopLevelKeys } : {}),
-        ...(typeof enforceAllowedTopLevelKeys === 'boolean' ? { enforceAllowedTopLevelKeys } : {}),
-        reservedKeyPrefixes,
-        forbidWrappers,
-        flattenWrappers
-      },
-      toolSurface: {
-        expectedToolFormat,
-        ...(expectedHistoryCarrier ? { expectedHistoryCarrier } : {})
-      }
-    };
-  } catch {
+  const parsed = parseJson('parseProtocolSpec', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  const row = parsed as Record<string, unknown>;
+  const id = row.id;
+  if (
+    id !== 'openai-chat' &&
+    id !== 'openai-responses' &&
+    id !== 'anthropic-messages' &&
+    id !== 'gemini-chat'
+  ) {
+    return null;
+  }
+  const providerOutbound =
+    row.providerOutbound && typeof row.providerOutbound === 'object' && !Array.isArray(row.providerOutbound)
+      ? (row.providerOutbound as Record<string, unknown>)
+      : null;
+  if (!providerOutbound) {
+    return null;
+  }
+  const enforceEnabled = providerOutbound.enforceEnabled;
+  if (typeof enforceEnabled !== 'boolean') {
+    return null;
+  }
+  const allowedTopLevelKeys = Array.isArray(providerOutbound.allowedTopLevelKeys)
+    ? providerOutbound.allowedTopLevelKeys.filter((entry): entry is string => typeof entry === 'string')
+    : undefined;
+  const enforceAllowedTopLevelKeys =
+    typeof providerOutbound.enforceAllowedTopLevelKeys === 'boolean'
+      ? providerOutbound.enforceAllowedTopLevelKeys
+      : undefined;
+  const reservedKeyPrefixes = Array.isArray(providerOutbound.reservedKeyPrefixes)
+    ? providerOutbound.reservedKeyPrefixes.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+  const forbidWrappers = Array.isArray(providerOutbound.forbidWrappers)
+    ? providerOutbound.forbidWrappers
+        .map((entry) => parseLayoutRule(entry))
+        .filter((entry): entry is NativeProviderOutboundLayoutRule => Boolean(entry))
+    : [];
+  const flattenWrappers = Array.isArray(providerOutbound.flattenWrappers)
+    ? providerOutbound.flattenWrappers
+        .map((entry) => parseFlattenRule(entry))
+        .filter((entry): entry is NativeProviderOutboundWrapperFlattenRule => Boolean(entry))
+    : [];
+  const toolSurface =
+    row.toolSurface && typeof row.toolSurface === 'object' && !Array.isArray(row.toolSurface)
+      ? (row.toolSurface as Record<string, unknown>)
+      : null;
+  if (!toolSurface) {
+    return null;
+  }
+  const expectedToolFormat = toolSurface.expectedToolFormat;
+  if (
+    expectedToolFormat !== 'openai' &&
+    expectedToolFormat !== 'anthropic' &&
+    expectedToolFormat !== 'gemini'
+  ) {
+    return null;
+  }
+  const expectedHistoryCarrier =
+    toolSurface.expectedHistoryCarrier === 'messages' || toolSurface.expectedHistoryCarrier === 'input'
+      ? toolSurface.expectedHistoryCarrier
+      : undefined;
+  return {
+    id,
+    providerOutbound: {
+      enforceEnabled,
+      ...(allowedTopLevelKeys ? { allowedTopLevelKeys } : {}),
+      ...(typeof enforceAllowedTopLevelKeys === 'boolean' ? { enforceAllowedTopLevelKeys } : {}),
+      reservedKeyPrefixes,
+      forbidWrappers,
+      flattenWrappers
+    },
+    toolSurface: {
+      expectedToolFormat,
+      ...(expectedHistoryCarrier ? { expectedHistoryCarrier } : {})
+    }
+  };
 }
 
 function parseStringArrayValue(value: unknown): string[] | null {
@@ -410,42 +441,38 @@ function parseStringArrayValue(value: unknown): string[] | null {
 }
 
 function parseHubProtocolAllowlists(raw: string): NativeHubProtocolAllowlists | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    const openaiChatAllowedFields = parseStringArrayValue(row.openaiChatAllowedFields);
-    const openaiChatParametersWrapperAllowKeys = parseStringArrayValue(row.openaiChatParametersWrapperAllowKeys);
-    const openaiResponsesAllowedFields = parseStringArrayValue(row.openaiResponsesAllowedFields);
-    const openaiResponsesParametersWrapperAllowKeys = parseStringArrayValue(row.openaiResponsesParametersWrapperAllowKeys);
-    const anthropicAllowedFields = parseStringArrayValue(row.anthropicAllowedFields);
-    const anthropicParametersWrapperAllowKeys = parseStringArrayValue(row.anthropicParametersWrapperAllowKeys);
-    const geminiAllowedFields = parseStringArrayValue(row.geminiAllowedFields);
-    if (
-      !openaiChatAllowedFields ||
-      !openaiChatParametersWrapperAllowKeys ||
-      !openaiResponsesAllowedFields ||
-      !openaiResponsesParametersWrapperAllowKeys ||
-      !anthropicAllowedFields ||
-      !anthropicParametersWrapperAllowKeys ||
-      !geminiAllowedFields
-    ) {
-      return null;
-    }
-    return {
-      openaiChatAllowedFields,
-      openaiChatParametersWrapperAllowKeys,
-      openaiResponsesAllowedFields,
-      openaiResponsesParametersWrapperAllowKeys,
-      anthropicAllowedFields,
-      anthropicParametersWrapperAllowKeys,
-      geminiAllowedFields
-    };
-  } catch {
+  const parsed = parseJson('parseHubProtocolAllowlists', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  const row = parsed as Record<string, unknown>;
+  const openaiChatAllowedFields = parseStringArrayValue(row.openaiChatAllowedFields);
+  const openaiChatParametersWrapperAllowKeys = parseStringArrayValue(row.openaiChatParametersWrapperAllowKeys);
+  const openaiResponsesAllowedFields = parseStringArrayValue(row.openaiResponsesAllowedFields);
+  const openaiResponsesParametersWrapperAllowKeys = parseStringArrayValue(row.openaiResponsesParametersWrapperAllowKeys);
+  const anthropicAllowedFields = parseStringArrayValue(row.anthropicAllowedFields);
+  const anthropicParametersWrapperAllowKeys = parseStringArrayValue(row.anthropicParametersWrapperAllowKeys);
+  const geminiAllowedFields = parseStringArrayValue(row.geminiAllowedFields);
+  if (
+    !openaiChatAllowedFields ||
+    !openaiChatParametersWrapperAllowKeys ||
+    !openaiResponsesAllowedFields ||
+    !openaiResponsesParametersWrapperAllowKeys ||
+    !anthropicAllowedFields ||
+    !anthropicParametersWrapperAllowKeys ||
+    !geminiAllowedFields
+  ) {
+    return null;
+  }
+  return {
+    openaiChatAllowedFields,
+    openaiChatParametersWrapperAllowKeys,
+    openaiResponsesAllowedFields,
+    openaiResponsesParametersWrapperAllowKeys,
+    anthropicAllowedFields,
+    anthropicParametersWrapperAllowKeys,
+    geminiAllowedFields
+  };
 }
 
 export function resolveHubProtocolSpecWithNative(input: {

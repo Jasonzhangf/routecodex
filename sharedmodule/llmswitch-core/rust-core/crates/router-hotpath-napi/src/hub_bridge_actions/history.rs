@@ -567,6 +567,27 @@ fn build_context_history_seed(context: Option<&Value>) -> Option<Value> {
     Some(Value::Object(seed))
 }
 
+fn read_previous_response_id_from_request_semantics(
+    request_semantics: Option<&Value>,
+) -> Option<String> {
+    let semantics = request_semantics.and_then(Value::as_object)?;
+    let continuation = semantics.get("continuation").and_then(Value::as_object);
+    let resume_from = continuation
+        .and_then(|row| row.get("resumeFrom"))
+        .and_then(Value::as_object);
+    let responses_resume = semantics
+        .get("responses")
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("resume"))
+        .and_then(Value::as_object);
+
+    read_trimmed_string(resume_from.and_then(|row| row.get("previousResponseId")))
+        .or_else(|| {
+            read_trimmed_string(responses_resume.and_then(|row| row.get("restoredFromResponseId")))
+        })
+        .or_else(|| read_trimmed_string(resume_from.and_then(|row| row.get("responseId"))))
+}
+
 pub(crate) fn resolve_responses_request_bridge_decisions(
     input: ResolveResponsesRequestBridgeDecisionsInput,
 ) -> ResolveResponsesRequestBridgeDecisionsOutput {
@@ -616,6 +637,9 @@ pub(crate) fn resolve_responses_request_bridge_decisions(
             .or(envelope_tool_call_id_style)
             .or(context_tool_call_id_style),
         history_seed,
+        previous_response_id: read_previous_response_id_from_request_semantics(
+            input.request_semantics.as_ref(),
+        ),
     }
 }
 

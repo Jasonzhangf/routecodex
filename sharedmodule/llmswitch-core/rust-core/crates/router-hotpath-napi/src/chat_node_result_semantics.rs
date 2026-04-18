@@ -208,6 +208,71 @@ fn map_tool_calls(message: Option<&Map<String, Value>>) -> Option<Value> {
     Some(Value::Array(mapped))
 }
 
+fn read_object_string(row: &Map<String, Value>, key: &str) -> Option<String> {
+    row.get(key)
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn restore_response_continuation_semantics(
+    chat_response: Value,
+    request_semantics: Option<&Value>,
+    provider_protocol: Option<&str>,
+) -> Value {
+    let mut response_row = chat_response.as_object().cloned().unwrap_or_default();
+    let provider_protocol = provider_protocol
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty());
+
+    let existing_semantics = response_row
+        .get("semantics")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    if existing_semantics
+        .get("continuation")
+        .and_then(Value::as_object)
+        .is_some()
+    {
+        return Value::Object(response_row);
+    }
+
+    let Some(request_semantics_obj) = request_semantics.and_then(Value::as_object) else {
+        return Value::Object(response_row);
+    };
+    let Some(continuation_obj) = request_semantics_obj
+        .get("continuation")
+        .and_then(Value::as_object)
+        .cloned()
+    else {
+        return Value::Object(response_row);
+    };
+
+    let mut continuation = continuation_obj;
+    if let Some(protocol) = provider_protocol.as_ref() {
+        if read_object_string(&continuation, "stateOrigin").is_none() {
+            continuation.insert(
+                "stateOrigin".to_string(),
+                Value::String(protocol.to_string()),
+            );
+        }
+        if let Some(resume_from) = continuation
+            .get_mut("resumeFrom")
+            .and_then(Value::as_object_mut)
+        {
+            if read_object_string(resume_from, "protocol").is_none() {
+                resume_from.insert("protocol".to_string(), Value::String(protocol.to_string()));
+            }
+        }
+    }
+
+    let mut semantics = existing_semantics;
+    semantics.insert("continuation".to_string(), Value::Object(continuation));
+    response_row.insert("semantics".to_string(), Value::Object(semantics));
+    Value::Object(response_row)
+}
+
 fn build_processed_request_from_chat_response(chat_response: Value, stream_enabled: bool) -> Value {
     let response_row = chat_response.as_object().cloned().unwrap_or_default();
     let choices = response_row
@@ -281,6 +346,11 @@ fn build_processed_request_from_chat_response(chat_response: Value, stream_enabl
     );
     out.insert("parameters".to_string(), Value::Object(Map::new()));
     out.insert("metadata".to_string(), Value::Object(metadata));
+    if let Some(semantics) = response_row.get("semantics").cloned() {
+        if semantics.is_object() {
+            out.insert("semantics".to_string(), semantics);
+        }
+    }
     out.insert("processed".to_string(), Value::Object(processed));
     out.insert(
         "processingMetadata".to_string(),
@@ -343,5 +413,23 @@ pub fn build_processed_request_from_chat_response_json(
     let chat_response: Value = serde_json::from_str(&chat_response_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = build_processed_request_from_chat_response(chat_response, stream_enabled);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn restore_response_continuation_semantics_json(
+    chat_response_json: String,
+    request_semantics_json: String,
+    provider_protocol: Option<String>,
+) -> NapiResult<String> {
+    let chat_response: Value = serde_json::from_str(&chat_response_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let request_semantics: Value = serde_json::from_str(&request_semantics_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = restore_response_continuation_semantics(
+        chat_response,
+        Some(&request_semantics),
+        provider_protocol.as_deref(),
+    );
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }

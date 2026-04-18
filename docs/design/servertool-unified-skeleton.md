@@ -107,3 +107,96 @@
 ## 当前决策
 - malformed tool_call 的正确处理：**保留到客户端错误闭环**，而不是服务端伪装成成功 stop。
 - servertool followup 的正确处理：**按正常响应统一编排**，而不是走 followup 特判旁路。
+
+## 2026-04-16 审计实锤（本轮新增）
+
+### 已确认的结构问题
+1. **request 标准化双实现**
+   - `src/server/runtime/http-server/executor-response.ts`
+   - `src/server/runtime/http-server/executor/provider-response-converter.ts`
+   - 两边都各自维护：
+     - `backfillAdapterContextSessionIdentifiersFromOriginalRequest(...)`
+     - `seedReasoningStopStateFromCapturedRequest(...)`
+   - 这会导致 session / conversation / stopless 进入骨架不是单点真源。
+
+2. **response wrapper 双实现**
+   - 两边都各自手拼 `__sse_responses` wrapper
+   - 各自挂 `finish_reason`
+   - 之前都**没有**把 `reasoning.stop finalized` 状态变成统一 wrapper 元数据
+
+3. **stopless 对 streamed wrapper 漏校验**
+   - `RequestExecutor.detectStoplessTerminationWithoutFinalization(...)`
+   - 之前一旦看到 `__sse_responses` 就直接跳过
+   - 导致 `finish_reason=stop` + 无 finalized marker 的 wrapper 仍可 200 透传
+
+4. **engine 仍是超大聚合体**
+   - `sharedmodule/llmswitch-core/src/servertool/engine.ts` ≈ 2317 行
+   - `sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts` ≈ 1037 行
+   - `sharedmodule/llmswitch-core/src/servertool/handlers/reasoning-stop-guard.ts` ≈ 705 行
+   - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts` ≈ 665 行
+   - 当前并非“薄骨架”，而是 trigger / execution outcome / followup dispatch / finalize / loop guard 混在一起。
+
+5. **历史残留仍在 servertool 真路径**
+   - `server-side-tools.ts.bak~bak6`
+   - `handlers/memory/cache-writer.ts.bak`
+   - 说明该区域长期热修，但没有完成真正骨架化。
+
+### 本轮已先落的第一刀
+1. 新增 host 壳层共享 helper：
+   - `src/server/runtime/http-server/executor/servertool-request-normalizer.ts`
+   - `src/server/runtime/http-server/executor/servertool-response-normalizer.ts`
+
+2. 已把 request 侧共享逻辑先抽单点：
+   - session / conversation backfill
+   - stopless seed
+
+3. 已把 SSE wrapper 共享逻辑先抽单点：
+   - `buildServerToolSseWrapperBody(...)`
+   - 统一挂：
+     - `__sse_responses`
+     - `__routecodex_finish_reason`
+     - `__routecodex_reasoning_stop_finalized`
+
+4. stopless streamed wrapper 漏检已修：
+   - 若 wrapper `finish_reason=stop`
+   - 且缺 finalized flag
+   - `RequestExecutor` 现在统一抛：
+     - `STOPLESS_FINALIZATION_MISSING`
+
+### 下一刀切点（按顺序）
+1. **Host 壳层继续单点化**
+   - 收掉 `executor-response.ts` / `provider-response-converter.ts` 里剩余的 request/followup metadata 组装重复逻辑
+
+2. **engine 按四段骨架拆分**
+   - `trigger detect`
+   - `execution outcome decide`
+   - `followup dispatch`
+   - `finalize + strip`
+
+3. **清历史侧路**
+   - pending injection 过渡逻辑
+   - followup bypass / post-governance 不一致点
+   - `.bak` 残留文件
+
+## 2026-04-16 第二刀（host followup dispatch/error helper 落地）
+
+### 已收口
+1. **nested followup dispatch 单点化**
+   - 新增 `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts`
+   - 统一承接：
+     - followup nested metadata 组装
+     - `clientInjectOnly` 预处理
+     - nested request execute
+   - `executor-response.ts` 与 `provider-response-converter.ts` 不再各自手拼一套 `reenterPipeline` / `clientInjectDispatch`。
+
+2. **followup 错误标记单点化**
+   - 新增 `src/server/runtime/http-server/executor/servertool-followup-error.ts`
+   - 统一承接：
+     - `SERVERTOOL_*` → `provider.followup` stage marker
+     - followup reason compact/logging
+     - 缺省 HTTP status（当前 converter 路径默认补 502）
+
+### 这一步的意义
+- followup 进入 host 壳层后，不再有两份“长得差不多但不完全一样”的 nested dispatch。
+- followup 错误不再由多个 callsite 各自猜测和打印，开始收敛到单点 helper。
+- 这是把 **followup 当普通请求重进统一链路** 的继续落地，而不是再给 followup 开一条特判旁路。

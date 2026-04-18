@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { OAuthDeviceFlowStrategy } from '../../../src/providers/core/strategies/oauth-device-flow.js';
+import { getProviderOAuthConfig } from '../../../src/providers/core/config/provider-oauth-configs.js';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -95,5 +96,79 @@ describe('OAuth device flow polling interval normalization', () => {
     warnSpy.mockRestore();
     logSpy.mockRestore();
     global.setTimeout = originalSetTimeout;
+  });
+
+  test('qwen oauth device/token requests align with official qwen headers', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+
+    const seen: Array<{ url: string; headers: Record<string, string> }> = [];
+    let tokenPollCount = 0;
+    const httpClient = async (input: string, init?: RequestInit) => {
+      const headers = new Headers(init?.headers || {});
+      seen.push({
+        url: input,
+        headers: Object.fromEntries(headers.entries())
+      });
+      if (input.includes('/device/code')) {
+        return jsonResponse(200, {
+          device_code: 'device-code-2',
+          user_code: 'USER-CODE-2',
+          verification_uri: 'https://chat.qwen.ai/authorize',
+          verification_uri_complete: 'https://chat.qwen.ai/authorize?user_code=USER-CODE-2&client=qwen-code',
+          expires_in: 600,
+          interval: 1
+        });
+      }
+      if (input.includes('/oauth2/token')) {
+        tokenPollCount += 1;
+        if (tokenPollCount === 1) {
+          return jsonResponse(400, {
+            error: 'authorization_pending',
+            error_description: 'pending'
+          });
+        }
+        return jsonResponse(200, {
+          access_token: 'access-token-2',
+          refresh_token: 'refresh-token-2',
+          token_type: 'Bearer',
+          expires_in: 3600,
+          resource_url: 'portal.qwen.ai'
+        });
+      }
+      throw new Error(`Unexpected URL: ${input}`);
+    };
+
+    const tokenFile = path.join(os.tmpdir(), `routecodex-qwen-device-headers-${Date.now()}.json`);
+    const strategy = new OAuthDeviceFlowStrategy(
+      getProviderOAuthConfig('qwen'),
+      httpClient as any,
+      tokenFile
+    );
+
+    await strategy.authenticate({ openBrowser: false, forceReauthorize: true });
+
+    const deviceRequest = seen.find((entry) => entry.url.includes('/device/code'));
+    const tokenRequests = seen.filter((entry) => entry.url.includes('/oauth2/token'));
+
+    expect(deviceRequest).toBeDefined();
+    expect(deviceRequest?.headers['content-type']).toBe('application/x-www-form-urlencoded');
+    expect(deviceRequest?.headers['accept']).toBe('application/json');
+    expect(typeof deviceRequest?.headers['x-request-id']).toBe('string');
+    expect(deviceRequest?.headers['user-agent']).toBeUndefined();
+    expect(deviceRequest?.headers['x-goog-api-client']).toBeUndefined();
+    expect(deviceRequest?.headers['client-metadata']).toBeUndefined();
+
+    expect(tokenRequests.length).toBeGreaterThan(0);
+    for (const request of tokenRequests) {
+      expect(request.headers['content-type']).toBe('application/x-www-form-urlencoded');
+      expect(request.headers['accept']).toBe('application/json');
+      expect(request.headers['user-agent']).toBeUndefined();
+      expect(request.headers['x-goog-api-client']).toBeUndefined();
+      expect(request.headers['client-metadata']).toBeUndefined();
+    }
+
+    warnSpy.mockRestore();
+    logSpy.mockRestore();
   });
 });

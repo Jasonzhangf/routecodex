@@ -4,6 +4,42 @@ import {
 } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 
+const NON_BLOCKING_CLOCK_REMINDER_LOG_THROTTLE_MS = 60_000;
+const nonBlockingClockReminderLogState = new Map<string, number>();
+const JSON_PARSE_FAILED = Symbol('native-chat-process-clock-reminder-semantics.parse-failed');
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error ?? 'unknown');
+  }
+}
+
+function logNativeClockReminderNonBlocking(stage: string, error: unknown): void {
+  const now = Date.now();
+  const last = nonBlockingClockReminderLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_CLOCK_REMINDER_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingClockReminderLogState.set(stage, now);
+  console.warn(
+    `[native-chat-process-clock-reminder-semantics] ${stage} failed (non-blocking): ${formatUnknownError(error)}`
+  );
+}
+
+function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAILED {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    logNativeClockReminderNonBlocking(stage, error);
+    return JSON_PARSE_FAILED;
+  }
+}
+
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
   const fn = binding?.[name];
@@ -11,93 +47,77 @@ function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | n
 }
 
 function parseArray(raw: string): unknown[] | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
+  const parsed = parseJson('parseArray', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  return Array.isArray(parsed) ? parsed : null;
 }
 
 function parseRecordOrNull(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return null;
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
+  const parsed = parseJson('parseRecordOrNull', raw);
+  if (parsed === JSON_PARSE_FAILED || parsed === null) {
     return null;
   }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function parseRecordOrNullResult(raw: string): { ok: true; value: Record<string, unknown> | null } | { ok: false } {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return { ok: true, value: null };
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { ok: false };
-    }
-    return { ok: true, value: parsed as Record<string, unknown> };
-  } catch {
+  const parsed = parseJson('parseRecordOrNullResult', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return { ok: false };
   }
+  if (parsed === null) {
+    return { ok: true, value: null };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false };
+  }
+  return { ok: true, value: parsed as Record<string, unknown> };
 }
 
 function parseRecord(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
+  const parsed = parseJson('parseRecord', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  return parsed as Record<string, unknown>;
 }
 
 function parseIndex(raw: string): number | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (typeof parsed !== 'number' || !Number.isFinite(parsed)) {
-      return null;
-    }
-    return Math.floor(parsed);
-  } catch {
+  const parsed = parseJson('parseIndex', raw);
+  if (parsed === JSON_PARSE_FAILED || typeof parsed !== 'number' || !Number.isFinite(parsed)) {
     return null;
   }
+  return Math.floor(parsed);
 }
 
 function parseStringOrNull(raw: string): string | null | undefined {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return null;
-    }
-    return typeof parsed === 'string' ? parsed : undefined;
-  } catch {
+  const parsed = parseJson('parseStringOrNull', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return undefined;
   }
+  if (parsed === null) {
+    return null;
+  }
+  return typeof parsed === 'string' ? parsed : undefined;
 }
 
 function parseClockConfigOrNull(raw: string): Record<string, unknown> | null | undefined {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return null;
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return undefined;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
+  const parsed = parseJson('parseClockConfigOrNull', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return undefined;
   }
+  if (parsed === null) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return undefined;
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export function resolveClockConfigWithNative(

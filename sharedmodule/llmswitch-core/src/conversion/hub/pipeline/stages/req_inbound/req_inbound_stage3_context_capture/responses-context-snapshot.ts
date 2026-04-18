@@ -36,7 +36,15 @@ export function captureResponsesContextSnapshot(
     captureResponsesRequestContext({
       requestId,
       payload: options.rawRequest as unknown as Record<string, unknown>,
-      context: context as unknown as Record<string, unknown>
+      context: context as unknown as Record<string, unknown>,
+      sessionId:
+        typeof (options.adapterContext as Record<string, unknown>).sessionId === 'string'
+          ? String((options.adapterContext as Record<string, unknown>).sessionId).trim() || undefined
+          : undefined,
+      conversationId:
+        typeof (options.adapterContext as Record<string, unknown>).conversationId === 'string'
+          ? String((options.adapterContext as Record<string, unknown>).conversationId).trim() || undefined
+          : undefined
     });
   }
   return context;

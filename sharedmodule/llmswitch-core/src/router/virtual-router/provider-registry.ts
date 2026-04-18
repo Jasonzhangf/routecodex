@@ -1,6 +1,35 @@
 import { VirtualRouterError, VirtualRouterErrorCode } from './types.js';
 import type { ProviderProfile, TargetMetadata, ModelCapability } from './types.js';
 
+const NON_BLOCKING_WARN_THROTTLE_MS = 60_000;
+const nonBlockingWarnByStage = new Map<string, number>();
+
+function shouldLogNonBlockingStage(stage: string): boolean {
+  const now = Date.now();
+  const lastAt = nonBlockingWarnByStage.get(stage) ?? 0;
+  if (now - lastAt < NON_BLOCKING_WARN_THROTTLE_MS) {
+    return false;
+  }
+  nonBlockingWarnByStage.set(stage, now);
+  return true;
+}
+
+function logProviderRegistryNonBlocking(
+  stage: string,
+  operation: string,
+  details?: Record<string, unknown>
+): void {
+  if (!shouldLogNonBlockingStage(stage)) {
+    return;
+  }
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[provider-registry] stage=${stage} operation=${operation} returned empty${suffix}`);
+  } catch {
+    void 0;
+  }
+}
+
 export class ProviderRegistry {
   private readonly providers: Map<string, ProviderProfile> = new Map();
 
@@ -39,10 +68,18 @@ listKeys(): string[] {
   getModelCapabilities(providerKey: string): Set<ModelCapability> {
     const profile = this.providers.get(providerKey);
     if (!profile) {
+      logProviderRegistryNonBlocking('capability_lookup', 'get_model_capabilities', {
+        providerKey,
+        cause: 'provider_not_registered'
+      });
       return new Set();
     }
     const modelId = profile.modelId ?? deriveModelId(providerKey);
     if (!modelId) {
+      logProviderRegistryNonBlocking('capability_lookup', 'get_model_capabilities', {
+        providerKey,
+        cause: 'missing_model_id'
+      });
       return new Set();
     }
     const capabilities = profile.modelCapabilities?.[modelId];
@@ -57,21 +94,48 @@ listKeys(): string[] {
   }
 
   resolveRuntimeKeyByAlias(providerId: string, keyAlias: string): string | null {
+    if (!providerId || !keyAlias) {
+      logProviderRegistryNonBlocking('runtime_key_alias', 'resolve_runtime_key_by_alias', {
+        providerId,
+        keyAlias,
+        cause: 'invalid_input'
+      });
+      return null;
+    }
     const pattern = new RegExp(`^${providerId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.${keyAlias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\.|$)`);
     for (const key of this.providers.keys()) {
       if (pattern.test(key)) {
         return key;
       }
     }
+    logProviderRegistryNonBlocking('runtime_key_alias', 'resolve_runtime_key_by_alias', {
+      providerId,
+      keyAlias,
+      cause: this.listProviderKeys(providerId).length > 0 ? 'alias_not_found' : 'provider_not_registered'
+    });
     return null;
   }
 
   resolveRuntimeKeyByIndex(providerId: string, keyIndex: number): string | null {
     const index = keyIndex - 1;
-    if (index < 0) return null;
+    if (index < 0) {
+      logProviderRegistryNonBlocking('runtime_key_index', 'resolve_runtime_key_by_index', {
+        providerId,
+        keyIndex,
+        cause: 'invalid_index'
+      });
+      return null;
+    }
 
     const keys = this.listProviderKeys(providerId);
-    if (index >= keys.length) return null;
+    if (index >= keys.length) {
+      logProviderRegistryNonBlocking('runtime_key_index', 'resolve_runtime_key_by_index', {
+        providerId,
+        keyIndex,
+        cause: keys.length > 0 ? 'index_out_of_range' : 'provider_not_registered'
+      });
+      return null;
+    }
 
     return keys[index];
   }
@@ -83,13 +147,31 @@ listKeys(): string[] {
 
   resolveRuntimeKeyByModel(providerId: string, modelId: string): string | null {
     if (!providerId || !modelId) {
+      logProviderRegistryNonBlocking('runtime_key_model', 'resolve_runtime_key_by_model', {
+        providerId,
+        modelId,
+        cause: 'invalid_input'
+      });
       return null;
     }
     const normalizedModel = modelId.trim();
     if (!normalizedModel) {
+      logProviderRegistryNonBlocking('runtime_key_model', 'resolve_runtime_key_by_model', {
+        providerId,
+        modelId,
+        cause: 'empty_model_id'
+      });
       return null;
     }
     const providerKeys = this.listProviderKeys(providerId);
+    if (providerKeys.length === 0) {
+      logProviderRegistryNonBlocking('runtime_key_model', 'resolve_runtime_key_by_model', {
+        providerId,
+        modelId: normalizedModel,
+        cause: 'provider_not_registered'
+      });
+      return null;
+    }
     for (const key of providerKeys) {
       const profile = this.providers.get(key);
       const candidate = profile?.modelId ?? deriveModelId(key);
@@ -97,6 +179,11 @@ listKeys(): string[] {
         return key;
       }
     }
+    logProviderRegistryNonBlocking('runtime_key_model', 'resolve_runtime_key_by_model', {
+      providerId,
+      modelId: normalizedModel,
+      cause: 'model_not_found'
+    });
     return null;
   }
 

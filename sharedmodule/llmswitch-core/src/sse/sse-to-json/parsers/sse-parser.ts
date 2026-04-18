@@ -33,6 +33,8 @@ export const DEFAULT_SSE_PARSER_CONFIG: SseParserConfig = {
 
     'response.created',
     'response.in_progress',
+    'response.failed',
+    'response.incomplete',
     'response.output_item.added',
     'response.content_part.added',
     'response.output_text.delta',

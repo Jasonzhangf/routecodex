@@ -189,6 +189,126 @@ fn resolve_finish_reason_impl(response: &Value, tool_calls: &[Value]) -> String 
     }
 }
 
+fn collect_pending_tool_call_ids(tool_calls: &[Value]) -> Vec<Value> {
+    let mut out = Vec::<Value>::new();
+    for call in tool_calls {
+        let Some(row) = call.as_object() else {
+            continue;
+        };
+        let call_id =
+            read_trimmed_string(row.get("id")).or_else(|| read_trimmed_string(row.get("call_id")));
+        let Some(call_id) = call_id else {
+            continue;
+        };
+        out.push(Value::String(call_id));
+    }
+    out
+}
+
+fn build_responses_continuation(
+    response_obj: &Map<String, Value>,
+    tool_calls: &[Value],
+) -> Option<Value> {
+    let response_id = read_trimmed_string(response_obj.get("id"));
+    let request_id = read_trimmed_string(response_obj.get("request_id"));
+    let previous_response_id = read_trimmed_string(response_obj.get("previous_response_id"));
+    let status = read_trimmed_string(response_obj.get("status"));
+    let pending_tool_call_ids = collect_pending_tool_call_ids(tool_calls);
+
+    if response_id.is_none()
+        && request_id.is_none()
+        && previous_response_id.is_none()
+        && status.is_none()
+        && pending_tool_call_ids.is_empty()
+    {
+        return None;
+    }
+
+    let mut continuation = Map::<String, Value>::new();
+    if let Some(chain_id) = request_id
+        .clone()
+        .or_else(|| previous_response_id.clone())
+        .or_else(|| response_id.clone())
+    {
+        continuation.insert("chainId".to_string(), Value::String(chain_id));
+    }
+    if let Some(previous_turn_id) = previous_response_id.clone() {
+        continuation.insert(
+            "previousTurnId".to_string(),
+            Value::String(previous_turn_id),
+        );
+    }
+
+    let mut resume_from = Map::<String, Value>::new();
+    resume_from.insert(
+        "protocol".to_string(),
+        Value::String("openai-responses".to_string()),
+    );
+    if let Some(request_id) = request_id {
+        resume_from.insert("requestId".to_string(), Value::String(request_id));
+    }
+    if let Some(response_id) = response_id.clone() {
+        resume_from.insert("responseId".to_string(), Value::String(response_id));
+    }
+    if let Some(previous_response_id) = previous_response_id.clone() {
+        resume_from.insert(
+            "previousResponseId".to_string(),
+            Value::String(previous_response_id),
+        );
+    }
+    if !resume_from.is_empty() {
+        continuation.insert("resumeFrom".to_string(), Value::Object(resume_from));
+    }
+
+    if let Some(status) = status.clone() {
+        continuation.insert(
+            "protocolHints".to_string(),
+            Value::Object(Map::from_iter([(
+                "status".to_string(),
+                Value::String(status),
+            )])),
+        );
+    }
+
+    if !pending_tool_call_ids.is_empty()
+        || status
+            .as_deref()
+            .map(|value| value.eq_ignore_ascii_case("requires_action"))
+            .unwrap_or(false)
+    {
+        let mut tool_continuation = Map::<String, Value>::new();
+        tool_continuation.insert(
+            "mode".to_string(),
+            Value::String("required_action".to_string()),
+        );
+        if !pending_tool_call_ids.is_empty() {
+            tool_continuation.insert(
+                "pendingToolCallIds".to_string(),
+                Value::Array(pending_tool_call_ids),
+            );
+        }
+        continuation.insert(
+            "toolContinuation".to_string(),
+            Value::Object(tool_continuation),
+        );
+    }
+
+    continuation.insert(
+        "stickyScope".to_string(),
+        Value::String("request_chain".to_string()),
+    );
+    continuation.insert(
+        "stateOrigin".to_string(),
+        Value::String("openai-responses".to_string()),
+    );
+    continuation.insert(
+        "restored".to_string(),
+        Value::Bool(previous_response_id.is_some()),
+    );
+
+    Some(Value::Object(continuation))
+}
+
 fn unwrap_responses_response_impl(payload: &Value) -> Option<Value> {
     let mut current = payload;
     let mut visited: Vec<*const Value> = Vec::new();
@@ -400,6 +520,12 @@ fn build_chat_response_from_responses_impl(payload: &Value) -> Value {
         .or_else(|| read_trimmed_string(response_obj.get("id")))
     {
         chat.insert("request_id".to_string(), Value::String(request_id));
+    }
+    if let Some(continuation) = build_responses_continuation(response_obj, tool_calls.as_slice()) {
+        chat.insert(
+            "semantics".to_string(),
+            Value::Object(Map::from_iter([("continuation".to_string(), continuation)])),
+        );
     }
 
     Value::Object(chat)

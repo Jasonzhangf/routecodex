@@ -59,6 +59,7 @@ describe('client-injection-flow strict tmux isolation', () => {
     ).rejects.toMatchObject({
       code: 'SERVERTOOL_FOLLOWUP_FAILED',
       upstreamCode: 'client_inject_failed',
+      requestExecutorProviderErrorStage: 'provider.followup',
       details: expect.objectContaining({
         reason: 'tmux_session_required'
       })

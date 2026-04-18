@@ -1713,12 +1713,10 @@ fn test_resp_profile_chat_deepseek_web_does_not_guess_exec_command_from_command_
     let result = run_resp_inbound_stage3_compat(input).unwrap();
     assert!(result.native_applied);
     assert_eq!(result.payload["choices"][0]["finish_reason"], "stop");
-    assert!(
-        result.payload["choices"][0]["message"]["tool_calls"]
-            .as_array()
-            .map(|rows| rows.is_empty())
-            .unwrap_or(true)
-    );
+    assert!(result.payload["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .map(|rows| rows.is_empty())
+        .unwrap_or(true));
 }
 
 #[test]
@@ -1973,11 +1971,9 @@ fn test_resp_profile_chat_qwenchat_web_normalizes_legacy_function_call_into_tool
         result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
         "exec_command"
     );
-    assert!(
-        result.payload["choices"][0]["message"]
-            .get("function_call")
-            .is_none()
-    );
+    assert!(result.payload["choices"][0]["message"]
+        .get("function_call")
+        .is_none());
     let args = result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
         .as_str()
         .unwrap_or("{}");

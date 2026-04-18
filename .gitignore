@@ -105,3 +105,6 @@ sharedmodule/llmswitch-core/src/tools/**/*.d.ts
 sharedmodule/llmswitch-core/src/tools/**/*.js.map
 sharedmodule/llmswitch-core/test-results/
 sharedmodule/test-results/
+sharedmodule/llmswitch-core/src/conversion/shared/request-meta-store.ts
+sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.ts
+tests/sharedmodule/provider-runtime-ingress.spec.ts

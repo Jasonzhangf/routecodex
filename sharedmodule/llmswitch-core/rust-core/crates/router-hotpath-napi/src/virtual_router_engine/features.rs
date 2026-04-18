@@ -8,8 +8,8 @@ use crate::virtual_router_engine::routing::is_server_tool_followup_request;
 use media::analyze_media_attachments;
 use tools::{
     choose_higher_priority_tool_category, classify_tool_call_for_report, detect_coding_tool,
-    detect_last_assistant_tool_category, detect_vision_tool, detect_web_search_tool_declared, detect_web_tool,
-    extract_meaningful_declared_tool_names,
+    detect_last_assistant_tool_category, detect_vision_tool, detect_web_search_tool_declared,
+    detect_web_tool, extract_meaningful_declared_tool_names,
 };
 
 fn get_latest_responses_context_message(request: &Value) -> Option<(String, Value)> {
@@ -301,9 +301,15 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
     let (has_tool_call_responses, last_assistant_tool) = if current_user_from_messages {
         (message_has_tool_call_responses, message_last_assistant_tool)
     } else if current_user_from_responses {
-        (responses_has_tool_call_responses, responses_last_assistant_tool)
+        (
+            responses_has_tool_call_responses,
+            responses_last_assistant_tool,
+        )
     } else if !responses_latest_message.is_none() {
-        (responses_has_tool_call_responses, responses_last_assistant_tool)
+        (
+            responses_has_tool_call_responses,
+            responses_last_assistant_tool,
+        )
     } else {
         (message_has_tool_call_responses, message_last_assistant_tool)
     };
@@ -613,11 +619,15 @@ mod tests {
 
         let features = build_routing_features(&request, &json!({}));
         assert!(features.has_tool_call_responses);
-        assert_eq!(features.last_assistant_tool_category.as_deref(), Some("read"));
+        assert_eq!(
+            features.last_assistant_tool_category.as_deref(),
+            Some("read")
+        );
     }
 
     #[test]
-    fn previous_turn_tool_signals_ignore_older_responses_context_history_before_latest_user_boundary() {
+    fn previous_turn_tool_signals_ignore_older_responses_context_history_before_latest_user_boundary(
+    ) {
         let request = json!({
             "model": "glm-5",
             "semantics": {
@@ -692,7 +702,10 @@ mod tests {
 
         let features = build_routing_features(&request, &json!({}));
         assert!(features.has_tool_call_responses);
-        assert_eq!(features.last_assistant_tool_category.as_deref(), Some("search"));
+        assert_eq!(
+            features.last_assistant_tool_category.as_deref(),
+            Some("search")
+        );
     }
 
     #[test]

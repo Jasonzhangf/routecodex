@@ -37,7 +37,6 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     nodeResults: inbound.nodeResults,
     inboundRecorder: inbound.inboundRecorder,
     activeProcessMode: inbound.activeProcessMode,
-    responsesResume: inbound.responsesResume,
     serverToolRequired: inbound.serverToolRequired,
     hasImageAttachment: inbound.hasImageAttachment,
     passthroughAudit: inbound.passthroughAudit,

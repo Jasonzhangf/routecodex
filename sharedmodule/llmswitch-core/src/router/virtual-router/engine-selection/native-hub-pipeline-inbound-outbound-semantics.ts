@@ -7,6 +7,42 @@ import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-ho
 export type NativeResumeToolOutput = { tool_call_id: string; content: string };
 export type NativeContextToolOutput = { tool_call_id: string; call_id: string; output?: string; name?: string };
 
+const NON_BLOCKING_INBOUND_OUTBOUND_LOG_THROTTLE_MS = 60_000;
+const nonBlockingInboundOutboundLogState = new Map<string, number>();
+const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-inbound-outbound-semantics.parse-failed');
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error ?? 'unknown');
+  }
+}
+
+function logNativeInboundOutboundNonBlocking(stage: string, error: unknown): void {
+  const now = Date.now();
+  const last = nonBlockingInboundOutboundLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_INBOUND_OUTBOUND_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingInboundOutboundLogState.set(stage, now);
+  console.warn(
+    `[native-hub-pipeline-inbound-outbound-semantics] ${stage} failed (non-blocking): ${formatUnknownError(error)}`
+  );
+}
+
+function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAILED {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    logNativeInboundOutboundNonBlocking(stage, error);
+    return JSON_PARSE_FAILED;
+  }
+}
+
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
   const fn = binding?.[name];
@@ -16,55 +52,50 @@ function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | n
 function safeStringify(value: unknown): string | undefined {
   try {
     return JSON.stringify(value);
-  } catch {
+  } catch (error) {
+    logNativeInboundOutboundNonBlocking('safeStringify', error);
     return undefined;
   }
 }
 
 function parseRecord(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
+  const parsed = parseJson('parseRecord', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  return parsed as Record<string, unknown>;
 }
 
 function parseOptionalRecord(raw: string): Record<string, unknown> | undefined | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return undefined;
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
+  const parsed = parseJson('parseOptionalRecord', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  if (parsed === null) {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function parseStyle(raw: string): 'fc' | 'preserve' | undefined | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null || parsed === undefined) {
-      return undefined;
-    }
-    if (typeof parsed !== 'string') {
-      return null;
-    }
-    const normalized = parsed.trim().toLowerCase();
-    if (normalized === 'fc' || normalized === 'preserve') {
-      return normalized;
-    }
-    return null;
-  } catch {
+  const parsed = parseJson('parseStyle', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  if (parsed === null || parsed === undefined) {
+    return undefined;
+  }
+  if (typeof parsed !== 'string') {
+    return null;
+  }
+  const normalized = parsed.trim().toLowerCase();
+  if (normalized === 'fc' || normalized === 'preserve') {
+    return normalized;
+  }
+  return null;
 }
 
 function parseToolOutputEntry(raw: unknown): NativeContextToolOutput | null {
@@ -110,111 +141,100 @@ function parseToolOutputEntry(raw: unknown): NativeContextToolOutput | null {
 }
 
 function parseResumeToolOutputs(raw: string): NativeResumeToolOutput[] | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) {
-      return null;
-    }
-    const out: NativeResumeToolOutput[] = [];
-    for (const entry of parsed) {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-        continue;
-      }
-      const row = entry as Record<string, unknown>;
-      const toolCallId =
-        (typeof row.tool_call_id === 'string' && row.tool_call_id.trim()) ||
-        (typeof row.toolCallId === 'string' && row.toolCallId.trim()) ||
-        '';
-      if (!toolCallId || typeof row.content !== 'string') {
-        continue;
-      }
-      out.push({ tool_call_id: toolCallId, content: row.content });
-    }
-    return out;
-  } catch {
+  const parsed = parseJson('parseResumeToolOutputs', raw);
+  if (parsed === JSON_PARSE_FAILED || !Array.isArray(parsed)) {
     return null;
   }
+  const out: NativeResumeToolOutput[] = [];
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      continue;
+    }
+    const row = entry as Record<string, unknown>;
+    const toolCallId =
+      (typeof row.tool_call_id === 'string' && row.tool_call_id.trim()) ||
+      (typeof row.toolCallId === 'string' && row.toolCallId.trim()) ||
+      '';
+    if (!toolCallId || typeof row.content !== 'string') {
+      continue;
+    }
+    out.push({ tool_call_id: toolCallId, content: row.content });
+  }
+  return out;
 }
 
 function parseCollectedToolOutputs(raw: string): NativeContextToolOutput[] | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) {
-      return null;
-    }
-    const out: NativeContextToolOutput[] = [];
-    for (const entry of parsed) {
-      const normalized = parseToolOutputEntry(entry);
-      if (normalized) {
-        out.push(normalized);
-      }
-    }
-    return out;
-  } catch {
+  const parsed = parseJson('parseCollectedToolOutputs', raw);
+  if (parsed === JSON_PARSE_FAILED || !Array.isArray(parsed)) {
     return null;
   }
+  const out: NativeContextToolOutput[] = [];
+  for (const entry of parsed) {
+    const normalized = parseToolOutputEntry(entry);
+    if (normalized) {
+      out.push(normalized);
+    }
+  }
+  return out;
 }
 
 function parseMergedToolOutputs(raw: string): Array<{ tool_call_id: string; content: string; name?: string }> | undefined | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return undefined;
-    }
-    if (!Array.isArray(parsed)) {
-      return null;
-    }
-    const out: Array<{ tool_call_id: string; content: string; name?: string }> = [];
-    for (const entry of parsed) {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-        continue;
-      }
-      const row = entry as Record<string, unknown>;
-      const toolCallId =
-        (typeof row.tool_call_id === 'string' && row.tool_call_id.trim()) ||
-        (typeof row.toolCallId === 'string' && row.toolCallId.trim()) ||
-        '';
-      if (!toolCallId || typeof row.content !== 'string') {
-        continue;
-      }
-      const name = typeof row.name === 'string' && row.name.trim() ? row.name.trim() : undefined;
-      out.push({ tool_call_id: toolCallId, content: row.content, ...(name ? { name } : {}) });
-    }
-    return out;
-  } catch {
+  const parsed = parseJson('parseMergedToolOutputs', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  if (parsed === null) {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) {
+    return null;
+  }
+  const out: Array<{ tool_call_id: string; content: string; name?: string }> = [];
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      continue;
+    }
+    const row = entry as Record<string, unknown>;
+    const toolCallId =
+      (typeof row.tool_call_id === 'string' && row.tool_call_id.trim()) ||
+      (typeof row.toolCallId === 'string' && row.toolCallId.trim()) ||
+      '';
+    if (!toolCallId || typeof row.content !== 'string') {
+      continue;
+    }
+    const name = typeof row.name === 'string' && row.name.trim() ? row.name.trim() : undefined;
+    out.push({ tool_call_id: toolCallId, content: row.content, ...(name ? { name } : {}) });
+  }
+  return out;
 }
 
 function parseNormalizedTools(raw: string): unknown[] | undefined | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return undefined;
-    }
-    if (!Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed;
-  } catch {
+  const parsed = parseJson('parseNormalizedTools', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  if (parsed === null) {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed;
 }
 
 function parseOptionalString(raw: string): string | undefined | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return undefined;
-    }
-    if (typeof parsed !== 'string') {
-      return null;
-    }
-    const trimmed = parsed.trim();
-    return trimmed ? trimmed : undefined;
-  } catch {
+  const parsed = parseJson('parseOptionalString', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  if (parsed === null) {
+    return undefined;
+  }
+  if (typeof parsed !== 'string') {
+    return null;
+  }
+  const trimmed = parsed.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 export function mapResumeToolOutputsDetailedWithNative(

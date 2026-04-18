@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { resolveRccPath } from '../../../runtime/user-data-paths.js';
 
-type StopMessageAiBackend = 'codex';
+type StopMessageAiBackend = 'codex' | 'iflow';
 type StopMessageRecord = Record<string, unknown>;
 
 export type StopMessageRuntimeConfig = {
@@ -19,6 +19,7 @@ export type StopMessageRuntimeConfig = {
     enabled?: boolean;
     backend?: StopMessageAiBackend;
     codexBin?: string;
+    iflowBin?: string;
     timeoutMs?: number;
     outputMaxChars?: number;
     trace?: boolean;
@@ -120,6 +121,9 @@ function resolveConfigPath(): string {
 
 function normalizeBackend(value: unknown): StopMessageAiBackend | undefined {
   const text = readString(value)?.toLowerCase();
+  if (text === 'iflow') {
+    return text;
+  }
   if (text === 'codex') {
     return text;
   }
@@ -171,6 +175,7 @@ function loadConfigSnapshot(): StopMessageRuntimeConfig {
                 ? { backend: normalizeBackend(aiFollowup.backend) }
                 : {}),
               ...(readString(aiFollowup.codexBin) ? { codexBin: readString(aiFollowup.codexBin) } : {}),
+              ...(readString(aiFollowup.iflowBin) ? { iflowBin: readString(aiFollowup.iflowBin) } : {}),
               ...(readPositiveInt(aiFollowup.timeoutMs)
                 ? { timeoutMs: readPositiveInt(aiFollowup.timeoutMs) }
                 : {}),
@@ -249,6 +254,9 @@ export function resolveStopMessageAiFollowupCommand(backend: StopMessageAiBacken
   const aiFollowup = resolveStopMessageRuntimeConfig().aiFollowup;
   if (!aiFollowup) {
     return undefined;
+  }
+  if (backend === 'iflow') {
+    return aiFollowup.iflowBin;
   }
   return aiFollowup.codexBin;
 }

@@ -300,6 +300,7 @@ export function buildResponsesPayloadFromChatWithNative(
     requestId?: string;
     toolsRaw?: unknown[];
     metadata?: Record<string, unknown>;
+    responseSemantics?: Record<string, unknown>;
     parallelToolCalls?: unknown;
     toolChoice?: unknown;
     include?: unknown;
@@ -322,6 +323,7 @@ export function buildResponsesPayloadFromChatWithNative(
     requestId: context.requestId,
     toolsRaw: Array.isArray(context.toolsRaw) ? context.toolsRaw : [],
     metadata: context.metadata,
+    responseSemantics: context.responseSemantics,
     parallelToolCalls: context.parallelToolCalls,
     toolChoice: context.toolChoice,
     include: context.include,

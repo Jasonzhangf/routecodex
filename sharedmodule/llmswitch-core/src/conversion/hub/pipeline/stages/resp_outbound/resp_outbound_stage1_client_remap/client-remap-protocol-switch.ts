@@ -21,6 +21,7 @@ export interface ClientRemapProtocolSwitchOptions {
   clientProtocol: ClientProtocol;
   requestId: string;
   requestSemantics?: JsonObject;
+  responseSemantics?: JsonObject;
 }
 
 type IndexedClientTool = {
@@ -364,6 +365,7 @@ export function buildClientPayloadForProtocol(options: ClientRemapProtocolSwitch
   } else {
     clientPayload = buildResponsesPayloadFromChatWithNative(options.payload, {
       requestId: options.requestId,
+      responseSemantics: options.responseSemantics,
       ...(toolsRaw ? { toolsRaw } : {})
     }) as JsonObject;
   }

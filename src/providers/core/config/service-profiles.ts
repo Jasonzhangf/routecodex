@@ -143,12 +143,13 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
 
   qwen: {
     // Qwen OpenAI兼容模式
-    // 对齐 CLIProxyAPI：使用 portal.qwen.ai 作为统一入口
-    // OAuth 设备码/令牌端点在 chat.qwen.ai 下，由 provider-oauth-configs 提供
-    defaultBaseUrl: 'https://portal.qwen.ai/v1',
+    // 对齐系统 qwen 安装包（@qwen-code/qwen-code）：
+    // OAuth 设备码/令牌端点在 chat.qwen.ai 下，由 provider-oauth-configs 提供；
+    // 实际推理请求走 DashScope compatible-mode。
+    defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     defaultEndpoint: '/chat/completions',
-    // 默认模型对齐当前配置，只保留 qwen3-coder-plus
-    defaultModel: 'qwen3-coder-plus',
+    // 对齐官方 @qwen-code/qwen-code：Qwen OAuth 默认走 coder-model。
+    defaultModel: 'coder-model',
     requiredAuth: [],
     optionalAuth: ['apikey','oauth'],
     headers: {
@@ -160,8 +161,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'X-DashScope-UserAgent': resolveQwenCodeUserAgent(),
       'X-DashScope-AuthType': 'qwen-oauth'
     },
-    // 默认 Provider 请求超时时间：500s
-    timeout: 240000,
+    // 对齐官方 @qwen-code/qwen-code DEFAULT_TIMEOUT=120000ms
+    timeout: 120000,
     maxRetries: 3
   },
 

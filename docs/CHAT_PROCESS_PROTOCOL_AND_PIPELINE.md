@@ -2,6 +2,8 @@
 
 > 目的：把“请求/响应都必须进入 chat process（且只走 chat 扩展协议）”写成可执行、可 fail-fast 的契约，并给出**命名统一**与**修改点清单**，供审阅后再落地。
 
+> continuation/state 的统一 contract 另见：`docs/chat-process-continuation-state-contract.md`
+
 ## 1) 术语（统一口径）
 
 - **Chat 扩展协议（Chat Extension Protocol）**：llmswitch-core 内部的统一载体。

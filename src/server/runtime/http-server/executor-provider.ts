@@ -69,12 +69,11 @@ export function shouldRetryProviderError(error: unknown): boolean {
     return false;
   }
   const status = extractErrorStatusCode(error);
-  // Deterministic context overflow: retrying the *same* model will keep failing,
-  // but a different model/provider in the same route pool might accept it.
-  // This matches the virtual-router strategy: if a target is over its context window,
-  // switch to the next candidate before giving up.
+  // Deterministic context overflow must fail fast for the current request payload.
+  // Replaying the same oversized prompt across providers in the same pool creates
+  // retry storms and hides the real issue (continuation/state restore failed).
   if (isPromptTooLongError(error)) {
-    return true;
+    return false;
   }
   // virtualRouterSeriesCooldown 表示 provider 已经把 alias 从池子里拉黑，需要切换到下一位。
   // 这类错误仍然属于「可恢复」，因为虚拟路由会根据 cooldown 信息选择新的目标。
@@ -85,6 +84,12 @@ export function shouldRetryProviderError(error: unknown): boolean {
   // must not be retried; repeated retries with the same payload only create retry storms.
   if (isDeterministicInvalidRequestError(error, status)) {
     return false;
+  }
+  if (status === 401 || status === 429 || status === 413 || status === 408 || status === 425) {
+    return true;
+  }
+  if (typeof status === 'number' && status >= 500) {
+    return true;
   }
   const providerError = error as ProviderError;
   if (providerError.retryable === true) {
@@ -98,12 +103,6 @@ export function shouldRetryProviderError(error: unknown): boolean {
     return true;
   }
   if (isNetworkTransportError(error)) {
-    return true;
-  }
-  if (status === 401 || status === 429 || status === 413 || status === 408 || status === 425) {
-    return true;
-  }
-  if (typeof status === 'number' && status >= 500) {
     return true;
   }
   return false;

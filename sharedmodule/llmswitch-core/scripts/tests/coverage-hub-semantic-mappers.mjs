@@ -30,6 +30,7 @@ function runNodeScript(relPath) {
 async function runAnthropicHelperCoverage() {
   const thinking = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/anthropic-thinking-config.js'));
   const audit = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/anthropic-semantics-audit.js'));
+  const protocolAudit = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/protocol-mapping-audit.js'));
 
   assert.equal(thinking.normalizeAnthropicThinkingConfigFromUnknown(undefined), undefined);
   assert.equal(thinking.normalizeAnthropicThinkingConfigFromUnknown(null), undefined);
@@ -161,14 +162,14 @@ async function runAnthropicHelperCoverage() {
   audit.appendDroppedFieldAudit(audited, { field: 'prompt_cache_key', targetProtocol: 'anthropic-messages', reason: 'unsupported' });
   audit.appendDroppedFieldAudit(audited, { field: 'prompt_cache_key', targetProtocol: 'anthropic-messages', reason: 'unsupported' });
   audit.appendLossyFieldAudit(audited, { field: 'reasoning', targetProtocol: 'anthropic-messages', reason: 'normalized' });
-  assert.equal(audited.metadata.mappingAudit.dropped.length, 1);
-  assert.equal(audited.metadata.mappingAudit.lossy.length, 1);
+  assert.equal(protocolAudit.readProtocolMappingAuditBucket(audited, 'dropped').length, 1);
+  assert.equal(protocolAudit.readProtocolMappingAuditBucket(audited, 'lossy').length, 1);
   const auditedNoMeta = {};
   audit.appendDroppedFieldAudit(auditedNoMeta, { field: 'x', targetProtocol: 'anthropic-messages', reason: 'drop' });
-  assert.equal(auditedNoMeta.metadata.mappingAudit.dropped.length, 1);
+  assert.equal(protocolAudit.readProtocolMappingAuditBucket(auditedNoMeta, 'dropped').length, 1);
   const auditedPrimitiveMeta = { metadata: 'bad' };
   audit.appendLossyFieldAudit(auditedPrimitiveMeta, { field: 'y', targetProtocol: 'anthropic-messages', reason: 'loss' });
-  assert.equal(auditedPrimitiveMeta.metadata.mappingAudit.lossy.length, 1);
+  assert.equal(protocolAudit.readProtocolMappingAuditBucket(auditedPrimitiveMeta, 'lossy').length, 1);
 }
 
 async function runGeminiHelperCoverage() {
@@ -178,6 +179,7 @@ async function runGeminiHelperCoverage() {
   const chatHelpers = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/gemini-chat-request-helpers.js'));
   const toolOutput = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/gemini-tool-output.js'));
   const audit = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/gemini-mapping-audit.js'));
+  const protocolAudit = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/protocol-mapping-audit.js'));
   const state = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/gemini-semantics-state.js'));
 
   assert.equal(antigravity.stripOnlineSuffix('gemini-pro-online'), 'gemini-pro');
@@ -571,8 +573,8 @@ async function runGeminiHelperCoverage() {
   audit.appendDroppedFieldAudit(auditChat, { field: 'x', targetProtocol: 'gemini-chat', reason: 'drop' });
   audit.appendDroppedFieldAudit(auditChat, { field: 'x', targetProtocol: 'gemini-chat', reason: 'drop' });
   audit.appendLossyFieldAudit(auditChat, { field: 'y', targetProtocol: 'gemini-chat', reason: 'loss' });
-  assert.equal(auditChat.metadata.mappingAudit.dropped.length, 1);
-  assert.equal(auditChat.metadata.mappingAudit.lossy.length, 1);
+  assert.equal(protocolAudit.readProtocolMappingAuditBucket(auditChat, 'dropped').length, 1);
+  assert.equal(protocolAudit.readProtocolMappingAuditBucket(auditChat, 'lossy').length, 1);
 
   const gemStateChat = {};
   assert.equal(typeof state.ensureGeminiSemanticsNode(gemStateChat), 'object');
@@ -1163,6 +1165,7 @@ async function runGeminiMainCoverage() {
     GeminiSemanticMapper,
     buildGeminiRequestFromChat
   } = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/gemini-mapper.js'));
+  const protocolAudit = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/protocol-mapping-audit.js'));
   const mapper = new GeminiSemanticMapper();
   const ctx = {
     requestId: 'semantic-coverage-gemini',
@@ -1384,8 +1387,9 @@ async function runGeminiMainCoverage() {
     },
     builtMainAuditChat.metadata
   );
-  assert.equal(builtMainAuditChat.metadata.mappingAudit.dropped.length, 7);
-  assert.equal(builtMainAuditChat.metadata.mappingAudit.lossy.length, 1);
+  assert.equal(protocolAudit.readProtocolMappingAuditBucket(builtMainAuditChat, 'dropped').length, 6);
+  assert.equal(protocolAudit.readProtocolMappingAuditBucket(builtMainAuditChat, 'unsupported').length, 1);
+  assert.equal(protocolAudit.readProtocolMappingAuditBucket(builtMainAuditChat, 'lossy').length, 1);
 
   const builtMetadataFallback = buildGeminiRequestFromChat(
     {

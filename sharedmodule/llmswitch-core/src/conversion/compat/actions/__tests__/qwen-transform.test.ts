@@ -13,7 +13,7 @@ describe('qwen-transform native wrapper', () => {
       } as any
     );
 
-    expect((result as any).model).toBe('qwen3-coder-plus');
+    expect((result as any).model).toBe('coder-model');
     expect((result as any).messages).toEqual([
       {
         role: 'user',

@@ -191,9 +191,7 @@ estimateInputTokensForWorkingRequest({
     ((normalized.metadata = {}) as Record<string, unknown>),
 });
 
-// responsesResume is a client-protocol semantic (/v1/responses tool loop) and must live in chat.semantics.
-// Do not read it from metadata once entering chat_process.
-const { responsesResume, hasImageAttachment, serverToolRequired } =
+const { hasImageAttachment, serverToolRequired } =
   deriveWorkingRequestFlags(workingRequest);
 
 const outbound = await executeRouteAndBuildOutbound({
@@ -205,7 +203,6 @@ const outbound = await executeRouteAndBuildOutbound({
   nodeResults,
   inboundRecorder: stageRecorder,
   activeProcessMode,
-  responsesResume,
   serverToolRequired,
   hasImageAttachment,
   passthroughAudit,

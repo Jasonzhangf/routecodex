@@ -21,7 +21,7 @@ function formatUnknownError(error: unknown): string {
   }
 }
 
-function logExecutorMetadataNonBlockingError(
+function logExecutorMetadataNonBlocking(
   stage: string,
   error: unknown,
   details?: Record<string, unknown>
@@ -176,7 +176,7 @@ function extractWorkdirFromTurnMetadata(rawTurnMetadata: string | undefined): st
   try {
     candidates.push(decodeURIComponent(rawTurnMetadata));
   } catch (decodeError) {
-    logExecutorMetadataNonBlockingError('extractWorkdirFromTurnMetadata.decodeURIComponent', decodeError);
+    logExecutorMetadataNonBlocking('extractWorkdirFromTurnMetadata.decodeURIComponent', decodeError);
   }
   for (const candidate of [...candidates]) {
     const normalized = candidate.trim();
@@ -193,7 +193,7 @@ function extractWorkdirFromTurnMetadata(rawTurnMetadata: string | undefined): st
         candidates.push(decoded);
       }
     } catch (base64DecodeError) {
-      logExecutorMetadataNonBlockingError('extractWorkdirFromTurnMetadata.base64Decode', base64DecodeError);
+      logExecutorMetadataNonBlocking('extractWorkdirFromTurnMetadata.base64Decode', base64DecodeError);
     }
   }
 
@@ -205,7 +205,7 @@ function extractWorkdirFromTurnMetadata(rawTurnMetadata: string | undefined): st
         return fromJson;
       }
     } catch (jsonParseError) {
-      logExecutorMetadataNonBlockingError('extractWorkdirFromTurnMetadata.jsonParse', jsonParseError);
+      logExecutorMetadataNonBlocking('extractWorkdirFromTurnMetadata.jsonParse', jsonParseError);
     }
 
     try {
@@ -219,7 +219,7 @@ function extractWorkdirFromTurnMetadata(rawTurnMetadata: string | undefined): st
         return fromParams;
       }
     } catch (urlParamsError) {
-      logExecutorMetadataNonBlockingError('extractWorkdirFromTurnMetadata.urlSearchParams', urlParamsError);
+      logExecutorMetadataNonBlocking('extractWorkdirFromTurnMetadata.urlSearchParams', urlParamsError);
     }
   }
   return undefined;
@@ -286,7 +286,8 @@ function resolveWorkdirFromSessionDaemon(daemonId: string | undefined): string |
     const record = getSessionClientRegistry().findByDaemonId(daemonId);
     const workdir = typeof record?.workdir === 'string' ? record.workdir.trim() : '';
     return workdir || undefined;
-  } catch {
+  } catch (error) {
+    logExecutorMetadataNonBlocking('resolveWorkdirFromSessionDaemon', error, { daemonId });
     return undefined;
   }
 }
@@ -302,7 +303,8 @@ function resolveWorkdirFromTmuxSessionId(tmuxSessionId: string | undefined): str
       return workdir;
     }
     return resolveTmuxSessionWorkingDirectory(tmuxSessionId);
-  } catch {
+  } catch (error) {
+    logExecutorMetadataNonBlocking('resolveWorkdirFromTmuxSessionId', error, { tmuxSessionId });
     return undefined;
   }
 }
@@ -319,7 +321,8 @@ function resolveTmuxSessionIdFromSessionDaemon(daemonId: string | undefined): st
     }
     const sessionId = typeof record?.sessionId === 'string' ? record.sessionId.trim() : '';
     return sessionId || undefined;
-  } catch {
+  } catch (error) {
+    logExecutorMetadataNonBlocking('resolveTmuxSessionIdFromSessionDaemon', error, { daemonId });
     return undefined;
   }
 }
@@ -331,7 +334,8 @@ function resolveTmuxSessionIdFromConversationBinding(scopeId: string): string | 
   }
   try {
     return getSessionClientRegistry().resolveBoundTmuxSession(token);
-  } catch {
+  } catch (error) {
+    logExecutorMetadataNonBlocking('resolveTmuxSessionIdFromConversationBinding', error, { scopeId: token });
     return undefined;
   }
 }
@@ -344,7 +348,8 @@ function resolveSessionDaemonIdFromTmuxSession(tmuxSessionId: string | undefined
   try {
     const record = getSessionClientRegistry().findByTmuxSessionId(token);
     return typeof record?.daemonId === 'string' && record.daemonId.trim() ? record.daemonId.trim() : undefined;
-  } catch {
+  } catch (error) {
+    logExecutorMetadataNonBlocking('resolveSessionDaemonIdFromTmuxSession', error, { tmuxSessionId: token });
     return undefined;
   }
 }
@@ -357,7 +362,8 @@ function resolveTmuxTargetFromSessionDaemon(daemonId: string | undefined): strin
     const record = getSessionClientRegistry().findByDaemonId(daemonId);
     const tmuxTarget = typeof record?.tmuxTarget === 'string' ? record.tmuxTarget.trim() : '';
     return tmuxTarget || undefined;
-  } catch {
+  } catch (error) {
+    logExecutorMetadataNonBlocking('resolveTmuxTargetFromSessionDaemon', error, { daemonId });
     return undefined;
   }
 }
@@ -467,7 +473,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     try {
       getSessionClientRegistry().unbindSessionScope(`tmux:${resolvedTmuxSessionId}`);
     } catch (unbindError) {
-      logExecutorMetadataNonBlockingError('buildRequestMetadata.unbindSessionScope', unbindError, {
+      logExecutorMetadataNonBlocking('buildRequestMetadata.unbindSessionScope', unbindError, {
         tmuxSessionId: resolvedTmuxSessionId
       });
     }
@@ -623,7 +629,7 @@ function cloneMetadata(source: Record<string, unknown>): Record<string, unknown>
     try {
       return structuredCloneFn(source);
     } catch (structuredCloneError) {
-      logExecutorMetadataNonBlockingError('cloneMetadata.structuredClone', structuredCloneError);
+      logExecutorMetadataNonBlocking('cloneMetadata.structuredClone', structuredCloneError);
     }
   }
   try {
@@ -632,3 +638,12 @@ function cloneMetadata(source: Record<string, unknown>): Record<string, unknown>
     return { ...source };
   }
 }
+
+export const __executorMetadataTestables = {
+  resolveWorkdirFromSessionDaemon,
+  resolveWorkdirFromTmuxSessionId,
+  resolveTmuxSessionIdFromSessionDaemon,
+  resolveTmuxSessionIdFromConversationBinding,
+  resolveSessionDaemonIdFromTmuxSession,
+  resolveTmuxTargetFromSessionDaemon
+};

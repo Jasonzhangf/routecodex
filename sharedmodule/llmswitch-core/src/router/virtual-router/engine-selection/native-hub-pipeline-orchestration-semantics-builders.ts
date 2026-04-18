@@ -11,6 +11,7 @@ type RouterMetadataInputBuildInput = {
   routeHint?: string;
   stage?: 'inbound' | 'outbound';
   responsesResume?: unknown;
+  requestSemantics?: unknown;
   includeEstimatedInputTokens?: boolean;
   serverToolRequired?: boolean;
   sessionId?: string;

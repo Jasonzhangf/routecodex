@@ -11,7 +11,7 @@ import os from 'os';
 import { spawnSync } from 'node:child_process';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { fetchIFlowUserInfo, mergeIFlowTokenData } from './iflow-userinfo-helper.js';
-import { fetchQwenUserInfo, mergeQwenTokenData } from './qwen-userinfo-helper.js';
+import { fetchQwenUserInfo, mergeQwenTokenData, validateQwenAccessToken } from './qwen-userinfo-helper.js';
 import {
   fetchGeminiCLIUserInfo,
   fetchGeminiCLIProjects,
@@ -75,6 +75,7 @@ import {
   readRawTokenFile
 } from './oauth-lifecycle/token-io.js';
 import { resolveRccAuthDir } from '../../config/user-data-paths.js';
+import { isPermanentOAuthRefreshErrorMessage } from '../core/strategies/oauth-refresh-errors.js';
 
 type InteractiveOAuthLockRecord = {
   pid: number;
@@ -100,6 +101,7 @@ type EnsureOpts = {
   forceReacquireIfRefreshFails?: boolean;
   openBrowser?: boolean;
   forceReauthorize?: boolean;
+  forceRefresh?: boolean;
 };
 
 type OAuthStrategy = {
@@ -192,6 +194,74 @@ async function openGoogleAccountVerificationInCamoufox(args: {
       process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = prevOpenOnly;
     }
   }
+}
+
+async function maybeMarkTokenFileNoRefresh(filePath: string): Promise<void> {
+  if (!filePath) {
+    return;
+  }
+  try {
+    const parsed = await readRawTokenFile(filePath);
+    if (!parsed || typeof parsed !== 'object') {
+      return;
+    }
+    const current =
+      (parsed as UnknownObject).norefresh ??
+      (parsed as UnknownObject).noRefresh;
+    if (
+      current === true ||
+      current === 'true' ||
+      current === '1' ||
+      current === 'yes'
+    ) {
+      return;
+    }
+    const next = {
+      ...(parsed as Record<string, unknown>),
+      norefresh: true,
+      noRefresh: true
+    };
+    await fs.writeFile(filePath, JSON.stringify(next, null, 2) + '\n', {
+      mode: 0o600
+    });
+  } catch (error) {
+    logOAuthLifecycleNonBlocking('maybeMarkTokenFileNoRefresh', error, { filePath });
+  }
+}
+
+async function hasTokenFileNoRefresh(filePath: string): Promise<boolean> {
+  if (!filePath) {
+    return false;
+  }
+  const parsed = await readRawTokenFile(filePath);
+  const token = sanitizeToken(parsed);
+  const providerType =
+    token && typeof (token as UnknownObject).type === 'string'
+      ? String((token as UnknownObject).type).trim().toLowerCase()
+      : '';
+  const direct =
+    (parsed as UnknownObject | null)?.norefresh ??
+    (parsed as UnknownObject | null)?.noRefresh;
+  const flagged =
+    typeof direct === 'boolean'
+      ? direct
+      : typeof direct === 'string'
+        ? ['1', 'true', 'yes'].includes(direct.trim().toLowerCase())
+        : false;
+  if (!flagged) {
+    return false;
+  }
+  if (providerType === 'qwen') {
+    return hasStableQwenApiKey(token);
+  }
+  return true;
+}
+
+function shouldHonorNoRefresh(providerType: string, token: StoredOAuthToken | null): boolean {
+  if (!hasNoRefreshFlag(token)) {
+    return false;
+  }
+  return providerType.trim().toLowerCase() === 'qwen' ? hasStableQwenApiKey(token) : true;
 }
 
 function isIflowRefreshEndpointRejectionMessage(message: string): boolean {
@@ -480,7 +550,7 @@ async function prepareTokenForStorage(
   }
   if (providerType === 'qwen') {
     const rawExisting = await readRawTokenFile(tokenFilePath);
-    const existing = rawExisting && typeof rawExisting === 'object' ? (rawExisting as UnknownObject) : null;
+    const existing = rawExisting && typeof rawExisting === 'object' ? (rawExisting as Record<string, unknown>) : null;
     const resolvedAlias = resolveTokenAliasFromPath(tokenFilePath);
     const token = sanitizeToken(tokenData) ?? (tokenData as StoredOAuthToken);
     const expiresAt = getExpiresAt(token);
@@ -490,16 +560,67 @@ async function prepareTokenForStorage(
       : (expiresAt && expiresAt > 10_000_000_000
           ? Math.max(1, Math.floor((expiresAt - Date.now()) / 1000))
           : 21600);
+    const {
+      resource_url: _dropLegacyResourceUrl,
+      resourceUrl: _dropLegacyResourceUrlCamel,
+      norefresh: _dropLegacyNoRefresh,
+      noRefresh: _dropLegacyNoRefreshCamel,
+      api_key: _dropLegacyApiKey,
+      apiKey: _dropLegacyApiKeyCamel,
+      ...existingWithoutLegacyQwenFields
+    } = existing || {};
+    const {
+      resource_url: _dropIncomingResourceUrl,
+      resourceUrl: _dropIncomingResourceUrlCamel,
+      norefresh: _dropIncomingNoRefresh,
+      noRefresh: _dropIncomingNoRefreshCamel,
+      api_key: _dropIncomingApiKey,
+      apiKey: _dropIncomingApiKeyCamel,
+      ...tokenDataWithoutLegacyQwenFields
+    } = tokenData as Record<string, unknown>;
+    const rawResourceUrl =
+      typeof (tokenData as Record<string, unknown>).resource_url === 'string' &&
+      String((tokenData as Record<string, unknown>).resource_url).trim()
+        ? String((tokenData as Record<string, unknown>).resource_url).trim()
+        : typeof (tokenData as Record<string, unknown>).resourceUrl === 'string' &&
+            String((tokenData as Record<string, unknown>).resourceUrl).trim()
+          ? String((tokenData as Record<string, unknown>).resourceUrl).trim()
+          : undefined;
+    const resourceUrl = (() => {
+      if (!rawResourceUrl) {
+        return undefined;
+      }
+      let normalized = rawResourceUrl;
+      if (!/^https?:\/\//i.test(normalized)) {
+        normalized = `https://${normalized}`;
+      }
+      normalized = normalized.replace(/\/+$/, '');
+      try {
+        const parsed = new URL(normalized);
+        const host = parsed.hostname.trim().toLowerCase();
+        const pathname = parsed.pathname.replace(/\/+$/, '');
+        const isLegacyPortalHost = host === 'portal.qwen.ai' || host === 'chat.qwen.ai';
+        const isDashscopeCompatibleHost =
+          host === 'dashscope.aliyuncs.com' && /^\/compatible-mode(?:\/v1)?$/i.test(pathname);
+        if (isLegacyPortalHost || !isDashscopeCompatibleHost) {
+          return undefined;
+        }
+        return `${parsed.origin}${pathname}`;
+      } catch {
+        return undefined;
+      }
+    })();
+    const stableApiKey = hasStableQwenApiKey(token) ? extractApiKey(token) : undefined;
     return {
-      ...(existing || {}),
-      ...(tokenData as Record<string, unknown>),
+      ...existingWithoutLegacyQwenFields,
+      ...tokenDataWithoutLegacyQwenFields,
       status: 'success',
       type: 'qwen',
       ...(resolvedAlias ? { alias: resolvedAlias } : {}),
       expires_in: expiresIn,
       access_token: String(token.access_token ?? ''),
-      ...(token.apiKey ? { apiKey: token.apiKey, api_key: token.apiKey } : {}),
-      ...(token.api_key && !token.apiKey ? { apiKey: token.api_key, api_key: token.api_key } : {})
+      ...(resourceUrl ? { resource_url: resourceUrl } : {}),
+      ...(stableApiKey ? { apiKey: stableApiKey, api_key: stableApiKey, norefresh: true, noRefresh: true } : {})
     } as UnknownObject;
   }
   return tokenData;
@@ -772,12 +893,15 @@ async function finalizeTokenWrite(
   strategy: OAuthStrategy,
   tokenFilePath: string,
   tokenData: UnknownObject | void,
-  reason: string
+  reason: string,
+  options?: {
+    strictQwenValidation?: boolean;
+  }
 ): Promise<void> {
   if (!tokenData || typeof strategy.saveToken !== 'function') {
     return;
   }
-  const enriched = await maybeEnrichToken(providerType, tokenData, tokenFilePath);
+  const enriched = await maybeEnrichToken(providerType, tokenData, tokenFilePath, options);
   const prepared = await prepareTokenForStorage(providerType, tokenFilePath, enriched);
   await strategy.saveToken(prepared);
   logOAuthDebug(`[OAuth] Token ${reason} saved: ${tokenFilePath}`);
@@ -786,10 +910,14 @@ async function finalizeTokenWrite(
 async function maybeEnrichToken(
   providerType: string,
   tokenData: UnknownObject,
-  tokenFilePath?: string
+  tokenFilePath?: string,
+  options?: {
+    strictQwenValidation?: boolean;
+  }
 ): Promise<UnknownObject> {
   if (providerType === 'qwen') {
     const sanitized = sanitizeToken(tokenData) ?? (tokenData as StoredOAuthToken);
+    const tokenRecord = tokenData as Record<string, unknown>;
     if (hasStableQwenApiKey(sanitized)) {
       return tokenData;
     }
@@ -797,6 +925,30 @@ async function maybeEnrichToken(
     if (!accessToken) {
       logOAuthDebug('[OAuth] Qwen: no access_token found in auth result, skipping API Key fetch');
       return tokenData;
+    }
+    if (options?.strictQwenValidation) {
+      try {
+        const resourceUrl =
+          typeof sanitized.resource_url === 'string' && sanitized.resource_url.trim()
+            ? sanitized.resource_url.trim()
+            : typeof tokenRecord.resource_url === 'string' && tokenRecord.resource_url.trim()
+              ? tokenRecord.resource_url.trim()
+              : typeof tokenRecord.resourceUrl === 'string' && tokenRecord.resourceUrl.trim()
+                ? tokenRecord.resourceUrl.trim()
+                : undefined;
+        const model =
+          typeof tokenRecord.model === 'string' && tokenRecord.model.trim()
+            ? tokenRecord.model.trim()
+            : undefined;
+        await validateQwenAccessToken({
+          accessToken,
+          resourceUrl,
+          model
+        });
+      } catch (error) {
+        const msg = formatOAuthErrorMessage(error);
+        throw new Error(`[OAuth] Qwen token validation failed after refresh/acquire: ${msg}`);
+      }
     }
     try {
       const userInfo = await fetchQwenUserInfo(accessToken);
@@ -807,16 +959,6 @@ async function maybeEnrichToken(
       }
       return mergeQwenTokenData(tokenData, userInfo) as unknown as UnknownObject;
     } catch (error) {
-      const msg = formatOAuthErrorMessage(error);
-      // If userInfo endpoint is unavailable (404), treat access_token as api_key to avoid repeated lookups.
-      if (/\bHTTP\s+404\b/i.test(msg) || /\bnot\s+found\b/i.test(msg)) {
-        logOAuthLifecycleNonBlocking(
-          'maybeEnrichToken.qwenUserInfo404Fallback',
-          error,
-          { tokenFilePath, fallback: 'access_token_as_api_key' }
-        );
-        return mergeQwenTokenData(tokenData, { apiKey: accessToken }) as unknown as UnknownObject;
-      }
       logOAuthLifecycleNonBlocking(
         'maybeEnrichToken.qwenUserInfo',
         error,
@@ -1302,7 +1444,9 @@ async function runInteractiveAuthorizationFlow(
       } else {
         const strategy = createStrategy(providerType, overrides, tokenFilePath);
         const authed = await strategy.authenticate?.({ openBrowser, forceReauthorize: forceReauth });
-        await finalizeTokenWrite(providerType, strategy, tokenFilePath, authed, 'acquired');
+        await finalizeTokenWrite(providerType, strategy, tokenFilePath, authed, 'acquired', {
+          strictQwenValidation: providerType === 'qwen'
+        });
       }
       await discardBackupFile(backupFile);
       if (openBrowser && shouldAutoCloseOAuthBrowserSession()) {
@@ -1466,11 +1610,12 @@ export async function ensureValidOAuthToken(
   // Only treat "open browser" as explicit user intent when caller passed it explicitly.
   // This prevents background flows (daemon/provider init) from bypassing noRefresh due to env defaults.
   const openBrowserRequested = opts.openBrowser === true;
+  const forceRefreshRequested = opts.forceRefresh === true;
   // 当 opts.forceReauthorize 显式为 true 时，跳过节流检查，
   // 确保来自上游 401/406 等认证错误的修复请求不会被初始化阶段的调用吞掉。
   // Explicit user-triggered OAuth (openBrowser=true) must also bypass throttle,
   // otherwise repeated "Authorize" clicks in WebUI can become a silent no-op.
-  if (!opts.forceReauthorize && !openBrowserRequested && shouldThrottle(cacheKey)) {
+  if (!opts.forceReauthorize && !openBrowserRequested && !forceRefreshRequested && shouldThrottle(cacheKey)) {
     return;
   }
 
@@ -1553,9 +1698,9 @@ export async function ensureValidOAuthToken(
 
     logTokenSnapshot(providerType, token, endpoints);
     const tokenState = evaluateTokenState(token, providerType);
-    const noRefresh = hasNoRefreshFlag(token);
+    const noRefresh = shouldHonorNoRefresh(providerType, token);
 
-    if (noRefresh && !forceReauth && !openBrowserRequested) {
+    if (noRefresh && !forceReauth && !openBrowserRequested && !forceRefreshRequested) {
       logOAuthDebug(
         `[OAuth] norefresh flag set for provider=${providerType} tokenFile=${tokenFilePath} - skip auto-refresh and re-authorization.`
       );
@@ -1563,7 +1708,7 @@ export async function ensureValidOAuthToken(
       return;
     }
 
-    if (!forceReauth && tokenState.validAccess) {
+    if (!forceReauth && !forceRefreshRequested && tokenState.validAccess) {
       logOAuthDebug(
         `[OAuth] Using existing token (${tokenState.hasApiKey ? 'apiKey' : 'access_token'} valid). No authorization required.`
       );
@@ -1573,14 +1718,20 @@ export async function ensureValidOAuthToken(
 
     if (
       !forceReauth &&
-      tokenState.isExpiredOrNear &&
+      (forceRefreshRequested || tokenState.isExpiredOrNear) &&
       token?.refresh_token &&
       typeof strategy.refreshToken === 'function'
     ) {
       try {
-        logOAuthDebug('[OAuth] refreshing token...');
+        logOAuthDebug(
+          forceRefreshRequested
+            ? '[OAuth] refreshing token (forced by upstream invalid-token repair)...'
+            : '[OAuth] refreshing token...'
+        );
         const refreshed = await strategy.refreshToken(token.refresh_token);
-        await finalizeTokenWrite(providerType, strategy, tokenFilePath, refreshed, 'refreshed and saved');
+        await finalizeTokenWrite(providerType, strategy, tokenFilePath, refreshed, 'refreshed and saved', {
+          strictQwenValidation: providerType === 'qwen'
+        });
         updateThrottle(cacheKey);
         return;
       } catch (error) {
@@ -1674,6 +1825,15 @@ export async function handleUpstreamInvalidOAuthToken(
     const lower = msg.toLowerCase();
     const statusCode = extractStatusCode(upstreamError);
     tokenFilePath = resolveTokenFilePath(auth as ExtendedOAuthAuth, providerType);
+    if (pt === 'qwen' && await hasTokenFileNoRefresh(tokenFilePath)) {
+      logOAuthLifecycleNonBlocking(
+        'handleUpstreamInvalidOAuthToken.qwenNoRefresh',
+        new Error('qwen auto-refresh disabled; standard re-auth required'),
+        { providerType, tokenFilePath },
+        { warn: true, throttleKey: `qwen-norefresh:${tokenFilePath}` }
+      );
+      return false;
+    }
     const cooldownReason: OAuthRepairCooldownReason =
       statusCode === 403 && isGoogleAccountVerificationRequiredMessage(lower) ? 'google_verify' : 'generic';
     const gate = await shouldSkipInteractiveOAuthRepair({
@@ -1723,7 +1883,8 @@ export async function handleUpstreamInvalidOAuthToken(
             await ensureValid(providerType, auth, {
               forceReacquireIfRefreshFails: false,
               openBrowser: false,
-              forceReauthorize: false
+              forceReauthorize: false,
+              forceRefresh: pt === 'qwen'
             });
           });
           await markInteractiveOAuthRepairSuccess({
@@ -1732,8 +1893,28 @@ export async function handleUpstreamInvalidOAuthToken(
           });
           return true;
         } catch (error) {
+          const refreshMsg = error instanceof Error ? error.message : String(error);
+          if (pt === 'qwen' && isPermanentOAuthRefreshErrorMessage(refreshMsg)) {
+            await maybeMarkTokenFileNoRefresh(tokenFilePath);
+            logOAuthLifecycleNonBlocking(
+              'handleUpstreamInvalidOAuthToken.qwenPermanentRefreshFailure',
+              new Error('qwen silent refresh permanently failed; standard re-auth required'),
+              { providerType, tokenFilePath, reason: refreshMsg },
+              { warn: true, throttleKey: `qwen-permanent-refresh:${tokenFilePath}` }
+            );
+            return false;
+          }
+          if (pt === 'qwen') {
+            logOAuthLifecycleNonBlocking(
+              'handleUpstreamInvalidOAuthToken.qwenSilentRefreshFailure',
+              new Error('qwen silent refresh failed; standard re-auth required'),
+              { providerType, tokenFilePath, reason: refreshMsg },
+              { warn: true, throttleKey: `qwen-silent-refresh:${tokenFilePath}` }
+            );
+            return false;
+          }
           logOAuthDebug(
-            `[OAuth] silent refresh failed; falling back to background interactive repair (provider=${providerType}) - ${error instanceof Error ? error.message : String(error)}`
+            `[OAuth] silent refresh failed; falling back to background interactive repair (provider=${providerType}) - ${refreshMsg}`
           );
         }
       }

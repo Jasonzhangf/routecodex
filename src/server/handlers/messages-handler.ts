@@ -9,7 +9,9 @@ import {
   logRequestComplete,
   logRequestError,
   captureClientHeaders,
-  captureRawRequestBodyForMetadata
+  captureRawRequestBodyForMetadata,
+  mergePipelineMetadata,
+  readRequestBodyMetadata
 } from './handler-utils.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 import { parseSseJsonRequest } from '../utils/sse-request-parser.js';
@@ -97,6 +99,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
 
     const clientHeaders = captureClientHeaders(req.headers);
     const clientConnectionState = trackClientConnectionState(req, res);
+    const requestBodyMetadata = readRequestBodyMetadata(pipelineBody);
     const clientRequestedStream = Boolean(isSseRequest || jsonPayload?.stream === true);
     const inboundStream = clientRequestedStream;
     const wantsStream = clientRequestedStream;
@@ -123,7 +126,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       headers: req.headers as Record<string, unknown>,
       query: req.query as Record<string, unknown>,
       body: pipelineBody,
-      metadata: {
+      metadata: mergePipelineMetadata(requestBodyMetadata, {
         stream: wantsStream,
         clientRequestId,
         inboundStream,
@@ -133,7 +136,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
         clientHeaders,
         clientConnectionState,
         ...(mockSampleReqId ? { mockSampleReqId } : {})
-      }
+      })
     });
     if (!hasSsePayload(result.body)) {
       logRequestComplete(entryEndpoint, requestId, result.status ?? 200, result.body, {

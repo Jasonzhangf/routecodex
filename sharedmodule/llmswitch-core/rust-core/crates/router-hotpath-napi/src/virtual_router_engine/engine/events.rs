@@ -1,5 +1,5 @@
-use serde_json::Value;
 use chrono::{Datelike, Local, TimeZone};
+use serde_json::Value;
 
 use super::VirtualRouterEngineCore;
 use crate::virtual_router_engine::time_utils::now_ms;
@@ -63,7 +63,10 @@ impl VirtualRouterEngineCore {
             return;
         }
         let classification = extract_provider_error_classification(event);
-        if matches!(classification, Some(ProviderErrorClassification::Special400)) {
+        if matches!(
+            classification,
+            Some(ProviderErrorClassification::Special400)
+        ) {
             return;
         }
         if let Some(classification) = classification {
@@ -107,6 +110,30 @@ impl VirtualRouterEngineCore {
         true
     }
 
+    fn apply_qwen_auth_family_blacklist(&mut self, event: &Value) -> bool {
+        let Some(provider_key) = resolve_provider_key(event) else {
+            return false;
+        };
+        if !provider_key.starts_with("qwen.") {
+            return false;
+        }
+        if !is_qwen_auth_invalid_event(event) {
+            return false;
+        }
+        let cooldown_ms = compute_cooldown_until_next_local_midnight_ms(now_ms())
+            .max(DEFAULT_UNRECOVERABLE_MIN_COOLDOWN_MS);
+        let now = now_ms();
+        for key in self.provider_registry.list_provider_keys("qwen") {
+            self.health_manager.trip_provider(
+                &key,
+                Some("auth".to_string()),
+                Some(cooldown_ms),
+                now,
+            );
+        }
+        true
+    }
+
     fn apply_classified_provider_error(
         &mut self,
         event: &Value,
@@ -121,7 +148,8 @@ impl VirtualRouterEngineCore {
         match classification {
             ProviderErrorClassification::Special400 => true,
             ProviderErrorClassification::Recoverable => {
-                let cooldown_ms = extract_recoverable_cooldown_ms(event).unwrap_or(DEFAULT_RECOVERABLE_COOLDOWN_MS);
+                let cooldown_ms = extract_recoverable_cooldown_ms(event)
+                    .unwrap_or(DEFAULT_RECOVERABLE_COOLDOWN_MS);
                 self.health_manager.cooldown_provider(
                     provider_key,
                     reason,
@@ -134,12 +162,9 @@ impl VirtualRouterEngineCore {
             ProviderErrorClassification::Unrecoverable => {
                 let cooldown_ms = compute_cooldown_until_next_local_midnight_ms(now)
                     .max(DEFAULT_UNRECOVERABLE_MIN_COOLDOWN_MS);
-                self.health_manager.trip_provider(
-                    provider_key,
-                    reason,
-                    Some(cooldown_ms),
-                    now,
-                );
+                self.health_manager
+                    .trip_provider(provider_key, reason, Some(cooldown_ms), now);
+                let _ = self.apply_qwen_auth_family_blacklist(event);
                 let _ = self.apply_antigravity_auth_verify_blacklist(event);
                 true
             }
@@ -197,7 +222,10 @@ const DEFAULT_RECOVERABLE_COOLDOWN_MS: i64 = 30_000;
 const DEFAULT_UNRECOVERABLE_MIN_COOLDOWN_MS: i64 = 5 * 60_000;
 
 fn event_affects_health(event: &Value) -> bool {
-    !matches!(event.get("affectsHealth").and_then(|v| v.as_bool()), Some(false))
+    !matches!(
+        event.get("affectsHealth").and_then(|v| v.as_bool()),
+        Some(false)
+    )
 }
 
 fn resolve_provider_key(event: &Value) -> Option<String> {
@@ -257,7 +285,9 @@ fn extract_recoverable_cooldown_ms(event: &Value) -> Option<i64> {
     if status == Some(429) && is_daily_limit_exceeded(event) {
         return Some(compute_cooldown_until_next_local_midnight_ms(now_ms()));
     }
-    if let Some(cooldown_ms) = extract_series_cooldown_detail(event).map(|detail| detail.cooldown_ms) {
+    if let Some(cooldown_ms) =
+        extract_series_cooldown_detail(event).map(|detail| detail.cooldown_ms)
+    {
         return Some(cooldown_ms);
     }
     None
@@ -267,9 +297,7 @@ fn is_daily_limit_exceeded(event: &Value) -> bool {
     let mut candidates: Vec<String> = Vec::new();
     collect_string_candidate(event.get("code"), &mut candidates);
     collect_string_candidate(
-        event
-            .get("error")
-            .and_then(|v| v.get("message")),
+        event.get("error").and_then(|v| v.get("message")),
         &mut candidates,
     );
     if let Some(details) = event.get("details").and_then(|v| v.as_object()) {
@@ -321,7 +349,11 @@ fn compute_cooldown_until_next_local_midnight_ms(now_ms: i64) -> i64 {
         return 24 * 60 * 60_000;
     };
     let ttl = next_midnight.timestamp_millis() - now_ms;
-    if ttl > 0 { ttl } else { 24 * 60 * 60_000 }
+    if ttl > 0 {
+        ttl
+    } else {
+        24 * 60 * 60_000
+    }
 }
 
 fn is_google_account_verification_required(event: &Value) -> bool {
@@ -361,6 +393,47 @@ fn is_google_account_verification_required(event: &Value) -> bool {
         || lowered.contains("validation url")
         || lowered.contains("accounts.google.com/signin/continue")
         || lowered.contains("support.google.com/accounts?p=al_alert")
+}
+
+fn is_qwen_auth_invalid_event(event: &Value) -> bool {
+    let mut sources: Vec<String> = Vec::new();
+    collect_string_candidate(event.get("code"), &mut sources);
+    collect_string_candidate(event.get("error").and_then(|v| v.get("code")), &mut sources);
+    collect_string_candidate(
+        event.get("error").and_then(|v| v.get("message")),
+        &mut sources,
+    );
+    if let Some(details) = event.get("details").and_then(|v| v.as_object()) {
+        collect_string_candidate(details.get("code"), &mut sources);
+        collect_string_candidate(details.get("upstreamCode"), &mut sources);
+        collect_string_candidate(details.get("reason"), &mut sources);
+        collect_string_candidate(details.get("message"), &mut sources);
+        collect_string_candidate(details.get("upstreamMessage"), &mut sources);
+        if let Some(meta) = details.get("meta").and_then(|v| v.as_object()) {
+            collect_string_candidate(meta.get("code"), &mut sources);
+            collect_string_candidate(meta.get("upstreamCode"), &mut sources);
+            collect_string_candidate(meta.get("reason"), &mut sources);
+            collect_string_candidate(meta.get("message"), &mut sources);
+            collect_string_candidate(meta.get("upstreamMessage"), &mut sources);
+        }
+    }
+    let status = event.get("status").and_then(|v| {
+        v.as_i64()
+            .or_else(|| v.as_u64().map(|value| value as i64))
+            .or_else(|| v.as_f64().map(|value| value.round() as i64))
+    });
+    if matches!(status, Some(401 | 402 | 403)) {
+        return true;
+    }
+    sources.into_iter().any(|source| {
+        let lowered = source.to_lowercase();
+        lowered.contains("invalid_api_key")
+            || lowered.contains("invalid api key")
+            || lowered.contains("invalid access token")
+            || lowered.contains("token expired")
+            || lowered.contains("http_401")
+            || lowered.contains("http_403")
+    })
 }
 
 fn resolve_antigravity_runtime_key(event: &Value) -> Option<String> {
@@ -473,6 +546,26 @@ mod tests {
         core
     }
 
+    fn build_test_core_with_providers(entries: &[(&str, &str)]) -> VirtualRouterEngineCore {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        for (provider_key, model_id) in entries {
+            providers.insert(
+                (*provider_key).to_string(),
+                json!({
+                    "providerKey": provider_key,
+                    "providerType": "openai",
+                    "modelId": model_id,
+                    "enabled": true
+                }),
+            );
+        }
+        core.provider_registry.load(&providers);
+        let provider_keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&provider_keys);
+        core
+    }
+
     fn build_error_event(provider_key: &str, classification: &str) -> Value {
         json!({
             "code": "HTTP_502",
@@ -489,7 +582,10 @@ mod tests {
         })
     }
 
-    fn provider_state(core: &VirtualRouterEngineCore, provider_key: &str) -> crate::virtual_router_engine::health::ProviderHealthState {
+    fn provider_state(
+        core: &VirtualRouterEngineCore,
+        provider_key: &str,
+    ) -> crate::virtual_router_engine::health::ProviderHealthState {
         core.health_manager
             .snapshot()
             .into_iter()
@@ -536,7 +632,9 @@ mod tests {
         let state = provider_state(&core, provider_key);
         assert_eq!(state.state, "tripped");
         assert_eq!(state.failure_count, 1);
-        let expiry = state.cooldown_expires_at.expect("recoverable cooldown expiry");
+        let expiry = state
+            .cooldown_expires_at
+            .expect("recoverable cooldown expiry");
         let ttl = expiry - started_at;
         assert!(ttl >= DEFAULT_RECOVERABLE_COOLDOWN_MS - 2_000, "ttl={ttl}");
         assert!(ttl <= DEFAULT_RECOVERABLE_COOLDOWN_MS + 5_000, "ttl={ttl}");
@@ -553,9 +651,49 @@ mod tests {
         let state = provider_state(&core, provider_key);
         assert_eq!(state.state, "tripped");
         assert!(state.failure_count >= 3);
-        let expiry = state.cooldown_expires_at.expect("unrecoverable cooldown expiry");
+        let expiry = state
+            .cooldown_expires_at
+            .expect("unrecoverable cooldown expiry");
         let ttl = expiry - started_at;
-        assert!(ttl >= DEFAULT_UNRECOVERABLE_MIN_COOLDOWN_MS - 2_000, "ttl={ttl}");
+        assert!(
+            ttl >= DEFAULT_UNRECOVERABLE_MIN_COOLDOWN_MS - 2_000,
+            "ttl={ttl}"
+        );
         assert!(ttl <= 24 * 60 * 60_000 + 5_000, "ttl={ttl}");
+    }
+
+    #[test]
+    fn qwen_invalid_auth_blacklists_qwen_family_until_midnight() {
+        let mut core = build_test_core_with_providers(&[
+            ("qwen.1.coder-model", "coder-model"),
+            ("qwen.2.coder-model", "coder-model"),
+            ("qwenchat.1.qwen3.6-plus", "qwen3.6-plus"),
+        ]);
+        let event = json!({
+            "code": "HTTP_401",
+            "message": "invalid access token or token expired",
+            "stage": "provider.send",
+            "status": 401,
+            "runtime": {
+                "requestId": "req-qwen-auth",
+                "providerKey": "qwen.1.coder-model"
+            },
+            "details": {
+                "errorClassification": "unrecoverable",
+                "upstreamCode": "invalid_api_key"
+            }
+        });
+
+        core.handle_provider_error(&event);
+
+        let qwen1 = provider_state(&core, "qwen.1.coder-model");
+        let qwen2 = provider_state(&core, "qwen.2.coder-model");
+        let qwenchat = provider_state(&core, "qwenchat.1.qwen3.6-plus");
+        assert_eq!(qwen1.state, "tripped");
+        assert_eq!(qwen2.state, "tripped");
+        assert!(qwen1.cooldown_expires_at.is_some());
+        assert!(qwen2.cooldown_expires_at.is_some());
+        assert_eq!(qwenchat.state, "healthy");
+        assert_eq!(qwenchat.cooldown_expires_at, None);
     }
 }

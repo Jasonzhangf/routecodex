@@ -189,3 +189,38 @@ export function buildProcessedRequestFromChatResponseWithNative(
     return fail(reason);
   }
 }
+
+export function restoreResponseContinuationSemanticsWithNative(
+  chatResponse: Record<string, unknown>,
+  requestSemantics?: Record<string, unknown>,
+  providerProtocol?: string
+): Record<string, unknown> {
+  const capability = 'restoreResponseContinuationSemanticsJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const chatResponseJson = safeStringify(chatResponse);
+  const requestSemanticsJson = safeStringify(requestSemantics ?? null);
+  if (!chatResponseJson || requestSemanticsJson === undefined) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(chatResponseJson, requestSemanticsJson, providerProtocol);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseJson(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}

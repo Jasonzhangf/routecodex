@@ -9,7 +9,9 @@ import {
   logRequestComplete,
   logRequestError,
   captureClientHeaders,
-  captureRawRequestBodyForMetadata
+  captureRawRequestBodyForMetadata,
+  mergePipelineMetadata,
+  readRequestBodyMetadata
 } from './handler-utils.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 import { trackClientConnectionState } from '../utils/client-connection-state.js';
@@ -35,6 +37,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       : {}) as ChatCompletionPayload;
     const isVideoRequest = payloadContainsVideoInput(payload);
     const originalPayload = captureRawRequestBodyForMetadata(payload) as ChatCompletionPayload;
+    const requestBodyMetadata = readRequestBodyMetadata(originalPayload);
     const clientHeaders = captureClientHeaders(req.headers);
     const clientConnectionState = trackClientConnectionState(req, res);
     const acceptsSse = typeof req.headers['accept'] === 'string'
@@ -71,7 +74,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       headers: req.headers as Record<string, unknown>,
       query: req.query as Record<string, unknown>,
       body: payload,
-      metadata: {
+      metadata: mergePipelineMetadata(requestBodyMetadata, {
         stream: wantsSSE,
         clientRequestId,
         clientStream: acceptsSse || undefined,
@@ -82,7 +85,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
         clientHeaders,
         clientConnectionState,
         ...(mockSampleReqId ? { mockSampleReqId } : {})
-      }
+      })
     });
     if (!hasSsePayload(result.body)) {
       logRequestComplete(entryEndpoint, requestId, result.status ?? 200, result.body, {

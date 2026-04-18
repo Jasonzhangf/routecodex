@@ -2,6 +2,9 @@ import { clearPendingServerToolInjection, loadPendingServerToolInjection } from 
 import { analyzePendingToolSync } from '../../../router/virtual-router/engine-selection/native-router-hotpath.js';
 import type { StandardizedMessage, StandardizedRequest } from '../types/standardized.js';
 
+const NON_BLOCKING_WARN_THROTTLE_MS = 60_000;
+const nonBlockingWarnByStage = new Map<string, number>();
+
 type PendingToolSyncDeps = {
   loadPendingServerToolInjectionFn?: (sessionId: string) => Promise<{
     afterToolCallIds?: unknown;
@@ -13,6 +16,46 @@ type PendingToolSyncDeps = {
     afterToolCallIds: string[]
   ) => { ready: boolean; insertAt: number };
 };
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function shouldLogNonBlockingStage(stage: string): boolean {
+  const now = Date.now();
+  const lastAt = nonBlockingWarnByStage.get(stage) ?? 0;
+  if (now - lastAt < NON_BLOCKING_WARN_THROTTLE_MS) {
+    return false;
+  }
+  nonBlockingWarnByStage.set(stage, now);
+  return true;
+}
+
+function logPendingToolSyncNonBlockingError(
+  stage: string,
+  operation: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  if (!shouldLogNonBlockingStage(stage)) {
+    return;
+  }
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[pending-tool-sync] stage=${stage} operation=${operation} failed (non-blocking): ${formatUnknownError(error)}${suffix}`
+    );
+  } catch {
+    void 0;
+  }
+}
 
 function readString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
@@ -85,8 +128,10 @@ export async function maybeInjectPendingServerToolResultsAfterClientTools(
     if (loadedSessionId) {
       await clearFn(loadedSessionId);
     }
-  } catch {
-    // best-effort
+  } catch (error) {
+    logPendingToolSyncNonBlockingError('session_cleanup', 'clear_pending_server_tool_injection', error, {
+      sessionId: loadedSessionId
+    });
   }
   return { ...request, messages: nextMessages };
 }

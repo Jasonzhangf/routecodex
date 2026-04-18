@@ -204,9 +204,9 @@ export interface ConversionConfig {
 
 // 预定义配置
 export const DEFAULT_CONVERSION_CONFIG: ConversionConfig = {
-  defaultTimeoutMs: 30000,
+  defaultTimeoutMs: 900000,
   heartbeatIntervalMs: 15000,
-  inactivityTimeoutMs: 60000,
+  inactivityTimeoutMs: 900000,
 
   defaultChunkSize: 12,
   defaultDelayMs: 8,

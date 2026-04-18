@@ -53,6 +53,23 @@ describe('stop_message_auto resolveStickyKey', () => {
     expect(key).toBe('req_chain_root');
   });
 
+  test('prefers unified continuation request-chain key across protocols', () => {
+    const key = resolveStickyKey({
+      providerProtocol: 'openai-chat',
+      requestId: 'req_chat_cont_1',
+      sessionId: 'session_should_lose',
+      continuation: {
+        chainId: 'req_chain_from_continuation',
+        stickyScope: 'request_chain',
+        resumeFrom: {
+          requestId: 'req_chain_from_continuation'
+        }
+      }
+    });
+
+    expect(key).toBe('req_chain_from_continuation');
+  });
+
   test('prefers responses resume chain over session scope', () => {
     const key = resolveStickyKey({
       providerProtocol: 'openai-responses',

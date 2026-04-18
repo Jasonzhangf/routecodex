@@ -1,8 +1,50 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../../src/server/runtime/handlers/types.js';
 import type { HubPipeline, ProviderHandle } from '../../../../src/server/runtime/http-server/types.js';
 import type { ProviderRuntimeManager } from '../../../../src/server/runtime/http-server/runtime-manager.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
+import {
+  saveRoutingInstructionStateSync
+} from '../../../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
+
+const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-request-executor-error-reporting-sessions');
+
+function createEmptyRoutingInstructionState() {
+  return {
+    forcedTarget: undefined,
+    stickyTarget: undefined,
+    preferTarget: undefined,
+    allowedProviders: new Set<string>(),
+    disabledProviders: new Set<string>(),
+    disabledKeys: new Map<string, Set<string | number>>(),
+    disabledModels: new Map<string, Set<string>>(),
+    stopMessageSource: undefined,
+    stopMessageText: undefined,
+    stopMessageMaxRepeats: undefined,
+    stopMessageUsed: undefined,
+    stopMessageUpdatedAt: undefined,
+    stopMessageLastUsedAt: undefined,
+    stopMessageStageMode: undefined,
+    stopMessageAiMode: undefined,
+    stopMessageAiSeedPrompt: undefined,
+    stopMessageAiHistory: undefined,
+    reasoningStopMode: undefined,
+    reasoningStopArmed: undefined,
+    reasoningStopSummary: undefined,
+    reasoningStopUpdatedAt: undefined,
+    preCommandSource: undefined,
+    preCommandScriptPath: undefined,
+    preCommandUpdatedAt: undefined
+  };
+}
+
+function seedStoplessSession(sessionId: string): void {
+  const state = createEmptyRoutingInstructionState();
+  state.reasoningStopMode = 'on';
+  saveRoutingInstructionStateSync(`session:${sessionId}`, state);
+}
 
 const mockEmitProviderError = jest.fn();
 
@@ -74,6 +116,9 @@ function createExecutor(pipelineResult: PipelineExecutionResult, handle: Provide
 describe('HubRequestExecutor provider error reporting', () => {
   beforeEach(() => {
     mockEmitProviderError.mockReset();
+    process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
+    fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+    fs.mkdirSync(SESSION_DIR, { recursive: true });
   });
 
   it('reports convert-side servertool followup failures through provider error reporter', async () => {
@@ -175,6 +220,55 @@ describe('HubRequestExecutor provider error reporting', () => {
         details: expect.objectContaining({
           source: 'provider.followup',
           reason: 'followup payload missing'
+        })
+      })
+    );
+  });
+
+  it('reports special_400 as direct client error without provider health impact', async () => {
+    const pipelineResult: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'crs.key2.gpt-5.3-codex',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:key',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const handle = createRuntimeHandle(async () => ({ ok: true }));
+    const { executor, request } = createExecutor(pipelineResult, handle);
+    jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockRejectedValue(
+        Object.assign(new Error('Your input exceeds the context window of this model.'), {
+          code: 'CONTEXT_LENGTH_EXCEEDED',
+          status: 400,
+          statusCode: 400,
+          retryable: false,
+          details: {
+            reason: 'context_length_exceeded'
+          }
+        })
+      );
+
+    await expect(executor.execute(request)).rejects.toMatchObject({
+      code: 'CONTEXT_LENGTH_EXCEEDED',
+      statusCode: 400
+    });
+
+    expect(mockEmitProviderError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'provider.send',
+        statusCode: 400,
+        recoverable: false,
+        affectsHealth: false,
+        details: expect.objectContaining({
+          source: 'provider.send',
+          errorClassification: 'special_400',
+          errorCode: 'CONTEXT_LENGTH_EXCEEDED'
         })
       })
     );
@@ -327,6 +421,99 @@ describe('HubRequestExecutor provider error reporting', () => {
           })
         })
       );
+    } finally {
+      if (previousMaxAttempts === undefined) {
+        delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      } else {
+        process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousMaxAttempts;
+      }
+    }
+  });
+
+  it('keeps stopless contract failures outside provider health reporting while preserving explicit stage', async () => {
+    const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
+    try {
+      const pipelineResult: PipelineExecutionResult = {
+        providerPayload: { data: { messages: [] } },
+        target: {
+          providerKey: 'ali-coding-plan.key1.qwen3-coder-next',
+          providerType: 'openai',
+          outboundProfile: 'openai-responses',
+          runtimeKey: 'runtime:key',
+          processMode: 'standard'
+        },
+        processMode: 'standard',
+        metadata: {}
+      };
+      const handle = createRuntimeHandle(async () => ({ ok: true }));
+      const { executor, request } = createExecutor(pipelineResult, handle);
+      seedStoplessSession('session_stopless_contract_health_neutral');
+      request.metadata = {
+        ...request.metadata,
+        sessionId: 'session_stopless_contract_health_neutral',
+        reasoningStopMode: 'on'
+      };
+      jest
+        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+        .mockResolvedValue({
+          status: 200,
+          body: {
+            status: 'completed',
+            output_text: 'done without reasoning.stop'
+          }
+        });
+
+      await expect(executor.execute(request)).rejects.toMatchObject({
+        code: 'STOPLESS_FINALIZATION_MISSING',
+        statusCode: 502,
+        requestExecutorProviderErrorStage: 'host.stopless_contract'
+      });
+
+      expect(mockEmitProviderError).not.toHaveBeenCalled();
+    } finally {
+      if (previousMaxAttempts === undefined) {
+        delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      } else {
+        process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousMaxAttempts;
+      }
+    }
+  });
+
+  it('keeps host response contract failures outside provider health reporting', async () => {
+    const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
+    try {
+      const pipelineResult: PipelineExecutionResult = {
+        providerPayload: { data: { messages: [] } },
+        target: {
+          providerKey: 'qwenchat.aliasA',
+          providerType: 'openai',
+          outboundProfile: 'openai-chat',
+          runtimeKey: 'runtime:key',
+          processMode: 'standard'
+        },
+        processMode: 'standard',
+        metadata: {}
+      };
+      const handle = createRuntimeHandle(async () => ({ ok: true }));
+      const { executor, request } = createExecutor(pipelineResult, handle);
+      jest
+        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+        .mockResolvedValue({
+          status: 200,
+          body: {
+            choices: [{ finish_reason: 'stop', message: { content: '' } }]
+          }
+        });
+
+      await expect(executor.execute(request)).rejects.toMatchObject({
+        code: 'EMPTY_ASSISTANT_RESPONSE',
+        statusCode: 502,
+        requestExecutorProviderErrorStage: 'host.response_contract'
+      });
+
+      expect(mockEmitProviderError).not.toHaveBeenCalled();
     } finally {
       if (previousMaxAttempts === undefined) {
         delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;

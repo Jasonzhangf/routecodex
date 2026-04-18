@@ -28,7 +28,7 @@ export class ResponsesSseToJsonConverterRefactored {
     strictMode: boolean;
     validateOutputItems: boolean;
   } = {
-    timeoutMs: 30000,
+    timeoutMs: 900000,
     enableEventValidation: true,
     enableSequenceValidation: false,
     strictMode: false,
@@ -185,6 +185,69 @@ export class ResponsesSseToJsonConverterRefactored {
     );
   }
 
+  private resolveSseFailureMetadata(error: Error): {
+    upstreamCode: string;
+    statusCode: number;
+    retryable: boolean;
+  } {
+    const explicitUpstreamCode =
+      typeof (error as { upstreamCode?: unknown }).upstreamCode === 'string'
+        ? String((error as { upstreamCode?: string }).upstreamCode).trim()
+        : '';
+    const explicitStatusCode =
+      typeof (error as { statusCode?: unknown }).statusCode === 'number'
+        ? Number((error as { statusCode?: number }).statusCode)
+        : typeof (error as { status?: unknown }).status === 'number'
+          ? Number((error as { status?: number }).status)
+          : undefined;
+    const explicitRetryable =
+      typeof (error as { retryable?: unknown }).retryable === 'boolean'
+        ? Boolean((error as { retryable?: boolean }).retryable)
+        : undefined;
+    const errorCode = typeof (error as { code?: unknown }).code === 'string'
+      ? String((error as { code?: string }).code).trim().toUpperCase()
+      : '';
+    const normalized = error.message.toLowerCase();
+    const normalizedUpstreamCode = explicitUpstreamCode.toLowerCase();
+    if (
+      normalizedUpstreamCode.includes('context_length_exceeded')
+      || normalizedUpstreamCode.includes('context_window_exceeded')
+      || normalizedUpstreamCode.includes('model_context_window_exceeded')
+      || errorCode === 'CONTEXT_LENGTH_EXCEEDED'
+      || normalized.includes('context_length_exceeded')
+      || normalized.includes('context window')
+    ) {
+      return {
+        upstreamCode: explicitUpstreamCode || 'context_length_exceeded',
+        statusCode: explicitStatusCode ?? 400,
+        retryable: explicitRetryable ?? false
+      };
+    }
+    if (explicitUpstreamCode || explicitStatusCode !== undefined || explicitRetryable !== undefined) {
+      return {
+        upstreamCode: explicitUpstreamCode || errorCode || 'SSE_TO_JSON_ERROR',
+        statusCode: explicitStatusCode ?? 502,
+        retryable: explicitRetryable ?? true
+      };
+    }
+    if (errorCode === 'UPSTREAM_STREAM_IDLE_TIMEOUT' || normalized.includes('upstream_stream_idle_timeout')) {
+      return { upstreamCode: 'UPSTREAM_STREAM_IDLE_TIMEOUT', statusCode: 504, retryable: true };
+    }
+    if (errorCode === 'UPSTREAM_STREAM_TIMEOUT' || normalized.includes('upstream_stream_timeout')) {
+      return { upstreamCode: 'UPSTREAM_STREAM_TIMEOUT', statusCode: 504, retryable: true };
+    }
+    if (errorCode === 'UPSTREAM_HEADERS_TIMEOUT' || normalized.includes('upstream_headers_timeout')) {
+      return { upstreamCode: 'UPSTREAM_HEADERS_TIMEOUT', statusCode: 504, retryable: true };
+    }
+    if (errorCode === 'UPSTREAM_STREAM_INCOMPLETE' || normalized.includes('stream incomplete')) {
+      return { upstreamCode: 'UPSTREAM_STREAM_INCOMPLETE', statusCode: 502, retryable: true };
+    }
+    if (errorCode === 'TERMINATED' || normalized.includes('terminated')) {
+      return { upstreamCode: 'UPSTREAM_STREAM_TERMINATED', statusCode: 502, retryable: true };
+    }
+    return { upstreamCode: errorCode || 'SSE_TO_JSON_ERROR', statusCode: 502, retryable: true };
+  }
+
   /**
    * 创建可读流
    */
@@ -259,6 +322,8 @@ export class ResponsesSseToJsonConverterRefactored {
       case 'response.created':
       case 'response.in_progress':
       case 'response.completed':
+      case 'response.failed':
+      case 'response.incomplete':
       case 'response.required_action':
       case 'response.done':
         context.eventStats.messageEventsCount++;
@@ -298,11 +363,31 @@ export class ResponsesSseToJsonConverterRefactored {
    * 包装错误
    */
   private wrapError(code: string, originalError: Error, requestId: string): Error {
-    return ErrorUtils.createError(
+    const failure = this.resolveSseFailureMetadata(originalError);
+    const wrapped = ErrorUtils.createError(
       `${code}: ${originalError.message}`,
       code,
-      { requestId, originalError }
-    );
+      {
+        requestId,
+        originalError,
+        upstreamCode: failure.upstreamCode,
+        statusCode: failure.statusCode,
+        retryable: failure.retryable,
+        requestExecutorProviderErrorStage: 'provider.sse_decode'
+      }
+    ) as Error & {
+      status?: number;
+      statusCode?: number;
+      retryable?: boolean;
+      upstreamCode?: string;
+      requestExecutorProviderErrorStage?: string;
+    };
+    wrapped.status = failure.statusCode;
+    wrapped.statusCode = failure.statusCode;
+    wrapped.retryable = failure.retryable;
+    wrapped.upstreamCode = failure.upstreamCode;
+    wrapped.requestExecutorProviderErrorStage = 'provider.sse_decode';
+    return wrapped;
   }
 
   /**

@@ -29,9 +29,11 @@ export {
 export {
   convertResponsesOutputToInputItemsWithNative,
   enforceChatBudgetWithNative,
+  materializeResponsesContinuationPayloadWithNative,
   pickResponsesPersistedFieldsWithNative,
   prepareResponsesConversationEntryWithNative,
   resolveBudgetForModelWithNative,
+  restoreResponsesContinuationPayloadWithNative,
   resumeResponsesConversationPayloadWithNative
 } from './native-shared-conversion-semantics-responses.js';
 export {

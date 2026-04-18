@@ -16,17 +16,15 @@ export type CapturedChatSeed = {
 };
 
 function resolveFollowupModel(seedModel: unknown, adapterContext: unknown): string {
-  if (typeof seedModel === 'string' && seedModel.trim()) {
-    return seedModel.trim();
-  }
   if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
-    return '';
+    return typeof seedModel === 'string' && seedModel.trim() ? seedModel.trim() : '';
   }
   const record = adapterContext as Record<string, unknown>;
   const candidates: unknown[] = [
-    record.model,
-    record.modelId,
     record.assignedModelId,
+    record.modelId,
+    seedModel,
+    record.model,
     record.originalModelId
   ];
   for (const value of candidates) {

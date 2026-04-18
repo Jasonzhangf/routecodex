@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import {
   buildQwenChatSendPlan,
+  classifyQwenChatProviderIdentity,
   collectQwenSseAsOpenAiResult,
   createOpenAiMappedSseStream,
   createQwenChatSession,
@@ -52,6 +53,16 @@ describe('qwenchat-http-provider helpers', () => {
     } as any);
 
     expect(payload.stream).toBe(false);
+  });
+
+  it('treats chat:qwen compatibility profile as qwenchat transport identity', () => {
+    expect(
+      classifyQwenChatProviderIdentity({
+        providerFamily: 'qwen',
+        providerId: 'qwen',
+        compatibilityProfile: 'chat:qwen'
+      })
+    ).toBe(true);
   });
 
   it('falls back to runtime capturedChatRequest tools when payload.tools are absent', () => {

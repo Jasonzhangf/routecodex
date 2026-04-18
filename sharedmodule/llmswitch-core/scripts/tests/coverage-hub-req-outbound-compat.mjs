@@ -131,7 +131,7 @@ async function main() {
     });
     assert.equal(result.nativeApplied, true);
     assert.equal(result.appliedProfile, 'chat:qwen');
-    assert.equal(result.payload.model, 'qwen3-coder-plus');
+    assert.equal(result.payload.model, 'coder-model');
     assert.equal(result.payload.messages?.[0]?.content, 'hello-qwen-native');
     assert.equal(result.payload.max_tokens, 128);
     assert.equal(result.payload.tools?.[0]?.function?.name, 'exec_command');
@@ -626,7 +626,7 @@ async function main() {
         }
       }
     });
-    assert.equal(payload.model, 'qwen3-coder-plus');
+    assert.equal(payload.model, 'coder-model');
     assert.equal(stageEvents.length, 1);
     assert.equal(stageEvents[0]?.value?.profile, 'chat:qwen');
   }

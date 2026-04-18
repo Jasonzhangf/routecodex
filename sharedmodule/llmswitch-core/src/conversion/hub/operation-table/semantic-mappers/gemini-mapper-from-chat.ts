@@ -21,7 +21,11 @@ import {
   applyAntigravityThinkingConfig,
   buildGenerationConfigFromParameters
 } from './gemini-thinking-config.js';
-import { appendLossyFieldAudit } from './gemini-mapping-audit.js';
+import {
+  appendLossyFieldAudit,
+  appendPreservedFieldAudit,
+  appendUnsupportedFieldAudit
+} from './gemini-mapping-audit.js';
 import {
   buildFunctionResponseEntry,
   cloneAsJsonValue,
@@ -63,6 +67,13 @@ export function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnv
   const isAntigravityProvider = providerIdPrefix === 'antigravity';
   const parameters = chat.parameters && typeof chat.parameters === 'object' ? (chat.parameters as Record<string, unknown>) : {};
   const responsesOrigin = isResponsesOrigin(chat);
+  if (Object.prototype.hasOwnProperty.call(parameters, 'response_format')) {
+    appendUnsupportedFieldAudit(chat, {
+      field: 'response_format',
+      targetProtocol: 'gemini-chat',
+      reason: 'structured_output_not_supported'
+    });
+  }
   recordGeminiResponsesDroppedParameters(chat, parameters, responsesOrigin);
   const keepReasoning =
     Boolean((parameters as { keep_thinking?: unknown }).keep_thinking) ||
@@ -307,6 +318,13 @@ export function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnv
     for (const [key, value] of Object.entries(passthrough)) {
       (request.metadata as JsonObject)[key] = value;
     }
+  }
+  if (Object.prototype.hasOwnProperty.call(parameters, 'tool_choice')) {
+    appendPreservedFieldAudit(chat, {
+      field: 'tool_choice',
+      targetProtocol: 'gemini-chat',
+      reason: 'preserved_via_metadata_passthrough'
+    });
   }
 
   if (isAntigravityProvider) {

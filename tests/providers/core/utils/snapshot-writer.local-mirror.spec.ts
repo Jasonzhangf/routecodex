@@ -76,8 +76,17 @@ describe('provider snapshot writer local mirror', () => {
       requestId,
       'provider-response.json'
     );
+    const runtimePath = path.join(
+      tempDir,
+      'openai-responses',
+      providerKey,
+      requestId,
+      '__runtime.json'
+    );
     const raw = await fs.readFile(filePath, 'utf-8');
+    const runtimeRaw = await fs.readFile(runtimePath, 'utf-8');
     const parsed = JSON.parse(raw) as { meta?: Record<string, unknown>; body?: Record<string, unknown> };
+    const runtimeParsed = JSON.parse(runtimeRaw) as Record<string, unknown>;
 
     expect(writeSnapshotViaHooksMock).toHaveBeenCalledTimes(1);
     expect(parsed.meta?.stage).toBe('provider-response');
@@ -86,5 +95,8 @@ describe('provider snapshot writer local mirror', () => {
       captureSse: true,
       transport: 'upstream-stream'
     });
+    expect(runtimeParsed.requestId).toBe(requestId);
+    expect(runtimeParsed.groupRequestId).toBe(requestId);
+    expect(runtimeParsed.providerKey).toBe(providerKey);
   });
 });

@@ -1,5 +1,8 @@
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
-import { resolveQwenCodeUserAgent } from '../core/utils/qwen-client-fingerprint.js';
+import {
+  buildQwenStainlessHeaderEntries,
+  resolveQwenCodeUserAgent
+} from '../core/utils/qwen-client-fingerprint.js';
 
 /**
  * Qwen UserInfo 获取API Key的辅助函数
@@ -26,6 +29,39 @@ export interface QwenTokenData {
   email?: string;
   type?: string;
   norefresh?: boolean;
+}
+
+type ValidateQwenAccessTokenOptions = {
+  accessToken: string;
+  resourceUrl?: string;
+  model?: string;
+};
+
+const QWEN_DEFAULT_RUNTIME_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+
+function resolveValidatedQwenRuntimeBaseUrl(resourceUrl?: string): string {
+  const rawBase = typeof resourceUrl === 'string' ? resourceUrl.trim() : '';
+  if (!rawBase) {
+    return QWEN_DEFAULT_RUNTIME_BASE_URL;
+  }
+  let baseUrl = rawBase;
+  if (!/^https?:\/\//i.test(baseUrl)) {
+    baseUrl = `https://${baseUrl}`;
+  }
+  baseUrl = baseUrl.replace(/\/+$/, '');
+  try {
+    const parsed = new URL(baseUrl);
+    const host = parsed.hostname.trim().toLowerCase();
+    const pathname = parsed.pathname.replace(/\/+$/, '');
+    const isLegacyPortalHost = host === 'portal.qwen.ai' || host === 'chat.qwen.ai';
+    const isDashscopeCompatibleHost = host === 'dashscope.aliyuncs.com' && /^\/compatible-mode(?:\/v1)?$/i.test(pathname);
+    if (!isLegacyPortalHost && isDashscopeCompatibleHost) {
+      return `${parsed.origin}${pathname.endsWith('/v1') ? pathname : `${pathname}/v1`}`;
+    }
+  } catch {
+    // Fall through to default runtime.
+  }
+  return QWEN_DEFAULT_RUNTIME_BASE_URL;
 }
 
 /**
@@ -118,6 +154,67 @@ export async function fetchQwenUserInfo(accessToken: string): Promise<QwenUserIn
     }
     throw new Error(`fetchQwenUserInfo: request failed - ${String(error)}`);
   }
+}
+
+/**
+ * 用真实业务请求验证 Qwen access_token 是否可用于推理接口。
+ * 只在严格校验（refresh / interactive acquire）时使用，避免把坏 token 写进 tokenFile 后再伪装成功。
+ */
+export async function validateQwenAccessToken(options: ValidateQwenAccessTokenOptions): Promise<void> {
+  const accessToken = typeof options.accessToken === 'string' ? options.accessToken.trim() : '';
+  if (!accessToken) {
+    throw new Error('validateQwenAccessToken: access token is empty');
+  }
+
+  const model =
+    typeof options.model === 'string' && options.model.trim()
+      ? options.model.trim()
+      : 'coder-model';
+  const userAgent = resolveQwenCodeUserAgent();
+  const baseUrl = resolveValidatedQwenRuntimeBaseUrl(options.resourceUrl);
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Authorization': `Bearer ${accessToken}`,
+      'User-Agent': userAgent,
+      'X-DashScope-CacheControl': 'enable',
+      'X-DashScope-UserAgent': userAgent,
+      'X-DashScope-AuthType': 'qwen-oauth',
+      ...buildQwenStainlessHeaderEntries()
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: 'system',
+          content: [
+            {
+              type: 'text',
+              text: '',
+              cache_control: { type: 'ephemeral' }
+            }
+          ]
+        },
+        {
+          role: 'user',
+          content: 'Reply with exactly OK.'
+        }
+      ],
+      stream: false,
+      max_tokens: 1
+    })
+  });
+
+  if (response.ok) {
+    await response.text().catch(() => '');
+    return;
+  }
+
+  const body = await response.text().catch(() => 'unknown error');
+  throw new Error(`validateQwenAccessToken: HTTP ${response.status} ${response.statusText} - ${body}`);
 }
 
 /**

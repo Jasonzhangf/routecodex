@@ -1,5 +1,9 @@
 import type { JsonObject } from '../../../conversion/hub/types/json.js';
 import { readRuntimeMetadata } from '../../../conversion/runtime-metadata.js';
+import {
+  resolveContinuationRequestChainKey as resolveRouterContinuationRequestChainKey,
+  resolveLegacyResponsesRequestChainKey
+} from '../../../router/virtual-router/engine/routing-state/keys.js';
 import type { RoutingInstructionState } from '../../../router/virtual-router/routing-instructions.js';
 import {
   saveRoutingInstructionStateSync
@@ -12,6 +16,7 @@ export function resolveStickyKey(
   record: {
     requestId?: unknown;
     providerProtocol?: unknown;
+    continuation?: unknown;
     responsesResume?: unknown;
     sessionId?: unknown;
     conversationId?: unknown;
@@ -20,6 +25,10 @@ export function resolveStickyKey(
   },
   runtimeMetadata?: unknown
 ): string | undefined {
+  const requestChainStickyKey = resolveContinuationRequestChainKey(record, runtimeMetadata);
+  if (requestChainStickyKey) {
+    return requestChainStickyKey;
+  }
   const providerProtocol = toNonEmptyText(record.providerProtocol).toLowerCase();
   if (providerProtocol === 'openai-responses') {
     const previousRequestId = resolveResponsesPreviousRequestId(record, runtimeMetadata);
@@ -76,7 +85,39 @@ export function resolveStopMessageSessionScope(
   },
   runtimeMetadata?: unknown
 ): string | undefined {
-  return resolveStopMessageInjectScope(record, runtimeMetadata);
+  const runtime = asRecord(runtimeMetadata);
+  const runtimeInjectScope = toNonEmptyText(runtime?.stopMessageClientInjectSessionScope);
+  if (
+    runtimeInjectScope &&
+    (
+      runtimeInjectScope.startsWith('tmux:')
+      || runtimeInjectScope.startsWith('session:')
+      || runtimeInjectScope.startsWith('conversation:')
+    )
+  ) {
+    return runtimeInjectScope;
+  }
+
+  const directTmuxSessionId =
+    toNonEmptyText(record.clientTmuxSessionId) ||
+    toNonEmptyText(record.client_tmux_session_id) ||
+    toNonEmptyText(record.tmuxSessionId) ||
+    toNonEmptyText(record.tmux_session_id);
+  if (directTmuxSessionId) {
+    return `tmux:${directTmuxSessionId}`;
+  }
+
+  const directSessionId = toNonEmptyText(record.sessionId);
+  if (directSessionId) {
+    return `session:${directSessionId}`;
+  }
+
+  const directConversationId = toNonEmptyText(record.conversationId);
+  if (directConversationId) {
+    return `conversation:${directConversationId}`;
+  }
+
+  return undefined;
 }
 
 export function resolveRuntimeStopMessageState(runtimeMetadata: unknown): {
@@ -171,12 +212,36 @@ function resolveResponsesPreviousRequestId(
   return '';
 }
 
-function readPreviousRequestId(value: unknown): string {
-  const row = asRecord(value);
-  if (!row) {
-    return '';
+function resolveContinuationRequestChainKey(
+  record: {
+    continuation?: unknown;
+    metadata?: unknown;
+  },
+  runtimeMetadata?: unknown
+): string {
+  const direct = readContinuationRequestChainKey(record.continuation);
+  if (direct) {
+    return direct;
   }
-  return toNonEmptyText(row.previousRequestId);
+  const metadata = asRecord(record.metadata);
+  const fromMetadata = readContinuationRequestChainKey(metadata?.continuation);
+  if (fromMetadata) {
+    return fromMetadata;
+  }
+  const runtime = asRecord(runtimeMetadata);
+  const fromRuntime = readContinuationRequestChainKey(runtime?.continuation);
+  if (fromRuntime) {
+    return fromRuntime;
+  }
+  return '';
+}
+
+function readContinuationRequestChainKey(value: unknown): string {
+  return resolveRouterContinuationRequestChainKey(value) ?? '';
+}
+
+function readPreviousRequestId(value: unknown): string {
+  return resolveLegacyResponsesRequestChainKey(value) ?? '';
 }
 
 export function resolveBdWorkingDirectoryForRecord(

@@ -58,7 +58,6 @@ export interface RequestStageInboundResult<TContext = Record<string, unknown>> {
   nodeResults: HubPipelineNodeResult[];
   hasImageAttachment: boolean;
   serverToolRequired: boolean;
-  responsesResume?: Record<string, unknown>;
 }
 
 export async function executeRequestStageInbound<TContext = Record<string, unknown>>(args: {
@@ -316,9 +315,8 @@ export async function executeRequestStageInbound<TContext = Record<string, unkno
       ((normalized.metadata = {}) as Record<string, unknown>),
   });
 
-  // responsesResume is a client-protocol semantic (/v1/responses tool loop) and must live in chat.semantics.
-  // Do not read it from metadata once entering chat_process.
-  const { responsesResume, hasImageAttachment, serverToolRequired } =
+  // request continuation/state must be consumed from chat.semantics once entering chat_process.
+  const { hasImageAttachment, serverToolRequired } =
     deriveWorkingRequestFlags(workingRequest);
 
   return {
@@ -336,6 +334,5 @@ export async function executeRequestStageInbound<TContext = Record<string, unkno
     nodeResults,
     hasImageAttachment,
     serverToolRequired,
-    responsesResume,
   };
 }

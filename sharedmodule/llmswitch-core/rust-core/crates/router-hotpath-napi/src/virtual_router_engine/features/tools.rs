@@ -60,8 +60,12 @@ const SEARCH_TOOL_EXACT: &[&str] = &[
     "list_dir",
 ];
 
-const READ_TOOL_KEYWORDS: &[&str] = &["read", "view", "download", "open", "show", "fetch", "inspect"];
-const WRITE_TOOL_KEYWORDS: &[&str] = &["write", "patch", "modify", "edit", "create", "update", "append", "replace", "save"];
+const READ_TOOL_KEYWORDS: &[&str] = &[
+    "read", "view", "download", "open", "show", "fetch", "inspect",
+];
+const WRITE_TOOL_KEYWORDS: &[&str] = &[
+    "write", "patch", "modify", "edit", "create", "update", "append", "replace", "save",
+];
 const SEARCH_TOOL_KEYWORDS: &[&str] = &["find", "grep", "glob", "lookup", "locate"];
 const WEB_TOOL_KEYWORDS: &[&str] = &[
     "websearch",
@@ -74,14 +78,28 @@ const WEB_TOOL_KEYWORDS: &[&str] = &[
     "internet_search",
 ];
 const SHELL_TOOL_NAMES: &[&str] = &["shell_command", "shell", "bash", "exec_command"];
-const SHELL_READ_COMMANDS: &[&str] = &["cat", "head", "tail", "awk", "strings", "less", "more", "nl"];
+const SHELL_READ_COMMANDS: &[&str] = &[
+    "cat", "head", "tail", "awk", "strings", "less", "more", "nl",
+];
 const SHELL_SEARCH_COMMANDS: &[&str] = &[
-    "rg", "ripgrep", "grep", "egrep", "fgrep", "ag", "ack", "find", "fd", "locate", "codesearch",
+    "rg",
+    "ripgrep",
+    "grep",
+    "egrep",
+    "fgrep",
+    "ag",
+    "ack",
+    "find",
+    "fd",
+    "locate",
+    "codesearch",
 ];
 const SHELL_WRITE_COMMANDS: &[&str] = &["apply_patch", "tee", "touch", "truncate", "patch"];
-const SHELL_REDIRECT_WRITE_BINARIES: &[&str] =
-    &["cat", "printf", "python", "node", "perl", "ruby", "php", "bash", "sh", "zsh", "echo"];
-const SHELL_WRAPPER_COMMANDS: &[&str] = &["sudo", "env", "time", "nice", "nohup", "command", "stdbuf"];
+const SHELL_REDIRECT_WRITE_BINARIES: &[&str] = &[
+    "cat", "printf", "python", "node", "perl", "ruby", "php", "bash", "sh", "zsh", "echo",
+];
+const SHELL_WRAPPER_COMMANDS: &[&str] =
+    &["sudo", "env", "time", "nice", "nohup", "command", "stdbuf"];
 
 fn extract_tool_name(tool: &Value) -> String {
     if let Some(name) = tool
@@ -299,7 +317,10 @@ fn classify_tool_call(call: &Value) -> Option<ToolClassification> {
         "other".to_string()
     };
 
-    let category = if WEB_TOOL_KEYWORDS.iter().any(|keyword| function_name.contains(keyword)) {
+    let category = if WEB_TOOL_KEYWORDS
+        .iter()
+        .any(|keyword| function_name.contains(keyword))
+    {
         "websearch".to_string()
     } else if name_category == "write" || shell_category == "write" {
         "write".to_string()
@@ -357,7 +378,9 @@ fn extract_command_text(args: Option<&Value>) -> String {
     let Some(record) = value.as_object() else {
         return String::new();
     };
-    for key in ["command", "cmd", "input", "code", "script", "text", "prompt"] {
+    for key in [
+        "command", "cmd", "input", "code", "script", "text", "prompt",
+    ] {
         if let Some(text) = record.get(key).and_then(|v| v.as_str()) {
             if !text.trim().is_empty() {
                 return text.to_string();
@@ -388,7 +411,10 @@ fn extract_command_text(args: Option<&Value>) -> String {
 }
 
 fn build_command_snippet(command_text: &str) -> Option<String> {
-    let collapsed = command_text.split_whitespace().collect::<Vec<&str>>().join(" ");
+    let collapsed = command_text
+        .split_whitespace()
+        .collect::<Vec<&str>>()
+        .join(" ");
     let trimmed = collapsed.trim();
     if trimmed.is_empty() {
         return None;
@@ -402,7 +428,9 @@ fn build_command_snippet(command_text: &str) -> Option<String> {
 fn categorize_tool_name(name: &str) -> String {
     let normalized = name.to_lowercase();
     if SEARCH_TOOL_EXACT.iter().any(|item| *item == normalized)
-        || SEARCH_TOOL_KEYWORDS.iter().any(|keyword| normalized.contains(keyword))
+        || SEARCH_TOOL_KEYWORDS
+            .iter()
+            .any(|keyword| normalized.contains(keyword))
         || normalized == "list"
         || normalized.starts_with("list_")
         || normalized.starts_with("list-")
@@ -415,10 +443,16 @@ fn categorize_tool_name(name: &str) -> String {
     if WRITE_TOOL_EXACT.iter().any(|item| *item == normalized) {
         return "write".to_string();
     }
-    if READ_TOOL_KEYWORDS.iter().any(|keyword| normalized.contains(keyword)) {
+    if READ_TOOL_KEYWORDS
+        .iter()
+        .any(|keyword| normalized.contains(keyword))
+    {
         return "read".to_string();
     }
-    if WRITE_TOOL_KEYWORDS.iter().any(|keyword| normalized.contains(keyword)) {
+    if WRITE_TOOL_KEYWORDS
+        .iter()
+        .any(|keyword| normalized.contains(keyword))
+    {
         return "write".to_string();
     }
     String::from("other")
@@ -432,7 +466,10 @@ fn classify_shell_command(command: &str) -> String {
     if normalized.contains("<<") {
         return "write".to_string();
     }
-    if SHELL_WRITE_COMMANDS.iter().any(|cmd| contains_command(&normalized, cmd)) {
+    if SHELL_WRITE_COMMANDS
+        .iter()
+        .any(|cmd| contains_command(&normalized, cmd))
+    {
         return "write".to_string();
     }
     if contains_command(&normalized, "sed") && normalized.contains(" -i") {
@@ -448,7 +485,10 @@ fn classify_shell_command(command: &str) -> String {
     {
         return "write".to_string();
     }
-    if SHELL_SEARCH_COMMANDS.iter().any(|cmd| contains_command(&normalized, cmd)) {
+    if SHELL_SEARCH_COMMANDS
+        .iter()
+        .any(|cmd| contains_command(&normalized, cmd))
+    {
         return "search".to_string();
     }
     if contains_command(&normalized, "git")
@@ -461,7 +501,10 @@ fn classify_shell_command(command: &str) -> String {
     if contains_command(&normalized, "bd") && normalized.contains(" search") {
         return "search".to_string();
     }
-    if SHELL_READ_COMMANDS.iter().any(|cmd| contains_command(&normalized, cmd)) {
+    if SHELL_READ_COMMANDS
+        .iter()
+        .any(|cmd| contains_command(&normalized, cmd))
+    {
         return "read".to_string();
     }
     if contains_command(&normalized, "sed") {
@@ -495,7 +538,9 @@ fn strip_shell_wrapper(command: &str) -> String {
 
 fn contains_command(command: &str, target: &str) -> bool {
     command
-        .split(|ch: char| ch.is_whitespace() || ch == '|' || ch == ';' || ch == '&' || ch == '\n' || ch == '\r')
+        .split(|ch: char| {
+            ch.is_whitespace() || ch == '|' || ch == ';' || ch == '&' || ch == '\n' || ch == '\r'
+        })
         .filter(|token| !token.is_empty())
         .map(normalize_binary_name)
         .any(|token| token == target)
@@ -557,7 +602,10 @@ mod tests {
         })];
 
         let result = detect_last_assistant_tool_category(&messages);
-        assert_eq!(result.as_ref().map(|item| item.category.as_str()), Some("search"));
+        assert_eq!(
+            result.as_ref().map(|item| item.category.as_str()),
+            Some("search")
+        );
     }
 
     #[test]

@@ -30,6 +30,31 @@ function parseResponsesConversationResumeResult(
   };
 }
 
+function parseNullableResponsesConversationResumeResult(
+  raw: string
+): { payload: Record<string, unknown>; meta: Record<string, unknown> } | null {
+  const parsed = parseJson(raw);
+  if (parsed === null) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const row = parsed as Record<string, unknown>;
+  const payload = row.payload;
+  const meta = row.meta;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+    return null;
+  }
+  return {
+    payload: payload as Record<string, unknown>,
+    meta: meta as Record<string, unknown>
+  };
+}
+
 export function pickResponsesPersistedFieldsWithNative(payload: unknown): Record<string, unknown> {
   const capability = 'pickResponsesPersistedFieldsJson';
   const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
@@ -176,6 +201,72 @@ export function resumeResponsesConversationPayloadWithNative(
     }
     const parsed = parseResponsesConversationResumeResult(raw);
     return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function restoreResponsesContinuationPayloadWithNative(
+  entry: unknown,
+  incomingPayload: unknown,
+  requestId?: string,
+  scopeKey?: string
+): { payload: Record<string, unknown>; meta: Record<string, unknown> } | null {
+  const capability = 'restoreResponsesContinuationPayloadJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<{ payload: Record<string, unknown>; meta: Record<string, unknown> } | null>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const entryJson = safeStringify(entry ?? null);
+  const incomingPayloadJson = safeStringify(incomingPayload ?? null);
+  if (!entryJson || !incomingPayloadJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(entryJson, incomingPayloadJson, requestId, scopeKey);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return parseNullableResponsesConversationResumeResult(raw);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function materializeResponsesContinuationPayloadWithNative(
+  entry: unknown,
+  incomingPayload: unknown,
+  requestId?: string,
+  scopeKey?: string
+): { payload: Record<string, unknown>; meta: Record<string, unknown> } | null {
+  const capability = 'materializeResponsesContinuationPayloadJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<{ payload: Record<string, unknown>; meta: Record<string, unknown> } | null>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const entryJson = safeStringify(entry ?? null);
+  const incomingPayloadJson = safeStringify(incomingPayload ?? null);
+  if (!entryJson || !incomingPayloadJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(entryJson, incomingPayloadJson, requestId, scopeKey);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return parseNullableResponsesConversationResumeResult(raw);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

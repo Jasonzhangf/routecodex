@@ -3,6 +3,7 @@ import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conve
 import { ResponsesSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/semantic-mappers/responses-mapper.js';
 import { AnthropicSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/semantic-mappers/anthropic-mapper.js';
 import { GeminiSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/semantic-mappers/gemini-mapper.js';
+import { readProtocolMappingAudit } from '../../sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/protocol-mapping-audit.js';
 
 function createResponsesContext(requestId: string): AdapterContext {
   return {
@@ -63,12 +64,11 @@ describe('responses cross-protocol dropped/lossy audit matrix', () => {
     expect(payload.store).toBeUndefined();
     expect(payload.thinking).toBeDefined();
 
-    const audit = (chat.metadata as any)?.mappingAudit;
+    const audit = readProtocolMappingAudit(chat as any);
     expect(audit).toBeDefined();
     const dropped = extractFieldSet(audit?.dropped);
     for (const field of [
       'prompt_cache_key',
-      'response_format',
       'parallel_tool_calls',
       'service_tier',
       'truncation',
@@ -77,6 +77,8 @@ describe('responses cross-protocol dropped/lossy audit matrix', () => {
     ]) {
       expect(dropped.has(field)).toBe(true);
     }
+    const unsupported = extractFieldSet(audit?.unsupported);
+    expect(unsupported.has('response_format')).toBe(true);
 
     const lossy = extractFieldSet(audit?.lossy);
     expect(lossy.has('reasoning')).toBe(true);
@@ -124,12 +126,11 @@ describe('responses cross-protocol dropped/lossy audit matrix', () => {
     expect(payload.store).toBeUndefined();
     expect(payload.generationConfig?.thinkingConfig).toBeDefined();
 
-    const audit = (chat.metadata as any)?.mappingAudit;
+    const audit = readProtocolMappingAudit(chat as any);
     expect(audit).toBeDefined();
     const dropped = extractFieldSet(audit?.dropped);
     for (const field of [
       'prompt_cache_key',
-      'response_format',
       'parallel_tool_calls',
       'service_tier',
       'truncation',
@@ -138,6 +139,8 @@ describe('responses cross-protocol dropped/lossy audit matrix', () => {
     ]) {
       expect(dropped.has(field)).toBe(true);
     }
+    const unsupported = extractFieldSet(audit?.unsupported);
+    expect(unsupported.has('response_format')).toBe(true);
 
     const lossy = extractFieldSet(audit?.lossy);
     expect(lossy.has('reasoning')).toBe(true);

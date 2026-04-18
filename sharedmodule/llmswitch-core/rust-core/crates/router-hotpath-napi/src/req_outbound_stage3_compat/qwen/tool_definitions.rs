@@ -111,10 +111,7 @@ pub(crate) fn normalize_qwen_family_tool_definitions(root: &Map<String, Value>) 
             if let Some(properties) = params.get_mut("properties").and_then(|v| v.as_object_mut()) {
                 if let Some(cmd_prop) = properties.get_mut("cmd").and_then(|v| v.as_object_mut()) {
                     let before = cmd_prop.get("description").cloned().unwrap_or(Value::Null);
-                    append_property_description(
-                        cmd_prop,
-                        "Single command string only.",
-                    );
+                    append_property_description(cmd_prop, "Single command string only.");
                     if cmd_prop.get("description").cloned().unwrap_or(Value::Null) != before {
                         changed = true;
                     }
@@ -139,7 +136,8 @@ pub(crate) fn normalize_qwen_family_tool_definitions(root: &Map<String, Value>) 
                         changed = true;
                     }
                 }
-                if let Some(plan_prop) = properties.get_mut("plan").and_then(|v| v.as_object_mut()) {
+                if let Some(plan_prop) = properties.get_mut("plan").and_then(|v| v.as_object_mut())
+                {
                     let before = plan_prop.get("description").cloned().unwrap_or(Value::Null);
                     append_property_description(
                         plan_prop,
@@ -149,17 +147,15 @@ pub(crate) fn normalize_qwen_family_tool_definitions(root: &Map<String, Value>) 
                         changed = true;
                     }
                 }
-                if let Some(session_prop) =
-                    properties.get_mut("session_id").and_then(|v| v.as_object_mut())
+                if let Some(session_prop) = properties
+                    .get_mut("session_id")
+                    .and_then(|v| v.as_object_mut())
                 {
                     let before = session_prop
                         .get("description")
                         .cloned()
                         .unwrap_or(Value::Null);
-                    append_property_description(
-                        session_prop,
-                        "Numeric exec session id only.",
-                    );
+                    append_property_description(session_prop, "Numeric exec session id only.");
                     if session_prop
                         .get("description")
                         .cloned()
@@ -169,14 +165,20 @@ pub(crate) fn normalize_qwen_family_tool_definitions(root: &Map<String, Value>) 
                         changed = true;
                     }
                 }
-                if let Some(chars_prop) = properties.get_mut("chars").and_then(|v| v.as_object_mut())
+                if let Some(chars_prop) =
+                    properties.get_mut("chars").and_then(|v| v.as_object_mut())
                 {
-                    let before = chars_prop.get("description").cloned().unwrap_or(Value::Null);
-                    append_property_description(
-                        chars_prop,
-                        "Optional stdin text string only.",
-                    );
-                    if chars_prop.get("description").cloned().unwrap_or(Value::Null) != before {
+                    let before = chars_prop
+                        .get("description")
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    append_property_description(chars_prop, "Optional stdin text string only.");
+                    if chars_prop
+                        .get("description")
+                        .cloned()
+                        .unwrap_or(Value::Null)
+                        != before
+                    {
                         changed = true;
                     }
                 }

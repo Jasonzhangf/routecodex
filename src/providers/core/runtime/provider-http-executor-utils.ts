@@ -10,6 +10,35 @@ import type { HttpClient } from '../utils/http-client.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 import { ProviderPayloadUtils } from './transport/provider-payload-utils.js';
 
+function summarizeUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message || error.name || 'unknown_error';
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error ?? 'unknown_error');
+  }
+}
+
+function logProviderOAuthRecoveryNonBlocking(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown> = {}
+): void {
+  try {
+    const suffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[provider-oauth-recovery] ${stage} failed (non-blocking): ${summarizeUnknownError(error)}${suffix}`
+    );
+  } catch {
+    // never throw from best-effort logging
+  }
+}
+
 export function getProviderHttpRetryLimit(): number {
   // Provider 层禁止重复尝试；失败后由虚拟路由负责 failover。
   return 1;
@@ -64,7 +93,31 @@ export async function tryRecoverOAuthAndReplay(options: {
       options.applyStreamModeHeaders,
       options.wrapUpstreamSseResponse
     );
-  } catch {
+  } catch (error) {
+    const auth = options.config?.config?.auth as
+      | {
+          type?: unknown;
+          rawType?: unknown;
+          tokenFile?: unknown;
+          oauthProviderId?: unknown;
+        }
+      | undefined;
+    logProviderOAuthRecoveryNonBlocking('tryRecoverOAuthAndReplay', error, {
+      requestId: options.context.requestId,
+      providerKey: options.context.providerKey,
+      providerId: options.context.providerId,
+      providerType: options.providerType,
+      oauthProviderId: options.oauthProviderId ?? null,
+      authType: typeof auth?.type === 'string' ? auth.type : null,
+      authRawType: typeof auth?.rawType === 'string' ? auth.rawType : null,
+      tokenFile: typeof auth?.tokenFile === 'string' ? auth.tokenFile : null,
+      upstreamStatus: extractStatusCodeFromError(options.error as ProviderErrorAugmented) ?? null,
+      upstreamCode:
+        typeof (options.error as ProviderErrorAugmented | null | undefined)?.code === 'string'
+          ? (options.error as ProviderErrorAugmented).code
+          : null,
+      upstreamMessage: summarizeUnknownError(options.error)
+    });
     return undefined;
   }
 }

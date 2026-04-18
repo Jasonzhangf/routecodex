@@ -92,4 +92,37 @@ describe('anthropic ↔ openai bridge roundtrip', () => {
     expect(String(userToolResult?.tool_use_id || '')).toBe('toolu_roundtrip_1');
     expect(String(userToolResult?.content || '')).toContain('hi');
   });
+
+  test('preserves input_image blocks when bridging openai chat into anthropic request', () => {
+    const openaiPayload: AnyRecord = {
+      model: 'qwen3.6-plus',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'describe this image' },
+            {
+              type: 'input_image',
+              image_url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAIUlEQVR4nGP8z0AaYCJRPcOoBmIAE1GqkMCoBmIAyaEEAEAuAR9UPEsJAAAAAElFTkSuQmCC'
+            }
+          ]
+        }
+      ]
+    };
+
+    const anthropicRequest = buildAnthropicRequestFromOpenAIChat(openaiPayload) as AnyRecord;
+    const anthropicMessages = asArray(anthropicRequest.messages) as AnyRecord[];
+    const userMessage = anthropicMessages[0] as AnyRecord;
+    const imageBlock = firstBlockByType(userMessage?.content, 'image');
+
+    expect(String(userMessage?.role || '')).toBe('user');
+    expect(firstBlockByType(userMessage?.content, 'text')).toEqual({
+      type: 'text',
+      text: 'describe this image'
+    });
+    expect(imageBlock).toBeTruthy();
+    expect(String((imageBlock?.source as AnyRecord)?.type || '')).toBe('base64');
+    expect(String((imageBlock?.source as AnyRecord)?.media_type || '')).toBe('image/png');
+    expect(String((imageBlock?.source as AnyRecord)?.data || '')).toContain('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQ');
+  });
 });

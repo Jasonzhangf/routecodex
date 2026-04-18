@@ -168,7 +168,7 @@ function hasHeader(headers: Record<string, string> | undefined, name: string): b
   }
   return false;
 }
-const QWEN_DEFAULT_USER_AGENT = 'QwenCode/0.13.2 (darwin; arm64)';
+const QWEN_DEFAULT_USER_AGENT = 'QwenCode/0.14.3 (darwin; arm64)';
 
 function maybeInjectQwenHeaders(
   providerId: string,

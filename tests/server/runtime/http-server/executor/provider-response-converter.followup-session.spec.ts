@@ -72,7 +72,8 @@ describe('provider-response-converter serverTool followup metadata', () => {
 
     expect(nestedMetadata.clientHeaders).toEqual({
       'anthropic-session-id': 'sess_123',
-      'anthropic-conversation-id': 'conv_456'
+      'anthropic-conversation-id': 'conv_456',
+      authorization: 'Bearer should-not-forward'
     });
     expect(nestedMetadata.clientRequestId).toBeUndefined();
     expect(nestedMetadata.sessionId).toBe('sess_123');

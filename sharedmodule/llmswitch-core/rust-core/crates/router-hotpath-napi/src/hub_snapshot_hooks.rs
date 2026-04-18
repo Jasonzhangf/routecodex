@@ -605,6 +605,85 @@ fn write_unique_file(dir: &Path, base_name: &str, contents: &str) -> Result<(), 
     Ok(())
 }
 
+fn write_json_file_if_missing_atomic(target: &Path, contents: &str) -> Result<(), std::io::Error> {
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = target
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("__runtime.json");
+    for _ in 0..16 {
+        let tmp_name = format!(
+            ".{}.tmp-{}-{}",
+            file_name,
+            chrono::Utc::now().timestamp_millis(),
+            Uuid::new_v4()
+                .simple()
+                .to_string()
+                .get(0..6)
+                .unwrap_or("rand")
+        );
+        let tmp_path = parent.join(tmp_name);
+        let mut tmp_file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+
+        let write_result = (|| -> Result<(), std::io::Error> {
+            tmp_file.write_all(contents.as_bytes())?;
+            tmp_file.sync_all()?;
+            drop(tmp_file);
+            match fs::hard_link(&tmp_path, target) {
+                Ok(_) => {
+                    let _ = fs::remove_file(&tmp_path);
+                    Ok(())
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let _ = fs::remove_file(&tmp_path);
+                    Ok(())
+                }
+                Err(error) => {
+                    let _ = fs::remove_file(&tmp_path);
+                    Err(error)
+                }
+            }
+        })();
+
+        if write_result.is_ok() {
+            return Ok(());
+        }
+        return write_result;
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "unable to allocate temporary runtime metadata file",
+    ))
+}
+
+fn build_runtime_metadata_payload(
+    options: &SnapshotHookOptions,
+    group_request_token: &str,
+    provider_token: &str,
+) -> Value {
+    serde_json::json!({
+      "timestamp": chrono::Utc::now().to_rfc3339(),
+      "versions": {
+        "routecodex": env::var("ROUTECODEX_VERSION").ok(),
+        "routecodexBuildTime": env::var("ROUTECODEX_BUILD_TIME").ok(),
+        "llmswitchCore": env::var("ROUTECODEX_LLMSWITCH_CORE_VERSION").ok(),
+        "node": env::var("NODE_VERSION").ok()
+      },
+      "endpoint": options.endpoint.clone(),
+      "requestId": options.request_id.clone(),
+      "groupRequestId": group_request_token,
+      "providerKey": provider_token
+    })
+}
+
 fn file_mtime_ms(path: &Path) -> i128 {
     let meta = match fs::metadata(path) {
         Ok(v) => v,
@@ -880,8 +959,8 @@ fn write_snapshot_file(
 
     let dir = root
         .join(folder)
-        .join(provider_token)
-        .join(group_request_token);
+        .join(&provider_token)
+        .join(&group_request_token);
     if let Err(e) = fs::create_dir_all(&dir) {
         eprintln!(
             "[hub_snapshot_hooks] Failed to create directory {:?}: {}",
@@ -889,23 +968,17 @@ fn write_snapshot_file(
         );
     }
     let meta_path = dir.join("__runtime.json");
-    if !meta_path.exists() {
-        let payload = serde_json::json!({
-          "timestamp": chrono::Utc::now().to_rfc3339(),
-          "versions": {
-            "routecodex": env::var("ROUTECODEX_VERSION").ok(),
-            "routecodexBuildTime": env::var("ROUTECODEX_BUILD_TIME").ok(),
-            "llmswitchCore": env::var("ROUTECODEX_LLMSWITCH_CORE_VERSION").ok(),
-            "node": env::var("NODE_VERSION").ok()
-          }
-        });
-        if let Ok(payload_str) = serde_json::to_string_pretty(&payload) {
-            if let Err(e) = fs::write(&meta_path, payload_str) {
-                eprintln!(
-                    "[hub_snapshot_hooks] Failed to write runtime metadata {:?}: {}",
-                    meta_path, e
-                );
-            }
+    let meta_payload = build_runtime_metadata_payload(
+        &options,
+        group_request_token.as_str(),
+        provider_token.as_str(),
+    );
+    if let Ok(payload_str) = serde_json::to_string_pretty(&meta_payload) {
+        if let Err(e) = write_json_file_if_missing_atomic(&meta_path, payload_str.as_str()) {
+            eprintln!(
+                "[hub_snapshot_hooks] Failed to write runtime metadata {:?}: {}",
+                meta_path, e
+            );
         }
     }
 
@@ -995,6 +1068,28 @@ fn write_snapshot_via_hooks_sync(options: SnapshotHookOptions) {
 
 fn write_snapshot_via_hooks(options: SnapshotHookOptions) {
     enqueue_snapshot_job(options);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_metadata_atomic_create_preserves_existing_file() {
+        let dir = std::env::temp_dir().join(format!("hub-snapshot-hooks-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("__runtime.json");
+
+        write_json_file_if_missing_atomic(&target, "{\"first\":true}\n").unwrap();
+        write_json_file_if_missing_atomic(&target, "{\"second\":true}\n").unwrap();
+
+        let parsed: Value =
+            serde_json::from_str(fs::read_to_string(&target).unwrap().as_str()).unwrap();
+        assert_eq!(parsed.get("first").and_then(Value::as_bool), Some(true));
+        assert!(parsed.get("second").is_none());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }
 
 #[derive(Clone, Copy)]

@@ -490,6 +490,9 @@ export async function convertProviderResponse(
       requestId: clientFacingRequestId,
       adapterContext: options.context,
       requestSemantics: options.requestSemantics,
+      responseSemantics:
+        (finalizeResult.processedRequest as { semantics?: JsonObject } | undefined)?.semantics ??
+        ((finalizeResult.finalizedPayload as { semantics?: JsonObject } | undefined)?.semantics),
       stageRecorder: options.stageRecorder
     }),
     {

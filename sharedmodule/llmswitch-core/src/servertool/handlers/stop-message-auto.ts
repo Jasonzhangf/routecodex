@@ -549,9 +549,11 @@ const handler: ServerToolHandler = async (
         persistStopMessageState(stickyKey, nextState);
       }
       const doneNextTaskPrompt = sanitizeFollowupText(resolveStopMessageAiDoneNextTaskPrompt());
-      const approvedInjectText = typeof followupText === 'string' && sanitizeFollowupText(followupText)
-        ? `${sanitizeFollowupText(followupText)}\n${doneNextTaskPrompt}`
-        : `${approvedMarker}\n${doneNextTaskPrompt}`;
+      const approvedInjectBase = sanitizeFollowupText(fallbackCandidateFollowupText || text || '继续执行') || '继续执行';
+      const approvedInjectText =
+        aiMode === 'on'
+          ? enforceStopMessageExecutionFollowupText(approvedInjectBase, doneMarker)
+          : sanitizeFollowupText(approvedInjectBase) || approvedInjectBase;
       debugLog('trigger_done_marker_approved', {
         stickyKey,
         doneMarker,

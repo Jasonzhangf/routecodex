@@ -251,6 +251,14 @@ export class TokenFileAuthProvider implements IAuthProvider {
       const providerId = this.getConfiguredProviderId();
       // Alias (no path separators / no .json suffix): resolve under the canonical auth dir.
       if (!tf.includes('/') && !tf.includes('\\') && !tf.endsWith('.json')) {
+        const directStem = path.join(resolveAuthDir(), `${tf}.json`);
+        try {
+          if (fs.existsSync(directStem)) {
+            return directStem;
+          }
+        } catch (error) {
+          logTokenfileAuthNonBlocking('resolve_token_file.direct_stem_probe', error, { path: directStem });
+        }
         if (providerId) {
           // Qwen: pin tokenFile="default" to a stable file name when present, to avoid "I reauthed but server reads another seq".
           if (providerId === 'qwen' && tf === 'default') {

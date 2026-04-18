@@ -9,6 +9,8 @@ export interface NativeReqInboundSemanticLiftApplyInput {
   protocol?: string;
   entryEndpoint?: string;
   responsesResume?: Record<string, unknown>;
+  sessionId?: string;
+  conversationId?: string;
 }
 export type NativeProviderProtocolToken =
   NonNullable<NativeReqInboundSemanticLiftApplyInput['protocol']>;

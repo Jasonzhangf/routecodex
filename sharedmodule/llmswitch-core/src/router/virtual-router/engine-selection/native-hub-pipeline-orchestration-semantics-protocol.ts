@@ -26,6 +26,42 @@ type HubPipelineOutput = {
   };
 };
 
+const NON_BLOCKING_PROTOCOL_LOG_THROTTLE_MS = 60_000;
+const nonBlockingProtocolLogState = new Map<string, number>();
+const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-orchestration-semantics-protocol.parse-failed');
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error ?? 'unknown');
+  }
+}
+
+function logNativeProtocolNonBlocking(stage: string, error: unknown): void {
+  const now = Date.now();
+  const last = nonBlockingProtocolLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_PROTOCOL_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingProtocolLogState.set(stage, now);
+  console.warn(
+    `[native-hub-pipeline-orchestration-semantics-protocol] ${stage} failed (non-blocking): ${formatUnknownError(error)}`
+  );
+}
+
+function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAILED {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    logNativeProtocolNonBlocking(stage, error);
+    return JSON_PARSE_FAILED;
+  }
+}
+
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
   const fn = binding?.[name];
@@ -35,91 +71,81 @@ function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | n
 function safeStringify(value: unknown): string | undefined {
   try {
     return JSON.stringify(value);
-  } catch {
+  } catch (error) {
+    logNativeProtocolNonBlocking('safeStringify', error);
     return undefined;
   }
 }
 
 function parseString(raw: string): string | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return typeof parsed === 'string' ? parsed : null;
-  } catch {
+  const parsed = parseJson('parseString', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  return typeof parsed === 'string' ? parsed : null;
 }
 
 function parseRecord(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
+  const parsed = parseJson('parseRecord', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  return parsed as Record<string, unknown>;
 }
 
 function parseOptionalString(raw: string): string | undefined | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return undefined;
-    }
-    return typeof parsed === 'string' ? parsed : null;
-  } catch {
+  const parsed = parseJson('parseOptionalString', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  if (parsed === null) {
+    return undefined;
+  }
+  return typeof parsed === 'string' ? parsed : null;
 }
 
 function parseOptionalBoolean(raw: string): boolean | undefined | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return undefined;
-    }
-    return typeof parsed === 'boolean' ? parsed : null;
-  } catch {
+  const parsed = parseJson('parseOptionalBoolean', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  if (parsed === null) {
+    return undefined;
+  }
+  return typeof parsed === 'boolean' ? parsed : null;
 }
 
 function parseOrchestrationOutput(raw: string): HubPipelineOutput | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    const requestId = typeof row.requestId === 'string' ? row.requestId : '';
-    const success = row.success === true;
-    if (!requestId) {
-      return null;
-    }
-    const output: HubPipelineOutput = { requestId, success };
-    if (row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)) {
-      output.payload = row.payload as Record<string, unknown>;
-    }
-    if (row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)) {
-      output.metadata = row.metadata as Record<string, unknown>;
-    }
-    if (row.error && typeof row.error === 'object' && !Array.isArray(row.error)) {
-      const err = row.error as Record<string, unknown>;
-      const code = typeof err.code === 'string' ? err.code.trim() : '';
-      const message = typeof err.message === 'string' ? err.message.trim() : '';
-      if (code && message) {
-        output.error = {
-          code,
-          message,
-          ...(Object.prototype.hasOwnProperty.call(err, 'details') ? { details: err.details } : {})
-        };
-      }
-    }
-    return output;
-  } catch {
+  const parsed = parseJson('parseOrchestrationOutput', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  const row = parsed as Record<string, unknown>;
+  const requestId = typeof row.requestId === 'string' ? row.requestId : '';
+  const success = row.success === true;
+  if (!requestId) {
+    return null;
+  }
+  const output: HubPipelineOutput = { requestId, success };
+  if (row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)) {
+    output.payload = row.payload as Record<string, unknown>;
+  }
+  if (row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)) {
+    output.metadata = row.metadata as Record<string, unknown>;
+  }
+  if (row.error && typeof row.error === 'object' && !Array.isArray(row.error)) {
+    const err = row.error as Record<string, unknown>;
+    const code = typeof err.code === 'string' ? err.code.trim() : '';
+    const message = typeof err.message === 'string' ? err.message.trim() : '';
+    if (code && message) {
+      output.error = {
+        code,
+        message,
+        ...(Object.prototype.hasOwnProperty.call(err, 'details') ? { details: err.details } : {})
+      };
+    }
+  }
+  return output;
 }
 
 export function runHubPipelineOrchestrationWithNative(

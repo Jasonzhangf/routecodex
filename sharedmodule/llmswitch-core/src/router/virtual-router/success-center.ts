@@ -1,6 +1,48 @@
 import type { ProviderSuccessEvent } from './types.js';
 
 type ProviderSuccessListener = (event: ProviderSuccessEvent) => void;
+const NON_BLOCKING_WARN_THROTTLE_MS = 60_000;
+const nonBlockingWarnByStage = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function shouldLogNonBlockingStage(stage: string): boolean {
+  const now = Date.now();
+  const lastAt = nonBlockingWarnByStage.get(stage) ?? 0;
+  if (now - lastAt < NON_BLOCKING_WARN_THROTTLE_MS) {
+    return false;
+  }
+  nonBlockingWarnByStage.set(stage, now);
+  return true;
+}
+
+function logSuccessCenterNonBlockingError(
+  stage: string,
+  operation: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  if (!shouldLogNonBlockingStage(stage)) {
+    return;
+  }
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[success-center] stage=${stage} operation=${operation} failed (non-blocking): ${formatUnknownError(error)}${suffix}`
+    );
+  } catch {
+    void 0;
+  }
+}
 
 export class ProviderSuccessCenter {
   private readonly listeners: Set<ProviderSuccessListener> = new Set();
@@ -17,8 +59,11 @@ export class ProviderSuccessCenter {
     for (const listener of this.listeners) {
       try {
         listener(enriched);
-      } catch {
-        // Listener failures should not break propagation
+      } catch (error) {
+        logSuccessCenterNonBlockingError('listener_dispatch', 'provider_success_listener', error, {
+          providerKey: enriched.runtime?.providerKey,
+          requestId: enriched.runtime?.requestId
+        });
       }
     }
     return enriched;
@@ -37,4 +82,3 @@ export class ProviderSuccessCenter {
 }
 
 export const providerSuccessCenter = new ProviderSuccessCenter();
-

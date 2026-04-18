@@ -11,11 +11,11 @@ describe('provider inspect', () => {
         provider: {
           id: 'qwen',
           type: 'openai',
-          baseURL: 'https://portal.qwen.ai/v1',
+          baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
           auth: { type: 'qwen-oauth' },
           models: {
             'qwen3.5-plus': { supportsStreaming: true },
-            'qwen3-coder-plus': { supportsStreaming: true }
+            'coder-model': { supportsStreaming: true }
           }
         }
       },
@@ -26,9 +26,9 @@ describe('provider inspect', () => {
     expect(inspection.catalogId).toBe('qwen');
     expect(inspection.providerType).toBe('openai');
     expect(inspection.authType).toBe('qwen-oauth');
-    expect(inspection.defaultModel).toBe('qwen3-coder-plus');
-    expect(inspection.models).toEqual(['qwen3-coder-plus', 'qwen3.5-plus']);
-    expect(inspection.routeTargets.default).toBe('qwen.qwen3-coder-plus');
+    expect(inspection.defaultModel).toBe('coder-model');
+    expect(inspection.models).toEqual(['coder-model', 'qwen3.5-plus']);
+    expect(inspection.routeTargets.default).toBe('qwen.coder-model');
     expect(inspection.routeTargets.webSearch).toBe('qwen.qwen3.5-plus');
     expect(inspection.webSearch).toMatchObject({
       engineId: 'qwen:web_search',
@@ -52,11 +52,11 @@ describe('provider inspect', () => {
         provider: {
           id: 'qwen',
           type: 'openai',
-          baseURL: 'https://portal.qwen.ai/v1',
+          baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
           auth: { type: 'qwen-oauth' },
           models: {
             'qwen3.5-plus': { supportsStreaming: true },
-            'qwen3-coder-plus': { supportsStreaming: true }
+            'coder-model': { supportsStreaming: true }
           }
         }
       },
@@ -70,7 +70,7 @@ describe('provider inspect', () => {
           id: 'default-primary',
           loadBalancing: {
             strategy: 'weighted',
-            weights: { 'qwen.qwen3-coder-plus': 1 }
+            weights: { 'qwen.coder-model': 1 }
           }
         }
       ],
@@ -79,7 +79,7 @@ describe('provider inspect', () => {
           id: 'thinking-primary',
           loadBalancing: {
             strategy: 'weighted',
-            weights: { 'qwen.qwen3-coder-plus': 1 }
+            weights: { 'qwen.coder-model': 1 }
           }
         }
       ],
@@ -88,7 +88,7 @@ describe('provider inspect', () => {
           id: 'tools-primary',
           loadBalancing: {
             strategy: 'weighted',
-            weights: { 'qwen.qwen3-coder-plus': 1 }
+            weights: { 'qwen.coder-model': 1 }
           }
         }
       ],
@@ -97,7 +97,7 @@ describe('provider inspect', () => {
           id: 'coding-primary',
           loadBalancing: {
             strategy: 'weighted',
-            weights: { 'qwen.qwen3-coder-plus': 1 }
+            weights: { 'qwen.coder-model': 1 }
           }
         }
       ],
@@ -106,7 +106,7 @@ describe('provider inspect', () => {
           id: 'longcontext-primary',
           loadBalancing: {
             strategy: 'weighted',
-            weights: { 'qwen.qwen3-coder-plus': 1 }
+            weights: { 'qwen.coder-model': 1 }
           }
         }
       ],
@@ -115,7 +115,7 @@ describe('provider inspect', () => {
           id: 'multimodal-primary',
           loadBalancing: {
             strategy: 'weighted',
-            weights: { 'qwen.qwen3-coder-plus': 1 }
+            weights: { 'qwen.coder-model': 1 }
           }
         }
       ],
@@ -156,7 +156,7 @@ describe('provider inspect', () => {
           type: 'openai',
           models: {
             'qwen3.5-plus': { supportsStreaming: true },
-            'qwen3-coder-plus': { supportsStreaming: true }
+            'coder-model': { supportsStreaming: true }
           }
         }
       },
@@ -175,7 +175,7 @@ describe('provider inspect', () => {
                   id: 'default-primary',
                   loadBalancing: {
                     strategy: 'weighted',
-                    weights: { 'qwen.qwen3-coder-plus': 1 }
+                    weights: { 'qwen.coder-model': 1 }
                   }
                 }
               ]

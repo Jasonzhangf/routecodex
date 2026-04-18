@@ -7,6 +7,7 @@ import { buildOpenAIChatFromAnthropicMessage } from './response-runtime.js';
 import type { JsonValue } from '../types/json.js';
 import type { ChatSemantics } from '../types/chat-envelope.js';
 import { resolveAliasMapFromRespSemanticsWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
+import { restoreResponseContinuationSemanticsWithNative } from '../../../router/virtual-router/engine-selection/native-chat-process-node-result-semantics.js';
 
 export type ChatCompletionLike = JsonObject;
 
@@ -61,18 +62,34 @@ function injectResponsesReasoningExtension(payload: JsonObject): void {
 }
 
 export class OpenAIChatResponseMapper implements ResponseMapper {
-  toChatCompletion(format: FormatEnvelope, _ctx: AdapterContext): ChatCompletionLike {
+  toChatCompletion(
+    format: FormatEnvelope,
+    _ctx: AdapterContext,
+    options?: { requestSemantics?: ChatSemantics | JsonObject }
+  ): ChatCompletionLike {
     const payload = (format.payload ?? {}) as ChatCompletionLike;
     if (payload && typeof payload === 'object') {
       injectResponsesReasoningExtension(payload as JsonObject);
     }
-    return payload;
+    return restoreResponseContinuationSemanticsWithNative(
+      payload as Record<string, unknown>,
+      options?.requestSemantics as Record<string, unknown> | undefined,
+      'openai-chat'
+    ) as ChatCompletionLike;
   }
 }
 
 export class ResponsesResponseMapper implements ResponseMapper {
-  toChatCompletion(format: FormatEnvelope, _ctx: AdapterContext): ChatCompletionLike {
-    return buildChatResponseFromResponses(format.payload ?? {}) as ChatCompletionLike;
+  toChatCompletion(
+    format: FormatEnvelope,
+    _ctx: AdapterContext,
+    options?: { requestSemantics?: ChatSemantics | JsonObject }
+  ): ChatCompletionLike {
+    return restoreResponseContinuationSemanticsWithNative(
+      buildChatResponseFromResponses(format.payload ?? {}) as Record<string, unknown>,
+      options?.requestSemantics as Record<string, unknown> | undefined,
+      'openai-responses'
+    ) as ChatCompletionLike;
   }
 }
 
@@ -83,12 +100,24 @@ export class AnthropicResponseMapper implements ResponseMapper {
     options?: { requestSemantics?: ChatSemantics | JsonObject }
   ): ChatCompletionLike {
     const aliasMap = resolveAliasMapFromRespSemanticsWithNative(options?.requestSemantics);
-    return buildOpenAIChatFromAnthropicMessage(format.payload ?? {}, { aliasMap });
+    return restoreResponseContinuationSemanticsWithNative(
+      buildOpenAIChatFromAnthropicMessage(format.payload ?? {}, { aliasMap }) as Record<string, unknown>,
+      options?.requestSemantics as Record<string, unknown> | undefined,
+      'anthropic-messages'
+    ) as ChatCompletionLike;
   }
 }
 
 export class GeminiResponseMapper implements ResponseMapper {
-  toChatCompletion(format: FormatEnvelope, _ctx: AdapterContext): ChatCompletionLike {
-    return buildOpenAIChatFromGeminiResponse(format.payload ?? {});
+  toChatCompletion(
+    format: FormatEnvelope,
+    _ctx: AdapterContext,
+    options?: { requestSemantics?: ChatSemantics | JsonObject }
+  ): ChatCompletionLike {
+    return restoreResponseContinuationSemanticsWithNative(
+      buildOpenAIChatFromGeminiResponse(format.payload ?? {}) as Record<string, unknown>,
+      options?.requestSemantics as Record<string, unknown> | undefined,
+      'gemini-chat'
+    ) as ChatCompletionLike;
   }
 }

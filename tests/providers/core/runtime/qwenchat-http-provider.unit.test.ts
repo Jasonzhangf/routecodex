@@ -102,6 +102,33 @@ describe('QwenChatHttpProvider', () => {
     delete process.env.ROUTECODEX_QWENCHAT_FORWARD_AUTH_HEADERS;
   });
 
+  it('forces chat.qwen.ai baseUrl when runtime compatibility profile is chat:qwen', async () => {
+    const provider = new TestQwenChatHttpProvider({
+      id: 'test-qwen-chat-compat',
+      type: 'qwenchat-http-provider',
+      config: {
+        providerType: 'openai',
+        providerId: 'qwen',
+        baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        auth: {
+          type: 'qwen-oauth'
+        },
+        overrides: {}
+      }
+    } as unknown as OpenAIStandardConfig, emptyDeps);
+
+    await provider.initialize();
+    provider.setRuntimeProfile({
+      providerFamily: 'qwen',
+      providerId: 'qwen',
+      providerKey: 'qwen.1.qwen3.6-plus',
+      providerType: 'openai',
+      compatibilityProfile: 'chat:qwen'
+    } as any);
+
+    expect((provider as any).getEffectiveBaseUrl()).toBe('https://chat.qwen.ai');
+  });
+
   it('passes auth-provider cookie headers into qwen send plan when forwarding is enabled', async () => {
     process.env.ROUTECODEX_QWENCHAT_FORWARD_AUTH_HEADERS = 'true';
     const originalFetch = globalThis.fetch;

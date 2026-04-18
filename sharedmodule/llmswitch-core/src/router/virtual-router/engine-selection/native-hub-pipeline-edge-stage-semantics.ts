@@ -4,6 +4,42 @@ import {
 } from "./native-router-hotpath-policy.js";
 import { loadNativeRouterHotpathBindingForInternalUse } from "./native-router-hotpath.js";
 
+const NON_BLOCKING_EDGE_STAGE_LOG_THROTTLE_MS = 60_000;
+const nonBlockingEdgeStageLogState = new Map<string, number>();
+const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-edge-stage-semantics.parse-failed');
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error ?? "unknown");
+  }
+}
+
+function logNativeEdgeStageNonBlocking(stage: string, error: unknown): void {
+  const now = Date.now();
+  const last = nonBlockingEdgeStageLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_EDGE_STAGE_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingEdgeStageLogState.set(stage, now);
+  console.warn(
+    `[native-hub-pipeline-edge-stage-semantics] ${stage} failed (non-blocking): ${formatUnknownError(error)}`,
+  );
+}
+
+function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAILED {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    logNativeEdgeStageNonBlocking(stage, error);
+    return JSON_PARSE_FAILED;
+  }
+}
+
 function readNativeFunction(
   name: string,
 ): ((...args: unknown[]) => unknown) | null {
@@ -20,21 +56,18 @@ function readNativeFunction(
 function safeStringify(value: unknown): string | undefined {
   try {
     return JSON.stringify(value);
-  } catch {
+  } catch (error) {
+    logNativeEdgeStageNonBlocking("safeStringify", error);
     return undefined;
   }
 }
 
 function parseRecord(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
+  const parsed = parseJson("parseRecord", raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return null;
   }
+  return parsed as Record<string, unknown>;
 }
 
 function parseFormatEnvelopePayload(
@@ -43,68 +76,62 @@ function parseFormatEnvelopePayload(
   fallbackProtocol: string,
   fallbackPayload: Record<string, unknown>,
 ): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    const envelope = row.envelope;
-    if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
-      return null;
-    }
-    const env = envelope as Record<string, unknown>;
-    const protocol =
-      typeof env.format === "string" && env.format.trim().length
-        ? env.format.trim()
-        : fallbackProtocol;
-    const payload =
-      env.payload &&
-      typeof env.payload === "object" &&
-      !Array.isArray(env.payload)
-        ? (env.payload as Record<string, unknown>)
-        : fallbackPayload;
-    const out: Record<string, unknown> = {
-      protocol,
-      direction,
-      payload,
-    };
-    if (
-      env.metadata &&
-      typeof env.metadata === "object" &&
-      !Array.isArray(env.metadata)
-    ) {
-      out.meta = env.metadata as Record<string, unknown>;
-    }
-    return out;
-  } catch {
+  const parsed = parseJson("parseFormatEnvelopePayload", raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return null;
   }
+  const row = parsed as Record<string, unknown>;
+  const envelope = row.envelope;
+  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
+    return null;
+  }
+  const env = envelope as Record<string, unknown>;
+  const protocol =
+    typeof env.format === "string" && env.format.trim().length
+      ? env.format.trim()
+      : fallbackProtocol;
+  const payload =
+    env.payload &&
+    typeof env.payload === "object" &&
+    !Array.isArray(env.payload)
+      ? (env.payload as Record<string, unknown>)
+      : fallbackPayload;
+  const out: Record<string, unknown> = {
+    protocol,
+    direction,
+    payload,
+  };
+  if (
+    env.metadata &&
+    typeof env.metadata === "object" &&
+    !Array.isArray(env.metadata)
+  ) {
+    out.meta = env.metadata as Record<string, unknown>;
+  }
+  return out;
 }
 
 function parseOptionalString(raw: string): string | undefined | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return undefined;
-    }
-    if (typeof parsed !== "string") {
-      return null;
-    }
-    const trimmed = parsed.trim();
-    return trimmed ? trimmed : undefined;
-  } catch {
+  const parsed = parseJson("parseOptionalString", raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  if (parsed === null) {
+    return undefined;
+  }
+  if (typeof parsed !== "string") {
+    return null;
+  }
+  const trimmed = parsed.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function parseBoolean(raw: string): boolean | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return typeof parsed === "boolean" ? parsed : null;
-  } catch {
+  const parsed = parseJson("parseBoolean", raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  return typeof parsed === "boolean" ? parsed : null;
 }
 
 export function sanitizeFormatEnvelopeWithNative<T>(candidate: T): T {
@@ -358,7 +385,10 @@ export function parseReqInboundFormatEnvelopeWithNative(input: {
     if (typeof raw !== "string" || !raw) {
       return fail("empty result");
     }
-    const parsed = JSON.parse(raw) as unknown;
+    const parsed = parseJson("parseReqInboundFormatEnvelopeWithNative", raw);
+    if (parsed === JSON_PARSE_FAILED) {
+      return fail("invalid envelope structure");
+    }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return fail("invalid envelope structure");
     }

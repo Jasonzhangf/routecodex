@@ -101,6 +101,8 @@ pub struct ResolveResponsesRequestBridgeDecisionsInput {
     pub bridge_metadata: Option<Value>,
     #[serde(default)]
     pub extra_bridge_history: Option<Value>,
+    #[serde(default)]
+    pub request_semantics: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -111,6 +113,8 @@ pub struct ResolveResponsesRequestBridgeDecisionsOutput {
     pub tool_call_id_style: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history_seed: Option<BuildBridgeHistoryOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_response_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

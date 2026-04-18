@@ -269,11 +269,11 @@ function shouldRestartActiveSession(context: CamoActionContext): boolean {
     return explicit === '1' || explicit === 'true' || explicit === 'yes' || explicit === 'on';
   }
   const profileId = String(context.profileId || '').toLowerCase();
-  const isQwenProfile = profileId.startsWith('rc-qwen');
   const autoMode = String(context.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
   if (autoMode.length > 0) {
+    const shouldReuseQwenProfile = autoMode === 'qwen' && (profileId.startsWith('rc-qwen') || profileId.startsWith('rc-auth'));
     // Qwen auto mode should reuse the same profile session to preserve login cookies.
-    return !isQwenProfile;
+    return !shouldReuseQwenProfile;
   }
   return false;
 }
@@ -374,13 +374,23 @@ export function setDefaultCamoProfile(context: CamoActionContext): boolean {
 }
 
 export function gotoCamoUrl(context: CamoActionContext, url: string): boolean {
-  const result = runCamoCliAction(context, ['goto', context.profileId, url], 'inherit');
+  const result = runCamoCliCapture(context, ['goto', context.profileId, url]);
   if (!result.ok) {
+    const combined = `${result.errorText}\n${result.stderr}\n${result.stdout}`.toLowerCase();
+    const isGotoTimeout = combined.includes('page.goto') && combined.includes('timeout');
+    if (!isGotoTimeout) {
+      printIfAny(result.stdout);
+      printIfAny(result.stderr);
+    } else {
+      logOAuthDebug('[OAuth] camo-cli goto timeout captured (stack output suppressed; launcher will try settle recovery)');
+    }
     logOAuthDebug(
-      `[OAuth] camo-cli goto failed url=${url} status=${result.status ?? 'n/a'} error=${result.errorText}`
+      `[OAuth] camo-cli goto failed url=${url} status=${result.status ?? 'n/a'} error=${result.errorText || result.stderr}`
     );
+    return false;
   }
-  return result.ok;
+  printIfAny(result.stdout);
+  return true;
 }
 
 export function getActiveCamoPageUrl(context: CamoActionContext): string | null {
@@ -401,12 +411,20 @@ export async function clickCamoTarget(
     const preferredSelector = resolveVisibleSelector(context, target.selectors);
     const selectorsToTry = preferredSelector ? [preferredSelector] : target.selectors;
     for (const selector of selectorsToTry) {
-      const result = runCamoCliAction(context, ['click', context.profileId, selector, '--no-highlight'], 'inherit');
+      const result = runCamoCliCapture(context, ['click', context.profileId, selector, '--no-highlight']);
       if (result.ok) {
         logOAuthDebug(`[OAuth] camo-cli click target=${target.key} selector=${selector} ok attempt=${attempt}/${retries}`);
         return true;
       }
-      logOAuthDebug(`[OAuth] camo-cli click target=${target.key} selector=${selector} failed attempt=${attempt}/${retries} status=${result.status ?? 'n/a'} error=${result.errorText}`);
+      if (result.stdout && result.stdout.trim()) {
+        logOAuthDebug(`[OAuth] camo-cli click target=${target.key} selector=${selector} failed stdout=${result.stdout.trim()}`);
+      }
+      if (result.stderr && result.stderr.trim()) {
+        logOAuthDebug(`[OAuth] camo-cli click target=${target.key} selector=${selector} failed stderr=${result.stderr.trim()}`);
+      }
+      logOAuthDebug(
+        `[OAuth] camo-cli click target=${target.key} selector=${selector} failed attempt=${attempt}/${retries} status=${result.status ?? 'n/a'} error=${result.errorText}`
+      );
     }
     if (attempt < retries && options.retryDelayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs));

@@ -20,6 +20,7 @@ import {
 } from "../policy/policy-engine.js";
 import { applyProviderOutboundToolSurface } from "../tool-surface/tool-surface-engine.js";
 import { measureHubStage } from "./hub-stage-timing.js";
+import { resolveRouteAwareResponsesContinuation } from "./route-aware-responses-continuation.js";
 
 function unwrapRawRequestBody(
   rawRequest: JsonObject,
@@ -239,12 +240,21 @@ export async function buildRequestStageProviderPayload<TContext = Record<string,
     ? undefined
     : (contextSnapshot as Record<string, unknown> | undefined);
 
+  const routeAwareWorkingRequest = resolveRouteAwareResponsesContinuation({
+    request: workingRequest,
+    rawRequest,
+    normalizedMetadata: normalized.metadata as Record<string, unknown> | undefined,
+    requestId: normalized.id,
+    entryProtocol: normalized.providerProtocol,
+    outboundProtocol,
+  });
+
   const outboundStage1 = await measureHubStage(
     normalized.id,
     "req_outbound.stage1_semantic_map",
     () =>
       runReqOutboundStage1SemanticMap({
-        request: workingRequest,
+        request: routeAwareWorkingRequest,
         adapterContext: outboundAdapterContext as any,
         semanticMapper: outboundSemanticMapper as any,
         contextSnapshot: outboundContextSnapshot,

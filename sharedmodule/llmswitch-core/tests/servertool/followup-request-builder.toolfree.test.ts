@@ -178,4 +178,27 @@ describe('servertool followup request builder', () => {
     expect(Array.isArray(followup.messages)).toBe(true);
     expect(followup.messages.length).toBe(2);
   });
+
+  test('prefers assigned model over captured seed model for pinned followup flows', () => {
+    const capturedChatRequest: any = {
+      model: 'glm-5.1',
+      messages: [{ role: 'user', content: '继续做' }]
+    };
+
+    const followup: any = buildServerToolFollowupChatPayloadFromInjection({
+      adapterContext: {
+        capturedChatRequest,
+        assignedModelId: 'kimi-k2.5',
+        modelId: 'kimi-k2.5',
+        originalModelId: 'glm-5.1'
+      },
+      chatResponse: { id: 'resp', choices: [] } as any,
+      injection: { ops: [{ op: 'append_user_text', text: '继续执行' }] } as any
+    });
+
+    expect(followup).toBeTruthy();
+    expect(followup.model).toBe('kimi-k2.5');
+    expect(Array.isArray(followup.messages)).toBe(true);
+    expect(followup.messages.length).toBe(2);
+  });
 });

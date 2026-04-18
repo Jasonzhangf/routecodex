@@ -184,49 +184,44 @@ function compactFollowupErrorReason(value: unknown): string | undefined {
   return `${normalized.slice(0, FOLLOWUP_ERROR_REASON_MAX_LENGTH)}…`;
 }
 
+function resolveAdapterContextProviderKey(adapterContext: unknown): string {
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    return '';
+  }
+  const record = adapterContext as Record<string, unknown>;
+  const direct =
+    typeof record.providerKey === 'string' && record.providerKey.trim().length
+      ? record.providerKey.trim()
+      : typeof record.targetProviderKey === 'string' && record.targetProviderKey.trim().length
+        ? record.targetProviderKey.trim()
+        : '';
+  if (direct) {
+    return direct;
+  }
+  const target =
+    record.target && typeof record.target === 'object' && !Array.isArray(record.target)
+      ? (record.target as Record<string, unknown>)
+      : null;
+  if (target) {
+    const targetProviderKey =
+      typeof target.providerKey === 'string' && target.providerKey.trim().length
+        ? target.providerKey.trim()
+        : typeof target.providerId === 'string' && target.providerId.trim().length
+          ? target.providerId.trim()
+          : '';
+    if (targetProviderKey) {
+      return targetProviderKey;
+    }
+  }
+  return '';
+}
+
 function isReasoningStopContinueFlow(flowId: unknown): boolean {
   return typeof flowId === 'string' && flowId.trim() === 'reasoning_stop_continue_flow';
 }
 
 function isReasoningStopGuardFlow(flowId: unknown): boolean {
   return typeof flowId === 'string' && flowId.trim() === 'reasoning_stop_guard_flow';
-}
-
-function shouldSoftSkipReasoningStopContinueFollowup(args: {
-  flowId?: string;
-  upstreamCode?: string;
-  upstreamStatus?: number;
-  reason?: string;
-  errorMessage?: string;
-}): boolean {
-  if (!isReasoningStopContinueFlow(args.flowId) && !isReasoningStopGuardFlow(args.flowId)) {
-    return false;
-  }
-  const upstreamCode = typeof args.upstreamCode === 'string' ? args.upstreamCode.trim().toUpperCase() : '';
-  const reason = typeof args.reason === 'string' ? args.reason.trim().toLowerCase() : '';
-  const errorMessage = typeof args.errorMessage === 'string' ? args.errorMessage.trim().toLowerCase() : '';
-  const upstreamStatus = typeof args.upstreamStatus === 'number' ? Math.floor(args.upstreamStatus) : undefined;
-  // Soft skip on transient errors: HTTP_429 (rate limit), HTTP_5xx (server error), HTTP_400 (invalid params)
-  // These are typically quota/infrastructure issues that retrying won't solve
-  if (upstreamStatus === 400 || upstreamStatus === 429 || (upstreamStatus >= 500 && upstreamStatus < 600)) {
-    return true;
-  }
-  if (upstreamCode === 'INVALID_PARAMETER_ERROR' || upstreamCode === 'HTTP_400' || upstreamCode === 'HTTP_429' || upstreamCode === 'INSUFFICIENT_QUOTA') {
-    return true;
-  }
-  if (
-    reason.includes('invalid_parameter_error')
-    || reason.includes('http_400')
-    || reason.includes('http_429')
-    || reason.includes('http 400')
-    || reason.includes('insufficient_quota')
-    || reason.includes('sse_to_json_error')
-    || errorMessage.includes('invalid_parameter_error')
-    || errorMessage.includes('sse_to_json_error')
-  ) {
-    return true;
-  }
-  return false;
 }
 
 function extractAppendUserTextFromFollowupPlan(followupPlan: unknown): string | undefined {
@@ -661,6 +656,106 @@ async function shouldDisableServerToolTimeoutForClockHold(args: {
   }
 }
 
+type ServerToolEngineResult = Awaited<ReturnType<typeof runServerSideToolEngine>>;
+type ServerToolEngineRunner = (
+  overrides: Partial<ServerSideToolEngineOptions>
+) => Promise<ServerToolEngineResult>;
+
+function createServerToolEngineRunner(args: {
+  engineOptions: ServerSideToolEngineOptions;
+  effectiveServerToolTimeoutMs: number;
+  serverToolTimeoutMs: number;
+  requestId: string;
+}): ServerToolEngineRunner {
+  return (overrides) =>
+    withTimeout(
+      runServerSideToolEngine({
+        ...args.engineOptions,
+        ...overrides
+      }),
+      args.effectiveServerToolTimeoutMs,
+      () =>
+        createServerToolTimeoutError({
+          requestId: args.requestId,
+          phase: 'engine',
+          timeoutMs: args.effectiveServerToolTimeoutMs || args.serverToolTimeoutMs
+        })
+    );
+}
+
+async function runReasoningStopGuardPrepass(args: {
+  chat: JsonObject;
+  adapterContext: AdapterContext;
+  stopSignal: ReturnType<typeof inspectStopGatewaySignal>;
+  runEngine: ServerToolEngineRunner;
+  logProgress: (step: number, total: number, message: string, extra?: Record<string, unknown>) => void;
+  logStopEntry: (stage: 'entry' | 'trigger', result: string, extra?: Record<string, unknown>) => void;
+}): Promise<ServerToolOrchestrationResult | null> {
+  // ReasoningStopGuard: dedicated orchestration for finish_reason=stop (post-phase hook)
+  // Must run BEFORE stop_message_auto to enforce stopless mode constraints.
+  const reasoningStopMode = syncReasoningStopModeFromRequest(args.adapterContext);
+  const reasoningStopGuardHandler = getServerToolHandler('reasoning_stop_guard');
+  const reasoningStopGuardEnabled =
+    reasoningStopGuardHandler && reasoningStopGuardHandler.trigger === 'auto';
+  const reasoningStopEligible = isStopEligibleForServerTool(args.chat, args.adapterContext);
+
+  if (
+    !args.stopSignal.observed ||
+    !reasoningStopGuardEnabled ||
+    !reasoningStopEligible ||
+    reasoningStopMode === 'off'
+  ) {
+    return null;
+  }
+
+  args.logProgress(0, 5, 'reasoning_stop_guard_check', { flowId: 'reasoning_stop_guard_flow' });
+  const guardResult = await args.runEngine({
+    disableToolCallHandlers: true,
+    includeAutoHookIds: ['reasoning_stop_guard'],
+    excludeAutoHookIds: ['stop_message_auto']
+  });
+  if (!guardResult.execution?.flowId) {
+    return null;
+  }
+
+  const guardFlowId = guardResult.execution.flowId;
+  args.logProgress(1, 5, 'matched', { flowId: guardFlowId });
+  args.logStopEntry('trigger', 'reasoning_stop_guard_activated', {
+    flowId: guardFlowId,
+    reason: args.stopSignal.reason,
+    source: args.stopSignal.source,
+    eligible: args.stopSignal.eligible
+  });
+
+  if (guardFlowId === 'reasoning_stop_finalize_flow') {
+    args.logProgress(5, 5, 'completed (reasoning_stop_finalize)', { flowId: guardFlowId });
+    return {
+      chat: guardResult.finalChatResponse,
+      executed: true,
+      flowId: guardFlowId
+    };
+  }
+
+  return null;
+}
+
+async function runPrimaryServerToolEngineSelection(args: {
+  runEngine: ServerToolEngineRunner;
+}): Promise<ServerToolEngineResult> {
+  // StopMessage owns a dedicated orchestration skeleton:
+  // same trigger/processing semantics as before, but isolated from the generic servertool queue.
+  let engineResult = await args.runEngine({
+    disableToolCallHandlers: true,
+    includeAutoHookIds: ['stop_message_auto']
+  });
+  if (engineResult.mode === 'passthrough' || !engineResult.execution) {
+    engineResult = await args.runEngine({
+      excludeAutoHookIds: ['stop_message_auto']
+    });
+  }
+  return engineResult;
+}
+
 export async function runServerToolOrchestration(
   options: ServerToolOrchestrationOptions
 ): Promise<ServerToolOrchestrationResult> {
@@ -919,79 +1014,26 @@ export async function runServerToolOrchestration(
     onAutoHookTrace: logAutoHookTrace
   };
 
-  const runEngine = async (
-    overrides: Partial<ServerSideToolEngineOptions>
-  ): Promise<Awaited<ReturnType<typeof runServerSideToolEngine>>> =>
-    withTimeout(
-      runServerSideToolEngine({
-        ...engineOptions,
-        ...overrides
-      }),
-      effectiveServerToolTimeoutMs,
-     () =>
-       createServerToolTimeoutError({
-         requestId: options.requestId,
-         phase: 'engine',
-         timeoutMs: effectiveServerToolTimeoutMs || serverToolTimeoutMs
-       })
-   );
-
-  // ReasoningStopGuard: dedicated orchestration for finish_reason=stop (post-phase hook)
-  // Must run BEFORE stop_message_auto to enforce stopless mode constraints.
-  const reasoningStopMode = syncReasoningStopModeFromRequest(options.adapterContext);
-  const reasoningStopGuardHandler = getServerToolHandler('reasoning_stop_guard');
- const reasoningStopGuardEnabled = reasoningStopGuardHandler && reasoningStopGuardHandler.trigger === 'auto';
- const reasoningStopEligible = isStopEligibleForServerTool(options.chat, options.adapterContext);
- const reasoningStopState = readReasoningStopState(options.adapterContext);
-
-  // Declare engineResult early so reasoning_stop_guard can assign it
-  let engineResult: Awaited<ReturnType<typeof runServerSideToolEngine>> | null = null;
-
- if (stopSignal.observed && reasoningStopGuardEnabled && reasoningStopEligible && reasoningStopMode !== 'off') {
-    logProgress(0, 5, 'reasoning_stop_guard_check', { flowId: 'reasoning_stop_guard_flow' });
-    const guardResult = await runEngine({
-      disableToolCallHandlers: true,
-      includeAutoHookIds: ['reasoning_stop_guard'],
-      excludeAutoHookIds: ['stop_message_auto']
-    });
-    if (guardResult.execution && guardResult.execution.flowId) {
-      const guardFlowId = guardResult.execution.flowId;
-      logProgress(1, 5, 'matched', { flowId: guardFlowId });
-      logStopEntry('trigger', 'reasoning_stop_guard_activated', {
-        flowId: guardFlowId,
-        reason: stopSignal.reason,
-        source: stopSignal.source,
-        eligible: stopSignal.eligible
-      });
-      if (guardFlowId === 'reasoning_stop_guard_flow' || guardFlowId === 'reasoning_stop_continue_flow') {
-       // Guard wants to continue execution, return followup
-       const followup = guardResult.execution.followup;
-        // Guard has followup, let engine continue processing
-        engineResult = guardResult;
-     }
-     if (guardFlowId === 'reasoning_stop_finalize_flow') {
-        // Guard finalized, allow stop
-        logProgress(5, 5, 'completed (reasoning_stop_finalize)', { flowId: guardFlowId });
-        return {
-          chat: guardResult.finalChatResponse,
-          executed: true,
-          flowId: guardFlowId
-        };
-      }
-    }
+  const runEngine = createServerToolEngineRunner({
+    engineOptions,
+    effectiveServerToolTimeoutMs,
+    serverToolTimeoutMs,
+    requestId: options.requestId
+  });
+  const reasoningStopState = readReasoningStopState(options.adapterContext);
+  const guardPrepassResult = await runReasoningStopGuardPrepass({
+    chat: options.chat,
+    adapterContext: options.adapterContext,
+    stopSignal,
+    runEngine,
+    logProgress,
+    logStopEntry
+  });
+  if (guardPrepassResult) {
+    return guardPrepassResult;
   }
 
-// StopMessage owns a dedicated orchestration skeleton:
- // same trigger/processing semantics as before, but isolated from the generic servertool queue.
-  engineResult = await runEngine({
-   disableToolCallHandlers: true,
-   includeAutoHookIds: ['stop_message_auto']
- });
-  if (engineResult.mode === 'passthrough' || !engineResult.execution) {
-    engineResult = await runEngine({
-      excludeAutoHookIds: ['stop_message_auto']
-    });
-  }
+  const engineResult = await runPrimaryServerToolEngineSelection({ runEngine });
   if (engineResult.mode === 'passthrough' || !engineResult.execution) {
     const skipReason = engineResult.mode === 'passthrough' ? 'passthrough' : 'no_execution';
     if (stopSignal.observed) {
@@ -1264,17 +1306,13 @@ export async function runServerToolOrchestration(
   // keep the same providerKey/alias.
   // Otherwise the followup requestId suffix would cause round-robin alias switching and compatibility drift.
   if (isStopMessageFlow || isClockHoldFlow || isContinueExecutionFlow) {
-    const providerKeyRaw = (options.adapterContext as unknown as { providerKey?: unknown }).providerKey;
-    const providerKey =
-      typeof providerKeyRaw === 'string' && providerKeyRaw.trim().length ? providerKeyRaw.trim() : '';
+    const providerKey = resolveAdapterContextProviderKey(options.adapterContext);
     if (providerKey) {
       (metadata as any).__shadowCompareForcedProviderKey = providerKey;
     }
   }
   if ((isReasoningStopGuardFlow || isReasoningStopContinueFlow) && !(metadata as any).__shadowCompareForcedProviderKey) {
-    const providerKeyRaw = (options.adapterContext as unknown as { providerKey?: unknown }).providerKey;
-    const providerKey =
-      typeof providerKeyRaw === 'string' && providerKeyRaw.trim().length ? providerKeyRaw.trim() : '';
+    const providerKey = resolveAdapterContextProviderKey(options.adapterContext);
     if (providerKey) {
       (metadata as any).__shadowCompareForcedProviderKey = providerKey;
     }
@@ -1576,41 +1614,6 @@ export async function runServerToolOrchestration(
         const compactErrorMessage = compactFollowupErrorReason(
           error instanceof Error ? error.message : String(error ?? 'unknown')
         );
-        if (
-          shouldSoftSkipReasoningStopContinueFollowup({
-            flowId: engineResult.execution.flowId,
-            upstreamCode,
-            upstreamStatus,
-            reason: compactReason,
-            errorMessage: compactErrorMessage
-          })
-        ) {
-          clearReasoningStopState(options.adapterContext);
-          const fallbackExecution = {
-            ...engineResult.execution,
-            context: {
-              ...(engineResult.execution.context ?? {}),
-              reasoning_stop_continue: {
-                skipped: true,
-                reason: compactReason ?? compactErrorMessage ?? 'invalid_parameter_error'
-              }
-            }
-          };
-          const fallbackChat = decorateFinalChatWithServerToolContext(
-            engineResult.finalChatResponse,
-            fallbackExecution
-          );
-          logProgress(5, totalSteps, 'completed (reasoning_stop_continue followup soft-skipped)', {
-            flowId,
-            attempt,
-            reason: compactReason ?? compactErrorMessage
-          });
-          return {
-            chat: fallbackChat,
-            executed: true,
-            flowId: engineResult.execution.flowId
-          };
-        }
         const wrapped = new ProviderProtocolError(
           `[servertool] Followup failed for flow ${engineResult.execution.flowId ?? 'unknown'} ` +
             `(attempt ${attempt}/${maxAttempts})`,
@@ -1730,9 +1733,7 @@ export async function runServerToolOrchestration(
           ? options.entryEndpoint
           : followupEntryEndpoint) as any;
 
-      const forcedProviderKeyRaw = (options.adapterContext as any)?.providerKey;
-      const forcedProviderKey =
-        typeof forcedProviderKeyRaw === 'string' && forcedProviderKeyRaw.trim().length ? forcedProviderKeyRaw.trim() : '';
+      const forcedProviderKey = resolveAdapterContextProviderKey(options.adapterContext);
       if (forcedProviderKey) {
         (replayMetadata as any).__shadowCompareForcedProviderKey = forcedProviderKey;
       }

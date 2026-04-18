@@ -9,7 +9,9 @@ import {
   logRequestComplete,
   logRequestError,
   captureClientHeaders,
-  captureRawRequestBodyForMetadata
+  captureRawRequestBodyForMetadata,
+  mergePipelineMetadata,
+  readRequestBodyMetadata
 } from './handler-utils.js';
 import { resumeResponsesConversation } from '../../modules/llmswitch/bridge.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
@@ -93,6 +95,7 @@ export async function handleResponses(
       ? req.body
       : {}) as ResponsesPayload;
     const originalPayload = captureRawRequestBodyForMetadata(payload) as ResponsesPayload;
+    const requestBodyMetadata = readRequestBodyMetadata(originalPayload);
     if (options.responseIdFromPath && !payload.response_id) {
       payload.response_id = options.responseIdFromPath;
     }
@@ -188,7 +191,7 @@ export async function handleResponses(
 	      headers: req.headers as Record<string, unknown>,
 	      query: req.query as Record<string, unknown>,
 	      body: payload,
-	      metadata: {
+	      metadata: mergePipelineMetadata(requestBodyMetadata, {
 	        stream: wantsStream,
 	        clientRequestId,
 	        clientStream: acceptsSse || undefined,
@@ -200,7 +203,7 @@ export async function handleResponses(
 	        clientConnectionState,
 	        ...(resumeMeta ? { responsesResume: resumeMeta } : {}),
 	        ...(mockSampleReqId ? { mockSampleReqId } : {})
-	      }
+	      })
 	    };
 
     if (Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0) {

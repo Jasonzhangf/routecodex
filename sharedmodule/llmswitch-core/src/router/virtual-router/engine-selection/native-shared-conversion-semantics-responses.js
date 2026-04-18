@@ -18,6 +18,28 @@ function parseResponsesConversationResumeResult(raw) {
         meta: meta
     };
 }
+function parseNullableResponsesConversationResumeResult(raw) {
+    const parsed = parseJson(raw);
+    if (parsed === null) {
+        return null;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return null;
+    }
+    const row = parsed;
+    const payload = row.payload;
+    const meta = row.meta;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return null;
+    }
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+        return null;
+    }
+    return {
+        payload: payload,
+        meta: meta
+    };
+}
 export function pickResponsesPersistedFieldsWithNative(payload) {
     const capability = 'pickResponsesPersistedFieldsJson';
     const fail = (reason) => failNativeRequired(capability, reason);
@@ -140,6 +162,60 @@ export function resumeResponsesConversationPayloadWithNative(entry, responseId, 
         }
         const parsed = parseResponsesConversationResumeResult(raw);
         return parsed ?? fail('invalid payload');
+    }
+    catch (error) {
+        const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+        return fail(reason);
+    }
+}
+export function restoreResponsesContinuationPayloadWithNative(entry, incomingPayload, requestId, scopeKey) {
+    const capability = 'restoreResponsesContinuationPayloadJson';
+    const fail = (reason) => failNativeRequired(capability, reason);
+    if (isNativeDisabledByEnv()) {
+        return fail('native disabled');
+    }
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+        return fail();
+    }
+    const entryJson = safeStringify(entry ?? null);
+    const incomingPayloadJson = safeStringify(incomingPayload ?? null);
+    if (!entryJson || !incomingPayloadJson) {
+        return fail('json stringify failed');
+    }
+    try {
+        const raw = fn(entryJson, incomingPayloadJson, requestId, scopeKey);
+        if (typeof raw !== 'string' || !raw) {
+            return fail('empty result');
+        }
+        return parseNullableResponsesConversationResumeResult(raw);
+    }
+    catch (error) {
+        const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+        return fail(reason);
+    }
+}
+export function materializeResponsesContinuationPayloadWithNative(entry, incomingPayload, requestId, scopeKey) {
+    const capability = 'materializeResponsesContinuationPayloadJson';
+    const fail = (reason) => failNativeRequired(capability, reason);
+    if (isNativeDisabledByEnv()) {
+        return fail('native disabled');
+    }
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+        return fail();
+    }
+    const entryJson = safeStringify(entry ?? null);
+    const incomingPayloadJson = safeStringify(incomingPayload ?? null);
+    if (!entryJson || !incomingPayloadJson) {
+        return fail('json stringify failed');
+    }
+    try {
+        const raw = fn(entryJson, incomingPayloadJson, requestId, scopeKey);
+        if (typeof raw !== 'string' || !raw) {
+            return fail('empty result');
+        }
+        return parseNullableResponsesConversationResumeResult(raw);
     }
     catch (error) {
         const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

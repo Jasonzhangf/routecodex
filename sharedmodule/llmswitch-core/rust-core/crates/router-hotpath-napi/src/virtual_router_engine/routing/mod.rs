@@ -1,4 +1,5 @@
 mod antigravity;
+mod bootstrap;
 mod config;
 mod direct_model;
 mod metadata;
@@ -9,6 +10,8 @@ pub(crate) use antigravity::{
     alias_prefix_from_alias_key, build_antigravity_alias_key,
     should_avoid_antigravity_after_repeated_error, should_bind_antigravity_session,
 };
+#[allow(unused_imports)]
+pub(crate) use bootstrap::{bootstrap_virtual_router_routing_json, NormalizedRoutePoolConfig};
 #[allow(unused_imports)]
 pub(crate) use config::{
     build_route_candidates, build_route_queue, default_pool_supports_capability,

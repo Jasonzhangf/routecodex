@@ -379,6 +379,7 @@ describe('Responses协议转换器测试', () => {
     });
   });
 
+
   describe('SSE → JSON 转换', () => {
     it('应该聚合基本响应事件', async () => {
       const events: ResponsesSseEvent[] = [

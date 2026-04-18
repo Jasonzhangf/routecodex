@@ -2,6 +2,7 @@
  * Virtual Router 类型定义
  */
 
+import type { ChatContinuationSemantics } from '../../conversion/hub/types/chat-envelope.js';
 import type { StandardizedRequest } from '../../conversion/hub/types/standardized.js';
 
 export const DEFAULT_MODEL_CONTEXT_TOKENS = 200_000;
@@ -507,6 +508,7 @@ export interface RouterMetadataInput {
   tmux_session_id?: string;
   stopMessageClientInjectSessionScope?: string;
   stopMessageClientInjectScope?: string;
+  continuation?: ChatContinuationSemantics;
   responsesResume?: {
     previousRequestId?: string;
     restoredFromResponseId?: string;

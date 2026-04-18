@@ -1,8 +1,10 @@
 import { ProviderProtocolError } from '../provider-protocol-error.js';
 import {
   convertResponsesOutputToInputItemsWithNative,
+  materializeResponsesContinuationPayloadWithNative,
   pickResponsesPersistedFieldsWithNative,
   prepareResponsesConversationEntryWithNative,
+  restoreResponsesContinuationPayloadWithNative,
   resumeResponsesConversationPayloadWithNative
 } from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
 
@@ -12,6 +14,8 @@ interface CaptureContextArgs {
   requestId?: string;
   payload: AnyRecord;
   context: AnyRecord;
+  sessionId?: string;
+  conversationId?: string;
 }
 
 interface RecordResponseArgs {
@@ -28,6 +32,13 @@ interface ResumeResult {
   meta: AnyRecord;
 }
 
+interface RestoreByScopeArgs {
+  payload: AnyRecord;
+  sessionId?: string;
+  conversationId?: string;
+  requestId?: string;
+}
+
 interface ConversationEntry {
   requestId: string;
   basePayload: AnyRecord;
@@ -36,6 +47,9 @@ interface ConversationEntry {
   createdAt: number;
   updatedAt: number;
   lastResponseId?: string;
+  sessionId?: string;
+  conversationId?: string;
+  scopeKeys: string[];
 }
 
 const TTL_MS = 1000 * 60 * 30; // 30min
@@ -57,15 +71,39 @@ function assertResponsesConversationStoreNativeAvailable(): void {
     typeof pickResponsesPersistedFieldsWithNative !== 'function' ||
     typeof convertResponsesOutputToInputItemsWithNative !== 'function' ||
     typeof prepareResponsesConversationEntryWithNative !== 'function' ||
+    typeof materializeResponsesContinuationPayloadWithNative !== 'function' ||
+    typeof restoreResponsesContinuationPayloadWithNative !== 'function' ||
     typeof resumeResponsesConversationPayloadWithNative !== 'function'
   ) {
     throw new Error('[responses-conversation-store] native bindings unavailable');
   }
 }
 
+function readScopeToken(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function buildScopeKeys(scope: { sessionId?: unknown; conversationId?: unknown }): string[] {
+  const keys: string[] = [];
+  const sessionId = readScopeToken(scope.sessionId);
+  const conversationId = readScopeToken(scope.conversationId);
+  if (sessionId) {
+    keys.push(`session:${sessionId}`);
+  }
+  if (conversationId) {
+    keys.push(`conversation:${conversationId}`);
+  }
+  return [...new Set(keys)];
+}
+
 class ResponsesConversationStore {
   private requestMap = new Map<string, ConversationEntry>();
   private responseIndex = new Map<string, ConversationEntry>();
+  private scopeIndex = new Map<string, ConversationEntry>();
 
   rebindRequestId(oldId: string | undefined, newId: string | undefined): void {
     if (!oldId || !newId || oldId === newId) {
@@ -85,12 +123,20 @@ class ResponsesConversationStore {
     if (!requestId || !payload) return;
     this.prune();
     assertResponsesConversationStoreNativeAvailable();
+    const existing = this.requestMap.get(requestId);
+    if (existing) {
+      this.detachEntry(existing);
+    }
     const prepared = prepareResponsesConversationEntryWithNative(payload, context);
+    const scopeKeys = buildScopeKeys(args);
     const entry: ConversationEntry = {
       requestId,
       basePayload: isRecord(prepared.basePayload) ? prepared.basePayload : pickPersistedFields(payload),
       input: Array.isArray(prepared.input) ? prepared.input : [],
       tools: Array.isArray(prepared.tools) ? prepared.tools : undefined,
+      sessionId: readScopeToken(args.sessionId),
+      conversationId: readScopeToken(args.conversationId),
+      scopeKeys,
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
@@ -103,6 +149,9 @@ class ResponsesConversationStore {
     const response = args.response;
     const responseId = typeof response.id === 'string' ? response.id : undefined;
     if (!responseId) return;
+    if (entry.lastResponseId) {
+      this.responseIndex.delete(entry.lastResponseId);
+    }
     const assistantBlocks = convertOutputToInputItems(response);
     if (assistantBlocks.length) {
       entry.input.push(...assistantBlocks);
@@ -110,6 +159,7 @@ class ResponsesConversationStore {
     entry.lastResponseId = responseId;
     entry.updatedAt = Date.now();
     this.responseIndex.set(responseId, entry);
+    this.attachEntryScopes(entry);
   }
 
   resumeConversation(responseId: string, submitPayload: AnyRecord, options?: ResumeOptions): ResumeResult {
@@ -174,30 +224,112 @@ class ResponsesConversationStore {
     if (!requestId) return;
     const entry = this.requestMap.get(requestId);
     if (!entry) return;
-    this.requestMap.delete(requestId);
-    if (entry.lastResponseId) {
-      this.responseIndex.delete(entry.lastResponseId);
+    this.detachEntry(entry);
+  }
+
+  resumeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
+    this.prune();
+    const scopeKeys = buildScopeKeys(args);
+    for (const scopeKey of scopeKeys) {
+      const entry = this.scopeIndex.get(scopeKey);
+      if (!entry || !entry.lastResponseId) {
+        continue;
+      }
+      assertResponsesConversationStoreNativeAvailable();
+      const restored = restoreResponsesContinuationPayloadWithNative(
+        {
+          requestId: entry.requestId,
+          basePayload: entry.basePayload,
+          input: entry.input,
+          tools: entry.tools,
+          lastResponseId: entry.lastResponseId
+        },
+        args.payload,
+        args.requestId,
+        scopeKey
+      );
+      if (!restored) {
+        continue;
+      }
+      return {
+        payload: restored.payload,
+        meta: restored.meta
+      };
     }
+    return null;
+  }
+
+  materializeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
+    this.prune();
+    const scopeKeys = buildScopeKeys(args);
+    for (const scopeKey of scopeKeys) {
+      const entry = this.scopeIndex.get(scopeKey);
+      if (!entry) {
+        continue;
+      }
+      assertResponsesConversationStoreNativeAvailable();
+      const materialized = materializeResponsesContinuationPayloadWithNative(
+        {
+          requestId: entry.requestId,
+          basePayload: entry.basePayload,
+          input: entry.input,
+          tools: entry.tools,
+          lastResponseId: entry.lastResponseId
+        },
+        args.payload,
+        args.requestId,
+        scopeKey
+      );
+      if (!materialized) {
+        continue;
+      }
+      return {
+        payload: materialized.payload,
+        meta: materialized.meta
+      };
+    }
+    return null;
   }
 
   private cleanupEntry(entry: ConversationEntry, responseId: string): void {
     this.responseIndex.delete(responseId);
+    this.detachEntry(entry);
+  }
+
+  private attachEntryScopes(entry: ConversationEntry): void {
+    for (const key of entry.scopeKeys) {
+      this.scopeIndex.set(key, entry);
+    }
+  }
+
+  private detachEntry(entry: ConversationEntry): void {
     this.requestMap.delete(entry.requestId);
+    if (entry.lastResponseId) {
+      this.responseIndex.delete(entry.lastResponseId);
+    }
+    for (const key of entry.scopeKeys) {
+      const current = this.scopeIndex.get(key);
+      if (current === entry) {
+        this.scopeIndex.delete(key);
+      }
+    }
   }
 
   private prune(): void {
     const now = Date.now();
-    for (const [requestId, entry] of this.requestMap.entries()) {
+    for (const [, entry] of this.requestMap.entries()) {
       if (now - entry.updatedAt > TTL_MS) {
-        this.requestMap.delete(requestId);
-        if (entry.lastResponseId) {
-          this.responseIndex.delete(entry.lastResponseId);
-        }
+        this.detachEntry(entry);
       }
     }
     for (const [respId, entry] of this.responseIndex.entries()) {
       if (!this.requestMap.has(entry.requestId)) {
         this.responseIndex.delete(respId);
+      }
+    }
+    for (const [scopeKey, entry] of this.scopeIndex.entries()) {
+      if (!this.requestMap.has(entry.requestId)) {
+        this.scopeIndex.delete(scopeKey);
       }
     }
   }
@@ -251,6 +383,20 @@ export function rebindResponsesConversationRequestId(oldId?: string, newId?: str
     console.log('[responses-store] rebind', oldId, '->', newId);
   }
   store.rebindRequestId(oldId, newId);
+}
+
+export function resumeLatestResponsesContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
+  if (RESPONSES_DEBUG) {
+    console.log('[responses-store] resume-by-scope', args.sessionId, args.conversationId);
+  }
+  return store.resumeLatestContinuationByScope(args);
+}
+
+export function materializeLatestResponsesContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
+  if (RESPONSES_DEBUG) {
+    console.log('[responses-store] materialize-by-scope', args.sessionId, args.conversationId);
+  }
+  return store.materializeLatestContinuationByScope(args);
 }
 
 export { store as responsesConversationStore };

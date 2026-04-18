@@ -179,7 +179,8 @@ fn sanitize_message_tool_names(payload_obj: &Map<String, Value>, out: &mut Map<S
                     next_tool_calls.push(tool_call.clone());
                     continue;
                 };
-                let Some(function_obj) = tool_call_obj.get("function").and_then(Value::as_object) else {
+                let Some(function_obj) = tool_call_obj.get("function").and_then(Value::as_object)
+                else {
                     next_tool_calls.push(tool_call.clone());
                     continue;
                 };
@@ -361,8 +362,14 @@ mod tests {
         });
 
         let output = sanitize_glm_tools_schema(&payload);
-        assert_eq!(output["tools"][0]["function"]["name"], json!("reasoning_stop"));
-        assert_eq!(output["tool_choice"]["function"]["name"], json!("reasoning_stop"));
+        assert_eq!(
+            output["tools"][0]["function"]["name"],
+            json!("reasoning_stop")
+        );
+        assert_eq!(
+            output["tool_choice"]["function"]["name"],
+            json!("reasoning_stop")
+        );
         assert_eq!(
             output["messages"][0]["tool_calls"][0]["function"]["name"],
             json!("reasoning_stop")

@@ -59,7 +59,7 @@ describe('provider-vercel-ai-doctor', () => {
   it('marks runtime-only providers as unsupported for direct SDK probing', async () => {
     const result = await runVercelAiProviderDoctor({
       providerId: 'iflow',
-      modelId: 'qwen3-coder-plus',
+      modelId: 'coder-model',
       providerNode: {
         type: 'iflow',
         baseURL: 'https://apis.iflow.cn/v1',
@@ -69,6 +69,6 @@ describe('provider-vercel-ai-doctor', () => {
 
     expect(result.ok).toBe(false);
     expect(result.binding.supported).toBe(false);
-    expect(result.message).toContain('runtime');
+    expect(result.message).toContain('removed');
   });
 });

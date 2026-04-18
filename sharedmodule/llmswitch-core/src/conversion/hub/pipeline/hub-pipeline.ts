@@ -12,8 +12,7 @@ import type {
   StageRecorder,
 } from "../format-adapters/index.js";
 import { VirtualRouterEngine } from "../../../router/virtual-router/engine.js";
-import { providerErrorCenter } from "../../../router/virtual-router/error-center.js";
-import { providerSuccessCenter } from "../../../router/virtual-router/success-center.js";
+import { setVirtualRouterPolicyRuntimeRouterHooks } from "../../../router/virtual-router/provider-runtime-ingress.js";
 import type {
   VirtualRouterConfig,
   RoutingDecision,
@@ -236,8 +235,6 @@ export function __unsafeBuildAdapterContextForTest(
 export class HubPipeline {
   private readonly routerEngine: VirtualRouterEngine;
   private config: HubPipelineConfig;
-  private unsubscribeProviderErrors?: () => void;
-  private unsubscribeProviderSuccess?: () => void;
 
   constructor(config: HubPipelineConfig) {
     this.config = config;
@@ -249,32 +246,24 @@ export class HubPipeline {
     this.routerEngine.initialize(config.virtualRouter);
     setHubPolicyRuntimePolicy(config.policy);
     try {
-      this.unsubscribeProviderErrors = providerErrorCenter.subscribe(
-        (event) => {
+      setVirtualRouterPolicyRuntimeRouterHooks(this, {
+        handleProviderError: (event) => {
           try {
             this.routerEngine.handleProviderError(event);
           } catch (subscriberError) {
-            logHubPipelineNonBlockingError('providerErrorCenter.handleProviderError', subscriberError);
+            logHubPipelineNonBlockingError('provider-runtime-ingress.handleProviderError', subscriberError);
           }
         },
-      );
-    } catch (subscribeError) {
-      logHubPipelineNonBlockingError('providerErrorCenter.subscribe', subscribeError);
-      this.unsubscribeProviderErrors = undefined;
-    }
-    try {
-      this.unsubscribeProviderSuccess = providerSuccessCenter.subscribe(
-        (event) => {
+        handleProviderSuccess: (event) => {
           try {
             this.routerEngine.handleProviderSuccess(event);
           } catch (subscriberError) {
-            logHubPipelineNonBlockingError('providerSuccessCenter.handleProviderSuccess', subscriberError);
+            logHubPipelineNonBlockingError('provider-runtime-ingress.handleProviderSuccess', subscriberError);
           }
-        },
-      );
-    } catch (subscribeError) {
-      logHubPipelineNonBlockingError('providerSuccessCenter.subscribe', subscribeError);
-      this.unsubscribeProviderSuccess = undefined;
+        }
+      });
+    } catch (hookError) {
+      logHubPipelineNonBlockingError('provider-runtime-ingress.register', hookError);
     }
   }
 
@@ -318,21 +307,10 @@ export class HubPipeline {
   }
 
   dispose(): void {
-    if (this.unsubscribeProviderErrors) {
-      try {
-        this.unsubscribeProviderErrors();
-      } catch (disposeError) {
-        logHubPipelineNonBlockingError('dispose.unsubscribeProviderErrors', disposeError);
-      }
-      this.unsubscribeProviderErrors = undefined;
-    }
-    if (this.unsubscribeProviderSuccess) {
-      try {
-        this.unsubscribeProviderSuccess();
-      } catch (disposeError) {
-        logHubPipelineNonBlockingError('dispose.unsubscribeProviderSuccess', disposeError);
-      }
-      this.unsubscribeProviderSuccess = undefined;
+    try {
+      setVirtualRouterPolicyRuntimeRouterHooks(this, undefined);
+    } catch (disposeError) {
+      logHubPipelineNonBlockingError('dispose.provider-runtime-ingress.unregister', disposeError);
     }
   }
 

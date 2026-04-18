@@ -7,6 +7,48 @@
 
 本页记录 RouteCodex 错误处理的**目标收口架构**与实现边界。历史 V2 机制中凡是“独立错误中心 / event bus”语义，均以本页的新决策为准，后续实现需同步删除旧中间层。
 
+## 0a. 2026-04-16 当前已验证收口状态
+
+- **provider 执行期错误主链已切到 `Virtual Router policy`**
+  - Host `emitProviderError` 不再双上报 `RouteErrorHub`
+  - 当前主路径：`provider/runtime/send/convert/followup error -> provider-error-reporter -> reportProviderErrorToRouterPolicy -> Virtual Router policy`
+- **HubPipeline 已不再把 legacy center 当主订阅中心**
+  - TS `HubPipeline` bridge wrapper 会先拆掉旧的 `providerErrorCenter/providerSuccessCenter.subscribe(...)`
+  - 再把 runtime router hooks 直接挂到 `routerEngine.handleProviderError/Success`
+- **legacy `providerErrorCenter/providerSuccessCenter` 现阶段只保留 compat adapter 角色**
+  - 残留 `emit(...)` 会在 bridge 层被 patch 后继续 forward 到 runtime ingress
+  - 即：它们仍物理存在，但**不再主导策略**
+- **RouteErrorHub / ErrorHandlingCenter 现阶段只保留 Host 边界职责**
+  - 适用：HTTP / server / CLI / 外层错误映射与统一返回
+  - 不再承担 provider runtime retry/reroute/backoff 主决策
+- **stopless 静默停已加硬校验**
+  - 若 `stopless=on/endless` 且响应完成时缺少 `reasoning.stop` finalized marker，直接抛 `STOPLESS_FINALIZATION_MISSING`（502、retryable）
+- **429 止血已落地**
+  - `RequestExecutor` 不再因为“当前 tier 是 singleton”就抱着当前 provider 死重试
+  - 当前 provider 出错会优先被排除并 reroute
+- **provider error reporting 前置装配已收口到单点 helper**
+  - `runtime_resolve` / `provider.send` 不再分支内手拼 `errorCode/upstreamCode/statusCode/stageHint`
+  - 当前统一入口：`resolveRequestExecutorProviderErrorReportPlan(...) -> reportRequestExecutorProviderError(...)`
+  - `resolveRequestExecutorProviderErrorReportPlan(...)` 现在会自己优先解析 `requestExecutorProviderErrorStage`（含 `details`）；外层只需要给默认 stage，不再先手动 resolve fallback
+  - 已覆盖 `provider.runtime_resolve` / `provider.sse_decode` / `provider.followup` 的阶段判定
+- **converted retryable HTTP status 不再双上报**
+  - 之前 `converted 401/429/5xx` 会在 try 内先报一次 `provider.http`，外层 catch 再报一次
+  - 现改为只给错误打 `provider.http` stage marker，统一由外层 `reportRequestExecutorProviderError(...)` 上报一次
+- **provider.followup 不再污染 provider 健康**
+  - servertool/client-inject/followup payload 这类 followup orchestration 错误统一视为 health-neutral
+  - `RequestExecutor` 会按 `provider.followup` stage 直接给 `affectsHealth=false`
+  - `emitProviderError(...)` 现在会显式尊重调用方传入的 `affectsHealth=false`，不再把所有 non-recoverable 一律强改为 `true`
+- **followup stage marker 前移到 converter 源头**
+  - `provider-response-converter` 对 `SERVERTOOL_*` followup 错误会直接打 `requestExecutorProviderErrorStage='provider.followup'`
+  - request-executor 优先读 marker，再回退到 code/stage 推断
+- **SSE decode stage marker 也开始前移**
+  - SSE wrapper / bridge SSE remap 错误会直接打 `requestExecutorProviderErrorStage='provider.sse_decode'`
+  - legacy `executor-response` 也已同步，减少新旧链路阶段口径漂移
+  - request-executor 继续保留 fallback 推断，但优先使用显式 marker
+- **client injection host 源头也已接入 followup marker**
+  - `client-injection-flow` 创建的 strict tmux / inject 失败错误会直接打 `requestExecutorProviderErrorStage='provider.followup'`
+  - 这样 host 内部已知的 followup/internal error 不必再等外层按 code/message 推断
+
 ## 0. 唯一真源与待删除项
 
 ### 唯一策略真源
@@ -48,13 +90,12 @@
 | RequestExecutor | 执行 Router decision、驱动 provider runtime/send/convert | 不再独立发明第二套 error policy |
 | servertool engine | followup 编排前/internal error 边界、followup reenter orchestration | 不再包一层独立 provider retry/error 语义 |
 
-## 3. 当前实现遗留问题（本 epic 要清掉）
+## 3. 当前剩余遗留问题（继续收口项）
 
-- followup 与普通请求没有共用唯一错误处理方案
-- followup 存在 `bypassTrafficGovernor`
-- provider-switch 日志出现 `attempt=max -> next=max+1`
-- `SERVERTOOL_FOLLOWUP_FAILED` 混入 provider 执行期错误语义
-- 独立 `error-handling center` / `providerErrorCenter` 继续形成第二中心错觉
+- legacy `providerErrorCenter/providerSuccessCenter` 仍是**物理残留模块**，虽然已降级为 compat adapter，但后续仍应继续物理去除中转角色
+- followup 的编排前/internal error 与 provider 执行期错误边界还需继续压实，避免 `SERVERTOOL_*` 语义再次外溢
+- provider-switch 日志仍需继续核对，确保不再出现误导性的“下一跳/回退”观感
+- Host 边界的 `RouteErrorHub / ErrorHandlingCenter` 文档与调用面还需继续缩小到“外层映射”职责，避免再次被误当策略中心
 
 ## 4. 收口验收信号
 
@@ -78,7 +119,7 @@
    - 根据构建模式自动裁剪堆栈：`release` 构建默认移除 stack（可通过 `ROUTECODEX_RELEASE_ERROR_VERBOSE=1` 恢复详细日志）。
    - 将错误交给 `ErrorHandlerRegistry`，触发挂载的处理 Hook（含 429 回退调度、快照写入等）。
    - 可选返回 HTTP 映射结果，确保客户端仅收到统一格式的错误体。
-3. Provider 侧在 `emitProviderError` 同时上报 `providerErrorCenter`（供 Virtual Router 熔断）与 `ErrorHandlingCenter`。
+3. （旧）Provider 侧曾在 `emitProviderError` 同时上报 `providerErrorCenter` 与 `ErrorHandlingCenter`。
 4. `llmswitch-core` 的 Virtual Router 根据 `ProviderErrorEvent` 执行健康状态变更（回退、降级、拉黑）。
 
 ## H2. 错误策略矩阵

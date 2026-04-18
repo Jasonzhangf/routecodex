@@ -15,6 +15,8 @@ export type ResponsesSseEventType =
   | 'response.created'
   | 'response.in_progress'
   | 'response.completed'
+  | 'response.failed'
+  | 'response.incomplete'
   | 'response.required_action'
   | 'response.done'
   | 'response.output_item.added'
@@ -405,7 +407,7 @@ export interface ResponsesConversionConfig {
 
 // 默认Responses转换配置
 export const DEFAULT_RESPONSES_CONVERSION_CONFIG: ResponsesConversionConfig = {
-  defaultTimeoutMs: 30000,
+  defaultTimeoutMs: 900000,
   heartbeatIntervalMs: 15000,
   eventTimeoutMs: 5000,
 

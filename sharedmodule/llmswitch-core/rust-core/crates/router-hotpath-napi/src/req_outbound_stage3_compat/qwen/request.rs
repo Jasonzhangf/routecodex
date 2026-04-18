@@ -15,7 +15,7 @@ fn coerce_text(value: &Value) -> String {
 fn normalize_qwen_model_name(model: &str) -> String {
     match model {
         "gpt-3.5-turbo" => "qwen-turbo".to_string(),
-        "gpt-4" | "gpt-4-turbo" | "gpt-4o" => "qwen3-coder-plus".to_string(),
+        "gpt-4" | "gpt-4-turbo" | "gpt-4o" => "coder-model".to_string(),
         _ => model.to_string(),
     }
 }

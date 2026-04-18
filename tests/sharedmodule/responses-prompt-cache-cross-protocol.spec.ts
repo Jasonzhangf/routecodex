@@ -3,6 +3,7 @@ import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conve
 import { ResponsesSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/semantic-mappers/responses-mapper.js';
 import { AnthropicSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/semantic-mappers/anthropic-mapper.js';
 import { GeminiSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/semantic-mappers/gemini-mapper.js';
+import { readProtocolMappingAuditBucket } from '../../sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/protocol-mapping-audit.js';
 
 function createResponsesContext(requestId: string): AdapterContext {
   return {
@@ -40,11 +41,10 @@ describe('responses prompt_cache_key cross protocol policy', () => {
     const payload = outbound.payload as any;
     expect(payload.prompt_cache_key).toBeUndefined();
 
-    const audit = (chat.metadata as any)?.mappingAudit;
-    expect(audit).toBeDefined();
-    expect(Array.isArray(audit.dropped)).toBe(true);
+    const dropped = readProtocolMappingAuditBucket(chat as any, 'dropped');
+    expect(Array.isArray(dropped)).toBe(true);
     expect(
-      (audit.dropped as any[]).some(
+      dropped.some(
         (entry) =>
           entry?.field === 'prompt_cache_key' &&
           entry?.targetProtocol === 'anthropic-messages' &&
@@ -83,11 +83,10 @@ describe('responses prompt_cache_key cross protocol policy', () => {
     expect(payload.generationConfig?.prompt_cache_key).toBeUndefined();
     expect(payload.metadata?.prompt_cache_key).toBeUndefined();
 
-    const audit = (chat.metadata as any)?.mappingAudit;
-    expect(audit).toBeDefined();
-    expect(Array.isArray(audit.dropped)).toBe(true);
+    const dropped = readProtocolMappingAuditBucket(chat as any, 'dropped');
+    expect(Array.isArray(dropped)).toBe(true);
     expect(
-      (audit.dropped as any[]).some(
+      dropped.some(
         (entry) =>
           entry?.field === 'prompt_cache_key' &&
           entry?.targetProtocol === 'gemini-chat' &&

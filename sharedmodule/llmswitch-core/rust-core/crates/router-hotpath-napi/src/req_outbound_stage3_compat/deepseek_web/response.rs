@@ -44,7 +44,13 @@ fn strip_skip_global_text_harvest(payload: &mut Value) {
 fn is_exec_command_family(name: &str) -> bool {
     matches!(
         name.trim().to_ascii_lowercase().as_str(),
-        "exec_command" | "execute_command" | "execute-command" | "shell_command" | "shell" | "bash" | "terminal"
+        "exec_command"
+            | "execute_command"
+            | "execute-command"
+            | "shell_command"
+            | "shell"
+            | "bash"
+            | "terminal"
     )
 }
 
@@ -80,7 +86,10 @@ fn resolve_requested_exec_tool_alias(adapter_context: &AdapterContext) -> Option
 }
 
 fn remap_exec_tool_name_to_requested_alias(payload: &mut Value, requested_alias: Option<&str>) {
-    let Some(alias) = requested_alias.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(alias) = requested_alias
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
         return;
     };
     if alias.eq_ignore_ascii_case("exec_command") {
@@ -163,7 +172,8 @@ fn attach_requested_tool_names(payload: &mut Value, adapter_context: &AdapterCon
         .and_then(|row| row.get("tools"))
         .and_then(Value::as_array)
         .map(|tools| {
-            tools.iter()
+            tools
+                .iter()
                 .filter_map(|tool| {
                     tool.as_object()
                         .and_then(|row| row.get("function"))

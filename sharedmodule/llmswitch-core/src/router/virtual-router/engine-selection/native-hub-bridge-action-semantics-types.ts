@@ -59,12 +59,14 @@ export interface NativeResolveResponsesRequestBridgeDecisionsInput {
   envelopeMetadata?: Record<string, unknown>;
   bridgeMetadata?: Record<string, unknown>;
   extraBridgeHistory?: Record<string, unknown>;
+  requestSemantics?: Record<string, unknown>;
 }
 
 export interface NativeResolveResponsesRequestBridgeDecisionsOutput {
   forceWebSearch: boolean;
   toolCallIdStyle?: 'fc' | 'preserve';
   historySeed?: NativeBridgeHistoryOutput;
+  previousResponseId?: string;
 }
 
 export interface NativeFilterBridgeInputForUpstreamInput {

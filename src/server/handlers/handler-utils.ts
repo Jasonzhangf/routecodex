@@ -413,6 +413,53 @@ export function captureRawRequestBodyForMetadata(payload: unknown): unknown {
   return out;
 }
 
+export function readRequestBodyMetadata(payload: unknown): Record<string, unknown> | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  const raw = (payload as Record<string, unknown>).metadata;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
+  } catch {
+    return { ...(raw as Record<string, unknown>) };
+  }
+}
+
+export function mergePipelineMetadata(
+  requestBodyMetadata: Record<string, unknown> | undefined,
+  internalMetadata: Record<string, unknown>
+): Record<string, unknown> {
+  if (!requestBodyMetadata || Object.keys(requestBodyMetadata).length === 0) {
+    return internalMetadata;
+  }
+  const merged: Record<string, unknown> = {
+    ...requestBodyMetadata,
+    ...internalMetadata
+  };
+  const requestRt =
+    requestBodyMetadata.__rt &&
+    typeof requestBodyMetadata.__rt === 'object' &&
+    !Array.isArray(requestBodyMetadata.__rt)
+      ? (requestBodyMetadata.__rt as Record<string, unknown>)
+      : undefined;
+  const internalRt =
+    internalMetadata.__rt &&
+    typeof internalMetadata.__rt === 'object' &&
+    !Array.isArray(internalMetadata.__rt)
+      ? (internalMetadata.__rt as Record<string, unknown>)
+      : undefined;
+  if (requestRt || internalRt) {
+    merged.__rt = {
+      ...(requestRt ?? {}),
+      ...(internalRt ?? {})
+    };
+  }
+  return merged;
+}
+
 function normalizeError(error: unknown, requestId: string, endpoint: string): Error & Record<string, unknown> {
   const err = error instanceof Error ? error : new Error(String(error ?? 'Unknown error'));
   const enriched = err as Error & Record<string, unknown>;

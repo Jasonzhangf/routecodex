@@ -71,7 +71,9 @@ enum TextToolProviderFamily {
     Qwen,
 }
 
-fn read_text_tool_provider_family_from_governance(payload: &Value) -> Option<TextToolProviderFamily> {
+fn read_text_tool_provider_family_from_governance(
+    payload: &Value,
+) -> Option<TextToolProviderFamily> {
     let family = payload
         .as_object()
         .and_then(|row| row.get("__rcc_tool_governance"))
@@ -198,7 +200,9 @@ fn contains_explicit_tool_wrapper_marker(raw: &str) -> bool {
         return true;
     }
 
-    let Ok(named_re) = Regex::new(r"(?is)</?\s*(exec_command|execute_command|apply_patch|write_stdin|update_plan|request_user_input|spawn_agent|send_input|resume_agent|wait_agent|close_agent|view_image|shell_command|shell|bash|terminal)\b") else {
+    let Ok(named_re) = Regex::new(
+        r"(?is)</?\s*(exec_command|execute_command|apply_patch|write_stdin|update_plan|request_user_input|spawn_agent|send_input|resume_agent|wait_agent|close_agent|view_image|shell_command|shell|bash|terminal)\b",
+    ) else {
         return false;
     };
     named_re.is_match(raw)
@@ -921,7 +925,11 @@ fn looks_like_exec_command_candidate(raw: &str) -> bool {
         tokens.next();
     }
 
-    let Some(command_token) = tokens.next().map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(command_token) = tokens
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
         return false;
     };
 
@@ -1594,7 +1602,11 @@ pub(crate) fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> 
             let normalized_rows: Vec<Value> = rows
                 .iter()
                 .filter_map(|row| {
-                    if let Some(step_text) = row.as_str().map(str::trim).filter(|value| !value.is_empty()) {
+                    if let Some(step_text) = row
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                    {
                         return Some(json!({
                             "step": step_text,
                             "status": "pending",
@@ -2059,9 +2071,9 @@ fn canonicalize_xml_named_tool_arg_key(raw_key: &str, tool_name: &str) -> String
 }
 
 fn parse_xml_tag_attributes(raw_tag: &str) -> Vec<(String, String)> {
-    let Ok(attr_pattern) = Regex::new(
-        r#"([A-Za-z_][A-Za-z0-9_.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))"#,
-    ) else {
+    let Ok(attr_pattern) =
+        Regex::new(r#"([A-Za-z_][A-Za-z0-9_.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))"#)
+    else {
         return Vec::new();
     };
     attr_pattern
@@ -2098,7 +2110,8 @@ fn resolve_xml_wrapper_tool_name_from_attrs(
     raw_tool_name: &str,
     attrs: &[(String, String)],
 ) -> Option<String> {
-    let attr_tool_name = read_xml_tag_attribute(attrs, &["name", "tool", "tool_name", "call", "action"]);
+    let attr_tool_name =
+        read_xml_tag_attribute(attrs, &["name", "tool", "tool_name", "call", "action"]);
     if let Some(candidate) = attr_tool_name {
         if let Some(canonical) = normalize_tool_name(candidate) {
             return Some(canonical);
@@ -2117,7 +2130,9 @@ fn resolve_xml_named_child_arg_key(
         normalized.as_str(),
         "parameter" | "param" | "arg" | "argument" | "field" | "property" | "item" | "value"
     ) {
-        if let Some(attr_name) = read_xml_tag_attribute(attrs, &["name", "key", "field", "property"]) {
+        if let Some(attr_name) =
+            read_xml_tag_attribute(attrs, &["name", "key", "field", "property"])
+        {
             return canonicalize_xml_named_tool_arg_key(attr_name, tool_name);
         }
     }
@@ -2329,8 +2344,7 @@ fn extract_xml_named_tool_call_blocks(text: &str, fallback_start_id: usize) -> V
                     body,
                     &wrapper_attrs,
                     fallback_start_id + index - 1,
-                )
-                {
+                ) {
                     if let Ok(key) = serde_json::to_string(&entry) {
                         if seen.insert(key) {
                             recovered.push(entry);
@@ -3037,7 +3051,8 @@ fn mask_tool_wrapper_markup(raw: &str) -> String {
         }
     }
 
-    if let Ok(re) = Regex::new(r#"(?m)^[ \t]*[•·*]\s+(?=(?:\{|\[|<<RCC_TOOL_CALLS|<\|tool_call))"#) {
+    if let Ok(re) = Regex::new(r#"(?m)^[ \t]*[•·*]\s+(?=(?:\{|\[|<<RCC_TOOL_CALLS|<\|tool_call))"#)
+    {
         masked = re.replace_all(masked.as_str(), "").into_owned();
     }
 
@@ -3207,11 +3222,31 @@ fn normalize_tool_call_entry(entry: &Value, fallback_id: usize) -> Option<Value>
         .or_else(|| row.get("params").map(|value| (value, true)))
         .or_else(|| row.get("parameters").map(|value| (value, true)))
         .or_else(|| row.get("payload").map(|value| (value, true)))
-        .or_else(|| fn_row.and_then(|f| f.get("arguments")).map(|value| (value, true)))
-        .or_else(|| fn_row.and_then(|f| f.get("input")).map(|value| (value, false)))
-        .or_else(|| fn_row.and_then(|f| f.get("params")).map(|value| (value, true)))
-        .or_else(|| fn_row.and_then(|f| f.get("parameters")).map(|value| (value, true)))
-        .or_else(|| fn_row.and_then(|f| f.get("payload")).map(|value| (value, true)));
+        .or_else(|| {
+            fn_row
+                .and_then(|f| f.get("arguments"))
+                .map(|value| (value, true))
+        })
+        .or_else(|| {
+            fn_row
+                .and_then(|f| f.get("input"))
+                .map(|value| (value, false))
+        })
+        .or_else(|| {
+            fn_row
+                .and_then(|f| f.get("params"))
+                .map(|value| (value, true))
+        })
+        .or_else(|| {
+            fn_row
+                .and_then(|f| f.get("parameters"))
+                .map(|value| (value, true))
+        })
+        .or_else(|| {
+            fn_row
+                .and_then(|f| f.get("payload"))
+                .map(|value| (value, true))
+        });
     let (args_source, preserve_raw_shape) = args_source_with_mode?;
 
     let raw_name = read_trimmed_string(row.get("name"))
@@ -3904,7 +3939,9 @@ fn sanitize_textual_noise_field_in_message(message: &mut Map<String, Value>, key
     if cleaned == raw {
         return false;
     }
-    if let Some(preserved) = fallback_preserve_inner_text_when_cleaned_empty(raw.as_str(), cleaned.as_str()) {
+    if let Some(preserved) =
+        fallback_preserve_inner_text_when_cleaned_empty(raw.as_str(), cleaned.as_str())
+    {
         message.insert(key.to_string(), Value::String(preserved));
     } else if cleaned.is_empty() {
         message.remove(key);
@@ -3926,7 +3963,9 @@ fn sanitize_textual_marker_field_in_message(message: &mut Map<String, Value>, ke
     if cleaned == raw {
         return false;
     }
-    if let Some(preserved) = fallback_preserve_inner_text_when_cleaned_empty(raw.as_str(), cleaned.as_str()) {
+    if let Some(preserved) =
+        fallback_preserve_inner_text_when_cleaned_empty(raw.as_str(), cleaned.as_str())
+    {
         message.insert(key.to_string(), Value::String(preserved));
     } else if cleaned.is_empty() {
         message.remove(key);
@@ -3952,7 +3991,9 @@ fn sanitize_textual_marker_field_in_message_with_policy(
     if cleaned == raw {
         return false;
     }
-    if let Some(preserved) = fallback_preserve_inner_text_when_cleaned_empty(raw.as_str(), cleaned.as_str()) {
+    if let Some(preserved) =
+        fallback_preserve_inner_text_when_cleaned_empty(raw.as_str(), cleaned.as_str())
+    {
         message.insert(key.to_string(), Value::String(preserved));
     } else if cleaned.is_empty() {
         if allow_empty_removal {
@@ -4012,10 +4053,9 @@ fn sanitize_content_field_after_tool_markup(
                         continue;
                     }
                     changed += 1;
-                    if let Some(preserved) = fallback_preserve_inner_text_when_cleaned_empty(
-                        raw,
-                        cleaned.as_str(),
-                    ) {
+                    if let Some(preserved) =
+                        fallback_preserve_inner_text_when_cleaned_empty(raw, cleaned.as_str())
+                    {
                         part_row.insert(key.to_string(), Value::String(preserved));
                     } else if cleaned.is_empty() {
                         part_row.remove(key);
@@ -4336,10 +4376,9 @@ pub(crate) fn harvest_text_tool_calls_from_payload(payload: &mut Value) -> i64 {
                                 "patch": candidate_text
                             }
                         });
-                        if let Some(normalized_patch) = normalize_tool_call_entry(
-                            &patch_entry,
-                            (harvested as usize) + 1,
-                        ) {
+                        if let Some(normalized_patch) =
+                            normalize_tool_call_entry(&patch_entry, (harvested as usize) + 1)
+                        {
                             recovered = vec![normalized_patch];
                             break;
                         }
@@ -5727,23 +5766,29 @@ console.log('ok')"#;
     #[test]
     fn test_normalize_tool_args_preserving_raw_shape_does_not_guess_exec_command_aliases() {
         let raw_args = json!({"command": "pwd", "workdir": "/workspace"});
-        let out = normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).unwrap();
+        let out =
+            normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).unwrap();
         let parsed: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed["command"], "pwd");
         assert_eq!(parsed["workdir"], "/workspace");
         assert!(parsed.get("cmd").is_none());
 
         let raw_args = Value::String("{\"command\":\"pwd\"}".to_string());
-        let out = normalize_tool_args_preserving_raw_shape("shell_command", Some(&raw_args)).unwrap();
+        let out =
+            normalize_tool_args_preserving_raw_shape("shell_command", Some(&raw_args)).unwrap();
         let parsed: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed["command"], "pwd");
         assert!(parsed.get("cmd").is_none());
 
         let raw_args = json!({});
-        assert!(normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).is_none());
+        assert!(
+            normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).is_none()
+        );
 
         let raw_args = Value::String("{}".to_string());
-        assert!(normalize_tool_args_preserving_raw_shape("shell_command", Some(&raw_args)).is_none());
+        assert!(
+            normalize_tool_args_preserving_raw_shape("shell_command", Some(&raw_args)).is_none()
+        );
     }
 
     #[test]
@@ -6080,9 +6125,7 @@ console.log('ok')"#;
         assert!(repaired.contains("with open('a.py', 'r') as f:"));
         assert!(repaired.contains("print(f.read())"));
 
-        let untouched = strip_python_heredoc_pseudo_escapes(
-            "grep -E \"foo\\(bar\\)\" src/file.ts",
-        );
+        let untouched = strip_python_heredoc_pseudo_escapes("grep -E \"foo\\(bar\\)\" src/file.ts");
         assert_eq!(untouched, "grep -E \"foo\\(bar\\)\" src/file.ts");
     }
 
@@ -6506,7 +6549,8 @@ console.log('ok')"#;
     }
 
     #[test]
-    fn test_extract_xml_named_tool_call_blocks_invoke_parameter_attribute_wrapper_inside_tool_calls() {
+    fn test_extract_xml_named_tool_call_blocks_invoke_parameter_attribute_wrapper_inside_tool_calls(
+    ) {
         let text = r#"<tool_calls>
 <invoke name="exec_command">
 <parameter name="cmd" string="true">tail -100 ~/.finger/logs/daemon.log | tail -20</parameter>
@@ -7108,9 +7152,12 @@ Arguments:
         let text = "• <<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"apply_patch\",\"input\":{\"patch\":\"*** Begin Patch\\n*** Add File: demo.txt\\n+hi\\n*** End Patch\"}}]}\nRCC_TOOL_CALLS_JSON";
         let variants = collect_harvest_text_variants(text);
         assert!(!variants.is_empty());
-        assert!(variants
-            .iter()
-            .any(|item| item.contains("\"tool_calls\"") && !item.contains("<<RCC_TOOL_CALLS_JSON")));
+        assert!(
+            variants
+                .iter()
+                .any(|item| item.contains("\"tool_calls\"")
+                    && !item.contains("<<RCC_TOOL_CALLS_JSON"))
+        );
     }
 
     #[test]
@@ -7362,21 +7409,22 @@ Arguments:
     #[test]
     fn test_strip_xml_tags_preserve_text_keeps_line_breaks() {
         let raw = "<review>\n第一行\n\n第二行 <search>query</search>\n</review>";
-        assert_eq!(
-            strip_xml_tags_preserve_text(raw),
-            "第一行\n\n第二行 query"
-        );
+        assert_eq!(strip_xml_tags_preserve_text(raw), "第一行\n\n第二行 query");
     }
 
     #[test]
-    fn test_sanitize_textual_marker_field_preserves_inner_text_when_wrapper_only_content_would_empty() {
+    fn test_sanitize_textual_marker_field_preserves_inner_text_when_wrapper_only_content_would_empty(
+    ) {
         let mut message = serde_json::json!({
             "content": "<function_calls>保留内部文本</function_calls>"
         })
         .as_object()
         .cloned()
         .unwrap();
-        assert!(sanitize_textual_marker_field_in_message(&mut message, "content"));
+        assert!(sanitize_textual_marker_field_in_message(
+            &mut message,
+            "content"
+        ));
         assert_eq!(message["content"], "保留内部文本");
     }
 
@@ -7388,7 +7436,10 @@ Arguments:
         .as_object()
         .cloned()
         .unwrap();
-        assert!(sanitize_textual_marker_field_in_message(&mut message, "content"));
+        assert!(sanitize_textual_marker_field_in_message(
+            &mut message,
+            "content"
+        ));
         assert_eq!(message["content"], "保留正文");
     }
 
@@ -7401,7 +7452,10 @@ Arguments:
         .as_object()
         .cloned()
         .unwrap();
-        assert!(!sanitize_textual_marker_field_in_message(&mut message, "content"));
+        assert!(!sanitize_textual_marker_field_in_message(
+            &mut message,
+            "content"
+        ));
         assert_eq!(message["content"], raw);
     }
 
@@ -7414,7 +7468,10 @@ Arguments:
         .as_object()
         .cloned()
         .unwrap();
-        assert!(!sanitize_textual_marker_field_in_message(&mut message, "content"));
+        assert!(!sanitize_textual_marker_field_in_message(
+            &mut message,
+            "content"
+        ));
         assert_eq!(message["content"], raw);
     }
 
@@ -7480,7 +7537,6 @@ Arguments:
             raw
         );
     }
-
 
     #[test]
     fn test_rcc_heredoc_tail_is_stripped_even_when_nonstandard_tool_call_is_recovered() {

@@ -214,19 +214,19 @@ impl VirtualRouterEngineCore {
             } else {
                 RoutingInstructionState::default()
             };
-        let mut routing_state = strip_stop_message_fields(&base_state);
-
+        let mut persisted_routing_state = strip_stop_message_fields(&base_state);
+        let mut selection_routing_state = strip_stop_message_fields(&base_state);
         let metadata_instructions = build_metadata_instructions(metadata);
         if !metadata_instructions.is_empty() {
-            apply_routing_instructions(&metadata_instructions, &mut routing_state)?;
+            apply_routing_instructions(&metadata_instructions, &mut selection_routing_state)?;
         }
         if metadata
             .get("disableStickyRoutes")
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
         {
-            routing_state.sticky_target = None;
-            routing_state.prefer_target = None;
+            selection_routing_state.sticky_target = None;
+            selection_routing_state.prefer_target = None;
         }
 
         let mut parsed_instructions = normalize_parsed_instructions_against_registry(
@@ -319,20 +319,28 @@ impl VirtualRouterEngineCore {
             }
         }
         if !core_instructions.is_empty() {
-            apply_routing_instructions(&core_instructions, &mut routing_state)?;
+            apply_routing_instructions(&core_instructions, &mut persisted_routing_state)?;
+            apply_routing_instructions(&core_instructions, &mut selection_routing_state)?;
         }
-        if self.should_auto_clear_prefer_target(env, &routing_state) {
-            routing_state.prefer_target = None;
+        if self.should_auto_clear_prefer_target(env, &persisted_routing_state) {
+            persisted_routing_state.prefer_target = None;
+        }
+        if self.should_auto_clear_prefer_target(env, &selection_routing_state) {
+            selection_routing_state.prefer_target = None;
         }
         let persisted_state = if stop_message_scope.is_some() {
-            strip_client_inject_fields(&routing_state)
+            strip_client_inject_fields(&persisted_routing_state)
         } else {
-            routing_state.clone()
+            persisted_routing_state.clone()
         };
         self.routing_instruction_state
             .insert(routing_state_key.clone(), persisted_state.clone());
         persist_routing_instruction_state(&routing_state_key, Some(&persisted_state));
-        let routing_state_for_selection = persisted_state;
+        let routing_state_for_selection = if stop_message_scope.is_some() {
+            strip_client_inject_fields(&selection_routing_state)
+        } else {
+            selection_routing_state
+        };
 
         if let Some(scope) = stop_message_scope.as_ref() {
             if !stop_instructions.is_empty() {

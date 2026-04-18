@@ -68,6 +68,16 @@ export function resolveTokenFilePath(auth: ExtendedOAuthAuth, providerType: stri
   const authDir = resolveRccAuthDirForRead();
   const pattern = new RegExp(`^${providerType}-oauth-(\\d+)(?:-(.+))?\\.json$`, 'i');
 
+  const directStemPath = path.join(authDir, `${raw}.json`);
+  try {
+    if (fsSync.existsSync(directStemPath)) {
+      auth.tokenFile = directStemPath;
+      return directStemPath;
+    }
+  } catch {
+    // ignore and continue with alias resolution
+  }
+
   const pt = providerType.toLowerCase();
   if (pt === 'qwen' && alias === 'default') {
     const pinned = path.join(authDir, 'qwen-oauth-1-default.json');

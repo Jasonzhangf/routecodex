@@ -1,3 +1,5 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { jest } from '@jest/globals';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../src/server/runtime/handlers/types.js';
 import type { HubPipeline } from '../../../src/server/runtime/http-server/types.js';
@@ -9,6 +11,50 @@ import {
   __resetSnapshotLocalDiskGateForTests,
   canWriteSnapshotToLocalDisk
 } from '../../../src/utils/snapshot-local-disk-gate.js';
+import {
+  REASONING_STOP_FINALIZED_FLAG_KEY
+} from '../../../src/server/runtime/http-server/executor/servertool-response-normalizer.js';
+import {
+  saveRoutingInstructionStateSync
+} from '../../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
+
+const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-request-executor-single-attempt-sessions');
+
+function createEmptyRoutingInstructionState() {
+  return {
+    forcedTarget: undefined,
+    stickyTarget: undefined,
+    preferTarget: undefined,
+    allowedProviders: new Set<string>(),
+    disabledProviders: new Set<string>(),
+    disabledKeys: new Map<string, Set<string | number>>(),
+    disabledModels: new Map<string, Set<string>>(),
+    stopMessageSource: undefined,
+    stopMessageText: undefined,
+    stopMessageMaxRepeats: undefined,
+    stopMessageUsed: undefined,
+    stopMessageUpdatedAt: undefined,
+    stopMessageLastUsedAt: undefined,
+    stopMessageStageMode: undefined,
+    stopMessageAiMode: undefined,
+    stopMessageAiSeedPrompt: undefined,
+    stopMessageAiHistory: undefined,
+    reasoningStopMode: undefined,
+    reasoningStopArmed: undefined,
+    reasoningStopSummary: undefined,
+    reasoningStopUpdatedAt: undefined,
+    preCommandSource: undefined,
+    preCommandScriptPath: undefined,
+    preCommandUpdatedAt: undefined
+  };
+}
+
+function seedStoplessSession(sessionId: string, armed = false): void {
+  const state = createEmptyRoutingInstructionState();
+  state.reasoningStopMode = 'on';
+  state.reasoningStopArmed = armed;
+  saveRoutingInstructionStateSync(`session:${sessionId}`, state);
+}
 
 function createRuntimeHandle(processImpl: () => Promise<unknown>): ProviderHandle {
   return {
@@ -72,9 +118,15 @@ function createExecutor(pipelineResult: PipelineExecutionResult, handle: Provide
 describe('HubRequestExecutor single attempt behaviour', () => {
   const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
+  beforeAll(() => {
+    process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
+  });
+
   beforeEach(() => {
     warnSpy.mockClear();
     __resetSnapshotLocalDiskGateForTests();
+    fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+    fs.mkdirSync(SESSION_DIR, { recursive: true });
   });
 
   afterAll(() => {
@@ -215,6 +267,104 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     });
   });
 
+  it('fails fast when stopless session completes without reasoning.stop finalized marker', async () => {
+    const handle = createRuntimeHandle(async () => ({ ok: true }));
+    const { executor, request } = createExecutor(pipelineResult, handle);
+    seedStoplessSession('session_stopless_guard');
+    request.metadata = {
+      ...request.metadata,
+      sessionId: 'session_stopless_guard',
+      reasoningStopMode: 'on'
+    };
+    const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
+    jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValue({
+        status: 200,
+        body: {
+          status: 'completed',
+          output_text: 'done without reasoning.stop'
+        }
+      });
+
+    try {
+      await expect(executor.execute(request)).rejects.toMatchObject({
+        code: 'STOPLESS_FINALIZATION_MISSING',
+        statusCode: 502,
+        retryable: true,
+        requestExecutorProviderErrorStage: 'host.stopless_contract'
+      });
+    } finally {
+      if (previousMaxAttempts === undefined) {
+        delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      } else {
+        process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousMaxAttempts;
+      }
+    }
+  });
+
+  it('fails fast when streamed stopless wrapper completes with finish_reason=stop and no finalized flag', async () => {
+    const handle = createRuntimeHandle(async () => ({ ok: true }));
+    const { executor, request } = createExecutor(pipelineResult, handle);
+    seedStoplessSession('session_stopless_stream_wrapper');
+    request.metadata = {
+      ...request.metadata,
+      sessionId: 'session_stopless_stream_wrapper',
+      reasoningStopMode: 'on'
+    };
+    const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
+    jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValue({
+        status: 200,
+        body: {
+          __sse_responses: { pipe: () => undefined },
+          __routecodex_finish_reason: 'stop'
+        }
+      });
+
+    try {
+      await expect(executor.execute(request)).rejects.toMatchObject({
+        code: 'STOPLESS_FINALIZATION_MISSING',
+        statusCode: 502,
+        retryable: true,
+        requestExecutorProviderErrorStage: 'host.stopless_contract'
+      });
+    } finally {
+      if (previousMaxAttempts === undefined) {
+        delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      } else {
+        process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousMaxAttempts;
+      }
+    }
+  });
+
+  it('allows streamed stopless wrapper when finalized flag is present', async () => {
+    const handle = createRuntimeHandle(async () => ({ ok: true }));
+    const { executor, request } = createExecutor(pipelineResult, handle);
+    seedStoplessSession('session_stopless_stream_wrapper_finalized');
+    request.metadata = {
+      ...request.metadata,
+      sessionId: 'session_stopless_stream_wrapper_finalized',
+      reasoningStopMode: 'on'
+    };
+    jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValue({
+        status: 200,
+        body: {
+          __sse_responses: { pipe: () => undefined },
+          __routecodex_finish_reason: 'stop',
+          [REASONING_STOP_FINALIZED_FLAG_KEY]: true
+        }
+      });
+
+    const response = await executor.execute(request);
+    expect(response.usageLogInfo?.finishReason).toBe('stop');
+  });
+
   it('retries retryable provider errors and re-runs pipeline', async () => {
     const retryable = Object.assign(new Error('HTTP 429'), { statusCode: 429, retryable: true });
     const successHandle = createRuntimeHandle(async () => ({ ok: true }));
@@ -282,6 +432,9 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       body: { messages: [{ role: 'user', content: 'retry me' }] },
       metadata: { stream: false, inboundStream: false }
     };
+    jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValue({ status: 200, body: { output_text: 'ok' } });
 
     const response = await executor.execute(request);
 
@@ -294,7 +447,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(secondCallMetadata.excludedProviderKeys).toEqual(['antigravity.aliasA']);
   });
 
-  it('reroutes when converted response is finish_reason=stop with empty assistant payload', async () => {
+  it('retries without excluding provider when converted response is finish_reason=stop with empty assistant payload', async () => {
     const firstHandle = createRuntimeHandle(async () => ({ status: 200, data: { ok: true } }));
     const secondHandle = createRuntimeHandle(async () => ({ status: 200, data: { ok: true } }));
     const pipelineResultOne: PipelineExecutionResult = {
@@ -373,9 +526,11 @@ describe('HubRequestExecutor single attempt behaviour', () => {
 
     expect(response).toBeDefined();
     expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
+    expect(firstHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
+    expect(secondHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
     const secondCallMetadata = fakePipeline.execute.mock.calls[1][0]
       .metadata as Record<string, unknown>;
-    expect(secondCallMetadata.excludedProviderKeys).toEqual(['qwenchat.aliasA']);
+    expect(secondCallMetadata.excludedProviderKeys ?? []).toEqual([]);
   });
 
   it('logs provider-switch status/code/upstreamCode parsed from raw error text', async () => {
@@ -451,6 +606,9 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       body: { messages: [{ role: 'user', content: 'retry me' }] },
       metadata: { stream: false, inboundStream: false }
     };
+    jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValue({ status: 200, body: { output_text: 'ok' } });
 
     const response = await executor.execute(request);
     expect(response).toBeDefined();
@@ -786,7 +944,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
         inboundStream: false,
         compatibilityProfile: 'chat:qwen',
         target: {
-          providerKey: 'qwen.1.qwen3-coder-plus',
+          providerKey: 'qwen.1.coder-model',
           compatibilityProfile: 'chat:qwen'
         }
       } as Record<string, unknown>
@@ -1041,6 +1199,9 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       body: { messages: [{ role: 'user', content: 'retry me' }] },
       metadata: { stream: false, inboundStream: false }
     };
+    jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValue({ status: 200, body: { output_text: 'ok' } });
 
     const response = await executor.execute(request);
     expect(response).toBeDefined();

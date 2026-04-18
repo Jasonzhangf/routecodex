@@ -24,8 +24,8 @@ fn append_description(existing: Option<&Value>, extra: &str) -> Value {
 }
 
 pub(crate) fn normalize_qwenchat_tool_definitions(root: &Map<String, Value>) -> Option<Value> {
-    let base_tools = normalize_qwen_family_tool_definitions(root)
-        .or_else(|| root.get("tools").cloned())?;
+    let base_tools =
+        normalize_qwen_family_tool_definitions(root).or_else(|| root.get("tools").cloned())?;
     let tools = base_tools.as_array()?;
 
     let mut changed = false;

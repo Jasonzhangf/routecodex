@@ -28,6 +28,42 @@ export type NativeChatServerToolBundlePlan = {
   continueExecution: NativeContinueExecutionPlan;
 };
 
+const NON_BLOCKING_SERVERTOOL_ORCHESTRATION_LOG_THROTTLE_MS = 60_000;
+const nonBlockingServertoolOrchestrationLogState = new Map<string, number>();
+const JSON_PARSE_FAILED = Symbol('native-chat-process-servertool-orchestration-semantics.parse-failed');
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error ?? 'unknown');
+  }
+}
+
+function logNativeServertoolOrchestrationNonBlocking(stage: string, error: unknown): void {
+  const now = Date.now();
+  const last = nonBlockingServertoolOrchestrationLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_SERVERTOOL_ORCHESTRATION_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingServertoolOrchestrationLogState.set(stage, now);
+  console.warn(
+    `[native-chat-process-servertool-orchestration-semantics] ${stage} failed (non-blocking): ${formatUnknownError(error)}`
+  );
+}
+
+function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAILED {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    logNativeServertoolOrchestrationNonBlocking(stage, error);
+    return JSON_PARSE_FAILED;
+  }
+}
+
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
   const fn = binding?.[name];
@@ -37,7 +73,8 @@ function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | n
 function safeStringify(value: unknown): string | undefined {
   try {
     return JSON.stringify(value);
-  } catch {
+  } catch (error) {
+    logNativeServertoolOrchestrationNonBlocking('safeStringify', error);
     return undefined;
   }
 }
@@ -80,41 +117,33 @@ function invokeNativeStringCapabilityWithJsonArgs(capability: string, args: unkn
 }
 
 function parseWebSearchPlan(raw: string): NativeChatWebSearchPlan | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    if (typeof row.shouldInject !== 'boolean' || !Array.isArray(row.selectedEngineIndexes)) {
-      return null;
-    }
-    const selectedEngineIndexes = row.selectedEngineIndexes
-      .map((entry) => (typeof entry === 'number' && Number.isFinite(entry) ? Math.floor(entry) : null))
-      .filter((entry): entry is number => entry !== null && entry >= 0);
-    return {
-      shouldInject: row.shouldInject,
-      selectedEngineIndexes
-    };
-  } catch {
+  const parsed = parseJson('parseWebSearchPlan', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  const row = parsed as Record<string, unknown>;
+  if (typeof row.shouldInject !== 'boolean' || !Array.isArray(row.selectedEngineIndexes)) {
+    return null;
+  }
+  const selectedEngineIndexes = row.selectedEngineIndexes
+    .map((entry) => (typeof entry === 'number' && Number.isFinite(entry) ? Math.floor(entry) : null))
+    .filter((entry): entry is number => entry !== null && entry >= 0);
+  return {
+    shouldInject: row.shouldInject,
+    selectedEngineIndexes
+  };
 }
 
 function parseClockPlan(raw: string): NativeChatClockPlan | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    if (typeof row.shouldInject !== 'boolean') {
-      return null;
-    }
-    return { shouldInject: row.shouldInject };
-  } catch {
+  const parsed = parseJson('parseClockPlan', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  const row = parsed as Record<string, unknown>;
+  if (typeof row.shouldInject !== 'boolean') {
+    return null;
+  }
+  return { shouldInject: row.shouldInject };
 }
 
 function parseContinueExecutionPlan(raw: string): NativeContinueExecutionPlan | null {
@@ -122,45 +151,37 @@ function parseContinueExecutionPlan(raw: string): NativeContinueExecutionPlan | 
 }
 
 function parseContinueDirectiveInjection(raw: string): NativeContinueDirectiveInjection | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    if (typeof row.changed !== 'boolean' || !Array.isArray(row.messages)) {
-      return null;
-    }
-    return {
-      changed: row.changed,
-      messages: row.messages
-    };
-  } catch {
+  const parsed = parseJson('parseContinueDirectiveInjection', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  const row = parsed as Record<string, unknown>;
+  if (typeof row.changed !== 'boolean' || !Array.isArray(row.messages)) {
+    return null;
+  }
+  return {
+    changed: row.changed,
+    messages: row.messages
+  };
 }
 
 function parseServerToolBundlePlan(raw: string): NativeChatServerToolBundlePlan | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    const webSearchRaw = typeof row.webSearch === 'object' ? JSON.stringify(row.webSearch) : '';
-    const clockRaw = typeof row.clock === 'object' ? JSON.stringify(row.clock) : '';
-    const continueRaw =
-      typeof row.continueExecution === 'object' ? JSON.stringify(row.continueExecution) : '';
-    const webSearch = webSearchRaw ? parseWebSearchPlan(webSearchRaw) : null;
-    const clock = clockRaw ? parseClockPlan(clockRaw) : null;
-    const continueExecution = continueRaw ? parseContinueExecutionPlan(continueRaw) : null;
-    if (!webSearch || !clock || !continueExecution) {
-      return null;
-    }
-    return { webSearch, clock, continueExecution };
-  } catch {
+  const parsed = parseJson('parseServerToolBundlePlan', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  const row = parsed as Record<string, unknown>;
+  const webSearchRaw = typeof row.webSearch === 'object' ? JSON.stringify(row.webSearch) : '';
+  const clockRaw = typeof row.clock === 'object' ? JSON.stringify(row.clock) : '';
+  const continueRaw =
+    typeof row.continueExecution === 'object' ? JSON.stringify(row.continueExecution) : '';
+  const webSearch = webSearchRaw ? parseWebSearchPlan(webSearchRaw) : null;
+  const clock = clockRaw ? parseClockPlan(clockRaw) : null;
+  const continueExecution = continueRaw ? parseContinueExecutionPlan(continueRaw) : null;
+  if (!webSearch || !clock || !continueExecution) {
+    return null;
+  }
+  return { webSearch, clock, continueExecution };
 }
 
 function parseProviderResponseShape(raw: string):
@@ -170,60 +191,50 @@ function parseProviderResponseShape(raw: string):
   | 'gemini-chat'
   | 'unknown'
   | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (typeof parsed !== 'string') {
-      return null;
-    }
-    if (
-      parsed === 'openai-chat' ||
-      parsed === 'openai-responses' ||
-      parsed === 'anthropic-messages' ||
-      parsed === 'gemini-chat' ||
-      parsed === 'unknown'
-    ) {
-      return parsed;
-    }
-    return null;
-  } catch {
+  const parsed = parseJson('parseProviderResponseShape', raw);
+  if (parsed === JSON_PARSE_FAILED || typeof parsed !== 'string') {
     return null;
   }
+  if (
+    parsed === 'openai-chat' ||
+    parsed === 'openai-responses' ||
+    parsed === 'anthropic-messages' ||
+    parsed === 'gemini-chat' ||
+    parsed === 'unknown'
+  ) {
+    return parsed;
+  }
+  return null;
 }
 
 function parseReviewOperations(raw: string): Record<string, unknown>[] | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed.filter(
-      (entry): entry is Record<string, unknown> =>
-        Boolean(entry && typeof entry === 'object' && !Array.isArray(entry))
-    );
-  } catch {
+  const parsed = parseJson('parseReviewOperations', raw);
+  if (parsed === JSON_PARSE_FAILED || !Array.isArray(parsed)) {
     return null;
   }
+  return parsed.filter(
+    (entry): entry is Record<string, unknown> =>
+      Boolean(entry && typeof entry === 'object' && !Array.isArray(entry))
+  );
 }
 
 function parseBoolean(raw: string): boolean | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return typeof parsed === 'boolean' ? parsed : null;
-  } catch {
+  const parsed = parseJson('parseBoolean', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  return typeof parsed === 'boolean' ? parsed : null;
 }
 
 function parseStringOrUndefined(raw: string): string | undefined | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return undefined;
-    }
-    return typeof parsed === 'string' ? parsed : null;
-  } catch {
+  const parsed = parseJson('parseStringOrUndefined', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  if (parsed === null) {
+    return undefined;
+  }
+  return typeof parsed === 'string' ? parsed : null;
 }
 
 export function detectProviderResponseShapeWithNative(

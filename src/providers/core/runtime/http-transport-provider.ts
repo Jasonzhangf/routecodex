@@ -154,12 +154,12 @@ export class HttpTransportProvider extends BaseProvider {
     // 验证配置
     this.validateConfig();
 
+    // 创建认证提供者
+    this.authProvider = this.createAuthProvider();
+
     // 创建HTTP客户端
     this.createHttpClient();
     this.requestExecutor = new HttpRequestExecutor(this.httpClient, this.createRequestExecutorDeps());
-
-    // 创建认证提供者
-    this.authProvider = this.createAuthProvider();
   }
 
   /**
@@ -546,9 +546,12 @@ export class HttpTransportProvider extends BaseProvider {
       providerId: typeof cfg.providerId === 'string' ? cfg.providerId : undefined
     });
     const authResourceBaseUrl = this.resolveAuthResourceBaseUrlOverride();
+    if (authResourceBaseUrl) {
+      return authResourceBaseUrl;
+    }
     return RuntimeEndpointResolver.resolveEffectiveBaseUrl({
       runtime: this.getRuntimeProfile(),
-      overrideBaseUrl: authResourceBaseUrl ?? this.config.config.overrides?.baseUrl,
+      overrideBaseUrl: this.config.config.overrides?.baseUrl,
       configBaseUrl: this.config.config.baseUrl,
       serviceDefaultBaseUrl: this.serviceProfile.defaultBaseUrl,
       profileKey,
@@ -583,6 +586,35 @@ export class HttpTransportProvider extends BaseProvider {
     return this.getRuntimeDetector().isGeminiFamily();
   }
 
+  private normalizeQwenAuthResourceBaseUrl(raw: string): string | undefined {
+    const trimmed = typeof raw === 'string' ? raw.trim() : '';
+    if (!trimmed) {
+      return undefined;
+    }
+    let baseUrl = trimmed;
+    if (!/^https?:\/\//i.test(baseUrl)) {
+      baseUrl = `https://${baseUrl}`;
+    }
+    baseUrl = baseUrl.replace(/\/+$/, '');
+    let parsed: URL;
+    try {
+      parsed = new URL(baseUrl);
+    } catch {
+      return undefined;
+    }
+    const host = parsed.hostname.trim().toLowerCase();
+    const pathname = parsed.pathname.replace(/\/+$/, '');
+    const isLegacyPortalHost = host === 'portal.qwen.ai' || host === 'chat.qwen.ai';
+    if (isLegacyPortalHost) {
+      return undefined;
+    }
+    const isDashscopeCompatibleHost = host === 'dashscope.aliyuncs.com' && /^\/compatible-mode(?:\/v1)?$/i.test(pathname);
+    if (!isDashscopeCompatibleHost) {
+      return undefined;
+    }
+    return `${parsed.origin}${pathname}`;
+  }
+
   private getRuntimeDetector(): RuntimeDetector {
     return new RuntimeDetector(this.config, this.providerType, this.oauthProviderId);
   }
@@ -590,7 +622,20 @@ export class HttpTransportProvider extends BaseProvider {
   private resolveAuthResourceBaseUrlOverride(): string | undefined {
     const cfg = this.config.config as ProviderConfigInternal & { providerId?: string };
     const providerId = typeof cfg.providerId === 'string' ? cfg.providerId.trim().toLowerCase() : '';
-    if (providerId !== 'qwen') {
+    const auth = cfg.auth as { type?: unknown; rawType?: unknown };
+    const authType =
+      typeof auth?.rawType === 'string' && auth.rawType.trim()
+        ? auth.rawType.trim().toLowerCase()
+        : typeof auth?.type === 'string'
+          ? auth.type.trim().toLowerCase()
+          : '';
+    const oauthProviderId = typeof this.oauthProviderId === 'string' ? this.oauthProviderId.trim().toLowerCase() : '';
+    const isQwenOAuthRuntime =
+      oauthProviderId === 'qwen' ||
+      authType === 'qwen-oauth' ||
+      providerId === 'qwen' ||
+      providerId.startsWith('qwen-');
+    if (!isQwenOAuthRuntime) {
       return undefined;
     }
 
@@ -621,11 +666,10 @@ export class HttpTransportProvider extends BaseProvider {
       return undefined;
     }
 
-    let baseUrl = raw;
-    if (!/^https?:\/\//i.test(baseUrl)) {
-      baseUrl = `https://${baseUrl}`;
+    let baseUrl = this.normalizeQwenAuthResourceBaseUrl(raw);
+    if (!baseUrl) {
+      return undefined;
     }
-    baseUrl = baseUrl.replace(/\/+$/, '');
     const runtimeMetadata = this.getCurrentRuntimeMetadata();
     const isQwenWebSearchRequest =
       runtimeMetadata?.qwenWebSearch === true ||

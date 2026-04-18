@@ -17,6 +17,8 @@ import {
 import {
   appendDroppedFieldAudit,
   appendLossyFieldAudit,
+  appendPreservedFieldAudit,
+  appendUnsupportedFieldAudit,
   hasExplicitEmptyToolsSemantics,
   isResponsesOrigin,
 } from './anthropic-semantics-audit.js';
@@ -152,6 +154,13 @@ export function buildAnthropicFormatEnvelopeFromChat(
       });
     }
   }
+  if (trimmedParameters && Object.prototype.hasOwnProperty.call(trimmedParameters, 'response_format')) {
+    appendUnsupportedFieldAudit(chat, {
+      field: 'response_format',
+      targetProtocol: 'anthropic-messages',
+      reason: 'structured_output_not_supported'
+    });
+  }
   if (trimmedParameters) {
     for (const [key, value] of Object.entries(trimmedParameters)) {
       if (ANTHROPIC_TOP_LEVEL_FIELDS.has(key) || key === 'stop') {
@@ -161,6 +170,13 @@ export function buildAnthropicFormatEnvelopeFromChat(
         baseRequest[key] = value as JsonValue;
       }
     }
+  }
+  if (trimmedParameters && Object.prototype.hasOwnProperty.call(trimmedParameters, 'tool_choice')) {
+    appendPreservedFieldAudit(chat, {
+      field: 'tool_choice',
+      targetProtocol: 'anthropic-messages',
+      reason: 'preserved_verbatim_top_level'
+    });
   }
   const passthroughMetadata = encodeMetadataPassthrough(chat.parameters as JsonObject | undefined, {
     prefix: PASSTHROUGH_METADATA_PREFIX,

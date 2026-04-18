@@ -6,6 +6,63 @@
 
 import type { ProviderCooldownState, VirtualRouterHealthSnapshot, VirtualRouterHealthStore, ProviderHealthConfig } from '../types.js';
 
+const NON_BLOCKING_WARN_THROTTLE_MS = 60_000;
+const nonBlockingWarnByStage = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function shouldLogNonBlockingStage(stage: string): boolean {
+  const now = Date.now();
+  const lastAt = nonBlockingWarnByStage.get(stage) ?? 0;
+  if (now - lastAt < NON_BLOCKING_WARN_THROTTLE_MS) {
+    return false;
+  }
+  nonBlockingWarnByStage.set(stage, now);
+  return true;
+}
+
+function resolveHealthStoreLogKey(store?: VirtualRouterHealthStore): string {
+  const candidates = [
+    (store as { filepath?: unknown } | undefined)?.filepath,
+    (store as { filePath?: unknown } | undefined)?.filePath,
+    (store as { path?: unknown } | undefined)?.path
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return 'virtual-router-health-store';
+}
+
+function logCooldownManagerNonBlockingError(
+  stage: string,
+  operation: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  if (!shouldLogNonBlockingStage(stage)) {
+    return;
+  }
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[cooldown-manager] stage=${stage} operation=${operation} failed (non-blocking): ${formatUnknownError(error)}${suffix}`
+    );
+  } catch {
+    void 0;
+  }
+}
+
 export class CooldownManager {
   private providerCooldowns: Map<string, number> = new Map();
   private healthStore?: VirtualRouterHealthStore;
@@ -77,7 +134,10 @@ export class CooldownManager {
     let snapshot: VirtualRouterHealthSnapshot | null = null;
     try {
       snapshot = this.healthStore.loadInitialSnapshot();
-    } catch {
+    } catch (error) {
+      logCooldownManagerNonBlockingError('state_restore', 'load_initial_snapshot', error, {
+        key: resolveHealthStoreLogKey(this.healthStore)
+      });
       snapshot = null;
     }
     if (!snapshot) return;
@@ -107,8 +167,10 @@ export class CooldownManager {
     try {
       const snapshot = this.buildHealthSnapshot();
       this.healthStore.persistSnapshot(snapshot);
-    } catch {
-      // persistence failure does not affect routing
+    } catch (error) {
+      logCooldownManagerNonBlockingError('state_persist', 'persist_snapshot', error, {
+        key: resolveHealthStoreLogKey(this.healthStore)
+      });
     }
   }
 

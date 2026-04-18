@@ -263,8 +263,12 @@ function buildReasoningStopFollowupOps(promptText: string): Array<Record<string,
 }
 
 function isReasoningStopGuardEnabled(): boolean {
-  const envValue = process.env.LLMSWITCHCORE_REASONING_STOP_GUARD_ENABLED;
-  if (envValue === '0' || envValue === 'false') {
+  const envValue =
+    process.env.LLMSWITCHCORE_REASONING_STOP_GUARD_ENABLED ??
+    process.env.ROUTECODEX_REASONING_STOP_GUARD_ENABLED ??
+    process.env.RCC_REASONING_STOP_GUARD_ENABLED;
+  const normalized = typeof envValue === 'string' ? envValue.trim().toLowerCase() : '';
+  if (normalized === '0' || normalized === 'false' || normalized === 'off' || normalized === 'no') {
     return false;
   }
   return true;

@@ -10,6 +10,35 @@ import { HeaderUtils, OAuthHeaderPreflight, RequestHeaderBuilder, SessionHeaderU
 
 type ProviderConfigInternal = OpenAIStandardConfig['config'];
 
+function isQwenHeaderProfile(options: {
+  config: ProviderConfigInternal;
+  familyProfile?: ProviderFamilyProfile;
+  oauthProviderId?: string;
+}): boolean {
+  const { config, familyProfile, oauthProviderId } = options;
+  if (familyProfile?.providerFamily === 'qwen') {
+    return true;
+  }
+  if (typeof oauthProviderId === 'string' && oauthProviderId.trim().toLowerCase() === 'qwen') {
+    return true;
+  }
+  const providerId =
+    typeof (config as { providerId?: unknown }).providerId === 'string'
+      ? String((config as { providerId?: string }).providerId).trim().toLowerCase()
+      : '';
+  return providerId === 'qwen' || providerId.startsWith('qwen-');
+}
+
+function resolveEffectiveProviderTimeoutMs(config: ProviderConfigInternal, serviceProfile: ServiceProfile): number | undefined {
+  const envTimeout = Number(process.env.ROUTECODEX_PROVIDER_TIMEOUT_MS || process.env.RCC_PROVIDER_TIMEOUT_MS || NaN);
+  const effectiveTimeout = Number.isFinite(envTimeout) && envTimeout > 0
+    ? envTimeout
+    : (config.overrides?.timeout ?? serviceProfile.timeout ?? DEFAULT_PROVIDER.TIMEOUT_MS);
+  return Number.isFinite(effectiveTimeout) && Number(effectiveTimeout) > 0
+    ? Math.floor(Number(effectiveTimeout))
+    : undefined;
+}
+
 export async function buildProviderRequestHeaders(options: {
   config: ProviderConfigInternal;
   authProvider: IAuthProvider | null;
@@ -40,6 +69,12 @@ export async function buildProviderRequestHeaders(options: {
   const baseHeaders: Record<string, string> = {
     'Content-Type': 'application/json'
   };
+  if (isQwenHeaderProfile({ config, familyProfile, oauthProviderId })) {
+    const timeoutMs = resolveEffectiveProviderTimeoutMs(config, serviceProfile);
+    if (timeoutMs) {
+      baseHeaders['X-Stainless-Timeout'] = String(Math.trunc(timeoutMs / 1000));
+    }
+  }
   const codexUaMode = isCodexUaMode({ runtime: runtimeMetadata, providerType });
   if (codexUaMode && !isAntigravity) {
     SessionHeaderUtils.ensureCodexSessionMetadata(runtimeMetadata);

@@ -3,6 +3,47 @@ import { __requestExecutorTestables, createRequestExecutor } from '../../../../s
 import type { ProviderHandle } from '../../../../src/server/runtime/http-server/types';
 import { StatsManager } from '../../../../src/server/runtime/http-server/stats-manager';
 
+function normalizeMinimalSuccessResponse(result: unknown): unknown {
+  if (!result || typeof result !== 'object') {
+    return result;
+  }
+  const record = result as { status?: unknown; data?: unknown };
+  if (record.status !== 200 || !record.data || typeof record.data !== 'object' || Array.isArray(record.data)) {
+    return result;
+  }
+  const data = record.data as Record<string, unknown>;
+  if (
+    Array.isArray(data.choices)
+    || Array.isArray(data.candidates)
+    || Array.isArray(data.output)
+    || typeof data.output_text === 'string'
+    || typeof data.content === 'string'
+    || Object.prototype.hasOwnProperty.call(data, 'error')
+    || data.mode === 'sse'
+  ) {
+    return result;
+  }
+  const id = typeof data.id === 'string' && data.id.trim() ? data.id.trim() : 'test-ok';
+  return {
+    ...record,
+    data: {
+      id,
+      object: 'chat.completion',
+      model: 'test-model',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    }
+  };
+}
+
 function buildHandle(providerKey: string, processFn: () => Promise<unknown>): ProviderHandle {
   return {
     runtimeKey: providerKey,
@@ -22,7 +63,7 @@ function buildHandle(providerKey: string, processFn: () => Promise<unknown>): Pr
     instance: {
       async initialize() { },
       async cleanup() { },
-      processIncoming: processFn
+      processIncoming: async () => normalizeMinimalSuccessResponse(await processFn())
     }
   };
 }
@@ -32,7 +73,7 @@ describe('HubRequestExecutor failover', () => {
     __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
   });
 
-  test('covers request-executor helper snapshots and truncation utilities', () => {
+  test('covers request-executor helper snapshots and truncation utilities', async () => {
     expect(__requestExecutorTestables.readString('  abc  ')).toBe('abc');
     expect(__requestExecutorTestables.readString('')).toBeUndefined();
     expect(__requestExecutorTestables.readString(undefined)).toBeUndefined();
@@ -53,10 +94,472 @@ describe('HubRequestExecutor failover', () => {
     expect(detailedSnapshot.errorCode).toBe('E_DETAIL');
     expect(detailedSnapshot.upstreamCode).toBe('rate_limit_error');
 
+    const runtimeResolveReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+      error: Object.assign(new Error('followup failed before send'), {
+        code: 'SERVERTOOL_FOLLOWUP_FAILED',
+        upstreamCode: 'client_inject_failed',
+        statusCode: 502
+      }),
+      retryError: {
+        statusCode: 502,
+        errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
+        upstreamCode: 'client_inject_failed',
+        reason: 'followup failed before send'
+      },
+      fallbackStage: 'provider.runtime_resolve'
+    });
+    expect(runtimeResolveReportPlan).toEqual({
+      errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
+      upstreamCode: 'CLIENT_INJECT_FAILED',
+      statusCode: 502,
+      stageHint: 'provider.runtime_resolve'
+    });
+
+    const sseDecodeReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+      error: Object.assign(
+        new Error('Anthropic SSE error event [1305] 该模型当前访问量过大，请您稍后再试'),
+        {
+          code: 'SSE_DECODE_ERROR',
+          upstreamCode: 'anthropic_sse_to_json_failed',
+          statusCode: 429
+        }
+      ),
+      retryError: {
+        statusCode: 429,
+        errorCode: 'SSE_DECODE_ERROR',
+        upstreamCode: 'anthropic_sse_to_json_failed',
+        reason: 'Anthropic SSE error event [1305] 该模型当前访问量过大，请您稍后再试'
+      },
+      fallbackStage: 'provider.send'
+    });
+    expect(sseDecodeReportPlan).toEqual({
+      errorCode: 'SSE_DECODE_ERROR',
+      upstreamCode: 'ANTHROPIC_SSE_TO_JSON_FAILED',
+      statusCode: 429,
+      stageHint: 'provider.sse_decode'
+    });
+
+    const followupReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+      error: Object.assign(new Error('followup client inject failed'), {
+        code: 'SERVERTOOL_FOLLOWUP_FAILED',
+        upstreamCode: 'client_inject_failed',
+        statusCode: 502
+      }),
+      retryError: {
+        statusCode: 502,
+        errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
+        upstreamCode: 'client_inject_failed',
+        reason: 'followup client inject failed'
+      },
+      fallbackStage: 'provider.send'
+    });
+    expect(followupReportPlan).toEqual({
+      errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
+      upstreamCode: 'CLIENT_INJECT_FAILED',
+      statusCode: 502,
+      stageHint: 'provider.followup'
+    });
+
+    const detailMarkedFollowupPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+      error: Object.assign(new Error('followup client inject failed'), {
+        code: 'INTERNAL_ERROR',
+        statusCode: 502,
+        details: {
+          requestExecutorProviderErrorStage: 'provider.followup',
+          reason: 'client_inject_failed'
+        }
+      }),
+      retryError: {
+        statusCode: 502,
+        errorCode: 'INTERNAL_ERROR',
+        reason: 'followup client inject failed'
+      },
+      fallbackStage: 'provider.send'
+    });
+    expect(detailMarkedFollowupPlan).toEqual({
+      errorCode: 'INTERNAL_ERROR',
+      statusCode: 502,
+      stageHint: 'provider.followup'
+    });
+
+    const providerHttpReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+      error: Object.assign(new Error('HTTP 429'), {
+        statusCode: 429,
+        response: {
+          data: {
+            error: {
+              code: 'HTTP_429',
+              message: 'rate limited'
+            }
+          }
+        }
+      }),
+      retryError: {
+        statusCode: 429,
+        errorCode: 'HTTP_429',
+        reason: 'rate limited'
+      },
+      fallbackStage: 'provider.http'
+    });
+    expect(providerHttpReportPlan).toEqual({
+      errorCode: 'HTTP_429',
+      statusCode: 429,
+      stageHint: 'provider.http'
+    });
+
+    const stoplessContractReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+      error: Object.assign(new Error('stopless contract violated'), {
+        code: 'STOPLESS_FINALIZATION_MISSING',
+        statusCode: 502,
+        requestExecutorProviderErrorStage: 'host.stopless_contract'
+      }),
+      retryError: {
+        statusCode: 502,
+        errorCode: 'STOPLESS_FINALIZATION_MISSING',
+        reason: 'stopless contract violated'
+      },
+      fallbackStage: 'provider.send'
+    });
+    expect(stoplessContractReportPlan).toEqual({
+      errorCode: 'STOPLESS_FINALIZATION_MISSING',
+      statusCode: 502,
+      stageHint: 'host.stopless_contract'
+    });
+
+    const stoplessExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+      error: Object.assign(new Error('stopless contract violated'), {
+        code: 'STOPLESS_FINALIZATION_MISSING',
+        statusCode: 502,
+        retryable: true,
+        requestExecutorProviderErrorStage: 'host.stopless_contract'
+      }),
+      retryError: {
+        statusCode: 502,
+        errorCode: 'STOPLESS_FINALIZATION_MISSING',
+        reason: 'stopless contract violated'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'host.stopless_contract',
+      providerKey: 'ali-coding-plan.key1.qwen3-coder-next',
+      runtimeKey: 'runtime:ali-coding-plan',
+      logicalRequestChainKey: 'req-stopless-host',
+      logicalChainRetryLimitStageRequestId: 'req-stopless-host',
+      routePool: ['ali-coding-plan.key1.qwen3-coder-next', 'crs.key2.gpt-5.3-codex'],
+      runtimeManager: {
+        resolveRuntimeKey: () => 'runtime:ali-coding-plan'
+      },
+      excludedProviderKeys: new Set<string>(),
+      recordAttempt: jest.fn(),
+      logStage: () => undefined,
+      status: 502
+    });
+    expect(stoplessExecutionPlan).toEqual(expect.objectContaining({
+      shouldRetry: true,
+      excludedCurrentProvider: true,
+      backoffScope: 'provider',
+      retrySwitchPlan: expect.objectContaining({
+        switchAction: 'exclude_and_reroute',
+        decisionLabel: 'provider_backoff_then_reroute'
+      })
+    }));
+
+    const responseContractReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+      error: Object.assign(new Error('empty assistant payload'), {
+        code: 'EMPTY_ASSISTANT_RESPONSE',
+        statusCode: 502,
+        retryable: true,
+        requestExecutorProviderErrorStage: 'host.response_contract'
+      }),
+      retryError: {
+        statusCode: 502,
+        errorCode: 'EMPTY_ASSISTANT_RESPONSE',
+        reason: 'empty assistant payload'
+      },
+      fallbackStage: 'provider.send'
+    });
+    expect(responseContractReportPlan).toEqual({
+      errorCode: 'EMPTY_ASSISTANT_RESPONSE',
+      statusCode: 502,
+      stageHint: 'host.response_contract'
+    });
+
+    const responseContractExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+      error: Object.assign(new Error('empty assistant payload'), {
+        code: 'EMPTY_ASSISTANT_RESPONSE',
+        statusCode: 502,
+        retryable: true,
+        requestExecutorProviderErrorStage: 'host.response_contract'
+      }),
+      retryError: {
+        statusCode: 502,
+        errorCode: 'EMPTY_ASSISTANT_RESPONSE',
+        reason: 'empty assistant payload'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'host.response_contract',
+      providerKey: 'qwenchat.aliasA',
+      runtimeKey: 'runtime:one',
+      logicalRequestChainKey: 'req-response-contract-host',
+      logicalChainRetryLimitStageRequestId: 'req-response-contract-host',
+      routePool: ['qwenchat.aliasA', 'tab.aliasB'],
+      runtimeManager: {
+        resolveRuntimeKey: () => 'runtime:one'
+      },
+      excludedProviderKeys: new Set<string>(),
+      recordAttempt: jest.fn(),
+      logStage: () => undefined,
+      status: 502
+    });
+    expect(responseContractExecutionPlan).toEqual(expect.objectContaining({
+      shouldRetry: true,
+      excludedCurrentProvider: false,
+      backoffScope: 'attempt',
+      retrySwitchPlan: expect.objectContaining({
+        switchAction: 'retry_same_provider',
+        decisionLabel: 'attempt_backoff_same_provider'
+      })
+    }));
+
     const longReason = 'x'.repeat(400);
     const truncated = __requestExecutorTestables.truncateReason(longReason, 50);
     expect(truncated.length).toBe(50);
     expect(truncated.endsWith('…')).toBe(true);
+
+    const excludedProviderKeys = new Set<string>();
+    const exclusionPlan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
+      providerKey: 'antigravity.alias1.gemini-3-pro-high',
+      status: 429,
+      error: Object.assign(new Error('HTTP 429: overload'), { statusCode: 429 }),
+      promptTooLong: false,
+      isVerify: false,
+      isReauth: false,
+      antigravityRetrySignal: { signature: 'sig-1', consecutive: 2 },
+      excludedProviderKeys
+    });
+    expect(exclusionPlan.excludedCurrentProvider).toBe(true);
+    expect(exclusionPlan.antigravityRetrySignal).toEqual({
+      signature: 'sig-1',
+      consecutive: 2,
+      avoidAllOnRetry: true
+    });
+    expect(Array.from(excludedProviderKeys)).toEqual(['antigravity.alias1.gemini-3-pro-high']);
+
+    const promptTooLongPlan = __requestExecutorTestables.resolveProviderRetryEligibilityPlan({
+      error: new Error('context exceeded'),
+      retryError: { statusCode: 400, reason: 'context exceeded' },
+      attempt: 1,
+      maxAttempts: 6,
+      providerKey: 'tabglm.key1.glm-5',
+      promptTooLong: true,
+      contextOverflowRetries: 1,
+      maxContextOverflowRetries: 2
+    });
+    expect(promptTooLongPlan).toEqual({
+      shouldRetry: false,
+      blockingRecoverable: false
+    });
+
+    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
+      error: Object.assign(new Error('context exceeded'), {
+        code: 'CONTEXT_LENGTH_EXCEEDED',
+        statusCode: 400
+      }),
+      retryError: {
+        statusCode: 400,
+        errorCode: 'CONTEXT_LENGTH_EXCEEDED',
+        reason: 'context exceeded'
+      },
+      stage: 'provider.send'
+    })).toBe('special_400');
+
+    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
+      error: Object.assign(new Error('invalid access token or token expired'), {
+        code: 'invalid_api_key',
+        statusCode: 401
+      }),
+      retryError: {
+        statusCode: 401,
+        errorCode: 'invalid_api_key',
+        reason: 'invalid access token or token expired'
+      },
+      stage: 'provider.send'
+    })).toBe('unrecoverable');
+
+    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
+      error: Object.assign(new Error('fetch failed'), {
+        code: 'HTTP_502',
+        statusCode: 502
+      }),
+      retryError: {
+        statusCode: 502,
+        errorCode: 'HTTP_502',
+        reason: 'fetch failed'
+      },
+      stage: 'provider.send'
+    })).toBe('recoverable');
+
+    const antigravityEligibilityPlan = __requestExecutorTestables.resolveProviderRetryEligibilityPlan({
+      error: new Error('Please authenticate with Google OAuth first'),
+      retryError: { statusCode: 403, reason: 'Please authenticate with Google OAuth first' },
+      attempt: 1,
+      maxAttempts: 6,
+      providerKey: 'antigravity.alias1.gemini-3-pro-high',
+      isVerify: false,
+      isReauth: true,
+      allowAntigravityRecovery: true
+    });
+    expect(antigravityEligibilityPlan).toEqual({
+      shouldRetry: true,
+      blockingRecoverable: false
+    });
+
+    const followupEligibilityPlan = __requestExecutorTestables.resolveProviderRetryEligibilityPlan({
+      error: Object.assign(new Error('followup failed'), {
+        code: 'SERVERTOOL_FOLLOWUP_FAILED',
+        statusCode: 401,
+        upstreamCode: 'invalid_api_key'
+      }),
+      retryError: {
+        statusCode: 401,
+        errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
+        upstreamCode: 'invalid_api_key',
+        reason: 'followup failed'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.followup',
+      providerKey: 'ali-coding-plan.key1.kimi-k2.5'
+    });
+    expect(followupEligibilityPlan).toEqual({
+      shouldRetry: false,
+      blockingRecoverable: false
+    });
+
+    const previous429Base = process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
+    const previous429Max = process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
+    process.env.ROUTECODEX_429_BACKOFF_BASE_MS = '1';
+    process.env.ROUTECODEX_429_BACKOFF_MAX_MS = '1';
+    try {
+      const orchestratorExcluded = new Set<string>();
+      const recordAttempt = jest.fn();
+      const executionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+        error: Object.assign(new Error('HTTP 429: overload'), { statusCode: 429, code: 'HTTP_429' }),
+        retryError: { statusCode: 429, errorCode: 'HTTP_429', reason: 'HTTP 429: overload' },
+        attempt: 1,
+        maxAttempts: 6,
+        providerKey: 'antigravity.alias1.gemini-3-pro-high',
+        runtimeKey: 'runtime:antigravity',
+        logicalRequestChainKey: 'req-helper',
+        logicalChainRetryLimitStageRequestId: 'req-helper',
+        routePool: [
+          'antigravity.alias1.gemini-3-pro-high',
+          'antigravity.alias2.gemini-3-pro-high'
+        ],
+        runtimeManager: {
+          resolveRuntimeKey: () => 'runtime:antigravity'
+        },
+        excludedProviderKeys: orchestratorExcluded,
+        recordAttempt,
+        logStage: () => undefined,
+        promptTooLong: false,
+        isVerify: false,
+        isReauth: false,
+        allowAntigravityRecovery: true,
+        antigravityRetrySignal: { signature: 'sig-1', consecutive: 2 },
+        status: 429
+      });
+      expect(recordAttempt).toHaveBeenCalledWith({ error: true });
+      expect(executionPlan.shouldRetry).toBe(true);
+      expect(executionPlan.backoffScope).toBe('provider');
+      expect(executionPlan.retrySwitchPlan).toEqual(expect.objectContaining({
+        switchAction: 'exclude_and_reroute',
+        decisionLabel: 'provider_backoff_then_reroute'
+      }));
+      expect(executionPlan.antigravityRetrySignal).toEqual({
+        signature: 'sig-1',
+        consecutive: 2,
+        avoidAllOnRetry: true
+      });
+      expect(Array.from(orchestratorExcluded)).toEqual(['antigravity.alias1.gemini-3-pro-high']);
+
+      const telemetryPlan = __requestExecutorTestables.buildProviderRetryTelemetryPlan({
+        requestId: 'req-helper',
+        attempt: 1,
+        maxAttempts: 6,
+        providerKey: 'antigravity.alias1.gemini-3-pro-high',
+        retryError: { statusCode: 429, errorCode: 'HTTP_429', reason: 'HTTP 429: overload' },
+        excludedProviderKeys: orchestratorExcluded,
+        routeHint: 'thinking',
+        retryExecutionPlan: executionPlan,
+        stage: 'provider.send',
+        runtimeKey: 'runtime:antigravity'
+      });
+      expect(telemetryPlan.switchLogArgs).toEqual(expect.objectContaining({
+        requestId: 'req-helper',
+        switchAction: 'exclude_and_reroute',
+        backoffScope: 'provider',
+        decisionLabel: 'provider_backoff_then_reroute',
+        stage: 'provider.send'
+      }));
+      expect(telemetryPlan.retryStageDetails).toEqual(expect.objectContaining({
+        providerKey: 'antigravity.alias1.gemini-3-pro-high',
+        routeHint: 'thinking',
+        switchAction: 'exclude_and_reroute',
+        backoffScope: 'provider',
+        decisionLabel: 'provider_backoff_then_reroute'
+      }));
+
+      const followupExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+        error: Object.assign(new Error('followup failed'), {
+          code: 'SERVERTOOL_FOLLOWUP_FAILED',
+          statusCode: 401,
+          upstreamCode: 'invalid_api_key'
+        }),
+        retryError: {
+          statusCode: 401,
+          errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
+          upstreamCode: 'invalid_api_key',
+          reason: 'followup failed'
+        },
+        attempt: 1,
+        maxAttempts: 6,
+        stage: 'provider.followup',
+        providerKey: 'ali-coding-plan.key1.kimi-k2.5',
+        runtimeKey: 'runtime:ali-coding-plan',
+        logicalRequestChainKey: 'req-followup',
+        logicalChainRetryLimitStageRequestId: 'req-followup',
+        routePool: ['ali-coding-plan.key1.kimi-k2.5', 'qwen.1.qwen3.6-plus'],
+        runtimeManager: {
+          resolveRuntimeKey: () => 'runtime:ali-coding-plan'
+        },
+        excludedProviderKeys: new Set<string>(),
+        recordAttempt,
+        logStage: () => undefined,
+        allowAntigravityRecovery: true,
+        status: 401
+      });
+      expect(followupExecutionPlan).toEqual({
+        shouldRetry: false,
+        blockingRecoverable: false,
+        excludedCurrentProvider: false,
+        retryBackoffMs: 0,
+        recoverableBackoffMs: 0,
+        antigravityRetrySignal: null
+      });
+    } finally {
+      if (previous429Base === undefined) {
+        delete process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
+      } else {
+        process.env.ROUTECODEX_429_BACKOFF_BASE_MS = previous429Base;
+      }
+      if (previous429Max === undefined) {
+        delete process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
+      } else {
+        process.env.ROUTECODEX_429_BACKOFF_MAX_MS = previous429Max;
+      }
+    }
 
   });
 
@@ -393,7 +896,103 @@ describe('HubRequestExecutor failover', () => {
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('code=SSE_TO_JSON_ERROR'));
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('upstreamCode=rate_limit_error'));
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('switch=exclude_and_reroute'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('decision=provider_backoff_then_reroute'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('backoffScope=provider'));
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('provider=crs.key2.gpt-5.3-codex'));
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  test('reroutes away from current provider on 429 even when current pool is singleton', async () => {
+    const firstProviderKey = 'tabglm.key1.glm-5.1';
+    const secondProviderKey = 'crs.key2.gpt-5.3-codex';
+    const failingError = Object.assign(new Error('HTTP 429: model overloaded'), {
+      statusCode: 429,
+      retryable: true
+    });
+
+    const failingProcess = jest.fn(async () => {
+      throw failingError;
+    });
+    const failureHandle = buildHandle(firstProviderKey, failingProcess);
+    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'ok-after-reroute' } }));
+    const successHandle = buildHandle(secondProviderKey, successProcess);
+
+    const handles = new Map<string, ProviderHandle>([
+      [firstProviderKey, failureHandle],
+      [secondProviderKey, successHandle]
+    ]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        const disabled = new Set<string>(
+          Array.isArray(input.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : []
+        );
+        const useFallback = disabled.has(firstProviderKey);
+        return {
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey: useFallback ? secondProviderKey : firstProviderKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-responses',
+            runtimeKey: useFallback ? secondProviderKey : firstProviderKey
+          },
+          routingDecision: { routeName: 'thinking', pool: useFallback ? [secondProviderKey] : [firstProviderKey] },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const logStage = jest.fn();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const deps = {
+        runtimeManager,
+        getHubPipeline: () => pipeline,
+        getModuleDependencies: () => ({
+          errorHandlingCenter: {
+            handleError: jest.fn(async () => undefined)
+          }
+        }),
+        logStage,
+        stats: new StatsManager()
+      };
+
+      const executor = createRequestExecutor(deps);
+      jest
+        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+        .mockResolvedValue({ status: 200, body: { output_text: 'ok-after-reroute' } });
+      const result = await executor.execute({
+        requestId: 'req-singleton-429-reroute',
+        entryEndpoint: '/v1/responses',
+        body: {},
+        headers: {},
+        metadata: {}
+      });
+
+      expect(result).toEqual(expect.objectContaining({ status: 200 }));
+      expect(pipeline.execute).toHaveBeenCalledTimes(2);
+      expect(successProcess).toHaveBeenCalledTimes(1);
+      expect(
+        logStage.mock.calls.some(
+          (call) =>
+            call[0] === 'provider.retry' &&
+            call[2]?.switchAction === 'exclude_and_reroute' &&
+            Array.isArray(call[2]?.excluded) &&
+            call[2]?.excluded.includes(firstProviderKey)
+        )
+      ).toBe(true);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('switch=exclude_and_reroute'));
     } finally {
       warnSpy.mockRestore();
     }
@@ -779,7 +1378,7 @@ describe('HubRequestExecutor failover', () => {
     expect(secondCallMetadata.excludedProviderKeys).toEqual([primaryProviderKey]);
   });
 
-  test('holds on last available provider when 429 occurs and retries same provider with backoff', async () => {
+  test('keeps excluding each 429 provider instead of hammering the last one again', async () => {
     const providerA = 'openrouter.key1.qwen/qwen3.6-plus:free';
     const providerB = 'qwen.2-135.qwen3.6-plus';
     const error429A = Object.assign(new Error('HTTP 429: provider A rate limited'), {
@@ -858,6 +1457,9 @@ describe('HubRequestExecutor failover', () => {
       };
 
       const executor = createRequestExecutor(deps);
+      jest
+        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+        .mockResolvedValue({ status: 200, body: { output_text: 'ok_after_last_provider_wait' } });
       const result = await executor.execute({
         requestId: 'req-last-provider-429',
         entryEndpoint: '/v1/responses',
@@ -874,7 +1476,7 @@ describe('HubRequestExecutor failover', () => {
       const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
       expect(secondCallMetadata.excludedProviderKeys).toEqual([providerA]);
       const thirdCallMetadata = pipeline.execute.mock.calls[2][0].metadata as Record<string, unknown>;
-      expect(thirdCallMetadata.excludedProviderKeys).toEqual([providerA]);
+      expect(thirdCallMetadata.excludedProviderKeys).toEqual([providerA, providerB]);
     } finally {
       if (previousBase === undefined) {
         delete process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
@@ -885,6 +1487,124 @@ describe('HubRequestExecutor failover', () => {
         delete process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
       } else {
         process.env.ROUTECODEX_429_BACKOFF_MAX_MS = previousMax;
+      }
+    }
+  });
+
+  test('keeps generic reroute backoff provider-scoped instead of raising across different providers', async () => {
+    const providerA = 'tabglm.key1.glm-5.1';
+    const providerB = 'crs.key2.gpt-5.3-codex';
+    const providerC = 'ali-coding-plan.key1.qwen3.6-plus';
+    const authErrorA = Object.assign(new Error('HTTP 401: provider A unauthorized'), {
+      statusCode: 401
+    });
+    const authErrorB = Object.assign(new Error('HTTP 401: provider B unauthorized'), {
+      statusCode: 401
+    });
+    const processA = jest.fn(async () => {
+      throw authErrorA;
+    });
+    const processB = jest.fn(async () => {
+      throw authErrorB;
+    });
+    const processC = jest.fn(async () => ({ status: 200, data: { id: 'ok_after_provider_scoped_reroute' } }));
+
+    const handles = new Map<string, ProviderHandle>([
+      [providerA, buildHandle(providerA, processA)],
+      [providerB, buildHandle(providerB, processB)],
+      [providerC, buildHandle(providerC, processC)]
+    ]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        const excluded = new Set<string>(
+          Array.isArray(input.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : []
+        );
+        const providerKey = !excluded.has(providerA)
+          ? providerA
+          : !excluded.has(providerB)
+            ? providerB
+            : providerC;
+        return {
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
+            runtimeKey: providerKey
+          },
+          routingDecision: {
+            routeName: 'thinking',
+            pool: [providerA, providerB, providerC]
+          },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const previousBase = process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
+    const previousMax = process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS;
+    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = '1';
+    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS = '5';
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const executor = createRequestExecutor({
+        runtimeManager,
+        getHubPipeline: () => pipeline,
+        getModuleDependencies: () => ({
+          errorHandlingCenter: {
+            handleError: jest.fn(async () => undefined)
+          }
+        }),
+        logStage: jest.fn(),
+        stats: new StatsManager()
+      });
+      jest
+        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+        .mockResolvedValue({ status: 200, body: { output_text: 'ok_after_provider_scoped_reroute' } });
+
+      const result = await executor.execute({
+        requestId: 'req-provider-scoped-reroute-backoff',
+        entryEndpoint: '/v1/responses',
+        body: {},
+        headers: {},
+        metadata: {}
+      });
+
+      expect(result).toEqual(expect.objectContaining({ status: 200 }));
+      const switchLines = warnSpy.mock.calls
+        .map((call) => String(call[0] ?? ''))
+        .filter((line) => line.includes('[provider-switch]'));
+      expect(switchLines).toHaveLength(2);
+      expect(switchLines[0]).toContain(`provider=${providerA}`);
+      expect(switchLines[0]).toContain('backoff=1ms');
+      expect(switchLines[0]).toContain('backoffScope=provider');
+      expect(switchLines[0]).toContain('decision=provider_backoff_then_reroute');
+      expect(switchLines[1]).toContain(`provider=${providerB}`);
+      expect(switchLines[1]).toContain('backoff=1ms');
+      expect(switchLines[1]).toContain('backoffScope=provider');
+      expect(switchLines[1]).toContain('decision=provider_backoff_then_reroute');
+    } finally {
+      warnSpy.mockRestore();
+      if (previousBase === undefined) {
+        delete process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
+      } else {
+        process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = previousBase;
+      }
+      if (previousMax === undefined) {
+        delete process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS;
+      } else {
+        process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS = previousMax;
       }
     }
   });

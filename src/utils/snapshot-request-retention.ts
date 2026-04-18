@@ -33,25 +33,25 @@ async function hasRuntimeMarker(dir: string): Promise<boolean> {
   }
 }
 
+function buildSnapshotRuntimeMarkerPayload(payload?: Record<string, unknown>): Record<string, unknown> {
+  return {
+    timestamp: new Date().toISOString(),
+    versions: {
+      routecodex: process.env.ROUTECODEX_VERSION || undefined,
+      routecodexBuildTime: process.env.ROUTECODEX_BUILD_TIME || undefined,
+      llmswitchCore: process.env.ROUTECODEX_LLMSWITCH_CORE_VERSION || undefined,
+      node: process.env.NODE_VERSION || undefined
+    },
+    ...(payload || {})
+  };
+}
+
 export async function ensureSnapshotRuntimeMarker(
   dir: string,
   payload?: Record<string, unknown>
 ): Promise<void> {
   const target = path.join(dir, '__runtime.json');
-  try {
-    await fsp.access(target);
-    return;
-  } catch {
-    // continue
-  }
-  const body = {
-    timestamp: new Date().toISOString(),
-    versions: {
-      routecodex: process.env.ROUTECODEX_VERSION || undefined,
-      routecodexBuildTime: process.env.ROUTECODEX_BUILD_TIME || undefined
-    },
-    ...(payload || {})
-  };
+  const body = buildSnapshotRuntimeMarkerPayload(payload);
   await fsp.writeFile(target, JSON.stringify(body, null, 2), { encoding: 'utf-8', flag: 'wx' }).catch((error) => {
     if ((error as NodeJS.ErrnoException | undefined)?.code === 'EEXIST') {
       return;

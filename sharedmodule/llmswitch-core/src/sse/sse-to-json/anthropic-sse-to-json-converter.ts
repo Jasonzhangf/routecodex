@@ -14,6 +14,12 @@ type AnthropicSseToJsonConverterConfig = {
   strictMode: boolean;
 } & typeof DEFAULT_ANTHROPIC_CONVERSION_CONFIG;
 
+type SseFailureMetadata = {
+  upstreamCode: string;
+  statusCode: number;
+  retryable: boolean;
+};
+
 export class AnthropicSseToJsonConverter {
   private config: AnthropicSseToJsonConverterConfig = {
     enableEventValidation: true,
@@ -123,6 +129,29 @@ export class AnthropicSseToJsonConverter {
       normalized.includes('upstream_stream_idle_timeout') ||
       normalized.includes('upstream_stream_timeout')
     );
+  }
+
+  private resolveSseFailureMetadata(error: Error): SseFailureMetadata {
+    const errorCode = typeof (error as { code?: unknown }).code === 'string'
+      ? String((error as { code?: string }).code).trim().toUpperCase()
+      : '';
+    const normalized = error.message.toLowerCase();
+    if (errorCode === 'UPSTREAM_STREAM_IDLE_TIMEOUT' || normalized.includes('upstream_stream_idle_timeout')) {
+      return { upstreamCode: 'UPSTREAM_STREAM_IDLE_TIMEOUT', statusCode: 504, retryable: true };
+    }
+    if (errorCode === 'UPSTREAM_STREAM_TIMEOUT' || normalized.includes('upstream_stream_timeout')) {
+      return { upstreamCode: 'UPSTREAM_STREAM_TIMEOUT', statusCode: 504, retryable: true };
+    }
+    if (errorCode === 'UPSTREAM_HEADERS_TIMEOUT' || normalized.includes('upstream_headers_timeout')) {
+      return { upstreamCode: 'UPSTREAM_HEADERS_TIMEOUT', statusCode: 504, retryable: true };
+    }
+    if (errorCode === 'UPSTREAM_STREAM_INCOMPLETE' || normalized.includes('stream incomplete')) {
+      return { upstreamCode: 'UPSTREAM_STREAM_INCOMPLETE', statusCode: 502, retryable: true };
+    }
+    if (errorCode === 'TERMINATED' || normalized.includes('terminated')) {
+      return { upstreamCode: 'UPSTREAM_STREAM_TERMINATED', statusCode: 502, retryable: true };
+    }
+    return { upstreamCode: errorCode || 'ANTHROPIC_SSE_TO_JSON_FAILED', statusCode: 502, retryable: true };
   }
 
   private createContext(options: SseToAnthropicJsonOptions): SseToAnthropicJsonContext {
@@ -248,6 +277,25 @@ export class AnthropicSseToJsonConverter {
   }
 
   private wrapError(code: string, error: Error, requestId: string): Error {
-    return ErrorUtils.createError(error.message, code, { requestId });
+    const failure = this.resolveSseFailureMetadata(error);
+    const wrapped = ErrorUtils.createError(error.message, code, {
+      requestId,
+      upstreamCode: failure.upstreamCode,
+      statusCode: failure.statusCode,
+      retryable: failure.retryable,
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    }) as Error & {
+      status?: number;
+      statusCode?: number;
+      retryable?: boolean;
+      upstreamCode?: string;
+      requestExecutorProviderErrorStage?: string;
+    };
+    wrapped.status = failure.statusCode;
+    wrapped.statusCode = failure.statusCode;
+    wrapped.retryable = failure.retryable;
+    wrapped.upstreamCode = failure.upstreamCode;
+    wrapped.requestExecutorProviderErrorStage = 'provider.sse_decode';
+    return wrapped;
   }
 }

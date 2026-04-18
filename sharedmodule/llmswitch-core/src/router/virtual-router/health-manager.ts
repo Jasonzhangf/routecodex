@@ -45,8 +45,13 @@ export class ProviderHealthManager {
     if (reason) {
       state.reason = reason;
     }
-    // 在新版策略中，普通失败仅用于监控；不再根据 failureThreshold 自动熔断。
-    // 只有显式 fatal 或 tripProvider 调用时才会进入 tripped 状态。
+    // Aggressive ban: auto-trip when reaching threshold (3 consecutive failures = 3 cycles cooldown)
+    const threshold = this.config.failureThreshold;
+    const cooldownUnit = this.config.cooldownMs;
+    if (state.failureCount >= threshold) {
+      state.state = 'tripped';
+      state.cooldownExpiresAt = Date.now() + cooldownUnit * 3;
+    }
     return state;
   }
 

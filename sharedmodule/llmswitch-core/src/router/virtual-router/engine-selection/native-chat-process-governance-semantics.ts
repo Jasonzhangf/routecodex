@@ -40,206 +40,216 @@ export type NativeRespProcessFinalizeInput = {
   endpoint?: string;
   requestId?: string;
 };
-function parseAliasMapPayload(raw: string): Record<string, unknown> | undefined | null {
+const NON_BLOCKING_NATIVE_GOVERNANCE_LOG_THROTTLE_MS = 60_000;
+const nonBlockingNativeGovernanceLogState = new Map<string, number>();
+const JSON_PARSE_FAILED = Symbol('native-chat-process-governance-semantics.parse-failed');
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
   try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return undefined;
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-      if (!key || typeof value !== 'string') {
-        return null;
-      }
-      out[key] = value;
-    }
-    return out;
+    return JSON.stringify(error);
   } catch {
+    return String(error ?? 'unknown');
+  }
+}
+
+function logNativeGovernanceNonBlocking(stage: string, error: unknown): void {
+  const now = Date.now();
+  const last = nonBlockingNativeGovernanceLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_NATIVE_GOVERNANCE_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingNativeGovernanceLogState.set(stage, now);
+  console.warn(
+    `[native-chat-process-governance-semantics] ${stage} failed (non-blocking): ${formatUnknownError(error)}`
+  );
+}
+
+function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAILED {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    logNativeGovernanceNonBlocking(stage, error);
+    return JSON_PARSE_FAILED;
+  }
+}
+
+function parseAliasMapPayload(raw: string): Record<string, unknown> | undefined | null {
+  const parsed = parseJson('parseAliasMapPayload', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  if (parsed === null) {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!key || typeof value !== 'string') {
+      return null;
+    }
+    out[key] = value;
+  }
+  return out;
 }
 function parseGovernanceContextPayload(raw: string): NativeGovernanceContextPayload | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    const entryEndpoint = typeof row.entryEndpoint === 'string' ? row.entryEndpoint : '';
-    const providerProtocol = typeof row.providerProtocol === 'string' ? row.providerProtocol : '';
-    const inboundStreamIntent = row.inboundStreamIntent === true;
-    const metadata =
-      row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
-        ? (row.metadata as Record<string, unknown>)
-        : null;
-    if (!entryEndpoint || !providerProtocol || !metadata) {
-      return null;
-    }
-    const rawRequestBody =
-      row.rawRequestBody && typeof row.rawRequestBody === 'object' && !Array.isArray(row.rawRequestBody)
-        ? (row.rawRequestBody as Record<string, unknown>)
-        : undefined;
-    return {
-      entryEndpoint,
-      metadata,
-      providerProtocol,
-      metadataToolHints: row.metadataToolHints === null ? undefined : row.metadataToolHints,
-      inboundStreamIntent,
-      ...(rawRequestBody ? { rawRequestBody } : {})
-    };
-  } catch {
+  const parsed = parseJson('parseGovernanceContextPayload', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  const row = parsed as Record<string, unknown>;
+  const entryEndpoint = typeof row.entryEndpoint === 'string' ? row.entryEndpoint : '';
+  const providerProtocol = typeof row.providerProtocol === 'string' ? row.providerProtocol : '';
+  const inboundStreamIntent = row.inboundStreamIntent === true;
+  const metadata =
+    row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+      ? (row.metadata as Record<string, unknown>)
+      : null;
+  if (!entryEndpoint || !providerProtocol || !metadata) {
+    return null;
+  }
+  const rawRequestBody =
+    row.rawRequestBody && typeof row.rawRequestBody === 'object' && !Array.isArray(row.rawRequestBody)
+      ? (row.rawRequestBody as Record<string, unknown>)
+      : undefined;
+  return {
+    entryEndpoint,
+    metadata,
+    providerProtocol,
+    metadataToolHints: row.metadataToolHints === null ? undefined : row.metadataToolHints,
+    inboundStreamIntent,
+    ...(rawRequestBody ? { rawRequestBody } : {})
+  };
 }
 function parseCastToolsPayload(raw: string): unknown | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return undefined;
-    }
-    if (!Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed;
-  } catch {
+  const parsed = parseJson('parseCastToolsPayload', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  if (parsed === null) {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed;
 }
 function parseWebSearchOperationsPayload(raw: string): unknown[] | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed;
-  } catch {
+  const parsed = parseJson('parseWebSearchOperationsPayload', raw);
+  if (parsed === JSON_PARSE_FAILED || !Array.isArray(parsed)) {
     return null;
   }
+  return parsed;
 }
 function parseRecord(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
+  const parsed = parseJson('parseRecord', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  return parsed as Record<string, unknown>;
 }
 function parseRespProcessToolGovernancePayload(raw: string): NativeRespProcessToolGovernanceOutput | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    const governedPayloadRaw =
-      row.governed_payload && typeof row.governed_payload === 'object' && !Array.isArray(row.governed_payload)
-        ? (row.governed_payload as Record<string, unknown>)
-        : row.governedPayload && typeof row.governedPayload === 'object' && !Array.isArray(row.governedPayload)
-          ? (row.governedPayload as Record<string, unknown>)
-          : null;
-    const summaryRaw =
-      row.summary && typeof row.summary === 'object' && !Array.isArray(row.summary)
-        ? (row.summary as Record<string, unknown>)
-        : null;
-    if (!governedPayloadRaw || !summaryRaw) {
-      return null;
-    }
-    const applied = summaryRaw.applied === true;
-    const toolCallsNormalizedRaw =
-      typeof summaryRaw.tool_calls_normalized === 'number'
-        ? summaryRaw.tool_calls_normalized
-        : typeof summaryRaw.toolCallsNormalized === 'number'
-          ? summaryRaw.toolCallsNormalized
-          : NaN;
-    const applyPatchRepairedRaw =
-      typeof summaryRaw.apply_patch_repaired === 'number'
-        ? summaryRaw.apply_patch_repaired
-        : typeof summaryRaw.applyPatchRepaired === 'number'
-          ? summaryRaw.applyPatchRepaired
-          : NaN;
-    if (!Number.isFinite(toolCallsNormalizedRaw) || !Number.isFinite(applyPatchRepairedRaw)) {
-      return null;
-    }
-    return {
-      governedPayload: governedPayloadRaw,
-      summary: {
-        applied,
-        toolCallsNormalized: Math.floor(toolCallsNormalizedRaw),
-        applyPatchRepaired: Math.floor(applyPatchRepairedRaw)
-      }
-    };
-  } catch {
+  const parsed = parseJson('parseRespProcessToolGovernancePayload', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  const row = parsed as Record<string, unknown>;
+  const governedPayloadRaw =
+    row.governed_payload && typeof row.governed_payload === 'object' && !Array.isArray(row.governed_payload)
+      ? (row.governed_payload as Record<string, unknown>)
+      : row.governedPayload && typeof row.governedPayload === 'object' && !Array.isArray(row.governedPayload)
+        ? (row.governedPayload as Record<string, unknown>)
+        : null;
+  const summaryRaw =
+    row.summary && typeof row.summary === 'object' && !Array.isArray(row.summary)
+      ? (row.summary as Record<string, unknown>)
+      : null;
+  if (!governedPayloadRaw || !summaryRaw) {
+    return null;
+  }
+  const applied = summaryRaw.applied === true;
+  const toolCallsNormalizedRaw =
+    typeof summaryRaw.tool_calls_normalized === 'number'
+      ? summaryRaw.tool_calls_normalized
+      : typeof summaryRaw.toolCallsNormalized === 'number'
+        ? summaryRaw.toolCallsNormalized
+        : NaN;
+  const applyPatchRepairedRaw =
+    typeof summaryRaw.apply_patch_repaired === 'number'
+      ? summaryRaw.apply_patch_repaired
+      : typeof summaryRaw.applyPatchRepaired === 'number'
+        ? summaryRaw.applyPatchRepaired
+        : NaN;
+  if (!Number.isFinite(toolCallsNormalizedRaw) || !Number.isFinite(applyPatchRepairedRaw)) {
+    return null;
+  }
+  return {
+    governedPayload: governedPayloadRaw,
+    summary: {
+      applied,
+      toolCallsNormalized: Math.floor(toolCallsNormalizedRaw),
+      applyPatchRepaired: Math.floor(applyPatchRepairedRaw)
+    }
+  };
 }
 function parseRespProcessToolGovernancePreparationPayload(
   raw: string
 ): NativeRespProcessToolGovernancePreparationOutput | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    const preparedPayloadRaw =
-      row.prepared_payload && typeof row.prepared_payload === 'object' && !Array.isArray(row.prepared_payload)
-        ? (row.prepared_payload as Record<string, unknown>)
-        : row.preparedPayload && typeof row.preparedPayload === 'object' && !Array.isArray(row.preparedPayload)
-          ? (row.preparedPayload as Record<string, unknown>)
-          : null;
-    const summaryRaw =
-      row.summary && typeof row.summary === 'object' && !Array.isArray(row.summary)
-        ? (row.summary as Record<string, unknown>)
-        : null;
-    if (!preparedPayloadRaw || !summaryRaw) {
-      return null;
-    }
-    const converted = summaryRaw.converted === true;
-    const shapeSanitized = summaryRaw.shape_sanitized === true || summaryRaw.shapeSanitized === true;
-    const harvestedToolCallsRaw =
-      typeof summaryRaw.harvested_tool_calls === 'number'
-        ? summaryRaw.harvested_tool_calls
-        : typeof summaryRaw.harvestedToolCalls === 'number'
-          ? summaryRaw.harvestedToolCalls
-          : NaN;
-    if (!Number.isFinite(harvestedToolCallsRaw)) {
-      return null;
-    }
-    return {
-      preparedPayload: preparedPayloadRaw,
-      summary: {
-        converted,
-        shapeSanitized,
-        harvestedToolCalls: Math.floor(harvestedToolCallsRaw)
-      }
-    };
-  } catch {
+  const parsed = parseJson('parseRespProcessToolGovernancePreparationPayload', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  const row = parsed as Record<string, unknown>;
+  const preparedPayloadRaw =
+    row.prepared_payload && typeof row.prepared_payload === 'object' && !Array.isArray(row.prepared_payload)
+      ? (row.prepared_payload as Record<string, unknown>)
+      : row.preparedPayload && typeof row.preparedPayload === 'object' && !Array.isArray(row.preparedPayload)
+        ? (row.preparedPayload as Record<string, unknown>)
+        : null;
+  const summaryRaw =
+    row.summary && typeof row.summary === 'object' && !Array.isArray(row.summary)
+      ? (row.summary as Record<string, unknown>)
+      : null;
+  if (!preparedPayloadRaw || !summaryRaw) {
+    return null;
+  }
+  const converted = summaryRaw.converted === true;
+  const shapeSanitized = summaryRaw.shape_sanitized === true || summaryRaw.shapeSanitized === true;
+  const harvestedToolCallsRaw =
+    typeof summaryRaw.harvested_tool_calls === 'number'
+      ? summaryRaw.harvested_tool_calls
+      : typeof summaryRaw.harvestedToolCalls === 'number'
+        ? summaryRaw.harvestedToolCalls
+        : NaN;
+  if (!Number.isFinite(harvestedToolCallsRaw)) {
+    return null;
+  }
+  return {
+    preparedPayload: preparedPayloadRaw,
+    summary: {
+      converted,
+      shapeSanitized,
+      harvestedToolCalls: Math.floor(harvestedToolCallsRaw)
+    }
+  };
 }
 function parseRespProcessFinalizePayload(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    const finalizedPayloadRaw =
-      row.finalized_payload && typeof row.finalized_payload === 'object' && !Array.isArray(row.finalized_payload)
-        ? (row.finalized_payload as Record<string, unknown>)
-        : row.finalizedPayload && typeof row.finalizedPayload === 'object' && !Array.isArray(row.finalizedPayload)
-          ? (row.finalizedPayload as Record<string, unknown>)
-          : null;
-    return finalizedPayloadRaw;
-  } catch {
+  const parsed = parseJson('parseRespProcessFinalizePayload', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  const row = parsed as Record<string, unknown>;
+  const finalizedPayloadRaw =
+    row.finalized_payload && typeof row.finalized_payload === 'object' && !Array.isArray(row.finalized_payload)
+      ? (row.finalized_payload as Record<string, unknown>)
+      : row.finalizedPayload && typeof row.finalizedPayload === 'object' && !Array.isArray(row.finalizedPayload)
+        ? (row.finalizedPayload as Record<string, unknown>)
+        : null;
+  return finalizedPayloadRaw;
 }
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
@@ -249,7 +259,8 @@ function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | n
 function safeStringify(value: unknown): string | undefined {
   try {
     return JSON.stringify(value);
-  } catch {
+  } catch (error) {
+    logNativeGovernanceNonBlocking('safeStringify', error);
     return undefined;
   }
 }

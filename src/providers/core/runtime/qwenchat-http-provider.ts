@@ -42,13 +42,22 @@ const QWENCHAT_TOOL_STOP_ERRORSAMPLE_MAX_RAW_CHARS = 24_000;
 
 export class QwenChatHttpProvider extends HttpTransportProvider {
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
+    const rawConfig = config.config as Record<string, unknown>;
+    const compatibilityProfile =
+      typeof rawConfig.compatibilityProfile === 'string'
+        ? rawConfig.compatibilityProfile.trim().toLowerCase()
+        : '';
+    const forceChatQwenBaseUrl = compatibilityProfile === 'chat:qwen';
+    const configuredBaseUrl = String(config.config.baseUrl || '').trim();
     const cfg: OpenAIStandardConfig = {
       ...config,
       config: {
         ...config.config,
         providerType: 'openai',
         providerId: config.config.providerId || 'qwenchat',
-        baseUrl: String(config.config.baseUrl || DEFAULT_QWENCHAT_BASE_URL).trim() || DEFAULT_QWENCHAT_BASE_URL,
+        baseUrl:
+          (forceChatQwenBaseUrl ? DEFAULT_QWENCHAT_BASE_URL : configuredBaseUrl)
+          || DEFAULT_QWENCHAT_BASE_URL,
         overrides: {
           ...(config.config.overrides || {}),
           endpoint: String(config.config.overrides?.endpoint || DEFAULT_QWENCHAT_COMPLETION_ENDPOINT).trim() || DEFAULT_QWENCHAT_COMPLETION_ENDPOINT
@@ -56,6 +65,18 @@ export class QwenChatHttpProvider extends HttpTransportProvider {
       }
     };
     super(cfg, dependencies, 'qwenchat-http-provider');
+  }
+
+  protected override getEffectiveBaseUrl(): string {
+    const runtimeProfile = this.getRuntimeProfile();
+    const runtimeCompatibilityProfile =
+      typeof runtimeProfile?.compatibilityProfile === 'string'
+        ? runtimeProfile.compatibilityProfile.trim().toLowerCase()
+        : '';
+    if (runtimeCompatibilityProfile === 'chat:qwen') {
+      return DEFAULT_QWENCHAT_BASE_URL;
+    }
+    return super.getEffectiveBaseUrl();
   }
 
   protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {

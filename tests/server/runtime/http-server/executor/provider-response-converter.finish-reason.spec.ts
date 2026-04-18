@@ -1,5 +1,8 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { STREAM_LOG_FINISH_REASON_KEY } from '../../../../../src/server/utils/finish-reason.js';
+import {
+  REASONING_STOP_FINALIZED_FLAG_KEY
+} from '../../../../../src/server/runtime/http-server/executor/servertool-response-normalizer.js';
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
@@ -56,6 +59,57 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
     );
 
     expect((converted.body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY]).toBe('tool_calls');
+    expect((converted.body as Record<string, unknown>).__sse_responses).toBe(sseStream);
+  });
+
+  it('preserves reasoning.stop finalized marker state on streamed wrapper bodies', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    const sseStream = { pipe: () => undefined };
+    mockConvertProviderResponse.mockResolvedValue({
+      __sse_responses: sseStream,
+      body: {
+        id: 'chatcmpl_reasoning_stop_finalized',
+        object: 'chat.completion',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: '[app.finished:reasoning.stop] {\"is_completed\":true}'
+            }
+          }
+        ]
+      }
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'anthropic-messages',
+        requestId: 'req_stream_reasoning_stop_finalized',
+        wantsStream: true,
+        response: { body: { id: 'upstream_body' } } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect((converted.body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY]).toBe('stop');
+    expect((converted.body as Record<string, unknown>)[REASONING_STOP_FINALIZED_FLAG_KEY]).toBe(true);
     expect((converted.body as Record<string, unknown>).__sse_responses).toBe(sseStream);
   });
 });

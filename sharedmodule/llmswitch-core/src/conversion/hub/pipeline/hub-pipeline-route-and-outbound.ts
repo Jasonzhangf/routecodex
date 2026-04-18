@@ -55,7 +55,6 @@ export async function executeRouteAndBuildOutbound<TContext = Record<string, unk
   nodeResults: HubPipelineNodeResult[];
   inboundRecorder?: StageRecorder;
   activeProcessMode: "chat" | "passthrough";
-  responsesResume?: Record<string, unknown>;
   serverToolRequired: boolean;
   hasImageAttachment: boolean;
   passthroughAudit?: Record<string, unknown>;
@@ -84,7 +83,6 @@ export async function executeRouteAndBuildOutbound<TContext = Record<string, unk
     nodeResults,
     inboundRecorder,
     activeProcessMode,
-    responsesResume,
     serverToolRequired,
     hasImageAttachment,
     passthroughAudit,
@@ -133,7 +131,7 @@ export async function executeRouteAndBuildOutbound<TContext = Record<string, unk
     providerProtocol: normalized.providerProtocol,
     routeHint: normalized.routeHint,
     stage: normalized.stage,
-    responsesResume,
+    requestSemantics: (workingRequest as { semantics?: Record<string, unknown> }).semantics,
     includeEstimatedInputTokens: true,
     serverToolRequired: serverToolRequired === true,
     sessionId: sessionIdentifiers.sessionId,

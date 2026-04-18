@@ -1,18 +1,7 @@
-import { createHmac } from 'node:crypto';
 import { describe, expect, test } from '@jest/globals';
 import { getProviderFamilyProfile, hasProviderFamilyProfile } from '../../../src/providers/profile/profile-registry.js';
 
 describe('provider family profile registry', () => {
-  test('resolves iflow profile from provider key prefix', () => {
-    const profile = getProviderFamilyProfile({
-      providerKey: 'iflow.3-138.kimi-k2.5'
-    });
-
-    expect(profile).toBeTruthy();
-    expect(profile?.providerFamily).toBe('iflow');
-    expect(hasProviderFamilyProfile({ providerKey: 'iflow.3-138.kimi-k2.5' })).toBe(true);
-  });
-
   test('resolves responses/anthropic profiles from providerType', () => {
     const responsesProfile = getProviderFamilyProfile({ providerType: 'responses' });
     const anthropicProfile = getProviderFamilyProfile({ providerType: 'anthropic' });
@@ -31,236 +20,6 @@ describe('provider family profile registry', () => {
     expect(qwenProfile?.providerFamily).toBe('qwen');
     expect(hasProviderFamilyProfile({ providerId: 'glm' })).toBe(true);
     expect(hasProviderFamilyProfile({ providerId: 'qwen' })).toBe(true);
-  });
-
-  test('iflow profile resolves endpoint/body for web search requests', () => {
-    const profile = getProviderFamilyProfile({ providerId: 'iflow' });
-    expect(profile).toBeTruthy();
-
-    const endpoint = profile?.resolveEndpoint?.({
-      request: {
-        metadata: {
-          iflowWebSearch: true,
-          entryEndpoint: '/chat/retrieve'
-        }
-      } as any,
-      defaultEndpoint: '/chat/completions'
-    });
-    expect(endpoint).toBe('/chat/retrieve');
-
-    const entryEndpointFallback = profile?.resolveEndpoint?.({
-      request: {
-        metadata: {
-          iflowWebSearch: true,
-          entryEndpoint: '/v1/messages'
-        }
-      } as any,
-      defaultEndpoint: '/chat/completions'
-    });
-    expect(entryEndpointFallback).toBe('/chat/completions');
-
-    const body = profile?.buildRequestBody?.({
-      request: {
-        metadata: { iflowWebSearch: true },
-        data: { query: 'routecodex' }
-      } as any,
-      defaultBody: { model: 'kimi-k2.5', messages: [] } as any
-    });
-    expect(body).toEqual({ query: 'routecodex' });
-
-    const bodyFromDefault = profile?.buildRequestBody?.({
-      request: {
-        metadata: { iflowWebSearch: true, entryEndpoint: '/v1/messages' },
-        data: { query: 'legacy-shape' }
-      } as any,
-      defaultBody: { model: 'minimax-m2.5', max_tokens: 32000, messages: [{ role: 'user', content: 'hi' }] } as any
-    });
-    expect(bodyFromDefault).toEqual({
-      model: 'minimax-m2.5',
-      max_tokens: 8192,
-      messages: [{ role: 'user', content: 'hi' }]
-    });
-
-    const bodyFromDefaultNonMinimax = profile?.buildRequestBody?.({
-      request: {
-        metadata: { iflowWebSearch: true, entryEndpoint: '/v1/messages' },
-        data: { query: 'legacy-shape' }
-      } as any,
-      defaultBody: { model: 'kimi-k2.5', max_tokens: 32000, messages: [{ role: 'user', content: 'hi' }] } as any
-    });
-    expect(bodyFromDefaultNonMinimax).toEqual({
-      model: 'kimi-k2.5',
-      max_tokens: 32000,
-      messages: [{ role: 'user', content: 'hi' }]
-    });
-  });
-
-  test('iflow profile user-agent policy keeps config/service priority', () => {
-    const profile = getProviderFamilyProfile({ providerId: 'iflow' });
-    expect(profile).toBeTruthy();
-
-    const fromService = profile?.resolveUserAgent?.({
-      uaFromConfig: undefined,
-      uaFromService: 'iFlow-Cli',
-      inboundUserAgent: 'curl/8.7.1',
-      defaultUserAgent: 'routecodex/default'
-    });
-    expect(fromService).toBe('iFlow-Cli');
-
-    const fromFallback = profile?.resolveUserAgent?.({
-      uaFromConfig: undefined,
-      uaFromService: undefined,
-      inboundUserAgent: undefined,
-      defaultUserAgent: 'routecodex/default'
-    });
-    expect(fromFallback).toBe('routecodex/default');
-  });
-
-  test('iflow profile applies CLI session/signature headers', () => {
-    const profile = getProviderFamilyProfile({ providerId: 'iflow' });
-    expect(profile).toBeTruthy();
-
-    const headers = profile?.applyRequestHeaders?.({
-      headers: {
-        Authorization: 'Bearer sk-test-iflow-signature-1234567890',
-        'User-Agent': 'iFlow-Cli',
-        session_id: 'sess-iflow-001',
-        conversation_id: 'conv-iflow-001'
-      },
-      runtimeMetadata: {
-        providerKey: 'iflow.test.key',
-        metadata: {}
-      } as any
-    });
-
-    expect(headers).toBeTruthy();
-    expect(typeof headers?.['session-id']).toBe('string');
-    expect((headers?.['session-id'] as string).startsWith('session-')).toBe(true);
-    expect(headers?.['conversation-id']).toBe('conv-iflow-001');
-    expect(typeof headers?.['x-iflow-timestamp']).toBe('string');
-    expect(typeof headers?.['x-iflow-signature']).toBe('string');
-
-    const expected = createHmac('sha256', 'sk-test-iflow-signature-1234567890')
-      .update(`iFlow-Cli:${headers?.['session-id']}:${headers?.['x-iflow-timestamp']}`, 'utf8')
-      .digest('hex');
-
-    expect(headers?.['x-iflow-signature']).toBe(expected);
-  });
-
-  test('iflow profile does not auto-inject originator/session from request id', () => {
-    const profile = getProviderFamilyProfile({ providerId: 'iflow' });
-    expect(profile).toBeTruthy();
-
-    const headers = profile?.applyRequestHeaders?.({
-      headers: {
-        Authorization: 'Bearer sk-test-iflow-signature-1234567890',
-        'User-Agent': 'iFlow-Cli'
-      },
-      runtimeMetadata: {
-        requestId: 'req-iflow-001',
-        metadata: {}
-      } as any
-    });
-
-    expect(headers?.originator).toBeUndefined();
-    expect(typeof headers?.['session-id']).toBe('string');
-    expect((headers?.['session-id'] as string).startsWith('session-')).toBe(true);
-  });
-
-  test('iflow profile rotates session every 200 calls per scope', () => {
-    const profile = getProviderFamilyProfile({ providerId: 'iflow' });
-    expect(profile).toBeTruthy();
-
-    const runtimeMetadata = {
-      providerKey: 'iflow.rotate-test.key',
-      metadata: {}
-    } as any;
-
-    // Rotation only applies when runtimeMetadata is provided; in prod usage the provider layer always passes it.
-    // In unit tests without runtimeMetadata we rely on passthrough behavior, so we only validate metadata capture here.
-    const rotateMetadata = {
-      providerKey: 'iflow.rotate-test.key',
-      metadata: {}
-    } as any;
-
-    const headers = profile?.applyRequestHeaders?.({
-      headers: {
-        Authorization: 'Bearer sk-test-rotate',
-        'User-Agent': 'iFlow-Cli',
-        session_id: 'client-session-001'
-      },
-      runtimeMetadata: rotateMetadata
-    });
-
-    expect(typeof headers?.['session-id']).toBe('string');
-    expect((headers?.['session-id'] as string).startsWith('session-')).toBe(true);
-    expect(typeof headers?.['x-iflow-signature']).toBe('string');
-  });
-
-  test('iflow profile isolates sessions across provider keys', () => {
-    const profile = getProviderFamilyProfile({ providerId: 'iflow' });
-    expect(profile).toBeTruthy();
-
-    // Isolation is a runtime behavior exercised via the compiled bundle (dist).
-    // Unit tests here validate the passthrough path without runtimeMetadata.
-    expect(true).toBe(true);
-  });
-
-  test('iflow response restores client session headers after rewrite', () => {
-    const profile = getProviderFamilyProfile({ providerId: 'iflow' });
-    expect(profile).toBeTruthy();
-
-    const runtimeMetadata = {
-      providerKey: 'iflow.restore-test.key',
-      metadata: {}
-    } as any;
-
-    const headers = profile?.applyRequestHeaders?.({
-      headers: {
-        Authorization: 'Bearer sk-test-restore',
-        'User-Agent': 'iFlow-Cli',
-        session_id: 'client-sess-001',
-        conversation_id: 'client-conv-001'
-      },
-      runtimeMetadata
-    });
-
-    const meta = runtimeMetadata.metadata as Record<string, unknown>;
-    expect(meta.__iflowSessionRewriteActive).toBe(true);
-    expect(meta.__iflowUpstreamSessionId).toBeDefined();
-    expect(typeof meta.__iflowUpstreamSessionId).toBe('string');
-    expect((meta.__iflowUpstreamSessionId as string).startsWith('session-')).toBe(true);
-    expect(meta.__iflowClientSessionId).toBe('client-sess-001');
-    expect(meta.__iflowClientConversationId).toBe('client-conv-001');
-    // Metadata is captured; actual rewrite happens in compiled bundle when runtimeMetadata.providerKey exists.
-    expect(meta.__iflowSessionRewriteActive).toBe(true);
-  });
-
-  test('iflow profile maps HTTP200 business envelope to provider error', () => {
-    const profile = getProviderFamilyProfile({ providerId: 'iflow' });
-    expect(profile).toBeTruthy();
-
-    const businessError = profile?.resolveBusinessResponseError?.({
-      response: {
-        data: {
-          error_code: 'iflow_business_error',
-          msg: 'Model not support'
-        }
-      }
-    });
-
-    expect(businessError).toBeTruthy();
-    expect(String(businessError?.message || '')).toContain('Model not support');
-
-    const tokenExpired = profile?.resolveBusinessResponseError?.({
-      response: {
-        data: {
-          status: 439,
-          msg: 'token has expired'
-        }
-      }
-    });
-    expect(String(tokenExpired?.message || '')).toContain('token has expired');
   });
 
   test('responses profile enforces codex UA header policy', () => {
@@ -411,9 +170,8 @@ describe('provider family profile registry', () => {
     }
   });
 
-  test('qwen/iflow profiles decide OAuth token-file mode', () => {
+  test('qwen profile decides OAuth token-file mode', () => {
     const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
-    const iflowProfile = getProviderFamilyProfile({ providerId: 'iflow' });
 
     expect(
       qwenProfile?.resolveOAuthTokenFileMode?.({
@@ -430,19 +188,11 @@ describe('provider family profile registry', () => {
         moduleType: 'openai-http-provider'
       })
     ).toBe(false);
-
-    expect(
-      iflowProfile?.resolveOAuthTokenFileMode?.({
-        oauthProviderId: 'iflow',
-        auth: {},
-        moduleType: 'iflow-http-provider'
-      })
-    ).toBe(true);
   });
 
   test('qwen profile applies DashScope headers and removes legacy Gemini metadata headers', () => {
     const previousUaVersion = process.env.ROUTECODEX_QWEN_UA_VERSION;
-    process.env.ROUTECODEX_QWEN_UA_VERSION = '0.10.3';
+    process.env.ROUTECODEX_QWEN_UA_VERSION = '0.14.3';
 
     try {
       const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
@@ -465,11 +215,15 @@ describe('provider family profile registry', () => {
       expect(headers?.['Client-Metadata']).toBeUndefined();
       expect(headers?.['X-DashScope-CacheControl']).toBe('enable');
       expect(headers?.['X-DashScope-AuthType']).toBe('qwen-oauth');
-      expect(headers?.['User-Agent']).toBe('QwenCode/0.10.3 (darwin; arm64)');
+      expect(headers?.['User-Agent']).toBe('QwenCode/0.14.3 (darwin; arm64)');
       expect(headers?.['X-DashScope-UserAgent']).toBe(headers?.['User-Agent']);
       expect(headers?.['X-Stainless-Lang']).toBe('js');
       expect(headers?.['X-Stainless-Runtime']).toBe('node');
+      expect(headers?.['X-Stainless-Runtime-Version']).toBe(process.version);
+      expect(headers?.['X-Stainless-Package-Version']).toBe('5.11.0');
+      expect(headers?.['X-Stainless-OS']).toBe('MacOS');
       expect(headers?.['X-Stainless-Retry-Count']).toBe('0');
+      expect(headers?.['X-Stainless-Os']).toBeUndefined();
       expect(headers?.originator).toBeUndefined();
       expect(headers?.session_id).toBeUndefined();
       expect(headers?.conversation_id).toBeUndefined();
@@ -484,7 +238,7 @@ describe('provider family profile registry', () => {
 
   test('qwen profile resolveUserAgent ignores client/config passthrough and stays qwen-cli aligned', () => {
     const previousUaVersion = process.env.ROUTECODEX_QWEN_UA_VERSION;
-    process.env.ROUTECODEX_QWEN_UA_VERSION = '0.10.3';
+    process.env.ROUTECODEX_QWEN_UA_VERSION = '0.14.3';
 
     try {
       const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
@@ -497,7 +251,7 @@ describe('provider family profile registry', () => {
         defaultUserAgent: 'RouteCodex/2.0'
       } as any);
 
-      expect(resolved).toBe('QwenCode/0.10.3 (darwin; arm64)');
+      expect(resolved).toBe('QwenCode/0.14.3 (darwin; arm64)');
     } finally {
       if (previousUaVersion === undefined) {
         delete process.env.ROUTECODEX_QWEN_UA_VERSION;
@@ -525,6 +279,7 @@ describe('provider family profile registry', () => {
     } as any);
 
     expect((body as any)?.model).toBe('coder-model');
+    expect((body as any)?.vl_high_resolution_images).toBe(true);
     expect((body as any)?.messages?.[0]?.role).toBe('system');
     expect((body as any)?.messages?.[0]?.content).toEqual([
       {
@@ -536,7 +291,7 @@ describe('provider family profile registry', () => {
     expect((body as any)?.reasoning_effort).toBeUndefined();
   });
 
-  test('qwen profile maps oauth vision model id to vision-model', () => {
+  test('qwen profile keeps oauth vision requests on coder-model per official qwen code', () => {
     const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
     expect(qwenProfile).toBeTruthy();
 
@@ -553,7 +308,8 @@ describe('provider family profile registry', () => {
       } as any
     } as any);
 
-    expect((body as any)?.model).toBe('vision-model');
+    expect((body as any)?.model).toBe('coder-model');
+    expect((body as any)?.vl_high_resolution_images).toBe(true);
   });
 
   test('qwen profile merges user system messages into injected qwen-oauth system envelope', () => {
@@ -586,7 +342,7 @@ describe('provider family profile registry', () => {
         cache_control: { type: 'ephemeral' }
       },
       { type: 'text', text: 'Be concise.' },
-      { type: 'text', text: 'Keep markdown.' }
+      { type: 'text', text: 'Keep markdown.', cache_control: { type: 'ephemeral' } }
     ]);
     expect((body as any)?.messages?.[1]).toEqual({ role: 'user', content: 'hello' });
     expect((body as any)?.messages).toHaveLength(2);

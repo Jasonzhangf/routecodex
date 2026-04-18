@@ -215,8 +215,9 @@ pub(crate) fn bootstrap_virtual_router_config_meta_json(
         load_balancing: normalize_load_balancing(section.get("loadBalancing")),
         health: normalize_health(section.get("health")),
         context_routing: normalize_context_routing(section.get("contextRouting")),
-        web_search: normalize_web_search(section.get("webSearch"), routing_source)
-            .map_err(|error| napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error)))?,
+        web_search: normalize_web_search(section.get("webSearch"), routing_source).map_err(
+            |error| napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error)),
+        )?,
         exec_command_guard: normalize_exec_command_guard(section.get("execCommandGuard")),
         clock: normalize_clock(section.get("clock")),
     };
@@ -283,7 +284,9 @@ fn normalize_load_balancing(value: Option<&Value>) -> Option<LoadBalancingConfig
 
 fn normalize_health(value: Option<&Value>) -> Option<ProviderHealthConfigOutput> {
     let record = value.and_then(Value::as_object)?;
-    let failure_threshold = record.get("failureThreshold").and_then(normalize_finite_i64)?;
+    let failure_threshold = record
+        .get("failureThreshold")
+        .and_then(normalize_finite_i64)?;
     let cooldown_ms = record.get("cooldownMs").and_then(normalize_finite_i64)?;
     let fatal_cooldown_ms = record.get("fatalCooldownMs").and_then(normalize_finite_i64);
     Some(ProviderHealthConfigOutput {
@@ -296,11 +299,19 @@ fn normalize_health(value: Option<&Value>) -> Option<ProviderHealthConfigOutput>
 fn normalize_context_routing(value: Option<&Value>) -> ContextRoutingConfigOutput {
     let record = value.and_then(Value::as_object);
     let warn_ratio = record
-        .and_then(|row| row.get("warnRatio").and_then(normalize_optional_f64).or_else(|| row.get("warn_ratio").and_then(normalize_optional_f64)))
+        .and_then(|row| {
+            row.get("warnRatio")
+                .and_then(normalize_optional_f64)
+                .or_else(|| row.get("warn_ratio").and_then(normalize_optional_f64))
+        })
         .map(clamp_warn_ratio)
         .unwrap_or(DEFAULT_WARN_RATIO);
     let hard_limit = record
-        .and_then(|row| row.get("hardLimit").and_then(parse_bool_like).or_else(|| row.get("hard_limit").and_then(parse_bool_like)))
+        .and_then(|row| {
+            row.get("hardLimit")
+                .and_then(parse_bool_like)
+                .or_else(|| row.get("hard_limit").and_then(parse_bool_like))
+        })
         .unwrap_or(false);
     ContextRoutingConfigOutput {
         warn_ratio,
@@ -333,14 +344,21 @@ fn normalize_exec_command_guard(value: Option<&Value>) -> Option<ExecCommandGuar
 
 fn normalize_clock(value: Option<&Value>) -> Option<ClockConfigOutput> {
     let record = value.and_then(Value::as_object)?;
-    let enabled = record.get("enabled").and_then(parse_bool_like).unwrap_or(false);
+    let enabled = record
+        .get("enabled")
+        .and_then(parse_bool_like)
+        .unwrap_or(false);
     if !enabled {
         return None;
     }
     Some(ClockConfigOutput {
         enabled: true,
-        retention_ms: record.get("retentionMs").and_then(normalize_non_negative_i64),
-        due_window_ms: record.get("dueWindowMs").and_then(normalize_non_negative_i64),
+        retention_ms: record
+            .get("retentionMs")
+            .and_then(normalize_non_negative_i64),
+        due_window_ms: record
+            .get("dueWindowMs")
+            .and_then(normalize_non_negative_i64),
         tick_ms: record.get("tickMs").and_then(normalize_non_negative_i64),
         hold_non_streaming: truthy_option(record.get("holdNonStreaming")),
         hold_max_ms: record.get("holdMaxMs").and_then(normalize_non_negative_i64),
@@ -378,11 +396,9 @@ fn normalize_web_search(
             if engines.iter().any(|engine| engine.id == id) {
                 continue;
             }
-            let resolved_provider_key = resolve_web_search_engine_provider_key(
-                &provider_key,
-                &web_search_route_targets,
-            )
-            .unwrap_or(provider_key);
+            let resolved_provider_key =
+                resolve_web_search_engine_provider_key(&provider_key, &web_search_route_targets)
+                    .unwrap_or(provider_key);
             let description = node.get("description").and_then(read_trimmed_string);
             let default = truthy_option(node.get("default"));
             let execution_mode = node
@@ -390,7 +406,13 @@ fn normalize_web_search(
                 .and_then(read_trimmed_string)
                 .or_else(|| node.get("mode").and_then(read_trimmed_string))
                 .map(|value| value.to_ascii_lowercase())
-                .map(|value| if value == "direct" { "direct".to_string() } else { "servertool".to_string() })
+                .map(|value| {
+                    if value == "direct" {
+                        "direct".to_string()
+                    } else {
+                        "servertool".to_string()
+                    }
+                })
                 .unwrap_or_else(|| "servertool".to_string());
             let direct_activation = node
                 .get("directActivation")
@@ -411,17 +433,21 @@ fn normalize_web_search(
                 });
             let model_id = node.get("modelId").and_then(read_trimmed_string);
             let max_uses = node.get("maxUses").and_then(normalize_positive_floor_i64);
-            let server_tools_disabled = truthy_option(node.get("serverToolsDisabled")).or_else(|| {
-                node.get("serverTools")
-                    .and_then(Value::as_object)
-                    .and_then(|server_tools| {
-                        if matches!(server_tools.get("enabled").and_then(parse_bool_like), Some(false)) {
-                            Some(true)
-                        } else {
-                            None
-                        }
-                    })
-            });
+            let server_tools_disabled =
+                truthy_option(node.get("serverToolsDisabled")).or_else(|| {
+                    node.get("serverTools")
+                        .and_then(Value::as_object)
+                        .and_then(|server_tools| {
+                            if matches!(
+                                server_tools.get("enabled").and_then(parse_bool_like),
+                                Some(false)
+                            ) {
+                                Some(true)
+                            } else {
+                                None
+                            }
+                        })
+                });
 
             engines.push(WebSearchEngineOutput {
                 id,
@@ -449,7 +475,10 @@ fn normalize_web_search(
         );
     }
     for engine in &engines {
-        if !route_targets.iter().any(|target| target == &engine.provider_key) {
+        if !route_targets
+            .iter()
+            .any(|target| target == &engine.provider_key)
+        {
             return Err(format!(
                 "Virtual Router webSearch engine \"{}\" references providerKey \"{}\" which is not present in routing.web_search/search",
                 engine.id, engine.provider_key
@@ -501,34 +530,45 @@ fn normalize_alias_selection(value: Option<&Value>) -> Option<AliasSelectionConf
     let session_lease_cooldown_ms = record
         .get("sessionLeaseCooldownMs")
         .and_then(normalize_non_negative_i64)
-        .or_else(|| record.get("sessionLease_cooldown_ms").and_then(normalize_non_negative_i64));
+        .or_else(|| {
+            record
+                .get("sessionLease_cooldown_ms")
+                .and_then(normalize_non_negative_i64)
+        });
     let antigravity_session_binding = record
         .get("antigravitySessionBinding")
         .and_then(read_trimmed_string)
-        .or_else(|| record.get("antigravity_session_binding").and_then(read_trimmed_string))
+        .or_else(|| {
+            record
+                .get("antigravity_session_binding")
+                .and_then(read_trimmed_string)
+        })
         .map(|value| value.to_ascii_lowercase())
         .and_then(|value| match value.as_str() {
             "strict" => Some("strict".to_string()),
             "lease" => Some("lease".to_string()),
             _ => None,
         });
-    let providers = record.get("providers").and_then(Value::as_object).and_then(|providers_raw| {
-        let mut providers = BTreeMap::new();
-        for (provider_id, raw_strategy) in providers_raw {
-            let Some(strategy) = raw_strategy
-                .as_str()
-                .and_then(|value| coerce_alias_selection_strategy(value))
-            else {
-                continue;
-            };
-            providers.insert(provider_id.clone(), strategy);
-        }
-        if providers.is_empty() {
-            None
-        } else {
-            Some(providers)
-        }
-    });
+    let providers = record
+        .get("providers")
+        .and_then(Value::as_object)
+        .and_then(|providers_raw| {
+            let mut providers = BTreeMap::new();
+            for (provider_id, raw_strategy) in providers_raw {
+                let Some(strategy) = raw_strategy
+                    .as_str()
+                    .and_then(|value| coerce_alias_selection_strategy(value))
+                else {
+                    continue;
+                };
+                providers.insert(provider_id.clone(), strategy);
+            }
+            if providers.is_empty() {
+                None
+            } else {
+                Some(providers)
+            }
+        });
 
     let output = AliasSelectionConfigOutput {
         enabled,
@@ -576,7 +616,9 @@ fn normalize_context_weighted(value: Option<&Value>) -> Option<ContextWeightedCo
     let record = value.and_then(Value::as_object)?;
     let output = ContextWeightedConfigOutput {
         enabled: record.get("enabled").and_then(parse_bool_like),
-        client_cap_tokens: record.get("clientCapTokens").and_then(normalize_optional_f64),
+        client_cap_tokens: record
+            .get("clientCapTokens")
+            .and_then(normalize_optional_f64),
         gamma: record.get("gamma").and_then(normalize_optional_f64),
         max_multiplier: record.get("maxMultiplier").and_then(normalize_optional_f64),
     };
@@ -666,18 +708,15 @@ fn normalize_f64(value: &Value) -> Option<f64> {
 fn parse_bool_like(value: &Value) -> Option<bool> {
     match value {
         Value::Bool(bool_value) => Some(*bool_value),
-        Value::Number(number) => number
-            .as_f64()
-            .filter(|v| v.is_finite())
-            .and_then(|v| {
-                if (v - 1.0).abs() < f64::EPSILON {
-                    Some(true)
-                } else if v.abs() < f64::EPSILON {
-                    Some(false)
-                } else {
-                    None
-                }
-            }),
+        Value::Number(number) => number.as_f64().filter(|v| v.is_finite()).and_then(|v| {
+            if (v - 1.0).abs() < f64::EPSILON {
+                Some(true)
+            } else if v.abs() < f64::EPSILON {
+                Some(false)
+            } else {
+                None
+            }
+        }),
         Value::String(raw) => {
             let normalized = raw.trim().to_ascii_lowercase();
             match normalized.as_str() {

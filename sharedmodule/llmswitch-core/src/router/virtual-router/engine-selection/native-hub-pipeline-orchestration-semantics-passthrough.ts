@@ -1,6 +1,42 @@
 import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 
+const NON_BLOCKING_PASSTHROUGH_LOG_THROTTLE_MS = 60_000;
+const nonBlockingPassthroughLogState = new Map<string, number>();
+const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-orchestration-semantics-passthrough.parse-failed');
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error ?? 'unknown');
+  }
+}
+
+function logNativePassthroughNonBlocking(stage: string, error: unknown): void {
+  const now = Date.now();
+  const last = nonBlockingPassthroughLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_PASSTHROUGH_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingPassthroughLogState.set(stage, now);
+  console.warn(
+    `[native-hub-pipeline-orchestration-semantics-passthrough] ${stage} failed (non-blocking): ${formatUnknownError(error)}`
+  );
+}
+
+function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAILED {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    logNativePassthroughNonBlocking(stage, error);
+    return JSON_PARSE_FAILED;
+  }
+}
+
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
   const fn = binding?.[name];
@@ -10,58 +46,49 @@ function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | n
 function safeStringify(value: unknown): string | undefined {
   try {
     return JSON.stringify(value);
-  } catch {
+  } catch (error) {
+    logNativePassthroughNonBlocking('safeStringify', error);
     return undefined;
   }
 }
 
 function parseBoolean(raw: string): boolean | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return typeof parsed === 'boolean' ? parsed : null;
-  } catch {
+  const parsed = parseJson('parseBoolean', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  return typeof parsed === 'boolean' ? parsed : null;
 }
 
 function parseString(raw: string): string | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return typeof parsed === 'string' ? parsed : null;
-  } catch {
+  const parsed = parseJson('parseString', raw);
+  if (parsed === JSON_PARSE_FAILED) {
     return null;
   }
+  return typeof parsed === 'string' ? parsed : null;
 }
 
 function parseStringArray(raw: string): string[] | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) {
-      return null;
-    }
-    const out: string[] = [];
-    for (const entry of parsed) {
-      if (typeof entry !== 'string') {
-        return null;
-      }
-      out.push(entry);
-    }
-    return out;
-  } catch {
+  const parsed = parseJson('parseStringArray', raw);
+  if (parsed === JSON_PARSE_FAILED || !Array.isArray(parsed)) {
     return null;
   }
+  const out: string[] = [];
+  for (const entry of parsed) {
+    if (typeof entry !== 'string') {
+      return null;
+    }
+    out.push(entry);
+  }
+  return out;
 }
 
 function parseRecord(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
+  const parsed = parseJson('parseRecord', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
+  return parsed as Record<string, unknown>;
 }
 
 export function resolveHasInstructionRequestedPassthroughWithNative(

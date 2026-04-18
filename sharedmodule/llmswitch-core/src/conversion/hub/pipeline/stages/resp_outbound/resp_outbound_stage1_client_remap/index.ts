@@ -15,6 +15,7 @@ export interface RespOutboundStage1ClientRemapOptions {
   requestId: string;
   adapterContext?: AdapterContext;
   requestSemantics?: JsonObject;
+  responseSemantics?: JsonObject;
   stageRecorder?: StageRecorder;
 }
 
@@ -37,7 +38,8 @@ export function runRespOutboundStage1ClientRemap(
     payload: options.payload,
     clientProtocol,
     requestId: options.requestId,
-    requestSemantics: options.requestSemantics
+    requestSemantics: options.requestSemantics,
+    responseSemantics: options.responseSemantics
   });
   logHubStageTiming(options.requestId, 'resp_outbound.stage1_build_client_payload', 'completed', {
     elapsedMs: Date.now() - buildStart,

@@ -2,6 +2,124 @@
 
 ## Skills 与调试工作流
 
+- 2026-04-17: virtual router 的 routing bootstrap 真源继续前移到 Rust：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/bootstrap.rs` 新接管 `normalizeRouting + expandRoutingTable`，并通过 native `bootstrapVirtualRouterRoutingJson` 回给 TS 薄壳；`bootstrap.ts` 不再直接执行 TS `routing-config` 语义。验证链：`npm run build:ci --prefix sharedmodule/llmswitch-core`、`node sharedmodule/llmswitch-core/scripts/tests/virtual-router-pool-mode.mjs`、`npm run jest:run -- --runTestsByPath tests/sharedmodule/virtual-router-loadbalancing-targets.spec.ts tests/sharedmodule/virtual-router-routing-model-validation.spec.ts`、真实 `/Volumes/extension/.rcc/config.json` dry-run 命中 `crs/duck/wuzu/glm-5/kimi-k2.5`。
+
+- 2026-04-16: 如果线上日志出现 `thinking/forced` / `tools/forced`，优先不要怀疑配置路径；先查 `~/.rcc/sessions/.../session-*.json` 是否被写入 `forcedTarget`。可复用规则：`servertool` 注入的 `__shadowCompareForcedProviderKey`、`disabledProviderKeyAliases`、`disableStickyRoutes` 都只能作用于**本次 selection**，不得持久化进 session routing state。
+
+Tags: virtual-router, metadata-force, forcedTarget, session-state, thinking-forced, servertool-followup, no-persist, 2026-04-16
+
+- 2026-04-16: Provider v2 新增独立 provider 时，`provider/<dir>/config.v2.<suffix>.json` 不能再默认为“被 loader 自动识别”。可复用规则：要么 loader 显式支持 suffixed v2 文件并把它们当 standalone provider，要么改成独立目录；否则“文件已加、路由不认识”会被误判成路径/缓存问题。
+
+Tags: provider-v2-loader, suffixed-config, standalone-provider, config.v2, routing-miss, 2026-04-16
+
+- 2026-04-16: servertool followup 最终错误出口不要一边 `console.warn([RequestExecutor] ServerTool followup failed...)`，一边再打 `convert.bridge.error`；可复用规则：`markServerToolFollowupError(...)` 只负责打 `provider.followup` stage marker 与默认状态，真正对外日志统一走 `convert.bridge.error`。
+
+Tags: servertool, followup, final-error-exit, convert-bridge-error, provider-followup, single-visible-log, 2026-04-16
+
+- 2026-04-16: executor 壳层的 non-blocking 日志（如 `request-retry`、`provider-response-converter`）要共用同一个 stackless + throttled helper，避免每个文件各自维护 `formatUnknownError + throttle Map` 再次分叉。
+
+Tags: executor, non-blocking-log, shared-helper, request-retry, provider-response-converter, stackless, throttled, 2026-04-16
+
+- 2026-04-16: qwen malformed remap 不能只依赖 `compatibilityProfile/providerId` 这类上下文元数据。可复用规则：像 hidden native tool、business rejection、incomplete RCC opener、partial RCC recover 这类 qwenchat 异常，必须同时允许 **payload 形状信号** 直接判定；否则线上缺 metadata 的样本会漏回 `MALFORMED_RESPONSE`。
+
+Tags: qwenchat, malformed-response, payload-signals, hidden-native-tool, business-rejection, incomplete-rcc, provider-response-converter, 2026-04-16
+
+- 2026-04-16: `request-retry` 的 non-blocking 日志若直接打 stack，会在 client-inject/session-binding 异常风暴里把控制台刷爆。可复用规则：这类观测日志必须至少做到 **stackless + 同 stage/同错误短窗口节流**，保留短原因即可，不要把整个 stack 作为默认输出。
+
+Tags: request-retry, non-blocking-log, throttling, stackless, client-inject, session-binding, log-storm, 2026-04-16
+
+- 2026-04-16: 静默失败治理闭环后，门禁要同时覆盖三类形态：`catch {}`、`catch { return null/false }`、`.catch(() => null/false)`。证据路径固定为 `scripts/ci/silent-failure-audit.mjs` + `tests/scripts/silent-failure-audit.spec.ts`，后续新增 runtime 热路径 catch 时必须先过这两个入口。
+
+Tags: silent-failure, audit-gate, catch-return-null, catch-return-false, promise-catch-null, promise-catch-false, runtime-hotpath, 2026-04-16
+
+- 2026-04-16: `reasoning_stop_guard/continue` 这类 servertool followup 要保原 provider/alias 时，**不要只从 `adapterContext.providerKey` 取 pin**；线上常只有 `adapterContext.target.providerKey`。可复用规则：followup provider pin helper 至少回落 `target.providerKey`，否则会掉回默认路由池并串到别的模型。
+
+Tags: servertool, reasoning-stop, followup, provider-pin, adapter-context, target-provider-key, route-leak, 2026-04-16
+
+- 2026-04-16: `provider.followup` 是 **inner followup orchestration stage**，不是 outer 主请求继续 reroute 的信号。可复用规则：inner followup 可以在自己的请求链内重试，但 outer `RequestExecutor` 一旦收到显式 `provider.followup` stage，就必须 fail-fast，避免把 followup 失败放大成主请求 provider 风暴。
+
+Tags: provider-followup, outer-fail-fast, retry-amplification, request-executor, servertool, 2026-04-16
+
+- 2026-04-16: servertool 的**请求标准化 / 响应标准化**要先在 Host 壳层做共享 helper，不能让 `executor-response.ts` 和 `provider-response-converter.ts` 各自维护一套 session/stopless backfill 与 SSE wrapper 拼装。可复用规则：先抽单点 `servertool-request-normalizer` / `servertool-response-normalizer`，再让后续骨架化从这两个 helper 继续往内收。
+
+Tags: servertool, request-normalization, response-normalization, executor-response, provider-response-converter, shared-helper, host-shell, 2026-04-16
+
+- 2026-04-16: stopless 对 **SSE wrapper** 也必须硬校验。可复用规则：只要 bridge 最终返回的是 `__sse_responses` 包装体，就必须同时携带 `__routecodex_finish_reason` 与 `__routecodex_reasoning_stop_finalized`；`RequestExecutor` 不得因为看见 `__sse_responses` 就直接跳过 stopless 检测，否则会把 `finish_reason=stop` + 无 finalized marker 的假成功 200 透传给客户端。
+
+Tags: stopless, sse-wrapper, reasoning-stop, finalized-marker, request-executor, no-silent-success, 2026-04-16
+
+- 2026-04-16: servertool 的 **SSE wrapper 组装** 也要单点化。可复用规则：`executor-response.ts`、`provider-response-converter.ts`、以及 recovered/tool-salvage 分支，都必须复用同一个 wrapper builder（当前 `buildServerToolSseWrapperBody(...)`），不要再各自手拼 `__sse_responses` / `finish_reason` / finalized flag。
+
+Tags: servertool, sse-wrapper, response-normalization, single-builder, executor-response, provider-response-converter, recovered-flow, 2026-04-16
+
+- 2026-04-16: quota/alias 归一也要守唯一真源。可复用规则：凡是 quota snapshot、provider-quota daemon、quota view 会读取 providerKey 的地方，都必须先走同一个 `canonicalizeProviderKey(...)`；对 antigravity legacy `N-alias` key 若不先归一，就会出现“快照恢复一套 key、运行时上报另一套 key”的双状态分裂。
+
+- 2026-04-16: antigravity OAuth reauth-required 403 不应只冷却单模型。可复用规则：这类错误本质是 alias/token 失效，quota daemon 必须对同 alias 的 providerKey 做 **fanout cooldown**；否则 router 会立刻切到同 alias 其他模型继续撞坏 token，形成“看起来在切 provider，实际还在打同一坏凭证”的假切换。
+
+- 2026-04-16: HubPipeline 自己也不能再直连 legacy center。可复用规则：如果 routerEngine 需要消费 provider success/error，优先直接注册到 `provider-runtime-ingress`；Host bridge 不要再包一层“构造后卸载旧订阅再重挂新订阅”的 wrapper。判断是否收口成功的最小证据：全仓 `providerErrorCenter/providerSuccessCenter.subscribe(...)` 只剩 ingress 一处。
+
+- 2026-04-16: provider error reporting 的**装配口径**也要单点化。可复用规则：`runtime_resolve`、`provider.send` 不要各自手拼 `errorCode/upstreamCode/statusCode/stageHint`；统一先过单一 helper（当前 `resolveRequestExecutorProviderErrorReportPlan(...)`），再交给 `reportRequestExecutorProviderError(...)`，避免 `provider.sse_decode`、`provider.followup`、`provider.runtime_resolve` 的阶段判断再次分叉。
+
+- 2026-04-16: `resolveRequestExecutorProviderErrorReportPlan(...)` 自己也要先读显式 stage marker。可复用规则：不要要求外层先手动 `resolve fallback stage` 再传进 reporter；helper 本身就应优先解析 `requestExecutorProviderErrorStage`（含 `details`），外层只提供默认 stage。这样 followup / SSE / HTTP / runtime-resolve 的阶段装配才能真正维持单点真源。
+
+Tags: provider-error-reporting, stageHint, sse-decode, followup, runtime-resolve, request-executor, ssot, 2026-04-16
+
+- 2026-04-16: `converted` 出来的 retryable HTTP 401/429/5xx 也不能在 try 内先 `emitProviderError('provider.http')`，再到外围 catch 再报一次；这会形成**同一次 provider 失败双上报**。可复用规则：这类错误只打一个 stage marker（当前 `requestExecutorProviderErrorStage='provider.http'`），统一让外层 `reportRequestExecutorProviderError(...)` 上报一次。
+
+Tags: provider-http, double-report, single-report, converted-status, request-executor, provider-error-reporting, 2026-04-16
+
+- 2026-04-16: `provider.followup` 必须整体视为 **health-neutral orchestration error**。可复用规则：servertool/client-inject/followup-payload 这类 followup 内部错误，虽然可能是 `recoverable=false`、`status=502`，但**不能污染 provider 健康**；`RequestExecutor` 要按 stage 直接判定 `affectsHealth=false`，`emitProviderError(...)` 也必须显式尊重调用方传入的 `affectsHealth=false`，不能再用“non-recoverable 一律 affectsHealth=true”覆盖。
+
+Tags: provider-followup, affects-health, health-neutral, servertool, client-inject, provider-error-reporter, request-executor, 2026-04-16
+
+- 2026-04-16: followup stage 不要只靠 `SERVERTOOL_*` code 猜。可复用规则：在 converter 源头就给 followup 错误打 `requestExecutorProviderErrorStage='provider.followup'`，让 request-executor 优先读 stage marker，而不是继续在外层用 code 前缀做弱推断。
+
+Tags: provider-followup, stage-marker, converter, request-executor, no-code-prefix-guess, 2026-04-16
+
+- 2026-04-16: `provider.sse_decode` 也不要只靠 `SSE_DECODE_ERROR/HTTP_502/message contains sse` 猜。可复用规则：SSE wrapper / bridge SSE remap 这种源头一旦确认是解码链路，就直接打 `requestExecutorProviderErrorStage='provider.sse_decode'`；legacy `executor-response` 也要同步，避免同一种 SSE 错误在新旧链路上阶段口径不一致。
+
+Tags: provider-sse-decode, stage-marker, converter, executor-response, request-executor, no-string-guess, 2026-04-16
+
+- 2026-04-16: `client-injection-flow` 自己产出的 strict tmux / inject 失败也必须在**源头**打 `requestExecutorProviderErrorStage='provider.followup'`。可复用规则：不要等 converter / request-executor 外层再靠 `SERVERTOOL_FOLLOWUP_FAILED` 或 `client_inject_failed` 猜 stage；能在 host 内部创建错误对象的地方，直接带 marker。
+
+Tags: client-injection-flow, provider-followup, stage-marker, host-source, request-executor, no-late-guess, 2026-04-16
+
+- 2026-04-16: 当 retry 已经有 execution orchestrator 后，**telemetry 也要继续单点化**。可复用规则：`provider-switch` 的 warn 字段与 `provider.retry` stage details 不要在 `runtime_resolve`、`provider.send` 各自手拼；统一交给单一 telemetry helper（当前 `buildProviderRetryTelemetryPlan(...)`），否则日志口径又会重新漂移。
+
+Tags: provider-switch, retry-telemetry, logging, request-executor, ssot, telemetry-plan, 2026-04-16
+
+- 2026-04-16: 当 retry 主链已经拆出 `eligibility / exclusion / switch / backoff` 四个 helper 后，下一步应继续压成**更高层 orchestrator**。可复用规则：`runtime_resolve`、`provider.send` 不要再各自手工串 `recordAttempt -> eligibility -> exclusion -> backoff -> switch`；统一收口到一个 async orchestrator（当前 `resolveProviderRetryExecutionPlan(...)`），把分支降成 thin shell，避免未来再出现“某一段 helper 已更新，但某个分支串接顺序还是旧的”。
+
+Tags: provider-switch, retry-orchestrator, request-executor, thin-shell, ssot, execution-plan, 2026-04-16
+
+- 2026-04-16: provider retry 的**资格判定**也要单点化。可复用规则：`runtime_resolve`、`provider.send` 不要各自手写 `attempt < maxAttempts`、blocking recoverable、`promptTooLong` budget、Antigravity `verify/reauth` 的 retry 条件；统一收口到单一 helper（当前 `resolveProviderRetryEligibilityPlan(...)`），避免一侧允许重试、另一侧提前 fail-fast。
+
+Tags: provider-switch, retry-eligibility, ssot, prompt-too-long, antigravity, recoverable, request-executor, 2026-04-16
+
+- 2026-04-16: provider retry 的**排除策略本身**也要单点化。可复用规则：`promptTooLong`、Antigravity `verify/429`、`reauth`、alias rotate 这些“是否排除当前 provider / 是否给 antigravity signal 打 `avoidAllOnRetry`”的判断，不要散落在 send/followup 分支里手写；统一收口到单一 helper（当前 `resolveProviderRetryExclusionPlan(...)`），否则 reroute 行为和日志原因会再次漂移。
+
+Tags: provider-switch, exclusion-policy, antigravity, prompt-too-long, retry-ssot, request-executor, 2026-04-16
+
+- 2026-04-16: provider retry 的 `switchAction/decisionLabel/runtime-scope exclude` 也要有**单一装配点**。可复用规则：`runtime_resolve`、`provider.send`、后续 followup 分支不要各自手拼 `exclude_and_reroute` / `retry_same_provider`、`decisionLabel`、`runtimeScopeExcludedCount`；统一走单点 helper（当前是 `resolveProviderRetrySwitchPlan(...)`），避免一边修了 backoffScope/日志口径，另一边还在沿用旧判断。
+
+Tags: provider-switch, retry-switch-plan, ssot, runtime-scope-exclude, request-executor, no-duplicate-assembly, 2026-04-16
+
+- 2026-04-16: provider-switch/backoff 再补一条调度规则：**如果当前 retry decision 已经是 `exclude_and_reroute`，backoff 必须按 provider 维度计数，不能继续沿用“全请求 attempt 指数退避”。** 否则会出现“A 失败 1s、切到 B 却变 2s、C 又 4s”的假全局抬升，用户体感像调度在无脑放大全局惩罚。可复用规则：同 provider 失败才累计；换 provider 后，generic reroute backoff 应从该 provider 自己的近期计数重新算。
+
+Tags: provider-switch, backoff, exclude-and-reroute, provider-scoped, no-global-attempt-escalation, request-executor, 2026-04-16
+
+- 2026-04-16: provider-switch 日志口径也要跟着调度收口。可复用规则：日志里至少显式区分 **`switchAction`、`decisionLabel`、`backoffScope`、`stage`**；否则用户看到的只是“又切了、又等了”，无法判断到底是“当前 provider 自己 backoff 后 reroute”，还是“recoverable 同 provider 重试”。推荐口径：`decision=provider_backoff_then_reroute|recoverable_backoff_same_provider|...`，并把 `backoffScope=provider|recoverable|attempt` 单独打出来。
+
+Tags: provider-switch, logging, decision-label, backoff-scope, stage, request-executor, observability, 2026-04-16
+
+- 2026-04-16: 错误处理收口继续验证后确认，**provider 执行期错误主链不能再双上报到 Host error hub**。可复用规则：provider/runtime/send/convert/followup 这类执行期错误，只能走 `provider-error-reporter -> reportProviderErrorToRouterPolicy -> Virtual Router policy`；`RouteErrorHub / ErrorHandlingCenter` 只保留 HTTP/server/CLI 外层映射。若又看到某层同时 `emit providerErrorCenter`、`reportRouteError`、`registry.handleError` 三路并存，优先判定为“第二中心回流”。
+
+Tags: error-policy, virtual-router, provider-runtime, no-double-report, route-error-hub-edge-only, second-center-regression, 2026-04-16
+
+- 2026-04-16: stopless 静默失败再补一条验收规则：**`stopless=on/endless` 只要响应结束，却没有 `reasoning.stop` finalized marker，就必须显式失败，不能把“完成但没 finalize”的响应当成功返回。** 可复用规则：在 Host `RequestExecutor` 末端对完成态 body 做 finalized-marker 校验，命中后统一抛 `STOPLESS_FINALIZATION_MISSING`（502、retryable）；这样才能拦住“客户端直接停住但服务端看起来 200”的假成功。
+
+Tags: stopless, reasoning-stop, finalized-marker, no-silent-success, request-executor, retryable-502, 2026-04-16
+
 - 2026-04-15: 全局错误处理收口决策确认：**不要保留独立 `error-handling center` / event engine**。可复用规则：如果某个“中心”只做 `emit/subscribe/normalize`，却不掌握 retry/reroute/backoff/fail/cooldown policy，它就不是策略真源，只会制造第二中心。RouteCodex 这类请求执行错误语义应直接收口到 **Virtual Router policy**；`RequestExecutor` 与 `servertool engine` 只消费同一套 Router decision，前者负责执行，后者只保留 followup 编排前/internal error 边界。
 
 Tags: error-policy, virtual-router, no-second-center, no-event-bus, request-executor-consumer, servertool-boundary, 2026-04-15
@@ -144,6 +262,7 @@ Tags: rust-migration, routecodex-3.11.9, provider-response, context-helpers, fol
 Tags: rust-migration, routecodex-3.11.7, hub-pipeline, metadata, hasImageAttachment, sessionId, conversationId, native-primary, thin-shell, in-place-rewrite, native-export-gate, build-matrix, install-global
 
 - 2026-03-20: `routecodex-3.11.7` 继续 HubPipeline route-select 收口：新增 Rust 能力 `build_router_metadata_input_json`（TS `buildRouterMetadataInputWithNative`），把 `RouterMetadataInput` 组装整体下沉到 native，一次性汇总基础路由字段 + stop-message metadata + runtime flags（`disableStickyRoutes`）+ estimated tokens gate（`includeEstimatedInputTokens`）+ session/responsesResume/serverToolRequired。`buildRouterMetadataInputFromContext` 收敛为 thin adapter，不再在 TS 层手拼 metadata 细节。验证链：`cargo test -p router-hotpath-napi test_build_router_metadata_input` + `cargo test -p router-hotpath-napi test_resolve_router_metadata_runtime_flags` + `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（routecodex 0.90.601 / llms 0.6.4213）。
+- 2026-04-16: 5555 `reasoning_stop_guard/continue` followup 串到 qwen 池的真因，不在 host followup metadata，也不在 RequestExecutor；真丢失点在 Rust `build_router_metadata_input`。此前 native builder 只保留基础路由字段/stop-message/runtime flags，**会把 `__shadowCompareForcedProviderKey` 与 `disabledProviderKeyAliases` 从 metadata 根上裁掉**，导致 followup 进入 Virtual Router 前已经失去 provider pin / disable 指令。修复规则：`buildRouterMetadataInputWithNative` 必须透传这两个 routing directives；验证链至少包含 `cargo test -p router-hotpath-napi test_build_router_metadata_input_preserves_forced_provider_and_disabled_aliases`、`tests/sharedmodule/hub-pipeline-router-metadata.spec.ts`、根仓 `npm run build:min`、`npm run install:global`、5555 `/health` 版本确认。
 
 Tags: rust-migration, routecodex-3.11.7, hub-pipeline, router-metadata-input, native-primary, stop-message-metadata, disableStickyRoutes, estimatedInputTokens, thin-shell, build-matrix, install-global
 
@@ -1350,3 +1469,14 @@ Tags: text-harvest, exec-command, shell-wrapper, bash-lc, compat, no-semantic-tr
 - 2026-04-12: RouteCodex 系统内**所有时间相关口径都按本地时间**，不要默认按 UTC 推断；包括 reset 编号、quota/reset 窗口、以及同类的“今天/本轮/重置点”计算与展示。排查/实现这类逻辑时，先确认本地时区语义，再看日志与编号。
 
 Tags: local-time, timezone, quota, reset, numbering, project-rule
+
+- 2026-04-16: servertool unified skeleton 第二刀确认有效：Host 壳层里的 followup nested dispatch 与 followup 错误标记都要做**单点 helper 真源**，不要让 `executor-response.ts` / `provider-response-converter.ts` 各自维护一套。当前已落地：
+  - `servertool-followup-dispatch.ts`：统一 nested metadata + clientInjectOnly 预处理 + nested execute
+  - `servertool-followup-error.ts`：统一 `SERVERTOOL_* -> provider.followup` stage marker + compact logging + converter 默认 502
+  可复用结论：followup 若要当普通请求回流，就必须先把 host 壳层的“重进请求”和“错误标记”两个入口压成单点，否则后续虚拟路由/错误中心再统一也会反复串台。
+
+Tags: servertool, unified-skeleton, followup, host-shell, single-source-of-truth, provider-followup
+
+- 2026-04-16: `request-executor` 外层错误出口也要做 host 壳层单点化：`runtime_resolve` / `provider.send` 不能各自手拼 `reportProviderError -> resolveProviderRetryExecutionPlan -> buildProviderRetryTelemetryPlan`。当前已抽出 `resolveRequestExecutorProviderFailurePlan(...)` 和 `emitRequestExecutorProviderRetryTelemetry(...)`；可复用结论：当 followup / http / sse 的 stage marker 已前移后，外层只保留一个 failure orchestrator，避免同一错误在不同 catch 里重新分叉。
+
+Tags: request-executor, provider-failure, retry-telemetry, host-shell, single-source-of-truth, provider-followup, provider-http, provider-sse

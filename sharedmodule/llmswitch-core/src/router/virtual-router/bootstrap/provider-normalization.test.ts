@@ -114,4 +114,24 @@ describe('normalizeProvider anthropic thinking config', () => {
 
     expect(normalized.modelCapabilities?.['glm-5']).toEqual(['text', 'web_search']);
   });
+
+  it('injects qwen default headers with the current official qwen user-agent', () => {
+    const normalized = normalizeProvider('qwen', {
+      id: 'qwen',
+      type: 'openai',
+      baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      compatibilityProfile: 'chat:qwen',
+      auth: { type: 'qwen-oauth', tokenFile: 'qwen-oauth-1-default' },
+      models: {
+        'qwen3.6-plus': {
+          supportsStreaming: true
+        }
+      }
+    });
+
+    expect(normalized.headers?.['User-Agent']).toBe('QwenCode/0.14.3 (darwin; arm64)');
+    expect(normalized.headers?.['X-DashScope-UserAgent']).toBe('QwenCode/0.14.3 (darwin; arm64)');
+    expect(normalized.headers?.['X-DashScope-CacheControl']).toBe('enable');
+    expect(normalized.headers?.['X-DashScope-AuthType']).toBe('qwen-oauth');
+  });
 });

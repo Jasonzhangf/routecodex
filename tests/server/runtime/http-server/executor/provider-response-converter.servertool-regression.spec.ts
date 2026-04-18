@@ -119,7 +119,8 @@ describe('provider-response-converter servertool regressions', () => {
       code: 'HTTP_502',
       status: 502,
       statusCode: 502,
-      retryable: true
+      retryable: true,
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
   });
 
@@ -173,9 +174,115 @@ describe('provider-response-converter servertool regressions', () => {
       code: 'HTTP_502',
       status: 502,
       statusCode: 502,
-      retryable: true
+      retryable: true,
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
   });
+
+  it('does not soft-skip servertool followup 429 failures', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockClear();
+    mockCreateSnapshotRecorder.mockClear();
+    mockConvertProviderResponse.mockImplementationOnce(async () => {
+      const error = new Error('followup rate limited') as Error & {
+        code?: string;
+        status?: number;
+        statusCode?: number;
+        upstreamCode?: string;
+        details?: Record<string, unknown>;
+      };
+      error.code = 'SERVERTOOL_FOLLOWUP_FAILED';
+      error.status = 429;
+      error.statusCode = 429;
+      error.upstreamCode = 'HTTP_429';
+      error.details = {
+        upstreamCode: 'HTTP_429',
+        reason: 'followup_http_429'
+      };
+      throw error;
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/messages',
+          providerProtocol: 'anthropic-messages',
+          requestId: 'req_followup_softskip_429',
+          wantsStream: false,
+          response: { body: { id: 'upstream_body' } } as any,
+          pipelineMetadata: {}
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_FOLLOWUP_FAILED',
+      status: 429,
+      statusCode: 429,
+      upstreamCode: 'HTTP_429'
+    });
+  });
+
+  it('does not soft-skip client injection followup failures', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockClear();
+    mockCreateSnapshotRecorder.mockClear();
+    mockConvertProviderResponse.mockImplementationOnce(async () => {
+      const error = new Error('client inject failed') as Error & {
+        code?: string;
+        status?: number;
+        statusCode?: number;
+        upstreamCode?: string;
+        details?: Record<string, unknown>;
+      };
+      error.code = 'SERVERTOOL_FOLLOWUP_FAILED';
+      error.upstreamCode = 'client_inject_failed';
+      error.details = {
+        upstreamCode: 'client_inject_failed',
+        reason: 'client_inject_failed'
+      };
+      throw error;
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/messages',
+          providerProtocol: 'anthropic-messages',
+          requestId: 'req_followup_client_inject_failed',
+          wantsStream: false,
+          response: { body: { id: 'upstream_body' } } as any,
+          pipelineMetadata: {}
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_FOLLOWUP_FAILED',
+      status: 502,
+      statusCode: 502,
+      upstreamCode: 'client_inject_failed'
+    });
+  });
+
   it('disables servertool orchestration when serverToolsEnabled=false', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockClear();
@@ -368,7 +475,8 @@ describe('provider-response-converter servertool regressions', () => {
 
     expect(nestedMetadata.clientHeaders).toEqual({
       'anthropic-session-id': 'sess_123',
-      'anthropic-conversation-id': 'conv_456'
+      'anthropic-conversation-id': 'conv_456',
+      authorization: 'Bearer should-not-forward'
     });
     expect(nestedMetadata.clientRequestId).toBeUndefined();
     expect(nestedMetadata.sessionId).toBe('sess_123');
@@ -558,7 +666,8 @@ describe('provider-response-converter servertool regressions', () => {
     ).rejects.toMatchObject({
       code: 'CONTEXT_LENGTH_EXCEEDED',
       status: 400,
-      statusCode: 400
+      statusCode: 400,
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
   });
 
@@ -607,6 +716,56 @@ describe('provider-response-converter servertool regressions', () => {
       code: 'CONTEXT_LENGTH_EXCEEDED',
       status: 400,
       statusCode: 400
+    });
+  });
+
+  it('marks generic bridge canonicalization failures as host response contract errors', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementation(async () => {
+      const err = Object.assign(
+        new Error('[hub_response] Failed to canonicalize response payload at chat_process.response.entry'),
+        {
+          name: 'ProviderProtocolError',
+          code: 'MALFORMED_RESPONSE'
+        }
+      );
+      throw err;
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-responses',
+          requestId: 'req_generic_bridge_contract_1',
+          wantsStream: false,
+          response: {
+            body: {
+              id: 'upstream_body',
+              status: 'completed'
+            }
+          } as any,
+          pipelineMetadata: {}
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      name: 'ProviderProtocolError',
+      code: 'MALFORMED_RESPONSE',
+      requestExecutorProviderErrorStage: 'host.response_contract'
     });
   });
 
@@ -1380,8 +1539,10 @@ describe('provider-response-converter servertool regressions', () => {
           executeNested: async () => ({ body: { ok: true } } as any)
         }
       )
-    ).resolves.toMatchObject({
-      body: { id: 'upstream_body' }
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_FOLLOWUP_FAILED',
+      upstreamCode: 'client_inject_failed',
+      requestExecutorProviderErrorStage: 'provider.followup'
     });
 
     expect(mockInjectSessionClientPromptWithResult).toHaveBeenCalledTimes(1);
@@ -1441,8 +1602,10 @@ describe('provider-response-converter servertool regressions', () => {
           executeNested
         }
       )
-    ).resolves.toMatchObject({
-      body: { id: 'upstream_body' }
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_FOLLOWUP_FAILED',
+      upstreamCode: 'client_inject_failed',
+      requestExecutorProviderErrorStage: 'provider.followup'
     });
 
     expect(mockInjectSessionClientPromptWithResult).not.toHaveBeenCalled();
@@ -1497,8 +1660,10 @@ describe('provider-response-converter servertool regressions', () => {
           executeNested
         }
       )
-    ).resolves.toMatchObject({
-      body: { id: 'upstream_body' }
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_FOLLOWUP_FAILED',
+      upstreamCode: 'client_inject_failed',
+      requestExecutorProviderErrorStage: 'provider.followup'
     });
 
     expect(mockInjectSessionClientPromptWithResult).not.toHaveBeenCalled();

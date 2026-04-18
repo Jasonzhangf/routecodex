@@ -164,6 +164,32 @@ export function extractProviderAuthEntries(providerId: string, raw: unknown): Pr
     pushEntry(undefined, buildAuthCandidate(baseTypeSource, { value: apiKeyField.trim() }));
   }
 
+  const fallbackExtras: Record<string, unknown> = {
+    value: readOptionalString(auth.value as string | undefined),
+    secretRef: readOptionalString(auth.secretRef as string | undefined),
+    tokenFile: readOptionalString((auth.tokenFile as string | undefined) ?? (auth.file as string | undefined)),
+    tokenUrl: readOptionalString((auth.tokenUrl as string | undefined) ?? (auth.token_url as string | undefined)),
+    deviceCodeUrl: readOptionalString(
+      (auth.deviceCodeUrl as string | undefined) ?? (auth.device_code_url as string | undefined)
+    ),
+    clientId: readOptionalString((auth.clientId as string | undefined) ?? (auth.client_id as string | undefined)),
+    clientSecret: readOptionalString(
+      (auth.clientSecret as string | undefined) ?? (auth.client_secret as string | undefined)
+    ),
+    authorizationUrl: readOptionalString(
+      (auth as any).authorizationUrl ?? (auth as any).authorization_url ?? (auth as any).authUrl
+    ),
+    userInfoUrl: readOptionalString((auth as any).userInfoUrl ?? (auth as any).user_info_url),
+    refreshUrl: readOptionalString((auth as any).refreshUrl ?? (auth as any).refresh_url),
+    scopes: normalizeScopeList((auth as any).scopes ?? (auth as any).scope),
+    cookieFile: readOptionalString((auth as any).cookieFile as string | undefined)
+  };
+  const fallbackHasData = hasAuthCandidateMaterial(fallbackExtras);
+
+  if (!entries.length && fallbackHasData) {
+    pushEntry(undefined, buildAuthCandidate(baseTypeSource, fallbackExtras));
+  }
+
   const hasExplicitEntries = entries.length > 0;
 
   if (baseType === 'oauth' && !hasExplicitEntries) {
@@ -219,45 +245,6 @@ export function extractProviderAuthEntries(providerId: string, raw: unknown): Pr
     }
   }
 
-  if (!entries.length) {
-    const fallbackExtras: Record<string, unknown> = {
-      value: readOptionalString(auth.value as string | undefined),
-      secretRef: readOptionalString(auth.secretRef as string | undefined),
-      tokenFile: readOptionalString((auth.tokenFile as string | undefined) ?? (auth.file as string | undefined)),
-      tokenUrl: readOptionalString((auth.tokenUrl as string | undefined) ?? (auth.token_url as string | undefined)),
-      deviceCodeUrl: readOptionalString(
-        (auth.deviceCodeUrl as string | undefined) ?? (auth.device_code_url as string | undefined)
-      ),
-      clientId: readOptionalString((auth.clientId as string | undefined) ?? (auth.client_id as string | undefined)),
-      clientSecret: readOptionalString(
-        (auth.clientSecret as string | undefined) ?? (auth.client_secret as string | undefined)
-      ),
-      authorizationUrl: readOptionalString(
-        (auth as any).authorizationUrl ?? (auth as any).authorization_url ?? (auth as any).authUrl
-      ),
-      userInfoUrl: readOptionalString((auth as any).userInfoUrl ?? (auth as any).user_info_url),
-      refreshUrl: readOptionalString((auth as any).refreshUrl ?? (auth as any).refresh_url),
-      scopes: normalizeScopeList((auth as any).scopes ?? (auth as any).scope),
-      cookieFile: readOptionalString((auth as any).cookieFile as string | undefined)
-    };
-    const fallbackHasData = Boolean(
-      (fallbackExtras as any).value ||
-      (fallbackExtras as any).secretRef ||
-      (fallbackExtras as any).tokenFile ||
-      (fallbackExtras as any).tokenUrl ||
-      (fallbackExtras as any).deviceCodeUrl ||
-      (fallbackExtras as any).clientId ||
-      (fallbackExtras as any).clientSecret ||
-      (fallbackExtras as any).cookieFile ||
-      ((fallbackExtras as any).scopes &&
-        Array.isArray((fallbackExtras as any).scopes) &&
-        (fallbackExtras as any).scopes.length)
-    );
-    if (fallbackHasData) {
-      pushEntry(undefined, buildAuthCandidate(baseTypeSource, fallbackExtras));
-    }
-  }
-
   if (!entries.length && baseType === 'apiKey') {
     const authDeclared =
       Object.prototype.hasOwnProperty.call(provider, 'auth') ||
@@ -276,6 +263,23 @@ export function extractProviderAuthEntries(providerId: string, raw: unknown): Pr
   }
 
   return entries;
+}
+
+function hasAuthCandidateMaterial(candidate: Record<string, unknown>): boolean {
+  return Boolean(
+    candidate.value ||
+    candidate.secretRef ||
+    candidate.tokenFile ||
+    candidate.tokenUrl ||
+    candidate.deviceCodeUrl ||
+    candidate.clientId ||
+    candidate.clientSecret ||
+    candidate.authorizationUrl ||
+    candidate.userInfoUrl ||
+    candidate.refreshUrl ||
+    candidate.cookieFile ||
+    (Array.isArray(candidate.scopes) && candidate.scopes.length)
+  );
 }
 
 function collectAuthDefaults(auth: Record<string, unknown>): AuthFieldDefaults {

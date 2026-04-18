@@ -36,7 +36,9 @@ struct DeepSeekSseState {
     model: Option<String>,
 }
 
-fn extract_sse_raw_record<'a>(value: &'a Value) -> Option<(&'a serde_json::Map<String, Value>, &'a str)> {
+fn extract_sse_raw_record<'a>(
+    value: &'a Value,
+) -> Option<(&'a serde_json::Map<String, Value>, &'a str)> {
     let root = value.as_object()?;
 
     let is_sse_record = |row: &'a serde_json::Map<String, Value>| {
@@ -48,12 +50,18 @@ fn extract_sse_raw_record<'a>(value: &'a Value) -> Option<(&'a serde_json::Map<S
     };
 
     if is_sse_record(root) {
-        return Some((root, root.get("raw").and_then(Value::as_str).unwrap_or_default()));
+        return Some((
+            root,
+            root.get("raw").and_then(Value::as_str).unwrap_or_default(),
+        ));
     }
 
     let body = root.get("body")?.as_object()?;
     if is_sse_record(body) {
-        return Some((body, body.get("raw").and_then(Value::as_str).unwrap_or_default()));
+        return Some((
+            body,
+            body.get("raw").and_then(Value::as_str).unwrap_or_default(),
+        ));
     }
 
     None
@@ -66,7 +74,10 @@ fn append_content(state: &mut DeepSeekSseState, text: &str) {
     state.content.push_str(text);
 }
 
-fn process_response_record(response: &serde_json::Map<String, Value>, state: &mut DeepSeekSseState) {
+fn process_response_record(
+    response: &serde_json::Map<String, Value>,
+    state: &mut DeepSeekSseState,
+) {
     if let Some(content) = response.get("content").and_then(Value::as_str) {
         append_content(state, content);
     }
@@ -96,8 +107,16 @@ fn process_response_record(response: &serde_json::Map<String, Value>, state: &mu
 }
 
 fn process_patch_payload(payload: &serde_json::Map<String, Value>, state: &mut DeepSeekSseState) {
-    let path = payload.get("p").and_then(Value::as_str).unwrap_or("").trim();
-    let op = payload.get("o").and_then(Value::as_str).unwrap_or("").trim();
+    let path = payload
+        .get("p")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let op = payload
+        .get("o")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
     let value = payload.get("v");
 
     if path == "response/content" && op.eq_ignore_ascii_case("APPEND") {
@@ -358,7 +377,10 @@ mod tests {
         let normalized = normalize_deepseek_business_envelope(payload).unwrap();
         assert_eq!(normalized["object"], "chat.completion");
         assert_eq!(normalized["choices"][0]["message"]["role"], "assistant");
-        assert_eq!(normalized["choices"][0]["message"]["content"], "<<RCC_TOOL_CALLS_JSON");
+        assert_eq!(
+            normalized["choices"][0]["message"]["content"],
+            "<<RCC_TOOL_CALLS_JSON"
+        );
         assert_eq!(normalized["choices"][0]["finish_reason"], "stop");
     }
 

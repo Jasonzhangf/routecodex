@@ -64,9 +64,9 @@ fn read_command_from_args_map(args: &Map<String, Value>) -> Option<String> {
         .and_then(Value::as_object)
         .and_then(|row| read_value(row.get("cmd")))
         .or_else(|| {
-            args.get("args").and_then(Value::as_object).and_then(|row| {
-                read_value(row.get("cmd"))
-            })
+            args.get("args")
+                .and_then(Value::as_object)
+                .and_then(|row| read_value(row.get("cmd")))
         })
 }
 
@@ -264,6 +264,10 @@ fn clone_object(value: Option<&Value>) -> Map<String, Value> {
 
 fn clone_array(value: Option<&Value>) -> Vec<Value> {
     value.and_then(Value::as_array).cloned().unwrap_or_default()
+}
+
+fn clone_optional_array(value: Option<&Value>) -> Option<Vec<Value>> {
+    value.and_then(Value::as_array).cloned()
 }
 
 fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
@@ -472,6 +476,181 @@ fn resume_responses_conversation_payload(
     })
 }
 
+fn canonicalize_continuation_item(value: &Value) -> Value {
+    let Some(row) = value.as_object() else {
+        return value.clone();
+    };
+    let item_type = read_trimmed_string(row.get("type"));
+    let role = read_trimmed_string(row.get("role"));
+    let content = row.get("content").cloned();
+
+    if role.is_some() && content.is_some() && item_type.as_deref() == Some("message") {
+        return serde_json::json!({
+            "role": role,
+            "content": content
+        });
+    }
+
+    if role.is_some() && content.is_some() && !row.contains_key("type") {
+        return serde_json::json!({
+            "role": role,
+            "content": content
+        });
+    }
+
+    let mut normalized = row.clone();
+    normalized.remove("message");
+    Value::Object(normalized)
+}
+
+fn values_equal(left: &Value, right: &Value) -> bool {
+    canonicalize_continuation_item(left) == canonicalize_continuation_item(right)
+}
+
+fn find_exact_prefix_delta(prefix: &[Value], incoming: &[Value]) -> Option<Vec<Value>> {
+    if prefix.is_empty() || incoming.len() <= prefix.len() {
+        return None;
+    }
+    for (index, expected) in prefix.iter().enumerate() {
+        let candidate = incoming.get(index)?;
+        if !values_equal(expected, candidate) {
+            return None;
+        }
+    }
+    Some(incoming[prefix.len()..].to_vec())
+}
+
+fn restore_responses_continuation_payload(
+    entry: &Value,
+    incoming_payload: &Value,
+    request_id: Option<&str>,
+    scope_key: Option<&str>,
+) -> Value {
+    let entry_obj = entry.as_object().cloned().unwrap_or_default();
+    let incoming_obj = incoming_payload.as_object().cloned().unwrap_or_default();
+    let last_response_id = read_trimmed_string(entry_obj.get("lastResponseId"));
+    let incoming_input = clone_optional_array(incoming_obj.get("input"));
+
+    let Some(response_id) = last_response_id else {
+        return Value::Null;
+    };
+    let Some(input_items) = incoming_input else {
+        return Value::Null;
+    };
+    let prefix = clone_array(entry_obj.get("input"));
+    let Some(delta_input) = find_exact_prefix_delta(&prefix, &input_items) else {
+        return Value::Null;
+    };
+
+    let mut payload = pick_responses_persisted_fields(&Value::Object(incoming_obj.clone()))
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+
+    for (key, value) in incoming_obj {
+        if key == "input"
+            || key == "previous_response_id"
+            || key == "response_id"
+            || key == "tool_outputs"
+        {
+            continue;
+        }
+        payload.insert(key, value);
+    }
+
+    if let Some(tools) = entry_obj.get("tools").and_then(Value::as_array).cloned() {
+        if !tools.is_empty() && !payload.contains_key("tools") {
+            payload.insert("tools".to_string(), Value::Array(tools));
+        }
+    }
+
+    payload.insert("input".to_string(), Value::Array(delta_input.clone()));
+    payload.insert(
+        "previous_response_id".to_string(),
+        Value::String(response_id.clone()),
+    );
+
+    serde_json::json!({
+        "payload": Value::Object(payload),
+        "meta": {
+            "restoredFromResponseId": response_id,
+            "previousRequestId": entry_obj.get("requestId").cloned().unwrap_or(Value::Null),
+            "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
+            "scopeKey": scope_key.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
+            "deltaInputItems": delta_input.len(),
+            "restored": true,
+        }
+    })
+}
+
+fn materialize_responses_continuation_payload(
+    entry: &Value,
+    incoming_payload: &Value,
+    request_id: Option<&str>,
+    scope_key: Option<&str>,
+) -> Value {
+    let entry_obj = entry.as_object().cloned().unwrap_or_default();
+    let incoming_obj = incoming_payload.as_object().cloned().unwrap_or_default();
+    let incoming_input = clone_optional_array(incoming_obj.get("input"));
+    let Some(input_items) = incoming_input else {
+        return Value::Null;
+    };
+    if input_items.is_empty() {
+        return Value::Null;
+    }
+
+    let prefix = clone_array(entry_obj.get("input"));
+    if prefix.is_empty() {
+        return Value::Null;
+    }
+
+    if find_exact_prefix_delta(&prefix, &input_items).is_some() || input_items == prefix {
+        return Value::Null;
+    }
+
+    let last_response_id = read_trimmed_string(entry_obj.get("lastResponseId"));
+    let mut full_input = prefix.clone();
+    full_input.extend(input_items.clone());
+
+    let mut payload = pick_responses_persisted_fields(&Value::Object(incoming_obj.clone()))
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+
+    for (key, value) in incoming_obj {
+        if key == "input" || key == "response_id" || key == "tool_outputs" {
+            continue;
+        }
+        if key == "previous_response_id" {
+            continue;
+        }
+        payload.insert(key, value);
+    }
+
+    if let Some(tools) = entry_obj.get("tools").and_then(Value::as_array).cloned() {
+        if !tools.is_empty() && !payload.contains_key("tools") {
+            payload.insert("tools".to_string(), Value::Array(tools));
+        }
+    }
+
+    payload.insert("input".to_string(), Value::Array(full_input.clone()));
+    payload.remove("previous_response_id");
+
+    serde_json::json!({
+        "payload": Value::Object(payload),
+        "meta": {
+            "restoredFromResponseId": last_response_id.map(Value::String).unwrap_or(Value::Null),
+            "previousRequestId": entry_obj.get("requestId").cloned().unwrap_or(Value::Null),
+            "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
+            "scopeKey": scope_key.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
+            "materialized": true,
+            "materializedMode": "local_full_input",
+            "incomingInputItems": input_items.len(),
+            "fullInputItems": full_input.len(),
+        }
+    })
+}
+
 #[napi_derive::napi]
 pub fn pick_responses_persisted_fields_json(payload_json: String) -> NapiResult<String> {
     let payload: Value =
@@ -521,11 +700,51 @@ pub fn resume_responses_conversation_payload_json(
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi_derive::napi]
+pub fn restore_responses_continuation_payload_json(
+    entry_json: String,
+    incoming_payload_json: String,
+    request_id: Option<String>,
+    scope_key: Option<String>,
+) -> NapiResult<String> {
+    let entry: Value =
+        serde_json::from_str(&entry_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let incoming_payload: Value = serde_json::from_str(&incoming_payload_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = restore_responses_continuation_payload(
+        &entry,
+        &incoming_payload,
+        request_id.as_deref(),
+        scope_key.as_deref(),
+    );
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi]
+pub fn materialize_responses_continuation_payload_json(
+    entry_json: String,
+    incoming_payload_json: String,
+    request_id: Option<String>,
+    scope_key: Option<String>,
+) -> NapiResult<String> {
+    let entry: Value =
+        serde_json::from_str(&entry_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let incoming_payload: Value = serde_json::from_str(&incoming_payload_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = materialize_responses_continuation_payload(
+        &entry,
+        &incoming_payload,
+        request_id.as_deref(),
+        scope_key.as_deref(),
+    );
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         convert_responses_output_to_input_items, prepare_responses_conversation_entry,
-        resume_responses_conversation_payload,
+        restore_responses_continuation_payload, resume_responses_conversation_payload,
     };
     use serde_json::{json, Value};
 
@@ -583,6 +802,70 @@ mod tests {
         );
         let meta = resumed.get("meta").and_then(Value::as_object).unwrap();
         assert_eq!(meta.get("toolOutputs").and_then(Value::as_u64), Some(1));
+    }
+
+    #[test]
+    fn restores_plain_responses_continuation_when_incoming_input_replays_exact_prefix() {
+        let restored = restore_responses_continuation_payload(
+            &json!({
+                "requestId": "req_prev",
+                "lastResponseId": "resp_prev",
+                "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "hi" }] },
+                    { "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "hello" }] }
+                ]
+            }),
+            &json!({
+                "model": "gpt-5.3-codex",
+                "stream": true,
+                "metadata": { "session_id": "sess-1" },
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "hi" }] },
+                    { "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "hello" }] },
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "next" }] }
+                ]
+            }),
+            Some("req_now"),
+            Some("session:sess-1"),
+        );
+
+        let payload = restored.get("payload").and_then(Value::as_object).unwrap();
+        assert_eq!(
+            payload.get("previous_response_id").and_then(Value::as_str),
+            Some("resp_prev")
+        );
+        let input = payload.get("input").and_then(Value::as_array).unwrap();
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["content"][0]["text"].as_str(), Some("next"));
+        let meta = restored.get("meta").and_then(Value::as_object).unwrap();
+        assert_eq!(
+            meta.get("scopeKey").and_then(Value::as_str),
+            Some("session:sess-1")
+        );
+    }
+
+    #[test]
+    fn does_not_restore_plain_continuation_when_prefix_does_not_match() {
+        let restored = restore_responses_continuation_payload(
+            &json!({
+                "requestId": "req_prev",
+                "lastResponseId": "resp_prev",
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "hi" }] }
+                ]
+            }),
+            &json!({
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "different" }] },
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "next" }] }
+                ]
+            }),
+            Some("req_now"),
+            Some("session:sess-1"),
+        );
+
+        assert!(restored.is_null());
     }
 
     #[test]

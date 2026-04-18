@@ -8,28 +8,29 @@ describe('provider add templates', () => {
     expect(templates.some((tpl) => tpl.id === 'openai' && tpl.source === 'bootstrap-generic')).toBe(true);
     expect(templates.some((tpl) => tpl.id === 'responses' && tpl.source === 'bootstrap-generic')).toBe(true);
     expect(templates.some((tpl) => tpl.id === 'qwen' && tpl.source === 'bootstrap-managed')).toBe(true);
-    expect(templates.some((tpl) => tpl.id === 'iflow' && tpl.source === 'bootstrap-managed')).toBe(true);
     expect(templates.at(-1)?.id).toBe('custom');
   });
 
-  it('preserves runtime-specific auth defaults from managed templates', () => {
-    const iflowTemplate = getProviderTemplates().find((tpl) => tpl.id === 'iflow');
-    expect(iflowTemplate).toBeTruthy();
+  it('keeps qwen managed template aligned to official qwen code defaults', () => {
+    const qwenTemplate = getProviderTemplates().find((tpl) => tpl.id === 'qwen');
+    expect(qwenTemplate).toBeTruthy();
     const provider = buildProviderFromTemplate(
-      'iflow',
-      iflowTemplate!,
-      iflowTemplate!.defaultBaseUrl || 'https://apis.iflow.cn/v1',
-      iflowTemplate!.defaultAuthType || 'iflow-cookie',
+      'qwen',
+      qwenTemplate!,
+      qwenTemplate!.defaultBaseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      qwenTemplate!.defaultAuthType || 'qwen-oauth',
       '',
-      '',
-      'qwen3-coder-plus'
+      '~/.rcc/auth/qwen-oauth-1-default.json',
+      'coder-model'
     ) as Record<string, any>;
 
-    expect(provider.type).toBe('iflow');
-    expect(provider.auth.type).toBe('iflow-cookie');
-    expect(provider.auth.cookieFile).toBe('~/.rcc/auth/iflow-work.cookie');
-    expect(provider.models['qwen3-coder-plus']).toBeTruthy();
-    expect(provider.defaultModel).toBe('qwen3-coder-plus');
+    expect(provider.auth.type).toBe('qwen-oauth');
+    expect(provider.auth.tokenFile).toBe('~/.rcc/auth/qwen-oauth-1-default.json');
+    expect(provider.defaultModel).toBe('coder-model');
+    expect(provider.models['coder-model']).toBeTruthy();
+    expect(provider.models['qwen3.5-plus']).toBeTruthy();
+    expect(provider.models['qwen3-coder-plus']).toBeUndefined();
+    expect(provider.models['qwen3-vl-plus']).toBeUndefined();
   });
 
   it('supports credential-file overrides for account-style templates', () => {

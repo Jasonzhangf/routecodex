@@ -35,11 +35,12 @@ describe('qwen profile request sanitization', () => {
     } as any) as any;
 
     expect(body?.model).toBe('coder-model');
+    expect(body?.vl_high_resolution_images).toBe(true);
     expect(Array.isArray(body?.messages)).toBe(true);
     expect(body.messages[0]?.role).toBe('system');
     expect(body.messages[0]?.content).toEqual([
       { type: 'text', text: '', cache_control: { type: 'ephemeral' } },
-      { type: 'text', text: 'You are helpful.' }
+      { type: 'text', text: 'You are helpful.', cache_control: { type: 'ephemeral' } }
     ]);
 
     expect(body.messages).toHaveLength(6);
@@ -159,5 +160,45 @@ describe('qwen profile request sanitization', () => {
 
     expect(body?.reasoning).toEqual({ effort: 'high', summary: 'detailed' });
     expect(body?.reasoning_effort).toBe('high');
+  });
+
+  test('adds DashScope cache_control to system and streaming tail message/tool', () => {
+    const body = qwenFamilyProfile.buildRequestBody?.({
+      request: {
+        metadata: { authType: 'qwen-oauth' }
+      } as any,
+      runtimeMetadata: {
+        authType: 'qwen-oauth',
+        providerProtocol: 'openai-chat'
+      } as any,
+      defaultBody: {
+        model: 'qwen3.6-plus',
+        stream: true,
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: { type: 'object', properties: { cmd: { type: 'string' } } }
+            }
+          }
+        ],
+        messages: [
+          { role: 'system', content: 'Be concise.' },
+          { role: 'user', content: 'first' },
+          { role: 'assistant', content: 'tail' }
+        ]
+      } as any
+    } as any) as any;
+
+    expect(body?.messages?.[0]?.content).toEqual([
+      { type: 'text', text: '', cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: 'Be concise.', cache_control: { type: 'ephemeral' } }
+    ]);
+    expect(body?.messages?.[2]?.content).toEqual([
+      { type: 'text', text: 'tail', cache_control: { type: 'ephemeral' } }
+    ]);
+    expect(body?.tools?.[0]?.cache_control).toEqual({ type: 'ephemeral' });
+    expect(body?.vl_high_resolution_images).toBe(true);
   });
 });

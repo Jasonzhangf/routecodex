@@ -117,12 +117,7 @@ function registerProviderOAuthConfigs(): void {
       clientId: 'f0304373b74a44d2b584a3fb70ca9e56',
       scopes: ['openid', 'profile', 'email', 'model.completion']
     },
-    headers: {
-      'User-Agent': 'google-api-nodejs-client/9.15.1',
-      'X-Goog-Api-Client': 'gl-node/22.17.0',
-      'Client-Metadata': 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI',
-      'Accept': 'application/json'
-    },
+    headers: {},
     polling: {
       interval: 5000,
       maxAttempts: 60,

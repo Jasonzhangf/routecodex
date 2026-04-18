@@ -360,12 +360,28 @@ fn build_router_metadata_input(input: &Value) -> Result<Value, String> {
         .unwrap_or_else(|| "openai-chat".to_string());
     let stream = row.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
     let metadata_node = row.get("metadata").unwrap_or(&Value::Null);
+    let request_semantics = row.get("requestSemantics");
     let stop_message_metadata = resolve_stop_message_router_metadata(metadata_node);
     let runtime_flags = resolve_router_metadata_runtime_flags(metadata_node);
     let include_estimated_input_tokens = row
         .get("includeEstimatedInputTokens")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let responses_resume_from_semantics =
+        read_responses_resume_from_semantics_node(request_semantics);
+    let responses_resume_from_input = row.get("responsesResume").cloned().and_then(|value| {
+        if value.is_null() {
+            None
+        } else {
+            Some(value)
+        }
+    });
+    let responses_resume_for_output = responses_resume_from_input
+        .clone()
+        .or_else(|| responses_resume_from_semantics.clone());
+    let continuation = read_continuation_from_semantics_node(request_semantics).or_else(|| {
+        synthesize_continuation_from_responses_resume(responses_resume_for_output.as_ref())
+    });
 
     let mut out = Map::<String, Value>::new();
     out.insert("requestId".to_string(), Value::String(request_id));
@@ -417,10 +433,11 @@ fn build_router_metadata_input(input: &Value) -> Result<Value, String> {
     {
         out.insert("serverToolRequired".to_string(), Value::Bool(true));
     }
-    if let Some(responses_resume) = row.get("responsesResume") {
-        if !responses_resume.is_null() {
-            out.insert("responsesResume".to_string(), responses_resume.clone());
-        }
+    if let Some(continuation) = continuation {
+        out.insert("continuation".to_string(), continuation);
+    }
+    if let Some(responses_resume) = responses_resume_for_output {
+        out.insert("responsesResume".to_string(), responses_resume);
     }
 
     if let Some(stop_obj) = stop_message_metadata.as_object() {
@@ -439,6 +456,39 @@ fn build_router_metadata_input(input: &Value) -> Result<Value, String> {
         if include_estimated_input_tokens {
             if let Some(value) = runtime_flags_obj.get("estimatedInputTokens") {
                 out.insert("estimatedInputTokens".to_string(), value.clone());
+            }
+        }
+    }
+
+    if let Some(metadata_obj) = metadata_node.as_object() {
+        if let Some(forced_provider_key) = metadata_obj
+            .get("__shadowCompareForcedProviderKey")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+        {
+            out.insert(
+                "__shadowCompareForcedProviderKey".to_string(),
+                Value::String(forced_provider_key),
+            );
+        }
+
+        if let Some(disabled_aliases) = metadata_obj
+            .get("disabledProviderKeyAliases")
+            .and_then(|v| v.as_array())
+        {
+            let normalized: Vec<Value> = disabled_aliases
+                .iter()
+                .filter_map(|entry| entry.as_str())
+                .map(|entry| entry.trim().to_string())
+                .filter(|entry| !entry.is_empty())
+                .map(Value::String)
+                .collect();
+            if !normalized.is_empty() {
+                out.insert(
+                    "disabledProviderKeyAliases".to_string(),
+                    Value::Array(normalized),
+                );
             }
         }
     }
@@ -1350,6 +1400,82 @@ fn read_responses_resume_from_request_semantics(request: &Value) -> Option<Value
     Some(resume.clone())
 }
 
+fn read_trimmed_optional_string(value: Option<&Value>) -> Option<String> {
+    let raw = value
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if raw.is_empty() {
+        return None;
+    }
+    Some(raw)
+}
+
+fn read_continuation_from_semantics_node(semantics: Option<&Value>) -> Option<Value> {
+    let semantics_obj = semantics?.as_object()?;
+    let continuation = semantics_obj.get("continuation")?;
+    if !continuation.is_object() {
+        return None;
+    }
+    Some(continuation.clone())
+}
+
+fn read_responses_resume_from_semantics_node(semantics: Option<&Value>) -> Option<Value> {
+    let semantics_obj = semantics?.as_object()?;
+    let responses_obj = semantics_obj.get("responses")?.as_object()?;
+    let resume = responses_obj.get("resume")?;
+    if !resume.is_object() {
+        return None;
+    }
+    Some(resume.clone())
+}
+
+fn synthesize_continuation_from_responses_resume(resume: Option<&Value>) -> Option<Value> {
+    let resume_obj = resume?.as_object()?;
+    let previous_request_id = read_trimmed_optional_string(resume_obj.get("previousRequestId"));
+    let restored_from_response_id =
+        read_trimmed_optional_string(resume_obj.get("restoredFromResponseId"));
+
+    let mut continuation = Map::<String, Value>::new();
+    if let Some(chain_id) = previous_request_id
+        .clone()
+        .or_else(|| restored_from_response_id.clone())
+    {
+        continuation.insert("chainId".to_string(), Value::String(chain_id));
+    }
+
+    let mut resume_from = Map::<String, Value>::new();
+    resume_from.insert(
+        "protocol".to_string(),
+        Value::String("openai-responses".to_string()),
+    );
+    if let Some(request_id) = previous_request_id {
+        resume_from.insert("requestId".to_string(), Value::String(request_id));
+    }
+    if let Some(response_id) = restored_from_response_id {
+        resume_from.insert("responseId".to_string(), Value::String(response_id));
+    }
+    if !resume_from.is_empty() {
+        continuation.insert("resumeFrom".to_string(), Value::Object(resume_from));
+    }
+
+    if continuation.is_empty() {
+        return None;
+    }
+
+    continuation.insert(
+        "stickyScope".to_string(),
+        Value::String("request_chain".to_string()),
+    );
+    continuation.insert(
+        "stateOrigin".to_string(),
+        Value::String("openai-responses".to_string()),
+    );
+    continuation.insert("restored".to_string(), Value::Bool(true));
+    Some(Value::Object(continuation))
+}
+
 fn is_search_route_id(route_id: &Value) -> bool {
     let normalized = route_id.as_str().unwrap_or("").trim().to_ascii_lowercase();
     normalized.starts_with("web_search") || normalized.starts_with("search")
@@ -1530,8 +1656,9 @@ fn lift_responses_resume_into_semantics(request: &Value, metadata: &Value) -> Va
     let mut output = Map::<String, Value>::new();
     let mut next_metadata = value_as_object_or_empty(metadata);
     let resume = read_responses_resume_from_metadata(metadata);
+    let continuation = synthesize_continuation_from_responses_resume(resume.as_ref());
 
-    if resume.is_none() {
+    if resume.is_none() && continuation.is_none() {
         output.insert("request".to_string(), request.clone());
         output.insert("metadata".to_string(), Value::Object(next_metadata));
         return Value::Object(output);
@@ -1547,6 +1674,11 @@ fn lift_responses_resume_into_semantics(request: &Value, metadata: &Value) -> Va
     let semantics_obj = semantics
         .as_object_mut()
         .expect("semantics should be object after normalization");
+    if !semantics_obj.contains_key("continuation") {
+        if let Some(continuation_value) = continuation {
+            semantics_obj.insert("continuation".to_string(), continuation_value);
+        }
+    }
     let responses = semantics_obj
         .entry("responses".to_string())
         .or_insert_with(|| Value::Object(Map::new()));
@@ -3482,6 +3614,38 @@ mod tests {
             Some(true)
         );
         assert!(!row.contains_key("estimatedInputTokens"));
+    }
+
+    #[test]
+    fn test_build_router_metadata_input_preserves_forced_provider_and_disabled_aliases() {
+        let input = json!({
+            "requestId": "req-3",
+            "metadata": {
+                "__shadowCompareForcedProviderKey": " ali-coding-plan.key1.kimi-k2.5 ",
+                "disabledProviderKeyAliases": [
+                    " qwen.1 ",
+                    "",
+                    null,
+                    "qwen.2"
+                ]
+            }
+        });
+        let output = build_router_metadata_input(&input).expect("router metadata input");
+        let row = output.as_object().expect("output object");
+        assert_eq!(
+            row.get("__shadowCompareForcedProviderKey")
+                .and_then(|v| v.as_str()),
+            Some("ali-coding-plan.key1.kimi-k2.5")
+        );
+        assert_eq!(
+            row.get("disabledProviderKeyAliases")
+                .and_then(|v| v.as_array())
+                .map(|items| items
+                    .iter()
+                    .filter_map(|entry| entry.as_str())
+                    .collect::<Vec<_>>()),
+            Some(vec!["qwen.1", "qwen.2"])
+        );
     }
 
     #[test]

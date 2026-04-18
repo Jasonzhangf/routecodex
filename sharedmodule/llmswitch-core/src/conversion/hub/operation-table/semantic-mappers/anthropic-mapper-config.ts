@@ -54,7 +54,6 @@ export const PASSTHROUGH_METADATA_PREFIX = 'rcc_passthrough_';
 export const PASSTHROUGH_PARAMETERS: readonly string[] = ['tool_choice'];
 export const RESPONSES_DROPPED_PARAMETER_KEYS: readonly string[] = [
   'prompt_cache_key',
-  'response_format',
   'parallel_tool_calls',
   'service_tier',
   'truncation',

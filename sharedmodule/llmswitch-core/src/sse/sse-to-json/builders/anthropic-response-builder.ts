@@ -242,27 +242,13 @@ export function createAnthropicResponseBuilder(options?: BuilderOptions) {
 
     getResult(): AnthropicBuilderResult {
       if (!state.completed) {
-        // 网络提前断开时可能缺失 content_block_stop/message_stop，
-        // 先尝试 flush 当前 block，尽最大努力还原已接收内容。
+        // 网络提前断开时可能缺失 content_block_stop/message_stop。
+        // 可以 flush 当前 block 便于诊断，但绝不能把半截流伪装成正常成功。
         flushCurrent();
-        // 对部分实现（或网络提前关闭）导致缺失 message_stop 的 SSE 流，
-        // 只要已经累计到可用内容，就以最佳努力方式返回结果，而不是直接抛错。
-        if (state.content.length > 0) {
-          return {
-            success: true,
-            response: {
-              id: state.id || `msg_${Date.now()}`,
-              type: 'message',
-              role: state.role || 'assistant',
-              model: state.model || 'unknown',
-              content: state.content,
-              usage: state.usage,
-              stop_reason: inferStopReason(),
-              stop_sequence: state.stopSequence
-            }
-          };
-        }
-        return { success: false, error: new Error('Anthropic SSE stream incomplete') };
+        return {
+          success: false,
+          error: new Error('Anthropic SSE stream incomplete before message_stop')
+        };
       }
       return {
         success: true,

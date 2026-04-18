@@ -3,7 +3,7 @@ use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 struct ResumeToolOutput {
     #[serde(rename = "tool_call_id")]
     tool_call_id: String,
@@ -35,6 +35,8 @@ struct ReqInboundSemanticLiftApplyInput {
     protocol: Option<String>,
     entry_endpoint: Option<String>,
     responses_resume: Option<Value>,
+    session_id: Option<String>,
+    conversation_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -100,6 +102,148 @@ fn map_resume_tool_outputs_detailed(responses_resume: &Value) -> Vec<ResumeToolO
     }
 
     mapped
+}
+
+fn read_trimmed_object_string(row: Option<&Map<String, Value>>, key: &str) -> Option<String> {
+    read_trimmed_string(row.and_then(|value| value.get(key)))
+}
+
+fn build_responses_continuation(
+    payload: Option<&Value>,
+    responses_resume: Option<&Value>,
+) -> Option<Value> {
+    let payload_obj = payload.and_then(|value| value.as_object());
+    let resume_obj = responses_resume.and_then(|value| value.as_object());
+
+    let previous_request_id = read_trimmed_object_string(resume_obj, "previousRequestId");
+    let restored_from_response_id =
+        read_trimmed_object_string(resume_obj, "restoredFromResponseId");
+    let previous_response_id = read_trimmed_object_string(payload_obj, "previous_response_id");
+
+    let chain_id = previous_request_id
+        .clone()
+        .or_else(|| previous_response_id.clone())
+        .or_else(|| restored_from_response_id.clone());
+
+    let mut continuation = Map::<String, Value>::new();
+    if let Some(chain_id) = chain_id {
+        continuation.insert("chainId".to_string(), Value::String(chain_id));
+    }
+
+    let mut resume_from = Map::<String, Value>::new();
+    resume_from.insert(
+        "protocol".to_string(),
+        Value::String("openai-responses".to_string()),
+    );
+    if let Some(response_id) = restored_from_response_id {
+        resume_from.insert("responseId".to_string(), Value::String(response_id));
+    }
+    if let Some(previous_response_id) = previous_response_id {
+        resume_from.insert(
+            "previousResponseId".to_string(),
+            Value::String(previous_response_id),
+        );
+    }
+    if let Some(request_id) = previous_request_id {
+        resume_from.insert("requestId".to_string(), Value::String(request_id));
+    }
+    if !resume_from.is_empty() {
+        continuation.insert("resumeFrom".to_string(), Value::Object(resume_from));
+    }
+
+    let mapped_outputs = responses_resume
+        .map(map_resume_tool_outputs_detailed)
+        .unwrap_or_default();
+    if responses_resume.is_some() || !mapped_outputs.is_empty() {
+        let mut tool_continuation = Map::<String, Value>::new();
+        tool_continuation.insert(
+            "mode".to_string(),
+            Value::String("submit_tool_outputs".to_string()),
+        );
+        if !mapped_outputs.is_empty() {
+            let submitted_ids = mapped_outputs
+                .iter()
+                .map(|entry| Value::String(entry.tool_call_id.clone()))
+                .collect::<Vec<_>>();
+            tool_continuation.insert(
+                "submittedToolCallIds".to_string(),
+                Value::Array(submitted_ids),
+            );
+            let resume_outputs = mapped_outputs
+                .iter()
+                .map(|entry| Value::String(entry.content.clone()))
+                .collect::<Vec<_>>();
+            tool_continuation.insert("resumeOutputs".to_string(), Value::Array(resume_outputs));
+        }
+        continuation.insert(
+            "toolContinuation".to_string(),
+            Value::Object(tool_continuation),
+        );
+    }
+
+    if continuation.is_empty() {
+        return None;
+    }
+
+    continuation.insert(
+        "stickyScope".to_string(),
+        Value::String("request_chain".to_string()),
+    );
+    continuation.insert(
+        "stateOrigin".to_string(),
+        Value::String("openai-responses".to_string()),
+    );
+    continuation.insert("restored".to_string(), Value::Bool(true));
+
+    Some(Value::Object(continuation))
+}
+
+fn build_generic_continuation(
+    protocol: Option<&str>,
+    session_id: Option<&str>,
+    conversation_id: Option<&str>,
+) -> Option<Value> {
+    let normalized_protocol = protocol.unwrap_or("").trim().to_ascii_lowercase();
+    let session_id = session_id
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+    let conversation_id = conversation_id
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+
+    let (chain_id, sticky_scope) = if let Some(session_id) = session_id {
+        (session_id.to_string(), "session")
+    } else if let Some(conversation_id) = conversation_id {
+        (conversation_id.to_string(), "conversation")
+    } else {
+        return None;
+    };
+
+    let state_origin = if normalized_protocol.is_empty() {
+        "unknown".to_string()
+    } else {
+        normalized_protocol
+    };
+
+    let mut continuation = Map::<String, Value>::new();
+    continuation.insert("chainId".to_string(), Value::String(chain_id));
+    continuation.insert(
+        "stickyScope".to_string(),
+        Value::String(sticky_scope.to_string()),
+    );
+    continuation.insert(
+        "stateOrigin".to_string(),
+        Value::String(state_origin.clone()),
+    );
+    continuation.insert("restored".to_string(), Value::Bool(false));
+    continuation.insert(
+        "resumeFrom".to_string(),
+        Value::Object(Map::from_iter([(
+            "protocol".to_string(),
+            Value::String(state_origin),
+        )])),
+    );
+    Some(Value::Object(continuation))
 }
 
 fn normalize_anthropic_tool_name(value: &str) -> Option<String> {
@@ -267,6 +411,18 @@ fn apply_req_inbound_semantic_lift(input: ReqInboundSemanticLiftApplyInput) -> V
             None
         }
     });
+    let continuation = if matches!(
+        input.protocol.as_deref().map(|value| value.trim().to_ascii_lowercase()),
+        Some(protocol) if protocol == "openai-responses"
+    ) {
+        build_responses_continuation(input.payload.as_ref(), normalized_responses_resume.as_ref())
+    } else {
+        build_generic_continuation(
+            input.protocol.as_deref(),
+            input.session_id.as_deref(),
+            input.conversation_id.as_deref(),
+        )
+    };
 
     let plan = resolve_req_inbound_semantic_lift_plan(&ReqInboundSemanticLiftInput {
         payload: input.payload,
@@ -306,6 +462,16 @@ fn apply_req_inbound_semantic_lift(input: ReqInboundSemanticLiftApplyInput) -> V
         if !has_tool_alias_map {
             if let Some(alias_map) = tool_name_alias_map {
                 tools.insert("toolNameAliasMap".to_string(), Value::Object(alias_map));
+            }
+        }
+
+        if !semantics
+            .get("continuation")
+            .and_then(|v| v.as_object())
+            .is_some()
+        {
+            if let Some(continuation) = continuation {
+                semantics.insert("continuation".to_string(), continuation);
             }
         }
 

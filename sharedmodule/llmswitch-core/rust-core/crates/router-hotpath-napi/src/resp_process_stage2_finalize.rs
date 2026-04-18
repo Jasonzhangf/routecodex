@@ -108,10 +108,7 @@ fn normalize_tool_call_arguments(tool_call: &mut Value, fallback_id: Option<Stri
             Some(&args),
         )
         .unwrap_or_else(|| stringify_args(&args));
-    function_obj.insert(
-        "arguments".to_string(),
-        Value::String(normalized_args),
-    );
+    function_obj.insert("arguments".to_string(), Value::String(normalized_args));
     true
 }
 
@@ -498,7 +495,10 @@ mod tests {
             result["choices"][0]["message"]["tool_calls"][0]["id"],
             "call_missing_name"
         );
-        assert!(result["choices"][0]["message"]["content"].is_null() || result["choices"][0]["message"]["content"] == "");
+        assert!(
+            result["choices"][0]["message"]["content"].is_null()
+                || result["choices"][0]["message"]["content"] == ""
+        );
     }
 
     #[test]

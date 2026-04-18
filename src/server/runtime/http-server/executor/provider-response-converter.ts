@@ -5,49 +5,31 @@ import {
   convertProviderResponse as bridgeConvertProviderResponse,
   createSnapshotRecorder as bridgeCreateSnapshotRecorder
 } from '../../../../modules/llmswitch/bridge.js';
-import { applyClientConnectionStateToContext } from '../../../utils/client-connection-state.js';
 import {
-  resolveStopMessageClientInjectReadiness,
-  runClientInjectionFlowBeforeReenter
-} from './client-injection-flow.js';
-import {
-  extractClientModelId,
   normalizeProviderResponse
 } from './provider-response-utils.js';
 import { isVerboseErrorLoggingEnabled } from './env-config.js';
+import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.js';
 import { extractSseWrapperError } from './sse-error-handler.js';
 import { isRateLimitLikeError } from './request-retry-helpers.js';
 import { extractUsageFromResult } from './usage-aggregator.js';
-import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../../../utils/finish-reason.js';
+import { deriveFinishReason } from '../../../utils/finish-reason.js';
 import { logPipelineStage } from '../../../utils/stage-logger.js';
-import { syncReasoningStopModeFromRequest } from '../../../../modules/llmswitch/bridge.js';
-
-const FOLLOWUP_SESSION_HEADER_KEYS = new Set([
-  'sessionid',
-  'conversationid',
-  'xsessionid',
-  'xconversationid',
-  'anthropicsessionid',
-  'anthropicconversationid',
-  'xroutecodexsessionid',
-  'xroutecodexconversationid',
-  'xroutecodexclientdaemonid',
-  'xroutecodexclientdid',
-  'xrccclientdaemonid',
-  'xroutecodexsessiondaemonid',
-  'xroutecodexdaemonid',
-  'xrccsessiondaemonid',
-  'xroutecodexclienttmuxsessionid',
-  'xrccclienttmuxsessionid',
-  'xroutecodextmuxsessionid',
-  'xrcctmuxsessionid',
-  'xtmuxsessionid',
-  'xroutecodexclientworkdir',
-  'xrccclientworkdir',
-  'xroutecodexworkdir',
-  'xrccworkdir',
-  'xworkdir'
-]);
+import {
+  buildServerToolSseWrapperBody
+} from './servertool-response-normalizer.js';
+import {
+  buildServerToolAdapterContext
+} from './servertool-adapter-context.js';
+import {
+  executeServerToolClientInjectDispatch,
+  executeServerToolReenterPipeline
+} from './servertool-followup-dispatch.js';
+import {
+  compactFollowupLogReason,
+  extractServerToolFollowupErrorLogDetails,
+  finalizeServerToolBridgeConvertError
+} from './servertool-followup-error.js';
 
 const CONTEXT_LENGTH_MESSAGE_HINTS = [
   'context_length_exceeded',
@@ -88,9 +70,6 @@ const RETRYABLE_NETWORK_CODE_HINTS = [
 ];
 
 const truthy = new Set(['1', 'true', 'yes', 'on']);
-const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
-const nonBlockingLogState = new Map<string, number>();
-const FOLLOWUP_LOG_REASON_MAX_LEN = 180;
 const KNOWN_QWEN_HIDDEN_NATIVE_TOOLS = new Set([
   'web_extractor',
   'tool_code_interpreter',
@@ -364,47 +343,6 @@ function tryParseJsonLikeString(raw: string): unknown {
     } catch {
       return undefined;
     }
-  }
-}
-
-function backfillAdapterContextSessionIdentifiersFromOriginalRequest(
-  baseContext: Record<string, unknown>,
-  originalRequest: unknown
-): void {
-  const original = asFlatRecord(originalRequest);
-  if (!original) {
-    return;
-  }
-  const requestMetadata = asFlatRecord(original.metadata);
-  const capturedRequest = asFlatRecord(baseContext.capturedChatRequest);
-  const capturedMetadata = asFlatRecord(capturedRequest?.metadata);
-
-  const sessionId =
-    readSessionLikeToken(baseContext.sessionId) ??
-    readSessionLikeToken(original.sessionId) ??
-    readSessionLikeToken(original.session_id) ??
-    readSessionLikeToken(requestMetadata?.sessionId) ??
-    readSessionLikeToken(requestMetadata?.session_id) ??
-    readSessionLikeToken(capturedRequest?.sessionId) ??
-    readSessionLikeToken(capturedRequest?.session_id) ??
-    readSessionLikeToken(capturedMetadata?.sessionId) ??
-    readSessionLikeToken(capturedMetadata?.session_id);
-  const conversationId =
-    readSessionLikeToken(baseContext.conversationId) ??
-    readSessionLikeToken(original.conversationId) ??
-    readSessionLikeToken(original.conversation_id) ??
-    readSessionLikeToken(requestMetadata?.conversationId) ??
-    readSessionLikeToken(requestMetadata?.conversation_id) ??
-    readSessionLikeToken(capturedRequest?.conversationId) ??
-    readSessionLikeToken(capturedRequest?.conversation_id) ??
-    readSessionLikeToken(capturedMetadata?.conversationId) ??
-    readSessionLikeToken(capturedMetadata?.conversation_id);
-
-  if (sessionId && !readSessionLikeToken(baseContext.sessionId)) {
-    baseContext.sessionId = sessionId;
-  }
-  if (conversationId && !readSessionLikeToken(baseContext.conversationId)) {
-    baseContext.conversationId = conversationId;
   }
 }
 
@@ -1070,6 +1008,39 @@ function extractQwenChatTerminalStreamError(payload: unknown): {
   };
 }
 
+function hasQwenChatPayloadSignals(body: unknown): boolean {
+  const raw = findNestedRawString(body);
+  const loweredRaw = raw.toLowerCase();
+  if (loweredRaw.includes('qwenchat') || loweredRaw.includes('chat.qwen.ai')) {
+    return true;
+  }
+
+  if (extractQwenChatTerminalStreamError(body)) {
+    return true;
+  }
+  if (findQwenChatBusinessRejectionDeep(body)) {
+    return true;
+  }
+  if (extractIncompleteQwenChatToolPrelude(raw)) {
+    return true;
+  }
+
+  const functionNameMatch =
+    raw.match(/"function_call"\s*:\s*\{\s*"name"\s*:\s*"([^"]+)"/i) ||
+    raw.match(/"tool_calls"\s*:\s*\[[\s\S]*?"name"\s*:\s*"([^"]+)"/i);
+  const functionName = functionNameMatch?.[1]?.trim().toLowerCase() || '';
+  if (functionName && KNOWN_QWEN_HIDDEN_NATIVE_TOOLS.has(functionName)) {
+    return true;
+  }
+
+  const recoveredToolAnalysis = analyzeQwenChatRecoveredToolCalls({ body });
+  if (recoveredToolAnalysis.toolCalls.length > 0 || recoveredToolAnalysis.invalidCall) {
+    return true;
+  }
+
+  return false;
+}
+
 function isLikelyQwenChatContext(baseContext: Record<string, unknown> | undefined, body: unknown): boolean {
   const candidates: string[] = [];
   const push = (value: unknown): void => {
@@ -1091,18 +1062,22 @@ function isLikelyQwenChatContext(baseContext: Record<string, unknown> | undefine
   push(record?.providerType);
   push(record?.providerFamily);
   push(record?.providerId);
+  push(record?.modelId);
+  push(record?.originalModelId);
   push(target?.compatibilityProfile);
   push(target?.providerType);
   push(target?.providerFamily);
   push(target?.providerId);
   push(target?.providerKey);
+  push(target?.modelId);
 
-  const raw = findNestedRawString(body).toLowerCase();
-  if (raw.includes('qwenchat') || raw.includes('chat.qwen.ai')) {
+  if (hasQwenChatPayloadSignals(body)) {
     return true;
   }
 
-  return candidates.some((value) => value.includes('qwenchat') || value === 'chat:qwenchat-web');
+  return candidates.some((value) =>
+    value.includes('qwenchat') || value === 'chat:qwenchat-web' || value.includes('qwen3.')
+  );
 }
 
 function remapMalformedQwenChatError(args: {
@@ -1283,15 +1258,23 @@ function remapMalformedQwenChatError(args: {
   return undefined;
 }
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
+function isGenericBridgeResponseContractError(args: {
+  error: Record<string, unknown>;
+  message: string;
+}): boolean {
+  const code = typeof args.error.code === 'string' ? args.error.code.trim() : '';
+  const name = typeof args.error.name === 'string' ? args.error.name.trim() : '';
+  const normalizedMessage = args.message.trim().toLowerCase();
+  if (name !== 'ProviderProtocolError') {
+    return false;
   }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
+  if (code !== 'MALFORMED_RESPONSE') {
+    return false;
   }
+  return (
+    normalizedMessage.includes('[hub_response] non-canonical response payload')
+    || normalizedMessage.includes('[hub_response] failed to canonicalize response payload')
+  );
 }
 
 function logProviderResponseConverterNonBlockingError(
@@ -1299,102 +1282,13 @@ function logProviderResponseConverterNonBlockingError(
   error: unknown,
   details?: Record<string, unknown>
 ): void {
-  const now = Date.now();
-  const last = nonBlockingLogState.get(stage) ?? 0;
-  if (now - last < NON_BLOCKING_LOG_THROTTLE_MS) {
-    return;
-  }
-  nonBlockingLogState.set(stage, now);
-  try {
-    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
-    console.warn(
-      `[provider-response-converter] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`
-    );
-  } catch {
-    // Never throw from non-blocking logging.
-  }
-}
-
-function compactFollowupLogReason(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim().replace(/\s+/g, ' ');
-  if (!normalized) {
-    return undefined;
-  }
-  const httpMatch =
-    normalized.match(/^http\s+(\d{3})\s*:/i) ||
-    normalized.match(/\bhttp\s+(\d{3})\b/i);
-  if (httpMatch?.[1]) {
-    return `HTTP_${httpMatch[1]}`;
-  }
-  if (/<\s*!doctype\s+html\b/i.test(normalized) || /<\s*html\b/i.test(normalized)) {
-    return 'UPSTREAM_HTML_ERROR';
-  }
-  if (normalized.length <= FOLLOWUP_LOG_REASON_MAX_LEN) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, FOLLOWUP_LOG_REASON_MAX_LEN)}…`;
-}
-
-function backfillCapturedChatRequestToolsFromRequestSemantics(
-  baseContext: Record<string, unknown>,
-  requestSemantics: unknown
-): void {
-  const capturedChatRequest =
-    baseContext.capturedChatRequest &&
-    typeof baseContext.capturedChatRequest === 'object' &&
-    !Array.isArray(baseContext.capturedChatRequest)
-      ? (baseContext.capturedChatRequest as Record<string, unknown>)
-      : undefined;
-  const semanticsRecord =
-    requestSemantics && typeof requestSemantics === 'object' && !Array.isArray(requestSemantics)
-      ? (requestSemantics as Record<string, unknown>)
-      : undefined;
-  const toolsRecord =
-    semanticsRecord?.tools && typeof semanticsRecord.tools === 'object' && !Array.isArray(semanticsRecord.tools)
-      ? (semanticsRecord.tools as Record<string, unknown>)
-      : undefined;
-  const clientToolsRaw = Array.isArray(toolsRecord?.clientToolsRaw) ? toolsRecord.clientToolsRaw : undefined;
-  if (!capturedChatRequest || !clientToolsRaw?.length) {
-    return;
-  }
-  const existingTools = Array.isArray(capturedChatRequest.tools) ? capturedChatRequest.tools : undefined;
-  if (existingTools?.length) {
-    return;
-  }
-  capturedChatRequest.tools = clientToolsRaw;
-}
-
-function preferOriginalRequestForReasoningStopSync(
-  baseContext: Record<string, unknown>,
-  originalRequest: unknown
-): void {
-  if (!asFlatRecord(originalRequest)) {
-    return;
-  }
-  if (!hasStoplessDirectiveInRequestPayload(originalRequest)) {
-    return;
-  }
-  if (hasStoplessDirectiveInRequestPayload(baseContext.capturedChatRequest)) {
-    return;
-  }
-  baseContext.capturedChatRequest = originalRequest as Record<string, unknown>;
-}
-
-function seedReasoningStopStateFromCapturedRequest(
-  baseContext: Record<string, unknown>
-): void {
-  try {
-    syncReasoningStopModeFromRequest(baseContext, 'on');
-  } catch (error) {
-    logProviderResponseConverterNonBlockingError(
-      'seedReasoningStopStateFromCapturedRequest',
-      error
-    );
-  }
+  logExecutorRuntimeNonBlockingWarning({
+    namespace: 'provider-response-converter',
+    stage,
+    error,
+    details,
+    throttleKey: stage
+  });
 }
 
 function shouldEnableHubStageRecorder(): boolean {
@@ -1488,75 +1382,6 @@ function remapBridgeSseErrorToHttp(error: Record<string, unknown>, message: stri
   }
 }
 
-function canonicalizeHeaderName(headerName: string): string {
-  return headerName.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function extractFollowupSessionHeaders(
-  headers: unknown
-): Record<string, string> | undefined {
-  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) {
-    return undefined;
-  }
-  const source = headers as Record<string, unknown>;
-  const preserved: Record<string, string> = {};
-  for (const [headerName, headerValue] of Object.entries(source)) {
-    if (!FOLLOWUP_SESSION_HEADER_KEYS.has(canonicalizeHeaderName(headerName))) {
-      continue;
-    }
-    if (typeof headerValue !== 'string') {
-      continue;
-    }
-    const normalizedValue = headerValue.trim();
-    if (!normalizedValue) {
-      continue;
-    }
-    preserved[headerName] = normalizedValue;
-  }
-  return Object.keys(preserved).length ? preserved : undefined;
-}
-
-function extractPreservedSessionToken(
-  headers: Record<string, string> | undefined,
-  field: 'session' | 'conversation'
-): string | undefined {
-  if (!headers) {
-    return undefined;
-  }
-  for (const [headerName, headerValue] of Object.entries(headers)) {
-    const normalizedName = canonicalizeHeaderName(headerName);
-    if (field === 'session' && normalizedName.endsWith('sessionid')) {
-      return headerValue;
-    }
-    if (field === 'conversation' && normalizedName.endsWith('conversationid')) {
-      return headerValue;
-    }
-  }
-  return undefined;
-}
-
-function extractPreservedDaemonOrInjectToken(
-  headers: Record<string, string> | undefined,
-  field: 'daemon' | 'tmux' | 'workdir'
-): string | undefined {
-  if (!headers) {
-    return undefined;
-  }
-  for (const [headerName, headerValue] of Object.entries(headers)) {
-    const normalizedName = canonicalizeHeaderName(headerName);
-    if (field === 'daemon' && (normalizedName.endsWith('sessiondaemonid') || normalizedName.endsWith('daemonid'))) {
-      return headerValue;
-    }
-    if (field === 'tmux' && normalizedName.endsWith('tmuxsessionid')) {
-      return headerValue;
-    }
-    if (field === 'workdir' && normalizedName.endsWith('workdir')) {
-      return headerValue;
-    }
-  }
-  return undefined;
-}
-
 function syncHubStageTopBackToPipelineMetadata(options: {
   pipelineMetadata?: Record<string, unknown>;
   adapterContext: Record<string, unknown>;
@@ -1613,8 +1438,10 @@ export async function convertProviderResponseIfNeeded(
         statusCode?: number;
         retryable?: boolean;
         upstreamCode?: string;
+        requestExecutorProviderErrorStage?: string;
       };
       error.code = 'SSE_DECODE_ERROR';
+      error.requestExecutorProviderErrorStage = 'provider.sse_decode';
       if (wrapperError.errorCode) {
         error.upstreamCode = wrapperError.errorCode;
       }
@@ -1692,88 +1519,23 @@ export async function convertProviderResponseIfNeeded(
   let adapterContext: Record<string, unknown> | undefined;
   try {
     const metadataBag = asRecord(options.pipelineMetadata);
-    const originalModelId = extractClientModelId(metadataBag, options.originalRequest);
-    const assignedModelId =
-      typeof (metadataBag as Record<string, unknown> | undefined)?.assignedModelId === 'string'
-        ? String((metadataBag as Record<string, unknown>).assignedModelId)
-        : metadataBag &&
-            typeof metadataBag === 'object' &&
-            metadataBag.target &&
-            typeof metadataBag.target === 'object' &&
-            typeof (metadataBag.target as Record<string, unknown>).modelId === 'string'
-          ? ((metadataBag.target as Record<string, unknown>).modelId as string)
-          : typeof (metadataBag as Record<string, unknown> | undefined)?.modelId === 'string'
-            ? String((metadataBag as Record<string, unknown>).modelId)
-            : undefined;
-    const baseContext: Record<string, unknown> = {
-      ...(metadataBag ?? {})
-    };
-    const hasValidCapturedChatRequest =
-      baseContext.capturedChatRequest &&
-      typeof baseContext.capturedChatRequest === 'object' &&
-      !Array.isArray(baseContext.capturedChatRequest);
-    if (
-      !hasValidCapturedChatRequest &&
-      options.originalRequest &&
-      typeof options.originalRequest === 'object' &&
-      !Array.isArray(options.originalRequest)
-    ) {
-      baseContext.capturedChatRequest = options.originalRequest;
-    }
-    preferOriginalRequestForReasoningStopSync(baseContext, options.originalRequest);
-    backfillAdapterContextSessionIdentifiersFromOriginalRequest(baseContext, options.originalRequest);
-    backfillCapturedChatRequestToolsFromRequestSemantics(baseContext, options.requestSemantics);
-    seedReasoningStopStateFromCapturedRequest(baseContext);
-    if (typeof (metadataBag as Record<string, unknown> | undefined)?.routeName === 'string') {
-      baseContext.routeId = (metadataBag as Record<string, unknown>).routeName as string;
-    }
-    baseContext.requestId = options.requestId;
-    baseContext.entryEndpoint = options.entryEndpoint || entry;
-    baseContext.providerProtocol = options.providerProtocol;
-    baseContext.originalModelId = originalModelId;
-    if (assignedModelId && assignedModelId.trim()) {
-      baseContext.modelId = assignedModelId.trim();
-    }
-    applyClientConnectionStateToContext(metadataBag, baseContext);
+    const baseContext = buildServerToolAdapterContext({
+      metadata: metadataBag,
+      originalRequest: options.originalRequest,
+      requestSemantics: options.requestSemantics,
+      requestId: options.requestId,
+      entryEndpoint: options.entryEndpoint || entry,
+      providerProtocol: options.providerProtocol,
+      serverToolsEnabled: options.serverToolsEnabled !== false,
+      onReasoningStopSeedError: (error) => {
+        logProviderResponseConverterNonBlockingError(
+          'seedReasoningStopStateFromCapturedRequest',
+          error
+        );
+      }
+    });
     adapterContext = baseContext;
-    const stopMessageInjectReadiness = resolveStopMessageClientInjectReadiness(baseContext);
-    {
-      const rt = asRecord((adapterContext as Record<string, unknown>).__rt) ?? {};
-      (adapterContext as Record<string, unknown>).__rt = {
-        ...rt,
-        stopMessageClientInjectReady: stopMessageInjectReadiness.ready,
-        stopMessageClientInjectReason: stopMessageInjectReadiness.reason,
-        ...(stopMessageInjectReadiness.sessionScope
-          ? { stopMessageClientInjectSessionScope: stopMessageInjectReadiness.sessionScope }
-          : {}),
-        ...(stopMessageInjectReadiness.tmuxSessionId
-          ? { stopMessageClientInjectTmuxSessionId: stopMessageInjectReadiness.tmuxSessionId }
-          : {})
-      };
-    }
-    const hasTargetMetadata =
-      metadataBag &&
-      typeof metadataBag === 'object' &&
-      metadataBag.target &&
-      typeof metadataBag.target === 'object';
-    const targetCompatProfile =
-      hasTargetMetadata &&
-      typeof (metadataBag.target as Record<string, unknown>).compatibilityProfile === 'string'
-        ? ((metadataBag.target as Record<string, unknown>).compatibilityProfile as string)
-        : undefined;
-    const metadataCompatProfile =
-      typeof (metadataBag as Record<string, unknown> | undefined)?.compatibilityProfile === 'string'
-        ? String((metadataBag as Record<string, unknown>).compatibilityProfile)
-        : undefined;
-    const compatProfile = hasTargetMetadata ? targetCompatProfile : metadataCompatProfile;
-    if (compatProfile && compatProfile.trim()) {
-      adapterContext.compatibilityProfile = compatProfile.trim();
-    }
     const serverToolsEnabled = options.serverToolsEnabled !== false;
-    (adapterContext as Record<string, unknown>).serverToolsEnabled = serverToolsEnabled;
-    if (!serverToolsEnabled) {
-      (adapterContext as Record<string, unknown>).serverToolsDisabled = true;
-    }
     let stageRecorder: unknown;
     if (shouldEnableHubStageRecorder()) {
       logPipelineStage('convert.snapshot_recorder.start', options.requestId, {
@@ -1872,76 +1634,31 @@ export async function convertProviderResponseIfNeeded(
       metadata?: Record<string, unknown>;
     }): Promise<{ body?: Record<string, unknown>; __sse_responses?: unknown; format?: string }> => {
       const reenterStartMs = Date.now();
-      logPipelineStage('convert.reenter.start', reenterOpts.requestId, {
-        entryEndpoint: reenterOpts.entryEndpoint || options.entryEndpoint || entry
-      });
       const nestedEntry = reenterOpts.entryEndpoint || options.entryEndpoint || entry;
-      const nestedExtra = asRecord(reenterOpts.metadata) ?? {};
-
-      const buildNestedMetadata = (extra: Record<string, unknown>, resolvedEntry: string): Record<string, unknown> => {
-        const out: Record<string, unknown> = {
-          ...(metadataBag ?? {}),
-          ...extra,
-          entryEndpoint: resolvedEntry,
-          direction: 'request',
-          stage: 'inbound'
-        };
-        try {
-          const baseRt = asRecord((metadataBag as any)?.__rt) ?? {};
-          const extraRt = asRecord((extra as any)?.__rt) ?? {};
-          if (Object.keys(baseRt).length || Object.keys(extraRt).length) {
-            (out as any).__rt = { ...baseRt, ...extraRt };
-          }
-        } catch (error) {
+      logPipelineStage('convert.reenter.start', reenterOpts.requestId, {
+        entryEndpoint: nestedEntry
+      });
+      const nestedResult = await executeServerToolReenterPipeline({
+        entryEndpoint: reenterOpts.entryEndpoint,
+        fallbackEntryEndpoint: options.entryEndpoint || entry,
+        requestId: reenterOpts.requestId,
+        body: reenterOpts.body,
+        metadata: reenterOpts.metadata,
+        baseMetadata: metadataBag,
+        executeNested: deps.executeNested,
+        runClientInjectBeforeNested: false,
+        onMergeRuntimeMetaError: (error, details) => {
           logProviderResponseConverterNonBlockingError('reenter.buildNestedMetadata.mergeRuntimeMeta', error, {
-            requestId: reenterOpts.requestId,
-            entryEndpoint: resolvedEntry
+            requestId: details.requestId,
+            entryEndpoint: details.entryEndpoint
           });
         }
-
-        if (asRecord((out as any).__rt)?.serverToolFollowup === true) {
-          const preservedClientHeaders = extractFollowupSessionHeaders(out.clientHeaders);
-          if (preservedClientHeaders) {
-            out.clientHeaders = preservedClientHeaders;
-            const sessionId = extractPreservedSessionToken(preservedClientHeaders, 'session');
-            const conversationId = extractPreservedSessionToken(preservedClientHeaders, 'conversation');
-            if (sessionId) {
-              out.sessionId = sessionId;
-            }
-            if (conversationId) {
-              out.conversationId = conversationId;
-            }
-          } else {
-            delete out.clientHeaders;
-          }
-          delete out.clientRequestId;
-        }
-        return out;
-      };
-
-      const nestedMetadata: Record<string, unknown> = buildNestedMetadata(nestedExtra, nestedEntry);
-
-      const nestedInput: PipelineExecutionInput = {
-        entryEndpoint: nestedEntry,
-        method: 'POST',
-        requestId: reenterOpts.requestId,
-        headers: {},
-        query: {},
-        body: reenterOpts.body,
-        metadata: nestedMetadata
-      };
-
-      const nestedResult = await deps.executeNested(nestedInput);
+      });
       logPipelineStage('convert.reenter.completed', reenterOpts.requestId, {
         entryEndpoint: nestedEntry,
-        status: nestedResult.status,
         elapsedMs: Date.now() - reenterStartMs
       });
-      const nestedBody =
-        nestedResult.body && typeof nestedResult.body === 'object'
-          ? (nestedResult.body as Record<string, unknown>)
-          : undefined;
-      return { body: nestedBody };
+      return nestedResult;
     };
 
     const clientInjectDispatch = async (injectOpts: {
@@ -1956,51 +1673,22 @@ export async function convertProviderResponseIfNeeded(
         entryEndpoint: injectOpts.entryEndpoint || options.entryEndpoint || entry
       });
       const nestedEntry = injectOpts.entryEndpoint || options.entryEndpoint || entry;
-      const nestedExtra = asRecord(injectOpts.metadata) ?? {};
-      const nestedMetadata: Record<string, unknown> = (() => {
-        const out: Record<string, unknown> = {
-        ...(metadataBag ?? {}),
-        ...nestedExtra,
-        entryEndpoint: nestedEntry,
-        direction: 'request',
-        stage: 'inbound'
-      };
-      try {
-        const baseRt = asRecord((metadataBag as any)?.__rt) ?? {};
-        const extraRt = asRecord((nestedExtra as any)?.__rt) ?? {};
-        if (Object.keys(baseRt).length || Object.keys(extraRt).length) {
-            (out as any).__rt = { ...baseRt, ...extraRt };
+      const injectResult = await executeServerToolClientInjectDispatch({
+        entryEndpoint: injectOpts.entryEndpoint,
+        fallbackEntryEndpoint: options.entryEndpoint || entry,
+        requestId: injectOpts.requestId,
+        body: injectOpts.body,
+        metadata: injectOpts.metadata,
+        baseMetadata: metadataBag,
+        onMergeRuntimeMetaError: (error, details) => {
+          logProviderResponseConverterNonBlockingError('clientInjectDispatch.mergeRuntimeMeta', error, {
+            requestId: details.requestId,
+            entryEndpoint: details.entryEndpoint
+          });
         }
-      } catch (error) {
-        logProviderResponseConverterNonBlockingError('clientInjectDispatch.mergeRuntimeMeta', error, {
-          requestId: injectOpts.requestId,
-          entryEndpoint: nestedEntry
-        });
-      }
-
-      if (asRecord((out as any).__rt)?.serverToolFollowup === true) {
-        const preservedClientHeaders = extractFollowupSessionHeaders(out.clientHeaders);
-        if (preservedClientHeaders) {
-          out.clientHeaders = preservedClientHeaders;
-        } else {
-          delete out.clientHeaders;
-        }
-        delete out.clientRequestId;
-      }
-        return out;
-      })();
-
-      const requestBody =
-        injectOpts.body && typeof injectOpts.body === 'object' && !Array.isArray(injectOpts.body)
-          ? (injectOpts.body as Record<string, unknown>)
-          : {};
-      const injectResult = await runClientInjectionFlowBeforeReenter({
-        nestedMetadata,
-        requestBody,
-        requestId: injectOpts.requestId
       });
       clientInjectWaitMs += Math.max(0, Date.now() - clientInjectAttemptStartedAt);
-      if (injectResult.clientInjectOnlyHandled) {
+      if (injectResult.ok) {
         logPipelineStage('convert.client_inject.completed', injectOpts.requestId, {
           entryEndpoint: nestedEntry,
           handled: true,
@@ -2011,10 +1699,10 @@ export async function convertProviderResponseIfNeeded(
       logPipelineStage('convert.client_inject.completed', injectOpts.requestId, {
         entryEndpoint: nestedEntry,
         handled: false,
-        reason: 'client_inject_not_handled',
+        reason: injectResult.reason || 'client_inject_not_handled',
         elapsedMs: Date.now() - clientInjectStartMs
       });
-      return { ok: false, reason: 'client_inject_not_handled' };
+      return { ok: false, reason: injectResult.reason || 'client_inject_not_handled' };
     };
 
     logPipelineStage('convert.bridge.start', options.requestId, {
@@ -2056,16 +1744,13 @@ export async function convertProviderResponseIfNeeded(
         hasUsage: Boolean(usage),
         finishReason
       });
-      const body: Record<string, unknown> = { __sse_responses: converted.__sse_responses };
-      if (usage) {
-        body.usage = usage;
-      }
-      if (finishReason) {
-        body[STREAM_LOG_FINISH_REASON_KEY] = finishReason;
-      }
       return attachTimingBreakdown({
         ...options.response,
-        body
+        body: buildServerToolSseWrapperBody({
+          sseResponses: converted.__sse_responses,
+          convertedBody: converted.body,
+          usage
+        })
       });
     }
     return attachTimingBreakdown({
@@ -2091,22 +1776,14 @@ export async function convertProviderResponseIfNeeded(
           ? String((detailRecord as Record<string, unknown>).error)
         : undefined;
     const malformedQwenFallbackContext = (() => {
-      const metadataBag = asRecord(options.pipelineMetadata);
-      const fallbackContext: Record<string, unknown> = {
-        ...(metadataBag ?? {})
-      };
-      if (
-        !fallbackContext.capturedChatRequest &&
-        options.originalRequest &&
-        typeof options.originalRequest === 'object' &&
-        !Array.isArray(options.originalRequest)
-      ) {
-        fallbackContext.capturedChatRequest = options.originalRequest;
-      }
-      preferOriginalRequestForReasoningStopSync(fallbackContext, options.originalRequest);
-      backfillAdapterContextSessionIdentifiersFromOriginalRequest(fallbackContext, options.originalRequest);
-      backfillCapturedChatRequestToolsFromRequestSemantics(fallbackContext, options.requestSemantics);
-      return fallbackContext;
+      return buildServerToolAdapterContext({
+        metadata: asRecord(options.pipelineMetadata),
+        originalRequest: options.originalRequest,
+        requestSemantics: options.requestSemantics,
+        requestId: options.requestId,
+        entryEndpoint: options.entryEndpoint || entry,
+        providerProtocol: options.providerProtocol
+      });
     })();
     const normalizedUpstreamCode = (upstreamCode || detailUpstreamCode || '').trim().toLowerCase();
     const fatalConversionCode =
@@ -2127,10 +1804,6 @@ export async function convertProviderResponseIfNeeded(
       errCode === 'HTTP_502' ||
       errCode === 'HTTP_429' ||
       (errName === 'ProviderProtocolError' && message.toLowerCase().includes('sse'));
-    const isServerToolFollowupError =
-      errCode === 'SERVERTOOL_FOLLOWUP_FAILED' ||
-      errCode === 'SERVERTOOL_EMPTY_FOLLOWUP' ||
-      (typeof errCode === 'string' && errCode.startsWith('SERVERTOOL_'));
     const normalizedMessage = message.toLowerCase();
     const isContextLengthExceeded = isContextLengthExceededError(
       normalizedMessage,
@@ -2177,7 +1850,10 @@ export async function convertProviderResponseIfNeeded(
           if (convertedRecovered.__sse_responses) {
             return attachTimingBreakdown({
               ...options.response,
-              body: { __sse_responses: convertedRecovered.__sse_responses }
+              body: buildServerToolSseWrapperBody({
+                sseResponses: convertedRecovered.__sse_responses,
+                convertedBody: convertedRecovered.body
+              })
             });
           }
           return attachTimingBreakdown({
@@ -2202,48 +1878,41 @@ export async function convertProviderResponseIfNeeded(
       throw remappedMalformedQwenChatError;
     }
 
-    if (isSseDecodeError || isServerToolFollowupError || isContextLengthExceeded) {
+    if (isGenericBridgeResponseContractError({ error: errRecord, message })) {
+      errRecord.requestExecutorProviderErrorStage = 'host.response_contract';
+    }
+
+    const convertErrorPlan = finalizeServerToolBridgeConvertError({
+      error,
+      requestId: options.requestId,
+      defaultFollowupStatus: 502,
+      message,
+      isSseDecodeError,
+      isContextLengthExceeded,
+      code: errCode,
+      upstreamCode,
+      detailUpstreamCode,
+      detailReason
+    });
+    const isServerToolFollowupFailure = convertErrorPlan.handled
+      && (errRecord as { requestExecutorProviderErrorStage?: unknown }).requestExecutorProviderErrorStage === 'provider.followup';
+    const followupLogDetails = isServerToolFollowupFailure
+      ? extractServerToolFollowupErrorLogDetails(error)
+      : undefined;
+
+    if (convertErrorPlan.handled) {
       if (isSseDecodeError || isContextLengthExceeded) {
         remapBridgeSseErrorToHttp(errRecord, message);
       }
-      const normalizedCode = typeof errRecord.code === 'string' ? errRecord.code : errCode;
-      if (isServerToolFollowupError) {
-        const compactReason = compactFollowupLogReason(detailReason) || compactFollowupLogReason(message);
-        const compactUpstreamCode = compactFollowupLogReason(upstreamCode || detailUpstreamCode);
-        const compactCode = compactFollowupLogReason(normalizedCode) || normalizedCode || 'UNKNOWN';
-        console.warn(
-          `[RequestExecutor] ServerTool followup failed req=${options.requestId}` +
-            ` code=${compactCode}` +
-            (compactUpstreamCode ? ` upstreamCode=${compactUpstreamCode}` : '') +
-            (compactReason ? ` reason=${JSON.stringify(compactReason)}` : '')
-        );
-        // Soft skip on transient errors (HTTP_429, INSUFFICIENT_QUOTA, HTTP_5xx)
-        // These are quota/infrastructure issues that should not break the main assistant response
-        const isTransientFollowupError =
-          normalizedUpstreamCode === 'http_429' ||
-          normalizedUpstreamCode === 'insufficient_quota' ||
-          normalizedUpstreamCode === 'http_502' ||
-          normalizedUpstreamCode === 'http_503' ||
-          normalizedUpstreamCode === 'http_504' ||
-          (typeof upstreamCode === 'string' && upstreamCode.trim().toUpperCase() === 'HTTP_429') ||
-          (typeof detailUpstreamCode === 'string' && detailUpstreamCode.trim().toUpperCase() === 'HTTP_429') ||
-          (typeof upstreamCode === 'string' && upstreamCode.trim().toUpperCase() === 'INSUFFICIENT_QUOTA') ||
-          (typeof detailUpstreamCode === 'string' && detailUpstreamCode.trim().toUpperCase() === 'INSUFFICIENT_QUOTA') ||
-          (typeof compactReason === 'string' && compactReason.toLowerCase().includes('insufficient_quota'));
-        if (isTransientFollowupError) {
-          // Followup transient error (429/quota/5xx) should not break the main assistant response.
-          return options.response;
-        }
-        if (normalizedUpstreamCode === 'client_inject_failed') {
-          // Followup rejection should not break the main assistant response.
-          return options.response;
-        }
-      }
       logPipelineStage('convert.bridge.error', options.requestId, {
-        code: normalizedCode,
-        upstreamCode: upstreamCode || detailUpstreamCode,
-        reason: compactFollowupLogReason(detailReason),
-        message
+        ...(isServerToolFollowupFailure
+          ? (convertErrorPlan.stageDetails ?? {})
+          : (convertErrorPlan.stageDetails ?? {
+              code: followupLogDetails?.code || (typeof errRecord.code === 'string' ? errRecord.code : errCode),
+              upstreamCode: followupLogDetails?.upstreamCode || upstreamCode || detailUpstreamCode,
+              reason: followupLogDetails?.reason || compactFollowupLogReason(detailReason),
+              message
+            }))
       });
       if (isVerboseErrorLoggingEnabled()) {
         console.error(
@@ -2263,6 +1932,6 @@ export async function convertProviderResponseIfNeeded(
     if (isVerboseErrorLoggingEnabled()) {
       console.error('[RequestExecutor] Failed to convert provider response via llmswitch-core', error);
     }
-    return options.response;
+    throw error;
   }
 }

@@ -381,7 +381,7 @@ export interface ChatConversionConfig {
 
 // 默认Chat转换配置
 export const DEFAULT_CHAT_CONVERSION_CONFIG: ChatConversionConfig = {
-  defaultTimeoutMs: 30000,
+  defaultTimeoutMs: 900000,
   heartbeatIntervalMs: 15000,
   chunkTimeoutMs: 5000,
 

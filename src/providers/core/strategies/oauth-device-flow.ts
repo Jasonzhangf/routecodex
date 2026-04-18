@@ -9,6 +9,7 @@ import { BaseOAuthFlowStrategy, OAuthFlowType } from '../config/oauth-flows.js';
 import type { OAuthFlowConfig } from '../config/oauth-flows.js';
 import fs from 'fs/promises';
 import path from 'path';
+import { randomUUID } from 'node:crypto';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
 import { formatOAuthErrorMessage } from '../../auth/oauth-error-message.js';
 import { isPermanentOAuthRefreshErrorMessage } from './oauth-refresh-errors.js';
@@ -174,7 +175,11 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
     const response = await this.makeRequest(this.config.endpoints.deviceCodeUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
+        ...(this.isQwenDeviceEndpoint()
+          ? { 'x-request-id': randomUUID() }
+          : {})
       },
       body: formData
     });
@@ -240,14 +245,20 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       throw new Error('Device code JSON missing device_code field');
     }
 
-    // 友好提示
-    console.log('Please visit the following URL to authorize the device:');
+    // 友好提示（Camoufox 自动模式下显示“兜底链接”，避免误导为必须手动）
+    const camoufoxAutoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
+    const isAutoAuthMode = camoufoxAutoMode.length > 0;
+    if (isAutoAuthMode) {
+      console.log('[OAuth] Auto authentication is running in Camoufox. The following URL/code are fallback only:');
+    } else {
+      console.log('Please visit the following URL to authorize the device:');
+    }
     console.log(verification_uri || verification_uri_complete);
     if (user_code) {
       console.log(`And enter the code: ${user_code}`);
     }
     if (verification_uri_complete) {
-      console.log('Or visit directly:');
+      console.log(isAutoAuthMode ? 'Fallback direct URL:' : 'Or visit directly:');
       console.log(verification_uri_complete);
     }
 
@@ -336,7 +347,8 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
         const response = await this.makeRequest(this.config.endpoints.tokenUrl, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json'
           },
           body: formData
         });
@@ -370,6 +382,11 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
     }
 
     throw new Error(`Device authorization timed out after ${maxAttempts} attempts`);
+  }
+
+  private isQwenDeviceEndpoint(): boolean {
+    const deviceUrl = String(this.config.endpoints.deviceCodeUrl || '').toLowerCase();
+    return deviceUrl.includes('chat.qwen.ai/api/v1/oauth2/device/code');
   }
 
   /**
@@ -455,7 +472,8 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
         const response = await this.makeRequest(this.config.endpoints.tokenUrl, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json'
           },
           body: formData
         });

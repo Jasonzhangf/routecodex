@@ -257,19 +257,18 @@ const CATALOG: InitProviderTemplate[] = [
       id: 'qwen',
       enabled: true,
       type: 'openai',
-      baseURL: 'https://portal.qwen.ai/v1',
+      baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
       compatibilityProfile: 'chat:qwen',
       auth: {
         type: 'qwen-oauth',
         tokenFile: 'default'
       },
       models: {
-        'qwen3-coder-plus': { supportsStreaming: true, maxContext: 1000000 },
+        'coder-model': { supportsStreaming: true, maxContext: 1000000 },
         'qwen3.5-plus': { supportsStreaming: true, maxContext: 1000000 },
-        'qwen3-vl-plus': { supportsStreaming: true }
       }
     },
-    defaultModel: 'qwen3-coder-plus'
+    defaultModel: 'coder-model'
   },
   {
     id: 'mimo',

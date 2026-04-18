@@ -1,4 +1,7 @@
 import { jest } from '@jest/globals';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 
 describe('oauth-lifecycle: non-blocking upstream repair', () => {
   jest.setTimeout(10_000);
@@ -106,7 +109,7 @@ describe('oauth-lifecycle: non-blocking upstream repair', () => {
     expect(String(url || '')).not.toContain('support.google.com/accounts?p=al_alert');
   });
 
-  it('tries silent refresh first for generic invalid token, then starts interactive in background', async () => {
+  it('tries silent refresh first for non-qwen invalid token, then starts interactive in background', async () => {
     jest.resetModules();
     const ensureValid = jest.fn(async (_providerType: string, _auth: any, opts: any) => {
       // Silent refresh path fails immediately.
@@ -126,7 +129,7 @@ describe('oauth-lifecycle: non-blocking upstream repair', () => {
     const { handleUpstreamInvalidOAuthToken } = await import('../../../src/providers/auth/oauth-lifecycle.js');
     const result = await Promise.race([
       handleUpstreamInvalidOAuthToken(
-        'qwen',
+        'gemini',
         { type: 'oauth', tokenFile } as any,
         err as any,
         { allowBlocking: false, ensureValidOAuthToken: ensureValid as any }
@@ -141,6 +144,179 @@ describe('oauth-lifecycle: non-blocking upstream repair', () => {
     const callArgs = ensureValid.mock.calls.map((c) => c[2]);
     expect(callArgs.some((o) => o && o.openBrowser === false)).toBe(true);
     expect(callArgs.some((o) => o && o.openBrowser === true)).toBe(true);
+    expect(
+      callArgs.some((o) => o && o.openBrowser === false && o.forceRefresh === true)
+    ).toBe(false);
+  });
+
+  it('qwen permanent refresh failure marks token noRefresh and does not start interactive flow', async () => {
+    jest.resetModules();
+    const prevHome = process.env.HOME;
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-qwen-refresh-perm-'));
+    process.env.HOME = tmpHome;
+
+    const tokenFile = path.join(tmpHome, '.routecodex', 'auth', 'qwen-oauth-4-jasonqueque.json');
+    fs.mkdirSync(path.dirname(tokenFile), { recursive: true });
+    fs.writeFileSync(
+      tokenFile,
+      JSON.stringify(
+        {
+          access_token: 'access-old',
+          refresh_token: 'refresh-old',
+          resource_url: 'portal.qwen.ai'
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+
+    const ensureValid = jest.fn(async (_providerType: string, _auth: any, opts: any) => {
+      if (opts && opts.openBrowser === false) {
+        throw new Error('Token refresh failed (permanent): OAuth error: invalid_request - Invalid refresh token or client_id');
+      }
+      if (opts && opts.openBrowser === true) {
+        throw new Error('interactive path should not be reached');
+      }
+      return {};
+    });
+
+    const { handleUpstreamInvalidOAuthToken } = await import('../../../src/providers/auth/oauth-lifecycle.js');
+    const result = await handleUpstreamInvalidOAuthToken(
+      'qwen',
+      { type: 'qwen-oauth', tokenFile } as any,
+      { statusCode: 401, message: 'HTTP 401: unauthorized (invalid_token)' } as any,
+      { allowBlocking: false, ensureValidOAuthToken: ensureValid as any }
+    );
+
+    expect(result).toBe(false);
+    expect(ensureValid).toHaveBeenCalledTimes(1);
+    expect(ensureValid.mock.calls[0]?.[2]?.openBrowser).toBe(false);
+
+    const updated = JSON.parse(fs.readFileSync(tokenFile, 'utf8'));
+    expect(updated.norefresh ?? updated.noRefresh).toBe(true);
+
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    try {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  });
+
+  it('qwen alias token file marks resolved auth token noRefresh and does not start interactive flow', async () => {
+    jest.resetModules();
+    const prevHome = process.env.HOME;
+    const prevRccHome = process.env.RCC_HOME;
+    const prevRouteCodexHome = process.env.ROUTECODEX_HOME;
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-qwen-refresh-alias-'));
+    process.env.HOME = tmpHome;
+    process.env.RCC_HOME = path.join(tmpHome, '.rcc');
+    process.env.ROUTECODEX_HOME = path.join(tmpHome, '.rcc');
+
+    const authDir = path.join(tmpHome, '.rcc', 'auth');
+    const tokenFile = path.join(authDir, 'qwen-oauth-4-jasonqueque.json');
+    fs.mkdirSync(authDir, { recursive: true });
+    fs.writeFileSync(
+      tokenFile,
+      JSON.stringify(
+        {
+          access_token: 'access-old',
+          refresh_token: 'refresh-old',
+          resource_url: 'portal.qwen.ai'
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+
+    const ensureValid = jest.fn(async (_providerType: string, _auth: any, opts: any) => {
+      if (opts && opts.openBrowser === false) {
+        throw new Error('Token refresh failed (permanent): OAuth error: invalid_request - Invalid refresh token or client_id');
+      }
+      if (opts && opts.openBrowser === true) {
+        throw new Error('interactive path should not be reached');
+      }
+      return {};
+    });
+
+    const { handleUpstreamInvalidOAuthToken } = await import('../../../src/providers/auth/oauth-lifecycle.js');
+    const result = await handleUpstreamInvalidOAuthToken(
+      'qwen',
+      { type: 'qwen-oauth', tokenFile: 'qwen-oauth-4-jasonqueque' } as any,
+      { statusCode: 401, message: 'HTTP 401: unauthorized (invalid_token)' } as any,
+      { allowBlocking: false, ensureValidOAuthToken: ensureValid as any }
+    );
+
+    expect(result).toBe(false);
+    expect(ensureValid).toHaveBeenCalledTimes(1);
+    expect(ensureValid.mock.calls[0]?.[2]?.openBrowser).toBe(false);
+
+    const updated = JSON.parse(fs.readFileSync(tokenFile, 'utf8'));
+    expect(updated.norefresh ?? updated.noRefresh).toBe(true);
+
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevRccHome === undefined) delete process.env.RCC_HOME;
+    else process.env.RCC_HOME = prevRccHome;
+    if (prevRouteCodexHome === undefined) delete process.env.ROUTECODEX_HOME;
+    else process.env.ROUTECODEX_HOME = prevRouteCodexHome;
+    try {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  });
+
+  it('qwen mirrored api_key noRefresh does not suppress silent repair attempt', async () => {
+    jest.resetModules();
+    const prevHome = process.env.HOME;
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-qwen-norefresh-mirrored-'));
+    process.env.HOME = tmpHome;
+
+    const tokenFile = path.join(tmpHome, '.routecodex', 'auth', 'qwen-oauth-4-jasonqueque.json');
+    fs.mkdirSync(path.dirname(tokenFile), { recursive: true });
+    fs.writeFileSync(
+      tokenFile,
+      JSON.stringify(
+        {
+          access_token: 'access-old',
+          api_key: 'access-old',
+          apiKey: 'access-old',
+          refresh_token: 'refresh-old',
+          resource_url: 'portal.qwen.ai',
+          norefresh: true,
+          noRefresh: true,
+          type: 'qwen'
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+
+    const ensureValid = jest.fn(async () => ({}));
+    const { handleUpstreamInvalidOAuthToken } = await import('../../../src/providers/auth/oauth-lifecycle.js');
+    const result = await handleUpstreamInvalidOAuthToken(
+      'qwen',
+      { type: 'qwen-oauth', tokenFile } as any,
+      { statusCode: 401, message: 'HTTP 401: unauthorized (invalid_token)' } as any,
+      { allowBlocking: false, ensureValidOAuthToken: ensureValid as any }
+    );
+
+    expect(result).toBe(true);
+    expect(ensureValid).toHaveBeenCalledTimes(1);
+    expect(ensureValid.mock.calls[0]?.[2]?.openBrowser).toBe(false);
+
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    try {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
   });
 
   it('stops reauth after three interactive attempts (no further ensureValid calls)', async () => {

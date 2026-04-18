@@ -423,10 +423,24 @@ impl VirtualRouterEngineCore {
                     dynamic_weight_map.as_ref(),
                 );
                 let sticky_for_lb = antigravity_sticky_key.as_deref().unwrap_or(&sticky_key);
+                // v2 weighted pools may be materialized by the bootstrap layer as:
+                //   mode=priority + loadBalancing.strategy=weighted
+                // when the user only declared loadBalancing.weights (no explicit targets/order).
+                // In that conflicting state, Rust selection must honor the weighted strategy
+                // instead of letting the synthetic priority mode lock the pool to the first
+                // provider.model group forever.
+                let effective_priority_mode = pool.mode.as_deref() == Some("priority")
+                    && tier_load_balancing.strategy != "weighted";
                 let mode_override = if antigravity_sticky_key.is_some() {
                     Some("sticky")
+                } else if effective_priority_mode {
+                    Some("priority")
                 } else if let Some(mode) = pool.mode.as_deref() {
-                    Some(mode)
+                    if mode == "priority" {
+                        Some(tier_load_balancing.strategy.as_str())
+                    } else {
+                        Some(mode)
+                    }
                 } else {
                     Some(tier_load_balancing.strategy.as_str())
                 };
@@ -444,7 +458,7 @@ impl VirtualRouterEngineCore {
                     && tier_load_balancing.strategy != "sticky"
                     && dynamic_weight_map.is_none()
                     && !has_runtime_key_level_weights;
-                let selected = if pool.mode.as_deref() == Some("priority") {
+                let selected = if effective_priority_mode {
                     let route_key = format!("{}:{}:priority", route_name, pool.id);
                     let priority_candidates = ordered_group_ids
                         .first()

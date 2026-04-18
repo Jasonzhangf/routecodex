@@ -186,6 +186,25 @@ function readPreviousResponseIdFromChatSemantics(chat: Record<string, unknown>):
   return '';
 }
 
+function readResumeDeltaInputFromChatSemantics(chat: Record<string, unknown>): BridgeInputItem[] | undefined {
+  const semantics =
+    chat?.semantics && typeof chat.semantics === 'object' && !Array.isArray(chat.semantics)
+      ? (chat.semantics as Record<string, unknown>)
+      : undefined;
+  const responses =
+    semantics?.responses && typeof semantics.responses === 'object' && !Array.isArray(semantics.responses)
+      ? (semantics.responses as Record<string, unknown>)
+      : undefined;
+  const responsesResume =
+    responses?.resume && typeof responses.resume === 'object' && !Array.isArray(responses.resume)
+      ? (responses.resume as Record<string, unknown>)
+      : undefined;
+  const deltaInput = responsesResume?.deltaInput;
+  return Array.isArray(deltaInput)
+    ? (jsonClone(deltaInput as JsonValue) as BridgeInputItem[])
+    : undefined;
+}
+
 export function captureResponsesContext(
   payload: Record<string, unknown>,
   dto?: { route?: { requestId?: string } }
@@ -392,6 +411,10 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
     typeof bridgeDecisions.previousResponseId === 'string' && bridgeDecisions.previousResponseId.trim().length > 0
       ? bridgeDecisions.previousResponseId.trim()
       : readPreviousResponseIdFromChatSemantics(chat as Record<string, unknown>);
+  const resumedDeltaInput =
+    previousResponseId.length > 0
+      ? readResumeDeltaInputFromChatSemantics(chat as Record<string, unknown>)
+      : undefined;
 
   // tools: 反向映射为 ResponsesToolDefinition 形状
   const chatTools: ChatToolDefinition[] = Array.isArray(chat.tools) ? (chat.tools as ChatToolDefinition[]) : [];
@@ -438,8 +461,15 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   } = history;
 
   // 不追加 metadata，以便 roundtrip 与原始 payload 对齐；系统提示直接写入 instructions。
+  const inputForUpstream =
+    previousResponseId.length > 0 && Array.isArray(resumedDeltaInput)
+      ? resumedDeltaInput
+      : input;
+  if (callIdTransformer) {
+    enforceToolCallIdStyle(inputForUpstream, callIdTransformer);
+  }
   const upstreamInput = filterBridgeInputForUpstreamWithNative({
-    input,
+    input: inputForUpstream,
     allowToolCallId: toolCallIdStyle === 'preserve'
   }).input as BridgeInputItem[];
   if (upstreamInput.length) {

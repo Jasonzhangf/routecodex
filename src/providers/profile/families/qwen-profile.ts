@@ -17,7 +17,6 @@ type QwenMessageNode = Record<string, unknown>;
 const QWEN_CODE_SERVICE_NAME = 'qwen-code';
 const QWEN_OAUTH_AUTH_TYPE = 'qwen-oauth';
 const QWEN_OAUTH_CODER_MODEL = 'coder-model';
-const QWEN_OAUTH_VISION_MODEL = 'vision-model';
 const QWEN_OAUTH_MAX_TOKENS = 65536;
 const QWEN_WEB_SEARCH_ENDPOINT = '/api/v1/indices/plugin/web_search';
 function buildDefaultQwenSystemPart(): UnknownRecord {
@@ -149,6 +148,91 @@ function appendSystemContent(systemParts: UnknownRecord[], content: unknown): vo
   systemParts.push(toTextPart(String(content)));
 }
 
+function normalizeContentToArray(content: unknown): UnknownRecord[] | undefined {
+  if (content == null) {
+    return undefined;
+  }
+  if (typeof content === 'string') {
+    return [toTextPart(content)];
+  }
+  if (Array.isArray(content)) {
+    return content.map((item) => {
+      if (typeof item === 'string') {
+        return toTextPart(item);
+      }
+      if (isRecord(item)) {
+        return { ...item };
+      }
+      return toTextPart(String(item));
+    });
+  }
+  if (isRecord(content)) {
+    return [{ ...content }];
+  }
+  return [toTextPart(String(content))];
+}
+
+function addEphemeralCacheControlToLastContentPart(content: unknown): unknown {
+  const contentArray = normalizeContentToArray(content);
+  if (!contentArray || contentArray.length === 0) {
+    return content;
+  }
+  const lastIndex = contentArray.length - 1;
+  contentArray[lastIndex] = {
+    ...contentArray[lastIndex],
+    cache_control: { type: 'ephemeral' }
+  };
+  return contentArray;
+}
+
+function addEphemeralCacheControlToLastTool(body: UnknownRecord): void {
+  if (!Array.isArray(body.tools) || body.tools.length === 0) {
+    return;
+  }
+  const lastIndex = body.tools.length - 1;
+  const lastTool = body.tools[lastIndex];
+  if (!isRecord(lastTool)) {
+    return;
+  }
+  body.tools[lastIndex] = {
+    ...lastTool,
+    cache_control: { type: 'ephemeral' }
+  };
+}
+
+function applyQwenDashScopeCacheControl(body: UnknownRecord): void {
+  const rawMessages = Array.isArray(body.messages) ? body.messages : [];
+  if (rawMessages.length === 0) {
+    return;
+  }
+
+  const systemIndex = rawMessages.findIndex((node) => isRecord(node) && String(node.role || '').trim().toLowerCase() === 'system');
+  if (systemIndex >= 0 && isRecord(rawMessages[systemIndex])) {
+    const systemNode = { ...(rawMessages[systemIndex] as UnknownRecord) };
+    systemNode.content = addEphemeralCacheControlToLastContentPart(systemNode.content);
+    rawMessages[systemIndex] = systemNode;
+  }
+
+  const isStreaming = body.stream === true;
+  if (isStreaming) {
+    const lastIndex = rawMessages.length - 1;
+    if (isRecord(rawMessages[lastIndex])) {
+      const lastNode = { ...(rawMessages[lastIndex] as UnknownRecord) };
+      lastNode.content = addEphemeralCacheControlToLastContentPart(lastNode.content);
+      rawMessages[lastIndex] = lastNode;
+    }
+    addEphemeralCacheControlToLastTool(body);
+  }
+}
+
+function shouldEnableQwenHighResolutionImages(body: UnknownRecord): boolean {
+  const model = typeof body.model === 'string' ? body.model.trim().toLowerCase() : '';
+  if (!model) {
+    return false;
+  }
+  return model === QWEN_OAUTH_CODER_MODEL || model.startsWith('qwen3.5-plus') || model.startsWith('qwen-vl') || model.startsWith('qwen3-vl-plus');
+}
+
 function normalizeQwenOAuthMessages(body: UnknownRecord): void {
   const rawMessages = Array.isArray(body.messages) ? body.messages : [];
   const systemParts: UnknownRecord[] = [buildDefaultQwenSystemPart()];
@@ -266,14 +350,8 @@ function isQwenOAuthAuthType(authType: string): boolean {
 
 function resolveQwenOAuthModel(requestedModel: string): string {
   const normalized = requestedModel.trim().toLowerCase();
-  if (normalized === QWEN_OAUTH_VISION_MODEL) {
-    return QWEN_OAUTH_VISION_MODEL;
-  }
   if (normalized === QWEN_OAUTH_CODER_MODEL) {
     return QWEN_OAUTH_CODER_MODEL;
-  }
-  if (normalized.includes('vision') || normalized.includes('-vl')) {
-    return QWEN_OAUTH_VISION_MODEL;
   }
   return QWEN_OAUTH_CODER_MODEL;
 }
@@ -429,6 +507,10 @@ export const qwenFamilyProfile: ProviderFamilyProfile = {
     normalizeQwenOAuthReasoning(requestBody, input);
     mirrorQwenOAuthReasoningEffort(requestBody);
     normalizeQwenOAuthMessages(requestBody);
+    applyQwenDashScopeCacheControl(requestBody);
+    if (shouldEnableQwenHighResolutionImages(requestBody)) {
+      requestBody.vl_high_resolution_images = true;
+    }
     return body;
   },
   resolveUserAgent(input: ResolveUserAgentInput): string | undefined {

@@ -95,7 +95,7 @@ describe('Provider outbound → upstream (openai-chat)', () => {
       config: {
         providerType: 'openai',
         baseUrl: 'https://api.openai.com/v1',
-        model: 'qwen3-coder-plus',
+        model: 'coder-model',
         auth: { type: 'apikey', apiKey: 'testapikey12345' },
         overrides: { maxRetries: 0 }
       }
@@ -107,7 +107,7 @@ describe('Provider outbound → upstream (openai-chat)', () => {
     );
     await provider.initialize();
 
-    const requestModel = (golden as any)?.model ?? 'qwen3-coder-plus';
+    const requestModel = (golden as any)?.model ?? 'coder-model';
     const request: any = { data: { ...golden, model: requestModel, stream: true, metadata: { foo: 'bar' } } };
     attachProviderRuntimeMetadata(request, {
       requestId: 'req_test_qwen', providerType: 'openai', providerProtocol: 'openai-chat', providerId: 'qwen'

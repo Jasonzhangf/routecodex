@@ -150,10 +150,7 @@ fn normalize_exec_like_args(fn_name: &str, args_obj: &mut Map<String, Value>) {
 
     let normalized_cmd = read_exec_command_candidate(args_obj);
 
-    if lowered == "shell_command"
-        && !args_obj.contains_key("command")
-        && normalized_cmd.is_some()
-    {
+    if lowered == "shell_command" && !args_obj.contains_key("command") && normalized_cmd.is_some() {
         args_obj.insert(
             "command".to_string(),
             Value::String(normalized_cmd.unwrap_or_default()),
@@ -582,7 +579,10 @@ mod tests {
             .expect("normalized arguments");
         let args: serde_json::Value = serde_json::from_str(args_text).expect("parse args");
         assert_eq!(args.get("cmd").and_then(|v| v.as_str()), None);
-        assert_eq!(args.get("input").and_then(|v| v.as_str()), Some("git status"));
+        assert_eq!(
+            args.get("input").and_then(|v| v.as_str()),
+            Some("git status")
+        );
     }
 
     #[test]

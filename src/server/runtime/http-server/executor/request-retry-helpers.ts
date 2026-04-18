@@ -1,4 +1,5 @@
 import { getSessionClientRegistry } from '../session-client-registry.js';
+import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.js';
 
 const DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS = 20;
 
@@ -26,30 +27,24 @@ const RATE_LIMIT_MESSAGE_HINTS = [
   '频率限制'
 ];
 
+
 export type AntigravityRetrySignal = {
   signature: string;
   consecutive: number;
   avoidAllOnRetry?: boolean;
 };
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logRequestRetryNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
-  try {
-    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
-    console.warn(`[request-retry] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
-  } catch {
-    // Never throw from non-blocking logging.
-  }
+  logExecutorRuntimeNonBlockingWarning({
+    namespace: 'request-retry',
+    stage,
+    error,
+    details,
+    throttleKey: details?.conversationSessionId && details?.tmuxSessionId
+      ? `${stage}:${String(details.conversationSessionId)}:${String(details.tmuxSessionId)}`
+      : undefined
+  });
 }
 
 export function resolveAntigravityMaxProviderAttempts(): number {

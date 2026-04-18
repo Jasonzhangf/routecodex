@@ -178,6 +178,12 @@ export class ResponsesResponseBuilder {
         case 'response.completed':
           this.handleResponseCompleted(event);
           break;
+        case 'response.failed':
+          this.handleResponseFailed(event);
+          break;
+        case 'response.incomplete':
+          this.handleResponseIncomplete(event);
+          break;
 
         case 'response.start':
           this.handleResponseStart(event);
@@ -1051,6 +1057,110 @@ export class ResponsesResponseBuilder {
     this.state = 'completed';
   }
 
+  private buildTerminalResponseError(params: {
+    payload: any;
+    fallbackCode: string;
+    fallbackMessage: string;
+    defaultStatusCode?: number;
+    defaultRetryable?: boolean;
+  }): Error {
+    const {
+      payload,
+      fallbackCode,
+      fallbackMessage,
+      defaultStatusCode = 502,
+      defaultRetryable = false
+    } = params;
+    const responseError = payload?.error && typeof payload.error === 'object' ? payload.error : undefined;
+    const incompleteDetails =
+      payload?.incomplete_details && typeof payload.incomplete_details === 'object'
+        ? payload.incomplete_details
+        : undefined;
+    const upstreamCode =
+      typeof responseError?.code === 'string' && responseError.code.trim()
+        ? responseError.code.trim()
+        : typeof incompleteDetails?.reason === 'string' && incompleteDetails.reason.trim()
+          ? incompleteDetails.reason.trim()
+          : fallbackCode;
+    const message =
+      typeof responseError?.message === 'string' && responseError.message.trim()
+        ? responseError.message.trim()
+        : typeof incompleteDetails?.reason === 'string' && incompleteDetails.reason.trim()
+          ? `Responses response incomplete: ${incompleteDetails.reason.trim()}`
+          : fallbackMessage;
+    const errorType = typeof responseError?.type === 'string' ? responseError.type.trim().toLowerCase() : '';
+    const normalizedCode = upstreamCode.toLowerCase();
+    const isContextLengthExceeded =
+      normalizedCode.includes('context_length_exceeded')
+      || normalizedCode.includes('context_window_exceeded')
+      || normalizedCode.includes('model_context_window_exceeded')
+      || message.toLowerCase().includes('context_length_exceeded');
+    const statusCode = isContextLengthExceeded || errorType === 'invalid_request_error'
+      ? 400
+      : defaultStatusCode;
+    const retryable = isContextLengthExceeded || errorType === 'invalid_request_error'
+      ? false
+      : defaultRetryable;
+
+    const error = new Error(message) as Error & {
+      code?: string;
+      upstreamCode?: string;
+      status?: number;
+      statusCode?: number;
+      retryable?: boolean;
+      details?: Record<string, unknown>;
+    };
+    error.code = upstreamCode;
+    error.upstreamCode = upstreamCode;
+    error.status = statusCode;
+    error.statusCode = statusCode;
+    error.retryable = retryable;
+    error.details = {
+      responseStatus: typeof payload?.status === 'string' ? payload.status : undefined,
+      incompleteReason: typeof incompleteDetails?.reason === 'string' ? incompleteDetails.reason : undefined,
+      errorType: errorType || undefined
+    };
+    return error;
+  }
+
+  private handleResponseFailed(event: ResponsesSseEvent): void {
+    const payload = (event.data as any)?.response ?? event.data ?? {};
+    this.response = {
+      ...this.response,
+      id: payload?.id ?? this.response.id,
+      status: typeof payload?.status === 'string' ? payload.status : 'failed',
+      output: Array.isArray(payload?.output) && payload.output.length ? payload.output : this.buildOutputItems(),
+      usage: payload?.usage ?? this.response.usage
+    };
+    this.error = this.buildTerminalResponseError({
+      payload,
+      fallbackCode: 'response_failed',
+      fallbackMessage: 'Responses request failed',
+      defaultStatusCode: 502,
+      defaultRetryable: false
+    });
+    this.state = 'error';
+  }
+
+  private handleResponseIncomplete(event: ResponsesSseEvent): void {
+    const payload = (event.data as any)?.response ?? event.data ?? {};
+    this.response = {
+      ...this.response,
+      id: payload?.id ?? this.response.id,
+      status: typeof payload?.status === 'string' ? payload.status : 'incomplete',
+      output: Array.isArray(payload?.output) && payload.output.length ? payload.output : this.buildOutputItems(),
+      usage: payload?.usage ?? this.response.usage
+    };
+    this.error = this.buildTerminalResponseError({
+      payload,
+      fallbackCode: 'response_incomplete',
+      fallbackMessage: 'Responses response incomplete',
+      defaultStatusCode: 502,
+      defaultRetryable: false
+    });
+    this.state = 'error';
+  }
+
   /**
    * 构建输出项列表
    */
@@ -1194,39 +1304,6 @@ export class ResponsesResponseBuilder {
         }
         return { success: true, response: this.response as ResponsesResponse };
       }
-      // 进一步容错：有些上游不发送 response.completed/response.done，仅发送 output_item.done 后直接结束流。
-      // 若至少存在一个已完成的输出项，则按 completed 视为成功。
-      let anyCompleted = false;
-      for (const [, st] of this.outputItemBuilders) {
-        if (st.status === 'completed') { anyCompleted = true; break; }
-      }
-      if (anyCompleted) {
-        (this.response as any).status = 'completed';
-        try {
-          const cur = (this.response as any).output;
-          if (!Array.isArray(cur) || cur.length === 0) {
-            (this.response as any).output = this.buildOutputItems();
-          }
-        } catch {
-          (this.response as any).output = this.buildOutputItems();
-        }
-        return { success: true, response: this.response as ResponsesResponse };
-      }
-      // Further salvage: some upstreams end the stream without any terminal events
-      // (no output_item.done/response.completed/response.done) but still materialize
-      // output_item.added + content deltas. Use current aggregated items as completed.
-      if (this.outputItemBuilders.size > 0) {
-        (this.response as any).status = 'completed';
-        try {
-          const cur = (this.response as any).output;
-          if (!Array.isArray(cur) || cur.length === 0) {
-            (this.response as any).output = this.buildOutputItems();
-          }
-        } catch {
-          (this.response as any).output = this.buildOutputItems();
-        }
-        return { success: true, response: this.response as ResponsesResponse };
-      }
     } catch (error) {
       logResponseBuilderNonBlocking('build.salvage_fallback', error, {
         state: this.state,
@@ -1234,7 +1311,10 @@ export class ResponsesResponseBuilder {
       });
     }
 
-    return { success: false, error: new Error('Building not completed') };
+    return {
+      success: false,
+      error: new Error('Responses SSE stream incomplete before response.completed/response.done')
+    };
   }
 
   /**

@@ -71,4 +71,36 @@ data: {"type":"response.completed","response":{"id":"resp_completed","object":"r
 
     expect(response.status).toBe('completed');
   });
+
+  it('preserves response.failed context_length_exceeded instead of misclassifying it as stream incomplete', async () => {
+    const ssePayload = `event: response.created
+data: {"type":"response.created","response":{"id":"resp_failed","object":"response","created_at":1710000000,"status":"in_progress","model":"gpt-5.3-codex","output":[]}}
+
+event: response.in_progress
+data: {"type":"response.in_progress","response":{"id":"resp_failed","object":"response","created_at":1710000000,"status":"in_progress","model":"gpt-5.3-codex","output":[]}}
+
+event: error
+data: {"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again.","param":"input"}}
+
+event: response.failed
+data: {"type":"response.failed","response":{"id":"resp_failed","object":"response","created_at":1710000000,"status":"failed","model":"gpt-5.3-codex","output":[],"error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again."}}}
+`;
+
+    const converter = new ResponsesSseToJsonConverter();
+    const stream = new PassThrough();
+    stream.end(ssePayload);
+
+    await expect(
+      converter.convertSseToJson(stream, {
+        requestId: 'resp-failed-context-length'
+      })
+    ).rejects.toMatchObject({
+      code: 'SSE_TO_JSON_ERROR',
+      status: 400,
+      statusCode: 400,
+      retryable: false,
+      upstreamCode: 'context_length_exceeded',
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    });
+  });
 });

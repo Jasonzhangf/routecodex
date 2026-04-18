@@ -22,6 +22,14 @@ describe('executor-provider retry policy', () => {
     expect(shouldRetryProviderError(nonRetriable)).toBe(false);
   });
 
+  it('fails fast on deterministic context overflow errors', () => {
+    const promptTooLong = Object.assign(new Error('context_length_exceeded: prompt is too long'), {
+      statusCode: 400,
+      code: 'context_length_exceeded'
+    });
+    expect(shouldRetryProviderError(promptTooLong)).toBe(false);
+  });
+
   it('treats HTTP 413 payload-too-large as retryable for provider failover', () => {
     const payloadTooLarge = Object.assign(
       new Error('HTTP 413: {"error":{"message":"Exceeded limit on max bytes to request body : 6291456"}}'),
