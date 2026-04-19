@@ -1,6 +1,7 @@
 import {
   AnthropicOpenAIConversionCodec,
   buildAnthropicFromOpenAIChat,
+  buildAnthropicRequestFromOpenAIChat,
   buildOpenAIChatFromAnthropic
 } from '../anthropic-openai-codec.js';
 
@@ -114,6 +115,55 @@ describe('anthropic-openai-codec native wrapper', () => {
       call_id: 'toolu_2',
       tool_call_id: 'toolu_2'
     });
+  });
+
+  test('preserves blank lines when converting anthropic request into openai chat', () => {
+    const result = buildOpenAIChatFromAnthropic(
+      {
+        model: 'claude-3-7-sonnet',
+        system: [{ type: 'text', text: 'system line 1\n\nsystem line 2\n' }],
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'alpha\n\nbeta' },
+              { type: 'text', text: '\n\ngamma' }
+            ]
+          }
+        ]
+      } as any
+    );
+
+    expect((result as any).messages[0]).toMatchObject({
+      role: 'system',
+      content: 'system line 1\n\nsystem line 2\n'
+    });
+    expect((result as any).messages[1]).toMatchObject({
+      role: 'user',
+      content: 'alpha\n\nbeta\n\ngamma'
+    });
+  });
+
+  test('preserves blank lines when converting openai chat back to anthropic request', () => {
+    const result = buildAnthropicRequestFromOpenAIChat(
+      {
+        model: 'claude-3-7-sonnet',
+        messages: [
+          { role: 'system', content: 'system line 1\n\nsystem line 2\n' },
+          { role: 'user', content: 'alpha\n\nbeta\n\ngamma' }
+        ]
+      } as any
+    );
+
+    expect((result as any).system).toEqual([
+      { type: 'text', text: 'system line 1\n\nsystem line 2\n' }
+    ]);
+    expect((result as any).messages).toEqual([
+      {
+        role: 'user',
+        content: 'alpha\n\nbeta\n\ngamma'
+      }
+    ]);
   });
 
   test('converts governed chat response back to anthropic using stored alias map', async () => {

@@ -44,6 +44,10 @@ fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
     Some(trimmed.to_string())
 }
 
+fn has_visible_text(value: &str) -> bool {
+    !value.trim().is_empty()
+}
+
 fn normalize_anthropic_tool_name(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -208,8 +212,8 @@ fn append_system_messages(raw_system: Option<&Value>, messages: &mut Vec<Value>)
     };
 
     for block in blocks {
-        let text = flatten_text(&block).trim().to_string();
-        if text.is_empty() {
+        let text = flatten_text(&block);
+        if !has_visible_text(&text) {
             continue;
         }
         messages.push(Value::Object(Map::from_iter([
@@ -237,17 +241,24 @@ fn convert_anthropic_messages(
         let content = row.get("content").cloned().unwrap_or(Value::Null);
         let Some(blocks) = content.as_array() else {
             let text = flatten_text(&content);
-            if text.is_empty() {
+            if !has_visible_text(&text) {
                 continue;
             }
             let normalized = normalize_chat_message_content(&Value::String(text.clone()));
+            let normalized_reasoning = normalized.reasoning_text.filter(|v| !v.trim().is_empty());
             let mut message = Map::<String, Value>::new();
             message.insert("role".to_string(), Value::String(role));
             message.insert(
                 "content".to_string(),
-                Value::String(normalized.content_text.unwrap_or(text)),
+                Value::String(
+                    if normalized_reasoning.is_some() {
+                        normalized.content_text.unwrap_or_else(|| text.clone())
+                    } else {
+                        text.clone()
+                    },
+                ),
             );
-            if let Some(reasoning) = normalized.reasoning_text.filter(|v| !v.trim().is_empty()) {
+            if let Some(reasoning) = normalized_reasoning {
                 if let Some(reasoning_payload) =
                     build_message_reasoning_value(&[], &[reasoning], None)
                 {
@@ -277,14 +288,14 @@ fn convert_anthropic_messages(
                 .to_ascii_lowercase();
             match kind.as_str() {
                 "text" => {
-                    let text = flatten_text(block).trim().to_string();
-                    if !text.is_empty() {
+                    let text = flatten_text(block);
+                    if has_visible_text(&text) {
                         text_parts.push(text);
                     }
                 }
                 "thinking" | "reasoning" => {
-                    let text = flatten_text(block).trim().to_string();
-                    if !text.is_empty() {
+                    let text = flatten_text(block);
+                    if has_visible_text(&text) {
                         reasoning_parts.push(text);
                     }
                 }
@@ -347,22 +358,26 @@ fn convert_anthropic_messages(
             || !tool_calls.is_empty()
             || !reasoning_parts.is_empty()
         {
-            let combined_text = text_parts.join("\n");
+            let combined_text = text_parts.join("");
             let normalized = normalize_chat_message_content(&Value::String(combined_text.clone()));
+            let normalized_reasoning = normalized.reasoning_text.filter(|v| !v.trim().is_empty());
+            let text_payload = if normalized_reasoning.is_some() {
+                normalized
+                    .content_text
+                    .unwrap_or_else(|| combined_text.clone())
+            } else {
+                combined_text.clone()
+            };
             let mut message = Map::<String, Value>::new();
             message.insert("role".to_string(), Value::String(role));
             if image_parts.is_empty() {
-                message.insert(
-                    "content".to_string(),
-                    Value::String(normalized.content_text.unwrap_or(combined_text)),
-                );
+                message.insert("content".to_string(), Value::String(text_payload.clone()));
             } else {
                 let mut content_parts: Vec<Value> = Vec::new();
-                let text_payload = normalized.content_text.unwrap_or(combined_text);
-                if !text_payload.trim().is_empty() {
+                if has_visible_text(&text_payload) {
                     content_parts.push(Value::Object(Map::from_iter([
                         ("type".to_string(), Value::String("text".to_string())),
-                        ("text".to_string(), Value::String(text_payload)),
+                        ("text".to_string(), Value::String(text_payload.clone())),
                     ])));
                 }
                 content_parts.extend(image_parts);
@@ -372,7 +387,7 @@ fn convert_anthropic_messages(
                 message.insert("tool_calls".to_string(), Value::Array(tool_calls));
             }
             let mut merged_reasoning = reasoning_parts;
-            if let Some(reasoning) = normalized.reasoning_text.filter(|v| !v.trim().is_empty()) {
+            if let Some(reasoning) = normalized_reasoning {
                 merged_reasoning.push(reasoning);
             }
             if let Some(reasoning_payload) =
@@ -433,6 +448,47 @@ mod tests {
         assert_eq!(
             content[1]["image_url"]["url"].as_str(),
             Some("data:image/png;base64,AAA")
+        );
+    }
+
+    #[test]
+    fn build_openai_chat_from_anthropic_preserves_blank_lines() {
+        let payload = json!({
+            "system": [{ "type": "text", "text": "system line 1\n\nsystem line 2\n" }],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "alpha\n\nbeta\n\ngamma"
+                },
+                {
+                    "role": "assistant",
+                    "content": [
+                        { "type": "text", "text": "first\n\nsecond" },
+                        { "type": "text", "text": "\n\nthird" }
+                    ]
+                }
+            ]
+        });
+
+        let output: Value = serde_json::from_str(
+            &build_openai_chat_from_anthropic_json(payload.to_string(), None).expect("build success"),
+        )
+        .expect("json output");
+
+        let messages = output["request"]["messages"]
+            .as_array()
+            .expect("messages array");
+        assert_eq!(
+            messages[0]["content"].as_str(),
+            Some("system line 1\n\nsystem line 2\n")
+        );
+        assert_eq!(
+            messages[1]["content"].as_str(),
+            Some("alpha\n\nbeta\n\ngamma")
+        );
+        assert_eq!(
+            messages[2]["content"].as_str(),
+            Some("first\n\nsecond\n\nthird")
         );
     }
 }

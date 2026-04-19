@@ -1,5 +1,6 @@
 import { createBridgeActionState, runBridgeActionPipeline } from '../bridge-actions.js';
 import { resolveBridgePolicy, resolvePolicyActions } from '../bridge-policies.js';
+import { ProviderProtocolError } from '../provider-protocol-error.js';
 import { normalizeChatMessageContent } from './chat-output-normalizer.js';
 import { jsonClone, type JsonValue, type JsonObject } from '../hub/types/json.js';
 import { mapAnthropicToolsToChat } from './anthropic-message-utils-tool-schema.js';
@@ -9,7 +10,6 @@ import {
   isObject,
   normalizeAnthropicToolName,
   normalizeToolResultContent,
-  requireSystemText,
   requireTrimmedString,
   safeJson
 } from './anthropic-message-utils-core.js';
@@ -69,6 +69,26 @@ function invertAnthropicAliasMap(source: Record<string, string> | undefined): Re
   return Object.keys(inverted).length ? inverted : undefined;
 }
 
+function hasVisibleText(value: string | undefined): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function requireAnthropicTextPreserveWhitespace(block: unknown, context: string): string {
+  const text = flattenAnthropicText(block);
+  if (!hasVisibleText(text)) {
+    throw new ProviderProtocolError(
+      `Anthropic bridge constraint violated: ${context} must contain text`,
+      {
+        code: 'MALFORMED_REQUEST',
+        protocol: 'anthropic-messages',
+        providerType: 'anthropic',
+        details: { context }
+      }
+    );
+  }
+  return text;
+}
+
 export function buildOpenAIChatFromAnthropic(
   payload: unknown,
   options?: { includeToolCallIds?: boolean }
@@ -105,7 +125,7 @@ export function buildOpenAIChatFromAnthropic(
       ? [rawSystem]
       : [];
   for (const block of systemBlocks) {
-    const text = requireSystemText(block, 'system entry');
+    const text = requireAnthropicTextPreserveWhitespace(block, 'system entry');
     newMessages.push({ role: 'system', content: text });
   }
 
@@ -116,14 +136,18 @@ export function buildOpenAIChatFromAnthropic(
     const content = (m as any).content;
     if (!Array.isArray(content)) {
       const text = flattenAnthropicText(content);
-      if (text) {
+      if (hasVisibleText(text)) {
         const normalized = normalizeChatMessageContent(text);
+        const reasoningText =
+          typeof normalized.reasoningText === 'string' && normalized.reasoningText.trim().length
+            ? normalized.reasoningText
+            : undefined;
         const message: Unknown = {
           role,
-          content: normalized.contentText ?? text
+          content: reasoningText ? (normalized.contentText ?? text) : text
         };
-        if (typeof normalized.reasoningText === 'string' && normalized.reasoningText.trim().length) {
-          (message as any).reasoning_content = normalized.reasoningText.trim();
+        if (reasoningText) {
+          (message as any).reasoning_content = reasoningText;
         }
         newMessages.push(message);
       }
@@ -138,11 +162,11 @@ export function buildOpenAIChatFromAnthropic(
       if (!block || typeof block !== 'object') continue;
       const t = String((block as any).type || '').toLowerCase();
       if (t === 'text' && typeof (block as any).text === 'string') {
-        const s = (block as any).text.trim();
-        if (s) textParts.push(s);
+        const s = String((block as any).text);
+        if (hasVisibleText(s)) textParts.push(s);
       } else if (t === 'thinking' || t === 'reasoning') {
-        const thinkingText = flattenAnthropicText(block).trim();
-        if (thinkingText) {
+        const thinkingText = flattenAnthropicText(block);
+        if (hasVisibleText(thinkingText)) {
           reasoningParts.push(thinkingText);
         }
       } else if (t === 'image') {
@@ -192,22 +216,26 @@ export function buildOpenAIChatFromAnthropic(
         toolResults.push({ role: 'tool', tool_call_id: callId, content: contentStr });
       }
     }
-    const combinedText = textParts.join('\n');
+    const combinedText = textParts.join('');
     const normalized = normalizeChatMessageContent(combinedText);
     const hasRawText = typeof combinedText === 'string' && combinedText.trim().length > 0;
     const mergedReasoning: string[] = [...reasoningParts];
     if (typeof normalized.reasoningText === 'string' && normalized.reasoningText.trim().length) {
-      mergedReasoning.push(normalized.reasoningText.trim());
+      mergedReasoning.push(normalized.reasoningText);
     }
     const hasText = typeof normalized.contentText === 'string' && normalized.contentText.length > 0;
     const hasReasoning = mergedReasoning.length > 0;
     if (hasText || hasRawText || toolCalls.length > 0 || hasReasoning || imageBlocks.length > 0) {
-      let contentNode: unknown = (hasText ? normalized.contentText : undefined) ?? combinedText ?? '';
+      let contentNode: unknown = hasReasoning
+        ? ((hasText ? normalized.contentText : undefined) ?? combinedText ?? '')
+        : (combinedText ?? '');
       if (imageBlocks.length > 0) {
         const blocks: UnknownArray = [];
-        const textPayload = (hasText ? normalized.contentText : undefined) ?? combinedText ?? '';
+        const textPayload = hasReasoning
+          ? ((hasText ? normalized.contentText : undefined) ?? combinedText ?? '')
+          : (combinedText ?? '');
         if (typeof textPayload === 'string' && textPayload.trim().length) {
-          blocks.push({ type: 'text', text: textPayload.trim() });
+          blocks.push({ type: 'text', text: textPayload });
         }
         for (const img of imageBlocks) {
           blocks.push(jsonClone(img as JsonValue) as Unknown);

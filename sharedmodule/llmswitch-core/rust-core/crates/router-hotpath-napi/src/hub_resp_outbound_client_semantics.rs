@@ -1969,10 +1969,17 @@ pub(crate) fn normalize_responses_function_name(raw: Option<&str>) -> Option<Str
     Some(trimmed)
 }
 
+fn read_raw_object_string(row: &Map<String, Value>, key: &str) -> Option<String> {
+    row.get(key)
+        .and_then(|v| v.as_str())
+        .map(|v| v.to_string())
+        .filter(|v| !v.is_empty())
+}
+
 fn normalize_output_text_content(content: &Value) -> Vec<Value> {
     let mut output: Vec<Value> = Vec::new();
     if let Some(raw) = content.as_str() {
-        let text = raw.trim().to_string();
+        let text = raw.to_string();
         if !text.is_empty() {
             output.push(Value::Object(Map::from_iter([
                 ("type".to_string(), Value::String("output_text".to_string())),
@@ -1987,7 +1994,7 @@ fn normalize_output_text_content(content: &Value) -> Vec<Value> {
     };
     for part in parts {
         if let Some(raw) = part.as_str() {
-            let text = raw.trim().to_string();
+            let text = raw.to_string();
             if !text.is_empty() {
                 output.push(Value::Object(Map::from_iter([
                     ("type".to_string(), Value::String("output_text".to_string())),
@@ -2005,8 +2012,8 @@ fn normalize_output_text_content(content: &Value) -> Vec<Value> {
             || raw_type.eq_ignore_ascii_case("output_text")
             || raw_type.eq_ignore_ascii_case("refusal")
         {
-            let text = read_object_string(row, "text")
-                .or_else(|| read_object_string(row, "content"))
+            let text = read_raw_object_string(row, "text")
+                .or_else(|| read_raw_object_string(row, "content"))
                 .unwrap_or_default();
             if !text.is_empty() {
                 output.push(Value::Object(Map::from_iter([
@@ -2041,6 +2048,7 @@ fn collect_responses_output_text(parts: &[Value], meta: Option<&Value>) -> Optio
     }
 
     let mut texts: Vec<String> = Vec::new();
+    let mut saw_output_text = false;
     for part in parts {
         let Some(row) = part.as_object() else {
             continue;
@@ -2054,19 +2062,18 @@ fn collect_responses_output_text(parts: &[Value], meta: Option<&Value>) -> Optio
         if kind != "output_text" {
             continue;
         }
-        let text = row
-            .get("text")
-            .and_then(|v| v.as_str())
-            .map(|v| v.trim().to_string())
-            .unwrap_or_default();
-        if !text.is_empty() {
-            texts.push(text);
-        }
+        saw_output_text = true;
+        texts.push(
+            row.get("text")
+                .and_then(|v| v.as_str())
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+        );
     }
-    if texts.is_empty() {
+    if !saw_output_text {
         None
     } else {
-        Some(texts.join("\n"))
+        Some(texts.join(""))
     }
 }
 
@@ -2630,7 +2637,7 @@ fn build_responses_payload_from_chat_core(
         );
         reasoning_item.insert("type".to_string(), Value::String("reasoning".to_string()));
         reasoning_item.insert("status".to_string(), Value::String("completed".to_string()));
-        let has_explicit_summary = reasoning_payload
+        let _has_explicit_summary = reasoning_payload
             .get("summary")
             .and_then(Value::as_array)
             .map(|items| !items.is_empty())
@@ -2675,16 +2682,16 @@ fn build_responses_payload_from_chat_core(
             normalize_reasoning_summary_for_codex_display(&mut summary);
             reasoning_item.insert("summary".to_string(), summary);
         }
-        let summary_was_backfilled =
-            !has_explicit_summary && reasoning_item.contains_key("summary");
-        if has_explicit_summary || !summary_was_backfilled {
-            if let Some(content) = reasoning_payload.get("content") {
-                reasoning_item.insert("content".to_string(), content.clone());
-            }
+        if let Some(content) = reasoning_payload.get("content") {
+            reasoning_item.insert("content".to_string(), content.clone());
         }
-        if let Some(encrypted_content) = reasoning_payload.get("encrypted_content") {
-            reasoning_item.insert("encrypted_content".to_string(), encrypted_content.clone());
-        }
+        reasoning_item.insert(
+            "encrypted_content".to_string(),
+            reasoning_payload
+                .get("encrypted_content")
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
         output_items.push(Value::Object(reasoning_item));
     }
 
@@ -3841,7 +3848,63 @@ mod tests {
             reasoning_item["summary"][1]["text"],
             Value::String("raw-only-2".to_string())
         );
-        assert!(reasoning_item.get("content").is_none());
+        assert_eq!(
+            reasoning_item["content"][0]["text"],
+            Value::String("raw-only-1".to_string())
+        );
+        assert_eq!(
+            reasoning_item["content"][1]["text"],
+            Value::String("raw-only-2".to_string())
+        );
+        assert_eq!(reasoning_item["encrypted_content"], Value::Null);
+    }
+
+    #[test]
+    fn build_responses_payload_from_chat_preserves_output_text_whitespace_and_concat_shape() {
+        let payload = serde_json::json!({
+            "id": "resp_output_text_whitespace",
+            "model": "gpt-5.2",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            { "type": "output_text", "text": "\nline-1\n\n" },
+                            { "type": "output_text", "text": "line-2\n" }
+                        ]
+                    }
+                }
+            ]
+        });
+
+        let output = build_responses_payload_from_chat_core(
+            &payload,
+            Some("req_output_text_whitespace"),
+            &serde_json::json!({ "toolsRaw": [] }),
+        )
+        .expect("build responses payload");
+
+        let message_item = output["output"]
+            .as_array()
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|item| item["type"] == Value::String("message".to_string()))
+            })
+            .cloned()
+            .expect("message output item");
+        assert_eq!(
+            message_item["content"][0]["text"],
+            Value::String("\nline-1\n\n".to_string())
+        );
+        assert_eq!(
+            message_item["content"][1]["text"],
+            Value::String("line-2\n".to_string())
+        );
+        assert_eq!(
+            output["output_text"],
+            Value::String("\nline-1\n\nline-2\n".to_string())
+        );
     }
 
     #[test]

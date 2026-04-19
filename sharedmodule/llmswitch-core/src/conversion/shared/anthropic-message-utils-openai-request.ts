@@ -7,7 +7,6 @@ import {
   flattenAnthropicText,
   isObject,
   normalizeShellLikeToolInput,
-  requireSystemText,
   requireTrimmedString,
   sanitizeToolUseId
 } from './anthropic-message-utils-core.js';
@@ -32,6 +31,10 @@ const ANTHROPIC_TOP_LEVEL_FIELDS = new Set<string>([
   'tool_choice',
   'thinking'
 ]);
+
+function hasVisibleText(value: string | undefined): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
 
 export function buildAnthropicRequestFromOpenAIChat(
   chatReq: unknown,
@@ -86,15 +89,25 @@ export function buildAnthropicRequestFromOpenAIChat(
 
   const systemBlocks: Array<{ type: 'text'; text: string }> = [];
   const pushSystemBlock = (text: string) => {
-    const trimmed = text.trim();
-    if (trimmed) systemBlocks.push({ type: 'text', text: trimmed });
+    if (hasVisibleText(text)) systemBlocks.push({ type: 'text', text });
   };
   try {
     const sys = requestBody.system;
     const ingestSystem = (val: unknown): void => {
       if (!val) return;
       if (typeof val === 'string') {
-        pushSystemBlock(requireSystemText(val, 'top-level system'));
+        if (!hasVisibleText(val)) {
+          throw new ProviderProtocolError(
+            'Anthropic bridge constraint violated: top-level system must contain text',
+            {
+              code: 'MALFORMED_REQUEST',
+              protocol: 'anthropic-messages',
+              providerType: 'anthropic',
+              details: { context: 'top-level system' }
+            }
+          );
+        }
+        pushSystemBlock(val);
         return;
       }
       if (Array.isArray(val)) {
@@ -102,7 +115,19 @@ export function buildAnthropicRequestFromOpenAIChat(
         return;
       }
       if (typeof val === 'object') {
-        pushSystemBlock(requireSystemText(val, 'top-level system'));
+        const text = flattenAnthropicText(val);
+        if (!hasVisibleText(text)) {
+          throw new ProviderProtocolError(
+            'Anthropic bridge constraint violated: top-level system must contain text',
+            {
+              code: 'MALFORMED_REQUEST',
+              protocol: 'anthropic-messages',
+              providerType: 'anthropic',
+              details: { context: 'top-level system' }
+            }
+          );
+        }
+        pushSystemBlock(text);
         return;
       }
       throw new ProviderProtocolError(
@@ -130,10 +155,11 @@ export function buildAnthropicRequestFromOpenAIChat(
       mirrorIndex += 1;
     }
     const contentNode = (m as any).content;
-    const text = collectText(contentNode).trim();
+    const text = collectText(contentNode);
+    const hasText = hasVisibleText(text);
 
     if (role === 'system') {
-      if (!text) {
+      if (!hasText) {
         throw new ProviderProtocolError(
           'Anthropic bridge constraint violated: Chat system message must contain text',
           {
@@ -224,17 +250,17 @@ export function buildAnthropicRequestFromOpenAIChat(
         }
       }
     }
-    if (text) {
+    if (hasText) {
       blocks.push({ type: 'text', text });
     }
     if (role === 'assistant') {
       const reasoningText =
         typeof (m as any).reasoning_content === 'string'
-          ? String((m as any).reasoning_content).trim()
+          ? String((m as any).reasoning_content)
           : typeof (m as any).reasoning === 'string'
-            ? String((m as any).reasoning).trim()
+            ? String((m as any).reasoning)
             : '';
-      if (reasoningText.length > 0) {
+      if (hasVisibleText(reasoningText)) {
         blocks.push({ type: 'thinking', text: reasoningText });
       }
     }
