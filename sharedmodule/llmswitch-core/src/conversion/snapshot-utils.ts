@@ -178,6 +178,30 @@ function resolvePositiveIntegerFromEnv(names: string[], fallback: number): numbe
   return fallback;
 }
 
+function resolveBoolFromEnv(names: string[], fallback: boolean): boolean {
+  for (const name of names) {
+    const raw = String(process.env[name] ?? '').trim().toLowerCase();
+    if (!raw) {
+      continue;
+    }
+    if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') {
+      return true;
+    }
+    if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') {
+      return false;
+    }
+  }
+  return fallback;
+}
+
+function shouldPreserveFullSnapshotPayload(stage: string): boolean {
+  if (resolveBoolFromEnv(['ROUTECODEX_SNAPSHOT_FULL', 'RCC_SNAPSHOT_FULL'], false)) {
+    return true;
+  }
+  const normalized = String(stage || '').trim().toLowerCase();
+  return normalized.startsWith('provider-request') || normalized.startsWith('provider-response');
+}
+
 function resolveSnapshotPayloadMaxBytes(): number {
   return resolvePositiveIntegerFromEnv(
     ['ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES', 'RCC_SNAPSHOT_PAYLOAD_MAX_BYTES'],
@@ -306,6 +330,13 @@ function summarizeSnapshotPayload(value: unknown): Record<string, unknown> {
 }
 
 function coerceSnapshotPayloadForWrite(stage: string, payload: unknown): { data: unknown; sizeBytes: number } {
+  if (shouldPreserveFullSnapshotPayload(stage)) {
+    const estimatedBytes = estimateSnapshotPayloadBytes(payload, { maxBytes: Number.POSITIVE_INFINITY });
+    return {
+      data: payload,
+      sizeBytes: Math.max(1, estimatedBytes)
+    };
+  }
   const maxBytes = resolveSnapshotPayloadMaxBytes();
   const estimatedBytes = estimateSnapshotPayloadBytes(payload, { maxBytes: maxBytes + 1 });
   if (estimatedBytes <= maxBytes) {
@@ -315,14 +346,8 @@ function coerceSnapshotPayloadForWrite(stage: string, payload: unknown): { data:
     };
   }
   return {
-    data: {
-      __snapshot_truncated: true,
-      stage,
-      maxBytes,
-      estimatedBytes,
-      summary: summarizeSnapshotPayload(payload)
-    },
-    sizeBytes: 512
+    data: undefined,
+    sizeBytes: 0
   };
 }
 
@@ -388,6 +413,9 @@ export function createSnapshotWriter(opts: {
       return;
     }
     const prepared = coerceSnapshotPayloadForWrite(stage, payload);
+    if (prepared.data === undefined) {
+      return;
+    }
     enqueueSnapshotTask(() => {
       void recordSnapshot({
         stage,

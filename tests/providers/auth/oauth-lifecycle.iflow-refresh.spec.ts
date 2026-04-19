@@ -30,7 +30,7 @@ describe('oauth-lifecycle: iflow refresh-endpoint rejection handling', () => {
     expect(shouldTriggerInteractiveOAuthRepair('iflow', err)).toBe(false);
   });
 
-  it('non-blocking path skips duplicate silent refresh and falls back auto -> manual interactive', async () => {
+  it('non-blocking path no longer launches automatic OAuth for iflow refresh rejection', async () => {
     jest.resetModules();
     const ensureCalls: Array<{ openBrowser?: boolean; autoMode: string; openOnly: string; devMode: string }> = [];
     const ensureValid = jest.fn(async (_providerType: string, _auth: any, opts: any) => {
@@ -40,12 +40,6 @@ describe('oauth-lifecycle: iflow refresh-endpoint rejection handling', () => {
         openOnly: String(process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY || ''),
         devMode: String(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '')
       });
-      if (
-        opts?.openBrowser === true &&
-        String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase() === 'iflow'
-      ) {
-        throw new Error('auto selector failed');
-      }
     });
 
     const { handleUpstreamInvalidOAuthToken } = await import('../../../src/providers/auth/oauth-lifecycle.js');
@@ -62,20 +56,14 @@ describe('oauth-lifecycle: iflow refresh-endpoint rejection handling', () => {
     );
     expect(result).toBe(false);
 
-    for (let i = 0; i < 40 && ensureCalls.length < 2; i += 1) {
+    for (let i = 0; i < 20 && ensureCalls.length < 1; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
-    expect(ensureCalls.some((call) => call.openBrowser === false)).toBe(false);
-    const interactiveCalls = ensureCalls.filter((call) => call.openBrowser === true);
-    expect(interactiveCalls.length).toBeGreaterThanOrEqual(2);
-    expect(interactiveCalls[0]?.autoMode.trim().toLowerCase()).toBe('iflow');
-    expect(
-      interactiveCalls.some((call) => call.autoMode.trim() === '' && String(call.openOnly).trim() === '1')
-    ).toBe(true);
+    expect(ensureCalls).toHaveLength(0);
   });
 
-  it('switches fallback to headful manual mode when auto flow reports missing element', async () => {
+  it('switches no longer attempt manual fallback when auto flow reports missing element', async () => {
     jest.resetModules();
     const ensureCalls: Array<{ openBrowser?: boolean; autoMode: string; openOnly: string; devMode: string }> = [];
     const ensureValid = jest.fn(async (_providerType: string, _auth: any, opts: any) => {
@@ -85,12 +73,6 @@ describe('oauth-lifecycle: iflow refresh-endpoint rejection handling', () => {
         openOnly: String(process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY || ''),
         devMode: String(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '')
       });
-      if (
-        opts?.openBrowser === true &&
-        String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase() === 'iflow'
-      ) {
-        throw new Error('OAuth browser launch failed (camo CLI): element_not_found:iflow_account_select');
-      }
     });
 
     const { handleUpstreamInvalidOAuthToken } = await import('../../../src/providers/auth/oauth-lifecycle.js');
@@ -107,17 +89,10 @@ describe('oauth-lifecycle: iflow refresh-endpoint rejection handling', () => {
     );
     expect(result).toBe(false);
 
-    for (let i = 0; i < 40 && ensureCalls.length < 2; i += 1) {
+    for (let i = 0; i < 20 && ensureCalls.length < 1; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
-    const manualHeadfulCall = ensureCalls.find(
-      (call) =>
-        call.openBrowser === true &&
-        call.autoMode.trim() === '' &&
-        call.openOnly.trim() === '1' &&
-        call.devMode.trim() === '1'
-    );
-    expect(manualHeadfulCall).toBeDefined();
+    expect(ensureCalls).toHaveLength(0);
   });
 });

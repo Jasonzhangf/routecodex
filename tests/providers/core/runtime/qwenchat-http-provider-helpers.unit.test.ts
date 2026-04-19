@@ -55,14 +55,14 @@ describe('qwenchat-http-provider helpers', () => {
     expect(payload.stream).toBe(false);
   });
 
-  it('treats chat:qwen compatibility profile as qwenchat transport identity', () => {
+  it('does not treat chat:qwen compatibility profile as qwenchat transport identity', () => {
     expect(
       classifyQwenChatProviderIdentity({
         providerFamily: 'qwen',
         providerId: 'qwen',
         compatibilityProfile: 'chat:qwen'
       })
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('falls back to runtime capturedChatRequest tools when payload.tools are absent', () => {

@@ -2644,7 +2644,6 @@ export function classifyQwenChatProviderIdentity(input: {
       value === 'qwenchat' ||
       value.startsWith('qwenchat.') ||
       value.includes('qwenchat') ||
-      value === 'chat:qwenchat-web' ||
-      value === 'chat:qwen'
+      value === 'chat:qwenchat-web'
   );
 }

@@ -30,44 +30,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function getLatestResponsesContextMessage(
-  request: StandardizedRequest | ProcessedRequest
-): { role?: string; message?: StandardizedRequest['messages'][number] } | null {
-  const contextInput = asRecord((request as { semantics?: unknown }).semantics)?.responses;
-  const context = asRecord(contextInput)?.context;
-  const input = Array.isArray(asRecord(context)?.input) ? (asRecord(context)?.input as unknown[]) : [];
-  for (let idx = input.length - 1; idx >= 0; idx -= 1) {
-    const entry = asRecord(input[idx]);
-    if (!entry) {
-      continue;
-    }
-    const entryType = typeof entry.type === 'string' && entry.type.trim()
-      ? entry.type.trim().toLowerCase()
-      : 'message';
-    if (entryType !== 'message') {
-      continue;
-    }
-    const role = typeof entry.role === 'string' && entry.role.trim()
-      ? entry.role.trim().toLowerCase()
-      : 'user';
-    if (role !== 'user' && role !== 'assistant' && role !== 'tool') {
-      continue;
-    }
-    const content = entry.content;
-    if (typeof content !== 'string' && !Array.isArray(content)) {
-      continue;
-    }
-    return {
-      role,
-      message: {
-        role: role as 'user' | 'assistant' | 'tool',
-        content: content as StandardizedRequest['messages'][number]['content']
-      }
-    };
-  }
-  return null;
-}
-
 function getResponsesContextInput(request: StandardizedRequest | ProcessedRequest): Record<string, unknown>[] {
   const contextInput = asRecord((request as { semantics?: unknown }).semantics)?.responses;
   const context = asRecord(contextInput)?.context;
@@ -77,28 +39,74 @@ function getResponsesContextInput(request: StandardizedRequest | ProcessedReques
     .filter((entry): entry is Record<string, unknown> => Boolean(entry));
 }
 
-function getResponsesContextToolSignals(request: StandardizedRequest | ProcessedRequest): {
+type ContextRole = 'user' | 'assistant' | 'tool';
+type MessageLike = StandardizedRequest['messages'][number];
+type ToolSignalState = {
+  latestRole?: ContextRole;
+  latestMessage?: MessageLike;
+  hasToolCallResponses: boolean;
+  lastAssistantTool: ReturnType<typeof classifyToolCallForReport>;
+};
+
+function normalizeResponsesEntryType(entry: Record<string, unknown>): string {
+  return typeof entry.type === 'string' && entry.type.trim()
+    ? entry.type.trim().toLowerCase()
+    : 'message';
+}
+
+function getResponsesMessageRole(entry: Record<string, unknown>): ContextRole | undefined {
+  const role = typeof entry.role === 'string' && entry.role.trim()
+    ? entry.role.trim().toLowerCase()
+    : 'user';
+  return role === 'user' || role === 'assistant' || role === 'tool'
+    ? role
+    : undefined;
+}
+
+function getResponsesEntryRole(entry: Record<string, unknown>): ContextRole | undefined {
+  const entryType = normalizeResponsesEntryType(entry);
+  if (entryType === 'message') {
+    return getResponsesMessageRole(entry);
+  }
+  if (entryType === 'function_call') {
+    return 'assistant';
+  }
+  if (
+    entryType === 'function_call_output'
+    || entryType === 'tool_result'
+    || entryType === 'tool_message'
+  ) {
+    return 'tool';
+  }
+  return undefined;
+}
+
+function toResponsesContextMessage(
+  entry: Record<string, unknown>,
+  role: ContextRole | undefined
+): MessageLike | undefined {
+  if (!role || normalizeResponsesEntryType(entry) !== 'message') {
+    return undefined;
+  }
+  const content = entry.content;
+  if (typeof content !== 'string' && !Array.isArray(content)) {
+    return undefined;
+  }
+  return {
+    role,
+    content: content as MessageLike['content']
+  };
+}
+
+function collectResponsesToolSignals(entries: Record<string, unknown>[]): {
   hasToolCallResponses: boolean;
   lastAssistantTool: ReturnType<typeof classifyToolCallForReport>;
 } {
-  const input = getResponsesContextInput(request);
   let lastAssistantTool: ReturnType<typeof classifyToolCallForReport>;
   let hasToolCallResponses = false;
-  let seenLatestUser = false;
 
-  for (let idx = input.length - 1; idx >= 0; idx -= 1) {
-    const entry = input[idx];
-    const entryType = typeof entry.type === 'string' ? entry.type.trim().toLowerCase() : '';
-    const entryRole = typeof entry.role === 'string' ? entry.role.trim().toLowerCase() : '';
-    if (!seenLatestUser) {
-      if (entryType === 'message' && entryRole === 'user') {
-        seenLatestUser = true;
-      }
-      continue;
-    }
-    if (entryType === 'message' && entryRole === 'user') {
-      break;
-    }
+  for (const entry of entries) {
+    const entryType = normalizeResponsesEntryType(entry);
     if (
       entryType === 'function_call'
       || entryType === 'function_call_output'
@@ -134,6 +142,117 @@ function getResponsesContextToolSignals(request: StandardizedRequest | Processed
   };
 }
 
+function getResponsesContextTurnState(request: StandardizedRequest | ProcessedRequest): ToolSignalState {
+  const input = getResponsesContextInput(request);
+  let latestRole: ContextRole | undefined;
+  let latestMessage: MessageLike | undefined;
+
+  for (let idx = input.length - 1; idx >= 0; idx -= 1) {
+    const entry = input[idx];
+    const entryRole = getResponsesEntryRole(entry);
+    if (!entryRole) {
+      continue;
+    }
+    latestRole = entryRole;
+    latestMessage = toResponsesContextMessage(entry, entryRole);
+    break;
+  }
+
+  let latestUserIndex = -1;
+  for (let idx = input.length - 1; idx >= 0; idx -= 1) {
+    const entry = input[idx];
+    if (normalizeResponsesEntryType(entry) === 'message' && getResponsesMessageRole(entry) === 'user') {
+      latestUserIndex = idx;
+      break;
+    }
+  }
+
+  let segmentStart = 0;
+  let segmentEnd = input.length;
+  if (latestUserIndex >= 0) {
+    if (latestRole === 'user') {
+      let previousUserIndex = -1;
+      for (let idx = latestUserIndex - 1; idx >= 0; idx -= 1) {
+        const entry = input[idx];
+        if (normalizeResponsesEntryType(entry) === 'message' && getResponsesMessageRole(entry) === 'user') {
+          previousUserIndex = idx;
+          break;
+        }
+      }
+      segmentStart = previousUserIndex + 1;
+      segmentEnd = latestUserIndex;
+    } else {
+      segmentStart = latestUserIndex + 1;
+    }
+  }
+
+  const toolSignals = collectResponsesToolSignals(input.slice(segmentStart, segmentEnd));
+  return {
+    latestRole,
+    latestMessage,
+    ...toolSignals
+  };
+}
+
+function getMessageTurnState(messages: StandardizedRequest['messages'] | undefined): ToolSignalState {
+  const normalizedMessages = Array.isArray(messages) ? messages : [];
+  const latestMessage = normalizedMessages.length
+    ? normalizedMessages[normalizedMessages.length - 1]
+    : undefined;
+  const latestRole = latestMessage?.role === 'user' || latestMessage?.role === 'assistant' || latestMessage?.role === 'tool'
+    ? latestMessage.role
+    : undefined;
+
+  let latestUserIndex = -1;
+  for (let idx = normalizedMessages.length - 1; idx >= 0; idx -= 1) {
+    if (normalizedMessages[idx]?.role === 'user') {
+      latestUserIndex = idx;
+      break;
+    }
+  }
+
+  let segmentStart = 0;
+  let segmentEnd = normalizedMessages.length;
+  if (latestUserIndex >= 0) {
+    if (latestRole === 'user') {
+      let previousUserIndex = -1;
+      for (let idx = latestUserIndex - 1; idx >= 0; idx -= 1) {
+        if (normalizedMessages[idx]?.role === 'user') {
+          previousUserIndex = idx;
+          break;
+        }
+      }
+      segmentStart = previousUserIndex + 1;
+      segmentEnd = latestUserIndex;
+    } else {
+      segmentStart = latestUserIndex + 1;
+    }
+  }
+
+  const assistantSegment: MessageLike[] = [];
+  let hasToolCallResponses = false;
+  for (const msg of normalizedMessages.slice(segmentStart, segmentEnd)) {
+    if (msg.role === 'tool') {
+      hasToolCallResponses = true;
+      continue;
+    }
+    if (msg.role !== 'assistant') {
+      continue;
+    }
+    assistantSegment.push(msg);
+    if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+      hasToolCallResponses = true;
+    }
+  }
+
+  return {
+    latestRole,
+    latestMessage,
+    hasToolCallResponses,
+    lastAssistantTool: detectLastAssistantToolCategory(assistantSegment)
+  };
+}
+
 export function buildRoutingFeatures(
   request: StandardizedRequest | ProcessedRequest,
   metadata: RouterMetadataInput
@@ -152,23 +271,31 @@ export function buildRoutingFeatures(
     }
   })();
 
-  const responsesLatestMessage = getLatestResponsesContextMessage(request);
-  const latestMessageRole = responsesLatestMessage?.role || getLatestMessageRole(request.messages);
-  const latestMessage = responsesLatestMessage?.message || (Array.isArray(request.messages) && request.messages.length
-    ? request.messages[request.messages.length - 1]
-    : undefined);
-  const assistantMessages = request.messages.filter((msg) => msg.role === 'assistant');
-  const responsesToolSignals = getResponsesContextToolSignals(request);
+  const messageTurnState = getMessageTurnState(request.messages);
+  const responsesTurnState = getResponsesContextTurnState(request);
+  const currentUserFromMessages = messageTurnState.latestRole === 'user';
+  const currentUserFromResponses = !currentUserFromMessages && responsesTurnState.latestRole === 'user';
+  const latestMessageRole = currentUserFromMessages || currentUserFromResponses
+    ? 'user'
+    : responsesTurnState.latestRole || messageTurnState.latestRole || getLatestMessageRole(request.messages);
+  const latestMessage = currentUserFromMessages
+    ? messageTurnState.latestMessage
+    : currentUserFromResponses
+      ? responsesTurnState.latestMessage
+      : responsesTurnState.latestMessage || messageTurnState.latestMessage;
   const latestUserText = latestMessageRole === 'user' && latestMessage
     ? extractMessageText(latestMessage)
     : '';
   const normalizedUserText = latestUserText.toLowerCase();
   const meaningfulDeclaredTools = extractMeaningfulDeclaredToolNames(request.tools);
   const hasTools = meaningfulDeclaredTools.length > 0;
-  const messageToolCallResponses = assistantMessages.some(
-    (msg) => Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0
-  );
-  const hasToolCallResponses = messageToolCallResponses || responsesToolSignals.hasToolCallResponses;
+  const hasToolCallResponses = currentUserFromMessages
+    ? messageTurnState.hasToolCallResponses
+    : currentUserFromResponses
+      ? responsesTurnState.hasToolCallResponses
+      : responsesTurnState.latestRole
+        ? responsesTurnState.hasToolCallResponses
+        : messageTurnState.hasToolCallResponses;
 
   const estimatedTokens = computeRequestTokens(request, latestUserText);
   const hasThinking = detectKeyword(normalizedUserText, THINKING_KEYWORDS);
@@ -181,7 +308,11 @@ export function buildRoutingFeatures(
   const hasCodingTool = detectCodingTool(request);
   const hasWebTool = detectWebTool(request);
   const hasThinkingKeyword = hasThinking || detectExtendedThinkingKeyword(normalizedUserText);
-  const lastAssistantTool = responsesToolSignals.lastAssistantTool || detectLastAssistantToolCategory(assistantMessages);
+  const lastAssistantTool = currentUserFromMessages
+    ? messageTurnState.lastAssistantTool
+    : currentUserFromResponses
+      ? responsesTurnState.lastAssistantTool
+      : responsesTurnState.lastAssistantTool || messageTurnState.lastAssistantTool;
   const lastAssistantToolLabel = (() => {
     if (!lastAssistantTool) {
       return undefined;

@@ -30,6 +30,14 @@ import {
   sanitizeAnthropicPayload,
 } from './anthropic-mapper-config.js';
 
+function getAnthropicSemanticsNode(chat: ChatEnvelope): JsonObject | undefined {
+  if (!chat.semantics || typeof chat.semantics !== 'object') {
+    return undefined;
+  }
+  const node = chat.semantics.anthropic;
+  return node && isJsonObject(node) ? (node as JsonObject) : undefined;
+}
+
 const TRUTHY = new Set(['1', 'true', 'yes', 'on']);
 const FALSY = new Set(['0', 'false', 'no', 'off']);
 const DEFAULT_HEAVY_INPUT_THRESHOLD = 120_000;
@@ -118,6 +126,16 @@ function hasAnthropicSystemSemantic(chat: ChatEnvelope): boolean {
   } catch {
     return false;
   }
+}
+
+function hasChatSystemMessage(chat: ChatEnvelope): boolean {
+  return Array.isArray(chat.messages)
+    && chat.messages.some((message) => {
+      if (!message || typeof message !== 'object') {
+        return false;
+      }
+      return message.role === 'system';
+    });
 }
 
 export function buildAnthropicFormatEnvelopeFromChat(
@@ -233,21 +251,35 @@ export function buildAnthropicFormatEnvelopeFromChat(
     baseRequest.tools = [];
   }
   try {
-    const sysNode = chat.semantics && typeof chat.semantics === 'object' ? (chat.semantics as any).system : undefined;
-    if (sysNode && typeof sysNode === 'object' && !Array.isArray(sysNode) && (sysNode as any).blocks !== undefined) {
-      baseRequest.system = jsonClone((sysNode as any).blocks as JsonValue) as JsonValue;
+    const anthropicSemantics = getAnthropicSemanticsNode(chat);
+    if (!hasChatSystemMessage(chat)) {
+      const sysBlocks = anthropicSemantics?.systemBlocks;
+      if (Array.isArray(sysBlocks) && sysBlocks.length > 0) {
+        baseRequest.system = jsonClone(sysBlocks as JsonValue[]) as JsonValue;
+      } else {
+        const sysNode = chat.semantics && typeof chat.semantics === 'object' ? (chat.semantics as any).system : undefined;
+        if (sysNode && typeof sysNode === 'object' && !Array.isArray(sysNode) && (sysNode as any).blocks !== undefined) {
+          baseRequest.system = jsonClone((sysNode as any).blocks as JsonValue) as JsonValue;
+        }
+      }
     }
   } catch {
     // ignore
   }
   try {
+    const anthropicSemantics = getAnthropicSemanticsNode(chat);
     const extras = chat.semantics && typeof chat.semantics === 'object' ? (chat.semantics as any).providerExtras : undefined;
-    const mirror = extras && typeof extras === 'object' && !Array.isArray(extras) ? (extras as any).anthropicMirror : undefined;
-    if (mirror && typeof mirror === 'object' && !Array.isArray(mirror)) {
+    const mirror = anthropicSemantics?.messageContentShape;
+    if (mirror !== undefined) {
       baseRequest.__anthropicMirror = jsonClone(mirror as JsonValue) as JsonObject;
+    } else {
+      const legacyMirror = extras && typeof extras === 'object' && !Array.isArray(extras) ? (extras as any).anthropicMirror : undefined;
+      if (legacyMirror && typeof legacyMirror === 'object' && !Array.isArray(legacyMirror)) {
+        baseRequest.__anthropicMirror = jsonClone(legacyMirror as JsonValue) as JsonObject;
+      }
     }
-    const providerMetadata =
-      extras && typeof extras === 'object' && !Array.isArray(extras) ? (extras as any).providerMetadata : undefined;
+    const providerMetadata = anthropicSemantics?.providerMetadata ??
+      (extras && typeof extras === 'object' && !Array.isArray(extras) ? (extras as any).providerMetadata : undefined);
     if (providerMetadata && typeof providerMetadata === 'object' && !Array.isArray(providerMetadata)) {
       const existing = baseRequest.metadata && isJsonObject(baseRequest.metadata as any)
         ? (jsonClone(baseRequest.metadata as JsonValue) as JsonObject)

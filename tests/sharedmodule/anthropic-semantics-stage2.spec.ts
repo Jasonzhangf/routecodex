@@ -83,8 +83,10 @@ describe('Anthropic semantics stage 2', () => {
     const aliasMap = tools?.toolNameAliasMap as Record<string, string> | undefined;
     expect(aliasMap).toBeDefined();
     expect(Object.values(aliasMap ?? {})).toContain('CallHTTP');
-    const providerExtras = (semantics?.providerExtras as Record<string, unknown> | undefined) ?? undefined;
-    expect(providerExtras?.anthropicMirror).toBeDefined();
+    const anthropic = (semantics?.anthropic as Record<string, unknown> | undefined) ?? undefined;
+    expect(anthropic?.systemBlocks).toBeDefined();
+    expect(anthropic?.toolNameAliasMap).toBeDefined();
+    expect(anthropic?.messageContentShape).toBeDefined();
   });
 
   it('replays semantics when metadata/protocolState snapshots are missing', async () => {

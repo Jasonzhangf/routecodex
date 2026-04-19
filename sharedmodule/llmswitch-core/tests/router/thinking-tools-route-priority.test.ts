@@ -23,7 +23,7 @@ function classifyRouteWith(
 }
 
 describe('virtual-router thinking vs declared tools priority', () => {
-  test('routes current user turns to thinking even when only exec_command is declared', () => {
+  test('routes current user turns to thinking when exec_command is declared', () => {
     const result = classifyRouteWith(
       [{ role: 'user', content: '继续处理当前任务。' }],
       [
@@ -39,9 +39,10 @@ describe('virtual-router thinking vs declared tools priority', () => {
 
     expect(result.routeName).toBe('thinking');
     expect(result.reasoning).toContain('thinking:user-input');
+    expect(result.reasoning).toContain('tools:tool-request-detected');
   });
 
-  test('routes current user thinking turn to thinking even when tools are only declared', () => {
+  test('routes current user thinking turn to thinking when tools are declared', () => {
     const result = classifyRouteWith(
       [{ role: 'user', content: 'Please think step by step and explain the root cause.' }],
       [
@@ -57,9 +58,10 @@ describe('virtual-router thinking vs declared tools priority', () => {
 
     expect(result.routeName).toBe('thinking');
     expect(result.reasoning).toContain('thinking:user-input');
+    expect(result.reasoning).toContain('tools:tool-request-detected');
   });
 
-  test('keeps tool followup context on tools when historical tool calls already exist', () => {
+  test('keeps read followup context on thinking when latest turn is assistant tool continuation', () => {
     const req = {
       model: 'gpt-test',
       messages: [
@@ -93,12 +95,12 @@ describe('virtual-router thinking vs declared tools priority', () => {
     const features = buildRoutingFeatures(req, { requestId: 'req_test_followup' } as any);
     const result = new RoutingClassifier({}).classify(features);
 
-    expect(result.routeName).toBe('tools');
-    expect(result.reasoning).toContain('tools:last-tool-other');
+    expect(result.routeName).toBe('thinking');
+    expect(result.reasoning).toContain('thinking:last-tool-read');
     expect(result.reasoning).not.toContain('thinking:user-input');
   });
 
-  test('current user turn overrides previous search continuation to thinking', () => {
+  test('current user turn ignores previous search continuation and still prefers thinking', () => {
     const req = {
       model: 'gpt-test',
       messages: [
@@ -135,6 +137,8 @@ describe('virtual-router thinking vs declared tools priority', () => {
 
     expect(result.routeName).toBe('thinking');
     expect(result.reasoning).toContain('thinking:user-input');
+    expect(result.reasoning).toContain('tools:tool-request-detected');
+    expect(result.reasoning).not.toContain('search:last-tool-search');
   });
 
   test('prefers search continuation when previous responses turn included both search and read function calls', () => {
@@ -181,5 +185,45 @@ describe('virtual-router thinking vs declared tools priority', () => {
 
     expect(result.routeName).toBe('search');
     expect(result.reasoning).toContain('search:last-tool-search');
+  });
+
+  test('responses tool continuation after latest user boundary does not route as current user input', () => {
+    const req = {
+      model: 'gpt-test',
+      messages: [],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: { type: 'object', properties: { cmd: { type: 'string' } } }
+          }
+        }
+      ],
+      semantics: {
+        responses: {
+          context: {
+            input: [
+              { type: 'message', role: 'user', content: '先搜索配置。' },
+              {
+                type: 'function_call',
+                id: 'call_search',
+                name: 'exec_command',
+                arguments: JSON.stringify({ cmd: 'rg -n "routing" sharedmodule/llmswitch-core' })
+              },
+              { type: 'function_call_output', call_id: 'call_search', output: 'matched' }
+            ]
+          }
+        }
+      }
+    } as any;
+
+    const features = buildRoutingFeatures(req, { requestId: 'req_test_responses_current_tool_turn' } as any);
+    const result = new RoutingClassifier({}).classify(features);
+
+    expect(features.latestMessageFromUser).toBe(false);
+    expect(result.routeName).toBe('search');
+    expect(result.reasoning).toContain('search:last-tool-search');
+    expect(result.reasoning).not.toContain('thinking:user-input');
   });
 });

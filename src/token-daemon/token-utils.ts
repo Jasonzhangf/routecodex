@@ -111,12 +111,14 @@ export function evaluateTokenState(
 ): TokenState {
   const access = hasAccessToken(token);
   const apiKey = hasApiKey(token);
-  const apiKeyBypassesExpiry = provider === 'qwen' && hasStableQwenApiKey(token);
+  const isQwenProvider = provider === 'qwen';
+  const apiKeyBypassesExpiry = isQwenProvider && hasStableQwenApiKey(token);
   const refresh = hasRefreshToken(token);
   const expiresAt = getExpiresAtMillis(token);
   const msUntilExpiry = expiresAt !== null ? expiresAt - now : null;
-  const noRefresh =
+  const rawNoRefresh =
     token !== null && (token.norefresh === true || (typeof token.noRefresh === 'boolean' && token.noRefresh));
+  const noRefresh = isQwenProvider ? rawNoRefresh && apiKeyBypassesExpiry : rawNoRefresh;
 
   let status: TokenState['status'] = 'invalid';
   if (!access && !apiKeyBypassesExpiry) {

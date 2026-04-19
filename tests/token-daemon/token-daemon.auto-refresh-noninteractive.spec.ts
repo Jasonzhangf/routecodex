@@ -96,7 +96,48 @@ describe('TokenDaemon ensureTokenWithOverrides', () => {
     expect(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE).toBe(prevDevMode);
   });
 
-  it('persists noRefresh and auto-suspends on permanent refresh failures', async () => {
+  it('qwen background refresh no longer escalates into automatic browser OAuth', async () => {
+    jest.resetModules();
+    const ensureValidOAuthToken = jest.fn(async () => {});
+
+    jest.unstable_mockModule('../../src/providers/auth/oauth-lifecycle.js', () => ({
+      ensureValidOAuthToken
+    }));
+
+    const mod = await import('../../src/token-daemon/token-daemon.js');
+    const daemon = new mod.TokenDaemon({ intervalMs: 999999, refreshAheadMinutes: 5 });
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await (daemon as any).trySilentRefresh({
+        provider: 'qwen',
+        filePath: '/tmp/qwen-oauth-1-default.json',
+        sequence: 1,
+        alias: 'default',
+        displayName: 'default@example.com',
+        state: {
+          hasAccessToken: true,
+          hasRefreshToken: true,
+          hasApiKey: false,
+          expiresAt: Date.now() + 1000,
+          msUntilExpiry: 1000,
+          status: 'expiring',
+          noRefresh: false
+        }
+      });
+    } finally {
+      warn.mockRestore();
+    }
+
+    // No auto browser OAuth: qwen daemon refresh stays non-interactive.
+    expect(ensureValidOAuthToken).toHaveBeenCalledTimes(1);
+    expect(ensureValidOAuthToken.mock.calls[0]?.[2]).toMatchObject({
+      openBrowser: false,
+      forceReacquireIfRefreshFails: false,
+      forceReauthorize: false
+    });
+  });
+
+  it('does not persist noRefresh for qwen without stable api_key but still auto-suspends on permanent refresh failures', async () => {
     const prevHome = process.env.HOME;
     const tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-token-daemon-perm-'));
     process.env.HOME = tmpHome;
@@ -156,11 +197,11 @@ describe('TokenDaemon ensureTokenWithOverrides', () => {
       }
 
       const tokenAfter = JSON.parse(await fs.readFile(tokenFile, 'utf8'));
-      expect(tokenAfter.noRefresh).toBe(true);
-      expect(tokenAfter.norefresh).toBe(true);
+      expect(tokenAfter.noRefresh).toBeUndefined();
+      expect(tokenAfter.norefresh).toBeUndefined();
 
       const mtimeAfter = (await fs.stat(tokenFile)).mtimeMs;
-      expect(mtimeAfter).toBeGreaterThan(mtimeBefore);
+      expect(mtimeAfter).toBe(mtimeBefore);
 
       const { resolveTokenHistoryFilePath } = await import('../../src/token-daemon/history-store.js');
       const historyPath = resolveTokenHistoryFilePath();

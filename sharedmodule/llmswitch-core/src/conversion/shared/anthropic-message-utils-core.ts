@@ -2,7 +2,11 @@ import { ProviderProtocolError } from '../provider-protocol-error.js';
 
 type Unknown = Record<string, unknown>;
 
-const ANTHROPIC_TOOL_NAME_ALIASES = new Map<string, string>();
+const ANTHROPIC_TOOL_NAME_ALIASES = new Map<string, string>([
+  ['bash', 'shell_command'],
+  ['shell', 'shell_command'],
+  ['terminal', 'shell_command'],
+]);
 const CANONICAL_TO_ANTHROPIC_TOOL_NAMES = new Map<string, string>([['shell_command', 'Bash']]);
 
 export function isObject(v: unknown): v is Unknown {

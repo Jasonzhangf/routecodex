@@ -52,6 +52,8 @@ function resolvePollingIntervalMs(intervalRaw: unknown): number | null {
   return Math.min(Math.max(ms, 1000), 120000);
 }
 
+const DISABLED_CAMOUFOX_AUTO_MODE = new Set(['0', 'false', 'no', 'off', 'manual', 'none']);
+
 type UserInfoPayload = {
   apiKey?: string;
   data?: {
@@ -246,8 +248,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
     }
 
     // 友好提示（Camoufox 自动模式下显示“兜底链接”，避免误导为必须手动）
-    const camoufoxAutoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
-    const isAutoAuthMode = camoufoxAutoMode.length > 0;
+    const isAutoAuthMode = this.isAutoAuthModeEnabled();
     if (isAutoAuthMode) {
       console.log('[OAuth] Auto authentication is running in Camoufox. The following URL/code are fallback only:');
     } else {
@@ -387,6 +388,15 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
   private isQwenDeviceEndpoint(): boolean {
     const deviceUrl = String(this.config.endpoints.deviceCodeUrl || '').toLowerCase();
     return deviceUrl.includes('chat.qwen.ai/api/v1/oauth2/device/code');
+  }
+
+  private isAutoAuthModeEnabled(): boolean {
+    const raw = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
+    if (raw) {
+      return !DISABLED_CAMOUFOX_AUTO_MODE.has(raw);
+    }
+    // Default: qwen oauth device flow should run Camoufox auto mode even when env is not preset.
+    return this.isQwenDeviceEndpoint();
   }
 
   /**

@@ -14,6 +14,7 @@ jest.unstable_mockModule(
 describe('snapshot-utils memory guard', () => {
   const originalMaxBytes = process.env.ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES;
   const originalQueueMaxItems = process.env.ROUTECODEX_SNAPSHOT_QUEUE_MAX_ITEMS;
+  const originalSnapshotStages = process.env.ROUTECODEX_SNAPSHOT_STAGES;
 
   afterEach(() => {
     writeSnapshotViaHooksWithNativeMock.mockReset();
@@ -29,9 +30,14 @@ describe('snapshot-utils memory guard', () => {
     } else {
       process.env.ROUTECODEX_SNAPSHOT_QUEUE_MAX_ITEMS = originalQueueMaxItems;
     }
+    if (originalSnapshotStages === undefined) {
+      delete process.env.ROUTECODEX_SNAPSHOT_STAGES;
+    } else {
+      process.env.ROUTECODEX_SNAPSHOT_STAGES = originalSnapshotStages;
+    }
   });
 
-  it('truncates oversized snapshot payload before enqueue/write', async () => {
+  it('drops oversized non-provider snapshot payload before enqueue/write', async () => {
     process.env.ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES = '2048';
     const { createSnapshotWriter } = await import('../../sharedmodule/llmswitch-core/src/conversion/snapshot-utils.js');
     const writer = createSnapshotWriter({
@@ -49,19 +55,12 @@ describe('snapshot-utils memory guard', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 25));
 
-    expect(writeSnapshotViaHooksWithNativeMock).toHaveBeenCalledTimes(1);
-    const payload = writeSnapshotViaHooksWithNativeMock.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(payload).toBeTruthy();
-    const data = payload?.data as Record<string, unknown>;
-    expect(data.__snapshot_truncated).toBe(true);
-    expect(data.stage).toBe('req_inbound_stage2_semantic_map');
-    expect(typeof data.maxBytes).toBe('number');
-    expect(typeof data.estimatedBytes).toBe('number');
-    expect(data.summary).toBeTruthy();
+    expect(writeSnapshotViaHooksWithNativeMock).not.toHaveBeenCalled();
   });
 
   it('keeps only the newest N pending snapshot tasks in queue', async () => {
     process.env.ROUTECODEX_SNAPSHOT_QUEUE_MAX_ITEMS = '10';
+    process.env.ROUTECODEX_SNAPSHOT_STAGES = 'stage_*';
     const { createSnapshotWriter } = await import('../../sharedmodule/llmswitch-core/src/conversion/snapshot-utils.js');
     const writer = createSnapshotWriter({
       requestId: 'req_snapshot_guard_2',

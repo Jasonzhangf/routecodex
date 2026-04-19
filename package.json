@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.1202",
+  "version": "0.90.1211",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
@@ -62,6 +62,8 @@
     "test:webui:coverage": "npm run jest:run -- --runTestsByPath tests/frontend/webui-app.utils.spec.ts tests/frontend/webui-app.render.spec.tsx tests/frontend/webui-app.integration.spec.tsx tests/frontend/webui-app.pages.spec.tsx tests/frontend/webui-app.edge.spec.tsx --coverage --collectCoverageFrom=webui/src/App.tsx",
     "test:performance": "npm run jest:run -- --testPathPattern=performance",
     "test:protocol": "npm run jest:run -- --testPathPattern=protocol-tools-e2e.spec.ts --runInBand --detectOpenHandles --forceExit",
+    "test:protocol-sample-replay": "npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/real-sample-hub-io-compare.spec.ts",
+    "test:protocol-compat-regression": "npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/anthropic-semantics-stage2.spec.ts tests/sharedmodule/anthropic-client-remap-namespace-fallback.spec.ts tests/sharedmodule/responses-semantics-snapshot.spec.ts tests/sharedmodule/real-sample-hub-io-compare.spec.ts",
     "test:dry-run": "node tests/basic-dry-run.mjs",
     "test:lmstudio-dryrun": "node tests/lmstudio-tools-bidir-dry-run.mjs",
     "test:unified-hub-shadow": "node scripts/tests/unified-hub-shadow-regression.mjs",

@@ -14,6 +14,107 @@ function readJson(filePath: string): any {
 }
 
 describe('ensureValidOAuthToken (qwen) enriches api_key', () => {
+  test('adopts official qwen code token for default alias after permanent refresh failure', async () => {
+    const prevFetch = globalThis.fetch;
+    const prevHome = process.env.HOME;
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-oauth-qwen-official-'));
+    process.env.HOME = tmpHome;
+
+    const tokenFile = path.join(tmpHome, '.routecodex', 'auth', 'qwen-oauth-1-default.json');
+    writeJson(tokenFile, {
+      status: 'success',
+      access_token: 'access-stale',
+      refresh_token: 'refresh-stale',
+      token_type: 'bearer',
+      expires_in: 21600,
+      expires_at: Date.now() - 60_000
+    });
+
+    const officialTokenFile = path.join(tmpHome, '.qwen', 'oauth_creds.json');
+    writeJson(officialTokenFile, {
+      access_token: 'access-official',
+      refresh_token: 'refresh-official',
+      token_type: 'Bearer',
+      expiry_date: Date.now() + 60 * 60 * 1000
+    });
+
+    const refreshBodies: string[] = [];
+    globalThis.fetch = (async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : String(input?.url || '');
+      if (url === 'https://chat.qwen.ai/api/v1/oauth2/token') {
+        const bodyText = String(init?.body?.toString?.() || '');
+        refreshBodies.push(bodyText);
+        if (bodyText.includes('refresh_token=refresh-stale')) {
+          return new Response(
+            JSON.stringify({
+              error: 'invalid_request',
+              error_description: 'Invalid refresh token or client_id'
+            }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (bodyText.includes('refresh_token=refresh-official')) {
+          return new Response(
+            JSON.stringify({
+              access_token: 'access-repaired',
+              refresh_token: 'refresh-repaired',
+              token_type: 'Bearer',
+              expires_in: 21600,
+              resource_url: 'portal.qwen.ai'
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+      }
+      if (
+        url === 'https://portal.qwen.ai/v1/chat/completions' ||
+        url === 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
+      ) {
+        return new Response(
+          JSON.stringify({ id: 'resp_repaired', choices: [{ message: { role: 'assistant', content: 'OK' } }] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (url.startsWith('https://chat.qwen.ai/api/v1/user/info')) {
+        return new Response(
+          JSON.stringify({ error: 'userinfo unavailable' }),
+          { status: 404, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return new Response(JSON.stringify({ error: `unexpected fetch: ${url}` }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }) as any;
+
+    try {
+      await ensureValidOAuthToken(
+        'qwen',
+        {
+          type: 'qwen-oauth',
+          tokenFile
+        } as any,
+        { openBrowser: false, forceReauthorize: false, forceReacquireIfRefreshFails: false, forceRefresh: true }
+      );
+
+      expect(refreshBodies.some((body) => body.includes('refresh_token=refresh-stale'))).toBe(true);
+      expect(refreshBodies.some((body) => body.includes('refresh_token=refresh-official'))).toBe(true);
+
+      const updated = readJson(tokenFile);
+      expect(updated.access_token).toBe('access-repaired');
+      expect(updated.refresh_token).toBe('refresh-repaired');
+      expect(updated.status).toBe('success');
+    } finally {
+      globalThis.fetch = prevFetch as any;
+      process.env.HOME = prevHome;
+      try {
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    }
+  });
+
   test('forceRefresh refreshes qwen token even when local expiry is still valid', async () => {
     const prevFetch = globalThis.fetch;
     const prevHome = process.env.HOME;
@@ -77,7 +178,7 @@ describe('ensureValidOAuthToken (qwen) enriches api_key', () => {
       const updated = readJson(tokenFile);
       expect(updated.access_token).toBe('access-new');
       expect(updated.refresh_token).toBe('refresh-new');
-      expect(updated.resource_url).toBeUndefined();
+      expect(updated.resource_url).toBe('https://portal.qwen.ai');
       expect(updated.api_key || updated.apiKey).toBe('sk-qwen-test');
       expect(updated.norefresh || updated.noRefresh).toBe(true);
     } finally {

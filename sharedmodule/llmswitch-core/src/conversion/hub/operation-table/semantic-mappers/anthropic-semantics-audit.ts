@@ -22,6 +22,14 @@ export function ensureToolsSemanticsNode(chat: ChatEnvelope): JsonObject {
   return semantics.tools as JsonObject;
 }
 
+export function ensureAnthropicSemanticsNode(chat: ChatEnvelope): JsonObject {
+  const semantics = ensureSemantics(chat);
+  if (!semantics.anthropic || !isJsonObject(semantics.anthropic)) {
+    semantics.anthropic = {};
+  }
+  return semantics.anthropic as JsonObject;
+}
+
 export function markExplicitEmptyTools(chat: ChatEnvelope): void {
   const semantics = ensureSemantics(chat);
   if (!semantics.tools || !isJsonObject(semantics.tools)) {

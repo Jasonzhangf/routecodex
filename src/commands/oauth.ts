@@ -71,19 +71,13 @@ async function safeInteractiveRefresh(
   }
 }
 
-function resolveAutoModeByProvider(provider?: string | null): 'gemini' | 'qwen' | 'antigravity' | 'iflow' | null {
+function resolveAutoModeByProvider(provider?: string | null): 'gemini' | 'antigravity' | null {
   const raw = String(provider || '').trim().toLowerCase();
   if (!raw) {
     return null;
   }
-  if (raw === 'iflow') {
-    return 'iflow';
-  }
   if (raw === 'gemini-cli') {
     return 'gemini';
-  }
-  if (raw === 'qwen') {
-    return 'qwen';
   }
   if (raw === 'antigravity') {
     return 'antigravity';
@@ -363,36 +357,28 @@ export function createOauthCommand(): Command {
     .option('--dev', 'Run Camoufox automation in headed debug mode (default headless)')
     .option('--headful', 'Open Camoufox in headed mode (alias of --dev)')
     .action(async (selector: string, options: { dev?: boolean; headful?: boolean }) => {
+      console.warn('[oauth-command] iflow-auto has been disabled; falling back to manual Camoufox OAuth.');
       const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
-      const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
       const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
       process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
-      process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'iflow';
-      process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
       if (options?.dev || options?.headful) {
         process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
       } else {
         delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
       }
       try {
-        await safeInteractiveRefresh(selector, { force: true, mode: 'auto', noAutoFallback: true });
+        await safeInteractiveRefresh(selector, { force: true, mode: 'manual' });
       } finally {
         if (prevBrowser === undefined) {
           delete process.env.ROUTECODEX_OAUTH_BROWSER;
         } else {
           process.env.ROUTECODEX_OAUTH_BROWSER = prevBrowser;
         }
-        if (prevAutoMode === undefined) {
-          delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-        } else {
-          process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
-        }
         if (prevDevMode === undefined) {
           delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
         } else {
           process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
         }
-        delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
       }
     });
 
@@ -406,36 +392,28 @@ export function createOauthCommand(): Command {
     .option('--dev', 'Run Camoufox automation in headed debug mode (default headless)')
     .option('--headful', 'Open Camoufox in headed mode (alias of --dev)')
     .action(async (selector: string, options: { dev?: boolean; headful?: boolean }) => {
+      console.warn('[oauth-command] qwen-auto has been disabled; falling back to manual Camoufox OAuth.');
       const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
-      const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
       const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
       process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
-      process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'qwen';
-      process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
       if (options?.dev || options?.headful) {
         process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
       } else {
         delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
       }
       try {
-        await safeInteractiveRefresh(selector, { force: true, mode: 'auto', noAutoFallback: true });
+        await safeInteractiveRefresh(selector, { force: true, mode: 'manual' });
       } finally {
         if (prevBrowser === undefined) {
           delete process.env.ROUTECODEX_OAUTH_BROWSER;
         } else {
           process.env.ROUTECODEX_OAUTH_BROWSER = prevBrowser;
         }
-        if (prevAutoMode === undefined) {
-          delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-        } else {
-          process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
-        }
         if (prevDevMode === undefined) {
           delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
         } else {
           process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
         }
-        delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
       }
     });
 

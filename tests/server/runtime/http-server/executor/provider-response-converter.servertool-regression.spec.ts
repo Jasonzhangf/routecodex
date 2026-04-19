@@ -880,7 +880,14 @@ describe('provider-response-converter servertool regressions', () => {
               }
             }
           } as any,
-          pipelineMetadata: {}
+          pipelineMetadata: {
+            target: {
+              providerId: 'qwenchat',
+              providerFamily: 'qwenchat',
+              compatibilityProfile: 'chat:qwenchat-web',
+              modelId: 'qwen3.6-plus'
+            }
+          }
         },
         {
           runtimeManager: {
@@ -894,6 +901,67 @@ describe('provider-response-converter servertool regressions', () => {
       code: 'QWENCHAT_COMPLETION_REJECTED',
       status: 403,
       statusCode: 403
+    });
+  });
+
+  it('does not misclassify qwen malformed bridge business rejection payload as qwenchat rejection', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementation(async () => {
+      const err = Object.assign(
+        new Error('[hub_response] Failed to canonicalize response payload at chat_process.response.entry'),
+        {
+          name: 'ProviderProtocolError',
+          code: 'MALFORMED_RESPONSE'
+        }
+      );
+      throw err;
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-chat',
+          requestId: 'req_qwen_business_reject_not_qwenchat_1',
+          wantsStream: false,
+          response: {
+            body: {
+              success: false,
+              request_id: 'req_upstream_qwen',
+              data: {
+                code: 'Unauthorized',
+                details: '您没有权限访问此资源。请联系您的管理员以获取帮助。'
+              }
+            }
+          } as any,
+          pipelineMetadata: {
+            target: {
+              providerId: 'qwen',
+              providerFamily: 'qwen',
+              compatibilityProfile: 'chat:qwen',
+              modelId: 'qwen3.6-plus'
+            }
+          }
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      name: 'ProviderProtocolError',
+      code: 'MALFORMED_RESPONSE',
+      requestExecutorProviderErrorStage: 'host.response_contract'
     });
   });
 
@@ -1471,7 +1539,14 @@ describe('provider-response-converter servertool regressions', () => {
               }
             }
           } as any,
-          pipelineMetadata: {}
+          pipelineMetadata: {
+            target: {
+              providerId: 'qwenchat',
+              providerFamily: 'qwenchat',
+              compatibilityProfile: 'chat:qwenchat-web',
+              modelId: 'qwen3.6-plus'
+            }
+          }
         },
         {
           runtimeManager: {

@@ -11,6 +11,7 @@ export {
   mapToolOutputs,
   normalizeMessages,
   normalizeTools,
+  readResponsesRequestParametersFromSemantics,
   selectResponsesContextSnapshot,
   serializeSystemContent,
 } from './responses-mapper-helpers.js';

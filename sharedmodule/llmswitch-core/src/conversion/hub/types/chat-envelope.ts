@@ -135,14 +135,54 @@ export interface ChatSemanticAudit extends JsonObject {
   };
 }
 
+export interface ChatToolSemantics extends JsonObject {
+  explicitEmpty?: boolean;
+  clientToolsRaw?: JsonValue[];
+  toolNameAliasMap?: JsonObject;
+  toolAliasMap?: JsonObject;
+}
+
+export interface ChatResponsesSemantics extends JsonObject {
+  context?: JsonObject;
+  resume?: JsonObject;
+  requestParameters?: JsonObject;
+  responseFormat?: JsonValue;
+  include?: JsonValue[];
+  store?: boolean;
+  promptCacheKey?: string;
+  toolChoice?: JsonValue;
+  parallelToolCalls?: boolean;
+  reasoning?: JsonValue;
+  text?: JsonValue;
+  serviceTier?: JsonValue;
+  truncation?: JsonValue;
+  modalities?: JsonValue;
+}
+
+export interface ChatAnthropicSemantics extends JsonObject {
+  systemBlocks?: JsonValue[];
+  toolNameAliasMap?: JsonObject;
+  clientToolsRaw?: JsonValue[];
+  messageContentShape?: JsonValue;
+  providerMetadata?: JsonObject;
+}
+
+export interface ChatGeminiSemantics extends JsonObject {
+  systemInstruction?: JsonValue;
+  safetySettings?: JsonValue;
+  generationConfig?: JsonObject;
+  toolConfig?: JsonObject;
+  providerMetadata?: JsonObject;
+}
+
 export interface ChatSemantics extends JsonObject {
   continuation?: ChatContinuationSemantics;
   session?: JsonObject;
   system?: JsonObject;
-  tools?: JsonObject;
-  responses?: JsonObject;
-  anthropic?: JsonObject;
-  gemini?: JsonObject;
+  tools?: ChatToolSemantics;
+  responses?: ChatResponsesSemantics;
+  anthropic?: ChatAnthropicSemantics;
+  gemini?: ChatGeminiSemantics;
   audit?: ChatSemanticAudit;
   providerExtras?: JsonObject;
 }

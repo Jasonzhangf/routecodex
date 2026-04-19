@@ -35,18 +35,6 @@ export async function withOAuthRepairEnv<T>(providerType: string, fn: () => Prom
       restore();
     }
   }
-  if (pt === 'qwen') {
-    const restore = setEnvScoped({
-      ROUTECODEX_OAUTH_BROWSER: 'camoufox',
-      ROUTECODEX_CAMOUFOX_AUTO_MODE: 'qwen',
-      ROUTECODEX_OAUTH_AUTO_CONFIRM: '1'
-    });
-    try {
-      return await fn();
-    } finally {
-      restore();
-    }
-  }
   if (pt === 'gemini' || pt === 'gemini-cli') {
     const restore = setEnvScoped({
       ROUTECODEX_OAUTH_BROWSER: 'camoufox',

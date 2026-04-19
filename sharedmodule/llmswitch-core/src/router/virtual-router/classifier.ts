@@ -15,7 +15,8 @@ export class RoutingClassifier {
   }
 
   classify(features: RoutingFeatures): ClassificationResult {
-    const lastToolCategory = features.lastAssistantToolCategory;
+    const latestMessageFromUser = features.latestMessageFromUser === true;
+    const lastToolCategory = latestMessageFromUser ? undefined : features.lastAssistantToolCategory;
     const webSearchContinuation = lastToolCategory === 'websearch';
     const localToolContinuation =
       lastToolCategory === 'read' ||
@@ -24,12 +25,12 @@ export class RoutingClassifier {
       lastToolCategory === 'other';
     const reachedLongContext =
       features.estimatedTokens >= (this.config.longContextThresholdTokens ?? DEFAULT_LONG_CONTEXT_THRESHOLD);
-    const latestMessageFromUser = features.latestMessageFromUser === true;
-    const hasToolActivity = features.hasTools || features.hasToolCallResponses;
+    const hasToolActivity =
+      features.hasTools || (!latestMessageFromUser && features.hasToolCallResponses);
     const thinkingContinuation = lastToolCategory === 'read';
-    // Jason 规则：只要当前轮仍是用户输入，就优先按 thinking 路由处理，
-    // 不再因为历史 tool 响应或本轮声明 tools/search 而降到 tools/search。
-    // tools/search/coding 续写只保留给非用户输入的 followup/tool 轮。
+    // Jason 规则：当前轮是用户输入时始终优先 thinking，
+    // 但不再引用历史 last-tool continuation 影响本轮判断。
+    // （tools 仍可作为并行诊断信号，避免“thinking 与 tools 冲突”）
     const thinkingFromUser = latestMessageFromUser;
     const thinkingFromRead = !thinkingFromUser && thinkingContinuation;
     const codingContinuation = lastToolCategory === 'write';

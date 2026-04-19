@@ -20,6 +20,11 @@ import { chatEnvelopeToStandardizedWithNative } from "../../../../../../router/v
 import { normalizeReqInboundShellLikeToolCallsWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics-tools.js";
 import { fixApplyPatchToolCallsWithNative } from "../../../../../../router/virtual-router/engine-selection/native-compat-action-semantics.js";
 import {
+  applyAnthropicToolAliasSemantics,
+  normalizeAnthropicToolAliasMap
+} from "../../../../process/chat-process-anthropic-alias.js";
+import { buildAnthropicToolAliasMapWithNative } from "../../../../../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js";
+import {
   isHubStageTimingDetailEnabled,
   logHubStageTiming,
 } from "../../../hub-stage-timing.js";
@@ -226,6 +231,51 @@ export async function runReqInboundStage2SemanticMap(
     "completed",
     { elapsedMs: Date.now() - stdStart },
   );
+  applyAnthropicToolAliasSemantics(
+    standardizedRequest,
+    options.adapterContext.entryEndpoint
+  );
+  if (
+    typeof options.adapterContext.entryEndpoint === "string" &&
+    options.adapterContext.entryEndpoint.trim().toLowerCase().includes("/v1/messages")
+  ) {
+    const semantics = isJsonObject(standardizedRequest.semantics)
+      ? (standardizedRequest.semantics as JsonObject)
+      : ({} as JsonObject);
+    const toolsNode = isJsonObject((semantics as any).tools)
+      ? ((semantics as any).tools as JsonObject)
+      : ({} as JsonObject);
+    const normalizedExistingAliasMap = normalizeAnthropicToolAliasMap(
+      isJsonObject((toolsNode as any).toolNameAliasMap)
+        ? ((toolsNode as any).toolNameAliasMap as Record<string, unknown>)
+        : undefined
+    );
+    if (normalizedExistingAliasMap) {
+      (toolsNode as any).toolNameAliasMap = normalizedExistingAliasMap;
+      standardizedRequest.semantics = {
+        ...semantics,
+        tools: toolsNode,
+      } as JsonObject;
+    }
+    const hasAliasMap =
+      isJsonObject((toolsNode as any).toolNameAliasMap) ||
+      isJsonObject((toolsNode as any).toolAliasMap);
+    const rawTools = Array.isArray((options.formatEnvelope.payload as Record<string, unknown>)?.tools)
+      ? ((options.formatEnvelope.payload as Record<string, unknown>).tools as unknown[])
+      : undefined;
+    if (!hasAliasMap && rawTools && rawTools.length > 0) {
+      const aliasMap = normalizeAnthropicToolAliasMap(
+        buildAnthropicToolAliasMapWithNative(rawTools)
+      );
+      if (aliasMap && Object.keys(aliasMap).length > 0) {
+        (toolsNode as any).toolNameAliasMap = aliasMap;
+        standardizedRequest.semantics = {
+          ...semantics,
+          tools: toolsNode,
+        } as JsonObject;
+      }
+    }
+  }
   // Ensure responses semantics (context) survive into standardized request for VirtualRouter parsing.
   if (chatEnvelope.semantics && typeof chatEnvelope.semantics === "object") {
     const envelopeSemantics = chatEnvelope.semantics as JsonObject;

@@ -116,6 +116,31 @@ export interface OAuthFlowConfig {
   tokenPortal?: TokenPortalMetadata;
 }
 
+const DISABLED_CAMOUFOX_AUTO_MODE = new Set(['0', 'false', 'no', 'off', 'manual', 'none']);
+const REMOVED_CAMOUFOX_AUTO_MODE = new Set(['qwen', 'iflow']);
+
+function resolveDefaultCamoufoxAutoMode(provider?: string | null): string {
+  const normalized = String(provider || '').trim().toLowerCase();
+  if (normalized === 'antigravity') {
+    return 'antigravity';
+  }
+  if (normalized === 'gemini-cli') {
+    return 'gemini';
+  }
+  return '';
+}
+
+function resolveEffectiveCamoufoxAutoMode(provider?: string | null): string {
+  const raw = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
+  if (raw) {
+    if (DISABLED_CAMOUFOX_AUTO_MODE.has(raw) || REMOVED_CAMOUFOX_AUTO_MODE.has(raw)) {
+      return '';
+    }
+    return raw;
+  }
+  return resolveDefaultCamoufoxAutoMode(provider);
+}
+
 /**
  * OAuth流程策略基类
  */
@@ -231,7 +256,7 @@ export abstract class BaseOAuthFlowStrategy {
       if (preferCamoufox) {
         const meta = this.extractTokenPortalMetadata(portalUrl);
         try {
-          const autoMode = (process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
+          const autoMode = resolveEffectiveCamoufoxAutoMode(meta.provider);
           const devMode = (process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '').trim();
           console.log(
             `[OAuth] Launching Camoufox for authentication... (autoMode=${autoMode || '-'} devMode=${devMode || '0'})`

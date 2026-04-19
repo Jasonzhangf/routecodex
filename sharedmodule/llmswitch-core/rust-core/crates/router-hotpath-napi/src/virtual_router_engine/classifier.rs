@@ -58,22 +58,27 @@ impl RoutingClassifier {
     }
 
     pub(crate) fn classify(&self, features: &RoutingFeatures) -> ClassificationResult {
-        let last_tool_category = features
-            .last_assistant_tool_category
-            .clone()
-            .unwrap_or_default();
+        let latest_message_from_user = features.latest_message_from_user;
+        let last_tool_category = if latest_message_from_user {
+            String::new()
+        } else {
+            features
+                .last_assistant_tool_category
+                .clone()
+                .unwrap_or_default()
+        };
         let web_search_continuation = last_tool_category == "websearch";
         let local_tool_continuation = matches!(
             last_tool_category.as_str(),
             "read" | "write" | "search" | "other"
         );
         let reached_long_context = features.estimated_tokens >= self.long_context_threshold_tokens;
-        let latest_message_from_user = features.latest_message_from_user;
-        let has_tool_activity = features.has_tools || features.has_tool_call_responses;
+        let has_tool_activity =
+            features.has_tools || (!latest_message_from_user && features.has_tool_call_responses);
         let thinking_continuation = last_tool_category == "read";
-        // Jason 规则：只要当前轮仍是用户输入，就优先按 thinking 路由处理，
-        // 不再因为历史上已有 tool-call 响应或本轮声明 tools/search 而降到 tools/search。
-        // tools/search/coding 续写只保留给非用户输入的 followup/tool 轮。
+        // Jason 规则：当前轮是用户输入时始终优先 thinking，
+        // 但不再引用历史 last-tool continuation 影响本轮判断。
+        // （tools 仍可作为并行诊断信号，避免“thinking 与 tools 冲突”）
         let thinking_from_user = latest_message_from_user;
         let thinking_from_read = !thinking_from_user && thinking_continuation;
         let coding_continuation = last_tool_category == "write";
@@ -235,6 +240,7 @@ mod tests {
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
+        assert!(result.reasoning.contains("tools:tool-request-detected"));
     }
 
     #[test]
@@ -266,6 +272,7 @@ mod tests {
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
+        assert!(result.reasoning.contains("tools:tool-request-detected"));
     }
 
     #[test]
@@ -302,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn current_user_turn_overrides_previous_search_continuation_to_thinking() {
+    fn current_user_turn_ignores_previous_search_continuation_and_prefers_thinking() {
         let features = RoutingFeatures {
             latest_message_from_user: true,
             has_tools: true,
@@ -315,8 +322,8 @@ mod tests {
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
-        assert!(!result.reasoning.starts_with("search:last-tool-search"));
-        assert!(!result.reasoning.starts_with("tools:tool-request-detected"));
+        assert!(result.reasoning.contains("tools:tool-request-detected"));
+        assert!(!result.reasoning.contains("search:last-tool-search"));
     }
 
     #[test]
@@ -332,6 +339,7 @@ mod tests {
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
+        assert!(result.reasoning.contains("tools:tool-request-detected"));
         assert!(!result.reasoning.contains("web_search:servertool-required"));
     }
 
@@ -348,6 +356,7 @@ mod tests {
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
+        assert!(result.reasoning.contains("tools:tool-request-detected"));
         assert!(!result.reasoning.contains("web_search:tool-declared"));
     }
 }

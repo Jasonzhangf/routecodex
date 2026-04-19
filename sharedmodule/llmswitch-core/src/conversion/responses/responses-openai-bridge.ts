@@ -45,6 +45,7 @@ import { resolveBridgePolicy, resolvePolicyActions } from '../bridge-policies.js
 import { logHubStageTiming } from '../hub/pipeline/hub-stage-timing.js';
 import {
   RESPONSES_TOOL_PASSTHROUGH_KEYS,
+  RESPONSES_REQUEST_PARAMETER_KEYS,
   buildSlimBridgeDecisionMetadata,
   buildSlimResponsesBridgeContext,
   collectResponsesRequestParameters,
@@ -538,6 +539,30 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   });
   Object.assign(out, preparedEnvelope.request);
   delete out.parameters;
+
+  const retainedParameters: Record<string, unknown> = {
+    ...(contextParameters ?? {}),
+    ...(
+      chat.parameters && typeof chat.parameters === 'object' && !Array.isArray(chat.parameters)
+        ? (chat.parameters as Record<string, unknown>)
+        : {}
+    )
+  };
+  for (const key of RESPONSES_REQUEST_PARAMETER_KEYS) {
+    if (out[key] !== undefined || retainedParameters[key] === undefined) {
+      continue;
+    }
+    out[key] = jsonClone(retainedParameters[key] as JsonValue);
+  }
+  if (out.stream === undefined) {
+    const retainedStream =
+      streamFromChat ??
+      streamFromParameters ??
+      (typeof (ctx as any)?.stream === 'boolean' ? ((ctx as any).stream as boolean) : undefined);
+    if (retainedStream !== undefined) {
+      out.stream = retainedStream;
+    }
+  }
 
   ensureBridgeInstructions(out);
 

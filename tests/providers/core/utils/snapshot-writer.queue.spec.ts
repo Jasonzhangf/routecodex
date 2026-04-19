@@ -91,7 +91,7 @@ describe('provider snapshot writer queue', () => {
     ]);
   });
 
-  it('keeps request-shape summary when oversized provider-request payload is truncated', async () => {
+  it('preserves full oversized provider-request payload for replayable protocol samples', async () => {
     const runtimeFlagsModule = await import('../../../../src/runtime/runtime-flags.js');
     previousSnapshotFlag = runtimeFlagsModule.runtimeFlags.snapshotsEnabled;
     runtimeFlagsModule.setRuntimeFlag('snapshotsEnabled', true);
@@ -136,20 +136,84 @@ describe('provider snapshot writer queue', () => {
     await __flushProviderSnapshotQueueForTests();
 
     const payload = writeSnapshotViaHooksMock.mock.calls[0]?.[0]?.data as Record<string, unknown>;
-    expect(payload?.__snapshot_truncated).toBe(true);
-    expect(payload?.summary).toMatchObject({
-      type: 'provider-request',
-      requestShape: {
+    expect(payload?.__snapshot_truncated).toBeUndefined();
+    expect(payload).toMatchObject({
+      meta: {
+        stage: 'provider-request'
+      },
+      body: {
         model: 'gpt-5.3-codex',
         previous_response_id: 'resp_prev_turn',
-        toolsCount: 32,
-        input: {
-          itemCount: 2,
-          roleCounts: {
-            user: 2
+        input: [
+          {
+            role: 'user',
+            content: [{ type: 'input_text', text: '继续' }]
+          },
+          {
+            role: 'user',
+            content: [{ type: 'input_text', text: '先配置好路由器如何用 ssh 访问' }]
           }
-        }
+        ]
       }
     });
+    expect((payload.body as Record<string, unknown>)?.tools).toHaveLength(32);
+    expect(
+      ((payload.body as Record<string, unknown>)?.instructions as string | undefined)?.length
+    ).toBeGreaterThan(1000);
+  });
+
+  it('preserves full oversized provider-response payload for replayable protocol samples', async () => {
+    const runtimeFlagsModule = await import('../../../../src/runtime/runtime-flags.js');
+    previousSnapshotFlag = runtimeFlagsModule.runtimeFlags.snapshotsEnabled;
+    runtimeFlagsModule.setRuntimeFlag('snapshotsEnabled', true);
+    const {
+      __flushProviderSnapshotQueueForTests,
+      __resetProviderSnapshotErrorBufferForTests,
+      __resetProviderSnapshotQueueForTests,
+      writeProviderSnapshot
+    } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
+    __resetProviderSnapshotErrorBufferForTests();
+    __resetProviderSnapshotQueueForTests();
+    process.env.ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES = '1024';
+
+    await writeProviderSnapshot({
+      phase: 'provider-response',
+      requestId: 'req_queue_full_response_1',
+      clientRequestId: 'req_queue_full_response_1',
+      providerKey: 'crs.key2.gpt-5.3-codex',
+      entryEndpoint: '/v1/responses',
+      data: {
+        mode: 'sse',
+        raw: 'z'.repeat(20000),
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'OK' }]
+          }
+        ]
+      }
+    });
+
+    await __flushProviderSnapshotQueueForTests();
+
+    const payload = writeSnapshotViaHooksMock.mock.calls[0]?.[0]?.data as Record<string, unknown>;
+    expect(payload?.__snapshot_truncated).toBeUndefined();
+    expect(payload).toMatchObject({
+      meta: {
+        stage: 'provider-response'
+      },
+      body: {
+        mode: 'sse',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant'
+          }
+        ]
+      }
+    });
+    expect(typeof (payload.body as Record<string, unknown>)?.raw).toBe('string');
+    expect(((payload.body as Record<string, unknown>)?.raw as string).length).toBeGreaterThan(10000);
   });
 });

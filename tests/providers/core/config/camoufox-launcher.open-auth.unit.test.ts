@@ -841,4 +841,162 @@ describe('openAuthInCamoufox portal flow', () => {
       }
     }
   });
+
+  it('keeps qwen auto progressing when portal settles to qwen login before google auth', async () => {
+    const originalHome = process.env.HOME;
+    const originalAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+    const originalQwenSettleMs = process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_SETTLE_MS;
+    const originalQwenPollMs = process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_POLL_MS;
+    const originalGoogleSettleMs = process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_SETTLE_MS;
+    const originalGooglePollMs = process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_POLL_MS;
+    const originalGoogleSignInSettleMs = process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_SETTLE_MS;
+    const originalGoogleSignInPollMs = process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_POLL_MS;
+    process.env.HOME = '/tmp';
+    process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'qwen';
+    process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_SETTLE_MS = '5';
+    process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_POLL_MS = '1';
+    process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_SETTLE_MS = '5';
+    process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_POLL_MS = '1';
+    process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_SETTLE_MS = '5';
+    process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_POLL_MS = '1';
+
+    const spawnCalls: Array<{ args: string[]; env?: SpawnSyncEnv }> = [];
+    let listPagesCalls = 0;
+    const spawnSyncMock = jest.fn((_: string, args?: ReadonlyArray<string>, options?: { env?: SpawnSyncEnv }) => {
+      const normalizedArgs = Array.isArray(args) ? [...args] : [];
+      spawnCalls.push({ args: normalizedArgs, env: options?.env });
+      if (normalizedArgs[0] === 'status') {
+        return {
+          status: 0,
+          stdout: JSON.stringify({ ok: true, session: { profileId: 'rc-qwen.default' } }),
+          stderr: ''
+        };
+      }
+      if (normalizedArgs[0] === 'list') {
+        return {
+          status: 0,
+          stdout: JSON.stringify({ ok: true, sessions: [{ profileId: 'rc-qwen.default' }] }),
+          stderr: ''
+        };
+      }
+      if (normalizedArgs[0] === 'start') {
+        return {
+          status: 0,
+          stdout: JSON.stringify({ ok: true, profileId: 'rc-qwen.default', sessionId: 'rc-qwen.default' }),
+          stderr: ''
+        };
+      }
+      if (normalizedArgs[0] === 'goto') {
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      if (normalizedArgs[0] === 'list-pages') {
+        listPagesCalls += 1;
+        const url = (() => {
+          if (listPagesCalls <= 4) {
+            return 'http://127.0.0.1:18080/token-auth/demo?oauthUrl=https%3A%2F%2Fchat.qwen.ai%2Fauthorize';
+          }
+          if (listPagesCalls <= 6) {
+            return 'https://chat.qwen.ai/auth?user_code=ABCD1234&client=qwen-code';
+          }
+          return 'https://accounts.google.com/signin/oauth/consent?state=abc';
+        })();
+        return {
+          status: 0,
+          stdout: JSON.stringify({ ok: true, activeIndex: 0, pages: [{ index: 0, active: true, url }] }),
+          stderr: ''
+        };
+      }
+      if (normalizedArgs[0] === 'devtools' && normalizedArgs[1] === 'eval') {
+        const expr = normalizedArgs[3] || '';
+        if (expr.includes('document.querySelectorAll(selector)')) {
+          if (expr.includes('.qwenchat-auth-pc-other-login-button')) {
+            return { status: 0, stdout: JSON.stringify({ result: { value: '.qwenchat-auth-pc-other-login-button' } }), stderr: '' };
+          }
+          if (expr.includes('div[data-identifier]')) {
+            return { status: 0, stdout: JSON.stringify({ result: { value: 'div[data-identifier]' } }), stderr: '' };
+          }
+          return { status: 0, stdout: JSON.stringify({ result: { value: '' } }), stderr: '' };
+        }
+        if (expr.includes('[data-rcx-google-signin="1"]') || expr.includes('[data-rcx-signin="1"]')) {
+          return { status: 0, stdout: JSON.stringify({ result: { value: false } }), stderr: '' };
+        }
+        return { status: 0, stdout: JSON.stringify({ result: { value: '' } }), stderr: '' };
+      }
+      if (normalizedArgs[0] === 'click') {
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    }) as SpawnSyncMock;
+
+    try {
+      writeFingerprintFixture('/tmp', 'rc-qwen.default');
+      const launcher = await loadLauncherWithSpawnSyncMock(spawnSyncMock);
+      const ok = await launcher.openAuthInCamoufox({
+        url: 'http://127.0.0.1:18080/token-auth/demo?oauthUrl=https%3A%2F%2Fchat.qwen.ai%2Fauthorize',
+        provider: 'qwen',
+        alias: 'default'
+      });
+
+      expect(ok).toBe(true);
+      expect(spawnCalls.map((entry) => entry.args)).toContainEqual([
+        'click',
+        'rc-qwen.default',
+        '#continue-btn',
+        '--no-highlight'
+      ]);
+      expect(spawnCalls.map((entry) => entry.args)).toContainEqual([
+        'click',
+        'rc-qwen.default',
+        '.qwenchat-auth-pc-other-login-button',
+        '--no-highlight'
+      ]);
+      expect(spawnCalls.map((entry) => entry.args)).toContainEqual([
+        'click',
+        'rc-qwen.default',
+        'div[data-identifier]',
+        '--no-highlight'
+      ]);
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (originalAutoMode === undefined) {
+        delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      } else {
+        process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = originalAutoMode;
+      }
+      if (originalQwenSettleMs === undefined) {
+        delete process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_SETTLE_MS;
+      } else {
+        process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_SETTLE_MS = originalQwenSettleMs;
+      }
+      if (originalQwenPollMs === undefined) {
+        delete process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_POLL_MS;
+      } else {
+        process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_POLL_MS = originalQwenPollMs;
+      }
+      if (originalGoogleSettleMs === undefined) {
+        delete process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_SETTLE_MS;
+      } else {
+        process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_SETTLE_MS = originalGoogleSettleMs;
+      }
+      if (originalGooglePollMs === undefined) {
+        delete process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_POLL_MS;
+      } else {
+        process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_POLL_MS = originalGooglePollMs;
+      }
+      if (originalGoogleSignInSettleMs === undefined) {
+        delete process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_SETTLE_MS;
+      } else {
+        process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_SETTLE_MS = originalGoogleSignInSettleMs;
+      }
+      if (originalGoogleSignInPollMs === undefined) {
+        delete process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_POLL_MS;
+      } else {
+        process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_POLL_MS = originalGoogleSignInPollMs;
+      }
+    }
+  });
 });

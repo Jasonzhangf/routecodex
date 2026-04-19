@@ -604,9 +604,9 @@ export class HttpTransportProvider extends BaseProvider {
     }
     const host = parsed.hostname.trim().toLowerCase();
     const pathname = parsed.pathname.replace(/\/+$/, '');
-    const isLegacyPortalHost = host === 'portal.qwen.ai' || host === 'chat.qwen.ai';
-    if (isLegacyPortalHost) {
-      return undefined;
+    const isOfficialQwenCodeHost = host === 'portal.qwen.ai' || host === 'chat.qwen.ai';
+    if (isOfficialQwenCodeHost && (!pathname || pathname === '/v1')) {
+      return parsed.origin;
     }
     const isDashscopeCompatibleHost = host === 'dashscope.aliyuncs.com' && /^\/compatible-mode(?:\/v1)?$/i.test(pathname);
     if (!isDashscopeCompatibleHost) {

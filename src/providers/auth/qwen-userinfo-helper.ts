@@ -53,9 +53,12 @@ function resolveValidatedQwenRuntimeBaseUrl(resourceUrl?: string): string {
     const parsed = new URL(baseUrl);
     const host = parsed.hostname.trim().toLowerCase();
     const pathname = parsed.pathname.replace(/\/+$/, '');
-    const isLegacyPortalHost = host === 'portal.qwen.ai' || host === 'chat.qwen.ai';
+    const isOfficialQwenCodeHost = host === 'portal.qwen.ai' || host === 'chat.qwen.ai';
     const isDashscopeCompatibleHost = host === 'dashscope.aliyuncs.com' && /^\/compatible-mode(?:\/v1)?$/i.test(pathname);
-    if (!isLegacyPortalHost && isDashscopeCompatibleHost) {
+    if (isOfficialQwenCodeHost && (!pathname || pathname === '/v1')) {
+      return `${parsed.origin}/v1`;
+    }
+    if (isDashscopeCompatibleHost) {
       return `${parsed.origin}${pathname.endsWith('/v1') ? pathname : `${pathname}/v1`}`;
     }
   } catch {

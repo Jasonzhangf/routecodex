@@ -149,7 +149,7 @@ describe('oauth-lifecycle: non-blocking upstream repair', () => {
     ).toBe(false);
   });
 
-  it('qwen permanent refresh failure marks token noRefresh and does not start interactive flow', async () => {
+  it('qwen permanent refresh failure without stable api_key does not persist noRefresh and does not start interactive flow', async () => {
     jest.resetModules();
     const prevHome = process.env.HOME;
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-qwen-refresh-perm-'));
@@ -194,7 +194,7 @@ describe('oauth-lifecycle: non-blocking upstream repair', () => {
     expect(ensureValid.mock.calls[0]?.[2]?.openBrowser).toBe(false);
 
     const updated = JSON.parse(fs.readFileSync(tokenFile, 'utf8'));
-    expect(updated.norefresh ?? updated.noRefresh).toBe(true);
+    expect(updated.norefresh ?? updated.noRefresh).toBeUndefined();
 
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
@@ -205,7 +205,7 @@ describe('oauth-lifecycle: non-blocking upstream repair', () => {
     }
   });
 
-  it('qwen alias token file marks resolved auth token noRefresh and does not start interactive flow', async () => {
+  it('qwen alias token file without stable api_key does not persist noRefresh and does not start interactive flow', async () => {
     jest.resetModules();
     const prevHome = process.env.HOME;
     const prevRccHome = process.env.RCC_HOME;
@@ -255,7 +255,7 @@ describe('oauth-lifecycle: non-blocking upstream repair', () => {
     expect(ensureValid.mock.calls[0]?.[2]?.openBrowser).toBe(false);
 
     const updated = JSON.parse(fs.readFileSync(tokenFile, 'utf8'));
-    expect(updated.norefresh ?? updated.noRefresh).toBe(true);
+    expect(updated.norefresh ?? updated.noRefresh).toBeUndefined();
 
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
@@ -319,7 +319,50 @@ describe('oauth-lifecycle: non-blocking upstream repair', () => {
     }
   });
 
-  it('stops reauth after three interactive attempts (no further ensureValid calls)', async () => {
+  it('qwen blocking repair is now silent-refresh only and never launches interactive auth', async () => {
+    jest.resetModules();
+    const prevHome = process.env.HOME;
+    const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-qwen-blocking-auto-'));
+    process.env.HOME = tmpHome;
+    const ensureValid = jest.fn(async (_providerType: string, _auth: any, opts: any) => {
+      if (opts && opts.openBrowser === false) {
+        throw new Error('Token refresh failed (permanent): OAuth error: invalid_request - Invalid refresh token or client_id');
+      }
+      return {};
+    });
+
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { handleUpstreamInvalidOAuthToken } = await import('../../../src/providers/auth/oauth-lifecycle.js');
+      const result = await handleUpstreamInvalidOAuthToken(
+        'qwen',
+        { type: 'qwen-oauth', tokenFile: path.join(tmpHome, 'auth', `qwen-oauth-${Date.now()}.json`) } as any,
+        { statusCode: 401, message: 'HTTP 401: unauthorized (invalid_token)' } as any,
+        { allowBlocking: true, ensureValidOAuthToken: ensureValid as any }
+      );
+
+      expect(result).toBe(false);
+      // No interactive fallback: only one silent refresh attempt should be made.
+      expect(ensureValid).toHaveBeenCalledTimes(1);
+      expect(ensureValid.mock.calls[0]?.[2]).toMatchObject({
+        openBrowser: false
+      });
+    } finally {
+      warn.mockRestore();
+      if (prevAutoMode === undefined) delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      else process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      try {
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    }
+  });
+
+  it('qwen auto-disabled path keeps retrying silent refresh and never enters interactive repair gating', async () => {
     jest.resetModules();
     const prevHome = process.env.HOME;
     const prevMax = process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS;
@@ -360,7 +403,11 @@ describe('oauth-lifecycle: non-blocking upstream repair', () => {
       { allowBlocking: false, ensureValidOAuthToken: ensureValid as any }
     );
 
-    expect(ensureValid.mock.calls.length).toBe(callCountAfterThree);
+    expect(callCountAfterThree).toBe(3);
+    expect(ensureValid.mock.calls.length).toBe(4);
+    expect(
+      ensureValid.mock.calls.every((call) => call?.[2]?.openBrowser === false)
+    ).toBe(true);
 
     if (prevMax === undefined) delete process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS;
     else process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS = prevMax;

@@ -82,7 +82,7 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     expect(body.stream).toBe(true);
   });
 
-  test('OpenAIHttpProvider (qwen) uses native web_search endpoint/body and ignores portal resource_url override', () => {
+  test('OpenAIHttpProvider (qwen) uses native web_search endpoint/body and honors official resource_url override', () => {
     const config: OpenAIStandardConfig = {
       id: 'test-qwen',
       type: 'openai-http-provider',
@@ -121,8 +121,8 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
       getTokenPayload: () => ({ resource_url: 'portal.qwen.ai' })
     };
     provider.getRuntimeProfile = () => ({ baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' });
-    expect(provider.resolveAuthResourceBaseUrlOverride()).toBeUndefined();
-    expect(provider.getEffectiveBaseUrl()).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1');
+    expect(provider.resolveAuthResourceBaseUrlOverride()).toBe('https://portal.qwen.ai/v1');
+    expect(provider.getEffectiveBaseUrl()).toBe('https://portal.qwen.ai/v1');
 
     const aliasConfig: OpenAIStandardConfig = {
       id: 'test-qwen-alias',
@@ -140,8 +140,8 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
       getTokenPayload: () => ({ resource_url: 'portal.qwen.ai' })
     };
     aliasProvider.getRuntimeProfile = () => ({ baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' });
-    expect(aliasProvider.resolveAuthResourceBaseUrlOverride()).toBeUndefined();
-    expect(aliasProvider.getEffectiveBaseUrl()).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1');
+    expect(aliasProvider.resolveAuthResourceBaseUrlOverride()).toBe('https://portal.qwen.ai/v1');
+    expect(aliasProvider.getEffectiveBaseUrl()).toBe('https://portal.qwen.ai/v1');
   });
 
 

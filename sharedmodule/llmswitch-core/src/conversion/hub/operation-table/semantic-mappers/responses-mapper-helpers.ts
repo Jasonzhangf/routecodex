@@ -14,6 +14,20 @@ import {
 } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
 import type { ResponsesToolOutputEntry } from './responses-submit-tool-outputs.js';
 
+const RESPONSES_SEMANTIC_PARAMETER_FIELDS = [
+  ['responseFormat', 'response_format'],
+  ['include', 'include'],
+  ['store', 'store'],
+  ['promptCacheKey', 'prompt_cache_key'],
+  ['toolChoice', 'tool_choice'],
+  ['parallelToolCalls', 'parallel_tool_calls'],
+  ['reasoning', 'reasoning'],
+  ['text', 'text'],
+  ['serviceTier', 'service_tier'],
+  ['truncation', 'truncation'],
+  ['modalities', 'modalities'],
+] as const;
+
 export function mapToolOutputs(
   entries: ResponsesToolOutputEntry[] | undefined,
   missing: MissingField[],
@@ -136,19 +150,35 @@ function mergeMetadata(a?: JsonObject, b?: JsonObject): JsonObject | undefined {
 export function attachResponsesSemantics(
   existing: ChatSemantics | undefined,
   context?: ResponsesRequestContext,
-  resume?: JsonObject
+  resume?: JsonObject,
+  requestParameters?: JsonObject,
 ): ChatSemantics | undefined {
-  if (!context && !resume) {
+  if (!context && !resume && !requestParameters) {
     return existing;
   }
   const next: ChatSemantics = existing ? { ...existing } : {};
   const currentNode =
     next.responses && isJsonObject(next.responses) ? ({ ...(next.responses as JsonObject) } as JsonObject) : ({} as JsonObject);
+  const effectiveRequestParameters =
+    requestParameters && isJsonObject(requestParameters)
+      ? (jsonClone(requestParameters) as JsonObject)
+      : context?.parameters && isJsonObject(context.parameters as JsonValue)
+        ? (jsonClone(context.parameters as JsonObject) as JsonObject)
+        : undefined;
   if (context) {
     currentNode.context = jsonClone(context as JsonObject);
   }
   if (resume) {
     currentNode.resume = jsonClone(resume);
+  }
+  if (effectiveRequestParameters) {
+    currentNode.requestParameters = effectiveRequestParameters;
+  }
+  for (const [semanticKey, parameterKey] of RESPONSES_SEMANTIC_PARAMETER_FIELDS) {
+    const parameterValue = effectiveRequestParameters?.[parameterKey];
+    if (parameterValue !== undefined) {
+      currentNode[semanticKey] = jsonClone(parameterValue as JsonValue);
+    }
   }
   next.responses = currentNode;
   return next;
@@ -174,6 +204,49 @@ function readResponsesContextFromSemantics(chat: ChatEnvelope): ResponsesRequest
   return jsonClone(contextNode as JsonObject) as ResponsesRequestContext;
 }
 
+export function readResponsesRequestParametersFromSemantics(
+  chat: ChatEnvelope
+): JsonObject | undefined {
+  const node = extractResponsesSemanticsNode(chat);
+  if (!node) {
+    return undefined;
+  }
+  const merged =
+    node.requestParameters && isJsonObject(node.requestParameters as JsonValue)
+      ? (jsonClone(node.requestParameters as JsonObject) as JsonObject)
+      : ({} as JsonObject);
+  let mutated = Object.keys(merged).length > 0;
+  for (const [semanticKey, parameterKey] of RESPONSES_SEMANTIC_PARAMETER_FIELDS) {
+    const semanticValue = node[semanticKey];
+    if (semanticValue === undefined) {
+      continue;
+    }
+    merged[parameterKey] = jsonClone(semanticValue as JsonValue);
+    mutated = true;
+  }
+  return mutated ? merged : undefined;
+}
+
+function hydrateResponsesContextWithSemantics(
+  context: ResponsesRequestContext,
+  chat: ChatEnvelope
+): ResponsesRequestContext {
+  const next = jsonClone(context as JsonObject) as ResponsesRequestContext;
+  const requestParameters = readResponsesRequestParametersFromSemantics(chat);
+  if (requestParameters) {
+    next.parameters = requestParameters as Record<string, unknown>;
+    for (const [semanticKey, parameterKey] of RESPONSES_SEMANTIC_PARAMETER_FIELDS) {
+      const value = requestParameters[parameterKey];
+      if (value === undefined) {
+        continue;
+      }
+      next[semanticKey] = jsonClone(value as JsonValue);
+      next[parameterKey] = jsonClone(value as JsonValue);
+    }
+  }
+  return next;
+}
+
 export function selectResponsesContextSnapshot(
   chat: ChatEnvelope,
   envelopeMetadata?: JsonObject
@@ -191,5 +264,5 @@ export function selectResponsesContextSnapshot(
   if (mergedMetadata) {
     context.metadata = mergedMetadata;
   }
-  return context;
+  return hydrateResponsesContextWithSemantics(context, chat);
 }

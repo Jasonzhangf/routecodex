@@ -8,6 +8,7 @@ import {
   isSubmitToolOutputsEndpoint,
 } from './responses-submit-tool-outputs.js';
 import {
+  readResponsesRequestParametersFromSemantics,
   selectResponsesContextSnapshot,
   serializeSystemContent,
 } from './responses-mapper-helpers.js';
@@ -20,6 +21,14 @@ export async function buildResponsesFormatEnvelopeFromChat(
   const requestId = typeof ctx.requestId === 'string' && ctx.requestId.trim().length ? ctx.requestId : 'unknown';
   const envelopeMetadata = chat.metadata && isJsonObject(chat.metadata) ? (chat.metadata as JsonObject) : undefined;
   const responsesContext = selectResponsesContextSnapshot(chat, envelopeMetadata);
+  const semanticsParameters = readResponsesRequestParametersFromSemantics(chat);
+  const mergedParameters =
+    semanticsParameters || chat.parameters
+      ? ({
+          ...(semanticsParameters ?? {}),
+          ...(chat.parameters ?? {})
+        } as JsonObject)
+      : undefined;
   if (isSubmitToolOutputsEndpoint(ctx)) {
     const submitPayload = buildSubmitToolOutputsPayload(chat, ctx, responsesContext);
     return {
@@ -32,12 +41,12 @@ export async function buildResponsesFormatEnvelopeFromChat(
       }
     };
   }
-  const modelValue = chat.parameters?.model;
+  const modelValue = mergedParameters?.model;
   if (typeof modelValue !== 'string' || !modelValue.trim()) {
     throw new Error('ChatEnvelope.parameters.model is required for openai-responses outbound conversion');
   }
   const requestShape: JsonObject = {
-    ...(chat.parameters || {}),
+    ...(mergedParameters || {}),
     model: modelValue,
     messages: chat.messages,
     tools: chat.tools,
@@ -61,8 +70,8 @@ export async function buildResponsesFormatEnvelopeFromChat(
     forceLog: true
   });
   const responses = responsesResult.request as JsonObject;
-  if (chat.parameters && chat.parameters.stream !== undefined) {
-    (responses as ResponsesPayload).stream = chat.parameters.stream as JsonValue;
+  if (mergedParameters && mergedParameters.stream !== undefined) {
+    (responses as ResponsesPayload).stream = mergedParameters.stream as JsonValue;
   }
   // Do not forward ChatEnvelope.toolOutputs to OpenAI Responses create requests.
   // Upstream expects historical tool results to remain inside input[] as

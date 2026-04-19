@@ -23,6 +23,7 @@ import {
   normalizeMessageReasoningPayload,
   type ToolAliasMap
 } from './response-runtime-anthropic-helpers.js';
+import { normalizeShellLikeToolInput } from '../../shared/anthropic-message-utils-core.js';
 import {
   applyAnthropicResponseInboundBridgePolicy,
   applyAnthropicResponseOutboundBridgePolicy
@@ -265,6 +266,15 @@ export function buildAnthropicResponseFromChat(chatResponse: JsonObject, options
     chatResponse as Record<string, unknown>,
     aliasMap
   ) as JsonObject;
+  const contentBlocks = Array.isArray((sanitized as any).content)
+    ? ((sanitized as any).content as Array<Record<string, unknown>>)
+    : [];
+  for (const block of contentBlocks) {
+    if (!block || block.type !== 'tool_use' || typeof block.name !== 'string') {
+      continue;
+    }
+    block.input = normalizeShellLikeToolInput(block.name, block.input);
+  }
   if ((chatResponse as any)?.__responses_reasoning) {
     registerResponsesReasoning(sanitized.id, (chatResponse as any).__responses_reasoning);
   }

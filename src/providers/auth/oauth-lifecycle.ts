@@ -205,6 +205,11 @@ async function maybeMarkTokenFileNoRefresh(filePath: string): Promise<void> {
     if (!parsed || typeof parsed !== 'object') {
       return;
     }
+    const token = sanitizeToken(parsed);
+    const providerType = inferProviderTypeFromTokenFilePath(token, filePath);
+    if (providerType === 'qwen' && !hasStableQwenApiKey(token)) {
+      return;
+    }
     const current =
       (parsed as UnknownObject).norefresh ??
       (parsed as UnknownObject).noRefresh;
@@ -235,10 +240,7 @@ async function hasTokenFileNoRefresh(filePath: string): Promise<boolean> {
   }
   const parsed = await readRawTokenFile(filePath);
   const token = sanitizeToken(parsed);
-  const providerType =
-    token && typeof (token as UnknownObject).type === 'string'
-      ? String((token as UnknownObject).type).trim().toLowerCase()
-      : '';
+  const providerType = inferProviderTypeFromTokenFilePath(token, filePath);
   const direct =
     (parsed as UnknownObject | null)?.norefresh ??
     (parsed as UnknownObject | null)?.noRefresh;
@@ -262,6 +264,112 @@ function shouldHonorNoRefresh(providerType: string, token: StoredOAuthToken | nu
     return false;
   }
   return providerType.trim().toLowerCase() === 'qwen' ? hasStableQwenApiKey(token) : true;
+}
+
+function inferProviderTypeFromTokenFilePath(
+  token: StoredOAuthToken | null,
+  tokenFilePath: string
+): string {
+  const fromToken =
+    token && typeof (token as UnknownObject).type === 'string'
+      ? String((token as UnknownObject).type).trim().toLowerCase()
+      : '';
+  if (fromToken) {
+    return fromToken;
+  }
+  const base = path.basename(String(tokenFilePath || '').trim()).toLowerCase();
+  if (base.startsWith('qwen-')) {
+    return 'qwen';
+  }
+  if (base.startsWith('gemini-')) {
+    return 'gemini';
+  }
+  if (base.startsWith('antigravity-')) {
+    return 'antigravity';
+  }
+  if (base.startsWith('iflow-')) {
+    return 'iflow';
+  }
+  return '';
+}
+
+function isQwenDefaultAliasTokenFile(providerType: string, tokenFilePath: string): boolean {
+  if (providerType.trim().toLowerCase() !== 'qwen') {
+    return false;
+  }
+  const alias = resolveTokenAliasFromPath(tokenFilePath) ?? 'default';
+  return alias.trim().toLowerCase() === 'default';
+}
+
+function resolveOfficialQwenCodeTokenFile(): string {
+  const homeDir = String(process.env.HOME || '').trim() || os.homedir();
+  return path.join(homeDir, '.qwen', 'oauth_creds.json');
+}
+
+function extractRefreshTokenString(token: StoredOAuthToken | null): string {
+  const value = token?.refresh_token;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+async function maybeAdoptOfficialQwenCodeToken(args: {
+  providerType: string;
+  tokenFilePath: string;
+  currentToken: StoredOAuthToken | null;
+  strategy: OAuthStrategy;
+  force?: boolean;
+}): Promise<StoredOAuthToken | null> {
+  if (!isQwenDefaultAliasTokenFile(args.providerType, args.tokenFilePath)) {
+    return null;
+  }
+
+  const officialTokenFile = resolveOfficialQwenCodeTokenFile();
+  if (!officialTokenFile || officialTokenFile === args.tokenFilePath) {
+    return null;
+  }
+
+  const officialRaw = await readRawTokenFile(officialTokenFile);
+  const officialToken = sanitizeToken(officialRaw);
+  if (!officialToken) {
+    return null;
+  }
+
+  const officialAccessToken = extractAccessToken(officialToken);
+  const officialRefreshToken = extractRefreshTokenString(officialToken);
+  if (!officialAccessToken && !officialRefreshToken) {
+    return null;
+  }
+
+  const currentAccessToken = extractAccessToken(args.currentToken);
+  const currentRefreshToken = extractRefreshTokenString(args.currentToken);
+  if (
+    currentAccessToken === officialAccessToken &&
+    currentRefreshToken === officialRefreshToken
+  ) {
+    return args.currentToken ?? officialToken;
+  }
+
+  if (!args.force && args.currentToken) {
+    return null;
+  }
+
+  const prepared = await prepareTokenForStorage(
+    args.providerType,
+    args.tokenFilePath,
+    (officialRaw as UnknownObject | null) ?? (officialToken as UnknownObject)
+  );
+
+  if (typeof args.strategy.saveToken === 'function') {
+    await args.strategy.saveToken(prepared);
+  } else {
+    await fs.writeFile(args.tokenFilePath, JSON.stringify(prepared, null, 2) + '\n', {
+      mode: 0o600
+    });
+  }
+
+  logOAuthDebug(
+    `[OAuth] Qwen default: adopted official qwen code token ${officialTokenFile} -> ${args.tokenFilePath}`
+  );
+  return sanitizeToken(prepared) ?? officialToken;
 }
 
 function isIflowRefreshEndpointRejectionMessage(message: string): boolean {
@@ -334,6 +442,11 @@ function isElementMissingAutomationFailure(message: string): boolean {
   );
 }
 
+function isAutoOAuthDisabledProvider(providerType: string): boolean {
+  const normalized = String(providerType || '').trim().toLowerCase();
+  return normalized === 'qwen' || normalized === 'iflow';
+}
+
 async function runInteractiveRepairWithAutoFallback(args: {
   providerType: string;
   auth: OAuthAuth;
@@ -349,6 +462,7 @@ async function runInteractiveRepairWithAutoFallback(args: {
     if (!autoModeAtStart) {
       throw error;
     }
+    const normalizedProviderType = String(providerType || '').trim().toLowerCase();
     const msg = error instanceof Error ? error.message : String(error || '');
     const selectorFailure = isElementMissingAutomationFailure(msg);
     let tokenFilePath = '';
@@ -364,6 +478,12 @@ async function runInteractiveRepairWithAutoFallback(args: {
     }
     if (tokenFilePath) {
       closeOAuthAuthResources(providerType, tokenFilePath);
+    }
+    if (isAutoOAuthDisabledProvider(normalizedProviderType)) {
+      console.warn(
+        `[OAuth] Camoufox auto OAuth failed (${providerType}, autoMode=${autoModeAtStart}): ${msg}. Auto OAuth is disabled for this provider; manual re-auth is required.`
+      );
+      throw error;
     }
     console.warn(
       `[OAuth] Camoufox auto OAuth failed (${providerType}, autoMode=${autoModeAtStart}): ${msg}. Falling back to headful manual mode once.`
@@ -599,10 +719,13 @@ async function prepareTokenForStorage(
         const parsed = new URL(normalized);
         const host = parsed.hostname.trim().toLowerCase();
         const pathname = parsed.pathname.replace(/\/+$/, '');
-        const isLegacyPortalHost = host === 'portal.qwen.ai' || host === 'chat.qwen.ai';
+        const isOfficialQwenCodeHost = host === 'portal.qwen.ai' || host === 'chat.qwen.ai';
         const isDashscopeCompatibleHost =
           host === 'dashscope.aliyuncs.com' && /^\/compatible-mode(?:\/v1)?$/i.test(pathname);
-        if (isLegacyPortalHost || !isDashscopeCompatibleHost) {
+        if (isOfficialQwenCodeHost && (!pathname || pathname === '/v1')) {
+          return parsed.origin;
+        }
+        if (!isDashscopeCompatibleHost) {
           return undefined;
         }
         return `${parsed.origin}${pathname}`;
@@ -1647,6 +1770,14 @@ export async function ensureValidOAuthToken(
     logOAuthSetup(providerType, defaults, overrides, endpoints, client, tokenFilePath, openBrowser, forceReauth);
     const strategy = createStrategy(providerType, overrides, tokenFilePath);
     let token = await readTokenFromFile(tokenFilePath);
+    if (!token) {
+      token = await maybeAdoptOfficialQwenCodeToken({
+        providerType,
+        tokenFilePath,
+        currentToken: null,
+        strategy
+      });
+    }
     const hadExistingTokenFile = token !== null;
 
     // Qwen: ensure api_key is present even when access_token is still valid.
@@ -1736,6 +1867,43 @@ export async function ensureValidOAuthToken(
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error || '');
+        if (
+          providerType === 'qwen' &&
+          isPermanentOAuthRefreshErrorMessage(message)
+        ) {
+          try {
+            const adopted = await maybeAdoptOfficialQwenCodeToken({
+              providerType,
+              tokenFilePath,
+              currentToken: token,
+              strategy,
+              force: true
+            });
+            const adoptedRefreshToken = extractRefreshTokenString(adopted);
+            if (adoptedRefreshToken && adoptedRefreshToken !== extractRefreshTokenString(token)) {
+              logOAuthDebug('[OAuth] Qwen default: refresh failed, retrying with official qwen code token');
+              const refreshed = await strategy.refreshToken(adoptedRefreshToken);
+              await finalizeTokenWrite(
+                providerType,
+                strategy,
+                tokenFilePath,
+                refreshed,
+                'repaired from official qwen code token and saved',
+                {
+                  strictQwenValidation: true
+                }
+              );
+              updateThrottle(cacheKey);
+              return;
+            }
+          } catch (repairError) {
+            logOAuthLifecycleNonBlocking(
+              'qwen_default_official_token_repair',
+              repairError,
+              { tokenFilePath }
+            );
+          }
+        }
         applyRefreshFailureBackoff(cacheKey, providerType, message);
         if (providerType === 'iflow' && shouldClearIflowTokenOnRefreshFailure(message)) {
           // Only clear token file for permanent refresh-credential failures.
@@ -1812,6 +1980,78 @@ export async function handleUpstreamInvalidOAuthToken(
   const allowBlocking = options?.allowBlocking !== false;
   const ensureValid = options?.ensureValidOAuthToken ?? ensureValidOAuthToken;
   let tokenFilePath: string | undefined;
+  const autoOAuthDisabled = isAutoOAuthDisabledProvider(providerType);
+
+  const attemptSilentRefreshOnly = async (
+    lowerMessage: string
+  ): Promise<boolean> => {
+    if (pt === 'iflow') {
+      logOAuthLifecycleNonBlocking(
+        'handleUpstreamInvalidOAuthToken.iflowAutoDisabled',
+        new Error('iflow auto OAuth has been removed; manual intervention required'),
+        { providerType, tokenFilePath },
+        { warn: true, throttleKey: `iflow-auto-disabled:${tokenFilePath || 'unknown'}` }
+      );
+      return false;
+    }
+
+    const refreshRejectedForIflow = pt === 'iflow' && isIflowRefreshEndpointRejectionMessage(lowerMessage);
+    if (refreshRejectedForIflow) {
+      logOAuthLifecycleNonBlocking(
+        'handleUpstreamInvalidOAuthToken.refreshRejected',
+        new Error('refresh endpoint rejected request; manual re-auth required'),
+        { providerType, tokenFilePath },
+        { warn: true, throttleKey: `oauth-refresh-rejected:${providerType}:${tokenFilePath || 'unknown'}` }
+      );
+      return false;
+    }
+
+    try {
+      await withOAuthRepairEnv(providerType, async () => {
+        await ensureValid(providerType, auth, {
+          forceReacquireIfRefreshFails: false,
+          openBrowser: false,
+          forceReauthorize: false,
+          forceRefresh: pt === 'qwen'
+        });
+      });
+      if (tokenFilePath) {
+        await markInteractiveOAuthRepairSuccess({
+          providerType,
+          tokenFile: tokenFilePath
+        });
+      }
+      return true;
+    } catch (error) {
+      const refreshMsg = error instanceof Error ? error.message : String(error);
+      if (pt === 'qwen' && isPermanentOAuthRefreshErrorMessage(refreshMsg)) {
+        await maybeMarkTokenFileNoRefresh(tokenFilePath || '');
+        logOAuthLifecycleNonBlocking(
+          'handleUpstreamInvalidOAuthToken.qwenPermanentRefreshFailure',
+          new Error('qwen silent refresh permanently failed; standard re-auth required'),
+          { providerType, tokenFilePath, reason: refreshMsg },
+          { warn: true, throttleKey: `qwen-permanent-refresh:${tokenFilePath || 'unknown'}` }
+        );
+        return false;
+      }
+      if (pt === 'qwen') {
+        logOAuthLifecycleNonBlocking(
+          'handleUpstreamInvalidOAuthToken.qwenSilentRefreshFailure',
+          new Error('qwen silent refresh failed; standard re-auth required'),
+          { providerType, tokenFilePath, reason: refreshMsg },
+          { warn: true, throttleKey: `qwen-silent-refresh:${tokenFilePath || 'unknown'}` }
+        );
+        return false;
+      }
+      logOAuthLifecycleNonBlocking(
+        'handleUpstreamInvalidOAuthToken.autoOAuthDisabled',
+        new Error('auto OAuth has been removed for this provider; manual re-auth required'),
+        { providerType, tokenFilePath, reason: refreshMsg },
+        { warn: true, throttleKey: `oauth-auto-disabled:${providerType}:${tokenFilePath || 'unknown'}` }
+      );
+      return false;
+    }
+  };
   try {
     if (!shouldTriggerInteractiveOAuthRepair(providerType, upstreamError)) {
       return false;
@@ -1833,6 +2073,9 @@ export async function handleUpstreamInvalidOAuthToken(
         { warn: true, throttleKey: `qwen-norefresh:${tokenFilePath}` }
       );
       return false;
+    }
+    if (autoOAuthDisabled) {
+      return await attemptSilentRefreshOnly(lower);
     }
     const cooldownReason: OAuthRepairCooldownReason =
       statusCode === 403 && isGoogleAccountVerificationRequiredMessage(lower) ? 'google_verify' : 'generic';

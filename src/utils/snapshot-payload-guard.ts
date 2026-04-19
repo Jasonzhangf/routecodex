@@ -1,5 +1,33 @@
 const DEFAULT_SNAPSHOT_PAYLOAD_MAX_BYTES = 256 * 1024;
 
+function resolveBoolFromEnv(names: string[], fallback: boolean): boolean {
+  for (const name of names) {
+    const raw = String(process.env[name] ?? '').trim().toLowerCase();
+    if (!raw) {
+      continue;
+    }
+    if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') {
+      return true;
+    }
+    if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') {
+      return false;
+    }
+  }
+  return fallback;
+}
+
+function normalizeStageToken(stage: string): string {
+  return String(stage || '').trim().toLowerCase();
+}
+
+function shouldPreserveFullSnapshotPayload(stage: string): boolean {
+  if (resolveBoolFromEnv(['ROUTECODEX_SNAPSHOT_FULL', 'RCC_SNAPSHOT_FULL'], false)) {
+    return true;
+  }
+  const normalized = normalizeStageToken(stage);
+  return normalized.startsWith('provider-request') || normalized.startsWith('provider-response');
+}
+
 function previewText(value: string, maxChars = 160): string {
   return value.length > maxChars ? `${value.slice(0, maxChars)}…` : value;
 }
@@ -223,16 +251,13 @@ function summarizeSnapshotPayload(value: unknown): Record<string, unknown> {
 }
 
 export function coerceSnapshotPayloadForWrite(stage: string, payload: unknown): unknown {
+  if (shouldPreserveFullSnapshotPayload(stage)) {
+    return payload;
+  }
   const maxBytes = resolveSnapshotPayloadMaxBytes();
   const estimatedBytes = estimateSnapshotPayloadBytes(payload, { maxBytes: maxBytes + 1 });
   if (estimatedBytes <= maxBytes) {
     return payload;
   }
-  return {
-    __snapshot_truncated: true,
-    stage,
-    maxBytes,
-    estimatedBytes,
-    summary: summarizeSnapshotPayload(payload)
-  };
+  return undefined;
 }

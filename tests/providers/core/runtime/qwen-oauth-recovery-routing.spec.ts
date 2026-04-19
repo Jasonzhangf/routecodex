@@ -84,7 +84,7 @@ describe('Qwen OAuth recovery routing', () => {
       );
 
       const output = warnSpy.mock.calls.map((call) => call.join(' ')).join('\n');
-      expect(output).toContain('qwen auto-refresh disabled; standard re-auth required');
+      expect(output).toContain('qwen silent refresh permanently failed; standard re-auth required');
     } finally {
       warnSpy.mockRestore();
     }

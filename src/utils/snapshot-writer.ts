@@ -296,6 +296,9 @@ export async function writeServerSnapshot(options: {
   const groupRequestId = options.groupRequestId || options.requestId;
   const providerKey = options.providerKey;
   const data = coerceServerSnapshotData(String(options.phase), options.data);
+  if (data === undefined) {
+    return;
+  }
 
   let hookWritten = false;
   // 1) 优先通过 llmswitch-core hooks 写快照（供核心调试使用）

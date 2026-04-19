@@ -416,8 +416,6 @@ export class TokenDaemon {
         await (this as any).runAntigravityAutoAuthorization(token);
       } else if (providerType === 'gemini-cli') {
         await (this as any).runGeminiCliAutoAuthorization(token);
-      } else if (providerType === 'qwen') {
-        await (this as any).runQwenAutoAuthorization(token);
       } else {
         await (this as any).ensureTokenWithOverrides(token);
       }
@@ -542,14 +540,10 @@ export class TokenDaemon {
       const message = autoError instanceof Error ? autoError.message : String(autoError);
       console.warn(
         chalk.yellow('!'),
-        `Camoufox auto OAuth failed for qwen (${token.displayName}): ${message}. Falling back to manual mode.`
+        `Camoufox auto OAuth failed for qwen (${token.displayName}): ${message}. Manual fallback is disabled in daemon; waiting for next auto cycle.`
       );
+      throw autoError;
     }
-    await this.ensureTokenWithOverrides(token, {
-      useCamoufox: true,
-      autoMode: null,
-      devMode: true
-    });
   }
 
   private async ensureTokenWithOverrides(
@@ -932,6 +926,28 @@ async function maybeMarkTokenFileNoRefresh(filePath: string): Promise<void> {
     }
     const parsed = JSON.parse(raw) as any;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return;
+    }
+    const providerType =
+      typeof parsed.type === 'string' && parsed.type.trim()
+        ? parsed.type.trim().toLowerCase()
+        : path.basename(filePath).toLowerCase().startsWith('qwen-')
+          ? 'qwen'
+          : '';
+    const accessToken =
+      typeof parsed.access_token === 'string' && parsed.access_token.trim()
+        ? parsed.access_token.trim()
+        : typeof parsed.AccessToken === 'string' && parsed.AccessToken.trim()
+          ? parsed.AccessToken.trim()
+          : '';
+    const apiKey =
+      typeof parsed.apiKey === 'string' && parsed.apiKey.trim()
+        ? parsed.apiKey.trim()
+        : typeof parsed.api_key === 'string' && parsed.api_key.trim()
+          ? parsed.api_key.trim()
+          : '';
+    const hasStableQwenApiKey = Boolean(apiKey) && (!accessToken || apiKey !== accessToken);
+    if (providerType === 'qwen' && !hasStableQwenApiKey) {
       return;
     }
     const already =

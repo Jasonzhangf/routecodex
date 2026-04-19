@@ -3,9 +3,11 @@ import { isJsonObject, jsonClone, type JsonObject, type JsonValue } from '../../
 import { buildOpenAIChatFromAnthropic } from '../../../codecs/anthropic-openai-codec.js';
 import { extractMetadataPassthrough } from '../../../metadata-passthrough.js';
 import { buildAnthropicToolAliasMapWithNative } from '../../../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
+import { normalizeAnthropicToolAliasMap } from '../../process/chat-process-anthropic-alias.js';
 import { ChatSemanticMapper } from './chat-mapper.js';
 import {
   cloneAnthropicSystemBlocks,
+  ensureAnthropicSemanticsNode,
   ensureSemantics,
   ensureToolsSemanticsNode,
   markExplicitEmptyTools
@@ -58,14 +60,24 @@ export async function buildAnthropicChatEnvelopeFromPayload(
   const systemBlocks = cloneAnthropicSystemBlocks(payload.system);
   if (systemBlocks) {
     (semantics.system as JsonObject).blocks = jsonClone(systemBlocks as JsonValue) as JsonValue;
+    const anthropicNode = ensureAnthropicSemanticsNode(chatEnvelope);
+    anthropicNode.systemBlocks = jsonClone(systemBlocks as JsonValue[]) as JsonValue[];
   }
   if (payload.tools && Array.isArray(payload.tools) && payload.tools.length === 0) {
     markExplicitEmptyTools(chatEnvelope);
   }
-  const aliasMap = buildAnthropicToolAliasMapWithNative(payload.tools);
+  if (Array.isArray(payload.tools) && payload.tools.length > 0) {
+    const anthropicNode = ensureAnthropicSemanticsNode(chatEnvelope);
+    anthropicNode.clientToolsRaw = jsonClone(payload.tools as JsonValue[]) as JsonValue[];
+  }
+  const aliasMap = normalizeAnthropicToolAliasMap(
+    buildAnthropicToolAliasMapWithNative(payload.tools)
+  );
   if (aliasMap) {
     const toolsNode = ensureToolsSemanticsNode(chatEnvelope);
     (toolsNode as JsonObject).toolNameAliasMap = jsonClone(aliasMap as JsonObject as JsonValue) as JsonObject;
+    const anthropicNode = ensureAnthropicSemanticsNode(chatEnvelope);
+    anthropicNode.toolNameAliasMap = jsonClone(aliasMap as JsonObject as JsonValue) as JsonObject;
   }
   if (Array.isArray(payload.messages) && payload.messages.length) {
     const shapes = payload.messages.map((entry) => {
@@ -86,6 +98,8 @@ export async function buildAnthropicChatEnvelopeFromPayload(
     });
     const mirrorNode: JsonObject = { messageContentShape: shapes as unknown as JsonValue };
     (semantics.providerExtras as JsonObject).anthropicMirror = jsonClone(mirrorNode) as JsonObject;
+    const anthropicNode = ensureAnthropicSemanticsNode(chatEnvelope);
+    anthropicNode.messageContentShape = jsonClone(mirrorNode.messageContentShape) as JsonValue;
   }
   if (missing.length) {
     metadata.missingFields = Array.isArray(metadata.missingFields)
@@ -97,6 +111,8 @@ export async function buildAnthropicChatEnvelopeFromPayload(
     (payload.metadata && isJsonObject(payload.metadata) ? (jsonClone(payload.metadata) as JsonObject) : undefined);
   if (providerMetadata) {
     (semantics.providerExtras as JsonObject).providerMetadata = jsonClone(providerMetadata) as JsonObject;
+    const anthropicNode = ensureAnthropicSemanticsNode(chatEnvelope);
+    anthropicNode.providerMetadata = jsonClone(providerMetadata) as JsonObject;
   }
 
   const mergedParameters: JsonObject = { ...(chatEnvelope.parameters ?? {}) };

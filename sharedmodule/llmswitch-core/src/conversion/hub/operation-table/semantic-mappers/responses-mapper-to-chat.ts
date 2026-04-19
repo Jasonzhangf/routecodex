@@ -58,7 +58,7 @@ export async function buildResponsesChatEnvelopeFromPayload(
     metadata.missingFields = missingFields;
   }
   // Keep responses protocol semantics in chat.semantics (not metadata).
-  const semantics = attachResponsesSemantics(undefined, responsesContext, undefined);
+  const semantics = attachResponsesSemantics(undefined, responsesContext, undefined, parameters);
   return {
     messages,
     tools: normalizeTools(toolsNormalized as JsonValue[] | undefined, missingFields),

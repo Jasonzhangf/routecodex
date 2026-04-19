@@ -1011,14 +1011,13 @@ function extractQwenChatTerminalStreamError(payload: unknown): {
 function hasQwenChatPayloadSignals(body: unknown): boolean {
   const raw = findNestedRawString(body);
   const loweredRaw = raw.toLowerCase();
-  if (loweredRaw.includes('qwenchat') || loweredRaw.includes('chat.qwen.ai')) {
+  const hasExplicitQwenChatBrandSignal =
+    loweredRaw.includes('qwenchat') || loweredRaw.includes('chat.qwen.ai');
+  if (hasExplicitQwenChatBrandSignal) {
     return true;
   }
 
   if (extractQwenChatTerminalStreamError(body)) {
-    return true;
-  }
-  if (findQwenChatBusinessRejectionDeep(body)) {
     return true;
   }
   if (extractIncompleteQwenChatToolPrelude(raw)) {
@@ -1075,8 +1074,12 @@ function isLikelyQwenChatContext(baseContext: Record<string, unknown> | undefine
     return true;
   }
 
+  if (findQwenChatBusinessRejectionDeep(body)) {
+    return candidates.some((value) => value.includes('qwenchat') || value === 'chat:qwenchat-web');
+  }
+
   return candidates.some((value) =>
-    value.includes('qwenchat') || value === 'chat:qwenchat-web' || value.includes('qwen3.')
+    value.includes('qwenchat') || value === 'chat:qwenchat-web'
   );
 }
 

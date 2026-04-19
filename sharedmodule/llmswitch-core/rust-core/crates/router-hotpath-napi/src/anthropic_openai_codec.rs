@@ -98,6 +98,32 @@ fn normalize_tool_result_content(block: &Map<String, Value>) -> String {
     }
 }
 
+fn build_openai_image_part(block: &Map<String, Value>) -> Option<Value> {
+    let source = block.get("source").and_then(Value::as_object)?;
+    let source_type = read_trimmed_string(source.get("type"))?.to_ascii_lowercase();
+    let url = match source_type.as_str() {
+        "url" => read_trimmed_string(source.get("url"))?,
+        "base64" => {
+            let data = read_trimmed_string(source.get("data"))?;
+            let media_type = read_trimmed_string(source.get("media_type"))
+                .unwrap_or_else(|| "image/png".to_string());
+            format!("data:{media_type};base64,{data}")
+        }
+        _ => return None,
+    };
+
+    Some(Value::Object(Map::from_iter([(
+        "type".to_string(),
+        Value::String("image_url".to_string()),
+    ), (
+        "image_url".to_string(),
+        Value::Object(Map::from_iter([(
+            "url".to_string(),
+            Value::String(url),
+        )])),
+    )])))
+}
+
 fn build_anthropic_tool_alias_map(raw_tools: Option<&Value>) -> Option<Value> {
     let rows = raw_tools.and_then(|v| v.as_array())?;
     if rows.is_empty() {
@@ -237,6 +263,7 @@ fn convert_anthropic_messages(
         };
 
         let mut text_parts: Vec<String> = Vec::new();
+        let mut image_parts: Vec<Value> = Vec::new();
         let mut reasoning_parts: Vec<String> = Vec::new();
         let mut tool_calls: Vec<Value> = Vec::new();
         let mut tool_results: Vec<Value> = Vec::new();
@@ -259,6 +286,11 @@ fn convert_anthropic_messages(
                     let text = flatten_text(block).trim().to_string();
                     if !text.is_empty() {
                         reasoning_parts.push(text);
+                    }
+                }
+                "image" => {
+                    if let Some(image_part) = build_openai_image_part(block_obj) {
+                        image_parts.push(image_part);
                     }
                 }
                 "tool_use" => {
@@ -310,15 +342,32 @@ fn convert_anthropic_messages(
             }
         }
 
-        if !text_parts.is_empty() || !tool_calls.is_empty() || !reasoning_parts.is_empty() {
+        if !text_parts.is_empty()
+            || !image_parts.is_empty()
+            || !tool_calls.is_empty()
+            || !reasoning_parts.is_empty()
+        {
             let combined_text = text_parts.join("\n");
             let normalized = normalize_chat_message_content(&Value::String(combined_text.clone()));
             let mut message = Map::<String, Value>::new();
             message.insert("role".to_string(), Value::String(role));
-            message.insert(
-                "content".to_string(),
-                Value::String(normalized.content_text.unwrap_or(combined_text)),
-            );
+            if image_parts.is_empty() {
+                message.insert(
+                    "content".to_string(),
+                    Value::String(normalized.content_text.unwrap_or(combined_text)),
+                );
+            } else {
+                let mut content_parts: Vec<Value> = Vec::new();
+                let text_payload = normalized.content_text.unwrap_or(combined_text);
+                if !text_payload.trim().is_empty() {
+                    content_parts.push(Value::Object(Map::from_iter([
+                        ("type".to_string(), Value::String("text".to_string())),
+                        ("text".to_string(), Value::String(text_payload)),
+                    ])));
+                }
+                content_parts.extend(image_parts);
+                message.insert("content".to_string(), Value::Array(content_parts));
+            }
             if !tool_calls.is_empty() {
                 message.insert("tool_calls".to_string(), Value::Array(tool_calls));
             }
@@ -342,6 +391,50 @@ fn convert_anthropic_messages(
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_openai_chat_from_anthropic_json;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn build_openai_chat_from_anthropic_preserves_image_blocks() {
+        let payload = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": "AAA"
+                            }
+                        },
+                        { "type": "text", "text": "describe the image" }
+                    ]
+                }
+            ]
+        });
+
+        let output: Value = serde_json::from_str(
+            &build_openai_chat_from_anthropic_json(payload.to_string(), None).expect("build success"),
+        )
+        .expect("json output");
+
+        let content = output["request"]["messages"][0]["content"]
+            .as_array()
+            .expect("content array");
+        assert_eq!(content[0]["type"].as_str(), Some("text"));
+        assert_eq!(content[0]["text"].as_str(), Some("describe the image"));
+        assert_eq!(content[1]["type"].as_str(), Some("image_url"));
+        assert_eq!(
+            content[1]["image_url"]["url"].as_str(),
+            Some("data:image/png;base64,AAA")
+        );
+    }
 }
 
 pub(crate) fn build_openai_chat_from_anthropic_json(

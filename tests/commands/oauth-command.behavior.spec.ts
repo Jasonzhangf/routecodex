@@ -2,7 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import { Command } from 'commander';
 
 describe('oauth command behavior', () => {
-  it('enables iflow auto mode for oauth <selector> when selector resolves to iflow token', async () => {
+  it('keeps iflow root oauth path in manual mode', async () => {
     jest.resetModules();
     let autoModeAtCall = '';
     let autoConfirmAtCall = '';
@@ -23,9 +23,9 @@ describe('oauth command behavior', () => {
     const cmd = createOauthCommand();
     await cmd.parseAsync(['node', 'oauth', 'iflow-oauth-3-138.json'], { from: 'node' });
 
-    expect(interactiveRefresh).toHaveBeenCalledWith('iflow-oauth-3-138.json', { force: true, mode: 'auto' });
-    expect(autoModeAtCall).toBe('iflow');
-    expect(autoConfirmAtCall).toBe('1');
+    expect(interactiveRefresh).toHaveBeenCalledWith('iflow-oauth-3-138.json', { force: true, mode: 'manual' });
+    expect(autoModeAtCall).toBe('');
+    expect(autoConfirmAtCall).toBe('');
   });
 
   it('forces manual reauth by default for oauth <selector>', async () => {
@@ -146,7 +146,7 @@ describe('oauth command behavior', () => {
     }
   });
 
-  it('honors --headful for oauth <selector> when auto mode is enabled', async () => {
+  it('honors --headful for oauth <selector> while staying in manual mode for iflow', async () => {
     jest.resetModules();
     const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
     const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
@@ -168,7 +168,7 @@ describe('oauth command behavior', () => {
 
     try {
       await cmd.parseAsync(['node', 'oauth', '--headful', 'iflow-oauth-3-138.json'], { from: 'node' });
-      expect(interactiveRefresh).toHaveBeenCalledWith('iflow-oauth-3-138.json', { force: true, mode: 'auto' });
+      expect(interactiveRefresh).toHaveBeenCalledWith('iflow-oauth-3-138.json', { force: true, mode: 'manual' });
       expect(devModeAtCall).toBe('1');
       expect(browserAtCall).toBe('camoufox');
     } finally {
@@ -246,11 +246,10 @@ describe('oauth command behavior', () => {
       await cmd.parseAsync(['node', 'oauth', 'iflow-auto', 'iflow-oauth-1-186.json', '--headful'], { from: 'node' });
       expect(interactiveRefresh).toHaveBeenCalledWith('iflow-oauth-1-186.json', {
         force: true,
-        mode: 'auto',
-        noAutoFallback: true
+        mode: 'manual'
       });
       expect(devModeAtCall).toBe('1');
-      expect(autoModeAtCall).toBe('iflow');
+      expect(autoModeAtCall).toBe('');
       expect(browserAtCall).toBe('camoufox');
     } finally {
       if (prevDevMode === undefined) {
@@ -306,8 +305,7 @@ describe('oauth command behavior', () => {
       );
       expect(interactiveRefresh).toHaveBeenCalledWith('iflow-oauth-1-186.json', {
         force: true,
-        mode: 'auto',
-        noAutoFallback: true
+        mode: 'manual'
       });
       expect(devModeAtCall).toBe('1');
     } finally {
