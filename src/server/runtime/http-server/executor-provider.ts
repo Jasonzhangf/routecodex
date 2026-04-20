@@ -11,6 +11,35 @@ const NETWORK_ERROR_CODE_SET = new Set([
   'ECONNABORTED'
 ]);
 
+export function isClientDisconnectAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const err = error as {
+    code?: unknown;
+    message?: unknown;
+    name?: unknown;
+    cause?: unknown;
+  };
+  const code = typeof err.code === 'string' ? err.code.trim().toUpperCase() : '';
+  if (code === 'CLIENT_DISCONNECTED') {
+    return true;
+  }
+  const name = typeof err.name === 'string' ? err.name.trim() : '';
+  const message = typeof err.message === 'string' ? err.message.toLowerCase() : '';
+  if (message.includes('client_disconnected') || message.includes('client disconnected')) {
+    return true;
+  }
+  if (name === 'AbortError' && (message.includes('client_request_aborted') || message.includes('client_response_closed') || message.includes('client_timeout_hint_expired'))) {
+    return true;
+  }
+  const cause = err.cause;
+  if (cause && cause !== error) {
+    return isClientDisconnectAbortError(cause);
+  }
+  return false;
+}
+
 export function hasVirtualRouterSeriesCooldown(error: unknown): boolean {
   if (!error || typeof error !== 'object') {
     return false;
@@ -38,6 +67,9 @@ export function hasVirtualRouterSeriesCooldown(error: unknown): boolean {
 }
 
 export function isNetworkTransportError(error: unknown): boolean {
+  if (isClientDisconnectAbortError(error)) {
+    return false;
+  }
   if (!error || typeof error !== 'object') {
     return false;
   }
@@ -66,6 +98,9 @@ export function isNetworkTransportError(error: unknown): boolean {
 
 export function shouldRetryProviderError(error: unknown): boolean {
   if (!error || typeof error !== 'object') {
+    return false;
+  }
+  if (isClientDisconnectAbortError(error)) {
     return false;
   }
   const status = extractErrorStatusCode(error);
@@ -178,6 +213,7 @@ function isIflowModelError(error: unknown): boolean {
 
 type WaitBeforeRetryOptions = {
   attempt?: number;
+  signal?: AbortSignal;
 };
 
 function readNestedProviderError(error: unknown): Record<string, unknown> | undefined {
@@ -346,7 +382,45 @@ export function computeRetryDelayMs(error: unknown, options?: WaitBeforeRetryOpt
 
 export async function waitBeforeRetry(error: unknown, options?: WaitBeforeRetryOptions): Promise<number> {
   const delayMs = computeRetryDelayMs(error, options);
-  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  const signal = options?.signal;
+  if (signal?.aborted) {
+    const reason = (signal as { reason?: unknown }).reason;
+    throw reason instanceof Error ? reason : Object.assign(new Error(String(reason ?? 'CLIENT_DISCONNECTED')), {
+      code: 'CLIENT_DISCONNECTED',
+      name: 'AbortError'
+    });
+  }
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve(undefined);
+    }, delayMs);
+    const onAbort = () => {
+      cleanup();
+      const reason = (signal as { reason?: unknown }).reason;
+      reject(
+        reason instanceof Error
+          ? reason
+          : Object.assign(new Error(String(reason ?? 'CLIENT_DISCONNECTED')), {
+              code: 'CLIENT_DISCONNECTED',
+              name: 'AbortError'
+            })
+      );
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      try {
+        signal?.removeEventListener?.('abort', onAbort as EventListener);
+      } catch {
+        // ignore cleanup errors
+      }
+    };
+    try {
+      signal?.addEventListener?.('abort', onAbort as EventListener, { once: true } as AddEventListenerOptions);
+    } catch {
+      // ignore listener registration failure and rely on timeout
+    }
+  });
   return delayMs;
 }
 

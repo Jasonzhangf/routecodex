@@ -35,6 +35,27 @@ const NETWORK_ERROR_CODE_SET = new Set([
   'ECONNABORTED'
 ]);
 
+function isClientDisconnectAbortError(error: ProviderErrorAugmented, msgLower: string): boolean {
+  const code = typeof error.code === 'string' ? error.code.trim().toUpperCase() : '';
+  if (code === 'CLIENT_DISCONNECTED') {
+    return true;
+  }
+  if (msgLower.includes('client_disconnected') || msgLower.includes('client disconnected')) {
+    return true;
+  }
+  if (
+    error.name === 'AbortError'
+    && (
+      msgLower.includes('client_request_aborted')
+      || msgLower.includes('client_response_closed')
+      || msgLower.includes('client_timeout_hint_expired')
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function classifyProviderError(options: ProviderErrorClassifierOptions): ProviderErrorClassification {
   const err: ProviderErrorAugmented =
     (options.error instanceof Error ? options.error : new Error(String(options.error))) as ProviderErrorAugmented;
@@ -58,8 +79,9 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
 
   const statusText = String(statusCode ?? '');
   const msgLower = message.toLowerCase();
+  const isClientDisconnect = isClientDisconnectAbortError(err, msgLower);
   const isAbortError = err.name === 'AbortError' || msgLower.includes('operation was aborted');
-  const isNetworkError = !statusCode && (looksLikeNetworkTransportError(err, msgLower) || isAbortError);
+  const isNetworkError = !statusCode && !isClientDisconnect && (looksLikeNetworkTransportError(err, msgLower) || isAbortError);
   const usesOauth = options.authMode === 'oauth';
 
   const isRateLimit = statusText.includes('429') || msgLower.includes('429');
@@ -125,7 +147,11 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
     recoverable = true;
     affectsHealth = false;
   }
-  if (isAbortError) {
+  if (isClientDisconnect) {
+    recoverable = false;
+    affectsHealth = false;
+  }
+  if (isAbortError && !isClientDisconnect) {
     recoverable = true;
     affectsHealth = false;
   }

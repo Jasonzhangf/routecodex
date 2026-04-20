@@ -609,7 +609,8 @@ export class VercelAiSdkOpenAiTransport {
     const response = await fetch(requestInfo.targetUrl, {
       method: 'POST',
       headers: requestInfo.headers,
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      ...(requestInfo.abortSignal ? { signal: requestInfo.abortSignal } : {})
     });
 
     if (!response.ok) {

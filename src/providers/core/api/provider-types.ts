@@ -214,6 +214,7 @@ export interface ProviderContext {
   runtimeMetadata?: ProviderRuntimeMetadata;
   pipelineId?: string;
   profile?: ServiceProfile;
+  abortSignal?: AbortSignal;
 }
 
 /**

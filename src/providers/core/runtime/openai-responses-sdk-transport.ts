@@ -144,7 +144,8 @@ export class OpenAiResponsesSdkTransport {
     try {
       response = await client.responses
         .create(requestBody as never, {
-          headers: buildSdkHeaders(requestInfo.headers)
+          headers: buildSdkHeaders(requestInfo.headers),
+          ...(requestInfo.abortSignal ? { signal: requestInfo.abortSignal } : {})
         } as never)
         .asResponse();
     } catch (error) {

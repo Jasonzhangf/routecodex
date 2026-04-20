@@ -32,6 +32,7 @@ import {
   shouldRetryProviderError,
   waitBeforeRetry
 } from './executor/retry-engine.js';
+import { isClientDisconnectAbortError } from './executor-provider.js';
 import {
   type SseWrapperErrorInfo
 } from './executor/sse-error-handler.js';
@@ -70,6 +71,7 @@ import { resolveProviderRuntimeOrThrow } from './executor/provider-runtime-resol
 import { resolveProviderRequestContext } from './executor/provider-request-context.js';
 import { isServerToolEnabled } from './servertool-admin-state.js';
 import { registerRequestLogContext } from '../../utils/request-log-color.js';
+import { getClientConnectionAbortSignal } from '../../utils/client-connection-state.js';
 import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../../utils/finish-reason.js';
 import { allowSnapshotLocalDiskWrite } from '../../../utils/snapshot-local-disk-gate.js';
 import {
@@ -786,6 +788,59 @@ type RequestExecutorProviderErrorClassification =
   | 'recoverable'
   | 'special_400';
 
+function createClientDisconnectedAbortError(reason?: unknown): Error & { code: string; name: string; retryable?: boolean } {
+  const message =
+    typeof reason === 'string' && reason.trim()
+      ? reason.trim()
+      : reason instanceof Error && typeof reason.message === 'string' && reason.message.trim()
+        ? reason.message.trim()
+        : 'CLIENT_DISCONNECTED';
+  return Object.assign(new Error(message), {
+    code: 'CLIENT_DISCONNECTED',
+    name: 'AbortError',
+    retryable: false
+  });
+}
+
+function throwIfClientAbortSignalAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) {
+    return;
+  }
+  const reason = (signal as { reason?: unknown }).reason;
+  throw reason instanceof Error ? reason : createClientDisconnectedAbortError(reason);
+}
+
+async function waitWithClientAbortSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  throwIfClientAbortSignalAborted(signal);
+  if (!(ms > 0)) {
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      cleanup();
+      const reason = (signal as { reason?: unknown }).reason;
+      reject(reason instanceof Error ? reason : createClientDisconnectedAbortError(reason));
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      try {
+        signal?.removeEventListener?.('abort', onAbort as EventListener);
+      } catch {
+        // ignore cleanup errors
+      }
+    };
+    try {
+      signal?.addEventListener?.('abort', onAbort as EventListener, { once: true } as AddEventListenerOptions);
+    } catch {
+      // ignore listener registration failures
+    }
+  });
+}
+
 function isRequestExecutorProviderErrorStage(value: unknown): value is RequestExecutorProviderErrorStage {
   return (
     value === 'provider.runtime_resolve'
@@ -812,6 +867,9 @@ function resolveRequestExecutorProviderErrorClassification(args: {
   const stage = args.stage;
   if (stage === 'provider.followup' || isHostRequestExecutorErrorStage(stage ?? 'provider.send')) {
     return undefined;
+  }
+  if (isClientDisconnectAbortError(args.error)) {
+    return 'unrecoverable';
   }
   const statusCode =
     typeof args.retryError.statusCode === 'number'
@@ -959,6 +1017,9 @@ function isHealthNeutralProviderError(args: {
   }
   const errorCode = normalizeCodeKey(args.errorCode);
   const upstreamCode = normalizeCodeKey(args.upstreamCode);
+  if (errorCode === 'CLIENT_DISCONNECTED' || upstreamCode === 'CLIENT_DISCONNECTED') {
+    return true;
+  }
   if (
     errorCode === 'CLIENT_TOOL_ARGS_INVALID'
     || errorCode === 'QWENCHAT_INVALID_TOOL_ARGS'
@@ -1566,6 +1627,7 @@ async function resolveProviderRetryExecutionPlan(args: {
   antigravityRetrySignal?: AntigravityRetrySignal | null;
   status?: number;
   forceExcludeCurrentProviderOnRetry?: boolean;
+  abortSignal?: AbortSignal;
 }): Promise<ProviderRetryExecutionPlan> {
   const hostContractFailure = isHostRequestExecutorErrorStage(args.stage ?? 'provider.send');
   const rerouteHostContractFailure = args.stage === 'host.stopless_contract';
@@ -1651,6 +1713,7 @@ async function resolveProviderRetryExecutionPlan(args: {
     attempt: args.attempt,
     forceProviderScopedBackoff: exclusionPlan.excludedCurrentProvider,
     forceAttemptScopedBackoff: hostContractFailure && !exclusionPlan.excludedCurrentProvider,
+    abortSignal: args.abortSignal,
     logStage: args.logStage
   });
   const retrySwitchPlan = resolveProviderRetrySwitchPlan({
@@ -1748,6 +1811,7 @@ async function resolveRequestExecutorProviderFailurePlan(args: {
   antigravityRetrySignal?: AntigravityRetrySignal | null;
   status?: number;
   forceExcludeCurrentProviderOnRetry?: boolean;
+  abortSignal?: AbortSignal;
 }): Promise<RequestExecutorProviderFailurePlan> {
   const reportPlan = resolveRequestExecutorProviderErrorReportPlan({
     error: args.error,
@@ -1794,7 +1858,8 @@ async function resolveRequestExecutorProviderFailurePlan(args: {
     allowAntigravityRecovery: args.allowAntigravityRecovery,
     antigravityRetrySignal: args.antigravityRetrySignal,
     status: args.status,
-    forceExcludeCurrentProviderOnRetry: args.forceExcludeCurrentProviderOnRetry
+    forceExcludeCurrentProviderOnRetry: args.forceExcludeCurrentProviderOnRetry,
+    abortSignal: args.abortSignal
   });
   const retryTelemetryPlan =
     retryExecutionPlan.shouldRetry && retryExecutionPlan.retrySwitchPlan && retryExecutionPlan.backoffScope
@@ -1923,6 +1988,7 @@ async function resolveProviderRetryBackoffPlan(args: {
   attempt: number;
   forceProviderScopedBackoff?: boolean;
   forceAttemptScopedBackoff?: boolean;
+  abortSignal?: AbortSignal;
   logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => void;
 }): Promise<ProviderRetryBackoffPlan> {
   const blockingRecoverable = isBlockingRecoverableRetryError({
@@ -1932,7 +1998,10 @@ async function resolveProviderRetryBackoffPlan(args: {
     reason: args.retryError.reason
   });
   if (args.forceAttemptScopedBackoff) {
-    const retryBackoffMs = await waitBeforeRetry(args.error, { attempt: args.attempt });
+    const retryBackoffMs = await waitBeforeRetry(args.error, {
+      attempt: args.attempt,
+      signal: args.abortSignal
+    });
     return {
       blockingRecoverable,
       retryBackoffMs,
@@ -1953,7 +2022,7 @@ async function resolveProviderRetryBackoffPlan(args: {
       error: args.error,
       statusCode: args.retryError.statusCode
     });
-    await waitRecoverableBackoffWithGlobalGate(providerScopedKey, retryBackoffMs);
+    await waitRecoverableBackoffWithGlobalGate(providerScopedKey, retryBackoffMs, args.abortSignal);
     return {
       blockingRecoverable,
       retryBackoffMs,
@@ -1962,7 +2031,10 @@ async function resolveProviderRetryBackoffPlan(args: {
     };
   }
   if (!blockingRecoverable) {
-    const retryBackoffMs = await waitBeforeRetry(args.error, { attempt: args.attempt });
+    const retryBackoffMs = await waitBeforeRetry(args.error, {
+      attempt: args.attempt,
+      signal: args.abortSignal
+    });
     return {
       blockingRecoverable,
       retryBackoffMs,
@@ -2001,7 +2073,7 @@ async function resolveProviderRetryBackoffPlan(args: {
     upstreamCode: args.retryError.upstreamCode,
     reason: args.retryError.reason
   });
-  await waitRecoverableBackoffWithGlobalGate(recoverableKey, recoverableBackoffMs);
+  await waitRecoverableBackoffWithGlobalGate(recoverableKey, recoverableBackoffMs, args.abortSignal);
   return {
     blockingRecoverable,
     retryBackoffMs: recoverableBackoffMs,
@@ -2054,11 +2126,8 @@ function resolveProviderRetrySwitchPlan(args: {
   };
 }
 
-async function waitRecoverableBackoffMs(ms: number): Promise<void> {
-  if (!(ms > 0)) {
-    return;
-  }
-  await new Promise((resolve) => setTimeout(resolve, ms));
+async function waitRecoverableBackoffMs(ms: number, signal?: AbortSignal): Promise<void> {
+  await waitWithClientAbortSignal(ms, signal);
 }
 
 function resolveRecoverableBackoffMaxWaiters(): number {
@@ -2127,7 +2196,7 @@ function releaseRecoverableWaiterSlot(key: string): void {
   });
 }
 
-async function waitRecoverableBackoffWithGlobalGate(key: string, ms: number): Promise<void> {
+async function waitRecoverableBackoffWithGlobalGate(key: string, ms: number, signal?: AbortSignal): Promise<void> {
   const waiter = acquireRecoverableWaiterSlot(key);
   const normalizedKey = waiter.key;
   const previous = recoverableRetryGateState.get(normalizedKey) ?? Promise.resolve();
@@ -2138,7 +2207,7 @@ async function waitRecoverableBackoffWithGlobalGate(key: string, ms: number): Pr
   recoverableRetryGateState.set(normalizedKey, current);
   try {
     await previous.catch(() => undefined);
-    await waitRecoverableBackoffMs(ms);
+    await waitRecoverableBackoffMs(ms, signal);
   } finally {
     release();
     if (recoverableRetryGateState.get(normalizedKey) === current) {
@@ -2859,6 +2928,8 @@ export class HubRequestExecutor implements RequestExecutor {
           }
         }
         const metadataForAttempt = decorateMetadataForAttempt(initialMetadata, attempt, excludedProviderKeys);
+        const clientAbortSignal = getClientConnectionAbortSignal(metadataForAttempt);
+        throwIfClientAbortSignalAborted(clientAbortSignal);
         if (forcedRouteHint) {
           metadataForAttempt.routeHint = forcedRouteHint;
         }
@@ -2923,7 +2994,7 @@ export class HubRequestExecutor implements RequestExecutor {
                 reason: 'provider_pool_cooling_down'
               });
               poolCooldownWaitBudgetMs -= cooldownWaitMs;
-              await new Promise((resolve) => setTimeout(resolve, cooldownWaitMs));
+              await waitWithClientAbortSignal(cooldownWaitMs, clientAbortSignal);
               attempt = Math.max(0, attempt - 1);
               continue;
             }
@@ -2935,6 +3006,7 @@ export class HubRequestExecutor implements RequestExecutor {
         }
         const pipelineMetadata = pipelineResult.metadata ?? {};
         const mergedMetadata = mergeMetadataPreservingDefined(metadataForAttempt, pipelineMetadata);
+        throwIfClientAbortSignalAborted(clientAbortSignal);
         registerRequestLogContext(input.requestId, {
           sessionId: mergedMetadata.sessionId,
           conversationId: mergedMetadata.conversationId
@@ -3083,7 +3155,8 @@ export class HubRequestExecutor implements RequestExecutor {
             recordAttempt,
             logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
             routeHint: forcedRouteHint,
-            forceExcludeCurrentProviderOnRetry: true
+            forceExcludeCurrentProviderOnRetry: true,
+            abortSignal: clientAbortSignal
           });
           lastError = error;
           const retryExecutionPlan = providerFailurePlan.retryExecutionPlan;
@@ -3172,7 +3245,8 @@ export class HubRequestExecutor implements RequestExecutor {
           runtimeKey,
           target,
           metadata: mergedMetadata,
-          compatibilityProfile: target.compatibilityProfile
+          compatibilityProfile: target.compatibilityProfile,
+          abortSignal: getClientConnectionAbortSignal(mergedMetadata)
         });
         this.logStage('provider.metadata_attach.completed', input.requestId, {
           providerKey: target.providerKey,
@@ -3187,6 +3261,7 @@ export class HubRequestExecutor implements RequestExecutor {
         let providerSendElapsedMs = 0;
         const bypassTrafficGovernor = isServerToolFollowupRequest(metadataForAttempt);
         try {
+          throwIfClientAbortSignalAborted(clientAbortSignal);
           if (bypassTrafficGovernor) {
             this.logStage('provider.traffic.acquire.bypassed', input.requestId, {
               providerKey: target.providerKey,
@@ -3247,6 +3322,7 @@ export class HubRequestExecutor implements RequestExecutor {
             providerLabel,
             attempt
           });
+          throwIfClientAbortSignalAborted(clientAbortSignal);
 
           allowSnapshotLocalDiskWrite(
             executorRequestId,
@@ -3698,7 +3774,8 @@ export class HubRequestExecutor implements RequestExecutor {
             isReauth,
             allowAntigravityRecovery: true,
             antigravityRetrySignal: nextAntigravityRetrySignal,
-            status
+            status,
+            abortSignal: clientAbortSignal
           });
           const retryExecutionPlan = providerFailurePlan.retryExecutionPlan;
           if (!retryExecutionPlan.shouldRetry || !retryExecutionPlan.retrySwitchPlan || !retryExecutionPlan.backoffScope) {

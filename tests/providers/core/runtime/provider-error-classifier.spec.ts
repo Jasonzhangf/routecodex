@@ -119,6 +119,25 @@ describe('Provider error classifier - internal conversion errors', () => {
     expect(classification.isRateLimit).toBe(false);
   });
 
+  it('treats client disconnect abort as non-recoverable and health-neutral', () => {
+    const error = Object.assign(new Error('CLIENT_REQUEST_ABORTED'), {
+      name: 'AbortError',
+      code: 'CLIENT_DISCONNECTED'
+    });
+    const classification = classifyProviderError({
+      error,
+      context: baseContext,
+      detectDailyLimit: () => false,
+      registerRateLimitFailure: () => false,
+      forceRateLimitFailure: () => {},
+      authMode: 'apikey'
+    });
+
+    expect(classification.recoverable).toBe(false);
+    expect(classification.affectsHealth).toBe(false);
+    expect(classification.isRateLimit).toBe(false);
+  });
+
   it('treats iflow upstream 434 blocked-account as non-recoverable and health-affecting', () => {
     const error = Object.assign(
       new Error('HTTP 400: iFlow business error (434): Access to the current AK has been blocked due to unauthorized requests'),

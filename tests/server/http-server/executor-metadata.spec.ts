@@ -1,9 +1,15 @@
 import { describe, expect, it } from '@jest/globals';
 import { EventEmitter } from 'node:events';
 
-import { buildRequestMetadata } from '../../../src/server/runtime/http-server/executor-metadata.js';
+import {
+  buildRequestMetadata,
+  decorateMetadataForAttempt
+} from '../../../src/server/runtime/http-server/executor-metadata.js';
 import { getSessionClientRegistry } from '../../../src/server/runtime/http-server/session-client-registry.js';
-import { trackClientConnectionState } from '../../../src/server/utils/client-connection-state.js';
+import {
+  getClientConnectionAbortSignal,
+  trackClientConnectionState
+} from '../../../src/server/utils/client-connection-state.js';
 import { encodeSessionClientApiKey } from '../../../src/utils/session-client-token.js';
 
 describe('executor metadata session daemon extraction', () => {
@@ -383,6 +389,25 @@ describe('client connection timeout hint', () => {
     expect(state.disconnected).toBe(true);
   });
 
+  it('aborts provider signal when client request aborts', () => {
+    const req = new EventEmitter() as any;
+    req.headers = {};
+    const res = new EventEmitter() as any;
+    res.writableFinished = false;
+    res.writableEnded = false;
+
+    const state = trackClientConnectionState(req, res);
+    const signal = getClientConnectionAbortSignal(state);
+    expect(signal).toBeDefined();
+    expect(signal?.aborted).toBe(false);
+
+    req.emit('aborted');
+
+    expect(state.disconnected).toBe(true);
+    expect(signal?.aborted).toBe(true);
+    expect((signal as AbortSignal & { reason?: Error }).reason?.message).toContain('CLIENT_REQUEST_ABORTED');
+  });
+
   it('clears timeout hint watcher on normal finish', async () => {
     const req = new EventEmitter() as any;
     req.headers = { 'x-stainless-timeout': '5' };
@@ -399,5 +424,41 @@ describe('client connection timeout hint', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 320));
     expect(state.disconnected).toBe(false);
+  });
+
+  it('does not clear timeout hint watcher on request close before response completes', async () => {
+    const req = new EventEmitter() as any;
+    req.headers = { 'x-stainless-timeout': '5' };
+    const res = new EventEmitter() as any;
+    res.writableFinished = false;
+    res.writableEnded = false;
+
+    const state = trackClientConnectionState(req, res);
+    req.emit('close');
+
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    expect(state.disconnected).toBe(true);
+  });
+
+  it('preserves client abort signal through decorateMetadataForAttempt clones', () => {
+    const req = new EventEmitter() as any;
+    req.headers = {};
+    const res = new EventEmitter() as any;
+    res.writableFinished = false;
+    res.writableEnded = false;
+
+    const state = trackClientConnectionState(req, res);
+    const metadata = decorateMetadataForAttempt(
+      { clientConnectionState: state },
+      1,
+      new Set<string>()
+    );
+    const signal = getClientConnectionAbortSignal(metadata);
+    expect(signal).toBeDefined();
+    expect(signal?.aborted).toBe(false);
+
+    req.emit('aborted');
+
+    expect(signal?.aborted).toBe(true);
   });
 });

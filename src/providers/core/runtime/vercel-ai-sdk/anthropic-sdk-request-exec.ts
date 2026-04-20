@@ -109,7 +109,8 @@ export async function executeAnthropicRequestWithBody(
   const response = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    ...(requestInfo.abortSignal ? { signal: requestInfo.abortSignal } : {})
   });
 
   if (!response.ok) {

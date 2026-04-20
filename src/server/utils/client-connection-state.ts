@@ -5,6 +5,14 @@ export interface ClientConnectionState {
 }
 
 export const CLIENT_CONNECTION_STATE_FIELD = '__clientConnectionState';
+const CLIENT_CONNECTION_ABORT_SIGNAL = Symbol('routecodex.clientConnectionAbortSignal');
+
+function buildClientDisconnectedError(reason: string): Error & { code: string; name: string } {
+  return Object.assign(new Error(reason), {
+    code: 'CLIENT_DISCONNECTED',
+    name: 'AbortError'
+  });
+}
 
 function readHeaderValue(headers: Request['headers'], name: string): string | undefined {
   const raw = headers[name];
@@ -46,6 +54,13 @@ function resolveClientTimeoutHintMs(req: Request): number | undefined {
 
 export function trackClientConnectionState(req: Request, res: Response): ClientConnectionState {
   const state: ClientConnectionState = { disconnected: false };
+  const controller = new AbortController();
+  Object.defineProperty(state, CLIENT_CONNECTION_ABORT_SIGNAL, {
+    value: controller.signal,
+    enumerable: false,
+    configurable: false,
+    writable: false
+  });
   let timeoutHandle: NodeJS.Timeout | undefined;
   const clearTimeoutHandle = () => {
     if (timeoutHandle) {
@@ -53,12 +68,20 @@ export function trackClientConnectionState(req: Request, res: Response): ClientC
       timeoutHandle = undefined;
     }
   };
-  const markDisconnected = () => {
+  const markDisconnected = (reason = 'CLIENT_DISCONNECTED') => {
     state.disconnected = true;
     clearTimeoutHandle();
+    try {
+      if (!controller.signal.aborted) {
+        controller.abort(buildClientDisconnectedError(reason));
+      }
+    } catch {
+      if (!controller.signal.aborted) {
+        controller.abort();
+      }
+    }
   };
-  req.on('aborted', markDisconnected);
-  req.on('close', clearTimeoutHandle);
+  req.on('aborted', () => markDisconnected('CLIENT_REQUEST_ABORTED'));
   res.on('finish', clearTimeoutHandle);
   res.on('close', () => {
     clearTimeoutHandle();
@@ -68,7 +91,7 @@ export function trackClientConnectionState(req: Request, res: Response): ClientC
     const finished = (res as unknown as { writableFinished?: boolean }).writableFinished;
     const ended = (res as unknown as { writableEnded?: boolean }).writableEnded;
     if (!finished && !ended) {
-      state.disconnected = true;
+      markDisconnected('CLIENT_RESPONSE_CLOSED');
     }
   });
   const clientTimeoutHintMs = resolveClientTimeoutHintMs(req);
@@ -80,7 +103,7 @@ export function trackClientConnectionState(req: Request, res: Response): ClientC
       const finished = (res as unknown as { writableFinished?: boolean }).writableFinished;
       const ended = (res as unknown as { writableEnded?: boolean }).writableEnded;
       if (!finished && !ended) {
-        state.disconnected = true;
+        markDisconnected('CLIENT_TIMEOUT_HINT_EXPIRED');
       }
       clearTimeoutHandle();
     }, deadlineMs);
@@ -104,6 +127,26 @@ export function extractClientConnectionState(
     }
   }
   return undefined;
+}
+
+export function getClientConnectionAbortSignal(
+  source?: ClientConnectionState | Record<string, unknown>
+): AbortSignal | undefined {
+  if (!source || typeof source !== 'object') {
+    return undefined;
+  }
+  const direct = Reflect.get(source as object, CLIENT_CONNECTION_ABORT_SIGNAL);
+  if (direct && typeof direct === 'object' && 'aborted' in (direct as object)) {
+    return direct as AbortSignal;
+  }
+  const state = extractClientConnectionState(source as Record<string, unknown>);
+  if (!state) {
+    return undefined;
+  }
+  const nested = Reflect.get(state as object, CLIENT_CONNECTION_ABORT_SIGNAL);
+  return nested && typeof nested === 'object' && 'aborted' in (nested as object)
+    ? (nested as AbortSignal)
+    : undefined;
 }
 
 export function applyClientConnectionStateToContext(

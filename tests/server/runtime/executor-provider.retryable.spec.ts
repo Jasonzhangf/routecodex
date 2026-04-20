@@ -53,4 +53,12 @@ describe('shouldRetryProviderError', () => {
     err.code = 'HTTP_400';
     expect(shouldRetryProviderError(err)).toBe(false);
   });
+
+  it('does not retry client disconnect abort errors', () => {
+    const err: any = Object.assign(new Error('CLIENT_REQUEST_ABORTED'), {
+      name: 'AbortError',
+      code: 'CLIENT_DISCONNECTED'
+    });
+    expect(shouldRetryProviderError(err)).toBe(false);
+  });
 });

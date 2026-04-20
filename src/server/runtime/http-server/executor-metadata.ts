@@ -580,6 +580,13 @@ export function decorateMetadataForAttempt(
   excludedProviderKeys: Set<string>
 ): Record<string, unknown> {
   const clone = cloneMetadata(base);
+  const clientConnectionState =
+    base.clientConnectionState && typeof base.clientConnectionState === 'object'
+      ? base.clientConnectionState
+      : undefined;
+  if (clientConnectionState) {
+    clone.clientConnectionState = clientConnectionState;
+  }
   clone.retryAttempt = attempt;
   if (excludedProviderKeys.size > 0) {
     clone.excludedProviderKeys = Array.from(excludedProviderKeys);

@@ -77,7 +77,11 @@ export function createProviderContext(options: {
     routeName: runtimeMetadata?.routeName,
     target: runtimeMetadata?.target,
     runtimeMetadata,
-    pipelineId: runtimeMetadata?.pipelineId
+    pipelineId: runtimeMetadata?.pipelineId,
+    abortSignal:
+      runtimeMetadata?.abortSignal && typeof runtimeMetadata.abortSignal === 'object'
+        ? (runtimeMetadata.abortSignal as AbortSignal)
+        : undefined
   };
   return { context, runtimeMetadata };
 }

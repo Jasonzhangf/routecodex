@@ -65,6 +65,10 @@ export function createProviderRuntimeContext(options: {
     metadata: runtime?.metadata,
     target: runtime?.target,
     runtimeMetadata: runtime,
-    pipelineId: runtime?.pipelineId
+    pipelineId: runtime?.pipelineId,
+    abortSignal:
+      runtime?.abortSignal && typeof runtime.abortSignal === 'object'
+        ? (runtime.abortSignal as AbortSignal)
+        : undefined
   };
 }

@@ -48,6 +48,7 @@ export type PreparedHttpRequest = {
   entryEndpoint?: string;
   clientRequestId?: string;
   wantsSse: boolean;
+  abortSignal?: AbortSignal;
 };
 
 export type PreparedRequestExecutor = (requestInfo: PreparedHttpRequest, context: ProviderContext, captureSse: boolean) => Promise<unknown>;
@@ -211,7 +212,8 @@ export class HttpRequestExecutor {
       body: finalBody,
       entryEndpoint,
       clientRequestId,
-      wantsSse
+      wantsSse,
+      ...(context.abortSignal ? { abortSignal: context.abortSignal } : {})
     };
   }
 
@@ -299,6 +301,15 @@ export class HttpRequestExecutor {
     const maxAttempts = this.deps.getHttpRetryLimit();
     let lastRequestInfo: PreparedHttpRequest = requestInfo;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (requestInfo.abortSignal?.aborted) {
+        const reason = (requestInfo.abortSignal as { reason?: unknown }).reason;
+        throw reason instanceof Error
+          ? reason
+          : Object.assign(new Error(String(reason ?? 'CLIENT_DISCONNECTED')), {
+              code: 'CLIENT_DISCONNECTED',
+              name: 'AbortError'
+            });
+      }
       const targets =
         requestInfo.targetUrls && requestInfo.targetUrls.length ? requestInfo.targetUrls : [requestInfo.targetUrl];
       for (let idx = 0; idx < targets.length; idx += 1) {
@@ -423,7 +434,13 @@ export class HttpRequestExecutor {
       ? await this.deps.executePreparedRequest(requestInfo, context, captureSse)
       : requestInfo.wantsSse
         ? await (async () => {
-            const upstreamStream = await this.httpClient.postStream(requestInfo.targetUrl, requestInfo.body, requestInfo.headers);
+            const upstreamStream = await this.httpClient.postStream(
+              requestInfo.targetUrl,
+              requestInfo.body,
+              requestInfo.headers,
+              undefined,
+              requestInfo.abortSignal
+            );
             const streamForHost = captureSse
               ? attachProviderSseSnapshotStream(upstreamStream, {
                   requestId: context.requestId,
@@ -463,7 +480,12 @@ export class HttpRequestExecutor {
             }
             return wrapped;
           })()
-        : await this.httpClient.post(requestInfo.targetUrl, requestInfo.body, requestInfo.headers);
+        : await this.httpClient.post(
+            requestInfo.targetUrl,
+            requestInfo.body,
+            requestInfo.headers,
+            requestInfo.abortSignal
+          );
 
     if (requestInfo.wantsSse) {
       if (!this.deps.executePreparedRequest) {
