@@ -188,4 +188,76 @@ describe('route-aware responses continuation', () => {
       materializedMode: 'local_full_input'
     });
   });
+
+  it('preserves the already route-selected model when materializing responses continuation for non-responses outbound', () => {
+    captureResponsesRequestContext({
+      requestId: 'req-route-aware-1',
+      sessionId: 'sess-route-aware-1',
+      payload: {
+        model: 'gpt-5.4'
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }]
+          },
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'world' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: 'req-route-aware-1',
+      response: {
+        id: 'resp-route-aware-1',
+        output: []
+      }
+    });
+
+    const workingRequest = {
+      model: 'qwen3.6-plus',
+      messages: [{ role: 'user', content: 'next turn' }],
+      parameters: {},
+      metadata: {}
+    } as any;
+
+    const resolved = resolveRouteAwareResponsesContinuation({
+      request: workingRequest,
+      rawRequest: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'next turn' }]
+          }
+        ]
+      } as any,
+      normalizedMetadata: {
+        sessionId: 'sess-route-aware-1'
+      },
+      requestId: 'req-route-aware-2',
+      entryProtocol: 'openai-responses',
+      outboundProtocol: 'openai-chat-completions'
+    });
+
+    expect((resolved as any).model).toBe('qwen3.6-plus');
+    expect((resolved as any).messages).toEqual([
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'world' },
+      { role: 'user', content: 'next turn' }
+    ]);
+    expect((resolved as any).semantics?.responses?.resume).toMatchObject({
+      previousRequestId: 'req-route-aware-1',
+      restoredFromResponseId: 'resp-route-aware-1',
+      materialized: true,
+      materializedMode: 'local_full_input'
+    });
+  });
 });

@@ -425,11 +425,29 @@ function enhanceResponseToolArguments(chat: Unknown): Unknown {
               }
             }
           } else if (name === 'exec_command') {
-            // Response-side canonical rule:
-            // keep provider arguments shape lossless and let host/client validation
-            // reject missing canonical fields like `cmd`; do not alias-repair
-            // `command -> cmd` here.
-            finalStr = repaired;
+            const validation = validateToolCall('exec_command', repaired, validationOptions);
+            if (validation && validation.ok && typeof validation.normalizedArgs === 'string') {
+              finalStr = validation.normalizedArgs;
+            } else {
+              let parsed: any;
+              try {
+                parsed = JSON.parse(repaired);
+              } catch (error) {
+                logToolGovernorNonBlocking('enhance_response_tool_arguments_exec_command_parse_json', error);
+                parsed = parseLenient(repaired);
+              }
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                const normalized = normalizeExecCommandArgs(parsed as Record<string, unknown>);
+                if (normalized.ok) {
+                  try {
+                    finalStr = JSON.stringify(normalized.normalized ?? {});
+                  } catch (error) {
+                    logToolGovernorNonBlocking('enhance_response_tool_arguments_exec_command_json_stringify', error);
+                    finalStr = repaired;
+                  }
+                }
+              }
+            }
           }
           if (fn) fn.arguments = finalStr;
         } catch (error) {

@@ -438,6 +438,7 @@ export function sendPipelineResponse(
         clientInjectWaitMs: usageLogInfo.clientInjectWaitMs,
         sseDecodeMs: usageLogInfo.sseDecodeMs,
         codecDecodeMs: usageLogInfo.codecDecodeMs,
+        providerDecodeTag: usageLogInfo.providerDecodeTag,
         providerAttemptCount: usageLogInfo.providerAttemptCount,
         retryCount: usageLogInfo.retryCount,
         hubStageTop: usageLogInfo.hubStageTop as any,

@@ -928,7 +928,15 @@ fn normalize_tool_name(raw: &str) -> String {
     } else {
         trimmed
     };
-    let lowered = without_prefix.to_ascii_lowercase();
+    let extracted_embedded =
+        Regex::new(r#"(?i)(?:^|[\s(<])(?:tool:|function:)([A-Za-z_][A-Za-z0-9_.-]*)"#)
+            .expect("valid embedded tool name pattern")
+            .captures(without_prefix)
+            .and_then(|caps| caps.get(1))
+            .map(|value| value.as_str().trim().to_string())
+            .filter(|value| !value.is_empty());
+    let normalized_input = extracted_embedded.unwrap_or_else(|| without_prefix.to_string());
+    let lowered = normalized_input.to_ascii_lowercase();
     if matches!(
         lowered.as_str(),
         "execute"
@@ -941,8 +949,74 @@ fn normalize_tool_name(raw: &str) -> String {
     ) {
         return "exec_command".to_string();
     }
-    normalize_responses_function_name(Some(without_prefix))
-        .unwrap_or_else(|| without_prefix.to_string())
+    normalize_responses_function_name(Some(normalized_input.as_str())).unwrap_or(normalized_input)
+}
+
+fn is_explicit_tool_name_candidate(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if is_structured_tool_name(trimmed) {
+        return true;
+    }
+    let lowered = trimmed.to_ascii_lowercase();
+    if lowered.starts_with("functions.")
+        || lowered.contains("tool:")
+        || lowered.contains("function:")
+        || lowered.contains("[tool_call")
+        || lowered.contains("[function_call")
+    {
+        let normalized = normalize_tool_name(trimmed);
+        return is_structured_tool_name(normalized.as_str());
+    }
+    false
+}
+
+fn read_markup_explicit_name_candidate(trimmed: &str, name_hint: Option<&str>) -> Option<String> {
+    let hinted = name_hint
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .filter(|value| is_explicit_tool_name_candidate(value.as_str()));
+    if hinted.is_some() {
+        return hinted;
+    }
+
+    let name_tag_pattern = Regex::new(
+        r"(?is)<\s*(?:function|name|tool_name|toolname|tool)\s*>\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*</\s*(?:function|name|tool_name|toolname|tool)\s*>",
+    )
+    .expect("valid markup name tag pattern");
+    if let Some(caps) = name_tag_pattern.captures(trimmed) {
+        if let Some(captured) = caps.get(1) {
+            let value = captured.as_str().trim();
+            if !value.is_empty() && is_explicit_tool_name_candidate(value) {
+                return Some(value.to_string());
+            }
+        }
+    }
+
+    let line_name_pattern =
+        Regex::new(r"^[A-Za-z_][A-Za-z0-9_.-]*$").expect("valid tool name line pattern");
+    for line in trimmed.lines() {
+        let candidate = line.trim();
+        if candidate.is_empty() || candidate.starts_with('<') || candidate.starts_with('[') {
+            continue;
+        }
+        if line_name_pattern.is_match(candidate) {
+            let lowered = candidate.to_ascii_lowercase();
+            if matches!(
+                lowered.as_str(),
+                "true" | "false" | "null" | "none" | "nil" | "undefined" | "n/a"
+            ) {
+                continue;
+            }
+            if is_explicit_tool_name_candidate(candidate) {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+
+    None
 }
 
 fn value_to_string(value: &Value) -> String {
@@ -1383,6 +1457,40 @@ fn infer_tool_name_from_args_value(value: Option<&Value>) -> Option<String> {
     None
 }
 
+fn read_tool_name_hint_from_args(raw_args: Option<&Value>) -> Option<String> {
+    fn scan(value: &Value, depth: usize) -> Option<String> {
+        if depth == 0 {
+            return None;
+        }
+        let obj = value.as_object()?;
+        if let Some(raw_name) = obj
+            .get("name")
+            .and_then(Value::as_str)
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+        {
+            let normalized = normalize_tool_name(raw_name);
+            if is_structured_tool_name(normalized.as_str()) {
+                return Some(normalized);
+            }
+        }
+        for key in ["function", "input", "args", "payload"] {
+            if let Some(child) = obj.get(key) {
+                if let Some(found) = scan(child, depth - 1) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    match raw_args {
+        Some(Value::Object(_)) => scan(raw_args?, 3),
+        Some(Value::Array(items)) => items.iter().find_map(|item| scan(item, 2)),
+        _ => None,
+    }
+}
+
 fn pick_tool_call_args_source<'a>(row: &'a Map<String, Value>) -> Option<&'a Value> {
     row.get("function")
         .and_then(Value::as_object)
@@ -1415,54 +1523,21 @@ fn parse_markup_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedTo
     if trimmed.is_empty() {
         return None;
     }
-    if !trimmed.contains('<') && !trimmed.contains('[') {
+    let lowered = trimmed.to_ascii_lowercase();
+    let has_markup_wrapper = trimmed.contains('<')
+        || lowered.contains("[tool_call")
+        || lowered.contains("[function_call");
+    if !has_markup_wrapper {
         return None;
     }
 
-    let mut name = name_hint
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
+    let mut name = read_markup_explicit_name_candidate(trimmed, name_hint);
     let id = Regex::new(r"(?is)<\s*id\s*>\s*([^<\s]+)\s*</\s*id\s*>")
         .expect("valid markup id pattern")
         .captures(trimmed)
         .and_then(|caps| caps.get(1))
         .map(|value| value.as_str().trim().to_string())
         .filter(|value| !value.is_empty());
-    if name.is_none() {
-        let name_tag_pattern = Regex::new(
-            r"(?is)<\s*(?:function|name|tool_name|toolname|tool)\s*>\s*([A-Za-z0-9_.-]+)\s*</\s*(?:function|name|tool_name|toolname|tool)\s*>",
-        )
-        .expect("valid markup name tag pattern");
-        if let Some(caps) = name_tag_pattern.captures(trimmed) {
-            if let Some(captured) = caps.get(1) {
-                let value = captured.as_str().trim();
-                if !value.is_empty() {
-                    name = Some(value.to_string());
-                }
-            }
-        }
-    }
-    if name.is_none() {
-        let line_name_pattern =
-            Regex::new(r"^[A-Za-z_][A-Za-z0-9_.-]*$").expect("valid tool name line pattern");
-        for line in trimmed.lines() {
-            let candidate = line.trim();
-            if candidate.is_empty() || candidate.starts_with('<') || candidate.starts_with('[') {
-                continue;
-            }
-            if line_name_pattern.is_match(candidate) {
-                let lowered = candidate.to_ascii_lowercase();
-                if matches!(
-                    lowered.as_str(),
-                    "true" | "false" | "null" | "none" | "nil" | "undefined" | "n/a"
-                ) {
-                    continue;
-                }
-                name = Some(candidate.to_string());
-                break;
-            }
-        }
-    }
 
     let mut args_obj = Map::new();
 
@@ -1515,6 +1590,55 @@ fn parse_markup_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedTo
         let value =
             parse_markup_argument_value(caps.get(2).map(|m| m.as_str()).unwrap_or_default());
         args_obj.insert(key, value);
+    }
+
+    if args_obj.is_empty()
+        && !Regex::new(
+            r"(?is)<\s*(?:tool:[A-Za-z_][A-Za-z0-9_.-]*|tool_call|function_call|invoke)\b",
+        )
+        .expect("valid outer tool wrapper pattern")
+        .is_match(trimmed)
+    {
+        let direct_field_pattern = Regex::new(
+            r"(?is)<\s*([A-Za-z_][A-Za-z0-9_.:-]*)\s*>([\s\S]*?)</\s*([A-Za-z_][A-Za-z0-9_.:-]*)\s*>",
+        )
+        .expect("valid direct field pattern");
+        for caps in direct_field_pattern.captures_iter(trimmed) {
+            let Some(raw_open) = caps.get(1).map(|m| m.as_str()) else {
+                continue;
+            };
+            let Some(raw_close) = caps.get(3).map(|m| m.as_str()) else {
+                continue;
+            };
+            let open = raw_open.rsplit(':').next().unwrap_or(raw_open).trim();
+            let close = raw_close.rsplit(':').next().unwrap_or(raw_close).trim();
+            if open.is_empty() || !open.eq_ignore_ascii_case(close) {
+                continue;
+            }
+            let Some(key) = normalize_tool_arg_key(open) else {
+                continue;
+            };
+            if matches!(
+                key.as_str(),
+                "tool_call"
+                    | "function_call"
+                    | "invoke"
+                    | "parameter"
+                    | "arg_key"
+                    | "arg_value"
+                    | "function"
+                    | "tool"
+            ) {
+                continue;
+            }
+            let value =
+                parse_markup_argument_value(caps.get(2).map(|m| m.as_str()).unwrap_or_default());
+            if key == "toon" {
+                args_obj.insert("cmd".to_string(), value);
+                continue;
+            }
+            args_obj.insert(key, value);
+        }
     }
 
     if args_obj.is_empty() {
@@ -1574,7 +1698,7 @@ fn parse_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedToolCall>
     }
 
     let parsed = parse_lenient_string_preserving_shell(trimmed);
-    if let Some(row) = parsed.as_object() {
+    if let Some(row) = parsed.as_object().filter(|row| !row.is_empty()) {
         let empty_obj = Value::Object(Map::new());
         let args_source = pick_tool_call_args_source(row).unwrap_or(&empty_obj);
         let candidate_name = row
@@ -1590,7 +1714,8 @@ fn parse_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedToolCall>
         let mut name = candidate_name
             .and_then(Value::as_str)
             .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty());
+            .filter(|v| !v.is_empty())
+            .filter(|v| is_explicit_tool_name_candidate(v.as_str()));
         if name.is_none() {
             name = name_hint
                 .map(|v| v.trim().to_string())
@@ -1606,22 +1731,21 @@ fn parse_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedToolCall>
                 args_source,
                 repair_arguments_to_string(args_source),
             );
-            let Some(args) =
+            if let Some(args) =
                 normalize_reasoning_harvested_arguments(resolved_name.as_str(), args_source, args)
-            else {
-                return None;
-            };
-            return Some(ParsedToolCall {
-                id: row
-                    .get("id")
-                    .or_else(|| row.get("call_id"))
-                    .or_else(|| row.get("tool_call_id"))
-                    .and_then(Value::as_str)
-                    .map(|v| v.trim().to_string())
-                    .filter(|v| !v.is_empty()),
-                name: normalize_tool_name(resolved_name.as_str()),
-                args,
-            });
+            {
+                return Some(ParsedToolCall {
+                    id: row
+                        .get("id")
+                        .or_else(|| row.get("call_id"))
+                        .or_else(|| row.get("tool_call_id"))
+                        .and_then(Value::as_str)
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty()),
+                    name: normalize_tool_name(resolved_name.as_str()),
+                    args,
+                });
+            }
         }
     }
 
@@ -1644,19 +1768,6 @@ fn normalize_structured_tool_call_entry(
     fallback_id: Option<String>,
 ) -> Option<Value> {
     let function_node = call_obj.get("function").and_then(Value::as_object);
-    let raw_name = function_node
-        .and_then(|f| f.get("name"))
-        .and_then(Value::as_str)
-        .or_else(|| call_obj.get("name").and_then(Value::as_str))
-        .or_else(|| call_obj.get("tool_name").and_then(Value::as_str))
-        .or_else(|| call_obj.get("tool").and_then(Value::as_str))
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())?;
-    let normalized_name = normalize_tool_name(raw_name.as_str());
-    if !is_structured_tool_name(normalized_name.as_str()) {
-        return None;
-    }
-
     let args_source = function_node
         .and_then(|f| f.get("arguments"))
         .or_else(|| function_node.and_then(|f| f.get("args")))
@@ -1666,6 +1777,21 @@ fn normalize_structured_tool_call_entry(
         .or_else(|| call_obj.get("input"))
         .cloned()
         .unwrap_or(Value::Null);
+    let hinted_name = read_tool_name_hint_from_args(Some(&args_source));
+    let raw_name = function_node
+        .and_then(|f| f.get("name"))
+        .and_then(Value::as_str)
+        .or_else(|| call_obj.get("name").and_then(Value::as_str))
+        .or_else(|| call_obj.get("tool_name").and_then(Value::as_str))
+        .or_else(|| call_obj.get("tool").and_then(Value::as_str))
+        .or(hinted_name.as_deref())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())?;
+    let normalized_name = normalize_tool_name(raw_name.as_str());
+    if !is_structured_tool_name(normalized_name.as_str()) {
+        return None;
+    }
+
     let args = normalize_reasoning_harvested_arguments(
         normalized_name.as_str(),
         &args_source,
@@ -1864,6 +1990,10 @@ fn collect_sentinel_tool_calls_candidates(text: &str) -> Vec<String> {
         }
     }
 
+    for inner in extract_rcc_tool_call_fence_segments(text) {
+        push(inner.as_str());
+    }
+
     let heredoc_json_pattern =
         Regex::new(r"(?ims)^\s*<<\s*RCC_TOOL_CALLS_JSON\s*$([\s\S]*?)^\s*RCC_TOOL_CALLS_JSON\s*$")
             .expect("valid rcc tool calls heredoc json pattern");
@@ -1879,6 +2009,58 @@ fn collect_sentinel_tool_calls_candidates(text: &str) -> Vec<String> {
     for caps in heredoc_pattern.captures_iter(text) {
         if let Some(inner) = caps.get(1) {
             push(inner.as_str());
+        }
+    }
+
+    out
+}
+
+fn extract_rcc_tool_call_fence_segments(raw: &str) -> Vec<String> {
+    fn find_open_marker(raw: &str, cursor: usize, open_marker: &str) -> Option<usize> {
+        let mut search_from = cursor;
+        while search_from < raw.len() {
+            let rel_start = raw[search_from..].find(open_marker)?;
+            let start = search_from + rel_start;
+            if open_marker == "<<RCC_TOOL_CALLS"
+                && raw[start + open_marker.len()..].starts_with("_JSON")
+            {
+                search_from = start + open_marker.len();
+                continue;
+            }
+            return Some(start);
+        }
+        None
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::<String>::new();
+    let markers = [
+        ("<<RCC_TOOL_CALLS_JSON", "RCC_TOOL_CALLS_JSON"),
+        ("<<RCC_TOOL_CALLS", "RCC_TOOL_CALLS"),
+    ];
+
+    for (open_marker, close_marker) in markers {
+        let mut cursor = 0usize;
+        while cursor < raw.len() {
+            let Some(open_start) = find_open_marker(raw, cursor, open_marker) else {
+                break;
+            };
+            let start = open_start + open_marker.len();
+            let remainder = &raw[start..];
+            let inner = if let Some(rel_end) = remainder.find(close_marker) {
+                &remainder[..rel_end]
+            } else {
+                remainder
+            };
+            let candidate = inner.trim();
+            if !candidate.is_empty() && seen.insert(candidate.to_string()) {
+                out.push(candidate.to_string());
+            }
+            if let Some(rel_end) = remainder.find(close_marker) {
+                cursor = start + rel_end + close_marker.len();
+            } else {
+                break;
+            }
         }
     }
 
@@ -1969,6 +2151,15 @@ fn build_tool_calls_shape_candidate(text: &str) -> Option<String> {
             candidate = format!("{{\"tool_calls\":{}}}", &after_marker[rel_open..]);
         } else {
             candidate = format!("{{\"tool_calls\":[{}]}}", after_marker.trim());
+        }
+    }
+    let trailing_rcc_closer_patterns = [
+        r"(?is)([}\]])\s*RCC_TOOL_CALLS_JSON\s*$",
+        r"(?is)([}\]])\s*RCC_TOOL_CALLS\s*$",
+    ];
+    for pattern in trailing_rcc_closer_patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            candidate = re.replace(candidate.as_str(), "$1").to_string();
         }
     }
     if candidate.is_empty() {
@@ -2078,11 +2269,28 @@ fn parse_tool_calls_shape_from_text(text: &str) -> Option<Value> {
     }
 }
 
+fn has_structured_or_nested_tool_name(row: &Map<String, Value>) -> bool {
+    row.get("name").is_some()
+        || row
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|function| function.get("name"))
+            .is_some()
+        || row.get("tool_name").is_some()
+        || row.get("tool").is_some()
+        || read_tool_name_hint_from_args(pick_tool_call_args_source(row)).is_some()
+}
+
 fn parse_explicit_json_tool_calls(text: &str, id_prefix: &str) -> Vec<Value> {
     let mut tool_calls = Vec::new();
     let mut seen = std::collections::HashSet::<String>::new();
+    let sentinel_candidates = collect_sentinel_tool_calls_candidates(text)
+        .into_iter()
+        .collect::<std::collections::HashSet<String>>();
+    let sentinel_present = !sentinel_candidates.is_empty();
 
     for candidate in collect_explicit_tool_calls_json_candidates(text) {
+        let from_sentinel = sentinel_candidates.contains(candidate.as_str());
         let parsed_initial = serde_json::from_str::<Value>(candidate.as_str())
             .unwrap_or_else(|_| parse_lenient_string_preserving_shell(candidate.as_str()));
         let parsed = match &parsed_initial {
@@ -2097,14 +2305,7 @@ fn parse_explicit_json_tool_calls(text: &str, id_prefix: &str) -> Vec<Value> {
                 if let Some(items) = row.get("tool_calls").and_then(Value::as_array) {
                     Some(items.clone())
                 } else {
-                    let has_name = row.get("name").is_some()
-                        || row
-                            .get("function")
-                            .and_then(Value::as_object)
-                            .and_then(|function| function.get("name"))
-                            .is_some()
-                        || row.get("tool_name").is_some()
-                        || row.get("tool").is_some();
+                    let has_name = has_structured_or_nested_tool_name(row);
                     let has_arguments = row.get("arguments").is_some()
                         || row.get("input").is_some()
                         || row.get("params").is_some()
@@ -2120,8 +2321,9 @@ fn parse_explicit_json_tool_calls(text: &str, id_prefix: &str) -> Vec<Value> {
                                     .or_else(|| function.get("parameters"))
                             })
                             .is_some();
-                    let has_inferable_name =
-                        infer_tool_name_from_args_value(pick_tool_call_args_source(row)).is_some();
+                    let has_inferable_name = !from_sentinel
+                        && infer_tool_name_from_args_value(pick_tool_call_args_source(row))
+                            .is_some();
                     let has_tool_type = row
                         .get("type")
                         .and_then(Value::as_str)
@@ -2149,16 +2351,9 @@ fn parse_explicit_json_tool_calls(text: &str, id_prefix: &str) -> Vec<Value> {
             let Value::Object(row) = entry else {
                 continue;
             };
-            let has_name = row.get("name").is_some()
-                || row
-                    .get("function")
-                    .and_then(Value::as_object)
-                    .and_then(|function| function.get("name"))
-                    .is_some()
-                || row.get("tool_name").is_some()
-                || row.get("tool").is_some();
-            let has_inferable_name =
-                infer_tool_name_from_args_value(pick_tool_call_args_source(row)).is_some();
+            let has_name = has_structured_or_nested_tool_name(row);
+            let has_inferable_name = !from_sentinel
+                && infer_tool_name_from_args_value(pick_tool_call_args_source(row)).is_some();
             let has_arguments = row.get("arguments").is_some()
                 || row.get("input").is_some()
                 || row.get("params").is_some()
@@ -2210,16 +2405,9 @@ fn parse_explicit_json_tool_calls(text: &str, id_prefix: &str) -> Vec<Value> {
                 let Value::Object(row) = entry else {
                     continue;
                 };
-                let has_name = row.get("name").is_some()
-                    || row
-                        .get("function")
-                        .and_then(Value::as_object)
-                        .and_then(|function| function.get("name"))
-                        .is_some()
-                    || row.get("tool_name").is_some()
-                    || row.get("tool").is_some();
-                let has_inferable_name =
-                    infer_tool_name_from_args_value(pick_tool_call_args_source(row)).is_some();
+                let has_name = has_structured_or_nested_tool_name(row);
+                let has_inferable_name = !sentinel_present
+                    && infer_tool_name_from_args_value(pick_tool_call_args_source(row)).is_some();
                 if !(has_name || has_inferable_name) {
                     continue;
                 }
@@ -2394,7 +2582,7 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
     );
 
     let function_equals_pattern =
-        Regex::new(r#"(?is)<function=([A-Za-z0-9_.-]+)\s*>([\s\S]*?)</function>"#)
+        Regex::new(r#"(?is)<function=([A-Za-z_][A-Za-z0-9_.-]*)\s*>([\s\S]*?)</function>"#)
             .expect("valid function equals pattern");
     consume_pattern(
         text,
@@ -2421,9 +2609,10 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
         &mut matches,
     );
 
-    let tool_namespace_pattern =
-        Regex::new(r#"(?is)<tool:([A-Za-z0-9_.-]+)\s*>([\s\S]*?)</tool:[A-Za-z0-9_.-]+\s*>"#)
-            .expect("valid tool namespace pattern");
+    let tool_namespace_pattern = Regex::new(
+        r#"(?is)<tool:([A-Za-z_][A-Za-z0-9_.-]*)\s*>([\s\S]*?)</tool:[A-Za-z_][A-Za-z0-9_.-]*\s*>"#,
+    )
+    .expect("valid tool namespace pattern");
     consume_pattern(
         text,
         &tool_namespace_pattern,
@@ -2499,8 +2688,39 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
                     }
                 }
             }
-            let stripped = strip_trailing_orphan_tool_markup_suffix(text);
-            if stripped.len() < text.trim_end().len() {
+            let has_orphan_cleanup_markers = {
+                let lowered = text.to_ascii_lowercase();
+                let has_explicit_valid_name =
+                    read_markup_explicit_name_candidate(text, None).is_some();
+                let has_opening_markup = lowered.contains("<tool_call")
+                    || lowered.contains("<function_call")
+                    || lowered.contains("<tool:")
+                    || lowered.contains("<parameter")
+                    || lowered.contains("<arg_value")
+                    || lowered.contains("<command>");
+                let has_orphan_only_closing = !has_opening_markup
+                    && (lowered.contains("</tool_call>")
+                        || lowered.contains("</function_call>")
+                        || lowered.contains("</command>")
+                        || lowered.contains("</arg_value>")
+                        || lowered.contains("</</parameter>"));
+                (lowered.contains("</tool_call>")
+                    || lowered.contains("</function_call>")
+                    || lowered.contains("</command>")
+                    || lowered.contains("</arg_value>")
+                    || lowered.contains("</</parameter>"))
+                    && (has_explicit_valid_name
+                        || has_orphan_only_closing
+                        || find_markup_tail_start(text)
+                            .map(|start| start > 0)
+                            .unwrap_or(false))
+            };
+            let stripped = if has_orphan_cleanup_markers {
+                strip_trailing_orphan_tool_markup_suffix(text)
+            } else {
+                text.trim_end().to_string()
+            };
+            if has_orphan_cleanup_markers && stripped.len() < text.trim_end().len() {
                 return (stripped, Vec::new());
             }
         }
@@ -3361,6 +3581,69 @@ mod tests {
     }
 
     #[test]
+    fn extract_tool_calls_harvests_tool_namespace_exec_command_block() {
+        let source = r#"<tool:exec_command>
+<command>cd /Users/fanzhang/Documents/github/cloudplayplus_stone && flutter --version</command>
+<requires_approval>false</requires_approval>
+</tool:exec_command>"#;
+        let (cleaned, tool_calls) =
+            extract_tool_calls_from_reasoning_text(source, "reasoning_test");
+        assert_eq!(cleaned, "");
+        assert_eq!(tool_calls.len(), 1);
+        let function = tool_calls[0]
+            .as_object()
+            .and_then(|row| row.get("function"))
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            function.get("name").and_then(Value::as_str),
+            Some("exec_command")
+        );
+        let args = function
+            .get("arguments")
+            .and_then(Value::as_str)
+            .unwrap_or("{}");
+        let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+        assert_eq!(
+            args_json["cmd"],
+            "cd /Users/fanzhang/Documents/github/cloudplayplus_stone && flutter --version"
+        );
+    }
+
+    #[test]
+    fn extract_tool_calls_harvests_tool_prefixed_exec_command_label() {
+        let source = r#"tool:exec_command (tool:exec_command)
+<command>cd /Users/fanzhang/Documents/github/cloudplayplus_stone && flutter --version</command>
+<requires_approval>false</requires_approval>
+<timeout_ms>10000</timeout_ms>
+</tool:exec_command>"#;
+        let (cleaned, tool_calls) =
+            extract_tool_calls_from_reasoning_text(source, "reasoning_test");
+        assert_eq!(cleaned, "");
+        assert_eq!(tool_calls.len(), 1);
+        let function = tool_calls[0]
+            .as_object()
+            .and_then(|row| row.get("function"))
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            function.get("name").and_then(Value::as_str),
+            Some("exec_command")
+        );
+        let args = function
+            .get("arguments")
+            .and_then(Value::as_str)
+            .unwrap_or("{}");
+        let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+        assert_eq!(
+            args_json["cmd"],
+            "cd /Users/fanzhang/Documents/github/cloudplayplus_stone && flutter --version"
+        );
+    }
+
+    #[test]
     fn extract_tool_calls_harvests_malformed_parameter_markup_payload() {
         let source = r#"
 <parameter name="input">pwd</</parameter>
@@ -3877,6 +4160,71 @@ exec_command
                 .and_then(Value::as_str),
             Some("update_plan")
         );
+    }
+
+    #[test]
+    fn normalize_assistant_text_accepts_heredoc_wrapped_tool_calls_payload_with_glued_closer() {
+        let message = json!({
+            "role": "assistant",
+            "content": "说明如下\n<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}RCC_TOOL_CALLS_JSON"
+        });
+
+        let output_json = normalize_assistant_text_to_tool_calls_json(message.to_string(), None)
+            .expect("normalize_assistant_text_to_tool_calls_json failed");
+
+        let output: Value =
+            serde_json::from_str(&output_json).expect("failed to parse output json");
+        let tool_calls = output
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(
+            tool_calls[0]
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("name"))
+                .and_then(Value::as_str),
+            Some("exec_command")
+        );
+    }
+
+    #[test]
+    fn normalize_assistant_text_accepts_heredoc_wrapped_tool_calls_payload_with_nested_input_name()
+    {
+        let message = json!({
+            "role": "assistant",
+            "content": "前言\n• <<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"cmd\":\"pwd\",\"name\":\"exec_command\"}}]}RCC_TOOL_CALLS_JSON\n尾言"
+        });
+
+        let output_json = normalize_assistant_text_to_tool_calls_json(message.to_string(), None)
+            .expect("normalize_assistant_text_to_tool_calls_json failed");
+
+        let output: Value =
+            serde_json::from_str(&output_json).expect("failed to parse output json");
+        let tool_calls = output
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(
+            tool_calls[0]
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("name"))
+                .and_then(Value::as_str),
+            Some("exec_command")
+        );
+        let args = tool_calls[0]
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|row| row.get("arguments"))
+            .and_then(Value::as_str)
+            .unwrap_or("{}");
+        let parsed_args: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+        assert_eq!(parsed_args.get("cmd").and_then(Value::as_str), Some("pwd"));
     }
 
     #[test]

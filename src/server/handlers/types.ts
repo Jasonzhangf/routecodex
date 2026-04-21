@@ -31,6 +31,7 @@ export interface PipelineExecutionResult {
     clientInjectWaitMs?: number;
     sseDecodeMs?: number;
     codecDecodeMs?: number;
+    providerDecodeTag?: string;
     providerAttemptCount?: number;
     retryCount?: number;
     hubStageTop?: Array<{

@@ -166,6 +166,7 @@ fn responses_input_contains_tool_history(items: &[Value]) -> bool {
 
 fn filter_orphan_responses_tool_outputs(items: Vec<Value>) -> Vec<Value> {
     let mut valid_call_ids = std::collections::HashSet::new();
+    let mut saw_function_calls = false;
     for entry in &items {
         let Some(row) = entry.as_object() else {
             continue;
@@ -176,11 +177,16 @@ fn filter_orphan_responses_tool_outputs(items: Vec<Value>) -> Vec<Value> {
         if ty != "function_call" && ty != "tool_call" {
             continue;
         }
+        saw_function_calls = true;
         for key in ["call_id", "tool_call_id", "id"] {
             if let Some(value) = read_trimmed_string(row.get(key)) {
                 valid_call_ids.insert(value);
             }
         }
+    }
+
+    if !saw_function_calls {
+        return items;
     }
 
     items
@@ -300,6 +306,41 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
 
             let mut normalized: Vec<Value> = Vec::with_capacity(items.len());
             let mut valid_call_ids = std::collections::HashSet::new();
+            let mut saw_function_calls = false;
+
+            for entry in items {
+                let Some(row) = entry.as_object() else {
+                    continue;
+                };
+                let ty = read_trimmed_string(row.get("type"))
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+
+                if !matches!(ty.as_str(), "function_call" | "tool_call") {
+                    continue;
+                }
+
+                saw_function_calls = true;
+                let name = read_trimmed_string(row.get("name"))
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty());
+                let Some(name) = name else {
+                    continue;
+                };
+                let lowered_name = name.to_ascii_lowercase();
+                let name_allowed = allowed_tool_names.is_empty()
+                    || allowed_tool_names.contains(lowered_name.as_str());
+                if name.len() > 128 || !name_allowed {
+                    continue;
+                }
+
+                let call_id = read_trimmed_string(row.get("call_id"))
+                    .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+                    .or_else(|| read_trimmed_string(row.get("id")));
+                if let Some(value) = call_id {
+                    valid_call_ids.insert(value);
+                }
+            }
 
             for entry in items {
                 let Some(row) = entry.as_object() else {
@@ -345,7 +386,7 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                     let Some(call_id) = call_id else {
                         continue;
                     };
-                    if !valid_call_ids.contains(call_id.as_str()) {
+                    if saw_function_calls && !valid_call_ids.contains(call_id.as_str()) {
                         continue;
                     }
                     normalized.push(entry.clone());
@@ -807,6 +848,63 @@ mod tests {
             let call_id = row.get("call_id").and_then(Value::as_str).unwrap_or("");
             ty == "function_call_output" && call_id == "fc_bad"
         }));
+    }
+
+    #[test]
+    fn normalize_responses_input_items_preserves_output_only_resume_batches() {
+        let raw_request = json!({
+          "input": [
+            {
+              "type": "function_call_output",
+              "id": "out_resume",
+              "call_id": "call_resume",
+              "output": "command failed: exit 2"
+            }
+          ]
+        });
+
+        let normalized = normalize_responses_input_items(raw_request.as_object().unwrap())
+            .expect("normalized input");
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0]["type"], "function_call_output");
+        assert_eq!(normalized[0]["call_id"], "call_resume");
+    }
+
+    #[test]
+    fn normalize_responses_input_items_keeps_outputs_when_call_appears_later_in_batch() {
+        let raw_request = json!({
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "exec_command",
+                "parameters": { "type": "object", "properties": {} }
+              }
+            }
+          ],
+          "input": [
+            {
+              "type": "function_call_output",
+              "id": "out_1",
+              "call_id": "fc_late",
+              "output": "stderr: permission denied"
+            },
+            {
+              "type": "function_call",
+              "id": "fc_late",
+              "call_id": "fc_late",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"pwd\"}"
+            }
+          ]
+        });
+
+        let normalized = normalize_responses_input_items(raw_request.as_object().unwrap())
+            .expect("normalized input");
+        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized[0]["type"], "function_call_output");
+        assert_eq!(normalized[0]["call_id"], "fc_late");
+        assert_eq!(normalized[1]["type"], "function_call");
     }
 
     #[test]

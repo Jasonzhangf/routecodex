@@ -116,16 +116,13 @@ fn build_openai_image_part(block: &Map<String, Value>) -> Option<Value> {
         _ => return None,
     };
 
-    Some(Value::Object(Map::from_iter([(
-        "type".to_string(),
-        Value::String("image_url".to_string()),
-    ), (
-        "image_url".to_string(),
-        Value::Object(Map::from_iter([(
-            "url".to_string(),
-            Value::String(url),
-        )])),
-    )])))
+    Some(Value::Object(Map::from_iter([
+        ("type".to_string(), Value::String("image_url".to_string())),
+        (
+            "image_url".to_string(),
+            Value::Object(Map::from_iter([("url".to_string(), Value::String(url))])),
+        ),
+    ])))
 }
 
 fn build_anthropic_tool_alias_map(raw_tools: Option<&Value>) -> Option<Value> {
@@ -250,13 +247,11 @@ fn convert_anthropic_messages(
             message.insert("role".to_string(), Value::String(role));
             message.insert(
                 "content".to_string(),
-                Value::String(
-                    if normalized_reasoning.is_some() {
-                        normalized.content_text.unwrap_or_else(|| text.clone())
-                    } else {
-                        text.clone()
-                    },
-                ),
+                Value::String(if normalized_reasoning.is_some() {
+                    normalized.content_text.unwrap_or_else(|| text.clone())
+                } else {
+                    text.clone()
+                }),
             );
             if let Some(reasoning) = normalized_reasoning {
                 if let Some(reasoning_payload) =
@@ -435,7 +430,8 @@ mod tests {
         });
 
         let output: Value = serde_json::from_str(
-            &build_openai_chat_from_anthropic_json(payload.to_string(), None).expect("build success"),
+            &build_openai_chat_from_anthropic_json(payload.to_string(), None)
+                .expect("build success"),
         )
         .expect("json output");
 
@@ -471,7 +467,8 @@ mod tests {
         });
 
         let output: Value = serde_json::from_str(
-            &build_openai_chat_from_anthropic_json(payload.to_string(), None).expect("build success"),
+            &build_openai_chat_from_anthropic_json(payload.to_string(), None)
+                .expect("build success"),
         )
         .expect("json output");
 

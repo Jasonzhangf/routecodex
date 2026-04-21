@@ -11,6 +11,31 @@ export interface ResponsesContextCaptureOptions {
   adapterContext: AdapterContext;
 }
 
+function readNormalizedToken(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+export function persistResponsesConversationRequestContext(
+  options: ResponsesContextCaptureOptions & { context: ResponsesRequestContext }
+): void {
+  const requestId = readNormalizedToken(options.adapterContext.requestId);
+  if (!requestId) {
+    return;
+  }
+  // captureResponsesRequestContext already best-effort wraps store failures.
+  captureResponsesRequestContext({
+    requestId,
+    payload: options.rawRequest as unknown as Record<string, unknown>,
+    context: options.context as unknown as Record<string, unknown>,
+    sessionId: readNormalizedToken((options.adapterContext as Record<string, unknown>).sessionId),
+    conversationId: readNormalizedToken((options.adapterContext as Record<string, unknown>).conversationId)
+  });
+}
+
 export function captureResponsesContextSnapshot(
   options: ResponsesContextCaptureOptions
 ): ResponsesRequestContext {
@@ -27,25 +52,6 @@ export function captureResponsesContextSnapshot(
   // - the tool loop is a client-protocol behavior (/v1/responses), independent of providerProtocol;
   // - providers must remain transport-only;
   // - the host may later enhance requestId with providerKey/model for logging, which is handled via rebind.
-  const requestId =
-    typeof options.adapterContext.requestId === 'string' && options.adapterContext.requestId.trim().length
-      ? options.adapterContext.requestId
-      : undefined;
-  if (requestId) {
-    // captureResponsesRequestContext already best-effort wraps store failures.
-    captureResponsesRequestContext({
-      requestId,
-      payload: options.rawRequest as unknown as Record<string, unknown>,
-      context: context as unknown as Record<string, unknown>,
-      sessionId:
-        typeof (options.adapterContext as Record<string, unknown>).sessionId === 'string'
-          ? String((options.adapterContext as Record<string, unknown>).sessionId).trim() || undefined
-          : undefined,
-      conversationId:
-        typeof (options.adapterContext as Record<string, unknown>).conversationId === 'string'
-          ? String((options.adapterContext as Record<string, unknown>).conversationId).trim() || undefined
-          : undefined
-    });
-  }
+  persistResponsesConversationRequestContext({ ...options, context });
   return context;
 }

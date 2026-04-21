@@ -25,6 +25,7 @@ import {
   parseCamoufoxConfig,
   readEnvBoolean,
   readStreamIntent,
+  shouldForceUpstreamSseForTools,
   shouldForceUpstreamSseForSearch,
   type CamoufoxFingerprintSnapshot,
   type DeepSeekCompletionBody
@@ -98,7 +99,7 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
   }
 
   protected override wantsUpstreamSse(request: UnknownObject, context: ProviderContext): boolean {
-    if (readStreamIntent(request) || shouldForceUpstreamSseForSearch(request)) {
+    if (readStreamIntent(request) || shouldForceUpstreamSseForSearch(request) || shouldForceUpstreamSseForTools(request)) {
       return true;
     }
     return super.wantsUpstreamSse(request, context);

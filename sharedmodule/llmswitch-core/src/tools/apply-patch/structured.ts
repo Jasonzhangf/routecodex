@@ -1,4 +1,5 @@
-import { fuzzyFindInLines, FuzzyMatchResult } from './patch-text/fuzzy-match.js';
+import { fuzzyFindInLines } from './patch-text/fuzzy-match.js';
+import type { FuzzyMatchResult } from './patch-text/fuzzy-match.js';
 
 type UnknownRecord = Record<string, unknown>;
 

@@ -125,4 +125,45 @@ describe('anthropic ↔ openai bridge roundtrip', () => {
     expect(String((imageBlock?.source as AnyRecord)?.media_type || '')).toBe('image/png');
     expect(String((imageBlock?.source as AnyRecord)?.data || '')).toContain('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQ');
   });
+
+  test('drops unified-exec capacity warning and fills empty tool_result fallback', () => {
+    const openaiPayload: AnyRecord = {
+      model: 'qwen3.6-plus',
+      messages: [
+        {
+          role: 'assistant',
+          tool_calls: [
+            {
+              id: 'call_exec_1',
+              type: 'function',
+              function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+            }
+          ]
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_exec_1',
+          name: 'exec_command',
+          content: ''
+        },
+        {
+          role: 'user',
+          content:
+            'Warning: The maximum number of unified exec processes you can keep open is 60 and you currently have 64 processes open. Reuse older processes or close them to prevent automatic pruning of old processes'
+        }
+      ]
+    };
+
+    const anthropicRequest = buildAnthropicRequestFromOpenAIChat(openaiPayload) as AnyRecord;
+    const anthropicMessages = asArray(anthropicRequest.messages) as AnyRecord[];
+
+    expect(anthropicMessages).toHaveLength(2);
+    const toolResultMsg = anthropicMessages[1] as AnyRecord;
+    const toolResultBlock = firstBlockByType(toolResultMsg.content, 'tool_result');
+
+    expect(String(toolResultBlock?.tool_use_id || '')).toBe('call_exec_1');
+    expect(String(toolResultBlock?.content || '')).toBe(
+      '[RouteCodex] Tool output was empty; execution status unknown.'
+    );
+  });
 });

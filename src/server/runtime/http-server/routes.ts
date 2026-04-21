@@ -636,15 +636,26 @@ export function registerHttpRoutes(options: RouteOptions): void {
     });
   });
 
-  app.use(async (error: unknown, req: Request, res: Response) => {
+  app.use(async (error: unknown, req: Request, res: Response, _next: unknown) => {
     const normalizedError = error instanceof Error ? error : new Error(String(error));
     const errorRecord = normalizedError as unknown as Record<string, unknown>;
+    const httpStatus =
+      typeof errorRecord.status === 'number'
+        ? errorRecord.status
+        : typeof errorRecord.statusCode === 'number'
+          ? errorRecord.statusCode
+          : undefined;
+    const isMalformedJsonRequest =
+      httpStatus === 400
+      && normalizedError.name === 'SyntaxError';
     let mapped = mapErrorToHttp(normalizedError);
     try {
       const { http } = await reportRouteError({
-        code: typeof errorRecord.code === 'string'
-          ? String(errorRecord.code)
-          : 'HTTP_MIDDLEWARE_ERROR',
+        code: isMalformedJsonRequest
+          ? 'MALFORMED_REQUEST'
+          : typeof errorRecord.code === 'string'
+            ? String(errorRecord.code)
+            : 'HTTP_MIDDLEWARE_ERROR',
         message: normalizedError.message,
         source: 'http-middleware.global',
         scope: 'http',
@@ -655,7 +666,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
           : undefined,
         details: {
           method: req.method,
-          statusOverride: (error as { status?: number })?.status
+          status: httpStatus
         },
         originalError: normalizedError
       }, { includeHttpResult: true });

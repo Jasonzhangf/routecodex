@@ -445,17 +445,32 @@ fn build_chat_response_from_responses_impl(payload: &Value) -> Value {
         .and_then(Value::as_str)
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    let has_tool_calls = !tool_calls.is_empty();
+    let sanitize_output_text = |value: &str| -> String {
+        let reasoning_sanitized = sanitize_reasoning_tagged_text(value);
+        if !has_tool_calls {
+            return reasoning_sanitized;
+        }
+        crate::resp_process_stage1_tool_governance::strip_tool_markup_for_display_text(
+            reasoning_sanitized.as_str(),
+        )
+    };
     let explicit_output = output_text_raw
         .as_ref()
-        .map(|value| sanitize_reasoning_tagged_text(value.as_str()))
+        .map(|value| sanitize_output_text(value.as_str()))
         .filter(|value| !value.is_empty());
-    let message_content_text =
-        explicit_output.unwrap_or_else(|| extracted.text_parts.join("\n").trim().to_string());
+    let message_content_text = explicit_output.unwrap_or_else(|| {
+        let joined = extracted.text_parts.join("\n").trim().to_string();
+        if !has_tool_calls {
+            return joined;
+        }
+        sanitize_output_text(joined.as_str())
+    });
 
     let mut message = Map::new();
     message.insert("role".to_string(), Value::String("assistant".to_string()));
     message.insert("content".to_string(), Value::String(message_content_text));
-    if !tool_calls.is_empty() {
+    if has_tool_calls {
         message.insert("tool_calls".to_string(), Value::Array(tool_calls.clone()));
     }
     let reasoning_segments = if !raw_reasoning_segments.is_empty() {
@@ -509,7 +524,9 @@ fn build_chat_response_from_responses_impl(payload: &Value) -> Value {
         "__responses_output_text_meta".to_string(),
         serde_json::json!({
             "hasField": response_obj.contains_key("output_text"),
-            "value": output_text_raw.as_ref().map(|value| sanitize_reasoning_tagged_text(value.as_str()))
+            "value": output_text_raw
+                .as_ref()
+                .map(|value| sanitize_output_text(value.as_str()))
         }),
     );
 
@@ -727,5 +744,41 @@ mod tests {
         );
         assert_eq!(output["__responses_output_text_meta"]["hasField"], true);
         assert!(output.get("__responses_payload_snapshot").is_none());
+    }
+
+    #[test]
+    fn responses_response_utils_build_chat_response_strips_tool_wrapper_from_output_text_when_structured_tool_calls_exist(
+    ) {
+        let payload = serde_json::json!({
+            "id": "resp_tool_text",
+            "object": "response",
+            "model": "gpt-test",
+            "created": 1700000000,
+            "status": "requires_action",
+            "output_text": "• <<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}\nRCC_TOOL_CALLS_JSON",
+            "required_action": {
+                "submit_tool_outputs": {
+                    "tool_calls": [
+                        {
+                            "call_id": "call_required",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": { "cmd": "pwd" }
+                            }
+                        }
+                    ]
+                }
+            }
+        });
+
+        let output = build_chat_response_from_responses_impl(&payload);
+        assert_eq!(output["choices"][0]["finish_reason"], "tool_calls");
+        assert_eq!(
+            output["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            "exec_command"
+        );
+        assert_eq!(output["choices"][0]["message"]["content"], "");
+        assert_eq!(output["__responses_output_text_meta"]["hasField"], true);
+        assert_eq!(output["__responses_output_text_meta"]["value"], "");
     }
 }

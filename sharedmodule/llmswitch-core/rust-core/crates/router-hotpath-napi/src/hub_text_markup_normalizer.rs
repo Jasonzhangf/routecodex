@@ -658,10 +658,6 @@ fn normalize_json_tool_call_entry(
 ) -> Option<ToolCallLite> {
     if let Value::Object(rec) = entry {
         let fn_obj = rec.get("function").and_then(|v| v.as_object());
-        let name_val = rec
-            .get("name")
-            .or_else(|| fn_obj.and_then(|f| f.get("name")));
-        let name = canonicalize_json_tool_name(name_val?, options)?;
         let args_source = if rec.get("input").is_some() {
             rec.get("input").unwrap()
         } else if rec.get("arguments").is_some() {
@@ -673,6 +669,13 @@ fn normalize_json_tool_call_entry(
         } else {
             &Value::Null
         };
+        let hinted_name = read_tool_name_hint_from_args(Some(args_source), options);
+        let name_val = rec
+            .get("name")
+            .or_else(|| fn_obj.and_then(|f| f.get("name")));
+        let name = name_val
+            .and_then(|value| canonicalize_json_tool_name(value, options))
+            .or(hinted_name)?;
         let args_obj = normalize_json_tool_args(name.as_str(), args_source, options)?;
         let args = serde_json::to_string(&args_obj).unwrap_or_else(|_| "{}".to_string());
         let id = rec
@@ -868,6 +871,98 @@ fn extract_tool_call_entries_from_unknown(value: &Value) -> Vec<Value> {
     Vec::new()
 }
 
+fn extract_rcc_tool_call_fence_segments(raw: &str) -> Vec<String> {
+    fn find_open_marker(raw: &str, cursor: usize, open_marker: &str) -> Option<usize> {
+        let mut search_from = cursor;
+        while search_from < raw.len() {
+            let rel_start = raw[search_from..].find(open_marker)?;
+            let start = search_from + rel_start;
+            if open_marker == "<<RCC_TOOL_CALLS"
+                && raw[start + open_marker.len()..].starts_with("_JSON")
+            {
+                search_from = start + open_marker.len();
+                continue;
+            }
+            return Some(start);
+        }
+        None
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = HashSet::<String>::new();
+    let markers = [
+        ("<<RCC_TOOL_CALLS_JSON", "RCC_TOOL_CALLS_JSON"),
+        ("<<RCC_TOOL_CALLS", "RCC_TOOL_CALLS"),
+    ];
+
+    for (open_marker, close_marker) in markers {
+        let mut cursor = 0usize;
+        while cursor < raw.len() {
+            let Some(open_start) = find_open_marker(raw, cursor, open_marker) else {
+                break;
+            };
+            let start = open_start + open_marker.len();
+            let remainder = &raw[start..];
+            let inner = if let Some(rel_end) = remainder.find(close_marker) {
+                &remainder[..rel_end]
+            } else {
+                remainder
+            };
+            let candidate = inner.trim();
+            if !candidate.is_empty() && seen.insert(candidate.to_string()) {
+                out.push(candidate.to_string());
+            }
+            if let Some(rel_end) = remainder.find(close_marker) {
+                cursor = start + rel_end + close_marker.len();
+            } else {
+                break;
+            }
+        }
+    }
+
+    out
+}
+
+fn read_tool_name_hint_from_args(
+    raw_args: Option<&Value>,
+    options: &Option<TextMarkupNormalizeOptions>,
+) -> Option<String> {
+    fn scan(
+        value: &Value,
+        depth: usize,
+        options: &Option<TextMarkupNormalizeOptions>,
+    ) -> Option<String> {
+        if depth == 0 {
+            return None;
+        }
+        let obj = value.as_object()?;
+        if let Some(raw_name) = obj
+            .get("name")
+            .and_then(Value::as_str)
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+        {
+            let normalized =
+                canonicalize_json_tool_name(&Value::String(raw_name.to_string()), options)?;
+            return Some(normalized);
+        }
+        for key in ["function", "input", "args", "payload"] {
+            if let Some(child) = obj.get(key) {
+                if let Some(found) = scan(child, depth - 1, options) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    match raw_args {
+        Some(Value::Object(_)) => scan(raw_args?, 3, options),
+        Some(Value::Array(items)) => items.iter().find_map(|item| scan(item, 2, options)),
+        _ => None,
+    }
+}
+
 fn extract_json_tool_calls_from_text_impl(
     text: &str,
     options: &Option<TextMarkupNormalizeOptions>,
@@ -892,6 +987,9 @@ fn extract_json_tool_calls_from_text_impl(
     };
 
     add_candidate(text);
+    for inner in extract_rcc_tool_call_fence_segments(text) {
+        add_candidate(inner.as_str());
+    }
     let fence_re =
         Regex::new(r"```(?:json|tool_call|tool_calls|function_call)?\s*([\s\S]*?)\s*```").unwrap();
     for caps in fence_re.captures_iter(text) {
@@ -1114,7 +1212,7 @@ fn apply_tool_inner_field(
     let raw_val = raw_val_input.to_string();
     let value = try_parse_primitive_value(raw_val.as_str());
 
-    if lname == "exec_command" && key == "cmd" {
+    if lname == "exec_command" && (key == "cmd" || key == "command") {
         let cmd = coerce_command_value_to_string(&value);
         if !cmd.trim().is_empty() {
             args_obj.insert("cmd".to_string(), Value::String(cmd));
@@ -1525,96 +1623,91 @@ fn extract_simple_xml_tools_from_text_impl(text: &str) -> Option<Vec<ToolCallLit
         return None;
     }
     let mut out = Vec::new();
-    let tool_re = Regex::new(
-    r"<\s*(exec_command|write_stdin|apply_patch|view_image|list_directory)\s*>([\s\S]*?)</\s*([A-Za-z0-9_]+)\s*>"
-  ).unwrap();
-    for caps in tool_re.captures_iter(text) {
-        let raw_name = caps
-            .get(1)
-            .map(|m| m.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        let close_name = caps
-            .get(3)
-            .map(|m| m.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if !raw_name.eq_ignore_ascii_case(close_name.as_str()) {
-            continue;
-        }
-        let inner = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-        if raw_name.is_empty() {
-            continue;
-        }
-        let lname = raw_name.to_lowercase();
-        let mut args_obj = Map::new();
-        let kv_re = Regex::new(
-            r"<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>([\s\S]*?)</\s*([A-Za-z_][A-Za-z0-9_]*)\s*>",
+    for raw_name in [
+        "exec_command",
+        "write_stdin",
+        "apply_patch",
+        "view_image",
+        "list_directory",
+    ] {
+        let tool_re = Regex::new(
+            format!(
+                r"(?is)<\s*{name}\s*>([\s\S]*?)</\s*{name}\s*>",
+                name = regex::escape(raw_name)
+            )
+            .as_str(),
         )
         .unwrap();
-        for km in kv_re.captures_iter(inner) {
-            let raw_key = km.get(1).map(|m| m.as_str()).unwrap_or("");
-            let close_key = km.get(3).map(|m| m.as_str()).unwrap_or("");
-            if !raw_key.eq_ignore_ascii_case(close_key) {
+        for caps in tool_re.captures_iter(text) {
+            let inner = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let lname = raw_name.to_lowercase();
+            let mut args_obj = Map::new();
+            let kv_re = Regex::new(
+                r"<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>([\s\S]*?)</\s*([A-Za-z_][A-Za-z0-9_]*)\s*>",
+            )
+            .unwrap();
+            for km in kv_re.captures_iter(inner) {
+                let raw_key = km.get(1).map(|m| m.as_str()).unwrap_or("");
+                let close_key = km.get(3).map(|m| m.as_str()).unwrap_or("");
+                if !raw_key.eq_ignore_ascii_case(close_key) {
+                    continue;
+                }
+                let raw_val = km.get(2).map(|m| m.as_str()).unwrap_or("");
+                apply_tool_inner_field(lname.as_str(), &mut args_obj, raw_key, raw_val);
+            }
+            if lname == "exec_command"
+                && args_obj
+                    .get("cmd")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .is_empty()
+            {
                 continue;
             }
-            let raw_val = km.get(2).map(|m| m.as_str()).unwrap_or("");
-            apply_tool_inner_field(lname.as_str(), &mut args_obj, raw_key, raw_val);
-        }
-        if lname == "exec_command"
-            && args_obj
-                .get("cmd")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim()
-                .is_empty()
-        {
-            continue;
-        }
-        if lname == "write_stdin" && args_obj.get("session_id").is_none() {
-            continue;
-        }
-        if lname == "apply_patch"
-            && args_obj
-                .get("patch")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim()
-                .is_empty()
-        {
-            continue;
-        }
-        if lname == "view_image" {
-            let path = args_obj
-                .get("path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if path.is_empty() || !is_image_path(path.as_str()) {
+            if lname == "write_stdin" && args_obj.get("session_id").is_none() {
                 continue;
             }
-        }
-        if lname == "list_directory" {
-            let path = args_obj
-                .get("path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if path.is_empty() {
+            if lname == "apply_patch"
+                && args_obj
+                    .get("patch")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .is_empty()
+            {
                 continue;
             }
+            if lname == "view_image" {
+                let path = args_obj
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if path.is_empty() || !is_image_path(path.as_str()) {
+                    continue;
+                }
+            }
+            if lname == "list_directory" {
+                let path = args_obj
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if path.is_empty() {
+                    continue;
+                }
+            }
+            let filtered = filter_args_for_tool(lname.as_str(), &args_obj);
+            let args = serde_json::to_string(&filtered).unwrap_or_else(|_| "{}".to_string());
+            out.push(ToolCallLite {
+                id: Some(gen_tool_call_id()),
+                name: lname,
+                args,
+            });
         }
-        let filtered = filter_args_for_tool(lname.as_str(), &args_obj);
-        let args = serde_json::to_string(&filtered).unwrap_or_else(|_| "{}".to_string());
-        out.push(ToolCallLite {
-            id: Some(gen_tool_call_id()),
-            name: lname,
-            args,
-        });
     }
     if out.is_empty() {
         None
@@ -1683,7 +1776,7 @@ fn looks_like_broken_tool_markup(text: &str) -> bool {
     if t.is_empty() {
         return false;
     }
-    let ran_re = Regex::new(r"^\s*(?:[•*+-]\s*)?Ran\s+(.+)$").unwrap();
+    let ran_re = Regex::new(r"(?m)^\s*(?:[•*+-]\s*)?Ran\s+(.+)$").unwrap();
     let has_ran_shell = ran_re.captures_iter(t.as_str()).any(|caps| {
         let payload = caps
             .get(1)
@@ -2078,4 +2171,72 @@ pub fn extract_qwen_tool_call_tokens_from_text_json(input_json: String) -> NapiR
     let calls = extract_qwen_tool_call_tokens_from_text_impl(text);
     serde_json::to_string(&calls)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize tool calls: {}", e)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_json_tool_calls_from_text_impl_harvests_rcc_fence_with_nested_input_name() {
+        let text = "前言\n• <<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"cmd\":\"pwd\",\"name\":\"exec_command\"}}]}RCC_TOOL_CALLS_JSON\n尾言";
+        let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "exec_command");
+        let args: Value = serde_json::from_str(calls[0].args.as_str()).unwrap_or(Value::Null);
+        assert_eq!(args.get("cmd").and_then(Value::as_str), Some("pwd"));
+    }
+
+    #[test]
+    fn extract_simple_xml_tools_from_text_impl_harvests_list_directory_block() {
+        let text = r#"
+<list_directory>
+  <path>/Users/fanzhang/Documents/github/routecodex</path>
+  <recursive>false</recursive>
+</list_directory>
+"#;
+        let calls = extract_simple_xml_tools_from_text_impl(text).unwrap_or_default();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "list_directory");
+        let args: Value = serde_json::from_str(calls[0].args.as_str()).unwrap_or(Value::Null);
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some("/Users/fanzhang/Documents/github/routecodex")
+        );
+        assert_eq!(args.get("recursive").and_then(Value::as_bool), Some(false));
+    }
+
+    #[test]
+    fn extract_tool_namespace_xml_blocks_from_text_impl_harvests_exec_command_direct_tags() {
+        let text = r#"
+<tool:exec_command>
+  <command>cd /Users/fanzhang/Documents/github/cloudplayplus_stone && flutter --version</command>
+  <requires_approval>false</requires_approval>
+</tool:exec_command>
+"#;
+        let calls = extract_tool_namespace_xml_blocks_from_text_impl(text).unwrap_or_default();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "exec_command");
+        let args: Value = serde_json::from_str(calls[0].args.as_str()).unwrap_or(Value::Null);
+        assert_eq!(
+            args.get("cmd").and_then(Value::as_str),
+            Some("cd /Users/fanzhang/Documents/github/cloudplayplus_stone && flutter --version")
+        );
+    }
+
+    #[test]
+    fn extract_bare_exec_command_from_text_impl_harvests_ran_prefix_line() {
+        let text = r#"• Ran git push origin main
+  └ Everything up-to-date
+
+• {"type":"blocked","summary":"服务状态异常导致 state API 测试失败"}"#;
+        let calls = extract_bare_exec_command_from_text_impl(text).unwrap_or_default();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "exec_command");
+        let args: Value = serde_json::from_str(calls[0].args.as_str()).unwrap_or(Value::Null);
+        assert_eq!(
+            args.get("cmd").and_then(Value::as_str),
+            Some("git push origin main")
+        );
+    }
 }

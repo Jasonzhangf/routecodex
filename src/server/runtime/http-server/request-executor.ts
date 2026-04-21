@@ -147,6 +147,21 @@ type HubDecodeBreakdown = {
   codecDecodeMs: number;
 };
 
+type QwenChatSseProbe = {
+  firstUpstreamChunkMs?: number;
+  firstDataFrameMs?: number;
+  firstEmitMs?: number;
+  firstToolCallMs?: number;
+  upstreamDoneMs?: number;
+  upstreamChunkCount?: number;
+  dataFrameCount?: number;
+  ignoredFrameCount?: number;
+  emittedChunkCount?: number;
+  terminalErrorCode?: string;
+};
+
+type QwenChatNonstreamDelivery = 'json' | 'sse_fallback';
+
 type RetryPayloadSeed =
   | {
     mode: 'serialized';
@@ -538,14 +553,181 @@ function readHubDecodeBreakdown(hubStageTop: HubStageTopEntry[] | undefined): Hu
     if (!(totalMs > 0) || !stage) {
       continue;
     }
-    if (stage.includes('sse_decode')) {
-      sseDecodeMs += totalMs;
-    }
+    // `resp_inbound.stage1_sse_decode` is a stable stage checkpoint even for non-stream JSON
+    // responses; counting it as "SSE decode time" makes non-stream requests look like they spent
+    // seconds decoding SSE when they only performed wrapper/text probes. Only explicit codec
+    // decoding work should contribute decode timings.
     if (stage.includes('codec_decode')) {
       codecDecodeMs += totalMs;
     }
   }
   return { sseDecodeMs, codecDecodeMs };
+}
+
+function readQwenChatSseProbe(metadata: Record<string, unknown> | undefined): QwenChatSseProbe | undefined {
+  const rt =
+    metadata?.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+      ? (metadata.__rt as Record<string, unknown>)
+      : undefined;
+  const probe =
+    rt?.qwenchatSseProbe && typeof rt.qwenchatSseProbe === 'object' && !Array.isArray(rt.qwenchatSseProbe)
+      ? (rt.qwenchatSseProbe as Record<string, unknown>)
+      : undefined;
+  if (!probe) {
+    return undefined;
+  }
+  const out: QwenChatSseProbe = {};
+  const numericKeys: Array<
+    | 'firstUpstreamChunkMs'
+    | 'firstDataFrameMs'
+    | 'firstEmitMs'
+    | 'firstToolCallMs'
+    | 'upstreamDoneMs'
+    | 'upstreamChunkCount'
+    | 'dataFrameCount'
+    | 'ignoredFrameCount'
+    | 'emittedChunkCount'
+  > = [
+    'firstUpstreamChunkMs',
+    'firstDataFrameMs',
+    'firstEmitMs',
+    'firstToolCallMs',
+    'upstreamDoneMs',
+    'upstreamChunkCount',
+    'dataFrameCount',
+    'ignoredFrameCount',
+    'emittedChunkCount'
+  ];
+  for (const key of numericKeys) {
+    const value = probe[key];
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+      out[key] = Math.round(value);
+    }
+  }
+  if (typeof probe.terminalErrorCode === 'string' && probe.terminalErrorCode.trim()) {
+    out.terminalErrorCode = probe.terminalErrorCode.trim();
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function readQwenChatNonstreamDelivery(
+  metadata: Record<string, unknown> | undefined
+): QwenChatNonstreamDelivery | undefined {
+  const rt =
+    metadata?.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+      ? (metadata.__rt as Record<string, unknown>)
+      : undefined;
+  const delivery =
+    typeof rt?.qwenchatNonstreamDelivery === 'string'
+      ? rt.qwenchatNonstreamDelivery.trim().toLowerCase()
+      : '';
+  if (delivery === 'json' || delivery === 'sse_fallback') {
+    return delivery;
+  }
+  return undefined;
+}
+
+function readQwenChatNonstreamDeliveryFromBody(
+  body: unknown
+): QwenChatNonstreamDelivery | undefined {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return undefined;
+  }
+  const rawDelivery = (body as Record<string, unknown>).__routecodex_qwenchat_nonstream_delivery;
+  const delivery = typeof rawDelivery === 'string' ? rawDelivery : '';
+  const normalized = delivery.trim().toLowerCase();
+  if (normalized === 'json' || normalized === 'sse_fallback') {
+    return normalized as QwenChatNonstreamDelivery;
+  }
+  return undefined;
+}
+
+function formatQwenChatSseProbeTag(
+  probe: QwenChatSseProbe | undefined,
+  delivery?: QwenChatNonstreamDelivery
+): string | undefined {
+  const parts: string[] = [];
+  if (delivery) {
+    parts.push(`qwen.nonstream=${delivery}`);
+  }
+  if (!probe && parts.length === 0) {
+    return undefined;
+  }
+  if (probe) {
+    if (Number.isFinite(probe.firstUpstreamChunkMs as number)) {
+      parts.push(`qwen.first_chunk=${Math.max(0, Math.round(Number(probe.firstUpstreamChunkMs)))}ms`);
+    }
+    if (Number.isFinite(probe.firstDataFrameMs as number)) {
+      parts.push(`qwen.first_frame=${Math.max(0, Math.round(Number(probe.firstDataFrameMs)))}ms`);
+    }
+    if (Number.isFinite(probe.firstEmitMs as number)) {
+      parts.push(`qwen.first_emit=${Math.max(0, Math.round(Number(probe.firstEmitMs)))}ms`);
+    }
+    if (Number.isFinite(probe.firstToolCallMs as number)) {
+      parts.push(`qwen.first_tool=${Math.max(0, Math.round(Number(probe.firstToolCallMs)))}ms`);
+    }
+    if (Number.isFinite(probe.upstreamDoneMs as number)) {
+      parts.push(`qwen.done=${Math.max(0, Math.round(Number(probe.upstreamDoneMs)))}ms`);
+    }
+    if (Number.isFinite(probe.upstreamChunkCount as number)) {
+      parts.push(`qwen.chunks=${Math.max(0, Math.round(Number(probe.upstreamChunkCount)))}`);
+    }
+    if (Number.isFinite(probe.dataFrameCount as number)) {
+      parts.push(`qwen.frames=${Math.max(0, Math.round(Number(probe.dataFrameCount)))}`);
+    }
+    if (Number.isFinite(probe.ignoredFrameCount as number)) {
+      parts.push(`qwen.ignored=${Math.max(0, Math.round(Number(probe.ignoredFrameCount)))}`);
+    }
+    if (Number.isFinite(probe.emittedChunkCount as number)) {
+      parts.push(`qwen.emitted=${Math.max(0, Math.round(Number(probe.emittedChunkCount)))}`);
+    }
+    if (typeof probe.terminalErrorCode === 'string' && probe.terminalErrorCode) {
+      parts.push(`qwen.err=${probe.terminalErrorCode}`);
+    }
+  }
+  return parts.length > 0 ? parts.join(' ') : undefined;
+}
+
+function resolveQwenChatProviderDecodeTag(options: {
+  pipelineMetadata?: Record<string, unknown>;
+  providerResponseBody?: unknown;
+  deliveryHint?: QwenChatNonstreamDelivery;
+  expectNonstreamDelivery?: boolean;
+  compatibilityProfile?: string;
+  providerClassName?: string;
+  providerRequestedStream?: boolean;
+}): string | undefined {
+  const delivery =
+    options.deliveryHint
+    ?? readQwenChatNonstreamDelivery(options.pipelineMetadata)
+    ?? readQwenChatNonstreamDeliveryFromBody(options.providerResponseBody);
+  if (!delivery && options.expectNonstreamDelivery) {
+    const compat = typeof options.compatibilityProfile === 'string'
+      ? options.compatibilityProfile.trim()
+      : '';
+    const klass = typeof options.providerClassName === 'string'
+      ? options.providerClassName.trim()
+      : '';
+    const requestedStream =
+      typeof options.providerRequestedStream === 'boolean'
+        ? options.providerRequestedStream
+        : undefined;
+    const parts = ['qwen.nonstream=missing'];
+    if (compat) {
+      parts.push(`qwen.compat=${compat}`);
+    }
+    if (klass) {
+      parts.push(`qwen.class=${klass}`);
+    }
+    if (requestedStream !== undefined) {
+      parts.push(`qwen.req_stream=${requestedStream ? 'true' : 'false'}`);
+    }
+    return parts.join(' ');
+  }
+  return formatQwenChatSseProbeTag(
+    readQwenChatSseProbe(options.pipelineMetadata),
+    delivery
+  );
 }
 
 function serializeRequestPayloadForRetry(payload: unknown): string | undefined {
@@ -1024,9 +1206,11 @@ function isHealthNeutralProviderError(args: {
     errorCode === 'CLIENT_TOOL_ARGS_INVALID'
     || errorCode === 'QWENCHAT_INVALID_TOOL_ARGS'
     || errorCode === 'QWENCHAT_HIDDEN_NATIVE_TOOL'
+    || errorCode === 'QWENCHAT_NATIVE_TOOL_CALL'
     || upstreamCode === 'CLIENT_TOOL_ARGS_INVALID'
     || upstreamCode === 'QWENCHAT_INVALID_TOOL_ARGS'
     || upstreamCode === 'QWENCHAT_HIDDEN_NATIVE_TOOL'
+    || upstreamCode === 'QWENCHAT_NATIVE_TOOL_CALL'
   ) {
     return true;
   }
@@ -1507,6 +1691,11 @@ type ProviderRetryTelemetryPlan = {
   runtimeScopeExcludeDetails?: Record<string, unknown>;
 };
 
+type ExcludedProviderReselectionPlan = {
+  hasAlternativeCandidate: boolean;
+  keepExcludedForNextAttempt: boolean;
+};
+
 type RequestExecutorProviderFailurePlan = {
   reportPlan: {
     errorCode?: string;
@@ -1776,6 +1965,31 @@ function hasAlternativeRouteCandidate(args: {
     }
     return !args.excludedProviderKeys.has(normalized);
   });
+}
+
+function resolveExcludedProviderReselectionPlan(args: {
+  providerKey?: string;
+  routePool?: string[];
+  excludedProviderKeys: Set<string>;
+  lastError?: unknown;
+}): ExcludedProviderReselectionPlan {
+  const hasAlternativeCandidate = hasAlternativeRouteCandidate({
+    providerKey: args.providerKey,
+    routePool: args.routePool,
+    excludedProviderKeys: args.excludedProviderKeys
+  });
+  const classification =
+    args.lastError
+      ? resolveRequestExecutorProviderErrorClassification({
+        error: args.lastError,
+        retryError: extractRetryErrorSnapshot(args.lastError),
+        stage: 'provider.send'
+      })
+      : undefined;
+  return {
+    hasAlternativeCandidate,
+    keepExcludedForNextAttempt: classification === 'unrecoverable' || hasAlternativeCandidate
+  };
 }
 
 async function resolveRequestExecutorProviderFailurePlan(args: {
@@ -2832,6 +3046,24 @@ export class HubRequestExecutor implements RequestExecutor {
     }
     providerSwitchLogState.set(dedupeKey, { lastAtMs: now, suppressed: 0 });
     const boundedNextAttempt = Math.max(args.attempt, Math.min(args.maxAttempts, args.nextAttempt));
+    const suppressQwenChatCreateSessionSwitch =
+      args.stage === 'provider.send'
+      && args.statusCode === 404
+      && args.errorCode === 'QWENCHAT_CREATE_SESSION_FAILED'
+      && providerLabel.startsWith('qwenchat.');
+    if (suppressQwenChatCreateSessionSwitch) {
+      this.logStage('provider.retry.qwenchat_create_session_transient', args.requestId, {
+        providerKey: providerLabel,
+        attempt: args.attempt,
+        nextAttempt: boundedNextAttempt,
+        switchAction: args.switchAction,
+        decisionLabel: args.decisionLabel,
+        backoffScope: args.backoffScope,
+        backoffMs: typeof args.backoffMs === 'number' ? Math.max(0, Math.round(args.backoffMs)) : undefined,
+        reason: truncateReason(args.reason)
+      });
+      return;
+    }
     const retryTag =
       `[provider-switch] req=${args.requestId} attempt=${args.attempt}/${args.maxAttempts} -> ` +
       `${boundedNextAttempt}/${args.maxAttempts}`;
@@ -3039,22 +3271,24 @@ export class HubRequestExecutor implements RequestExecutor {
           });
         }
         if (excludedProviderKeys.has(target.providerKey)) {
-          const reselectedExcludedClassification =
+          const reselectedExcludedPlan = resolveExcludedProviderReselectionPlan({
+            providerKey: target.providerKey,
+            routePool: routePoolForAttempt,
+            excludedProviderKeys,
             lastError
-              ? resolveRequestExecutorProviderErrorClassification({
-                error: lastError,
-                retryError: extractRetryErrorSnapshot(lastError),
-                stage: 'provider.send'
-              })
-              : undefined;
-          if (reselectedExcludedClassification !== 'unrecoverable') {
-            excludedProviderKeys.delete(target.providerKey);
-          } else {
+          });
           this.logStage('provider.retry.excluded_target_reselected', providerRequestId, {
             providerKey: target.providerKey,
             excluded: Array.from(excludedProviderKeys),
-            attempt
+            attempt,
+            hasAlternativeCandidate: reselectedExcludedPlan.hasAlternativeCandidate
           });
+          if (!reselectedExcludedPlan.keepExcludedForNextAttempt) {
+            excludedProviderKeys.delete(target.providerKey);
+          } else {
+          if (reselectedExcludedPlan.hasAlternativeCandidate) {
+            continue;
+          }
           if (lastError) {
             throw lastError;
           }
@@ -3227,6 +3461,7 @@ export class HubRequestExecutor implements RequestExecutor {
           providerLabel,
           attempt
         });
+        throwIfClientAbortSignalAborted(clientAbortSignal);
 
         this.logStage('provider.metadata_attach.start', input.requestId, {
           providerKey: target.providerKey,
@@ -3259,6 +3494,10 @@ export class HubRequestExecutor implements RequestExecutor {
         let trafficActiveInFlightAtAcquire = 0;
         let providerSendStartedAtMs = 0;
         let providerSendElapsedMs = 0;
+        const providerRequestedStream =
+          typeof (providerPayload as { stream?: unknown } | undefined)?.stream === 'boolean'
+            ? Boolean((providerPayload as { stream?: unknown }).stream)
+            : undefined;
         const bypassTrafficGovernor = isServerToolFollowupRequest(metadataForAttempt);
         try {
           throwIfClientAbortSignalAborted(clientAbortSignal);
@@ -3320,6 +3559,7 @@ export class HubRequestExecutor implements RequestExecutor {
             providerFamily: handle.providerFamily,
             model: providerModel,
             providerLabel,
+            providerRequestedStream,
             attempt
           });
           throwIfClientAbortSignalAborted(clientAbortSignal);
@@ -3396,6 +3636,9 @@ export class HubRequestExecutor implements RequestExecutor {
             processMode: pipelineResult.processMode,
             attempt
           });
+          const qwenChatNonstreamDeliveryHint =
+            readQwenChatNonstreamDelivery(mergedMetadata)
+            ?? readQwenChatNonstreamDeliveryFromBody(normalized.body);
           const converted = await this.convertProviderResponseIfNeeded({
             entryEndpoint: input.entryEndpoint,
             providerProtocol,
@@ -3636,6 +3879,21 @@ export class HubRequestExecutor implements RequestExecutor {
           recordAttempt({ usage: aggregatedUsage, error: false });
           const metadataHubStageTop = readHubStageTop(mergedMetadata);
           const hubDecodeBreakdown = readHubDecodeBreakdown(metadataHubStageTop);
+          const qwenChatSseProbeTag = resolveQwenChatProviderDecodeTag({
+            pipelineMetadata: mergedMetadata,
+            providerResponseBody: normalized.body,
+            deliveryHint: qwenChatNonstreamDeliveryHint,
+            expectNonstreamDelivery:
+              !wantsStreamBase
+              && typeof target.providerKey === 'string'
+              && target.providerKey.startsWith('qwenchat.'),
+            compatibilityProfile: target.compatibilityProfile,
+            providerClassName:
+              handle.instance && typeof handle.instance === 'object'
+                ? (handle.instance as { constructor?: { name?: string } }).constructor?.name
+                : undefined,
+            providerRequestedStream
+          });
           return {
             ...converted,
             usageLogInfo: {
@@ -3650,6 +3908,7 @@ export class HubRequestExecutor implements RequestExecutor {
               clientInjectWaitMs: cumulativeClientInjectWaitMs > 0 ? cumulativeClientInjectWaitMs : undefined,
               sseDecodeMs: hubDecodeBreakdown.sseDecodeMs > 0 ? hubDecodeBreakdown.sseDecodeMs : undefined,
               codecDecodeMs: hubDecodeBreakdown.codecDecodeMs > 0 ? hubDecodeBreakdown.codecDecodeMs : undefined,
+              providerDecodeTag: qwenChatSseProbeTag,
               providerAttemptCount: attempt,
               retryCount: Math.max(0, attempt - 1),
               hubStageTop: metadataHubStageTop,
@@ -3858,8 +4117,13 @@ export class HubRequestExecutor implements RequestExecutor {
 
 export const __requestExecutorTestables = {
   readString,
+  readQwenChatNonstreamDelivery,
+  readQwenChatNonstreamDeliveryFromBody,
+  formatQwenChatSseProbeTag,
+  resolveQwenChatProviderDecodeTag,
   extractRetryErrorSnapshot,
   truncateReason,
+  isHealthNeutralProviderError,
   buildRecoverableErrorBackoffKey,
   consumeRecoverableErrorBackoffMs,
   detectRetryableEmptyAssistantResponse,
@@ -3870,6 +4134,7 @@ export const __requestExecutorTestables = {
   resolveRequestExecutorProviderErrorReportPlan,
   resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExclusionPlan,
+  resolveExcludedProviderReselectionPlan,
   resolveProviderRetryExecutionPlan,
   buildProviderRetryTelemetryPlan,
   resetRequestExecutorInternalStateForTests

@@ -11,6 +11,7 @@ import {
 } from '../utils/snapshot-writer.js';
 import {
   buildQwenChatSendPlan,
+  collectQwenJsonAsOpenAiResult,
   collectQwenSseAsOpenAiResult,
   createOpenAiMappedSseStream,
   DEFAULT_QWENCHAT_BASE_URL,
@@ -19,7 +20,10 @@ import {
   extractQwenChatPayload,
   getQwenBaxiaTokens,
   inspectQwenUpstreamStreamPrelude,
-  parseIncomingMessages
+  parseIncomingMessages,
+  QWENCHAT_NONSTREAM_DELIVERY_KEY,
+  QWENCHAT_SSE_PROBE_WRAPPER_KEY,
+  shouldFallbackToQwenSseForJsonModeError
 } from './qwenchat-http-provider-helpers.js';
 import { extractClientRequestId, extractEntryEndpoint } from './responses-provider-helpers.js';
 
@@ -39,6 +43,39 @@ const bxCacheState: BxCacheState = {
 
 const VIDEO_REQUEST_TIMEOUT_MS = 60 * 60 * 1000;
 const QWENCHAT_TOOL_STOP_ERRORSAMPLE_MAX_RAW_CHARS = 24_000;
+const QWENCHAT_TOOL_SEARCH_SUPPRESSION_ATTEMPTS = ['off', 'disable'] as const;
+
+function collectDeclaredToolNames(payload: Record<string, unknown>): string[] {
+  return Array.isArray(payload.tools)
+    ? payload.tools
+        .map((item) => {
+          if (!item || typeof item !== 'object') return '';
+          const row = item as Record<string, unknown>;
+          const fn = row.function && typeof row.function === 'object'
+            ? (row.function as Record<string, unknown>)
+            : row;
+          return typeof fn.name === 'string' ? fn.name : '';
+        })
+        .filter(Boolean)
+    : [];
+}
+
+function isQwenHiddenNativeToolError(error: unknown): boolean {
+  const code = String((error as { code?: string } | undefined)?.code || '').trim().toUpperCase();
+  return code === 'QWENCHAT_HIDDEN_NATIVE_TOOL' || code === 'QWENCHAT_NATIVE_TOOL_CALL';
+}
+
+function hasExplicitRccToolCallsCarrier(value: unknown): boolean {
+  if (typeof value !== 'string' || !value.trim()) {
+    return false;
+  }
+  const markerMatch = value.match(/<<RCC_TOOL_CALLS(?:_JSON)?/i);
+  if (!markerMatch) {
+    return false;
+  }
+  const tail = value.slice(markerMatch.index ?? 0);
+  return /"tool_calls"\s*:/i.test(tail);
+}
 
 export class QwenChatHttpProvider extends HttpTransportProvider {
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
@@ -88,153 +125,275 @@ export class QwenChatHttpProvider extends HttpTransportProvider {
     const baseUrl = this.getEffectiveBaseUrl().replace(/\/$/, '');
     const baxiaTokens = await getQwenBaxiaTokens(bxCacheState);
     const authHeaders = this.resolveForwardAuthHeaders();
-
-    const sendPlan = await buildQwenChatSendPlan({
-      baseUrl,
-      payload,
-      baxiaTokens,
-      authHeaders
-    });
-    await this.snapshotPhase(
-      'provider-request',
-      context,
-      sendPlan.completionBody,
-      sendPlan.completionHeaders,
-      sendPlan.completionUrl,
-      entryEndpoint
-    );
-
-    const upstreamStream = await this.httpClient.postStream(
-      sendPlan.completionUrl,
-      sendPlan.completionBody,
-      sendPlan.completionHeaders,
-      isVideoRequest
-        ? {
-            timeoutMs: VIDEO_REQUEST_TIMEOUT_MS,
-            idleTimeoutMs: VIDEO_REQUEST_TIMEOUT_MS,
-            headersTimeoutMs: VIDEO_REQUEST_TIMEOUT_MS
-          }
-        : undefined
-    );
-    const streamForProcessing =
-      shouldCaptureProviderStreamSnapshots()
-        ? attachProviderSseSnapshotStream(upstreamStream, {
-            requestId: context.requestId,
-            headers: sendPlan.completionHeaders,
-            url: sendPlan.completionUrl,
-            entryEndpoint,
-            clientRequestId: extractClientRequestId(context),
-            providerKey: context.providerKey,
-            providerId: context.providerId
-          })
-        : upstreamStream;
+    const declaredToolNames = collectDeclaredToolNames(payload);
+    const suppressionAttempts =
+      declaredToolNames.length > 0
+        ? [...QWENCHAT_TOOL_SEARCH_SUPPRESSION_ATTEMPTS]
+        : [undefined];
 
     if (payload.stream) {
-      const inspectedPrelude = await inspectQwenUpstreamStreamPrelude({
-        upstreamStream: streamForProcessing
-      });
-      if (inspectedPrelude.businessError) {
+      let lastStreamError: unknown;
+      let lastRawCapture = '';
+      let lastSendPlan:
+        | {
+            completionUrl: string;
+            completionHeaders: Record<string, string>;
+            completionBody: Record<string, unknown>;
+          }
+        | undefined;
+
+      for (let attemptIndex = 0; attemptIndex < suppressionAttempts.length; attemptIndex += 1) {
+        const sendPlan = await buildQwenChatSendPlan({
+          baseUrl,
+          payload,
+          baxiaTokens,
+          authHeaders,
+          backoffKey: context.providerKey || context.providerId,
+          toolSearchSuppressionMode: suppressionAttempts[attemptIndex]
+        });
+        lastSendPlan = sendPlan;
         await this.snapshotPhase(
-          'provider-response',
+          'provider-request',
           context,
-          {
-            mode: 'sse',
-            raw: inspectedPrelude.rawCapture,
-            error: {
-              message: inspectedPrelude.businessError.message,
-              code: inspectedPrelude.businessError.code,
-              status: inspectedPrelude.businessError.statusCode
-            }
-          },
+          sendPlan.completionBody,
           sendPlan.completionHeaders,
           sendPlan.completionUrl,
           entryEndpoint
         );
-        const err = new Error(inspectedPrelude.businessError.message) as Error & {
-          code?: string;
-          statusCode?: number;
-          status?: number;
-          retryable?: boolean;
+        const upstreamStream = await this.httpClient.postStream(
+          sendPlan.completionUrl,
+          sendPlan.completionBody,
+          sendPlan.completionHeaders,
+          isVideoRequest
+            ? {
+                timeoutMs: VIDEO_REQUEST_TIMEOUT_MS,
+                idleTimeoutMs: VIDEO_REQUEST_TIMEOUT_MS,
+                headersTimeoutMs: VIDEO_REQUEST_TIMEOUT_MS
+              }
+            : undefined
+        );
+        const streamForProcessing =
+          shouldCaptureProviderStreamSnapshots()
+            ? attachProviderSseSnapshotStream(upstreamStream, {
+                requestId: context.requestId,
+                headers: sendPlan.completionHeaders,
+                url: sendPlan.completionUrl,
+                entryEndpoint,
+                clientRequestId: extractClientRequestId(context),
+                providerKey: context.providerKey,
+                providerId: context.providerId
+              })
+            : upstreamStream;
+        const inspectedPrelude = await inspectQwenUpstreamStreamPrelude({
+          upstreamStream: streamForProcessing,
+          declaredToolNames
+        });
+        if (inspectedPrelude.businessError) {
+          await this.snapshotPhase(
+            'provider-response',
+            context,
+            {
+              mode: 'sse',
+              raw: inspectedPrelude.rawCapture,
+              error: {
+                message: inspectedPrelude.businessError.message,
+                code: inspectedPrelude.businessError.code,
+                status: inspectedPrelude.businessError.statusCode
+              }
+            },
+            sendPlan.completionHeaders,
+            sendPlan.completionUrl,
+            entryEndpoint
+          );
+          const err = new Error(inspectedPrelude.businessError.message) as Error & {
+            code?: string;
+            statusCode?: number;
+            status?: number;
+            retryable?: boolean;
+          };
+          err.code = inspectedPrelude.businessError.code;
+          err.statusCode = inspectedPrelude.businessError.statusCode;
+          err.status = inspectedPrelude.businessError.statusCode;
+          err.retryable = inspectedPrelude.businessError.statusCode === 429;
+          throw err;
+        }
+        if (inspectedPrelude.toolContractError) {
+          lastStreamError = inspectedPrelude.toolContractError;
+          lastRawCapture = inspectedPrelude.rawCapture;
+          const hasRecoveryAttempt = attemptIndex + 1 < suppressionAttempts.length;
+          if (isQwenHiddenNativeToolError(inspectedPrelude.toolContractError) && hasRecoveryAttempt) {
+            continue;
+          }
+          throw inspectedPrelude.toolContractError;
+        }
+        const mappedStream = createOpenAiMappedSseStream({
+          upstreamStream: inspectedPrelude.replayStream || streamForProcessing,
+          model: payload.model,
+          declaredToolNames
+        });
+        const qwenSseProbe =
+          (mappedStream as NodeJS.ReadableStream & { [QWENCHAT_SSE_PROBE_WRAPPER_KEY]?: Record<string, unknown> })[
+            QWENCHAT_SSE_PROBE_WRAPPER_KEY
+          ];
+        return {
+          __sse_responses: mappedStream,
+          ...(qwenSseProbe ? { [QWENCHAT_SSE_PROBE_WRAPPER_KEY]: qwenSseProbe } : {}),
+          status: 200
         };
-        err.code = inspectedPrelude.businessError.code;
-        err.statusCode = inspectedPrelude.businessError.statusCode;
-        err.status = inspectedPrelude.businessError.statusCode;
-        err.retryable = inspectedPrelude.businessError.statusCode === 429;
-        throw err;
       }
-      const mappedStream = createOpenAiMappedSseStream({
-        upstreamStream: inspectedPrelude.replayStream || streamForProcessing,
-        model: payload.model,
-        declaredToolNames: Array.isArray(payload.tools)
-          ? payload.tools
-              .map((item) => {
-                if (!item || typeof item !== 'object') return '';
-                const row = item as Record<string, unknown>;
-                const fn = row.function && typeof row.function === 'object'
-                  ? (row.function as Record<string, unknown>)
-                  : row;
-                return typeof fn.name === 'string' ? fn.name : '';
-              })
-              .filter(Boolean)
-          : []
-      });
-      return {
-        __sse_responses: mappedStream,
-        status: 200
-      };
-    }
 
-    const rawCaptureRef: { raw?: string } = {};
-    let completion: Record<string, unknown>;
-    try {
-      completion = await collectQwenSseAsOpenAiResult({
-        upstreamStream: streamForProcessing,
-        model: payload.model,
-        rawCaptureRef,
-        declaredToolNames: Array.isArray(payload.tools)
-          ? payload.tools
-              .map((item) => {
-                if (!item || typeof item !== 'object') return '';
-                const row = item as Record<string, unknown>;
-                const fn = row.function && typeof row.function === 'object'
-                  ? (row.function as Record<string, unknown>)
-                  : row;
-                return typeof fn.name === 'string' ? fn.name : '';
-              })
-              .filter(Boolean)
-          : []
-      });
-    } catch (error) {
       await this.maybeWriteHiddenNativeToolErrorsample({
-        error,
+        error: lastStreamError,
         payload,
-        rawSse: rawCaptureRef.raw,
+        rawSse: lastRawCapture,
         context,
         entryEndpoint,
-        url: sendPlan.completionUrl
+        url: lastSendPlan?.completionUrl || ''
       });
-      throw error;
+      throw lastStreamError instanceof Error ? lastStreamError : new Error('QwenChat streaming request failed');
     }
-    await this.snapshotPhase(
-      'provider-response',
-      context,
-      completion,
-      sendPlan.completionHeaders,
-      sendPlan.completionUrl,
-      entryEndpoint
-    );
-    await this.maybeWriteSuspiciousToolStopErrorsample({
+
+    let lastError: unknown;
+    let lastRawCapture = '';
+    let lastSendPlan:
+      | {
+          completionUrl: string;
+          completionHeaders: Record<string, string>;
+          completionBody: Record<string, unknown>;
+        }
+      | undefined;
+
+    for (let attemptIndex = 0; attemptIndex < suppressionAttempts.length; attemptIndex += 1) {
+      const sendPlan = await buildQwenChatSendPlan({
+        baseUrl,
+        payload,
+        baxiaTokens,
+        authHeaders,
+        backoffKey: context.providerKey || context.providerId,
+        toolSearchSuppressionMode: suppressionAttempts[attemptIndex]
+      });
+      lastSendPlan = sendPlan;
+      await this.snapshotPhase(
+        'provider-request',
+        context,
+        sendPlan.completionBody,
+        sendPlan.completionHeaders,
+        sendPlan.completionUrl,
+        entryEndpoint
+      );
+
+      const rawCaptureRef: { raw?: string } = {};
+      try {
+        let completion: Record<string, unknown>;
+        try {
+          const jsonResponse = await this.httpClient.post(
+            sendPlan.completionUrl,
+            sendPlan.completionBody,
+            sendPlan.completionHeaders
+          );
+          rawCaptureRef.raw =
+            typeof jsonResponse.data === 'string'
+              ? jsonResponse.data
+              : JSON.stringify(jsonResponse.data);
+          completion = collectQwenJsonAsOpenAiResult({
+            payload: jsonResponse.data,
+            model: payload.model,
+            declaredToolNames
+          });
+          completion[QWENCHAT_NONSTREAM_DELIVERY_KEY] = 'json';
+        } catch (error) {
+          const errorCode = String((error as { code?: string } | undefined)?.code || '').trim().toUpperCase();
+          const allowSseFallback =
+            errorCode === 'UPSTREAM_SSE_NOT_ALLOWED'
+            || shouldFallbackToQwenSseForJsonModeError(rawCaptureRef.raw || '', error);
+          if (!allowSseFallback) {
+            throw error;
+          }
+          const sseFallbackBody = {
+            ...sendPlan.completionBody,
+            stream: true,
+            incremental_output: true
+          };
+          const upstreamStream = await this.httpClient.postStream(
+            sendPlan.completionUrl,
+            sseFallbackBody,
+            sendPlan.completionHeaders,
+            isVideoRequest
+              ? {
+                  timeoutMs: VIDEO_REQUEST_TIMEOUT_MS,
+                  idleTimeoutMs: VIDEO_REQUEST_TIMEOUT_MS,
+                  headersTimeoutMs: VIDEO_REQUEST_TIMEOUT_MS
+                }
+              : undefined
+          );
+          const streamForProcessing =
+            shouldCaptureProviderStreamSnapshots()
+              ? attachProviderSseSnapshotStream(upstreamStream, {
+                  requestId: context.requestId,
+                  headers: sendPlan.completionHeaders,
+                  url: sendPlan.completionUrl,
+                  entryEndpoint,
+                  clientRequestId: extractClientRequestId(context),
+                  providerKey: context.providerKey,
+                  providerId: context.providerId
+                })
+              : upstreamStream;
+          completion = await collectQwenSseAsOpenAiResult({
+            upstreamStream: streamForProcessing,
+            model: payload.model,
+            rawCaptureRef,
+            declaredToolNames
+          });
+          completion[QWENCHAT_NONSTREAM_DELIVERY_KEY] = 'sse_fallback';
+        }
+        await this.snapshotPhase(
+          'provider-response',
+          context,
+          completion,
+          sendPlan.completionHeaders,
+          sendPlan.completionUrl,
+          entryEndpoint
+        );
+        await this.maybeWriteSuspiciousToolStopErrorsample({
+          payload,
+          completion,
+          rawSse: rawCaptureRef.raw,
+          context,
+          entryEndpoint,
+          url: sendPlan.completionUrl
+        });
+        return {
+          status: 200,
+          data: completion
+        };
+      } catch (error) {
+        lastError = error;
+        lastRawCapture = rawCaptureRef.raw || '';
+        const hasRecoveryAttempt = attemptIndex + 1 < suppressionAttempts.length;
+        if (isQwenHiddenNativeToolError(error) && hasRecoveryAttempt) {
+          continue;
+        }
+        await this.maybeWriteHiddenNativeToolErrorsample({
+          error,
+          payload,
+          rawSse: rawCaptureRef.raw,
+          context,
+          entryEndpoint,
+          url: sendPlan.completionUrl
+        });
+        throw error;
+      }
+    }
+
+    await this.maybeWriteHiddenNativeToolErrorsample({
+      error: lastError,
       payload,
-      completion,
-      rawSse: rawCaptureRef.raw,
+      rawSse: lastRawCapture,
       context,
       entryEndpoint,
-      url: sendPlan.completionUrl
+      url: lastSendPlan?.completionUrl || ''
     });
-    return {
-      status: 200,
-      data: completion
-    };
+    throw lastError instanceof Error ? lastError : new Error('QwenChat request failed');
   }
 
   protected override async performHealthCheck(_url: string): Promise<boolean> {
@@ -327,6 +486,13 @@ export class QwenChatHttpProvider extends HttpTransportProvider {
     }
     const content = typeof message?.content === 'string' ? message.content : '';
     const reasoning = typeof message?.reasoning_content === 'string' ? message.reasoning_content : '';
+    if (
+      hasExplicitRccToolCallsCarrier(content)
+      || hasExplicitRccToolCallsCarrier(reasoning)
+      || hasExplicitRccToolCallsCarrier(args.rawSse)
+    ) {
+      return;
+    }
     const rawPreview = typeof args.rawSse === 'string'
       ? args.rawSse.slice(0, QWENCHAT_TOOL_STOP_ERRORSAMPLE_MAX_RAW_CHARS)
       : '';
@@ -372,14 +538,17 @@ export class QwenChatHttpProvider extends HttpTransportProvider {
     url: string;
   }): Promise<void> {
     const err = args.error as { code?: string; toolName?: string; phase?: string; message?: string } | undefined;
-    if (err?.code !== 'QWENCHAT_HIDDEN_NATIVE_TOOL') {
+    const isToolContractError =
+      err?.code === 'QWENCHAT_HIDDEN_NATIVE_TOOL' || err?.code === 'QWENCHAT_NATIVE_TOOL_CALL';
+    if (!isToolContractError) {
       return;
     }
+    const isHiddenNativeTool = err?.code === 'QWENCHAT_HIDDEN_NATIVE_TOOL';
     await writeErrorsampleJson({
       group: 'provider-error',
-      kind: 'qwenchat-hidden-native-tool',
+      kind: isHiddenNativeTool ? 'qwenchat-hidden-native-tool' : 'qwenchat-native-tool-call',
       payload: {
-        kind: 'qwenchat_hidden_native_tool',
+        kind: isHiddenNativeTool ? 'qwenchat_hidden_native_tool' : 'qwenchat_native_tool_call',
         timestamp: new Date().toISOString(),
         requestId: args.context.requestId,
         clientRequestId: extractClientRequestId(args.context),
@@ -387,7 +556,7 @@ export class QwenChatHttpProvider extends HttpTransportProvider {
         providerId: args.context.providerId,
         entryEndpoint: args.entryEndpoint,
         url: args.url,
-        hiddenToolName: err.toolName || '',
+        toolName: err.toolName || '',
         phase: err.phase || '',
         message: err.message || '',
         toolNames: (args.payload.tools as Array<Record<string, unknown>> | undefined || [])

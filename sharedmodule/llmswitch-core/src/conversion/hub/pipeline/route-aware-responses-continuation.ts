@@ -89,6 +89,12 @@ export function resolveRouteAwareResponsesContinuation(args: {
     if (!rebuiltMessages?.length) {
       return args.request;
     }
+    const currentModel = typeof args.request.model === 'string' ? args.request.model : undefined;
+    const rebuiltModel = typeof rebuilt.model === 'string' ? rebuilt.model : undefined;
+    const nextModel = currentModel ?? rebuiltModel;
+    if (!nextModel) {
+      return args.request;
+    }
     const nextSemantics = cloneSemantics(args.request);
     const currentResponses = asRecord(nextSemantics.responses);
     const currentResume = asRecord(currentResponses?.resume);
@@ -103,7 +109,9 @@ export function resolveRouteAwareResponsesContinuation(args: {
     };
     return {
       ...args.request,
-      model: typeof rebuilt.model === 'string' ? rebuilt.model : args.request.model,
+      // Preserve the already route-selected model; do not let stored responses payload
+      // restore the original client model before provider payload build.
+      model: nextModel,
       messages: rebuiltMessages as unknown as StandardizedMessage[],
       ...(Array.isArray(rebuilt.tools) ? { tools: rebuilt.tools as StandardizedRequest['tools'] } : {}),
       semantics: nextSemantics as ChatSemantics

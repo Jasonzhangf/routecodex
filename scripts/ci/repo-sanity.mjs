@@ -68,6 +68,7 @@ function isForbiddenTrackedPath(p) {
 function checkRootLayout() {
   // Fixed top-level layout. Adding new root entries requires an explicit policy change.
  const allowed = new Set([
+   '.agents',
    'eslint.config.js',
    '.beads',
    '.github',

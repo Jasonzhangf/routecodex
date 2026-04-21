@@ -61,6 +61,14 @@ fn resolve_thinking_search_flags(model_raw: &str) -> (bool, bool) {
     (false, false)
 }
 
+fn resolve_explicit_thinking_flag(root: &Map<String, Value>, fallback: bool) -> bool {
+    read_optional_boolean(root.get("thinking_enabled")).unwrap_or(fallback)
+}
+
+fn resolve_explicit_search_flag(root: &Map<String, Value>, fallback: bool) -> bool {
+    read_optional_boolean(root.get("search_enabled")).unwrap_or(fallback)
+}
+
 fn should_force_search(root: &Map<String, Value>, adapter_context: &AdapterContext) -> bool {
     let route_id = adapter_context
         .route_id
@@ -92,6 +100,14 @@ fn has_declared_tools(root: &Map<String, Value>) -> bool {
         .unwrap_or(false)
 }
 
+fn latest_message_role(root: &Map<String, Value>) -> Option<String> {
+    root.get("messages")
+        .and_then(|v| v.as_array())
+        .and_then(|rows| rows.iter().rev().find_map(|item| item.as_object()))
+        .and_then(|obj| read_trimmed_string(obj.get("role")))
+        .map(|role| role.to_ascii_lowercase())
+}
+
 fn should_force_tool_required(
     root: &Map<String, Value>,
     adapter_context: &AdapterContext,
@@ -100,6 +116,12 @@ fn should_force_tool_required(
 ) -> bool {
     if !strict_tool_required || !has_declared_tools(root) {
         return false;
+    }
+    if latest_message_role(root).as_deref() == Some("tool") {
+        return false;
+    }
+    if route_starts_with(adapter_context, &["thinking"]) {
+        return true;
     }
     if route_starts_with(adapter_context, &["tools"]) {
         return true;
@@ -119,11 +141,12 @@ pub(crate) fn apply_deepseek_web_request_compat(
     };
 
     let model = resolve_model(root);
-    let (thinking_enabled, search_by_model) = resolve_thinking_search_flags(&model);
+    let (thinking_by_model, search_by_model) = resolve_thinking_search_flags(&model);
+    let thinking_enabled = resolve_explicit_thinking_flag(root, thinking_by_model);
     let search_enabled = if should_force_search(root, adapter_context) {
         true
     } else {
-        search_by_model
+        resolve_explicit_search_flag(root, search_by_model)
     };
     let (strict_tool_required, text_tool_fallback) = resolve_deepseek_options(adapter_context);
     let force_tool_required =

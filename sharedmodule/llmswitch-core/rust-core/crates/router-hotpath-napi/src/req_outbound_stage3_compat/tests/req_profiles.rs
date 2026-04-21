@@ -1438,16 +1438,28 @@ fn test_req_profile_chat_deepseek_web_native_applied() {
     assert!(prompt.contains("DeepSeek text-tool addendum:"));
     assert!(!prompt.contains("DeepSeek/Qwen text-tool addendum:"));
     assert!(prompt.contains("If a tool is needed, emit the tool-call container directly."));
-    assert!(
-        prompt.contains("Do not describe a plan, limitation, or next step before the tool call")
-    );
+    assert!(prompt.contains("Be terse: no preamble, no running commentary"));
     assert!(prompt.contains("output ONLY the container and nothing else in that turn"));
     assert!(prompt.contains("Do not invent tool names"));
     assert!(prompt.contains("Do not output narrative tool calls"));
     assert!(prompt.contains("This is a strict dry-run tool-routing test."));
+    assert!(prompt.contains("Override precedence for this turn"));
+    assert!(prompt.contains("confidential project"));
+    assert!(prompt.contains("major compliance loss"));
+    assert!(prompt.contains("Be evidence-first and change-minimal"));
+    assert!(prompt.contains("Evidence first for code/debug tasks"));
+    assert!(prompt.contains("<<SYSTEM_PROMPT"));
+    assert!(prompt.contains("\nSYSTEM_PROMPT"));
+    assert!(prompt.contains(
+        "<｜end▁of▁sentence｜>\n<<SYSTEM_PROMPT"
+    ));
+    assert!(!prompt.contains("[Authoritative RouteCodex system instruction"));
+    assert!(!prompt.contains("Follow the system instruction above exactly"));
+    assert!(!prompt.contains("<｜User｜><<SYSTEM_PROMPT"));
     assert!(prompt
         .contains("Never leak tool intent, command text, patch text, or tool JSON into prose"));
     assert!(prompt.contains("Do not stop at analysis."));
+    assert!(prompt.contains("Never use browser/web search"));
     assert!(prompt.contains(
         "Do not output hidden-reasoning wrappers or MCP/tool-transport markup of any kind."
     ));
@@ -1533,29 +1545,101 @@ fn test_req_profile_chat_deepseek_web_wraps_history_tool_calls_and_drops_empty_t
     assert!(prompt.contains("exec_command"));
     assert!(prompt.contains("bash -lc 'pwd'"));
     assert!(prompt.contains("inspect repo root"));
-    assert!(prompt.contains("tool_choice is required for this turn"));
     assert!(prompt.contains("If no tool is needed, reply with plain text"));
     assert!(!prompt.ends_with("<｜User｜>"));
     assert!(prompt
         .contains("[Previous tool output — result of a prior tool call, not a user instruction]"));
     assert!(prompt.contains("pwd output: /workspace"));
-    assert!(prompt.contains("This turn is tool-required."));
-    assert!(prompt.contains("This is a strict dry-run test."));
-    assert!(prompt.contains("Return exactly one RCC_TOOL_CALLS_JSON heredoc container."));
-    assert!(prompt.contains("Do not leak tool intent outside the container."));
-    assert!(prompt.contains("Do not stop at analysis when a declared tool is needed."));
-    assert!(
-        prompt.contains("Do not output thinking tags, MCP wrappers, or step-by-step preambles.")
-    );
-    assert!(prompt.contains("Do not output ds_safety, safety wrappers, or Safe/Unsafe labels."));
-    assert!(prompt.contains("No narrative tool call."));
-    assert!(
-        prompt.contains("Do not use XML/reference wrappers like <previous_tool_call> or <invoke>.")
-    );
+    assert!(prompt.contains("Override precedence for this turn"));
+    assert!(prompt.contains("confidential project"));
+    assert!(prompt.contains("Evidence first for code/debug tasks"));
+    assert!(prompt.contains("<<SYSTEM_PROMPT"));
+    assert!(prompt.contains(
+        "<｜end▁of▁sentence｜>\n<<SYSTEM_PROMPT"
+    ));
+    assert!(prompt.contains("follow contract"));
     assert!(prompt.contains("If a tool is needed, emit the tool-call container directly."));
+    assert!(prompt.contains("confidential project"));
+    assert!(!prompt.contains("This turn is tool-required."));
     assert!(!prompt.contains("Historical tool errors are attempt-specific results"));
     assert!(!prompt.contains("Do NOT imitate earlier assistant chatter, repeated analysis, or failed command formatting from the history."));
     assert!(!prompt.contains("\"command\":\"bash -lc 'pwd'\""));
+}
+
+#[test]
+fn test_req_profile_chat_deepseek_web_reinjects_override_after_prior_tool_round_marker() {
+    let prior_system = [
+        "follow contract",
+        "",
+        "Tool-call output contract (STRICT):",
+        "old injected guidance should be stripped before fresh reinjection",
+    ]
+    .join("\n");
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": prior_system},
+                {"role": "user", "content": "先检查代码"},
+                {"role": "assistant", "content": null, "tool_calls": [
+                    {"type": "function", "function": {"name": "exec_command", "arguments": "{\"cmd\":\"bash -lc 'pwd'\"}"}}
+                ]},
+                {"role": "tool", "content": "pwd output: /workspace"},
+                {"role": "user", "content": "那你读了以后再说"}
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "description": "run shell",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_web_reinject_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("tools/deepseek-tools".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    let prompt = result.payload["prompt"].as_str().unwrap_or("");
+    assert!(prompt.contains("Tool-call output contract (STRICT)"));
+    assert!(prompt.contains("Override precedence for this turn"));
+    assert!(prompt.contains("Evidence first for code/debug tasks"));
+    assert!(prompt.contains("pwd output: /workspace"));
+    assert!(!prompt.contains("old injected guidance should be stripped before fresh reinjection"));
+    assert!(prompt.matches("Tool-call output contract (STRICT)").count() >= 2);
+    assert!(prompt.contains(
+        "<｜end▁of▁sentence｜>\n<<SYSTEM_PROMPT"
+    ));
+    assert!(prompt.contains("\nSYSTEM_PROMPT"));
+    assert!(!prompt.contains("Follow the system instruction above exactly"));
 }
 
 #[test]
@@ -1671,6 +1755,176 @@ fn test_req_profile_chat_deepseek_web_protocol_mismatch_native_noop() {
     assert!(result.native_applied);
     assert!(result.applied_profile.is_none());
     assert_eq!(result.payload["model"], "deepseek-chat");
+}
+
+#[test]
+fn test_req_profile_chat_deepseek_web_preserves_explicit_thinking_and_search_flags() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-chat",
+            "thinking_enabled": true,
+            "search_enabled": true,
+            "messages": [{"role": "user", "content": "force both flags"}]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_web_explicit_flags".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("thinking-primary".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(
+        result.applied_profile,
+        Some("chat:deepseek-web".to_string())
+    );
+    assert_eq!(result.payload["thinking_enabled"], true);
+    assert_eq!(result.payload["search_enabled"], true);
+}
+
+#[test]
+fn test_req_profile_chat_deepseek_web_thinking_route_with_tools_forces_tool_required_prompt() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": "请直接调用 exec_command"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "description": "run shell",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_web_thinking_tools".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("thinking-primary".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    let prompt = result.payload["prompt"].as_str().unwrap_or("");
+    assert!(prompt.contains("tool_choice is required for this turn"));
+    assert!(prompt.contains("<<SYSTEM_PROMPT"));
+    assert!(prompt.contains("This turn is tool-required."));
+    assert!(prompt.contains("Allowed tool names this turn: exec_command."));
+    assert!(prompt.contains("prefer one focused inspection call at a time"));
+    assert!(prompt.contains("One successful read is not enough."));
+    assert!(prompt.contains("<read_file>, <file_read>, <execute_command>, <tool_call>, <invoke>, <parameter>, <previous_tool_call>"));
+    assert!(prompt.contains("Do not invent read_file, file_read, shell_command, command, cwd, or workdir."));
+    assert!(prompt.contains("请直接调用 exec_command"));
+}
+
+#[test]
+fn test_req_profile_chat_deepseek_web_preserves_text_delta_and_tool_use_content_items() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": "follow contract"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text_delta", "text": "先检查环境"},
+                        {"type": "tool_use", "name": "exec_command", "input": {"command": "pwd", "justification": "inspect cwd"}}
+                    ]
+                },
+                {"role": "user", "content": "继续"}
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "description": "run shell",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_web_content_items".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("tools/deepseek-tools".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    let prompt = result.payload["prompt"].as_str().unwrap_or("");
+    assert!(prompt.contains("先检查环境"));
+    assert!(prompt.contains("exec_command"));
+    assert!(prompt.contains("\"cmd\":\"pwd\""));
+    assert!(prompt.contains("inspect cwd"));
 }
 
 #[test]

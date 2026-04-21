@@ -65,6 +65,7 @@ export function logUsageSummary(
     clientInjectWaitMs?: number;
     sseDecodeMs?: number;
     codecDecodeMs?: number;
+    providerDecodeTag?: string;
     providerAttemptCount?: number;
     retryCount?: number;
     hubStageTop?: HubStageTopEntry[];
@@ -136,6 +137,7 @@ export function logUsageSummary(
     clientInjectWaitMs,
     sseDecodeMs,
     codecDecodeMs,
+    providerDecodeTag: info.providerDecodeTag,
     providerAttemptCount,
     retryCount,
     finishReason: info.finishReason
@@ -147,7 +149,10 @@ export function logUsageSummary(
   const hubStageTopSuffix = isUsageTimingOutputEnabled() ? formatHubStageTop(info.hubStageTop) : '';
   const extraBreakdown = ` retries=${retryCount} attempts=${providerAttemptCount}`
     + ` wait.traffic=${formatMs(trafficWaitMs)} wait.inject=${formatMs(clientInjectWaitMs)}`
-    + ` decode.sse=${formatMs(sseDecodeMs)} decode.codec=${formatMs(codecDecodeMs)}`;
+    + ` decode.sse=${formatMs(sseDecodeMs)} decode.codec=${formatMs(codecDecodeMs)}`
+    + (typeof info.providerDecodeTag === 'string' && info.providerDecodeTag.trim()
+      ? ` ${info.providerDecodeTag.trim()}`
+      : '');
   const line = `[usage] request ${requestId} provider=${providerLabel} latency=${latency}ms (${usageText})${extraBreakdown}${timingSuffix}${hubStageTopSuffix}`;
   console.log(colorizeRequestLog(line, requestId, {
     sessionId: info.sessionId,

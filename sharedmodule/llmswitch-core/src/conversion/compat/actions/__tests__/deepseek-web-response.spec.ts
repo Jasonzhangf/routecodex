@@ -36,6 +36,6 @@ describe('deepseek-web-response action spec', () => {
           }
         } as any
       )
-    ).toThrow('DeepSeek tool_choice=required but no valid tool call was produced');
+    ).toThrow('DeepSeek declared tools present but no valid tool call was produced');
   });
 });

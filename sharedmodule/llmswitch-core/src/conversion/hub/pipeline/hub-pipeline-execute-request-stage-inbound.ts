@@ -7,6 +7,7 @@ import type { RequestStageHooks } from "./hub-pipeline-stage-hooks.js";
 import { runReqInboundStage1FormatParse } from "./stages/req_inbound/req_inbound_stage1_format_parse/index.js";
 import { runReqInboundStage2SemanticMap } from "./stages/req_inbound/req_inbound_stage2_semantic_map/index.js";
 import { writeCacheEntryForRequest } from "./stages/req_inbound/req_inbound_stage3_context_capture/cache-write.js";
+import { persistResponsesConversationRequestContext } from "./stages/req_inbound/req_inbound_stage3_context_capture/responses-context-snapshot.js";
 import { runReqProcessStage1ToolGovernance } from "./stages/req_process/req_process_stage1_tool_governance/index.js";
 import { isCompactionRequest } from "../../compaction-detect.js";
 import {
@@ -205,10 +206,15 @@ export async function executeRequestStageInbound<TContext = Record<string, unkno
     () => {
       if (inboundStage2.responsesContext) {
         // responses 语义上下文已在 stage2 捕获，但请求侧 CACHE.md 仍需写入
-        // 仅做请求写入，不重复 captureContext 逻辑
+        // 仍需补做 conversation-store capture；否则 submit_tool_outputs 无法按 response_id 恢复。
         writeCacheEntryForRequest({
           rawRequest,
           adapterContext: inboundAdapterContext,
+        });
+        persistResponsesConversationRequestContext({
+          rawRequest,
+          adapterContext: inboundAdapterContext,
+          context: inboundStage2.responsesContext as Record<string, unknown>,
         });
         return inboundStage2.responsesContext as Record<string, unknown>;
       }

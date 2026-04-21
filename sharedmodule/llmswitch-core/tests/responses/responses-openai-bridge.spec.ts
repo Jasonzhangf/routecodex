@@ -4,7 +4,8 @@ import path from 'node:path';
 import {
   buildChatRequestFromResponses,
   buildResponsesPayloadFromChat,
-  buildResponsesRequestFromChat
+  buildResponsesRequestFromChat,
+  captureResponsesContext
 } from '../../src/conversion/responses/responses-openai-bridge.js';
 
 function createTempPng(): string {
@@ -592,6 +593,56 @@ describe('responses-openai-bridge history seed normalization', () => {
     } as any);
 
     expect(roundtrip.request.messages).toBeUndefined();
+  });
+
+  test('preserves output-only function_call_output resume batches during responses capture', () => {
+    const payload = {
+      model: 'deepseek-chat',
+      input: [
+        {
+          type: 'function_call_output',
+          id: 'out_resume',
+          call_id: 'call_resume',
+          output: 'stderr: permission denied'
+        }
+      ]
+    } as any;
+
+    const captured = captureResponsesContext(payload, { route: { requestId: 'responses-output-only-resume' } });
+    expect(captured.input).toEqual(payload.input);
+  });
+
+  test('preserves function_call_output even when it appears before the matching function_call in current batch', () => {
+    const payload = {
+      model: 'deepseek-chat',
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: { type: 'object', properties: {} }
+          }
+        }
+      ],
+      input: [
+        {
+          type: 'function_call_output',
+          id: 'out_late',
+          call_id: 'call_late',
+          output: 'stderr: permission denied'
+        },
+        {
+          type: 'function_call',
+          id: 'call_late',
+          call_id: 'call_late',
+          name: 'exec_command',
+          arguments: '{"cmd":"pwd"}'
+        }
+      ]
+    } as any;
+
+    const captured = captureResponsesContext(payload, { route: { requestId: 'responses-output-before-call' } });
+    expect(captured.input).toEqual(payload.input);
   });
 
   test('autoloads local image paths through native bridge helper without disturbing content order', () => {

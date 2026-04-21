@@ -1039,6 +1039,129 @@ fn test_resp_profile_chat_deepseek_web_strips_commentary_markup() {
 }
 
 #[test]
+fn test_resp_profile_chat_deepseek_web_strips_meta_leakage_when_tool_call_exists() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "<We are in a tool-call block. We output only RCC_TOOL_CALLS_JSON. See the system prompt for exact format.>\n<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"bash -lc 'pwd'\"}}]}\nRCC_TOOL_CALLS_JSON",
+                    "tool_calls": []
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_strip_meta_leakage".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("thinking-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "required"
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": true,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    let message = &result.payload["choices"][0]["message"];
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
+    assert_eq!(message["content"], Value::Null);
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_rejects_hidden_transport_markup_without_valid_tool_call() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "Looking at your question about absolute line numbers causing buffer mis-rendering in Android, I need to examine the rendering logic.\n<use_mcp_tool>\n<server_name>computer_use</server_name>\n<tool_name>find</tool_name>\n<arguments>{\"path\":\"/Volumes/extension/code/zterm/android\",\"pattern\":\"*.{kt,java}\",\"content_pattern\":\"render|buffer|line\",\"max_results\":30}</arguments>\n</use_mcp_tool>",
+                    "tool_calls": []
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_hidden_transport".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("thinking-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "auto"
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": false,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let error = run_resp_inbound_stage3_compat(input).unwrap_err();
+    assert!(error.contains("forbidden hidden tool transport markup"));
+}
+
+#[test]
 fn test_resp_profile_chat_deepseek_web_backfills_usage_from_estimate() {
     let input = ReqOutboundCompatInput {
         payload: json!({
@@ -1242,7 +1365,126 @@ fn test_resp_profile_chat_deepseek_web_required_tool_missing_returns_error() {
         explicit_profile: None,
     };
     let error = run_resp_inbound_stage3_compat(input).unwrap_err();
-    assert!(error.contains("tool_choice=required"));
+    assert!(error.contains("declared tools present"));
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_declared_tools_missing_returns_error_without_tool_choice() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "我先分析一下。",
+                    "tool_calls": []
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_declared_tools_missing".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("thinking-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }]
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": true,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let error = run_resp_inbound_stage3_compat(input).unwrap_err();
+    assert!(error.contains("declared tools present"));
+    assert!(error.contains("toolChoiceRequired=false"));
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_narrative_tool_intent_is_rejected_without_wrapper() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "好的，我尝试通过 claw 作为跳板连接到 coder1。\n\n## 步骤 1：检查 claw 上是否有 coder1 的 SSH 密钥或认证方式\nssh -i ~/.ssh/claw.pem root@159.75.134.56",
+                    "tool_calls": []
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_narrative_tool_intent".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("thinking-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }]
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": true,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let error = run_resp_inbound_stage3_compat(input).unwrap_err();
+    assert!(error.contains("declared tools present"));
 }
 
 #[test]

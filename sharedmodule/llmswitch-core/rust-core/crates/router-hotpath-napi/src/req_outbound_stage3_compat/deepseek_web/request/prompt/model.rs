@@ -3,7 +3,8 @@ use serde_json::{Map, Value};
 use super::super::super::read_trimmed_string;
 use super::content::{normalize_content_to_text, normalize_tool_calls_as_text};
 use super::tool_guidance::{
-    build_tool_fallback_instruction, has_tool_guidance_marker, is_tool_choice_required,
+    build_required_tool_call_tail_reminder_for_tools, build_tool_fallback_instruction,
+    is_tool_choice_required, strip_existing_tool_guidance_block,
 };
 use super::types::PromptMessage;
 
@@ -12,6 +13,13 @@ pub(super) fn to_prompt_messages(
     require_tool_call_override: bool,
 ) -> Vec<PromptMessage> {
     let mut messages: Vec<PromptMessage> = Vec::new();
+    let require_tool_call =
+        require_tool_call_override || is_tool_choice_required(root);
+    let tail_reminder = if require_tool_call {
+        build_required_tool_call_tail_reminder_for_tools(root.get("tools"))
+    } else {
+        String::new()
+    };
     let rows = root
         .get("messages")
         .and_then(|v| v.as_array())
@@ -27,7 +35,10 @@ pub(super) fn to_prompt_messages(
         if role.is_empty() {
             continue;
         }
-        let content_text = normalize_content_to_text(obj.get("content").unwrap_or(&Value::Null));
+        let mut content_text = normalize_content_to_text(obj.get("content").unwrap_or(&Value::Null));
+        if role == "system" {
+            content_text = strip_existing_tool_guidance_block(content_text.as_str());
+        }
         let tool_calls_text = normalize_tool_calls_as_text(obj.get("tool_calls"));
         let reasoning = read_trimmed_string(obj.get("reasoning_content"))
             .or_else(|| read_trimmed_string(obj.get("reasoning")))
@@ -49,14 +60,25 @@ pub(super) fn to_prompt_messages(
         messages.push(PromptMessage { role, text });
     }
 
-    let instruction = if has_tool_guidance_marker(&messages) {
-        String::new()
-    } else {
-        build_tool_fallback_instruction(
-            root.get("tools"),
-            require_tool_call_override || is_tool_choice_required(root),
-        )
-    };
+    if require_tool_call && !tail_reminder.is_empty() {
+        if let Some(last_user) = messages.iter_mut().rev().find(|msg| msg.role == "user") {
+            let current = last_user.text.trim();
+            if !current.contains("This turn is tool-required.")
+                && !current.contains("Return exactly one RCC_TOOL_CALLS_JSON heredoc container.")
+            {
+                last_user.text = if current.is_empty() {
+                    tail_reminder.clone()
+                } else {
+                    [current.to_string(), tail_reminder.clone()].join("\n\n")
+                };
+            }
+        }
+    }
+
+    let instruction = build_tool_fallback_instruction(
+        root.get("tools"),
+        require_tool_call,
+    );
     if !instruction.is_empty() {
         if let Some(first) = messages.first_mut() {
             if first.role == "system" {

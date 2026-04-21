@@ -5,7 +5,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use uuid::Uuid;
 
@@ -174,11 +174,17 @@ fn extract_balanced_json_candidate_at(
 
 fn collect_json_candidates(text: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
+    let mut seen = HashSet::<String>::new();
+    for candidate in extract_rcc_tool_call_fence_segments(text) {
+        if seen.insert(candidate.clone()) {
+            out.push(candidate);
+        }
+    }
     let fence_re = Regex::new(r"```(?:json)?\s*([\s\S]*?)\s*```").unwrap();
     for caps in fence_re.captures_iter(text) {
         if let Some(body) = caps.get(1) {
             let candidate = body.as_str().trim();
-            if !candidate.is_empty() {
+            if !candidate.is_empty() && seen.insert(candidate.to_string()) {
                 out.push(candidate.to_string());
             }
         }
@@ -193,7 +199,9 @@ fn collect_json_candidates(text: &str) -> Vec<String> {
                 if let Some((end, candidate)) =
                     extract_balanced_json_candidate_at(text, index, '{', '}')
                 {
-                    out.push(candidate);
+                    if seen.insert(candidate.clone()) {
+                        out.push(candidate);
+                    }
                     index = end;
                     continue;
                 }
@@ -201,7 +209,9 @@ fn collect_json_candidates(text: &str) -> Vec<String> {
                 if let Some((end, candidate)) =
                     extract_balanced_json_candidate_at(text, index, '[', ']')
                 {
-                    out.push(candidate);
+                    if seen.insert(candidate.clone()) {
+                        out.push(candidate);
+                    }
                     index = end;
                     continue;
                 }
@@ -209,6 +219,58 @@ fn collect_json_candidates(text: &str) -> Vec<String> {
             index += ch.len_utf8();
         }
     }
+    out
+}
+
+fn extract_rcc_tool_call_fence_segments(raw: &str) -> Vec<String> {
+    fn find_open_marker(raw: &str, cursor: usize, open_marker: &str) -> Option<usize> {
+        let mut search_from = cursor;
+        while search_from < raw.len() {
+            let rel_start = raw[search_from..].find(open_marker)?;
+            let start = search_from + rel_start;
+            if open_marker == "<<RCC_TOOL_CALLS"
+                && raw[start + open_marker.len()..].starts_with("_JSON")
+            {
+                search_from = start + open_marker.len();
+                continue;
+            }
+            return Some(start);
+        }
+        None
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = HashSet::<String>::new();
+    let markers = [
+        ("<<RCC_TOOL_CALLS_JSON", "RCC_TOOL_CALLS_JSON"),
+        ("<<RCC_TOOL_CALLS", "RCC_TOOL_CALLS"),
+    ];
+
+    for (open_marker, close_marker) in markers {
+        let mut cursor = 0usize;
+        while cursor < raw.len() {
+            let Some(open_start) = find_open_marker(raw, cursor, open_marker) else {
+                break;
+            };
+            let start = open_start + open_marker.len();
+            let remainder = &raw[start..];
+            let inner = if let Some(rel_end) = remainder.find(close_marker) {
+                &remainder[..rel_end]
+            } else {
+                remainder
+            };
+            let candidate = inner.trim();
+            if !candidate.is_empty() && seen.insert(candidate.to_string()) {
+                out.push(candidate.to_string());
+            }
+            if let Some(rel_end) = remainder.find(close_marker) {
+                cursor = start + rel_end + close_marker.len();
+            } else {
+                break;
+            }
+        }
+    }
+
     out
 }
 
@@ -239,6 +301,40 @@ fn extract_tool_call_entries_from_json_value(value: &Value) -> Vec<Value> {
     Vec::new()
 }
 
+fn read_tool_name_hint_from_args(raw_args: Option<&Value>) -> Option<String> {
+    fn scan(value: &Value, depth: usize) -> Option<String> {
+        if depth == 0 {
+            return None;
+        }
+        let obj = value.as_object()?;
+        if let Some(raw_name) = obj
+            .get("name")
+            .and_then(Value::as_str)
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+        {
+            let normalized = normalize_tool_name(raw_name);
+            if !normalized.is_empty() {
+                return Some(normalized);
+            }
+        }
+        for key in ["function", "input", "args", "payload"] {
+            if let Some(child) = obj.get(key) {
+                if let Some(found) = scan(child, depth - 1) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    match raw_args {
+        Some(Value::Object(_)) => scan(raw_args?, 3),
+        Some(Value::Array(items)) => items.iter().find_map(|item| scan(item, 2)),
+        _ => None,
+    }
+}
+
 fn build_tool_events_from_entries(
     entries: Vec<Value>,
     ctx: Option<&HarvestContext>,
@@ -251,10 +347,18 @@ fn build_tool_events_from_entries(
             continue;
         };
         let fn_obj = call_obj.get("function").and_then(Value::as_object);
+        let args_value = fn_obj
+            .and_then(|row| row.get("arguments"))
+            .cloned()
+            .or_else(|| call_obj.get("arguments").cloned())
+            .or_else(|| call_obj.get("input").cloned())
+            .unwrap_or_else(|| Value::Object(Map::new()));
+        let hinted_name = read_tool_name_hint_from_args(Some(&args_value));
         let name_raw = fn_obj
             .and_then(|row| row.get("name"))
             .and_then(Value::as_str)
             .or_else(|| call_obj.get("name").and_then(Value::as_str))
+            .or(hinted_name.as_deref())
             .unwrap_or("")
             .trim()
             .to_string();
@@ -269,12 +373,6 @@ fn build_tool_events_from_entries(
             .or_else(|| call_obj.get("tool_call_id").and_then(Value::as_str))
             .map(|v| v.to_string())
             .unwrap_or_else(|| gen_id(ctx, idx));
-        let args_value = fn_obj
-            .and_then(|row| row.get("arguments"))
-            .cloned()
-            .or_else(|| call_obj.get("arguments").cloned())
-            .or_else(|| call_obj.get("input").cloned())
-            .unwrap_or_else(|| Value::Object(Map::new()));
         let arg_str = to_json_string(&args_value);
         push_tool_call_event(&mut out, idx, &id, Some(&normalized_name), None);
         for part in chunk_string(&arg_str, chunk_size) {

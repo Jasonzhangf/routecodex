@@ -32,8 +32,34 @@ const ANTHROPIC_TOP_LEVEL_FIELDS = new Set<string>([
   'thinking'
 ]);
 
+const EMPTY_TOOL_RESULT_FALLBACK = '[RouteCodex] Tool output was empty; execution status unknown.';
+const UNIFIED_EXEC_CAP_WARNING_RE =
+  /^warning:\s*the maximum number of unified exec processes you can keep open is \d+\s+and you currently have \d+\s+processes open\.[\s\S]*automatic pruning of old processes\s*$/i;
+
 function hasVisibleText(value: string | undefined): boolean {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isInternalUnifiedExecCapacityWarning(value: string | undefined): boolean {
+  return typeof value === 'string' && UNIFIED_EXEC_CAP_WARNING_RE.test(value.trim());
+}
+
+function sanitizeUserVisibleText(value: string | undefined): string {
+  if (!hasVisibleText(value)) {
+    return '';
+  }
+  if (isInternalUnifiedExecCapacityWarning(value)) {
+    return '';
+  }
+  return String(value);
+}
+
+function normalizeToolResultText(value: string | undefined): string {
+  const sanitized = sanitizeUserVisibleText(value);
+  if (!hasVisibleText(sanitized)) {
+    return EMPTY_TOOL_RESULT_FALLBACK;
+  }
+  return sanitized;
 }
 
 export function buildAnthropicRequestFromOpenAIChat(
@@ -155,7 +181,7 @@ export function buildAnthropicRequestFromOpenAIChat(
       mirrorIndex += 1;
     }
     const contentNode = (m as any).content;
-    const text = collectText(contentNode);
+    const text = sanitizeUserVisibleText(collectText(contentNode));
     const hasText = hasVisibleText(text);
 
     if (role === 'system') {
@@ -194,7 +220,7 @@ export function buildAnthropicRequestFromOpenAIChat(
       }
       const block: any = {
         type: 'tool_result',
-        content: text
+        content: normalizeToolResultText(text)
       };
       block.tool_use_id = toolCallId;
       messages.push({

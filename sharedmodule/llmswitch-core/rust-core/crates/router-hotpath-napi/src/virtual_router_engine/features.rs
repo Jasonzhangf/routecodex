@@ -33,7 +33,12 @@ fn get_responses_context_input(request: &Value) -> Vec<Value> {
 
 fn get_message_turn_state(
     messages: &[Value],
-) -> (Option<String>, Option<Value>, bool, Option<tools::ToolClassification>) {
+) -> (
+    Option<String>,
+    Option<Value>,
+    bool,
+    Option<tools::ToolClassification>,
+) {
     let latest_message = messages.last().cloned();
     let latest_role = latest_message
         .as_ref()
@@ -54,7 +59,10 @@ fn get_message_turn_state(
                     .map(|v| v.trim().eq_ignore_ascii_case("user"))
                     .unwrap_or(false)
             });
-            (previous_user_index.map(|idx| idx + 1).unwrap_or(0), user_index)
+            (
+                previous_user_index.map(|idx| idx + 1).unwrap_or(0),
+                user_index,
+            )
         } else {
             (user_index + 1, messages.len())
         }
@@ -95,7 +103,8 @@ fn get_message_turn_state(
 }
 
 fn get_responses_entry_type(entry: &Value) -> String {
-    entry.as_object()
+    entry
+        .as_object()
         .and_then(|obj| obj.get("type"))
         .and_then(|v| v.as_str())
         .map(|v| v.trim().to_ascii_lowercase())
@@ -117,7 +126,8 @@ fn is_responses_message_with_role(entry: &Value, target_role: &str) -> bool {
 }
 
 fn get_responses_message_role(entry: &Value) -> Option<String> {
-    entry.as_object()
+    entry
+        .as_object()
         .and_then(|obj| obj.get("role"))
         .and_then(|v| v.as_str())
         .map(|v| v.trim().to_ascii_lowercase())
@@ -193,7 +203,12 @@ fn collect_responses_tool_signals(entries: &[Value]) -> (bool, Option<tools::Too
 
 fn get_responses_context_turn_state(
     request: &Value,
-) -> (Option<String>, Option<Value>, bool, Option<tools::ToolClassification>) {
+) -> (
+    Option<String>,
+    Option<Value>,
+    bool,
+    Option<tools::ToolClassification>,
+) {
     let input = get_responses_context_input(request);
     let mut latest_role = None;
     let mut latest_message = None;
@@ -214,7 +229,10 @@ fn get_responses_context_turn_state(
             let previous_user_index = input[..user_index]
                 .iter()
                 .rposition(|entry| is_responses_message_with_role(entry, "user"));
-            (previous_user_index.map(|idx| idx + 1).unwrap_or(0), user_index)
+            (
+                previous_user_index.map(|idx| idx + 1).unwrap_or(0),
+                user_index,
+            )
         } else {
             (user_index + 1, input.len())
         }

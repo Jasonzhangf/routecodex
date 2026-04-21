@@ -1,5 +1,5 @@
 import { readRuntimeMetadata } from '../runtime-metadata.js';
-import type { ToolValidationOptions } from '../../tools/tool-registry.js';
+import { validateToolCall, type ToolValidationOptions } from '../../tools/tool-registry.js';
 import {
   parseLenientJsonishWithNative as parseLenient,
   repairArgumentsToStringWithNative as repairArgumentsToString
@@ -244,10 +244,73 @@ export function repairCommandNameAsExecToolCall(
   fn: Record<string, unknown> | undefined,
   validationOptions?: ToolValidationOptions
 ): boolean {
-  void fn;
-  void validationOptions;
-  // Client-canonical response rule:
-  // do not reinterpret a free-form command-looking function name as exec_command,
-  // and do not synthesize cmd/command during response repair.
-  return false;
+  if (!fn || typeof fn !== 'object') {
+    return false;
+  }
+
+  const rawName = typeof fn.name === 'string' ? String(fn.name).trim() : '';
+  if (!rawName) {
+    return false;
+  }
+
+  const lowered = rawName.toLowerCase();
+  if (
+    lowered === 'exec_command' ||
+    lowered === 'execute_command' ||
+    lowered === 'execute-command' ||
+    lowered === 'shell_command' ||
+    lowered === 'shell' ||
+    lowered === 'bash' ||
+    lowered === 'terminal'
+  ) {
+    return false;
+  }
+
+  if (!EXEC_COMMAND_NAME_AS_COMMAND_PATTERN.test(rawName)) {
+    return false;
+  }
+
+  const argsStr = repairArgumentsToString((fn as any).arguments);
+  let parsed: Record<string, unknown> = {};
+  try {
+    const json = JSON.parse(argsStr);
+    if (json && typeof json === 'object' && !Array.isArray(json)) {
+      parsed = json as Record<string, unknown>;
+    }
+  } catch {
+    const lenient = parseLenient(argsStr);
+    if (lenient && typeof lenient === 'object' && !Array.isArray(lenient)) {
+      parsed = lenient as Record<string, unknown>;
+    }
+  }
+
+  const hasExplicitCommand =
+    typeof parsed.cmd === 'string' ||
+    typeof parsed.command === 'string' ||
+    typeof parsed.toon === 'string' ||
+    typeof parsed.script === 'string';
+  const normalized = {
+    ...parsed,
+    ...(hasExplicitCommand ? {} : { cmd: rawName })
+  };
+
+  let nextArgs = '{}';
+  try {
+    const validation = validateToolCall('exec_command', JSON.stringify(normalized), validationOptions);
+    if (validation && validation.ok && typeof validation.normalizedArgs === 'string') {
+      nextArgs = validation.normalizedArgs;
+    } else {
+      nextArgs = JSON.stringify(normalized);
+    }
+  } catch {
+    try {
+      nextArgs = JSON.stringify(normalized);
+    } catch {
+      nextArgs = '{}';
+    }
+  }
+
+  (fn as any).name = 'exec_command';
+  (fn as any).arguments = nextArgs;
+  return true;
 }

@@ -1,3 +1,4 @@
+use crate::shared_tooling::repair_find_meta_impl;
 use napi_derive::napi;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -206,6 +207,92 @@ fn contains_explicit_tool_wrapper_marker(raw: &str) -> bool {
         return false;
     };
     named_re.is_match(raw)
+}
+
+fn contains_allowlisted_tool_harvest_mask(
+    raw: &str,
+    requested_tool_name_keys: &HashSet<String>,
+) -> bool {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    if contains_explicit_tool_wrapper_marker(trimmed) {
+        return true;
+    }
+
+    let stripped = strip_leading_bullet_prefix(trimmed).trim_start();
+    if requested_tool_name_keys.contains("apply_patch") && stripped.contains("*** Begin Patch") {
+        return true;
+    }
+
+    let matches_requested_entries = |parsed: &Value| -> bool {
+        let recovered = extract_tool_call_entries_from_unknown(parsed);
+        if recovered.is_empty() {
+            return false;
+        }
+        if requested_tool_name_keys.is_empty() {
+            return true;
+        }
+        recovered.iter().any(|entry| {
+            entry
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+                .and_then(normalize_requested_tool_name_key)
+                .map(|name| requested_tool_name_keys.contains(name.as_str()))
+                .unwrap_or(false)
+        })
+    };
+
+    if stripped.starts_with('{')
+        || stripped.starts_with('[')
+        || stripped.starts_with("```")
+        || stripped.contains("\"tool_calls\"")
+        || stripped.contains("'tool_calls'")
+        || stripped.contains("tool_calls:")
+    {
+        if let Some(parsed) = maybe_parse_tool_call_text_value(stripped) {
+            if matches_requested_entries(&parsed) {
+                return true;
+            }
+        }
+    }
+
+    let lowered = trimmed.to_ascii_lowercase();
+    if lowered.contains("tool:")
+        && lowered.contains("arguments:")
+        && requested_tool_name_keys.iter().any(|tool_name| {
+            let normalized = normalize_tool_name(tool_name).unwrap_or_else(|| tool_name.clone());
+            let name_lowered = normalized.to_ascii_lowercase();
+            lowered.contains(format!("tool: {}", name_lowered).as_str())
+                || lowered.contains(format!("tool:{}", name_lowered).as_str())
+                || lowered.contains(format!("tool：{}", name_lowered).as_str())
+        })
+    {
+        return true;
+    }
+
+    false
+}
+
+fn should_attempt_masked_whitelist_harvest(
+    provider_family: TextToolProviderFamily,
+    raw: &str,
+    requested_tool_name_keys: &HashSet<String>,
+) -> bool {
+    if raw.trim().is_empty() {
+        return false;
+    }
+    match provider_family {
+        TextToolProviderFamily::DeepSeek
+        | TextToolProviderFamily::Qwen
+        | TextToolProviderFamily::Other => {
+            contains_allowlisted_tool_harvest_mask(raw, requested_tool_name_keys)
+        }
+    }
 }
 
 fn payload_contains_explicit_text_tool_markup(payload: &Value) -> bool {
@@ -703,6 +790,30 @@ fn strip_python_heredoc_pseudo_escapes(raw: &str) -> String {
         out.push(ch);
     }
     out
+}
+
+fn normalize_exec_command_text(raw: &str) -> String {
+    let wrapped = repair_shell_wrapper_shape(raw);
+    let repaired = repair_find_meta_impl(wrapped.as_str());
+    strip_python_heredoc_pseudo_escapes(repaired.as_str())
+}
+
+fn repair_command_like_fields_in_args(args: &mut Map<String, Value>) {
+    fn repair_value(value: &mut Value) {
+        match value {
+            Value::String(raw) => {
+                *raw = normalize_exec_command_text(raw.as_str());
+            }
+            Value::Object(obj) => repair_command_like_fields_in_args(obj),
+            _ => {}
+        }
+    }
+
+    for key in ["cmd", "command", "script", "toon", "input", "text", "args"] {
+        if let Some(value) = args.get_mut(key) {
+            repair_value(value);
+        }
+    }
 }
 
 fn read_workdir_from_args(args: &Map<String, Value>) -> Option<String> {
@@ -1308,6 +1419,9 @@ fn normalize_apply_patch_text(raw: &str) -> String {
             continue;
         }
         if in_add_section {
+            if raw_line.trim_start().starts_with("@@") {
+                continue;
+            }
             if raw_line.starts_with('+') {
                 out.push(raw_line.to_string());
             } else {
@@ -1428,9 +1542,7 @@ pub(crate) fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> 
     let name = normalize_tool_name(tool_name)?;
     let args = parse_json_record(raw_args).unwrap_or_default();
     if name == "exec_command" {
-        let cmd = strip_python_heredoc_pseudo_escapes(
-            repair_shell_wrapper_shape(read_command_from_args(&args)?.as_str()).as_str(),
-        );
+        let cmd = normalize_exec_command_text(read_command_from_args(&args)?.as_str());
         let mut out = Map::new();
         let preserve_command_alias = source_is_shell_alias
             || args.contains_key("command")
@@ -1656,22 +1768,6 @@ pub(crate) fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> 
     serde_json::to_string(&Value::Object(args)).ok()
 }
 
-fn stringify_tool_args_losslessly(raw_args: Option<&Value>) -> Option<String> {
-    match raw_args {
-        None => None,
-        Some(Value::Null) => Some("{}".to_string()),
-        Some(Value::String(raw)) => {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                Some("{}".to_string())
-            } else {
-                Some(trimmed.to_string())
-            }
-        }
-        Some(other) => serde_json::to_string(other).ok(),
-    }
-}
-
 pub(crate) fn normalize_tool_args_preserving_raw_shape(
     tool_name: &str,
     raw_args: Option<&Value>,
@@ -1680,9 +1776,10 @@ pub(crate) fn normalize_tool_args_preserving_raw_shape(
     if canonical_name != "exec_command" {
         return normalize_tool_args(tool_name, raw_args);
     }
-    let args = parse_json_record(raw_args).unwrap_or_default();
+    let mut args = parse_json_record(raw_args).unwrap_or_default();
     read_command_from_args(&args)?;
-    stringify_tool_args_losslessly(raw_args)
+    repair_command_like_fields_in_args(&mut args);
+    serde_json::to_string(&Value::Object(args)).ok()
 }
 
 fn extract_balanced_json_object_at(text: &str, start_index: usize) -> Option<String> {
@@ -2447,7 +2544,9 @@ fn extract_xml_tool_call_blocks(text: &str, fallback_start_id: usize) -> Vec<Val
 }
 
 fn extract_tool_argument_label_blocks(text: &str, fallback_start_id: usize) -> Vec<Value> {
-    let Ok(tool_pattern) = Regex::new(r"(?im)^[>\-\*\s]*Tool\s*:\s*([A-Za-z0-9_.-]+)\s*$") else {
+    let Ok(tool_pattern) = Regex::new(
+        r"(?im)^[>\-\*\s\u{2022}]*tool\s*:\s*([A-Za-z0-9_.-]+)(?:\s*\([^)\r\n]*\))?\s*$",
+    ) else {
         return Vec::new();
     };
     let Ok(args_pattern) = Regex::new(r"(?im)^[>\-\*\s]*Arguments?\s*:\s*") else {
@@ -2479,29 +2578,36 @@ fn extract_tool_argument_label_blocks(text: &str, fallback_start_id: usize) -> V
             continue;
         }
         let segment = &text[*tool_line_end..block_end];
-        let Some(args_match) = args_pattern.find(segment) else {
+        let segment_trimmed = segment.trim();
+        if segment_trimmed.is_empty() {
             continue;
-        };
-        let args_tail = &segment[args_match.end()..];
-        let Some((non_ws_rel, first_char)) =
-            args_tail.char_indices().find(|(_, ch)| !ch.is_whitespace())
-        else {
-            continue;
-        };
-        let candidate_start = args_match.end() + non_ws_rel;
-        let candidate_raw = match first_char {
-            '{' => extract_balanced_json_object_at(segment, candidate_start),
-            '[' => extract_balanced_json_array_at(segment, candidate_start),
-            _ => None,
         }
-        .or_else(|| {
-            let trimmed = args_tail.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
+        let candidate_raw = if let Some(args_match) = args_pattern.find(segment) {
+            let args_tail = &segment[args_match.end()..];
+            let Some((non_ws_rel, first_char)) =
+                args_tail.char_indices().find(|(_, ch)| !ch.is_whitespace())
+            else {
+                continue;
+            };
+            let candidate_start = args_match.end() + non_ws_rel;
+            match first_char {
+                '{' => extract_balanced_json_object_at(segment, candidate_start),
+                '[' => extract_balanced_json_array_at(segment, candidate_start),
+                _ => None,
             }
-        });
+            .or_else(|| {
+                let trimmed = args_tail.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            })
+        } else if segment_trimmed.contains('<') && segment_trimmed.contains('>') {
+            Some(segment_trimmed.to_string())
+        } else {
+            None
+        };
         let Some(candidate_raw) = candidate_raw else {
             continue;
         };
@@ -2509,17 +2615,27 @@ fn extract_tool_argument_label_blocks(text: &str, fallback_start_id: usize) -> V
             let repaired = auto_close_jsonish_shape(candidate_raw.as_str());
             try_parse_json_value_lenient(repaired.as_str())
         });
-        let Some(arguments) = parsed else {
-            continue;
-        };
-        let entry = json!({
-            "name": tool_name,
-            "arguments": arguments,
-        });
-        if let Some(normalized) =
-            normalize_tool_call_entry(&entry, fallback_start_id + recovered.len())
-        {
-            recovered.push(normalized);
+        if let Some(arguments) = parsed {
+            let entry = json!({
+                "name": tool_name,
+                "arguments": arguments,
+            });
+            if let Some(normalized) =
+                normalize_tool_call_entry(&entry, fallback_start_id + recovered.len())
+            {
+                recovered.push(normalized);
+                continue;
+            }
+        }
+        if candidate_raw.contains('<') && candidate_raw.contains('>') {
+            if let Some(normalized) = build_xml_named_tool_call_entry(
+                tool_name,
+                candidate_raw.as_str(),
+                &[],
+                fallback_start_id + recovered.len(),
+            ) {
+                recovered.push(normalized);
+            }
         }
     }
 
@@ -2996,6 +3112,10 @@ fn collect_harvest_text_variants(raw: &str) -> Vec<String> {
         }
     };
 
+    for inner in extract_rcc_tool_call_fence_segments(raw) {
+        push_variant(inner.as_str());
+    }
+
     let masked_wrapper_variant = mask_tool_wrapper_markup(raw);
     if !masked_wrapper_variant.is_empty() && masked_wrapper_variant != raw.trim() {
         push_variant(masked_wrapper_variant.as_str());
@@ -3026,6 +3146,58 @@ fn collect_harvest_text_variants(raw: &str) -> Vec<String> {
     }
 
     push_variant(raw);
+
+    out
+}
+
+fn extract_rcc_tool_call_fence_segments(raw: &str) -> Vec<String> {
+    fn find_open_marker(raw: &str, cursor: usize, open_marker: &str) -> Option<usize> {
+        let mut search_from = cursor;
+        while search_from < raw.len() {
+            let rel_start = raw[search_from..].find(open_marker)?;
+            let start = search_from + rel_start;
+            if open_marker == "<<RCC_TOOL_CALLS"
+                && raw[start + open_marker.len()..].starts_with("_JSON")
+            {
+                search_from = start + open_marker.len();
+                continue;
+            }
+            return Some(start);
+        }
+        None
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = HashSet::<String>::new();
+    let markers = [
+        ("<<RCC_TOOL_CALLS_JSON", "RCC_TOOL_CALLS_JSON"),
+        ("<<RCC_TOOL_CALLS", "RCC_TOOL_CALLS"),
+    ];
+
+    for (open_marker, close_marker) in markers {
+        let mut cursor = 0usize;
+        while cursor < raw.len() {
+            let Some(open_start) = find_open_marker(raw, cursor, open_marker) else {
+                break;
+            };
+            let start = open_start + open_marker.len();
+            let remainder = &raw[start..];
+            let inner = if let Some(rel_end) = remainder.find(close_marker) {
+                &remainder[..rel_end]
+            } else {
+                remainder
+            };
+            let candidate = inner.trim();
+            if !candidate.is_empty() && seen.insert(candidate.to_string()) {
+                out.push(candidate.to_string());
+            }
+            if let Some(rel_end) = remainder.find(close_marker) {
+                cursor = start + rel_end + close_marker.len();
+            } else {
+                break;
+            }
+        }
+    }
 
     out
 }
@@ -3085,6 +3257,24 @@ fn build_tool_calls_shape_candidate(text: &str) -> Option<String> {
             candidate = format!("{{\"tool_calls\":{}}}", &after_marker[rel_open..]);
         } else {
             candidate = format!("{{\"tool_calls\":[{}]}}", after_marker.trim());
+        }
+    }
+    let trailing_rcc_closer_patterns = [
+        r"(?is)([}\]])\s*RCC_TOOL_CALLS_JSON\s*$",
+        r"(?is)([}\]])\s*RCC_TOOL_CALLS\s*$",
+    ];
+    for pattern in trailing_rcc_closer_patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            candidate = re.replace(candidate.as_str(), "$1").to_string();
+        }
+    }
+    if candidate.starts_with('{') {
+        if let Some(balanced) = extract_balanced_json_object_at(candidate.as_str(), 0) {
+            candidate = balanced;
+        }
+    } else if candidate.starts_with('[') {
+        if let Some(balanced) = extract_balanced_json_array_at(candidate.as_str(), 0) {
+            candidate = balanced;
         }
     }
     if candidate.is_empty() {
@@ -3251,6 +3441,7 @@ fn normalize_tool_call_entry(entry: &Value, fallback_id: usize) -> Option<Value>
 
     let raw_name = read_trimmed_string(row.get("name"))
         .or_else(|| fn_row.and_then(|f| read_trimmed_string(f.get("name"))))
+        .or_else(|| read_tool_name_hint_from_args(Some(args_source)))
         .or_else(|| infer_tool_name_from_args(Some(args_source)))?;
     let canonical_name = normalize_tool_name(&raw_name)?;
     let normalized_args = if preserve_raw_shape {
@@ -3271,6 +3462,34 @@ fn normalize_tool_call_entry(entry: &Value, fallback_id: usize) -> Option<Value>
             "arguments": normalized_args
         }
     }))
+}
+
+fn read_tool_name_hint_from_args(raw_args: Option<&Value>) -> Option<String> {
+    fn scan(value: &Value, depth: usize) -> Option<String> {
+        if depth == 0 {
+            return None;
+        }
+        let obj = value.as_object()?;
+        if let Some(raw_name) = read_trimmed_string(obj.get("name")) {
+            if let Some(normalized) = normalize_tool_name(&raw_name) {
+                return Some(normalized);
+            }
+        }
+        for key in ["function", "input", "args", "payload"] {
+            if let Some(child) = obj.get(key) {
+                if let Some(hint) = scan(child, depth - 1) {
+                    return Some(hint);
+                }
+            }
+        }
+        None
+    }
+
+    match raw_args {
+        Some(Value::Object(_)) => scan(raw_args?, 3),
+        Some(Value::Array(items)) => items.iter().find_map(|item| scan(item, 2)),
+        _ => None,
+    }
 }
 
 fn extract_tool_call_entries_from_unknown(value: &Value) -> Vec<Value> {
@@ -3657,6 +3876,26 @@ fn strip_empty_tool_calls_payload_noise(raw: &str) -> String {
 }
 
 fn strip_tool_call_marker_payload(raw: &str) -> String {
+    fn is_rcc_wrapper_only_text(raw: &str) -> bool {
+        let patterns = [
+            r"(?s)<<RCC_TOOL_CALLS_JSON(?:\s*\n|\s+)[\s\S]*?(?:\n?\s*RCC_TOOL_CALLS_JSON\b|$)",
+            r"(?s)<<RCC_TOOL_CALLS(?:\s*\n|\s+)[\s\S]*?(?:\n?\s*RCC_TOOL_CALLS\b|$)",
+        ];
+        for pattern in patterns {
+            let Ok(re) = Regex::new(pattern) else {
+                continue;
+            };
+            if let Some(matched) = re.find(raw) {
+                let prefix = raw[..matched.start()].trim();
+                let suffix = raw[matched.end()..].trim();
+                if prefix.is_empty() && suffix.is_empty() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn looks_like_direct_tool_payload_text(raw: &str) -> bool {
         let trimmed = strip_leading_bullet_prefix(raw).trim();
         if trimmed.is_empty() {
@@ -3667,6 +3906,9 @@ fn strip_tool_call_marker_payload(raw: &str) -> String {
             || trimmed.starts_with("```")
             || trimmed.starts_with("<<RCC_TOOL_CALLS");
         if !starts_like_payload {
+            return false;
+        }
+        if trimmed.starts_with("<<RCC_TOOL_CALLS") && !is_rcc_wrapper_only_text(trimmed) {
             return false;
         }
         maybe_parse_tool_call_text_value(trimmed)
@@ -3738,21 +3980,6 @@ fn strip_tool_call_marker_payload(raw: &str) -> String {
         return String::new();
     }
 
-    let mut direct_payload_lines_changed = false;
-    let mut filtered_lines: Vec<&str> = Vec::new();
-    for line in raw.lines() {
-        if looks_like_direct_tool_payload_text(line) {
-            direct_payload_lines_changed = true;
-            continue;
-        }
-        filtered_lines.push(line);
-    }
-    let raw = if direct_payload_lines_changed {
-        filtered_lines.join("\n")
-    } else {
-        raw
-    };
-
     let mut text = raw.to_string();
     let rcc_patterns = [
         r"(?s)<<RCC_TOOL_CALLS_JSON(?:\s*\n|\s+)([\s\S]*?)(?:\n?\s*RCC_TOOL_CALLS_JSON\b|$)",
@@ -3774,6 +4001,19 @@ fn strip_tool_call_marker_payload(raw: &str) -> String {
                 }
             })
             .to_string();
+    }
+
+    let mut direct_payload_lines_changed = false;
+    let mut filtered_lines: Vec<&str> = Vec::new();
+    for line in text.lines() {
+        if looks_like_direct_tool_payload_text(line) {
+            direct_payload_lines_changed = true;
+            continue;
+        }
+        filtered_lines.push(line);
+    }
+    if direct_payload_lines_changed {
+        text = filtered_lines.join("\n");
     }
 
     let patterns = [
@@ -4005,6 +4245,15 @@ fn sanitize_textual_marker_field_in_message_with_policy(
         message.insert(key.to_string(), Value::String(cleaned));
     }
     true
+}
+
+pub(crate) fn strip_tool_markup_for_display_text(raw: &str) -> String {
+    let cleaned = strip_orphan_tool_markup_lines(strip_tool_call_marker_payload(raw).as_str());
+    if let Some(preserved) = fallback_preserve_inner_text_when_cleaned_empty(raw, cleaned.as_str())
+    {
+        return preserved;
+    }
+    cleaned
 }
 
 fn sanitize_content_field_after_tool_markup(
@@ -4271,7 +4520,6 @@ pub(crate) fn harvest_text_tool_calls_from_payload(payload: &mut Value) -> i64 {
     let mut harvested = 0i64;
     let requested_tool_name_keys = collect_requested_tool_name_keys(payload);
     let provider_family = detect_text_tool_provider_family(payload);
-    let enable_qwen_specific_harvest = provider_family == TextToolProviderFamily::Qwen;
     let Some(choices) = payload.get_mut("choices").and_then(|v| v.as_array_mut()) else {
         return harvested;
     };
@@ -4290,12 +4538,29 @@ pub(crate) fn harvest_text_tool_calls_from_payload(payload: &mut Value) -> i64 {
         let existing_tool_calls = message.get("tool_calls").and_then(|v| v.as_array());
         if let Some(rows) = existing_tool_calls {
             if !rows.is_empty() {
+                sanitize_reasoning_fields_after_tool_harvest(message);
+                let finish_reason = read_trimmed_string(choice_row.get("finish_reason"))
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                if finish_reason.is_empty() || finish_reason == "stop" {
+                    choice_row.insert(
+                        "finish_reason".to_string(),
+                        Value::String("tool_calls".to_string()),
+                    );
+                }
                 continue;
             }
         }
 
         let mut recovered: Vec<Value> = Vec::new();
         for text in read_message_text_candidates(message) {
+            if !should_attempt_masked_whitelist_harvest(
+                provider_family,
+                &text,
+                &requested_tool_name_keys,
+            ) {
+                continue;
+            }
             if let Some(function_call_shell) =
                 extract_function_calls_shell_fence_tool_call(&text, (harvested as usize) + 1)
             {
@@ -4329,33 +4594,11 @@ pub(crate) fn harvest_text_tool_calls_from_payload(payload: &mut Value) -> i64 {
                     recovered = label_tool_calls;
                     break;
                 }
-                let allowlisted_calling_blocks = extract_allowlisted_calling_label_blocks(
-                    &candidate_text,
-                    &requested_tool_name_keys,
-                    (harvested as usize) + 1,
-                );
-                if !allowlisted_calling_blocks.is_empty() {
-                    recovered = allowlisted_calling_blocks;
+                let qwen_markers =
+                    extract_tool_calls_from_qwen_markers(&candidate_text, (harvested as usize) + 1);
+                if !qwen_markers.is_empty() {
+                    recovered = qwen_markers;
                     break;
-                }
-                if enable_qwen_specific_harvest {
-                    let function_style_calls = extract_allowlisted_function_style_calls(
-                        &candidate_text,
-                        &requested_tool_name_keys,
-                        (harvested as usize) + 1,
-                    );
-                    if !function_style_calls.is_empty() {
-                        recovered = function_style_calls;
-                        break;
-                    }
-                    let qwen_markers = extract_tool_calls_from_qwen_markers(
-                        &candidate_text,
-                        (harvested as usize) + 1,
-                    );
-                    if !qwen_markers.is_empty() {
-                        recovered = qwen_markers;
-                        break;
-                    }
                 }
                 let has_tool_marker = candidate_text.contains(TOOL_CALL_JSON_MARKER)
                     || candidate_text.contains("'tool_calls'")
@@ -5551,7 +5794,7 @@ mod tests {
         );
         assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
         let content = message["content"].as_str().unwrap_or("");
-        assert_eq!(content, "先分析。");
+        assert_eq!(content, "先分析。\n\n再继续。");
     }
 
     #[test]
@@ -5581,6 +5824,83 @@ mod tests {
             .as_str()
             .unwrap_or("");
         assert!(content.is_empty());
+    }
+
+    #[test]
+    fn test_glued_closing_rcc_heredoc_tool_calls_can_be_harvested() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "tool_calls": [],
+                        "content": "<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}RCC_TOOL_CALLS_JSON"
+                    },
+                    "finish_reason": "stop"
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            request_id: "req_rcc_heredoc_glued_closer_1".to_string(),
+        };
+
+        let result = govern_response(input).unwrap();
+        assert_eq!(result.summary.tool_calls_normalized, 1);
+        assert_eq!(
+            result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            "exec_command"
+        );
+        let content = result.governed_payload["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("");
+        assert!(content.is_empty());
+    }
+
+    #[test]
+    fn test_extract_rcc_tool_call_fence_segments_crops_outer_prose_and_glued_closer() {
+        let raw = "前言\n• <<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"cmd\":\"pwd\",\"name\":\"exec_command\"}}]}RCC_TOOL_CALLS_JSON尾言";
+        let segments = extract_rcc_tool_call_fence_segments(raw);
+        assert_eq!(segments.len(), 1);
+        assert_eq!(
+            segments[0],
+            "{\"tool_calls\":[{\"input\":{\"cmd\":\"pwd\",\"name\":\"exec_command\"}}]}"
+        );
+    }
+
+    #[test]
+    fn test_govern_response_harvests_rcc_wrapper_when_tool_name_is_nested_in_input() {
+        let raw = "• <<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"cmd\":\"bd --no-db create \\\"Mailbox 统一消息与心跳优先级改造\\\" --type epic --description \\\"统一 mailbox 消息三段式格式\\\"\",\"name\":\"exec_command\"}}]}\nRCC_TOOL_CALLS_JSON";
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "__rcc_tool_governance": {
+                    "requestedToolNames": ["exec_command"]
+                },
+                "choices": [{
+                    "message": {
+                        "tool_calls": [],
+                        "content": raw
+                    },
+                    "finish_reason": "stop"
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            request_id: "req_rcc_nested_name_hint".to_string(),
+        };
+
+        let result = govern_response(input).unwrap();
+        assert_eq!(result.summary.tool_calls_normalized, 1);
+        let call = &result.governed_payload["choices"][0]["message"]["tool_calls"][0];
+        assert_eq!(call["function"]["name"], "exec_command");
+        let args = call["function"]["arguments"].as_str().unwrap_or("{}");
+        let parsed: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+        assert!(parsed["cmd"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Mailbox 统一消息与心跳优先级改造"));
+        assert_eq!(
+            result.governed_payload["choices"][0]["finish_reason"],
+            "tool_calls"
+        );
     }
 
     #[test]
@@ -5645,6 +5965,19 @@ console.log('ok')"#;
         assert!(normalized.contains("*** Begin Patch"));
         assert!(normalized.contains("*** Add File: a.ts"));
         assert!(normalized.contains("*** End Patch"));
+
+        let input = r#"--- /dev/null
++++ b/new.txt
+@@ -0,0 +1,2 @@
++hello
++world
+"#;
+        let normalized = normalize_apply_patch_text(input);
+        assert!(normalized.contains("*** Begin Patch"));
+        assert!(normalized.contains("*** Add File: new.txt"));
+        assert!(normalized.contains("+hello"));
+        assert!(normalized.contains("+world"));
+        assert!(!normalized.contains("+@@ -0,0 +1,2 @@"));
     }
 
     #[test]
@@ -6317,6 +6650,77 @@ console.log('ok')"#;
     }
 
     #[test]
+    fn test_normalize_tool_args_exec_command_repairs_find_predicates() {
+        let raw_args = json!({
+            "cmd": "bash -lc 'cd /Volumes/extension/code/wterm && find . -type f ( -name \"*.ts\" -o -name \"*.tsx\" -o -name \"*.js\" -o -name \"*.jsx\" -o -name \"*.json\" ) -not -path \"./node_modules/*\" -not -path \"./.next/*\" -not -path \"./dist/*\" | head -100'"
+        });
+        let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        let cmd = parsed["cmd"].as_str().unwrap_or("");
+        assert!(cmd.contains("find . -type f \\("));
+        assert!(cmd.contains("-o -name \"*.json\""));
+        assert!(cmd.contains("\\) -not -path"));
+    }
+
+    #[test]
+    fn test_normalize_tool_args_preserving_raw_shape_repairs_find_predicates() {
+        let raw_args = json!({
+            "command": "bash -lc 'cd /Volumes/extension/code/wterm && find . -type f ( -name \"*.ts\" -o -name \"*.tsx\" -o -name \"*.js\" -o -name \"*.jsx\" -o -name \"*.json\" ) -not -path \"./node_modules/*\" | head -100'",
+            "workdir": "/Volumes/extension/code/wterm"
+        });
+        let out =
+            normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        let cmd = parsed["command"].as_str().unwrap_or("");
+        assert!(cmd.contains("find . -type f \\("));
+        assert!(cmd.contains("-o -name \"*.json\""));
+        assert!(cmd.contains("\\) -not -path"));
+        assert_eq!(parsed["workdir"], "/Volumes/extension/code/wterm");
+    }
+
+    #[test]
+    fn test_normalize_tool_args_exec_command_repairs_find_exec_separator() {
+        let raw_args = json!({
+            "cmd": "bash -lc 'find . -type f -name \"*.ts\" -exec sed -n \"1,3p\" {} ; | head -5'"
+        });
+        let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        let cmd = parsed["cmd"].as_str().unwrap_or("");
+        assert!(cmd.contains("-exec sed -n \"1,3p\" {} \\;"));
+    }
+
+    #[test]
+    fn test_normalize_tool_args_preserving_raw_shape_repairs_find_exec_separator() {
+        let raw_args = json!({
+            "command": "bash -lc 'find . -type f -name \"*.ts\" -exec sed -n \"1,3p\" {} ; | head -5'"
+        });
+        let out =
+            normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        let cmd = parsed["command"].as_str().unwrap_or("");
+        assert!(cmd.contains("-exec sed -n \"1,3p\" {} \\;"));
+        assert!(parsed.get("cmd").is_none());
+    }
+
+    #[test]
+    fn test_normalize_tool_args_preserving_raw_shape_repairs_nested_input_find_shell() {
+        let raw_args = json!({
+            "input": {
+                "command": "bash -lc 'find . -type f ( -name \"*.ts\" -o -name \"*.tsx\" ) -exec sed -n \"1,3p\" {} ; | head -5'"
+            },
+            "workdir": "/workspace"
+        });
+        let out =
+            normalize_tool_args_preserving_raw_shape("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        let cmd = parsed["input"]["command"].as_str().unwrap_or("");
+        assert!(cmd.contains("find . -type f \\("));
+        assert!(cmd.contains("\\) -exec sed -n \"1,3p\" {} \\;"));
+        assert_eq!(parsed["workdir"], "/workspace");
+        assert!(parsed.get("cmd").is_none());
+    }
+
+    #[test]
     fn test_normalize_tool_args_write_stdin_data_field() {
         let raw_args = json!({"sessionId": "42", "data": {"x": 1}});
         let out = normalize_tool_args("write_stdin", Some(&raw_args)).unwrap();
@@ -6681,7 +7085,7 @@ console.log('ok')"#;
     }
 
     #[test]
-    fn test_harvest_tool_calls_from_allowlisted_function_style_blocks() {
+    fn test_govern_response_rejects_function_style_tool_intent_without_whitelisted_wrapper() {
         let input = ToolGovernanceInput {
             payload: serde_json::json!({
                 "choices": [{
@@ -6710,23 +7114,21 @@ console.log('ok')"#;
 
         let result = govern_response(input).unwrap();
         let message = &result.governed_payload["choices"][0]["message"];
-        assert_eq!(result.summary.tool_calls_normalized, 1);
+        assert_eq!(result.summary.tool_calls_normalized, 0);
         assert_eq!(
             result.governed_payload["choices"][0]["finish_reason"],
-            "tool_calls"
+            "stop"
         );
-        assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
-        let args: Value = serde_json::from_str(
-            message["tool_calls"][0]["function"]["arguments"]
-                .as_str()
-                .unwrap_or("{}"),
-        )
-        .unwrap_or(Value::Null);
-        assert_eq!(args["cmd"], "bash -lc 'pwd'");
+        assert!(message["tool_calls"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .is_empty());
+        assert_eq!(message["content"], r#"exec_command(cmd="bash -lc'pwd'")"#);
     }
 
     #[test]
-    fn test_harvest_tool_calls_from_tool_prefixed_function_style_blocks() {
+    fn test_govern_response_rejects_tool_prefixed_function_style_without_whitelisted_wrapper() {
         let input = ToolGovernanceInput {
             payload: serde_json::json!({
                 "choices": [{
@@ -6755,19 +7157,20 @@ console.log('ok')"#;
 
         let result = govern_response(input).unwrap();
         let message = &result.governed_payload["choices"][0]["message"];
-        assert_eq!(result.summary.tool_calls_normalized, 1);
+        assert_eq!(result.summary.tool_calls_normalized, 0);
         assert_eq!(
             result.governed_payload["choices"][0]["finish_reason"],
-            "tool_calls"
+            "stop"
         );
-        assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
-        let args: Value = serde_json::from_str(
-            message["tool_calls"][0]["function"]["arguments"]
-                .as_str()
-                .unwrap_or("{}"),
-        )
-        .unwrap_or(Value::Null);
-        assert_eq!(args["cmd"], "head -n3 docs/ARCHITECTURE.md");
+        assert!(message["tool_calls"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .is_empty());
+        assert_eq!(
+            message["content"],
+            r#"```toolexec_command(command="head -n3 docs/ARCHITECTURE.md")```"#
+        );
     }
 
     #[test]
@@ -6948,6 +7351,22 @@ Arguments:
     }
 
     #[test]
+    fn test_extract_tool_argument_label_blocks_recovers_tool_prefixed_parameter_markup() {
+        let text = r#"
+• tool:exec_command (tool:exec_command)
+  <parameter name="command">rg -n "function resolveEndpoint|function mapEndpointToFolder" src/providers/core/utils/snapshot-writer.ts /Users/fanzhang/Documents/github/sharedmodule/llmswitch-core/src/filters/utils/snapshot-writer.ts /Users/fanzhang/Documents/github/sharedmodule/llmswitch-core/src/conversion/shared/snapshot-hooks.ts</command>
+  </tool:exec_command>
+"#;
+        let out = extract_tool_argument_label_blocks(text, 1);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["function"]["name"], "exec_command");
+        let args: Value =
+            serde_json::from_str(out[0]["function"]["arguments"].as_str().unwrap_or("{}"))
+                .unwrap_or(Value::Null);
+        assert!(args["cmd"].as_str().unwrap_or("").contains("rg -n"));
+    }
+
+    #[test]
     fn test_extract_allowlisted_calling_label_blocks_exec_command() {
         let text = r#"
 我来审计自动压缩功能。
@@ -6971,15 +7390,75 @@ Arguments:
     }
 
     #[test]
+    fn test_govern_response_rejects_calling_label_tool_intent_without_whitelisted_wrapper() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "__rcc_tool_governance": {
+                    "providerFamily": "deepseek-web",
+                    "requestedToolNames": ["exec_command"]
+                },
+                "choices": [{
+                    "message": {
+                        "tool_calls": [],
+                        "content": r#"
+我来审计自动压缩功能。
+**Calling:** `exec_command`
+```json
+{"cmd":"bash -lc 'cd /Volumes/extension/code/finger && find . -type f -name \"*.ts\" | xargs grep -l \"compress|compression\" 2>/dev/null | head -20'","max_output_tokens":2000}
+```
+"#
+                    },
+                    "finish_reason": "stop"
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            request_id: "req_reject_calling_label_without_wrapper".to_string(),
+        };
+
+        let result = govern_response(input).unwrap();
+        let message = &result.governed_payload["choices"][0]["message"];
+        assert_eq!(result.summary.tool_calls_normalized, 0);
+        assert_eq!(
+            result.governed_payload["choices"][0]["finish_reason"],
+            "stop"
+        );
+        assert!(message["tool_calls"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .is_empty());
+        let content = message["content"].as_str().unwrap_or("");
+        assert!(content.contains("**Calling:** `exec_command`"));
+    }
+
+    #[test]
     fn test_harvest_tool_calls_from_tool_argument_label_blocks() {
         let input = ToolGovernanceInput {
             payload: serde_json::json!({
+                "__rcc_tool_governance": {
+                    "providerFamily": "deepseek-web",
+                    "requestedToolNames": ["exec_command"]
+                },
                 "choices": [{
                     "message": {
                         "tool_calls": [],
                         "content": "我将通过分析实际代码来回答你的问题。\n\nTool: exec_command\nArguments: {\"cmd\":\"find /Volumes/extension/code/finger -name \\\"project\\\" -type f\",\"workdir\":\"/Volumes/extension/code/finger\"}"
                     },
                     "finish_reason": "stop"
+                }],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "cmd": { "type": "string" }
+                            },
+                            "required": ["cmd"]
+                        }
+                    }
                 }]
             }),
             client_protocol: "openai-chat".to_string(),
@@ -7197,6 +7676,98 @@ Arguments:
             .unwrap_or("")
             .contains("*** Begin Patch"));
         assert_eq!(payload["choices"][0]["finish_reason"], "tool_calls");
+    }
+
+    #[test]
+    fn test_harvest_text_tool_calls_recovers_noisy_exec_command_json_wrapper_with_trailing_status()
+    {
+        let mut payload = json!({
+            "__rcc_tool_governance": {
+                "providerFamily": "deepseek-web",
+                "requestedToolNames": ["exec_command"]
+            },
+            "choices": [{
+                "message": {
+                    "tool_calls": [],
+                    "content": "⏺ {\"tool_calls\":[{\"name\":\"shell_command\",\"input\":{\"command\":\"bd --no-db ready\"}},{\"name\":\"shell_command\",\"input\":{\"command\":\"bd --no-db list --status in_progress\"}}]}\n\n✻ Baked for 41s"
+                },
+                "finish_reason": "stop"
+            }]
+        });
+        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 2);
+        let tool_calls = payload["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(tool_calls.len(), 2);
+        assert_eq!(tool_calls[0]["function"]["name"], "exec_command");
+        assert_eq!(tool_calls[1]["function"]["name"], "exec_command");
+        let args0: Value = serde_json::from_str(
+            tool_calls[0]["function"]["arguments"]
+                .as_str()
+                .unwrap_or("{}"),
+        )
+        .unwrap_or(Value::Null);
+        let args1: Value = serde_json::from_str(
+            tool_calls[1]["function"]["arguments"]
+                .as_str()
+                .unwrap_or("{}"),
+        )
+        .unwrap_or(Value::Null);
+        assert_eq!(args0["cmd"], "bd --no-db ready");
+        assert_eq!(args1["cmd"], "bd --no-db list --status in_progress");
+    }
+
+    #[test]
+    fn test_harvest_text_tool_calls_recovers_escaped_exec_command_transcript_with_trailing_text() {
+        let mut payload = json!({
+            "__rcc_tool_governance": {
+                "providerFamily": "deepseek-web",
+                "requestedToolNames": ["exec_command"]
+            },
+            "choices": [{
+                "message": {
+                    "tool_calls": [],
+                    "content": "{\\\"tool_calls\\\":[{\\\"name\\\":\\\"exec_command\\\",\\\"input\\\":{\\\"cmd\\\":\\\"npm run build:dev\\\",\\\"workdir\\\":\\\"/Users/fanzhang/Documents/github/routecodex\\\"}}]}<｜User｜>> routecodex@0.89.2125 build:dev<｜Assistant｜>继续执行"
+                },
+                "finish_reason": "stop"
+            }]
+        });
+        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 1);
+        let call = &payload["choices"][0]["message"]["tool_calls"][0];
+        assert_eq!(call["function"]["name"], "exec_command");
+        let args: Value =
+            serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
+                .unwrap_or(Value::Null);
+        assert_eq!(args["cmd"], "npm run build:dev");
+        assert_eq!(
+            args["workdir"],
+            "/Users/fanzhang/Documents/github/routecodex"
+        );
+    }
+
+    #[test]
+    fn test_harvest_text_tool_calls_recovers_trailing_exec_command_json_after_prose() {
+        let mut payload = json!({
+            "__rcc_tool_governance": {
+                "providerFamily": "deepseek-web",
+                "requestedToolNames": ["exec_command"]
+            },
+            "choices": [{
+                "message": {
+                    "tool_calls": [],
+                    "content": "我将按以下步骤执行：\n\n1. 先检查项目状态\n2. 再执行构建\n\n让我立即开始：\n\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"command\":\"bd --no-db ready\"}}]}"
+                },
+                "finish_reason": "stop"
+            }]
+        });
+        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 1);
+        let call = &payload["choices"][0]["message"]["tool_calls"][0];
+        assert_eq!(call["function"]["name"], "exec_command");
+        let args: Value =
+            serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
+                .unwrap_or(Value::Null);
+        assert_eq!(args["cmd"], "bd --no-db ready");
     }
 
     #[test]
@@ -7430,8 +8001,10 @@ Arguments:
 
     #[test]
     fn test_sanitize_textual_marker_field_preserves_trailing_text_when_rcc_wrapper_starts_first() {
+        let raw = "<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}\nRCC_TOOL_CALLS_JSON\n保留正文";
+        assert_eq!(strip_tool_call_marker_payload(raw), "保留正文");
         let mut message = serde_json::json!({
-            "content": "<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}\nRCC_TOOL_CALLS_JSON\n保留正文"
+            "content": raw
         })
         .as_object()
         .cloned()
@@ -7536,6 +8109,41 @@ Arguments:
             result.governed_payload["choices"][0]["message"]["content"],
             raw
         );
+    }
+
+    #[test]
+    fn test_govern_response_sanitizes_marker_text_when_structured_tool_calls_already_exist() {
+        let raw = "• <<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}\nRCC_TOOL_CALLS_JSON";
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "tool_calls": [{
+                            "id": "call_existing",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"pwd\"}"
+                            }
+                        }],
+                        "content": raw
+                    },
+                    "finish_reason": "stop"
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            request_id: "req_existing_tool_calls_sanitize_1".to_string(),
+        };
+
+        let result = govern_response(input).unwrap();
+        let message = &result.governed_payload["choices"][0]["message"];
+        assert_eq!(
+            result.governed_payload["choices"][0]["finish_reason"],
+            "tool_calls"
+        );
+        assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
+        assert_eq!(message["content"], "");
     }
 
     #[test]

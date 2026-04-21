@@ -31,7 +31,7 @@ function resolveStreamingPreference(model: Record<string, unknown>): StreamingPr
   return (
     coerceStreamingPreference(model.streaming) ??
     coerceStreamingPreference(model.stream) ??
-    coerceStreamingPreference(model.supportsStreaming)
+    coerceStreamingCapability(model.supportsStreaming)
   );
 }
 
@@ -67,6 +67,25 @@ function coerceStreamingPreference(value: unknown): StreamingPreference | undefi
     }
   }
   return undefined;
+}
+
+function coerceStreamingCapability(value: unknown): StreamingPreference | undefined {
+  if (typeof value === 'boolean') {
+    return value ? 'auto' : 'never';
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    if (record.enabled !== undefined) {
+      return coerceStreamingCapability(record.enabled);
+    }
+    if (record.value !== undefined) {
+      return coerceStreamingCapability(record.value);
+    }
+    if (record.mode !== undefined) {
+      return coerceStreamingCapability(record.mode);
+    }
+  }
+  return coerceStreamingPreference(value);
 }
 
 /**

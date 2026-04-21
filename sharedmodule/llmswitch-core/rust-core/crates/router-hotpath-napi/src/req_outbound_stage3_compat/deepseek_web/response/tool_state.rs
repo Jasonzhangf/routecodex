@@ -83,6 +83,17 @@ pub(super) fn resolve_tool_choice_required(adapter_context: &AdapterContext) -> 
     false
 }
 
+pub(super) fn resolve_declared_tools_present(adapter_context: &AdapterContext) -> bool {
+    adapter_context
+        .captured_chat_request
+        .as_ref()
+        .and_then(|v| v.as_object())
+        .and_then(|captured| captured.get("tools"))
+        .and_then(|v| v.as_array())
+        .map(|rows| !rows.is_empty())
+        .unwrap_or(false)
+}
+
 pub(super) fn resolve_deepseek_options(adapter_context: &AdapterContext) -> (bool, bool) {
     let Some(deepseek) = adapter_context
         .deepseek

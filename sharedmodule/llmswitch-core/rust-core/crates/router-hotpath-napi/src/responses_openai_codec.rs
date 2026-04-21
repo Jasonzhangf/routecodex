@@ -402,6 +402,74 @@ mod tests {
     }
 
     #[test]
+    fn response_codec_harvests_bullet_prefixed_heredoc_tool_calls_into_requires_action() {
+        let request_raw = run_responses_openai_request_codec_json(
+            json!({
+                "model": "gpt-4.1",
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "inspect router dns" }
+                        ]
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "exec_command",
+                        "parameters": { "type": "object", "properties": {} }
+                    }
+                ]
+            })
+            .to_string(),
+            Some(json!({ "requestId": "req_responses_codec_bullet_heredoc" }).to_string()),
+        )
+        .unwrap();
+        let request_value: Value = serde_json::from_str(&request_raw).unwrap();
+        let context = request_value["context"].clone();
+
+        let raw = run_responses_openai_response_codec_json(
+            json!({
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": concat!(
+                                "• <<RCC_TOOL_CALLS_JSON\n",
+                                "{\"tool_calls\":[{\"input\":{\"cmd\":\"sshpass -p password ssh -o ConnectTimeout=10 root@192.168.5.1 \\\"echo ok\\\"\"},\"name\":\"exec_command\"}]}\n",
+                                "RCC_TOOL_CALLS_JSON"
+                            )
+                        }
+                    }
+                ]
+            })
+            .to_string(),
+            context.to_string(),
+        )
+        .unwrap();
+
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(
+            value["status"],
+            Value::String("requires_action".to_string())
+        );
+        assert_eq!(
+            value["required_action"]["submit_tool_outputs"]["tool_calls"][0]["name"],
+            Value::String("exec_command".to_string())
+        );
+        assert_eq!(
+            value["required_action"]["submit_tool_outputs"]["tool_calls"][0]["arguments"],
+            Value::String(
+                "{\"cmd\":\"sshpass -p password ssh -o ConnectTimeout=10 root@192.168.5.1 \\\"echo ok\\\"\"}"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
     fn request_codec_harvests_malformed_assistant_tool_markup_from_history() {
         let raw = run_responses_openai_request_codec_json(
             json!({

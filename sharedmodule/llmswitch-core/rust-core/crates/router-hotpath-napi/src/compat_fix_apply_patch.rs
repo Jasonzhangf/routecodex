@@ -655,6 +655,9 @@ fn normalize_apply_patch_text(raw: &str) -> String {
             continue;
         }
         if in_add_section {
+            if raw_line.trim_start().starts_with("@@") {
+                continue;
+            }
             if raw_line.starts_with('+') {
                 out.push(raw_line.to_string());
             } else {
@@ -1177,6 +1180,28 @@ mod tests {
         assert!(!patch.contains("--- a/HEARTBEAT.md"));
         assert!(patch.contains("@@ -1 +1 @@"));
         assert!(patch.ends_with("*** End Patch"));
+    }
+
+    #[test]
+    fn normalizes_unified_add_diff_without_prefixing_hunk_header_inside_add_file() {
+        let payload = json!({
+          "input": [{
+            "type": "function_call",
+            "name": "apply_patch",
+            "arguments": "--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1,2 @@\n+hello\n+world\n"
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        let args = output["input"][0]["arguments"]
+            .as_str()
+            .expect("arguments string");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert!(patch.contains("*** Add File: new.txt"));
+        assert!(patch.contains("+hello"));
+        assert!(patch.contains("+world"));
+        assert!(!patch.contains("+@@ -0,0 +1,2 @@"));
     }
 
     #[test]

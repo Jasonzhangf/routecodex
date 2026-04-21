@@ -115,6 +115,25 @@ export function sanitizeCapturedResponsesInput(
     return input;
   }
   const acceptedCallIds = new Set<string>();
+  let sawFunctionCalls = false;
+  for (const entry of input) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      continue;
+    }
+    const type = typeof (entry as any).type === 'string' ? String((entry as any).type).trim().toLowerCase() : '';
+    if (type !== 'function_call') {
+      continue;
+    }
+    sawFunctionCalls = true;
+    const sanitizedName = sanitizeResponsesFunctionName((entry as any).name);
+    if (!sanitizedName) {
+      continue;
+    }
+    const callId = typeof (entry as any).call_id === 'string' ? String((entry as any).call_id).trim() : '';
+    if (callId) {
+      acceptedCallIds.add(callId);
+    }
+  }
   const out: BridgeInputItem[] = [];
   for (const entry of input) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
@@ -131,16 +150,12 @@ export function sanitizeCapturedResponsesInput(
         rawName === sanitizedName
           ? entry
           : ({ ...(entry as Record<string, unknown>), name: sanitizedName } as BridgeInputItem);
-      const callId = typeof (next as any).call_id === 'string' ? String((next as any).call_id).trim() : '';
-      if (callId) {
-        acceptedCallIds.add(callId);
-      }
       out.push(next);
       continue;
     }
     if (type === 'function_call_output') {
       const callId = typeof (entry as any).call_id === 'string' ? String((entry as any).call_id).trim() : '';
-      if (!callId || !acceptedCallIds.has(callId)) {
+      if (!callId || (sawFunctionCalls && !acceptedCallIds.has(callId))) {
         continue;
       }
     }

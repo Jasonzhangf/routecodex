@@ -58,12 +58,14 @@ async function main() {
 
   const call = output.governedPayload?.choices?.[0]?.message?.tool_calls?.[0];
   assert.ok(call, 'harvested tool call should exist');
-  assert.equal(call.function?.name, 'shell_command', 'shell_command should be preserved');
+  assert.equal(call.function?.name, 'exec_command', 'stage1 governance should stay on canonical exec_command');
   assert.equal(output.governedPayload?.choices?.[0]?.finish_reason, 'tool_calls');
 
   const args = JSON.parse(call.function?.arguments || '{}');
   assert.equal(args.command, 'pwd');
   assert.equal(args.cwd, '/tmp');
+  assert.equal(args.cmd, undefined);
+  assert.equal(args.workdir, undefined);
 
   console.log('✅ native anthropic response tool harvest regression passed');
 }

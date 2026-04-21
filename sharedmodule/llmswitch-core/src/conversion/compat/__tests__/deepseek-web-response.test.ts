@@ -27,7 +27,7 @@ describe('deepseek-web-response compat wrapper', () => {
 
     expect(() =>
       applyDeepSeekWebResponseTransform(payload as any, adapterContext as any)
-    ).toThrow('DeepSeek tool_choice=required but no valid tool call was produced');
+    ).toThrow('DeepSeek declared tools present but no valid tool call was produced');
   });
 
   test('throws business errors from upstream envelope', () => {

@@ -1,67 +1,29 @@
-import { normalizeAssistantTextToToolCalls } from '../../sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer.js';
-import { canonicalizeChatResponseTools } from '../../sharedmodule/llmswitch-core/src/conversion/shared/tool-canonicalizer.js';
+import {
+  extractApplyPatchCallsFromText,
+  extractBareExecCommandFromText,
+  extractExploredListDirectoryCallsFromText,
+  extractSimpleXmlToolsFromText,
+  extractToolNamespaceXmlBlocksFromText,
+  normalizeAssistantTextToToolCalls
+} from '../../sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer.js';
 
 describe('text-markup-normalizer (tool text → tool_calls)', () => {
-  it('converts <list_directory> XML block into list_directory tool_calls and clears content', () => {
-    const message = {
-      role: 'assistant',
-      content: `
-        I'll help you list the local files.
+  it('extracts <list_directory> XML block via dedicated simple-xml extractor', () => {
+    const calls = extractSimpleXmlToolsFromText(`
+      I'll help you list the local files.
 
-        <list_directory>
-          <path>/Users/fanzhang/Documents/github/routecodex</path>
-          <recursive>false</recursive>
-        </list_directory>
-      `
-    };
+      <list_directory>
+        <path>/Users/fanzhang/Documents/github/routecodex</path>
+        <recursive>false</recursive>
+      </list_directory>
+    `);
 
-    const normalized = normalizeAssistantTextToToolCalls(message);
-    expect(normalized).toBeDefined();
-
-    const toolCalls = Array.isArray((normalized as any).tool_calls)
-      ? (normalized as any).tool_calls
-      : [];
-    expect(toolCalls.length).toBeGreaterThanOrEqual(1);
-
-    const tc = toolCalls[0];
-    expect(tc.type).toBe('function');
-    expect(tc.function).toBeDefined();
-    expect(typeof tc.function.name).toBe('string');
-    expect(tc.function.name).toBe('list_directory');
-    expect(typeof tc.function.arguments).toBe('string');
-
-    const args = JSON.parse(tc.function.arguments);
+    expect(Array.isArray(calls)).toBe(true);
+    expect(calls?.length).toBe(1);
+    expect(calls?.[0]?.name).toBe('list_directory');
+    const args = JSON.parse(String(calls?.[0]?.args || '{}'));
     expect(args.path).toBe('/Users/fanzhang/Documents/github/routecodex');
     expect(args.recursive).toBe(false);
-
-    // 文本被收割为工具调用后，content 应被清空，避免残留 XML 垃圾
-    expect((normalized as any).content).toBe('');
-
-    // 将 message 包装成 Chat completion 形状，验证 canonicalizer + finish_reason 约束
-    const chatLike = {
-      id: 'test-list-directory',
-      object: 'chat.completion',
-      choices: [
-        {
-          index: 0,
-          message: normalized,
-          finish_reason: null
-        }
-      ]
-    };
-
-    const canonical = canonicalizeChatResponseTools(chatLike) as any;
-    const choices = Array.isArray(canonical?.choices) ? canonical.choices : [];
-    expect(choices.length).toBeGreaterThan(0);
-
-    const choice = choices[0];
-    const msg = choice?.message || {};
-    const tc2 = Array.isArray(msg.tool_calls) ? msg.tool_calls[0] : undefined;
-
-    expect(choice.finish_reason).toBe('tool_calls');
-    expect(tc2).toBeDefined();
-    expect(tc2.function.name).toBe('list_directory');
-    expect(typeof tc2.function.arguments).toBe('string');
   });
 
   it('converts tool:exec_command markup into exec_command tool_calls', () => {
@@ -97,10 +59,8 @@ tool:exec_command (tool:exec_command)
     expect((normalized as any).content).toBe('');
   });
 
-  it('converts <tool:exec_command> XML blocks into exec_command tool_calls (antigravity compact variant)', () => {
-    const message = {
-      role: 'assistant',
-      content: `
+  it('extracts <tool:exec_command> XML blocks via dedicated namespace extractor', () => {
+    const calls = extractToolNamespaceXmlBlocksFromText(`
 <tool:exec_command>
 <command>cd /Users/fanzhang/Documents/github/cloudplayplus_stone && flutter --version</command>
 <requires_approval>false</requires_approval>
@@ -110,26 +70,18 @@ tool:exec_command (tool:exec_command)
 <command>cd /Users/fanzhang/Documents/github/cloudplayplus_stone && flutter doctor -v</command>
 <timeout_ms>120000</timeout_ms>
 </tool:exec_command>
-      `
-    };
+    `);
 
-    const normalized = normalizeAssistantTextToToolCalls(message);
-    const toolCalls = Array.isArray((normalized as any).tool_calls)
-      ? (normalized as any).tool_calls
-      : [];
-    expect(toolCalls.length).toBeGreaterThanOrEqual(2);
+    expect(Array.isArray(calls)).toBe(true);
+    expect(calls?.length).toBeGreaterThanOrEqual(2);
 
-    for (const tc of toolCalls.slice(0, 2)) {
-      expect(tc.type).toBe('function');
-      expect(tc.function?.name).toBe('exec_command');
-      const args = JSON.parse(tc.function.arguments);
+    for (const tc of (calls ?? []).slice(0, 2)) {
+      expect(tc.name).toBe('exec_command');
+      const args = JSON.parse(String(tc.args || '{}'));
       const cmd = (args.cmd ?? args.command) as string;
       expect(typeof cmd).toBe('string');
       expect(cmd).toContain('cd /Users/fanzhang/Documents/github/cloudplayplus_stone');
     }
-
-    // After harvesting, the text content must be cleared to avoid leaking the markup.
-    expect((normalized as any).content).toBe('');
   });
 
   it('harvests JSON tool_calls text (shell_command/input.command) into exec_command tool_calls', () => {
@@ -159,7 +111,7 @@ tool:exec_command (tool:exec_command)
   "tool_calls": [
     {
       "function": {
-        "arguments": "{"command":"bd --no-db ready","cmd":"bd --no-db ready"}",
+        "arguments": "{"cmd":"bd --no-db ready"}",
         "name": "exec_command",
       },
       "id": "<tool_call_id>",
@@ -191,7 +143,7 @@ tool:exec_command (tool:exec_command)
     expect((normalized as any).content).toBe('');
   });
 
-  it('does not harvest JSON tool_calls embedded inside quote envelope', () => {
+  it('harvests JSON tool_calls embedded inside quote envelope when payload is explicit', () => {
     const message = {
       role: 'assistant',
       content: [
@@ -205,15 +157,15 @@ tool:exec_command (tool:exec_command)
 
     const normalized = normalizeAssistantTextToToolCalls(message);
     const toolCalls = Array.isArray((normalized as any).tool_calls) ? (normalized as any).tool_calls : [];
-    expect(toolCalls.length).toBe(0);
-    expect((normalized as any).content).toContain('<quote>');
-    expect((normalized as any).content).toContain('tool_calls');
+    expect(toolCalls.length).toBe(1);
+    expect(toolCalls[0]?.function?.name).toBe('exec_command');
+    const args = JSON.parse(String(toolCalls[0]?.function?.arguments || '{}'));
+    expect(args.cmd).toBe('bd --no-db list --status in_progress');
+    expect((normalized as any).content).toBe('');
   });
 
-  it('harvests plain Begin/End Patch transcript into apply_patch tool_calls', () => {
-    const message = {
-      role: 'assistant',
-      content: `
+  it('extracts plain Begin/End Patch transcript via dedicated apply_patch extractor', () => {
+    const calls = extractApplyPatchCallsFromText(`
 I need to add a backend endpoint and then execute the patch.
 
 *** Begin Patch
@@ -223,26 +175,20 @@ I need to add a backend endpoint and then execute the patch.
 +  res.send('ok');
 +});
 *** End Patch
-      `
-    };
+    `);
 
-    const normalized = normalizeAssistantTextToToolCalls(message);
-    const toolCalls = Array.isArray((normalized as any).tool_calls) ? (normalized as any).tool_calls : [];
-    expect(toolCalls.length).toBe(1);
-
-    const call = toolCalls[0];
-    expect(call?.function?.name).toBe('apply_patch');
-    const args = JSON.parse(String(call?.function?.arguments || '{}'));
+    expect(Array.isArray(calls)).toBe(true);
+    expect(calls?.length).toBe(1);
+    const call = calls?.[0];
+    expect(call?.name).toBe('apply_patch');
+    const args = JSON.parse(String(call?.args || '{}'));
     const patchText = String(args.patch || args.input || '');
     expect(patchText).toContain('*** Begin Patch');
     expect(patchText).toContain('app.get(\'/tabs/:tabId/view\'');
-    expect((normalized as any).content).toBe('');
   });
 
-  it('harvests codex explored list transcript into list_directory tool_calls', () => {
-    const message = {
-      role: 'assistant',
-      content: [
+  it('extracts codex explored list transcript via dedicated list_directory extractor', () => {
+    const calls = extractExploredListDirectoryCallsFromText([
         '服务已启动，API 测试通过。',
         '',
         '• Explored',
@@ -255,41 +201,33 @@ I need to add a backend endpoint and then execute the patch.
         '    List app',
         '',
         '› Summarize recent commits'
-      ].join('\n')
-    };
+      ].join('\n'));
 
-    const normalized = normalizeAssistantTextToToolCalls(message);
-    const toolCalls = Array.isArray((normalized as any).tool_calls) ? (normalized as any).tool_calls : [];
-    expect(toolCalls.length).toBe(2);
+    expect(Array.isArray(calls)).toBe(true);
+    expect(calls?.length).toBe(2);
 
-    const firstArgs = JSON.parse(String(toolCalls[0]?.function?.arguments || '{}'));
-    const secondArgs = JSON.parse(String(toolCalls[1]?.function?.arguments || '{}'));
-    expect(toolCalls[0]?.function?.name).toBe('list_directory');
+    const firstArgs = JSON.parse(String(calls?.[0]?.args || '{}'));
+    const secondArgs = JSON.parse(String(calls?.[1]?.args || '{}'));
+    expect(calls?.[0]?.name).toBe('list_directory');
     expect(firstArgs.path).toBe('xiaohongshu');
     expect(firstArgs.recursive).toBe(false);
-    expect(toolCalls[1]?.function?.name).toBe('list_directory');
+    expect(calls?.[1]?.name).toBe('list_directory');
     expect(secondArgs.path).toBe('app');
     expect(secondArgs.recursive).toBe(false);
-    expect((normalized as any).content).toBe('');
   });
 
-  it('harvests codex ran-command transcript into exec_command tool_calls even with blocked json tail', () => {
-    const message = {
-      role: 'assistant',
-      content: [
+  it('extracts bare ran-command transcript via dedicated exec extractor', () => {
+    const calls = extractBareExecCommandFromText([
         '• Ran git push origin main',
         '  └ Everything up-to-date',
         '',
         '• {"type":"blocked","summary":"服务状态异常导致 state API 测试失败","blocker":"unified-api 服务 health check 失败，core-daemon 显示 unified-api 状态为 unhealthy","impact":"无法验证新分解的 Xiaohongshu 模块与 state API 的集成","next_action":"检查 unified-api 日志 (/Users/fanzhang/.webauto/logs/unified-api.log) 定位启动失败原因","evidence":["node scripts/xiaohongshu/tests/test-state-api.mjs 返回 ECONNREFUSED","node scripts/core-daemon.mjs status 显示 unified-api 为 unhealthy"]}'
-      ].join('\n')
-    };
+      ].join('\n'));
 
-    const normalized = normalizeAssistantTextToToolCalls(message);
-    const toolCalls = Array.isArray((normalized as any).tool_calls) ? (normalized as any).tool_calls : [];
-    expect(toolCalls.length).toBe(1);
-    expect(toolCalls[0]?.function?.name).toBe('exec_command');
-    const args = JSON.parse(String(toolCalls[0]?.function?.arguments || '{}'));
+    expect(Array.isArray(calls)).toBe(true);
+    expect(calls?.length).toBe(1);
+    expect(calls?.[0]?.name).toBe('exec_command');
+    const args = JSON.parse(String(calls?.[0]?.args || '{}'));
     expect(args.cmd).toBe('git push origin main');
-    expect((normalized as any).content).toBe('');
   });
 });

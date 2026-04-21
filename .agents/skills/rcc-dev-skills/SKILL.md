@@ -37,6 +37,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 
 **注意**：`req_outbound_stage3_compat` 和 `resp_inbound_stage3_compat` 是 **provider 格式转换层**，不是工具治理的位置。
 - continuation/state 统一补丁（2026-04-17）：**非 Responses 协议的 response continuity 也必须在 `chat_process.resp` 恢复到 `chat.semantics.continuation`**；不要把 session/conversation 状态恢复留给 outbound remap。可复用动作：先看 `response-mappers.ts` 是否把 request-side `semantics.continuation` 回填到 chat response，再看 `buildProcessedRequestFromChatResponse` / outbound 是否只做映射消费。
+- Responses continuation 路由模型护栏（2026-04-21）：若 `/v1/responses` 已在 `req_process_stage2_route_select` 命中过目标模型，后续 **route-aware continuation materialize** 只能恢复 history/messages/tools，**不得用 store 里的原始 responses `payload.model` 覆盖当前 workingRequest.model**；排查 5555/5520 出现“virtual-router-hit 是 A，providerRequestId/上游报错却是 B”时，先看 `route-aware-responses-continuation.ts` 是否把模型翻回 client/original model。
 - Anthropic alias fidelity（2026-04-19）：`Bash/Glob/...` 这类客户端原始工具名必须同时落盘到 `semantics.tools.toolNameAliasMap + clientToolsRaw`，必要时再镜像到 `semantics.anthropic.*`；response-side client remap 只能消费这些 semantics 恢复原始 tool name，不能回读 metadata。
 
 ## 工具治理唯一真源
@@ -82,14 +83,43 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - malformed 显式容器保留规则（2026-04-14）：若响应命中了 **RCC heredoc / 显式 wrapper**，但内部仍**恢复不出合法 tool_call**（如缺 `name`），**不得把 wrapper 清洗成空回复**；只能在“成功 harvest 合法调用”时剥离容器，否则保留原文交给客户端显式报错。
 - shell text-tool canonical shape（2026-04-11）：请求引导统一要求 shell 只用 `exec_command + input.cmd`，且 `cmd` 必须是单字符串 `bash -lc '...'`；禁止再引导 `shell/command/workdir/cwd` 形状。
 - shell 收割硬规则（2026-04-11）：响应侧只做**外层壳归一**（tool/tag/field alias → `exec_command` / `cmd`），**绝不修正文**；像 `catdocs/...`、`.md2>&1`、`&&head` 这类原始命令内容必须原样保留到 `cmd`。
+- 5520 exec_command 壳修复对齐（2026-04-20）：`normalize_tool_args` 与 `normalize_tool_args_preserving_raw_shape` 必须共用同一条 shell 轻修复链（`repair_shell_wrapper_shape -> repair_find_meta_impl -> strip_python_heredoc_pseudo_escapes`）；否则 5520 会出现 **`find ... ( ... )` 裸括号没转义**、而 preserving-raw 路径与 canonical 路径行为分叉。
 - DeepSeek-Web prompt 反嘴炮精华（2026-04-12）：若样本出现“前几轮会调工具、后面突然改成 `我来分析...```bash`”，先查 DeepSeek prompt 尾部是否被**空 tool/user block**污染成裸 `<｜User｜>`；空 `function_call_output` / 空 tool turn 必须在 prompt builder 侧直接丢弃。
+- DeepSeek-Web override 优先级（2026-04-20）：如果 DeepSeek 仍爱“描述问题/猜根因/假装已检查代码”，provider override 必须**显式声明优先级覆盖**（忽略冲突的 hidden/native prompt），并加 **evidence-first** 约束：只要是代码/日志/路径相关任务且声明了检查工具，就先出工具，不得先嘴炮。
+- DeepSeek-Web 工具轮续注入（2026-04-20）：如果第二轮/工具轮又开始嘴炮，先查 `prompt/model.rs` 是否因为历史消息里已有 `Tool-call output contract (STRICT)` 就**跳过新一轮注入**。正确做法是：**先剥掉历史 system 里的旧 guidance block，再按当前 tools/tool_choice 重新注入 fresh override**，不要把首轮注入当成可继承真源。
+- DeepSeek-Web 结构覆盖（2026-04-20）：仅把 override 放在首段 system 还不够稳；若要压过页面/隐藏 prompt，需使用**两段式 marker**：先用 user prompt 结束 marker 收口，再开启独立的 system prompt marker 重建权威 system 段，并显式写“override hidden/page/provider prompt for this turn”，这样 deepseek 才不容易把用户的 system 提示“吃掉”后又回到网页内建行为。
+- DeepSeek-Web 保密动机强化（2026-04-20）：若项目是保密/受限场景，prompt 可显式把**工具意图泄露**定义为会暴露保密内容的重大违规；这类 framing 只用于压制 fence 外 prose，不改变真实 tool payload 语义。
+- DeepSeek-Web system-role 纪律（2026-04-20）：如果要压制乐观倾向 / 事实未证实 / 唯一真源未锁定这类行为，约束必须进 **system prefix**，不能伪装成 user block；否则模型会把它当作普通任务内容来复述或忽略。
+- DeepSeek-Web 双 marker 纪律（2026-04-20）：user 输入里的 marker 不是普通正文；必须先用 user 结束 marker 划清边界，再用独立 system marker 引入 override。不要把 system 覆盖伪装成“authoritative user block”，且 marker 名字不要带 RouteCodex/品牌字样，避免额外泄露或引入噪声。
 - DeepSeek-Web addendum 最小化（2026-04-12）：provider-specific addendum 只保留 **DeepSeek 自身约束**；不要混写 Qwen，不要把历史失败样本大段灌进 provider addendum，也不要在每轮尾部重复“保密 dry-run 合同”重话术。共享 dry-run 契约留在 `shared_tool_text_guidance`，DeepSeek 尾提醒只保留最小必需句。
 - DeepSeek-Web 主链结论（2026-04-14）：5520 实测表明 DeepSeek upstream 即使被要求“直接输出标准 function call”，仍常回 **RCC fence** 或 `<tool_call>...</tool_call>` 这类文本工具壳；因此 **文本 fence 才是当前 provider 真正稳定主路径**，客户端看到的标准 `function_call` 只是 harvest/bridge 结果，不要反过来把“原生标准 function call”当 SSOT。
+- DeepSeek-Web wrapper 泄露真因（2026-04-19）：若客户端同时看到 **已结构化的 tool_calls** 和残留 `<<RCC_TOOL_CALLS_JSON ...` 文本，不要先怪“请求 JSON 坏了”；高概率是真实链路里 **responses→chat 已先产出 structured tool_calls，但 `output_text/message.content` 里的 raw wrapper 没被二次清理**。修复铁律：**只要 tool_calls 已存在，也必须继续 sanitize `content/output_text/__responses_output_text_meta`**，否则就会出现“工具已执行 + raw wrapper 仍回显”的双写假象。
+- DeepSeek-Web SSE 判定边界（2026-04-19）：**不要只用 `payload.tools[]` 判断 tool 请求。** `chat:deepseek-web` 的 text-tool compat 会把 `tools` 收进 `prompt`，runtime 只剩 `prompt + metadata.deepseek.textToolFallback/toolProtocol=text`；若 5520 出现 `UPSTREAM_SSE_NOT_ALLOWED`，先按这个 transformed payload 形状强制 upstream SSE。
+- DeepSeek-Web 路由护栏（2026-04-19）：若目标是**文本工具收割**，`thinking` 池也必须指向 `deepseek-chat`，不要把 `thinking` 绑到 `deepseek-reasoner`；否则当前轮 `thinking:user-input|tools:tool-request-detected` 会稳定落到 reasoner，表现为长时间 `finish_reason=stop` 且不出工具。`deepseek-reasoner` 只留给 `longcontext`。
+- DeepSeek-Web 文本工具硬护栏（2026-04-19）：**收割只认白名单 wrapper/mask**（优先 `RCC_TOOL_CALLS_JSON` / `<function_calls>`）；如果声明了 tools 却只输出“步骤/我先检查/命令列表”这类口嗨正文，没有命中白名单容器，就必须按“未产生有效 tool_call”直接报错重试，不能把 narrative tool intent 当成功响应放回客户端。
+- DeepSeek / 文本工具 mask 白名单（2026-04-19）：高层收割入口只放行**显式壳**：`RCC_TOOL_CALLS(_JSON)`、`<function_calls>/<tool_call>`、Qwen marker、顶层 `{"tool_calls":...}`、以及声明工具后的 `Tool: <name> + Arguments:` 对；**`Calling:` / `exec_command(...)` 这类 function-style 口嗨一律不算合法 tool 容器**。
+- RCC fence-first harvest（2026-04-20）：若现场样本是 `<<RCC_TOOL_CALLS(_JSON) ... RCC_TOOL_CALLS(_JSON)` 且内部 JSON 已坏，不要先赌 `serde_json`；必须先按 **fence/mask 裁边界**，只在 fence 内恢复 `tool_calls` 语义，wrapper 外 prose 原样保留。
+- RCC nested-name 恢复边界（2026-04-20）：如果 `name` 只是错层级落在 `input.name / args.name / payload.name / function.name`，可以按 allowlisted tool 名恢复；但如果显式容器内仍没有安全 tool name，必须保留原文，**禁止猜成 `exec_command/apply_patch`**。
+- allowlist 命中前置条件（2026-04-20）：对 bullet/prose/escaped transcript 中嵌着的 `{"tool_calls":...}`，可以先抽出**显式 tool_calls 容器**再恢复，但只有当**恢复出的至少一个 tool name 命中本轮 requested allowlist**时才允许进入清洗；若容器里只有未声明工具，必须保留原 wrapper 正文，不能因为“看见 tool_calls”就把现场抹掉。
+- tool:exec_command 参数壳容错（2026-04-20）：`tool:exec_command (...)` + `<parameter name="command">...` 这种显式 tool label，即使 closing tag 残缺/错配，也应按**顶层 label 先锁容器**，再把内部 `<parameter>` 映射回 canonical `cmd`；禁止回退到从 shell 正文猜工具。
+- RCC public TS surface 只做薄壳（2026-04-20）：`text-markup-normalizer` / `tool-harvester` 这类 TS 入口只允许转发 native 真源；不要在 TS 里另写一套 fence / JSON / name 推断逻辑，否则 public surface 会和 Rust 真源再次分叉。
+- Responses submit_tool_outputs 真因（2026-04-20）：若 5520 现场首轮 `/v1/responses` 正常返回 `requires_action`，但 `POST /v1/responses/:id/submit_tool_outputs` 立刻报 `Responses conversation expired or not found`，先查 `executeRequestStageInbound`：**当 stage2 已生成 `responsesContext` 时，不要只写 CACHE 后直接短路返回；仍必须补做 `responses conversation store capture`**，否则 responseId 根本没入 store。
+- DeepSeek-Web resume 续轮边界（2026-04-20）：若第二跳明明拿到了 tool result，却继续 `tool_calls` 循环或报“declared tools present but no valid tool call”，先分两层查：**请求侧** `tools/*` 路由在最新消息角色为 `tool` 时**不得再强塞 `tool-required` 尾提醒**；**响应侧** `strictToolRequired` 只应在 `tool_choice=required/function` 时生效，tool result 之后允许模型直接返回最终文本完成。
 - QwenChat tools 边界（2026-04-12）：**qwenchat 不要改全局 system prompt**。当前 Jason 允许的最小方案是：**仅在声明 tools 时**做 request-side 最小 override（头部 prepend 一条极短 system 提示），再配合 `tools` schema/description；消息正文语义保持原样，响应 harvest 继续走统一 `resp_process_stage1_tool_governance`。
 - QwenChat tool 实战结论（2026-04-13）：tool 场景要关闭 qwenchat upstream `thinking_*`，否则会放大嘴炮；关闭后它可能吐 **顶层函数样式文本壳**（如 `apply_patch(path=\"...\", content=\"...\")`），响应侧要在 `resp_process_stage1_tool_governance` 用**顶层壳 shape**收割，不解析 shell 正文。
 - QwenChat tool follow-up 实测（2026-04-13）：5520 真实 `/v1/responses` 回放显示，最小 override 可以把 `tool_code_interpreter(...)` 这类内建工具幻觉压成“file inaccessible”式拒绝，但**仍可能不出 declared tool call**。若 `tool_choice=required` 下 qwenchat 继续返回 `completed + plain text refusal`，优先判定为**上游隐藏系统提示词压过最小覆盖**；下一步应只加强 **qwenchat 专属头部 override / tool descriptions**，不要回灌到 DeepSeek 共享层。
 - QwenChat provider override 强化命中（2026-04-13）：若 qwenchat 仍报 “tool not found / file inaccessible”，provider 层头部覆盖要明确三件事：**declared tools 确实存在**、**external runtime 会执行**、**输出这类抱怨文本视为失败**。5520 live 验证后，qwenchat 已可从 plain-text complaint 转成 `finish_reason=tool_calls`。
 - QwenChat malformed 新分支（2026-04-13）：若 5520 最新 `provider-response.json` 只吐出 `<<RCC_TOOL_CALLS_JSON` 或半截 dry-run 容器，先**直接从 SSE `delta.content` 拼回 assistant 文本**；能从半截 JSON/`cmd`/`patch` 恢复 declared tool call 就恢复，恢复不了就从 fence 开头整段切掉并显式报 **retryable** 错误，禁止继续糊成通用 `MALFORMED_RESPONSE`。
+- QwenChat override 回归边界（2026-04-19）：**禁词/反诱导断言只检查 provider 注入的 override block**，不要扫描整段消息内容；用户/历史正文允许出现这些词。真正的上线验收仍看**模型实际输出**：若仍吐原生 `function_call` / 非预期工具壳，说明 override 目标未达成，不能投入使用。
+- QwenChat live/source 不一致排查（2026-04-19）：若单测里的 `src/*qwenchat*` override 已更新，但 **5520 实测仍回 “unlock / capability verification / bypass safety”**，先直接检查 `dist/providers/core/runtime/qwenchat-http-provider-helpers.js`；qwenchat live 行为以 **dist 实际注入 prompt** 为准，build 前不要拿 src 文本当证据。
+- QwenChat schema-first override（2026-04-19）：5520 实测表明，仅写“只用 declared tools”还不够；要在 provider override 里显式写 **tool 名 + 精确 input key schema + 最小 JSON example**（如 `exec_command => input { cmd:string }`，且明确 `cmd` 不能写成 `command`），这样 qwenchat 的文本 harvest 才能稳定对回原始工具列表。
+- QwenChat create-session 高频 404（2026-04-19）：`/api/v2/chats/new` 的瞬时 404 在高频 burst 下可能可恢复；正确修法是 **provider 内部串行化同 alias create-session + 指数回退**，不要把一次可恢复的 404 立即上升成外层 provider 风暴。
+- QwenChat create-session 404 日志边界（2026-04-19）：若 5520 实测里 qwenchat 最终请求都成功，但日志仍刷 `[provider-switch] ... QWENCHAT_CREATE_SESSION_FAILED 404`，应在 `request-executor` 把这类 **qwenchat provider.send 404** 降为内部 stage log；对用户侧/顶层日志，恢复成功的瞬时 create-session 404 应视为**已吸收的 provider 内部抖动**。
+- QwenChat tools × webSearch 冲突（2026-04-19）：若请求里 **已声明 client tools**，即使 metadata/route 带了 `webSearch=true` / `chat_type=search`，provider request 也必须把 **`feature_config.auto_search=false` 且 `research_mode` 关严（默认 `off`）**；否则 upstream 会把“禁止原生搜索”的 prompt 与 `auto_search=true` 的 body 冲突解释成原生 `web_search`。
+- QwenChat hidden-native-tool 止损顺序（2026-04-19）：非流式 `/v1/responses` 若仍遇到 `QWENCHAT_HIDDEN_NATIVE_TOOL`，要先在 **aggregate SSE reader 增量解析并即时中止**，不要等整条 upstream SSE 结束后才报错；随后在 provider 内部做 **同请求静默二次尝试**（如 `off -> disable`），优先把问题吸收到 provider 层，减少外层 provider-switch 噪音与长 `decode.sse` 假象。
+- QwenChat non-stream 观测铁律（2026-04-19）：5520 live 若已确认 `stream:false` 正常、`decode.sse=0ms`，但日志仍看不到 `json/sse_fallback`，**不要脑补成功路径**；要么打真实 `qwen.nonstream=json|sse_fallback`，要么明确记成 `qwen.nonstream=missing`，把“marker 丢失”当成独立链路问题继续追。
+- QwenChat false-positive tool-stop sample（2026-04-19）：若 `finish_reason=stop` 但 `message.content/reasoning/rawSse` 已出现显式 `<<RCC_TOOL_CALLS(_JSON)` 且带 `"tool_calls"`，provider 层**不要再写 `qwenchat-tool-stop-no-call` errorsample**；这类显式 RCC 容器应交给下游 harvest/recover，继续打样本只会制造噪声。
+- QwenChat declared native tool absorb（2026-04-19）：若 upstream 直接走 provider-native `function_call/tool_calls`，但 **tool 名属于本轮 declared allowlist**（如真实 5520 样本 `exec_command`），provider 层应**直接吸收并映射成标准 tool_calls**，不要再报 `QWENCHAT_NATIVE_TOOL_CALL`；只有**未声明/已知隐藏原生工具**（`web_search/web_extractor/...`）才继续 fail-fast。
 - QwenChat malformed 再分流（2026-04-13）：若最新真实样本里 `provider-response.raw` 出现 `phase=function_call.name=web_extractor` / `tool_code_interpreter` 等 **qwen 内建 native tool**，即使 bridge fallback context 丢了 declared-tool allowlist，也要在 `provider-response-converter` 直接 remap 成 `QWENCHAT_HIDDEN_NATIVE_TOOL`；不要继续落成通用 `MALFORMED_RESPONSE`。
 - QwenChat hidden-native-tool 前置止血（2026-04-13）：`qwenchat-http-provider-helpers` 里对 `web_search / web_extractor / tool_code_interpreter` 这类**已知隐藏原生工具**的拦截，**不能依赖 declaredToolNames 非空**；否则一旦请求侧没把 allowlist 透传进 helper，live SSE 会先掉进 bridge malformed，再表现成 `finish_reason=unknown` 或空回复。
 - 主链策略（2026-04-13）：**真实工具调用优先，文本 dry-run/harvest 只做兼容补救**。不要再把“彻底禁止模型原生工具”当硬前提；我们的职责是 RouteCodex 自己不依赖它，并在模型偷跑到隐藏原生工具、半截容器、或 malformed wrapper 时给出显式错误/恢复，而不是静默吞掉。
@@ -149,40 +179,41 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 
 ## 性能与预算精华（2026-04-06）
 
-- 触发信号：`--snap` / retry 场景出现 OOM，同时日志窗口里 `provider-switch`、`ServerTool followup failed`、`SERVERTOOL_TIMEOUT` 密集共现。  
-- 可复用动作：先把根因锁到“风暴链 + 等待队列 + 大 payload retry/snapshot 放大”三件套；不要先怀疑 `~/.rcc/errorsamples` 这类小文件目录。  
-- 可复用动作：429 / concurrency / recoverable followup 一律保持“阻塞 + 指数回退”，但必须给 **recoverable backoff queue** 和 **provider traffic acquire queue** 都加 waiter 上限；否则只是把重试风暴改成排队堆内存。  
-- 可复用动作：本地盘 snapshot gate 要在 `provider.send.start` 之后、`processIncoming` 之前放行；如果等 provider 返回后才放行，`provider-request / provider-response / provider-error` 的本地 mirror 会整段丢失。  
-- 可复用动作：查 5555/5520 的 SSE snapshot 缺口时，不要只看 generic `postStream` 分支；`executePreparedRequest`（SDK transport）返回的 `__sse_responses` 也必须走同一套 `wrapUpstreamSseResponse + provider-response snapshot` 收口。  
-- 触发信号：`SSE timeout after 1000000ms`、`PROVIDER_TRAFFIC_SATURATED` 高频、WindowServer watchdog/panic。  
-- 可复用动作：优先排查“深拷贝 + 双写落盘 + 超长超时”三件套；请求/响应大历史块一律走**零拷贝摘要（mmap-hint）**，禁止在热路径做全量 JSON 深拷贝。  
+- 触发信号：`--snap` / retry 场景出现 OOM，同时日志窗口里 `provider-switch`、`ServerTool followup failed`、`SERVERTOOL_TIMEOUT` 密集共现。
+- 可复用动作：先把根因锁到“风暴链 + 等待队列 + 大 payload retry/snapshot 放大”三件套；不要先怀疑 `~/.rcc/errorsamples` 这类小文件目录。
+- 可复用动作：429 / concurrency / recoverable followup 一律保持“阻塞 + 指数回退”，但必须给 **recoverable backoff queue** 和 **provider traffic acquire queue** 都加 waiter 上限；否则只是把重试风暴改成排队堆内存。
+- 可复用动作：本地盘 snapshot gate 要在 `provider.send.start` 之后、`processIncoming` 之前放行；如果等 provider 返回后才放行，`provider-request / provider-response / provider-error` 的本地 mirror 会整段丢失。
+- 可复用动作：查 5555/5520 的 SSE snapshot 缺口时，不要只看 generic `postStream` 分支；`executePreparedRequest`（SDK transport）返回的 `__sse_responses` 也必须走同一套 `wrapUpstreamSseResponse + provider-response snapshot` 收口。
+- 触发信号：`SSE timeout after 1000000ms`、`PROVIDER_TRAFFIC_SATURATED` 高频、WindowServer watchdog/panic。
+- 可复用动作：优先排查“深拷贝 + 双写落盘 + 超长超时”三件套；请求/响应大历史块一律走**零拷贝摘要（mmap-hint）**，禁止在热路径做全量 JSON 深拷贝。
 - 日志口径边界（2026-04-12）：`[session-request][rt] internal` **不应包含 SSE decode**。若要看真正核心内耗，口径应为 `total - external - sseDecode`; rollup 的 `avg.core_internal` 只能再扣 `codec` 超出 `sse` 的残余，不能把 SSE 重复减两次。
-- 反模式：在 handler / retry 路径对完整 payload 执行 `JSON.parse(JSON.stringify(...))`，会放大内存与 GC 抖动。  
-- 触发信号：`restoreRequestPayloadFromRetrySnapshot.oversized_skip` 频发（>2MB payload）。  
-- 可复用动作：重试种子优先保留 `structuredClone` 的对象快照；字符串快照仅作小体积辅助，超限直接弃用，避免“大 payload 无 seed”与 parse 噪声。  
-- 触发信号：`SERVERTOOL_TIMEOUT` 出现 `followup timeout after 500000ms`，且伴随多 provider 重试风暴。  
-- 可复用动作：把 servertool/followup 默认超时收敛到 120s/90s（并设上限），并对 `reasoning_only_continue/ reasoning_stop_guard/ reasoning_stop_continue` 启用 auto-limit，避免无限续轮卡死。  
-- 触发信号：`429`（含 `insufficient_quota`）重试链路出现 64s/120s 级退避，拖慢切换。  
-- 可复用动作：recoverable backoff 按错误分级：429 类保持小退避（<=4s）快速换 provider；servertool 类保持中退避（<=12s）避免重放风暴。  
-- 触发信号：Node 进程 **虚拟内存/常驻内存随运行时间单调上涨**，但 FD / TCP 连接数基本平稳，同时日志里长期存在 `429` / timeout / aborted / provider error。  
-- 可复用动作：优先排查 **requestId → meta/context** 的内存 Map（如 codec `ctxMap`、v2 pipeline `requestMetaStore`）；凡是“只在 `convertResponse` 删除、错误路径不清理”的，都必须补 **TTL + 容量上限 + 写入前 prune**，否则失败/中断请求会永久滞留并把 VM 慢慢顶高。  
-- 触发信号：热路径里的“仅供观测/调度”的 request Map（如 `StatsManager.inflight`、`RequestActivityTracker.byRequestId`）在长时间运行后缓慢变大，且正常路径理论上应在 `finally/end` 删除。  
-- 可复用动作：这类 Map 不要只信 happy-path 清理；统一补 **TTL + max entries + 每次读写前/后 prune**，并确保 prune 时同步回收派生计数（如 tmux active counts），避免长挂请求把非关键状态常驻在内存里。  
-- 触发信号：Responses/OpenAI bridge 出现 **registry Map + inline `__responses_*` 字段** 双保留，且同一 payload 还会按 `id/request_id` 多 key 缓存。  
-- 可复用动作：优先让 **registry 有 TTL/max/prune**，并让多 key 共享**同一份已克隆 snapshot 引用**；不要对同一个大 response 在 registry / inline / alias key 上重复 deep clone。  
-- 触发信号：session/tmux 相关路径出现频繁 `tmux has-session` 子进程调用（QPS 高时放大为进程风暴）。  
-- 可复用动作：对 `isTmuxSessionAlive`/`resolveTmuxSessionWorkingDirectory` 增加短 TTL 缓存 + 容量上限（默认 1.2s / 256 项），并在 kill/注入结果点做缓存失效或回写，避免每次 metadata/cleanup 都 spawnSync。  
-- 触发信号：heartbeat 周期内重复调用 `isTmuxSessionIdleForInject`，导致 `list-panes/capture-pane` 高频子进程创建。  
-- 可复用动作：对 idle 探针同样做短 TTL 缓存（仅缓存 true/false，异常不缓存），把缓存失效点放在注入前与注入后，确保性能和准确性平衡。  
-- 触发信号：session startup cleanup / registry cleanup 一轮内对同一 tmuxSession 多次活性探测。  
-- 可复用动作：在 cleanup 函数内部增加“单轮 memoized liveness cache”，与 probe TTL 缓存叠加，进一步降低重复探测开销。  
+- 反模式：在 handler / retry 路径对完整 payload 执行 `JSON.parse(JSON.stringify(...))`，会放大内存与 GC 抖动。
+- 触发信号：`restoreRequestPayloadFromRetrySnapshot.oversized_skip` 频发（>2MB payload）。
+- 可复用动作：重试种子优先保留 `structuredClone` 的对象快照；字符串快照仅作小体积辅助，超限直接弃用，避免“大 payload 无 seed”与 parse 噪声。
+- client disconnect / timeout hint 续跑真因（2026-04-20）：若 5520/5555 已出现 `CLIENT_TIMEOUT_HINT_EXPIRED` / `CLIENT_RESPONSE_CLOSED`，但请求仍继续 provider-switch / backoff，先查 **attempt metadata clone** 是否把 `clientConnectionState` 上的**非枚举 abort signal**丢了；`decorateMetadataForAttempt` 这类 clone 步骤必须回填原始 state 引用。另一个高频坑是 **不要在 `req.close` 提前清掉 timeout hint watcher**，否则 `x-stainless-timeout` 会表面存在、实际失效。
+- 触发信号：`SERVERTOOL_TIMEOUT` 出现 `followup timeout after 500000ms`，且伴随多 provider 重试风暴。
+- 可复用动作：把 servertool/followup 默认超时收敛到 120s/90s（并设上限），并对 `reasoning_only_continue/ reasoning_stop_guard/ reasoning_stop_continue` 启用 auto-limit，避免无限续轮卡死。
+- 触发信号：`429`（含 `insufficient_quota`）重试链路出现 64s/120s 级退避，拖慢切换。
+- 可复用动作：recoverable backoff 按错误分级：429 类保持小退避（<=4s）快速换 provider；servertool 类保持中退避（<=12s）避免重放风暴。
+- 触发信号：Node 进程 **虚拟内存/常驻内存随运行时间单调上涨**，但 FD / TCP 连接数基本平稳，同时日志里长期存在 `429` / timeout / aborted / provider error。
+- 可复用动作：优先排查 **requestId → meta/context** 的内存 Map（如 codec `ctxMap`、v2 pipeline `requestMetaStore`）；凡是“只在 `convertResponse` 删除、错误路径不清理”的，都必须补 **TTL + 容量上限 + 写入前 prune**，否则失败/中断请求会永久滞留并把 VM 慢慢顶高。
+- 触发信号：热路径里的“仅供观测/调度”的 request Map（如 `StatsManager.inflight`、`RequestActivityTracker.byRequestId`）在长时间运行后缓慢变大，且正常路径理论上应在 `finally/end` 删除。
+- 可复用动作：这类 Map 不要只信 happy-path 清理；统一补 **TTL + max entries + 每次读写前/后 prune**，并确保 prune 时同步回收派生计数（如 tmux active counts），避免长挂请求把非关键状态常驻在内存里。
+- 触发信号：Responses/OpenAI bridge 出现 **registry Map + inline `__responses_*` 字段** 双保留，且同一 payload 还会按 `id/request_id` 多 key 缓存。
+- 可复用动作：优先让 **registry 有 TTL/max/prune**，并让多 key 共享**同一份已克隆 snapshot 引用**；不要对同一个大 response 在 registry / inline / alias key 上重复 deep clone。
+- 触发信号：session/tmux 相关路径出现频繁 `tmux has-session` 子进程调用（QPS 高时放大为进程风暴）。
+- 可复用动作：对 `isTmuxSessionAlive`/`resolveTmuxSessionWorkingDirectory` 增加短 TTL 缓存 + 容量上限（默认 1.2s / 256 项），并在 kill/注入结果点做缓存失效或回写，避免每次 metadata/cleanup 都 spawnSync。
+- 触发信号：heartbeat 周期内重复调用 `isTmuxSessionIdleForInject`，导致 `list-panes/capture-pane` 高频子进程创建。
+- 可复用动作：对 idle 探针同样做短 TTL 缓存（仅缓存 true/false，异常不缓存），把缓存失效点放在注入前与注入后，确保性能和准确性平衡。
+- 触发信号：session startup cleanup / registry cleanup 一轮内对同一 tmuxSession 多次活性探测。
+- 可复用动作：在 cleanup 函数内部增加“单轮 memoized liveness cache”，与 probe TTL 缓存叠加，进一步降低重复探测开销。
 
-- 触发信号：日志出现 `web_search-auto-capability`、`session=unknown project=-`，并伴随 `provider traffic lock acquire timed out` / `recoverable retry waiters overloaded`。  
-- 可复用动作：`web_search` 只能由**显式工具链**续写命中；禁止根据用户意图关键词或 `serverToolRequired` 自动切到 `web_search` 路由，否则匿名联网请求会绕开工具显式边界并放大成 provider 风暴。  
-- Rust/TS classifier 对齐（2026-04-12）：若线上仍出现 `web_search:servertool-required`，先查 **Rust hotpath** `virtual_router_engine/classifier.rs` 是否还保留旧分支；TS classifier 修好了但 Rust 没同步，5520/5555 仍会继续误命中。  
-- servertool → client remap 闭环（2026-04-12）：若日志出现 `CLIENT_TOOL_NAME_MISMATCH unknown=[review|clock|...]`，不要去放宽 client allowlist；先查 `strip-servertool-calls.ts` 是否按 **`tool_outputs.tool_call_id`** 剥掉所有已执行 servertool 调用，避免 internal servertool 泄露到客户端工具集合校验。  
-- followup 剥离护栏（2026-04-14）：若 `reasoning.stop` / `review` / `clock` 这类 internal servertool 在 **followup** 样本里出现在 `required_action.submit_tool_outputs` 或 `output.function_call`，优先检查 `resp_process.stage2_finalize` 是否错误跳过 `filterOutExecutedServerToolCalls`；servertool followup 也必须剥离已执行 internal tool_call，不能因为 `serverToolFollowup` 标记而放行。  
-- followup 编排顺序（2026-04-14）：若 followup 样本里 internal RCC tool_call 只在 `resp_process.stage1_tool_governance` 后才出现，但 `resp_process.stage3_servertool_orchestration` 仍在 governance 之前且对 `serverToolFollowup` 直接 bypass，就会出现“统一请求注入了、统一响应收割却没吃到”的假象；要补 **post-governance servertool pass**，不能只靠 pre-governance orchestration。  
+- 触发信号：日志出现 `web_search-auto-capability`、`session=unknown project=-`，并伴随 `provider traffic lock acquire timed out` / `recoverable retry waiters overloaded`。
+- 可复用动作：`web_search` 只能由**显式工具链**续写命中；禁止根据用户意图关键词或 `serverToolRequired` 自动切到 `web_search` 路由，否则匿名联网请求会绕开工具显式边界并放大成 provider 风暴。
+- Rust/TS classifier 对齐（2026-04-12）：若线上仍出现 `web_search:servertool-required`，先查 **Rust hotpath** `virtual_router_engine/classifier.rs` 是否还保留旧分支；TS classifier 修好了但 Rust 没同步，5520/5555 仍会继续误命中。
+- servertool → client remap 闭环（2026-04-12）：若日志出现 `CLIENT_TOOL_NAME_MISMATCH unknown=[review|clock|...]`，不要去放宽 client allowlist；先查 `strip-servertool-calls.ts` 是否按 **`tool_outputs.tool_call_id`** 剥掉所有已执行 servertool 调用，避免 internal servertool 泄露到客户端工具集合校验。
+- followup 剥离护栏（2026-04-14）：若 `reasoning.stop` / `review` / `clock` 这类 internal servertool 在 **followup** 样本里出现在 `required_action.submit_tool_outputs` 或 `output.function_call`，优先检查 `resp_process.stage2_finalize` 是否错误跳过 `filterOutExecutedServerToolCalls`；servertool followup 也必须剥离已执行 internal tool_call，不能因为 `serverToolFollowup` 标记而放行。
+- followup 编排顺序（2026-04-14）：若 followup 样本里 internal RCC tool_call 只在 `resp_process.stage1_tool_governance` 后才出现，但 `resp_process.stage3_servertool_orchestration` 仍在 governance 之前且对 `serverToolFollowup` 直接 bypass，就会出现“统一请求注入了、统一响应收割却没吃到”的假象；要补 **post-governance servertool pass**，不能只靠 pre-governance orchestration。
 - reasoning.stop 单一真源（2026-04-14）：`reasoning.stop` 的 schema/注入只能以 **chat-process request tooling** 为真源；guard/followup 只能 `preserve_tools + ensure_standard_tools`，禁止再用 `append_tool_if_missing` 造第二份工具定义，否则 followup 的 declared tools 与 host validator 会漂移成 `unknown_tool`。
 - stopless 越界修复（2026-04-14）：**不要为了逼模型调用 `reasoning.stop` 而砍掉真实工具面，也不要额外注入“本轮只能 reasoning.stop/工具缺失”这类约束文案。** 正确动作只有两步：保留真实 tools（`preserve_tools + ensure_standard_tools`），并在 `reasoning.stop` 工具定义/validator 上坚持“未调用不得停止”；若线上出现“exec_command 不存在”式自造阻塞，先回查是否有人为缩了 followup tools。
 - stopless 只读任务边界（2026-04-15）：若任务本身就是 **plan mode / audit / 其它有意只读交付**，`reasoning.stop` 说明与 schema 里要显式提供 `stop_reason=plan_mode`，并要求同时给 `is_completed=true + completion_evidence`；不要把这类任务误判成“必须继续写动作”或硬塞成 blocked reason。
@@ -190,17 +221,17 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 
 ## 静默失败治理精华（2026-04-07）
 
-- 触发信号：`catch {}` / `.catch(() => {})` 出现在 runtime 热路径（tmux probe、SSE write/end、startup cleanup、provider init/reporter）。  
-- 可复用动作：保持 best-effort 语义不变，但统一升级为“非阻断 + 可观测”：记录 `stage + requestId/providerKey/tmuxSessionId`，并对高频路径做节流日志。  
-- 重点补位：`provider-runtime-resolver`、`oauth-recovery-handler`、`daemon-admin/control`、`http-client` 这类“异常分支才触发”的路径，优先打点 non-blocking 日志，避免无声丢线索。  
-- 触发信号：每请求路径的 best-effort 注入（如 middleware header hint）若直接 `console.warn`，会在异常风暴时放大日志。  
-- 可复用动作：这类高频非关键路径必须加 stage 级节流（建议 60s），避免“修复静默失败”反向引入日志风暴。  
-- health probe / guardian / restart 判断精华（2026-04-16）：`fetch/json/auth` 异常若统一塌缩成 `false/null/status=n/a`，调用方会把“网络错 / 401 / 响应非法 / 服务真离线”误判成同一种离线；正确做法是返回结构化 probe result（`kind + status + parseOk + bodySnippet`），并只在最外层决定是否 fallback。  
-- 状态持久化 best-effort 精华（2026-04-16）：`cooldown` / `leader-lock` / `pending-tool-sync.clear` 这类“允许不中断主链”的状态写失败，也必须至少打一次节流日志并带 `operation + key/sessionId/providerKey + filepath`；否则线上只会看到重复 followup、冷却丢失、锁竞争异常，却没有第一现场。  
-- 静默失败门禁精华（2026-04-16）：审计脚本不能只抓 `catch {}`；还要覆盖 `catch { return null/false }` 与 `.catch(() => null/false)`。固定证据入口：`scripts/ci/silent-failure-audit.mjs` + `tests/scripts/silent-failure-audit.spec.ts`。  
-- 错误收口主链（2026-04-16）：排查 provider 执行期错误时，先确认主路径是否仍是 **`provider-error-reporter -> reportProviderErrorToRouterPolicy -> Virtual Router policy`**；如果又看到 `providerErrorCenter` + `RouteErrorHub` 双上报、或 HubPipeline 重新直接订阅 legacy center，优先判定为“第二中心回流”。  
-- stopless 硬校验（2026-04-16）：若 `stopless=on/endless` 但响应已 `completed/stop` 且缺 `[app.finished:reasoning.stop]` finalized marker，Host `RequestExecutor` 必须抛 `STOPLESS_FINALIZATION_MISSING`；不要把这种“完成但未 finalize”的响应当成功，避免客户端静默停住。  
-- provider-switch 退避边界（2026-04-16）：若 retry 已经决定 `exclude_and_reroute`，generic 401/403/非 blocking 错误的 backoff 也必须按 **provider 维度**计数，不能沿用全请求 `attempt` 指数增长；否则不同 provider 会被无端抬高 backoff，看起来像调度在“全局连坐”。  
+- 触发信号：`catch {}` / `.catch(() => {})` 出现在 runtime 热路径（tmux probe、SSE write/end、startup cleanup、provider init/reporter）。
+- 可复用动作：保持 best-effort 语义不变，但统一升级为“非阻断 + 可观测”：记录 `stage + requestId/providerKey/tmuxSessionId`，并对高频路径做节流日志。
+- 重点补位：`provider-runtime-resolver`、`oauth-recovery-handler`、`daemon-admin/control`、`http-client` 这类“异常分支才触发”的路径，优先打点 non-blocking 日志，避免无声丢线索。
+- 触发信号：每请求路径的 best-effort 注入（如 middleware header hint）若直接 `console.warn`，会在异常风暴时放大日志。
+- 可复用动作：这类高频非关键路径必须加 stage 级节流（建议 60s），避免“修复静默失败”反向引入日志风暴。
+- health probe / guardian / restart 判断精华（2026-04-16）：`fetch/json/auth` 异常若统一塌缩成 `false/null/status=n/a`，调用方会把“网络错 / 401 / 响应非法 / 服务真离线”误判成同一种离线；正确做法是返回结构化 probe result（`kind + status + parseOk + bodySnippet`），并只在最外层决定是否 fallback。
+- 状态持久化 best-effort 精华（2026-04-16）：`cooldown` / `leader-lock` / `pending-tool-sync.clear` 这类“允许不中断主链”的状态写失败，也必须至少打一次节流日志并带 `operation + key/sessionId/providerKey + filepath`；否则线上只会看到重复 followup、冷却丢失、锁竞争异常，却没有第一现场。
+- 静默失败门禁精华（2026-04-16）：审计脚本不能只抓 `catch {}`；还要覆盖 `catch { return null/false }` 与 `.catch(() => null/false)`。固定证据入口：`scripts/ci/silent-failure-audit.mjs` + `tests/scripts/silent-failure-audit.spec.ts`。
+- 错误收口主链（2026-04-16）：排查 provider 执行期错误时，先确认主路径是否仍是 **`provider-error-reporter -> reportProviderErrorToRouterPolicy -> Virtual Router policy`**；如果又看到 `providerErrorCenter` + `RouteErrorHub` 双上报、或 HubPipeline 重新直接订阅 legacy center，优先判定为“第二中心回流”。
+- stopless 硬校验（2026-04-16）：若 `stopless=on/endless` 但响应已 `completed/stop` 且缺 `[app.finished:reasoning.stop]` finalized marker，Host `RequestExecutor` 必须抛 `STOPLESS_FINALIZATION_MISSING`；不要把这种“完成但未 finalize”的响应当成功，避免客户端静默停住。
+- provider-switch 退避边界（2026-04-16）：若 retry 已经决定 `exclude_and_reroute`，generic 401/403/非 blocking 错误的 backoff 也必须按 **provider 维度**计数，不能沿用全请求 `attempt` 指数增长；否则不同 provider 会被无端抬高 backoff，看起来像调度在“全局连坐”。
 - provider-switch 观测口径（2026-04-16）：当你在日志里看不清“到底是在同 provider 等待，还是已决定换 provider”时，先补齐 `decisionLabel + backoffScope + stage`。最少要区分：`provider_backoff_then_reroute`、`recoverable_backoff_same_provider`、`attempt_backoff_same_provider`。
 - provider-switch 装配真源（2026-04-16）：`switchAction + decisionLabel + runtimeScopeExcludedCount` 不要在 `runtime_resolve`、`provider.send`、followup 各自手拼；优先收口到单点 helper（当前 `resolveProviderRetrySwitchPlan(...)`），否则日志口径和 reroute 排除策略会再次分叉。
 - provider exclusion 真源（2026-04-16）：`promptTooLong`、Antigravity `verify/429`、`reauth`、alias rotate 这些“是否排除当前 provider / 是否把 antigravity 标成 `avoidAllOnRetry`”的规则，也要单点 helper 化（当前 `resolveProviderRetryExclusionPlan(...)`）；否则 reroute 行为会在 send/followup 边界重新分叉。
@@ -306,49 +337,49 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - 可复用动作：在 `req_outbound_stage3_compat/chat:qwen` 统一归一化 `messages + input`：`input_text/output_text/commentary → text`，`input_image → image_url`，`input_video → video_url`，避免在 provider 请求层再分叉修补。
 
 ### Qwen Code 对齐精华（2026-04-10）
-- 触发信号：provider-request 已有 `session_id/conversation_id`，但 response/servertool 侧 sticky scope 仍拿不到，表现为 stopless/stopMessage 失效。  
-- 可复用动作：不要在 transport 末端“header 倒灌 metadata”；正确修复是 **先在 metadata/runtime mapping 真层生成或归一 `sessionId/conversationId`，再映射到 provider header**。同时检查 raw metadata 提取链：JSON 字符串必须先 parse 再 regex，避免把 `codex_cli_conversation_*` 截成半截 token。  
+- 触发信号：provider-request 已有 `session_id/conversation_id`，但 response/servertool 侧 sticky scope 仍拿不到，表现为 stopless/stopMessage 失效。
+- 可复用动作：不要在 transport 末端“header 倒灌 metadata”；正确修复是 **先在 metadata/runtime mapping 真层生成或归一 `sessionId/conversationId`，再映射到 provider header**。同时检查 raw metadata 提取链：JSON 字符串必须先 parse 再 regex，避免把 `codex_cli_conversation_*` 截成半截 token。
 
-- 触发信号：portal.qwen.ai 可用但工具场景更容易 `finish_reason=stop`、且源码里的 qwen provider 头部/系统 envelope 与真实 Qwen CLI 漂移。  
-- 可复用动作：对 `chat:qwen` 先对齐 **非提示词形状**：保留首条 system envelope 的 `cache_control: ephemeral` 结构、补齐 `X-Stainless-*` 头、并把 `reasoning.effort` 同步镜像为 `reasoning_effort`；同时对齐 Qwen CLI 的 header 习惯，`User-Agent / X-DashScope-UserAgent / session_id / conversation_id / originator` 都不要透传客户端值，统一按 qwen-cli 指纹重建。未经授权不要改 system/prompt 文本。  
+- 触发信号：portal.qwen.ai 可用但工具场景更容易 `finish_reason=stop`、且源码里的 qwen provider 头部/系统 envelope 与真实 Qwen CLI 漂移。
+- 可复用动作：对 `chat:qwen` 先对齐 **非提示词形状**：保留首条 system envelope 的 `cache_control: ephemeral` 结构、补齐 `X-Stainless-*` 头、并把 `reasoning.effort` 同步镜像为 `reasoning_effort`；同时对齐 Qwen CLI 的 header 习惯，`User-Agent / X-DashScope-UserAgent / session_id / conversation_id / originator` 都不要透传客户端值，统一按 qwen-cli 指纹重建。未经授权不要改 system/prompt 文本。
 
-- 触发信号：qwen provider 配的是 DashScope compatible base，但日志/错误样本仍漂到 `https://portal.qwen.ai/v1`，token 文件里同时出现 `resource_url=portal.qwen.ai`、`api_key==access_token`、`norefresh=true`。  
-- 可复用动作：把这组字段视为 **legacy 污染**：qwen runtime 必须忽略 `portal/chat.qwen.ai` 的 `resource_url` 覆盖；token 落盘时必须丢弃 fake `api_key=access_token` 与随之产生的 `norefresh`，只保留真实 `access_token/refresh_token`，若 userinfo 返回独立稳定 apiKey 才写回 `api_key + norefresh`。  
+- 触发信号：qwen provider 配的是 DashScope compatible base，但日志/错误样本仍漂到 `https://portal.qwen.ai/v1`，token 文件里同时出现 `resource_url=portal.qwen.ai`、`api_key==access_token`、`norefresh=true`。
+- 可复用动作：把这组字段视为 **legacy 污染**：qwen runtime 必须忽略 `portal/chat.qwen.ai` 的 `resource_url` 覆盖；token 落盘时必须丢弃 fake `api_key=access_token` 与随之产生的 `norefresh`，只保留真实 `access_token/refresh_token`，若 userinfo 返回独立稳定 apiKey 才写回 `api_key + norefresh`。
 
-- 触发信号：qwen 的 `User-Agent / X-DashScope-* / X-Stainless-*` 已与 Qwen CLI 对齐，但工具场景仍更容易 `finish_reason=stop`。  
-- 可复用动作：不要继续怀疑 header；优先检查 `chat:qwen` 是否像当前历史回归那样改写了**非 system messages**（删除空 assistant/tool turn、回填 `tool_call_id`、重写 tool call id 等）。Qwen CLI 真实现只做 system envelope 注入/合并；最小正确修复是保留非 system history 原样透传，响应侧继续按客户端语义对称恢复。  
+- 触发信号：qwen 的 `User-Agent / X-DashScope-* / X-Stainless-*` 已与 Qwen CLI 对齐，但工具场景仍更容易 `finish_reason=stop`。
+- 可复用动作：不要继续怀疑 header；优先检查 `chat:qwen` 是否像当前历史回归那样改写了**非 system messages**（删除空 assistant/tool turn、回填 `tool_call_id`、重写 tool call id 等）。Qwen CLI 真实现只做 system envelope 注入/合并；最小正确修复是保留非 system history 原样透传，响应侧继续按客户端语义对称恢复。
 
-- 触发信号：`/v1/responses` 的 Qwen 样本里 upstream 明明已有 1 个 native `tool_calls`，但客户端返回出现重复 `function_call` 或额外空参数 `{}` 调用；同时 `reasoning_content` 里常带 XML/JSON 形式的工具片段。  
-- 可复用动作：优先检查 **response-side reasoning normalizer**，不要只盯 provider request/header。若 assistant 已经有结构化 `tool_calls/function_call`，必须禁止再从 `reasoning_content` 二次 harvest；否则会把 reasoning 里的示例/XML/JSON 再抽成第二个工具调用，污染后续多轮上下文并放大成莫名其妙的 `stop`。  
+- 触发信号：`/v1/responses` 的 Qwen 样本里 upstream 明明已有 1 个 native `tool_calls`，但客户端返回出现重复 `function_call` 或额外空参数 `{}` 调用；同时 `reasoning_content` 里常带 XML/JSON 形式的工具片段。
+- 可复用动作：优先检查 **response-side reasoning normalizer**，不要只盯 provider request/header。若 assistant 已经有结构化 `tool_calls/function_call`，必须禁止再从 `reasoning_content` 二次 harvest；否则会把 reasoning 里的示例/XML/JSON 再抽成第二个工具调用，污染后续多轮上下文并放大成莫名其妙的 `stop`。
 
-- 触发信号：`stopless` 明明已开启，但在线表现仍像完全没生效；`reasoning-stop-guard.spec` 同时从 “tool_flow” 退化成 “passthrough”。  
-- 可复用动作：先查 `reasoning-stop-guard` 这类 **post-hook** 是否误从 `ctx.base`（响应）读取 request-only 字段（如 `tools`）；在 servertool auto hook 里，`ctx.base` 默认是模型响应，不是原始请求。请求级判定应改读 `capturedChatRequest` / sticky session state，而不是 response payload。  
-- 触发信号：直连 `/v1/responses` 或 direct-model 场景里，request 已带 `<**stopless:on**>`，但 response 侧 followup 没触发，sticky state 里也没有 `reasoningStopMode`。  
-- 可复用动作：先查 response converter 是否在 `bridgeConvertProviderResponse` 前**回填 `capturedChatRequest + sessionId/conversationId` 并立刻调用 `syncReasoningStopModeFromRequest`**；其次检查 `reasoning-stop-guard` followup 是否显式补回 `reasoning.stop` 工具（`preserve_tools + ensure_standard_tools + append_tool_if_missing`），避免首跳是无工具请求时续轮失去 stopless 护栏。  
-- 触发信号：router、stop_message、sticky state 对同一轮 continuation 给出不同 sticky key，或只有 Responses 能续轮而 openai-chat / anthropic / gemini 走回 session/request fallback。  
-- 可复用动作：先查 `sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/keys.ts` 是否仍被旁路；`request_chain/session/conversation/request` 必须都从统一 continuation helper 解析，`stop-message-auto/runtime-utils.ts` 之类 sidecar 只能复用该 helper，`responsesResume.previousRequestId` 只允许保留为 migration fallback。  
-- 触发信号：`stopless:endless` 文案说“绝不停止”，但真实需求是“完成可停、不可抗阻塞也可停”，线上表现出现文档/提示词/validator/finalize 四处语义打架。  
-- 可复用动作：把 **停止条件** 固化成单一真源：`completed + completion_evidence`，或 `attempts_exhausted=true + cannot_complete_reason + blocking_evidence + next_step 为空`（若需用户参与再加 `user_input_required + user_question`）；同步检查 tool schema、validator、summary parser、finalize gate 与设计文档是否完全一致。  
+- 触发信号：`stopless` 明明已开启，但在线表现仍像完全没生效；`reasoning-stop-guard.spec` 同时从 “tool_flow” 退化成 “passthrough”。
+- 可复用动作：先查 `reasoning-stop-guard` 这类 **post-hook** 是否误从 `ctx.base`（响应）读取 request-only 字段（如 `tools`）；在 servertool auto hook 里，`ctx.base` 默认是模型响应，不是原始请求。请求级判定应改读 `capturedChatRequest` / sticky session state，而不是 response payload。
+- 触发信号：直连 `/v1/responses` 或 direct-model 场景里，request 已带 `<**stopless:on**>`，但 response 侧 followup 没触发，sticky state 里也没有 `reasoningStopMode`。
+- 可复用动作：先查 response converter 是否在 `bridgeConvertProviderResponse` 前**回填 `capturedChatRequest + sessionId/conversationId` 并立刻调用 `syncReasoningStopModeFromRequest`**；其次检查 `reasoning-stop-guard` followup 是否显式补回 `reasoning.stop` 工具（`preserve_tools + ensure_standard_tools + append_tool_if_missing`），避免首跳是无工具请求时续轮失去 stopless 护栏。
+- 触发信号：router、stop_message、sticky state 对同一轮 continuation 给出不同 sticky key，或只有 Responses 能续轮而 openai-chat / anthropic / gemini 走回 session/request fallback。
+- 可复用动作：先查 `sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/keys.ts` 是否仍被旁路；`request_chain/session/conversation/request` 必须都从统一 continuation helper 解析，`stop-message-auto/runtime-utils.ts` 之类 sidecar 只能复用该 helper，`responsesResume.previousRequestId` 只允许保留为 migration fallback。
+- 触发信号：`stopless:endless` 文案说“绝不停止”，但真实需求是“完成可停、不可抗阻塞也可停”，线上表现出现文档/提示词/validator/finalize 四处语义打架。
+- 可复用动作：把 **停止条件** 固化成单一真源：`completed + completion_evidence`，或 `attempts_exhausted=true + cannot_complete_reason + blocking_evidence + next_step 为空`（若需用户参与再加 `user_input_required + user_question`）；同步检查 tool schema、validator、summary parser、finalize gate 与设计文档是否完全一致。
 
 ### Qwen OAuth 多账号实操精华（2026-04-10）
-- 触发信号：`qwen-auto`/device-code 已打开浏览器，但页面 selector 漂移、Google/Qwen 跳转链变长，导致自动点击卡在 `element_not_found:qwen_authorization` 或长时间 timeout。  
-- 可复用动作：**保留原 device-code 框架，不改提示词**；对每个 alias 只使用其隔离 profile（`rc-auth.<alias>` / `rc-qwen.<alias>`），先在 `rc-auth.<alias>` 完成 `chat.qwen.ai/auth?user_code=...` → Google account chooser → Qwen 已登录首页，再重新访问 `authorize?user_code=...` 并点击 `.qwen-confirm-btn`；成功后立即 `camo stop` 关闭该 alias 浏览器，避免串号/泄露。  
-- 触发信号：portal `Continue` 后并不直接跳 Google/`/authorize`，而是**先停在 `https://chat.qwen.ai/auth?...` 登录页**，随后 device-code 长时间 timeout。  
-- 可复用动作：qwen auto 必须把 **portal → qwen `/auth` 登录页 → Google OAuth** 当成合法链路；不要只等 Google/confirm。若 `/auth` 是晚到页面，也要继续点击 `.qwenchat-auth-pc-other-login-button` 把流程推进到 Google，否则会出现“浏览器已打开但自动化提前停住”的假成功。  
-- 反模式：在不同 alias 间复用浏览器；账号已成功还留着 session；在 Google consent 页用宽泛 selector（如 `button:last-of-type`），容易点到无关按钮而不是“Continue/继续”。  
-- 触发信号：qwen 明明已有多个 token 文件，但线上 provider 仍只像在用一个账号，且主配置里只有 `tokenFile: "default"`。  
-- 可复用动作：qwen 多 token 的**主真源**是 `~/.rcc/provider/qwen/config.v2.json` 的 `provider.auth.entries[]`；不要再拆多份 `config.v2.<alias>.json` 企图替代主配置。修完后先用 bootstrap 真源确认展开出 `qwen.<alias>.<model>` 多 runtime，再 `SIGUSR2` 热重载并用在线请求/日志验证。  
+- 触发信号：`qwen-auto`/device-code 已打开浏览器，但页面 selector 漂移、Google/Qwen 跳转链变长，导致自动点击卡在 `element_not_found:qwen_authorization` 或长时间 timeout。
+- 可复用动作：**保留原 device-code 框架，不改提示词**；对每个 alias 只使用其隔离 profile（`rc-auth.<alias>` / `rc-qwen.<alias>`），先在 `rc-auth.<alias>` 完成 `chat.qwen.ai/auth?user_code=...` → Google account chooser → Qwen 已登录首页，再重新访问 `authorize?user_code=...` 并点击 `.qwen-confirm-btn`；成功后立即 `camo stop` 关闭该 alias 浏览器，避免串号/泄露。
+- 触发信号：portal `Continue` 后并不直接跳 Google/`/authorize`，而是**先停在 `https://chat.qwen.ai/auth?...` 登录页**，随后 device-code 长时间 timeout。
+- 可复用动作：qwen auto 必须把 **portal → qwen `/auth` 登录页 → Google OAuth** 当成合法链路；不要只等 Google/confirm。若 `/auth` 是晚到页面，也要继续点击 `.qwenchat-auth-pc-other-login-button` 把流程推进到 Google，否则会出现“浏览器已打开但自动化提前停住”的假成功。
+- 反模式：在不同 alias 间复用浏览器；账号已成功还留着 session；在 Google consent 页用宽泛 selector（如 `button:last-of-type`），容易点到无关按钮而不是“Continue/继续”。
+- 触发信号：qwen 明明已有多个 token 文件，但线上 provider 仍只像在用一个账号，且主配置里只有 `tokenFile: "default"`。
+- 可复用动作：qwen 多 token 的**主真源**是 `~/.rcc/provider/qwen/config.v2.json` 的 `provider.auth.entries[]`；不要再拆多份 `config.v2.<alias>.json` 企图替代主配置。修完后先用 bootstrap 真源确认展开出 `qwen.<alias>.<model>` 多 runtime，再 `SIGUSR2` 热重载并用在线请求/日志验证。
 
 ### OpenAI-compatible chat reasoning outbound 精华（2026-04-11）
-- 触发信号：`/v1/chat/completions` 客户端在 `reasoning_details` 上报 `sequence item 0: expected str instance, dict found`，或 Python `''.join(message['reasoning_details'])` 直接崩溃。  
-- 可复用动作：**不要删除 `reasoning_details` 逃避兼容问题**；保留结构化真源在 `message.reasoning`，保留主文本在 `message.reasoning_content`，同时把兼容投影 `message.reasoning_details` 规范为 `Array<string>`（例如 `[type] text`），做到信息不丢、客户端可 join。  
-- 验证：Rust outbound 单测 + `tests/monitoring/resp-outbound-stage.test.ts` 断言 `reasoning_details.join('')` 可用 + 5555 live chat 验证 `reasoning/reasoning_content/reasoning_details` 三者同时存在。  
+- 触发信号：`/v1/chat/completions` 客户端在 `reasoning_details` 上报 `sequence item 0: expected str instance, dict found`，或 Python `''.join(message['reasoning_details'])` 直接崩溃。
+- 可复用动作：**不要删除 `reasoning_details` 逃避兼容问题**；保留结构化真源在 `message.reasoning`，保留主文本在 `message.reasoning_content`，同时把兼容投影 `message.reasoning_details` 规范为 `Array<string>`（例如 `[type] text`），做到信息不丢、客户端可 join。
+- 验证：Rust outbound 单测 + `tests/monitoring/resp-outbound-stage.test.ts` 断言 `reasoning_details.join('')` 可用 + 5555 live chat 验证 `reasoning/reasoning_content/reasoning_details` 三者同时存在。
 
 ## 服务器重启与热加载（合并自 rcc-server-restart）
 
 ### Jason 重启固定动作（2026-04-14）
-- 触发信号：Jason 直接要求“编译 / 全局安装 / 重启 5555 和 5520”，或用户明确要让**运行中的端口吃到本地新代码**。  
-- 固定顺序：**先 build，再 install，再 restart，再验活**；不要现场猜是 `SIGUSR2`、`start` 还是别的路径。  
+- 触发信号：Jason 直接要求“编译 / 全局安装 / 重启 5555 和 5520”，或用户明确要让**运行中的端口吃到本地新代码**。
+- 固定顺序：**先 build，再 install，再 restart，再验活**；不要现场猜是 `SIGUSR2`、`start` 还是别的路径。
 - 当前项目已验证可复用命令：
   1. `npm run build:min`
   2. `npm run install:global`
@@ -357,7 +388,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
   5. `curl -s http://127.0.0.1:5555/health && curl -s http://127.0.0.1:5520/health`
   6. `lsof -nP -iTCP:5555 -sTCP:LISTEN && lsof -nP -iTCP:5520 -sTCP:LISTEN`
   7. `tail -n 30 ~/.rcc/logs/process-lifecycle.jsonl && tail -n 30 ~/.rcc/logs/server-5555.log && tail -n 30 ~/.rcc/logs/server-5520.log`
-- 成功信号：`/health.version` 等于新版本、PID 发生变化、日志出现 `Server started on 0.0.0.0:<PORT>`。  
+- 成功信号：`/health.version` 等于新版本、PID 发生变化、日志出现 `Server started on 0.0.0.0:<PORT>`。
 - 反模式：没 build/install 就猜“为什么线上还是旧代码”；或者 5520 又切回 `start` / 手动 kill / broad kill。
 
 ### 标准流程（推荐）
@@ -474,11 +505,11 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - `provider-response.retry`
 
 ### 启动方式
-- 轻量默认（推荐）  
+- 轻量默认（推荐）
   - `node dist/cli.js start --port 5555 --snap`
-- 显式增加某些 stage（支持前缀通配 `*`）  
+- 显式增加某些 stage（支持前缀通配 `*`）
   - `node dist/cli.js start --port 5555 --snap --snap-stages "client-request,provider-request,provider-response,provider-error,chat_process.req.*"`
-- 全量分析（高开销）  
+- 全量分析（高开销）
   - `node dist/cli.js start --port 5555 --mode analysis`
 
 ### 环境变量

@@ -31,6 +31,7 @@ type UsageRollupRecord = {
   clientInjectWaitMs?: number;
   sseDecodeMs?: number;
   codecDecodeMs?: number;
+  providerDecodeTag?: string;
   providerAttemptCount?: number;
   retryCount?: number;
   finishReason?: string;
@@ -49,6 +50,7 @@ type SessionRequestEvent = {
   clientInjectWaitMs: number;
   sseDecodeMs: number;
   codecDecodeMs: number;
+  providerDecodeTag?: string;
   providerAttemptCount: number;
   retryCount: number;
   finishReason?: string;
@@ -396,7 +398,7 @@ function emitRealtimeSessionRequestLog(args: {
   console.log(colorize(`[session-request][rt] session=${sessionLabel} project=${project}`, sessionColor));
   console.log(
     `${colorize(
-      `  req=${requestLabel} ${routePool} -> ${provider} total=${formatMs(args.event.latencyMs)} internal=${formatMs(args.event.internalLatencyMs)} external=${formatMs(args.event.externalLatencyMs)} retries=${args.event.retryCount} attempts=${args.event.providerAttemptCount} wait.traffic=${formatMs(args.event.trafficWaitMs)} wait.inject=${formatMs(args.event.clientInjectWaitMs)} decode.sse=${formatMs(args.event.sseDecodeMs)} decode.codec=${formatMs(args.event.codecDecodeMs)}`,
+      `  req=${requestLabel} ${routePool} -> ${provider} total=${formatMs(args.event.latencyMs)} internal=${formatMs(args.event.internalLatencyMs)} external=${formatMs(args.event.externalLatencyMs)} retries=${args.event.retryCount} attempts=${args.event.providerAttemptCount} wait.traffic=${formatMs(args.event.trafficWaitMs)} wait.inject=${formatMs(args.event.clientInjectWaitMs)} decode.sse=${formatMs(args.event.sseDecodeMs)} decode.codec=${formatMs(args.event.codecDecodeMs)}${args.event.providerDecodeTag ? ` ${args.event.providerDecodeTag}` : ''}`,
       sessionColor
     )} ${ANSI_WHITE}finish_reason=${finishReason}${ANSI_RESET}`
   );
@@ -701,6 +703,9 @@ export function recordUsageRollup(event: UsageRollupRecord): void {
     clientInjectWaitMs,
     sseDecodeMs,
     codecDecodeMs,
+    providerDecodeTag: typeof event.providerDecodeTag === 'string' && event.providerDecodeTag.trim()
+      ? event.providerDecodeTag.trim()
+      : undefined,
     providerAttemptCount,
     retryCount,
     finishReason: normalizeFinishReason(event.finishReason),

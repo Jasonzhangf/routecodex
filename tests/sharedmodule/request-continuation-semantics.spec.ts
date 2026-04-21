@@ -3,6 +3,11 @@ import { describe, expect, it } from '@jest/globals';
 import { REQUEST_STAGE_HOOKS } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-stage-hooks.js';
 import { executeRequestStageInbound } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage-inbound.js';
 import { runReqInboundStage2SemanticMap } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage2_semantic_map/index.js';
+import {
+  clearResponsesConversationByRequestId,
+  recordResponsesResponse,
+  resumeResponsesConversation
+} from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js';
 
 describe('request continuation semantics', () => {
   it('lifts responses resume and previous_response_id into unified continuation semantics', async () => {
@@ -121,6 +126,117 @@ describe('request continuation semantics', () => {
       previousRequestId: 'req_chain_cleanup',
       restoredFromResponseId: 'resp_restored_cleanup'
     });
+  });
+
+  it('captures responses conversation store even when stage2 already provides responsesContext', async () => {
+    const requestId = 'req-stage2-responses-store';
+    const responseId = 'resp-stage2-responses-store';
+
+    try {
+      const normalized = {
+        id: requestId,
+        endpoint: '/v1/responses',
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        payload: {
+          model: 'gpt-4o-mini',
+          input: [
+            {
+              role: 'user',
+              content: [{ type: 'input_text', text: '继续执行工具结果续轮测试' }]
+            }
+          ],
+          tools: [
+            {
+              type: 'function',
+              name: 'exec_command',
+              description: 'run shell command',
+              parameters: {
+                type: 'object',
+                properties: {
+                  cmd: { type: 'string' }
+                },
+                required: ['cmd']
+              }
+            }
+          ]
+        },
+        metadata: {},
+        processMode: 'passthrough',
+        direction: 'request',
+        stage: 'inbound',
+        stream: false
+      } as any;
+
+      const result = await executeRequestStageInbound({
+        normalized,
+        hooks: REQUEST_STAGE_HOOKS['openai-responses'],
+        config: { virtualRouter: {} as any }
+      });
+
+      expect((result as any).contextSnapshot).toBeDefined();
+
+      recordResponsesResponse({
+        requestId,
+        response: {
+          id: responseId,
+          object: 'response',
+          status: 'requires_action',
+          output: [
+            {
+              id: 'fc_stage2_1',
+              type: 'function_call',
+              call_id: 'call_stage2_1',
+              name: 'exec_command',
+              arguments: JSON.stringify({ cmd: 'pwd' }),
+              status: 'in_progress'
+            }
+          ],
+          required_action: {
+            type: 'submit_tool_outputs',
+            submit_tool_outputs: {
+              tool_calls: [
+                {
+                  id: 'call_stage2_1',
+                  type: 'function',
+                  name: 'exec_command',
+                  arguments: JSON.stringify({ cmd: 'pwd' })
+                }
+              ]
+            }
+          }
+        }
+      });
+
+      const resumed = resumeResponsesConversation(
+        responseId,
+        {
+          response_id: responseId,
+          tool_outputs: [
+            {
+              tool_call_id: 'call_stage2_1',
+              output: '{"stdout":"/tmp"}'
+            }
+          ]
+        },
+        { requestId: `${requestId}-resume` }
+      );
+
+      expect((resumed.payload as any).previous_response_id).toBe(responseId);
+      expect((resumed.payload as any).input).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'function_call_output',
+            call_id: 'call_stage2_1',
+            output: '{"stdout":"/tmp"}'
+          })
+        ])
+      );
+      expect((resumed.meta as any).previousRequestId).toBe(requestId);
+      expect((resumed.meta as any).restoredFromResponseId).toBe(responseId);
+    } finally {
+      clearResponsesConversationByRequestId(requestId);
+    }
   });
 
   it('lifts session-scoped continuation for openai-chat into unified continuation semantics', async () => {

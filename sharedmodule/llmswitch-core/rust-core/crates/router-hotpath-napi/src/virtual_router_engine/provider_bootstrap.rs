@@ -1756,15 +1756,16 @@ fn resolve_provider_streaming_preference(
         provider
             .get("streaming")
             .or_else(|| provider.get("stream"))
-            .or_else(|| provider.get("supportsStreaming"))
             .or_else(|| provider.get("streamingPreference")),
     )
+    .or_else(|| coerce_streaming_capability(provider.get("supportsStreaming")))
     .or_else(|| {
-        coerce_streaming_preference(responses_node.and_then(|node| {
-            node.get("streaming")
-                .or_else(|| node.get("stream"))
-                .or_else(|| node.get("supportsStreaming"))
-        }))
+        coerce_streaming_preference(
+            responses_node.and_then(|node| node.get("streaming").or_else(|| node.get("stream"))),
+        )
+    })
+    .or_else(|| {
+        coerce_streaming_capability(responses_node.and_then(|node| node.get("supportsStreaming")))
     })
     .or_else(|| {
         coerce_streaming_preference(
@@ -1799,15 +1800,30 @@ fn coerce_streaming_preference(value: Option<&Value>) -> Option<String> {
     }
 }
 
+fn coerce_streaming_capability(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::Bool(enabled)) => Some(if *enabled {
+            "auto".to_string()
+        } else {
+            "never".to_string()
+        }),
+        Some(Value::Object(record)) => coerce_streaming_capability(
+            record
+                .get("enabled")
+                .or_else(|| record.get("value"))
+                .or_else(|| record.get("mode")),
+        ),
+        _ => coerce_streaming_preference(value),
+    }
+}
+
 fn normalize_model_streaming(provider: &Map<String, Value>) -> Option<BTreeMap<String, String>> {
     let mut normalized = BTreeMap::new();
     for_each_model(provider, |model_id, model| {
-        if let Some(preference) = coerce_streaming_preference(
-            model
-                .get("streaming")
-                .or_else(|| model.get("stream"))
-                .or_else(|| model.get("supportsStreaming")),
-        ) {
+        if let Some(preference) =
+            coerce_streaming_preference(model.get("streaming").or_else(|| model.get("stream")))
+                .or_else(|| coerce_streaming_capability(model.get("supportsStreaming")))
+        {
             normalized.insert(model_id, preference);
         }
     });

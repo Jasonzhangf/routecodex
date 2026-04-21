@@ -115,6 +115,44 @@ describe('normalizeProvider anthropic thinking config', () => {
     expect(normalized.modelCapabilities?.['glm-5']).toEqual(['text', 'web_search']);
   });
 
+  it('treats supportsStreaming as capability auto instead of forcing always', () => {
+    const normalized = normalizeProvider('qwenchat', {
+      id: 'qwenchat',
+      type: 'openai',
+      baseURL: 'https://chat.qwen.ai',
+      auth: { type: 'qwen-oauth', tokenFile: 'qwen-oauth-1-default' },
+      models: {
+        'qwen3.6-plus': {
+          supportsStreaming: true
+        },
+        'qwen3.5-flash': {
+          supportsStreaming: false
+        }
+      }
+    });
+
+    expect(normalized.streaming).toBeUndefined();
+    expect(normalized.modelStreaming?.['qwen3.6-plus']).toBe('auto');
+    expect(normalized.modelStreaming?.['qwen3.5-flash']).toBe('never');
+  });
+
+  it('treats provider-level supportsStreaming as capability auto instead of forcing always', () => {
+    const normalized = normalizeProvider('provider-auto-stream', {
+      id: 'provider-auto-stream',
+      type: 'openai',
+      baseURL: 'https://example.test/openai',
+      auth: { type: 'apikey', apiKey: 'test-key' },
+      supportsStreaming: true,
+      models: {
+        'default-model': {
+          maxTokens: 4096
+        }
+      }
+    });
+
+    expect(normalized.streaming).toBe('auto');
+  });
+
   it('injects qwen default headers with the current official qwen user-agent', () => {
     const normalized = normalizeProvider('qwen', {
       id: 'qwen',

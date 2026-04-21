@@ -218,17 +218,19 @@ fn escape_unescaped_parens(input: &str) -> String {
     out
 }
 
-fn repair_find_meta_impl(script: &str) -> String {
+pub(crate) fn repair_find_meta_impl(script: &str) -> String {
     let s = script.to_string();
     if s.is_empty() {
         return s;
     }
-    let has_find = Regex::new(r"(^|\s)find\s").unwrap().is_match(s.as_str());
+    let has_find = Regex::new(r#"(^|[\s'"`;|&(])find\s"#)
+        .unwrap()
+        .is_match(s.as_str());
     if !has_find {
         return s;
     }
-    let exec_re = Regex::new(r"-exec([^;]*?)(?:\\*);").unwrap();
-    let mut out = exec_re.replace_all(s.as_str(), "-exec$1 \\\\;").to_string();
+    let exec_re = Regex::new(r"-exec([^;]*?)(?:\s*)(?:\\*);").unwrap();
+    let mut out = exec_re.replace_all(s.as_str(), "-exec$1 \\;").to_string();
     out = escape_unescaped_parens(out.as_str());
     out
 }

@@ -229,3 +229,70 @@ fn harvest_tools_json_final_extracts_jsonish_tool_calls_from_text() {
         Some("finger-system-agent")
     );
 }
+
+#[test]
+fn harvest_tools_json_final_extracts_rcc_fence_tool_calls_with_nested_input_name() {
+    let input = json!({
+        "signal": {
+            "type": "final",
+            "payload": {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "前言\n• <<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"cmd\":\"pwd\",\"name\":\"exec_command\"}}]}RCC_TOOL_CALLS_JSON\n尾言"
+                        },
+                        "finish_reason": "stop"
+                    }
+                ]
+            }
+        },
+        "context": {
+            "requestId": "req_harvest_rcc_nested_name",
+            "idPrefix": "call"
+        }
+    })
+    .to_string();
+
+    let raw = harvest_tools_json(input).unwrap();
+    let parsed: Value = serde_json::from_str(&raw).unwrap();
+    let normalized = parsed.get("normalized").cloned().unwrap_or(Value::Null);
+    let choice = normalized
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.get(0))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        choice.get("finish_reason").and_then(Value::as_str),
+        Some("tool_calls")
+    );
+    let message = choice
+        .get("message")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let tool_calls = message
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(tool_calls.len(), 1);
+    let function = tool_calls[0]
+        .get("function")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        function.get("name").and_then(Value::as_str),
+        Some("exec_command")
+    );
+    let args = function
+        .get("arguments")
+        .and_then(Value::as_str)
+        .unwrap_or("{}");
+    let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+    assert_eq!(args_json.get("cmd").and_then(Value::as_str), Some("pwd"));
+    assert_eq!(message.get("content").and_then(Value::as_str), Some(""));
+}

@@ -16,6 +16,10 @@ import { extractUsageFromResult } from './usage-aggregator.js';
 import { deriveFinishReason } from '../../../utils/finish-reason.js';
 import { logPipelineStage } from '../../../utils/stage-logger.js';
 import {
+  QWENCHAT_NONSTREAM_DELIVERY_KEY,
+  QWENCHAT_SSE_PROBE_WRAPPER_KEY
+} from '../../../../providers/core/runtime/qwenchat-http-provider-helpers.js';
+import {
   buildServerToolSseWrapperBody
 } from './servertool-response-normalizer.js';
 import {
@@ -1098,7 +1102,10 @@ function remapMalformedQwenChatError(args: {
   }
 
   const terminalStreamError = extractQwenChatTerminalStreamError(args.body);
-  if (terminalStreamError?.code === 'QWENCHAT_HIDDEN_NATIVE_TOOL') {
+  if (
+    terminalStreamError?.code === 'QWENCHAT_HIDDEN_NATIVE_TOOL'
+    || terminalStreamError?.code === 'QWENCHAT_NATIVE_TOOL_CALL'
+  ) {
     const err = new Error(terminalStreamError.message) as Error & {
       code?: string;
       status?: number;
@@ -1108,11 +1115,11 @@ function remapMalformedQwenChatError(args: {
       toolName?: string;
       phase?: string;
     };
-    err.code = 'QWENCHAT_HIDDEN_NATIVE_TOOL';
+    err.code = terminalStreamError.code;
     err.status = terminalStreamError.statusCode ?? 502;
     err.statusCode = terminalStreamError.statusCode ?? 502;
     err.retryable = terminalStreamError.retryable ?? false;
-    err.upstreamCode = 'QWENCHAT_HIDDEN_NATIVE_TOOL';
+    err.upstreamCode = terminalStreamError.code;
     err.toolName = terminalStreamError.toolName;
     err.phase = terminalStreamError.phase;
     return err;
@@ -1136,8 +1143,11 @@ function remapMalformedQwenChatError(args: {
       || isKnownQwenHiddenNativeTool
     )
   ) {
+    const isDeclaredRawNativeTool = declaredToolNames.size > 0 && declaredToolNames.has(functionName.toLowerCase());
     const err = new Error(
-      `QwenChat upstream emitted undeclared native tool "${functionName}"${phase ? ` (phase=${phase})` : ''}`
+      isDeclaredRawNativeTool
+        ? `QwenChat upstream emitted raw native tool call "${functionName}"${phase ? ` (phase=${phase})` : ''}`
+        : `QwenChat upstream emitted undeclared native tool "${functionName}"${phase ? ` (phase=${phase})` : ''}`
     ) as Error & {
       code?: string;
       status?: number;
@@ -1147,11 +1157,11 @@ function remapMalformedQwenChatError(args: {
       toolName?: string;
       phase?: string;
     };
-    err.code = 'QWENCHAT_HIDDEN_NATIVE_TOOL';
+    err.code = isDeclaredRawNativeTool ? 'QWENCHAT_NATIVE_TOOL_CALL' : 'QWENCHAT_HIDDEN_NATIVE_TOOL';
     err.status = 502;
     err.statusCode = 502;
     err.retryable = false;
-    err.upstreamCode = 'QWENCHAT_HIDDEN_NATIVE_TOOL';
+    err.upstreamCode = err.code;
     err.toolName = functionName;
     err.phase = phase || undefined;
     return err;
@@ -1404,6 +1414,48 @@ function syncHubStageTopBackToPipelineMetadata(options: {
   };
 }
 
+function syncQwenChatSseProbeBackToPipelineMetadata(options: {
+  pipelineMetadata?: Record<string, unknown>;
+  providerResponseBody?: unknown;
+}): void {
+  const pipelineMetadata = asRecord(options.pipelineMetadata);
+  const providerResponseBody = asRecord(options.providerResponseBody);
+  if (!pipelineMetadata || !providerResponseBody) {
+    return;
+  }
+  const probe = asRecord(providerResponseBody[QWENCHAT_SSE_PROBE_WRAPPER_KEY]);
+  if (!probe) {
+    return;
+  }
+  const metadataRt = asRecord((pipelineMetadata as Record<string, unknown>).__rt) ?? {};
+  (pipelineMetadata as Record<string, unknown>).__rt = {
+    ...metadataRt,
+    qwenchatSseProbe: probe
+  };
+}
+
+function syncQwenChatNonstreamDeliveryBackToPipelineMetadata(options: {
+  pipelineMetadata?: Record<string, unknown>;
+  providerResponseBody?: unknown;
+}): void {
+  const pipelineMetadata = asRecord(options.pipelineMetadata);
+  const providerResponseBody = asRecord(options.providerResponseBody);
+  if (!pipelineMetadata || !providerResponseBody) {
+    return;
+  }
+  const deliveryRaw = providerResponseBody[QWENCHAT_NONSTREAM_DELIVERY_KEY];
+  const delivery = typeof deliveryRaw === 'string' ? deliveryRaw.trim().toLowerCase() : '';
+  delete providerResponseBody[QWENCHAT_NONSTREAM_DELIVERY_KEY];
+  if (delivery !== 'json' && delivery !== 'sse_fallback') {
+    return;
+  }
+  const metadataRt = asRecord((pipelineMetadata as Record<string, unknown>).__rt) ?? {};
+  (pipelineMetadata as Record<string, unknown>).__rt = {
+    ...metadataRt,
+    qwenchatNonstreamDelivery: delivery
+  };
+}
+
 export type ConvertProviderResponseOptions = {
   entryEndpoint?: string;
   providerProtocol: string;
@@ -1522,6 +1574,14 @@ export async function convertProviderResponseIfNeeded(
   let adapterContext: Record<string, unknown> | undefined;
   try {
     const metadataBag = asRecord(options.pipelineMetadata);
+    syncQwenChatNonstreamDeliveryBackToPipelineMetadata({
+      pipelineMetadata: metadataBag,
+      providerResponseBody: body as Record<string, unknown>
+    });
+    syncQwenChatSseProbeBackToPipelineMetadata({
+      pipelineMetadata: metadataBag,
+      providerResponseBody: body as Record<string, unknown>
+    });
     const baseContext = buildServerToolAdapterContext({
       metadata: metadataBag,
       originalRequest: options.originalRequest,

@@ -337,6 +337,37 @@ class ResponsesConversationStore {
 
 const store = new ResponsesConversationStore();
 const RESPONSES_DEBUG = (process.env.ROUTECODEX_RESPONSES_DEBUG || '').trim() === '1';
+const RESPONSES_WARN_THROTTLE_MS = 60_000;
+const responsesWarnAt = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error ?? 'unknown');
+}
+
+function logResponsesStoreNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  const now = Date.now();
+  const lastAt = responsesWarnAt.get(stage) ?? 0;
+  if (now - lastAt < RESPONSES_WARN_THROTTLE_MS) {
+    return;
+  }
+  responsesWarnAt.set(stage, now);
+  try {
+    const detailSuffix =
+      details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[responses-store] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`
+    );
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
 
 export function captureResponsesRequestContext(args: CaptureContextArgs): void {
   try {
@@ -344,8 +375,12 @@ export function captureResponsesRequestContext(args: CaptureContextArgs): void {
       console.log('[responses-store] capture', args.requestId);
     }
     store.captureRequestContext(args);
-  } catch {
-    /* ignore capture failures */
+  } catch (error) {
+    logResponsesStoreNonBlockingError('capture', error, {
+      requestId: args.requestId,
+      sessionId: args.sessionId,
+      conversationId: args.conversationId
+    });
   }
 }
 
@@ -355,8 +390,11 @@ export function recordResponsesResponse(args: RecordResponseArgs): void {
       console.log('[responses-store] record', args.requestId, (args.response as AnyRecord)?.id);
     }
     store.recordResponse(args);
-  } catch {
-    /* ignore */
+  } catch (error) {
+    logResponsesStoreNonBlockingError('record', error, {
+      requestId: args.requestId,
+      responseId: (args.response as AnyRecord)?.id
+    });
   }
 }
 

@@ -4,6 +4,9 @@ use serde_json::{json, Map, Value};
 use super::super::super::read_trimmed_string;
 use super::tool_guidance::wrap_tool_calls_json;
 
+const EMPTY_TOOL_RESULT_FALLBACK: &str =
+    "[RouteCodex] Tool output was empty; execution status unknown.";
+
 fn stringify_unknown(value: &Value) -> String {
     if let Some(raw) = value.as_str() {
         return raw.to_string();
@@ -12,6 +15,32 @@ fn stringify_unknown(value: &Value) -> String {
         return String::new();
     }
     serde_json::to_string(value).unwrap_or_else(|_| value.to_string())
+}
+
+fn is_internal_unified_exec_capacity_warning(value: &str) -> bool {
+    Regex::new(
+        r"(?is)^\s*warning:\s*the maximum number of unified exec processes you can keep open is \d+\s+and you currently have \d+\s+processes open\..*automatic pruning of old processes\s*$",
+    )
+    .map(|re| re.is_match(value.trim()))
+    .unwrap_or(false)
+}
+
+fn sanitize_user_visible_text(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || is_internal_unified_exec_capacity_warning(trimmed) {
+        return String::new();
+    }
+    trimmed.to_string()
+}
+
+fn normalize_tool_result_text(value: &Value) -> String {
+    let raw = stringify_unknown(value);
+    let sanitized = sanitize_user_visible_text(raw.as_str());
+    if sanitized.is_empty() {
+        EMPTY_TOOL_RESULT_FALLBACK.to_string()
+    } else {
+        sanitized
+    }
 }
 
 fn read_trimmed_string_from_map(map: &Map<String, Value>, key: &str) -> Option<String> {
@@ -46,6 +75,24 @@ fn canonicalize_tool_input_for_prompt(name: &str, input: Value) -> Value {
     }
 }
 
+fn normalize_tool_use_item_as_text(obj: &Map<String, Value>) -> Option<String> {
+    let tool_name = read_trimmed_string(obj.get("name")).unwrap_or_else(|| "tool_call".to_string());
+    let tool_input = canonicalize_tool_input_for_prompt(
+        tool_name.as_str(),
+        obj.get("input")
+            .cloned()
+            .unwrap_or(Value::Object(Map::new())),
+    );
+    let serialized = serde_json::to_string(&json!({
+        "tool_calls": [{
+            "name": tool_name,
+            "input": tool_input
+        }]
+    }))
+    .ok()?;
+    Some(wrap_tool_calls_json(serialized.as_str()))
+}
+
 pub(super) fn strip_text_tool_wrapper_noise(raw: &str) -> String {
     let mut text = raw.to_string();
     let patterns = [
@@ -72,7 +119,7 @@ pub(super) fn strip_text_tool_wrapper_noise(raw: &str) -> String {
 
 pub(super) fn normalize_content_to_text(content: &Value) -> String {
     if let Some(raw) = content.as_str() {
-        return strip_text_tool_wrapper_noise(raw);
+        return strip_text_tool_wrapper_noise(sanitize_user_visible_text(raw).as_str());
     }
     if content.is_null() {
         return String::new();
@@ -90,18 +137,50 @@ pub(super) fn normalize_content_to_text(content: &Value) -> String {
             .unwrap_or_default();
         if (normalized_type == "text"
             || normalized_type == "input_text"
-            || normalized_type == "output_text")
+            || normalized_type == "output_text"
+            || normalized_type == "text_delta")
             && read_trimmed_string(obj.get("text")).is_some()
         {
-            out.push(read_trimmed_string(obj.get("text")).unwrap_or_default());
+            let text = sanitize_user_visible_text(
+                read_trimmed_string(obj.get("text"))
+                    .unwrap_or_default()
+                    .as_str(),
+            );
+            if !text.is_empty() {
+                out.push(text);
+            }
+            continue;
+        }
+        if read_trimmed_string(obj.get("text")).is_some() {
+            let text = sanitize_user_visible_text(
+                read_trimmed_string(obj.get("text"))
+                    .unwrap_or_default()
+                    .as_str(),
+            );
+            if !text.is_empty() {
+                out.push(text);
+            }
             continue;
         }
         if read_trimmed_string(obj.get("content")).is_some() {
-            out.push(read_trimmed_string(obj.get("content")).unwrap_or_default());
+            let text = sanitize_user_visible_text(
+                read_trimmed_string(obj.get("content"))
+                    .unwrap_or_default()
+                    .as_str(),
+            );
+            if !text.is_empty() {
+                out.push(text);
+            }
             continue;
         }
+        if normalized_type == "tool_use" {
+            if let Some(tool_use_text) = normalize_tool_use_item_as_text(obj) {
+                out.push(tool_use_text);
+                continue;
+            }
+        }
         if normalized_type == "tool_result" && obj.get("content").is_some() {
-            out.push(stringify_unknown(
+            out.push(normalize_tool_result_text(
                 obj.get("content").unwrap_or(&Value::Null),
             ));
         }
@@ -153,4 +232,31 @@ pub(super) fn normalize_tool_calls_as_text(tool_calls_raw: Option<&Value>) -> St
     let serialized =
         serde_json::to_string(&json!({ "tool_calls": tool_calls })).unwrap_or_default();
     wrap_tool_calls_json(serialized.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_content_to_text;
+    use serde_json::json;
+
+    #[test]
+    fn deepseek_prompt_content_drops_unified_exec_capacity_warning() {
+        let content = json!("Warning: The maximum number of unified exec processes you can keep open is 60 and you currently have 64 processes open. Reuse older processes or close them to prevent automatic pruning of old processes");
+        assert_eq!(normalize_content_to_text(&content), "");
+    }
+
+    #[test]
+    fn deepseek_prompt_content_falls_back_for_empty_tool_result() {
+        let content = json!([
+            {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": ""
+            }
+        ]);
+        assert_eq!(
+            normalize_content_to_text(&content),
+            "[RouteCodex] Tool output was empty; execution status unknown."
+        );
+    }
 }

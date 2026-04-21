@@ -329,6 +329,40 @@ export function shouldForceUpstreamSseForSearch(request: UnknownObject): boolean
   );
 }
 
+export function shouldForceUpstreamSseForTools(request: UnknownObject): boolean {
+  const direct = isRecord(request) ? request : {};
+  const dataNode = isRecord(direct.data) ? direct.data : undefined;
+  const toolsRaw =
+    (Array.isArray(direct.tools) ? direct.tools : undefined) ||
+    (dataNode && Array.isArray(dataNode.tools) ? dataNode.tools : undefined);
+  if (Array.isArray(toolsRaw) && toolsRaw.length > 0) {
+    return true;
+  }
+
+  const metadataNode = isRecord(direct.metadata)
+    ? direct.metadata
+    : dataNode && isRecord(dataNode.metadata)
+      ? dataNode.metadata
+      : undefined;
+  const deepseekNode = metadataNode && isRecord(metadataNode.deepseek) ? metadataNode.deepseek : undefined;
+  const textToolFallback =
+    deepseekNode?.textToolFallback === true ||
+    normalizeString(deepseekNode?.toolProtocol)?.toLowerCase() === 'text';
+  if (!textToolFallback) {
+    return false;
+  }
+
+  const prompt = normalizeString(direct.prompt) || normalizeString(dataNode?.prompt);
+  if (!prompt) {
+    return false;
+  }
+
+  if (/<<\s*RCC_TOOL_CALLS(?:_JSON)?/i.test(prompt)) {
+    return true;
+  }
+  return /"tool_calls"\s*:/i.test(prompt);
+}
+
 export function extractPromptFromPayload(body: Record<string, unknown>, request: UnknownObject): string | undefined {
   const direct = normalizeString(body.prompt);
   if (direct) {

@@ -276,8 +276,49 @@ describe('deepseek-web text tool-call harvest', () => {
     expect(call?.function?.name).toBe('exec_command');
     const args = JSON.parse(String(call?.function?.arguments || '{}'));
     expect(args.cmd).toBe('bd --no-db ready');
-    expect(args.command).toBe('bd --no-db ready');
+    expect(args.command).toBeUndefined();
     expect(args.workdir).toBe('/tmp');
+  });
+
+  it('accepts declared native exec_command tool_calls without forcing text fallback', () => {
+    const adapterContextExec: any = {
+      capturedChatRequest: {
+        tools: [{ type: 'function', function: { name: 'exec_command' } }],
+        tool_choice: 'required'
+      }
+    };
+    const payload: any = {
+      id: 'chatcmpl_deepseek_native_exec_1',
+      object: 'chat.completion',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_native_exec_1',
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  arguments: '{"cmd":"bash -lc \\"pwd && ls\\"","workdir":"/repo"}'
+                }
+              }
+            ]
+          },
+          finish_reason: 'tool_calls'
+        }
+      ]
+    };
+
+    const out: any = applyDeepSeekWebResponseTransform(payload, adapterContextExec);
+    const call = out.choices?.[0]?.message?.tool_calls?.[0];
+    expect(call?.function?.name).toBe('exec_command');
+    const args = JSON.parse(String(call?.function?.arguments || '{}'));
+    expect(args.cmd).toBe('bash -lc "pwd && ls"');
+    expect(args.workdir).toBe('/repo');
+    expect(out.choices?.[0]?.finish_reason).toBe('tool_calls');
   });
 
   it('harvests plain Begin/End Patch text into apply_patch tool_call', () => {

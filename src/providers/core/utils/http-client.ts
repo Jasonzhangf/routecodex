@@ -21,6 +21,7 @@ export interface HttpRequestConfig {
   timeout?: number;
   maxRetries?: number;
   retryDelay?: number;
+  signal?: AbortSignal;
 }
 
 /**
@@ -173,9 +174,10 @@ export class HttpClient {
   async post(
     url: string,
     data?: unknown,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
+    signal?: AbortSignal
   ): Promise<HttpResponse> {
-    return this.request('POST', url, data, headers);
+    return this.request('POST', url, data, headers, signal);
   }
 
   /**
@@ -189,7 +191,8 @@ export class HttpClient {
       timeoutMs?: number;
       idleTimeoutMs?: number;
       headersTimeoutMs?: number;
-    }
+    },
+    signal?: AbortSignal
   ): Promise<NodeJS.ReadableStream> {
     const fullUrl = this.buildUrl(url);
     const finalHeaders = this.buildHeaders({ Accept: 'text/event-stream', ...(headers || {}) });
@@ -227,6 +230,7 @@ export class HttpClient {
     };
     const timeoutId = setTimeout(() => abortWithReason('UPSTREAM_STREAM_TIMEOUT'), timeout);
     const headersTimeoutId = setTimeout(() => abortWithReason('UPSTREAM_HEADERS_TIMEOUT'), headersTimeoutMs);
+    const detachExternalAbort = this.attachExternalAbortSignal(controller, signal);
 
     try {
       const fetchOptions: RequestInit = {
@@ -265,7 +269,14 @@ export class HttpClient {
       const body = response.body as StreamBody;
       if (body) {
         if (isNodeReadable(body)) {
-          return this.wrapStreamWithTimeouts(body, controller, timeoutId, idleTimeoutMs, abortWithReason);
+          return this.wrapStreamWithTimeouts(
+            body,
+            controller,
+            timeoutId,
+            idleTimeoutMs,
+            abortWithReason,
+            detachExternalAbort
+          );
         }
         if (isWebReadableStream(body)) {
           try {
@@ -273,7 +284,14 @@ export class HttpClient {
             if (typeof Readable.fromWeb === 'function') {
               const nodeStream = Readable.fromWeb(body);
               if (isNodeReadable(nodeStream)) {
-                return this.wrapStreamWithTimeouts(nodeStream, controller, timeoutId, idleTimeoutMs, abortWithReason);
+                return this.wrapStreamWithTimeouts(
+                  nodeStream,
+                  controller,
+                  timeoutId,
+                  idleTimeoutMs,
+                  abortWithReason,
+                  detachExternalAbort
+                );
               }
             }
           } catch (conversionError) {
@@ -285,11 +303,13 @@ export class HttpClient {
       }
 
       clearTimeout(timeoutId);
+      detachExternalAbort();
       // As a last resort, throw to let caller decide (should not fallback silently)
       throw new Error('Upstream response body is not streamable');
     } catch (error) {
       clearTimeout(timeoutId);
       clearTimeout(headersTimeoutId);
+      detachExternalAbort();
       throw this.createProviderError(error);
     }
   }
@@ -299,7 +319,8 @@ export class HttpClient {
     controller: AbortController,
     timeoutId: NodeJS.Timeout,
     idleTimeoutMs: number,
-    abortWithReason: (reason: string) => void
+    abortWithReason: (reason: string) => void,
+    detachExternalAbort: () => void
   ): NodeJS.ReadableStream {
     const pass = new PassThrough();
     let idleTimer: NodeJS.Timeout | null = null;
@@ -334,6 +355,7 @@ export class HttpClient {
       }
       cleaned = true;
       clearTimers();
+      detachExternalAbort();
       try {
         controller.signal.removeEventListener?.('abort', onAbort as unknown as EventListener);
         upstream.removeListener('data', onData);
@@ -425,16 +447,17 @@ export class HttpClient {
   async put(
     url: string,
     data?: unknown,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
+    signal?: AbortSignal
   ): Promise<HttpResponse> {
-    return this.request('PUT', url, data, headers);
+    return this.request('PUT', url, data, headers, signal);
   }
 
   /**
    * 发送DELETE请求
    */
-  async delete(url: string, headers?: Record<string, string>): Promise<HttpResponse> {
-    return this.request('DELETE', url, undefined, headers);
+  async delete(url: string, headers?: Record<string, string>, signal?: AbortSignal): Promise<HttpResponse> {
+    return this.request('DELETE', url, undefined, headers, signal);
   }
 
   /**
@@ -443,9 +466,10 @@ export class HttpClient {
   async patch(
     url: string,
     data?: unknown,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
+    signal?: AbortSignal
   ): Promise<HttpResponse> {
-    return this.request('PATCH', url, data, headers);
+    return this.request('PATCH', url, data, headers, signal);
   }
 
   /**
@@ -455,7 +479,8 @@ export class HttpClient {
     method: HttpRequestConfig['method'],
     url: string,
     data?: unknown,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
+    signal?: AbortSignal
   ): Promise<HttpResponse> {
     const fullUrl = this.buildUrl(url);
     const requestConfig: HttpRequestConfig = {
@@ -463,7 +488,8 @@ export class HttpClient {
       headers: this.buildHeaders(headers),
       timeout: this.defaultConfig.timeout,
       maxRetries: 0,
-      retryDelay: 0
+      retryDelay: 0,
+      signal
     };
 
     try {
@@ -483,6 +509,7 @@ export class HttpClient {
   ): Promise<HttpResponse> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), config.timeout);
+    const detachExternalAbort = this.attachExternalAbortSignal(controller, config.signal);
 
     try {
       const fetchOptions: RequestInit = {
@@ -562,6 +589,7 @@ export class HttpClient {
         const textData = await response.text();
         const headersObj: Record<string, string> = {};
         response.headers.forEach((value, key) => { headersObj[key] = value; });
+        detachExternalAbort();
         return {
           data: textData,
           status: response.status,
@@ -579,6 +607,7 @@ export class HttpClient {
         headersObj[key] = value;
       });
 
+      detachExternalAbort();
       return {
         data: responseData,
         status: response.status,
@@ -589,8 +618,40 @@ export class HttpClient {
 
     } catch (error) {
       clearTimeout(timeoutId);
+      detachExternalAbort();
       throw error;
     }
+  }
+
+  private attachExternalAbortSignal(controller: AbortController, signal?: AbortSignal): () => void {
+    if (!signal) {
+      return () => {};
+    }
+    const abort = () => {
+      try {
+        const reason = (signal as { reason?: unknown }).reason;
+        if (reason !== undefined) {
+          (controller as unknown as { abort: (reason?: unknown) => void }).abort(reason);
+        } else {
+          controller.abort();
+        }
+      } catch {
+        controller.abort();
+      }
+    };
+    if (signal.aborted) {
+      abort();
+      return () => {};
+    }
+    const listener = () => abort();
+    signal.addEventListener?.('abort', listener as EventListener, { once: true } as AddEventListenerOptions);
+    return () => {
+      try {
+        signal.removeEventListener?.('abort', listener as EventListener);
+      } catch {
+        // ignore cleanup errors
+      }
+    };
   }
 
   /**

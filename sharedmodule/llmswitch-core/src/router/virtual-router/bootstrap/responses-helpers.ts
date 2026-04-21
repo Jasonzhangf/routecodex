@@ -53,9 +53,11 @@ export function resolveProviderStreamingPreference(
   const configResponses = configNode ? asRecord(configNode.responses) : undefined;
   return (
     coerceStreamingPreference(
-      provider.streaming ?? provider.stream ?? provider.supportsStreaming ?? provider.streamingPreference
+      provider.streaming ?? provider.stream ?? provider.streamingPreference
     ) ??
-    coerceStreamingPreference(responsesNode?.streaming ?? responsesNode?.stream ?? responsesNode?.supportsStreaming) ??
+    coerceStreamingCapability(provider.supportsStreaming) ??
+    coerceStreamingPreference(responsesNode?.streaming ?? responsesNode?.stream) ??
+    coerceStreamingCapability(responsesNode?.supportsStreaming) ??
     coerceStreamingPreference(configResponses?.streaming ?? configResponses?.stream)
   );
 }
@@ -92,6 +94,25 @@ function coerceStreamingPreference(value: unknown): StreamingPreference | undefi
     }
   }
   return undefined;
+}
+
+function coerceStreamingCapability(value: unknown): StreamingPreference | undefined {
+  if (typeof value === 'boolean') {
+    return value ? 'auto' : 'never';
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    if (record.enabled !== undefined) {
+      return coerceStreamingCapability(record.enabled);
+    }
+    if (record.value !== undefined) {
+      return coerceStreamingCapability(record.value);
+    }
+    if (record.mode !== undefined) {
+      return coerceStreamingCapability(record.mode);
+    }
+  }
+  return coerceStreamingPreference(value);
 }
 
 export function normalizeModelCapabilities(
