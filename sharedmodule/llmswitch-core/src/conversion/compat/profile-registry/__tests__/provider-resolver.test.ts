@@ -8,9 +8,21 @@ import {
 } from '../provider-resolver.js';
 import type { ProviderResolutionConfig } from '../types.js';
 
+function resolveCompatConfigPathForTests(): string {
+  const candidates = [
+    path.resolve(process.cwd(), 'src', 'conversion', 'compat', 'provider-resolution-config.json'),
+    path.resolve(process.cwd(), 'sharedmodule', 'llmswitch-core', 'src', 'conversion', 'compat', 'provider-resolution-config.json')
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(`provider-resolution-config.json not found from cwd=${process.cwd()}`);
+}
+
 describe('provider-resolver: config-driven resolution', () => {
-  const configDir = path.resolve(import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname), '..', '..');
-  const configPath = path.join(configDir, 'provider-resolution-config.json');
+  const configPath = resolveCompatConfigPathForTests();
   let config: ProviderResolutionConfig;
 
   beforeAll(() => {

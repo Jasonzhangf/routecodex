@@ -287,7 +287,8 @@ export function renderStopMessageAutoFollowupViaAi(args: StopMessageAiFollowupAr
         if (stdout) {
           const approvedMarker = resolveStopMessageAiApprovedMarker(args.approvedMarker);
           const normalizedOutput =
-              ? sanitizeFollowupText(args.candidateFollowupText || args.baseStopMessageText || stdout) || stdout
+            hasStandaloneMarkerLine(stdout, approvedMarker)
+              ? approvedMarker
               : stdout;
           logStopMessageAutoMessage({
             requestId: args.requestId,
@@ -396,7 +397,8 @@ export async function renderStopMessageAutoFollowupViaAiAsync(args: StopMessageA
         if (stdout) {
           const approvedMarker = resolveStopMessageAiApprovedMarker(args.approvedMarker);
           const normalizedOutput =
-              ? sanitizeFollowupText(args.candidateFollowupText || args.baseStopMessageText || stdout) || stdout
+            hasStandaloneMarkerLine(stdout, approvedMarker)
+              ? approvedMarker
               : stdout;
           logStopMessageAutoMessage({
             requestId: args.requestId,
@@ -716,13 +718,6 @@ function createStopMessageAutoMessageInvocation(
   outputFilePath?: string;
   cleanup: () => void;
 } {
-    return {
-      args: ['-p', prompt],
-      cleanup: () => {
-        // no-op
-      }
-    };
-  }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-stopmessage-codex-'));
   const outputFilePath = path.join(dir, 'last-message.txt');
   return {

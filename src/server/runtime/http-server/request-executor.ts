@@ -1058,13 +1058,6 @@ function isHealthNeutralProviderError(args: {
   }
   if (
     errorCode === 'CLIENT_TOOL_ARGS_INVALID'
-    || errorCode === 'QWENCHAT_INVALID_TOOL_ARGS'
-    || errorCode === 'QWENCHAT_HIDDEN_NATIVE_TOOL'
-    || errorCode === 'QWENCHAT_NATIVE_TOOL_CALL'
-    || upstreamCode === 'CLIENT_TOOL_ARGS_INVALID'
-    || upstreamCode === 'QWENCHAT_INVALID_TOOL_ARGS'
-    || upstreamCode === 'QWENCHAT_HIDDEN_NATIVE_TOOL'
-    || upstreamCode === 'QWENCHAT_NATIVE_TOOL_CALL'
   ) {
     return true;
   }

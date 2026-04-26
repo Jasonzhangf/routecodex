@@ -12,28 +12,42 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { CompatProfileEntry, CompatProfileRegistry, HeaderPolicyRule, PolicyOverrideConfig, ProviderResolutionConfig } from './types.js';
 
 // Re-export types for consumers
 export type { CompatProfileEntry, CompatProfileRegistry, HeaderPolicyRule, PolicyOverrideConfig, ProviderResolutionConfig };
 
 function getProfilesDir(): string {
-  try {
-    const selfDir = path.dirname(fileURLToPath(import.meta.url));
-    return path.resolve(selfDir, '..', 'profiles');
-  } catch {
-    return path.resolve(process.cwd(), 'src', 'conversion', 'compat', 'profiles');
+  return path.join(getCompatDir(), 'profiles');
+}
+
+function findCompatDirFromCwd(): string {
+  let current = process.cwd();
+  while (true) {
+    const candidates = [
+      path.join(current, 'src', 'conversion', 'compat'),
+      path.join(current, 'sharedmodule', 'llmswitch-core', 'src', 'conversion', 'compat'),
+      path.join(current, 'dist', 'conversion', 'compat'),
+      path.join(current, 'sharedmodule', 'llmswitch-core', 'dist', 'conversion', 'compat')
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(path.join(candidate, 'profiles'))) {
+        return candidate;
+      }
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
   }
+  throw new Error(
+    `[CompatProfileRegistry] unable to locate compat directory from cwd=${process.cwd()}`
+  );
 }
 
 function getCompatDir(): string {
-  try {
-    const selfDir = path.dirname(fileURLToPath(import.meta.url));
-    return path.resolve(selfDir, '..');
-  } catch {
-    return path.resolve(process.cwd(), 'src', 'conversion', 'compat');
-  }
+  return findCompatDirFromCwd();
 }
 
 /**

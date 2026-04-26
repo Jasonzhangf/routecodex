@@ -12,6 +12,11 @@ type HarvestToolCallsFromTextConfig = Record<string, unknown>;
 type ToolTextRequestGuidanceConfig = Record<string, unknown>;
 type DeepSeekWebResponseConfig = Record<string, unknown>;
 
+export interface AnthropicClaudeCodeSystemPromptConfig {
+  systemText?: string;
+  preserveExistingSystemAsUserMessage?: boolean;
+}
+
 export type CompatDirection = 'request' | 'response';
 export type CompatNativeProtocolToken = NativeProviderProtocolToken;
 
@@ -30,4 +35,19 @@ export interface CompatStageConfig {
   filters?: FilterInstruction[];
 }
 
-export type MappingInstruction =
+export interface MappingInstruction {
+  action: string;
+  config?: JsonValue;
+  phase?: string;
+  [key: string]: JsonValue | undefined;
+}
+
+export interface FilterInstruction {
+  action: string;
+  [key: string]: JsonValue | undefined;
+}
+
+export interface CompatApplicationResult {
+  payload: JsonObject;
+  appliedProfile?: string;
+}

@@ -2,7 +2,7 @@
  * Policy Overrides — pure functions for config-driven policy skip/apply.
  *
  * Replaces the hardcoded profile string checks in policy-engine.ts
- * (chat:deepseek-web / chat:qwenchat-web skip). These functions are pure:
+ * (chat:deepseek-web skip). These functions are pure:
  * data in, data out, no global state.
  */
 

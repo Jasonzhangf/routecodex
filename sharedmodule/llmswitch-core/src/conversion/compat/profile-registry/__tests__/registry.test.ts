@@ -4,10 +4,21 @@ import path from 'node:path';
 import os from 'node:os';
 import { loadCompatProfileRegistry, getProfile, getHeaderPolicies, getPolicyOverrides } from '../registry.js';
 
+function resolveCompatProfilesDirForTests(): string {
+  const candidates = [
+    path.resolve(process.cwd(), 'src', 'conversion', 'compat', 'profiles'),
+    path.resolve(process.cwd(), 'sharedmodule', 'llmswitch-core', 'src', 'conversion', 'compat', 'profiles')
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(`compat profiles dir not found from cwd=${process.cwd()}`);
+}
+
 describe('loadCompatProfileRegistry', () => {
-  // __tests__/registry.test.ts -> ../.. = compat/profile-registry/../../ = compat/ -> profiles/
-  const _testDir = import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname);
-  const profilesDir = path.resolve(_testDir, '..', '..', 'profiles');
+  const profilesDir = resolveCompatProfilesDirForTests();
 
   let registry: ReturnType<typeof loadCompatProfileRegistry>;
 

@@ -159,9 +159,6 @@ export function resolveProviderModule(value?: string): OpenAIStandardConfig['typ
     return undefined;
   }
   const trimmed = value.trim();
-  if (trimmed === 'qwenchat-http-provider' || trimmed === 'qwenchat') {
-    throw new Error('[ProviderFactory] qwenchat provider has been removed; use qwen or another supported provider.');
-  }
   switch (trimmed) {
     case 'openai-standard':
     case 'openai-http-provider':
@@ -201,11 +198,6 @@ export function instantiateProvider(
   config: OpenAIStandardConfig,
   dependencies: ModuleDependencies
 ): IProviderV2 {
-  if (moduleType === 'qwenchat-http-provider' || moduleType === 'qwenchat') {
-    const error = new Error('[ProviderFactory] qwenchat provider has been removed; use qwen or another supported provider.');
-    (error as Error & { code?: string }).code = 'ERR_PROVIDER_REMOVED';
-    throw error;
-  }
   if (moduleType === 'mock-provider') {
     return new MockProvider(config, dependencies);
   }

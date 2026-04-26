@@ -2,6 +2,19 @@ import { normalizeProvider } from './provider-normalization.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
+function resolveRepoProviderConfigPath(filename: string): string {
+  const candidates = [
+    path.join(process.cwd(), 'config', 'providers', filename),
+    path.join(process.cwd(), '..', '..', 'config', 'providers', filename)
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(`provider config not found for ${filename} from cwd=${process.cwd()}`);
+}
+
 describe('normalizeProvider anthropic thinking config', () => {
   it('reads model-level anthropic thinking from provider config', () => {
     const normalized = normalizeProvider('ali-coding-plan', {
@@ -68,7 +81,7 @@ describe('normalizeProvider anthropic thinking config', () => {
   });
 
   it('normalizes the real ali-coding-plan provider config with model ids', () => {
-    const configPath = path.join(process.cwd(), 'config', 'providers', 'ali-coding-plan.json');
+    const configPath = resolveRepoProviderConfigPath('ali-coding-plan.json');
     const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     const normalized = normalizeProvider('ali-coding-plan', raw);
 
