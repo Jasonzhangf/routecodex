@@ -1,0 +1,24 @@
+{
+  "typeKeywords": [
+    { "keywords": ["anthropic", "claude"], "providerType": "anthropic" },
+    { "keywords": ["responses"], "providerType": "responses" },
+    { "keywords": ["gemini"], "providerType": "gemini" },
+    { "keywords": ["qwen"], "providerType": "qwen" },
+    { "keywords": ["glm"], "providerType": "glm" },
+    { "keywords": ["lmstudio"], "providerType": "lmstudio" }
+  ],
+  "defaultProviderType": "openai",
+  "outboundProfiles": {
+    "anthropic": "anthropic-messages",
+    "responses": "openai-responses",
+    "gemini": "gemini-chat"
+  },
+  "defaultOutboundProfile": "openai-chat",
+  "compatibilityProfileBlocks": [
+    { "providerId": "antigravity", "compatibilityProfile": "chat:gemini-cli" },
+    { "providerId": "gemini-cli", "compatibilityProfile": "chat:gemini-cli" },
+    { "providerTypeContains": "antigravity", "compatibilityProfile": "chat:gemini-cli" },
+    { "providerTypeContains": "gemini-cli", "compatibilityProfile": "chat:gemini-cli" }
+  ],
+  "defaultCompatibilityProfile": "compat:passthrough"
+}

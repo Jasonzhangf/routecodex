@@ -13,10 +13,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { CompatProfileEntry, CompatProfileRegistry, HeaderPolicyRule, PolicyOverrideConfig } from './types.js';
+import type { CompatProfileEntry, CompatProfileRegistry, HeaderPolicyRule, PolicyOverrideConfig, ProviderResolutionConfig } from './types.js';
 
 // Re-export types for consumers
-export type { CompatProfileEntry, CompatProfileRegistry, HeaderPolicyRule, PolicyOverrideConfig };
+export type { CompatProfileEntry, CompatProfileRegistry, HeaderPolicyRule, PolicyOverrideConfig, ProviderResolutionConfig };
 
 function getProfilesDir(): string {
   try {
@@ -24,6 +24,15 @@ function getProfilesDir(): string {
     return path.resolve(selfDir, '..', 'profiles');
   } catch {
     return path.resolve(process.cwd(), 'src', 'conversion', 'compat', 'profiles');
+  }
+}
+
+function getCompatDir(): string {
+  try {
+    const selfDir = path.dirname(fileURLToPath(import.meta.url));
+    return path.resolve(selfDir, '..', '..');
+  } catch {
+    return path.resolve(process.cwd(), 'src', 'conversion', 'compat');
   }
 }
 
@@ -80,7 +89,22 @@ export function loadCompatProfileRegistry(profilesDir?: string): CompatProfileRe
     profiles.set(profile.id, profile);
   }
 
-  return { profiles, providerBlocks: [] };
+  // Load provider-resolution-config.json (provider type / outbound / compat profile resolution)
+  const compatDir = profilesDir ? path.dirname(dir) : getCompatDir();
+  const configPath = path.join(compatDir, 'provider-resolution-config.json');
+  let providerResolutionConfig: ProviderResolutionConfig | undefined;
+  if (fs.existsSync(configPath)) {
+    const configRaw = fs.readFileSync(configPath, 'utf-8');
+    try {
+      providerResolutionConfig = JSON.parse(configRaw) as ProviderResolutionConfig;
+    } catch (err) {
+      throw new Error(
+        `[CompatProfileRegistry] invalid JSON in ${configPath}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  return { profiles, providerBlocks: [], providerResolutionConfig };
 }
 
 /**

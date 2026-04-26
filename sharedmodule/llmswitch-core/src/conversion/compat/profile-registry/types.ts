@@ -81,4 +81,30 @@ export interface CompatProfileRegistry {
   profiles: Map<string, CompatProfileEntry>;
   /** Provider compat blocks for default-profile resolution. */
   providerBlocks: ProviderCompatBlock[];
+  /** Config-driven provider type / outbound / default-profile resolution. */
+  providerResolutionConfig?: ProviderResolutionConfig;
+}
+
+// ---------------------------------------------------------------------------
+// Provider Resolution Config — config-driven provider type detection
+// ---------------------------------------------------------------------------
+
+export interface TypeKeywordRule {
+  keywords: string[];
+  providerType: string;
+}
+
+export interface CompatibilityProfileBlock {
+  providerId?: string;
+  providerTypeContains?: string;
+  compatibilityProfile: string;
+}
+
+export interface ProviderResolutionConfig {
+  typeKeywords: TypeKeywordRule[];
+  defaultProviderType: string;
+  outboundProfiles: Record<string, string>;
+  defaultOutboundProfile: string;
+  compatibilityProfileBlocks: CompatibilityProfileBlock[];
+  defaultCompatibilityProfile: string;
 }
