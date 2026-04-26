@@ -37,13 +37,12 @@
 ## Phase A：实现不连线
 
 - 新建 profile contracts / registry / provider-directory
-- 新建 family profiles（iflow、antigravity、qwen、gemini）
+- 新建 family profiles（antigravity、qwen、gemini）
 - 新建 protocol adapters（4 协议）
 - 只加单测，不改主路径
 
 ## Phase B：分 wave 连线（新主旧影子）
 
-- Wave-1：iflow
 - Wave-2：antigravity / gemini-cli
 - Wave-3：protocol/factory/service-profile/provider-type 清理
 

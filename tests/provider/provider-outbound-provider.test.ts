@@ -124,16 +124,16 @@ describe('Provider outbound → upstream (openai-chat)', () => {
   });
 });
 
-describe('Provider outbound → upstream (iflow/lmstudio)', () => {
+describe('Provider outbound → upstream (glm/lmstudio)', () => {
   beforeAll(() => { process.env.RCC_TEST_FAKE_GLM = '1'; });
 
-  test('iflow: compat.minimal + provider shaping', async () => {
-    process.env.RCC_TEST_FAKE_IFLOW = '1';
-    const golden = loadGolden('iflow', 'openai-chat') || { messages: [{ role: 'user', content: 'hi' }] };
+  test('glm: compat.minimal + provider shaping', async () => {
+    process.env.RCC_TEST_FAKE_GLM = '1';
+    const golden = loadGolden('glm', 'openai-chat') || { messages: [{ role: 'user', content: 'hi' }] };
     const provider = new ChatHttpProvider({
       type: 'openai-standard',
       config: {
-        providerType: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'iflow-gpt4-1106', auth: { type: 'apikey', apiKey: 'testapikey12345' }, overrides: { maxRetries: 0 }
+        providerType: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'glm-gpt4-1106', auth: { type: 'apikey', apiKey: 'testapikey12345' }, overrides: { maxRetries: 0 }
       }
     } as any, deps);
     (provider as any).httpClient = new FakeHttpClient({});
@@ -142,9 +142,9 @@ describe('Provider outbound → upstream (iflow/lmstudio)', () => {
       (provider as any).createRequestExecutorDeps()
     );
     await provider.initialize();
-    const requestModel = (golden as any)?.model ?? 'iflow-gpt4-1106';
+    const requestModel = (golden as any)?.model ?? 'glm-gpt4-1106';
     const request: any = { data: { ...golden, model: requestModel, stream: true, metadata: { foo: 'bar' } } };
-    attachProviderRuntimeMetadata(request, { requestId: 'req_iflow', providerType: 'openai', providerProtocol: 'openai-chat', providerId: 'iflow' });
+    attachProviderRuntimeMetadata(request, { requestId: 'req_glm', providerType: 'openai', providerProtocol: 'openai-chat', providerId: 'glm' });
     const res = await provider.sendRequest(request); const call = (provider as any).httpClient.last as any;
     expect(res?.status ?? 200).toBe(200);
     expect(String(call.url)).toMatch(/\/chat\/completions$/);

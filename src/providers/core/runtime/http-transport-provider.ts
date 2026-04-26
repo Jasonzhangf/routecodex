@@ -36,8 +36,6 @@ import { createTransportAuthProvider, createTransportHttpClient } from './provid
 import { createProviderRuntimeContext, resolveProviderProfileKey } from './provider-runtime-utils.js';
 import { buildProviderRequestHeaders, finalizeProviderRequestHeaders } from './provider-request-header-orchestrator.js';
 import {
-  resolveLegacyIflowEndpoint as resolveLegacyIflowEndpointFromRequest,
-  resolveLegacyIflowRequestBody as resolveLegacyIflowRequestBodyFromRequest,
   resolveProviderFamilyProfile
 } from './provider-family-profile-utils.js';
 import {
@@ -424,8 +422,7 @@ export class HttpTransportProvider extends BaseProvider {
       defaultEndpoint,
       protocolClient: this.protocolClient,
       runtimeMetadata,
-      familyProfile: this.resolveFamilyProfile(runtimeMetadata),
-      legacyEndpoint: this.resolveLegacyIflowEndpoint(request)
+      familyProfile: this.resolveFamilyProfile(runtimeMetadata)
     });
   }
 
@@ -438,8 +435,7 @@ export class HttpTransportProvider extends BaseProvider {
       request,
       protocolClient: this.protocolClient,
       runtimeMetadata,
-      familyProfile: this.resolveFamilyProfile(runtimeMetadata),
-      legacyBody: this.resolveLegacyIflowRequestBody(request)
+      familyProfile: this.resolveFamilyProfile(runtimeMetadata)
     });
   }
 
@@ -454,21 +450,7 @@ export class HttpTransportProvider extends BaseProvider {
     });
   }
 
-  private resolveLegacyIflowEndpoint(request: UnknownObject): string | undefined {
-    return resolveLegacyIflowEndpointFromRequest({
-      request,
-      isIflowRuntime: this.isIflowTransportRuntime(this.getCurrentRuntimeMetadata())
-    });
-  }
-
-  private resolveLegacyIflowRequestBody(request: UnknownObject): UnknownObject | undefined {
-    return resolveLegacyIflowRequestBodyFromRequest({
-      request,
-      isIflowRuntime: this.isIflowTransportRuntime(this.getCurrentRuntimeMetadata())
-    });
-  }
-
-  /**
+/**
    * 允许子类在 Hook 运行完后对头部做最终调整
    */
   protected async finalizeRequestHeaders(
@@ -482,8 +464,7 @@ export class HttpTransportProvider extends BaseProvider {
       finalizeHeaders: (baseHeaders, req) => this.protocolClient.finalizeHeaders(baseHeaders, req as ProtocolRequestPayload),
       runtimeMetadata,
       familyProfile: this.resolveFamilyProfile(runtimeMetadata),
-      providerType: this.providerType,
-      isIflow: this.isIflowTransportRuntime(runtimeMetadata)
+      providerType: this.providerType
     });
   }
 
@@ -514,7 +495,6 @@ export class HttpTransportProvider extends BaseProvider {
     const isAntigravity = this.isAntigravityTransportRuntime(runtimeMetadata);
     const runtimeHeaders = this.getRuntimeProfile()?.headers || {};
     const isGeminiFamily = this.isGeminiFamilyTransport();
-    const isIflow = this.isIflowTransportRuntime(runtimeMetadata);
     return buildProviderRequestHeaders({
       config: this.config.config,
       authProvider: this.authProvider,
@@ -525,17 +505,12 @@ export class HttpTransportProvider extends BaseProvider {
       familyProfile: this.resolveFamilyProfile(runtimeMetadata),
       isGeminiFamily,
       isAntigravity,
-      isIflow,
       providerType: this.providerType
     });
   }
 
   private isAntigravityTransportRuntime(runtimeMetadata?: ProviderRuntimeMetadata): boolean {
     return this.getRuntimeDetector().isAntigravity(runtimeMetadata);
-  }
-
-  private isIflowTransportRuntime(runtimeMetadata?: ProviderRuntimeMetadata): boolean {
-    return this.getRuntimeDetector().isIflow(runtimeMetadata);
   }
 
   protected getEffectiveBaseUrl(): string {

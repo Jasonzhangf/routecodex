@@ -347,40 +347,6 @@ export function createOauthCommand(): Command {
       }
     });
 
-  cmd
-    .command('iflow-auto')
-    .description('Trigger IFlow OAuth re-auth using Camoufox automation (auto confirm on authorize page)')
-    .argument(
-      '<selector>',
-      'Token selector: file basename, full path, or provider id (e.g. "iflow-oauth-1-default.json" or "iflow")'
-    )
-    .option('--dev', 'Run Camoufox automation in headed debug mode (default headless)')
-    .option('--headful', 'Open Camoufox in headed mode (alias of --dev)')
-    .action(async (selector: string, options: { dev?: boolean; headful?: boolean }) => {
-      console.warn('[oauth-command] iflow-auto has been disabled; falling back to manual Camoufox OAuth.');
-      const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
-      const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
-      process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
-      if (options?.dev || options?.headful) {
-        process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
-      } else {
-        delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
-      }
-      try {
-        await safeInteractiveRefresh(selector, { force: true, mode: 'manual' });
-      } finally {
-        if (prevBrowser === undefined) {
-          delete process.env.ROUTECODEX_OAUTH_BROWSER;
-        } else {
-          process.env.ROUTECODEX_OAUTH_BROWSER = prevBrowser;
-        }
-        if (prevDevMode === undefined) {
-          delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
-        } else {
-          process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
-        }
-      }
-    });
 
   cmd
     .command('qwen-auto')

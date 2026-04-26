@@ -281,7 +281,7 @@ export function shouldRepairCamoufoxFingerprintForOAuth(
   if (platform !== 'win32') {
     return false;
   }
-  return family === 'gemini' || family === 'iflow' || family === 'qwen';
+  return family === 'gemini' || family === 'qwen';
 }
 
 export function sanitizeCamouConfigForOAuth(
@@ -306,15 +306,6 @@ export function sanitizeCamouConfigForOAuth(
     return env;
   }
 
-  const family = getProviderFamily(provider);
-  if (family === 'iflow') {
-    // iFlow OAuth 页面在部分指纹下会因 header 覆盖导致页面乱码；OAuth 场景统一移除该覆盖。
-    delete parsed['headers.Accept-Encoding'];
-    if (Object.prototype.hasOwnProperty.call(parsed, 'timezone')) {
-      delete parsed.timezone;
-    }
-    env.CAMOU_CONFIG_1 = JSON.stringify(parsed);
-  }
   return env;
 }
 
@@ -337,7 +328,7 @@ function buildProfileId(provider?: string | null, alias?: string | null): string
 }
 
 const DISABLED_CAMOUFOX_AUTO_MODE = new Set(['0', 'false', 'no', 'off', 'manual', 'none']);
-const REMOVED_CAMOUFOX_AUTO_MODE = new Set(['qwen', 'iflow']);
+const REMOVED_CAMOUFOX_AUTO_MODE = new Set(['qwen']);
 
 function resolveDefaultCamoufoxAutoMode(provider?: string | null): string {
   const family = getProviderFamily(provider);
@@ -851,17 +842,6 @@ async function maybeAdvanceTokenPortal(options: {
   });
 }
 
-function isIflowOAuthUrl(rawUrl: string): boolean {
-  if (!rawUrl || typeof rawUrl !== 'string') {
-    return false;
-  }
-  try {
-    const parsed = new URL(rawUrl);
-    return /(?:^|\.)iflow\.cn$/i.test(parsed.hostname) && parsed.pathname === '/oauth';
-  } catch {
-    return rawUrl.includes('iflow.cn/oauth');
-  }
-}
 
 function isQwenAuthorizeUrl(rawUrl: string): boolean {
   if (!rawUrl || typeof rawUrl !== 'string') {
@@ -959,9 +939,6 @@ async function waitForOAuthRelatedPage(options: {
       if (provider === 'qwen' && (isQwenAuthorizeUrl(activeUrl) || isQwenLoginUrl(activeUrl) || isGoogleAuthUrl(activeUrl))) {
         return activeUrl;
       }
-      if (provider === 'iflow' && isIflowOAuthUrl(activeUrl)) {
-        return activeUrl;
-      }
       if ((provider === 'gemini-cli' || provider === 'antigravity') && isGoogleAuthUrl(activeUrl)) {
         return activeUrl;
       }
@@ -1050,50 +1027,6 @@ async function maybeAdvanceQwenAuthorization(options: {
   return googleClicked;
 }
 
-async function maybeAdvanceIflowAccountSelection(options: {
-  provider?: string | null;
-  actionContext: CamoActionContext;
-}): Promise<boolean> {
-  const provider = String(options.provider || '').trim().toLowerCase();
-  if (provider !== 'iflow') {
-    return true;
-  }
-  const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
-  const autoModeEnabled = autoMode === 'iflow';
-  if (!autoModeEnabled) {
-    return true;
-  }
-  let activeUrl = getActiveCamoPageUrl(options.actionContext);
-  if (activeUrl && !isIflowOAuthUrl(activeUrl) && isTokenPortalUrl(activeUrl)) {
-    const settleTimeoutMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_IFLOW_OAUTH_SETTLE_MS, 7000);
-    const pollIntervalMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_IFLOW_OAUTH_POLL_MS, 250);
-    const waited = await waitForIflowOAuthPage({
-      actionContext: options.actionContext,
-      settleTimeoutMs,
-      pollIntervalMs
-    });
-    if (!waited) {
-      logOAuthDebug(
-        `[OAuth] camo-cli iflow account advance skipped (iflow oauth page not ready): ${activeUrl || 'n/a'}`
-      );
-      return true;
-    }
-    activeUrl = waited;
-  }
-  if (!activeUrl || !isIflowOAuthUrl(activeUrl)) {
-    return true;
-  }
-  logOAuthDebug(`[OAuth] camo-cli iflow oauth page ready: ${activeUrl}`);
-  const retryCount = parsePositiveInt(
-    process.env.ROUTECODEX_CAMOUFOX_IFLOW_ACCOUNT_CLICK_RETRIES,
-    autoModeEnabled ? 6 : 2
-  );
-  const retryDelayMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_IFLOW_ACCOUNT_CLICK_RETRY_DELAY_MS, 400);
-  return clickCamoTarget(options.actionContext, CAMO_CLICK_TARGETS.iflowAccountSelect, {
-    retries: retryCount,
-    retryDelayMs,
-    required: autoModeEnabled
-  });
 }
 
 async function waitForGoogleAuthPage(options: {
@@ -1305,27 +1238,6 @@ async function waitForTokenPortalPage(options: {
   return false;
 }
 
-async function waitForIflowOAuthPage(options: {
-  actionContext: CamoActionContext;
-  settleTimeoutMs: number;
-  pollIntervalMs: number;
-}): Promise<string | null> {
-  const timeoutMs = options.settleTimeoutMs > 0 ? options.settleTimeoutMs : 7000;
-  const intervalMs = options.pollIntervalMs > 0 ? options.pollIntervalMs : 250;
-  const deadline = Date.now() + timeoutMs;
-  let lastUrl: string | null = null;
-  while (Date.now() <= deadline) {
-    const activeUrl = getActiveCamoPageUrl(options.actionContext);
-    if (activeUrl) {
-      lastUrl = activeUrl;
-      if (isIflowOAuthUrl(activeUrl)) {
-        return activeUrl;
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  return isIflowOAuthUrl(lastUrl || '') ? lastUrl : null;
-}
 
 export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promise<boolean> {
   setCamoufoxLaunchFailureReason(null);
@@ -1471,14 +1383,6 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
       return false;
     }
 
-    const iflowAdvanced = await maybeAdvanceIflowAccountSelection({
-      provider: options.provider,
-      actionContext
-    });
-    if (!iflowAdvanced) {
-      setCamoufoxLaunchFailureReason('element_not_found:iflow_account_select');
-      return false;
-    }
     const qwenAdvanced = await maybeAdvanceQwenAuthorization({
       provider: options.provider,
       actionContext

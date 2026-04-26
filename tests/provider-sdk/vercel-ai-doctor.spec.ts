@@ -58,12 +58,12 @@ describe('provider-vercel-ai-doctor', () => {
 
   it('marks runtime-only providers as unsupported for direct SDK probing', async () => {
     const result = await runVercelAiProviderDoctor({
-      providerId: 'iflow',
+      providerId: 'glm',
       modelId: 'coder-model',
       providerNode: {
-        type: 'iflow',
-        baseURL: 'https://apis.iflow.cn/v1',
-        auth: { type: 'iflow-cookie', cookieFile: '~/.routecodex/auth/iflow-work.cookie' }
+        type: 'glm',
+        baseURL: 'https://api.glm.com/v1',
+        auth: { type: 'token', cookieFile: '~/.routecodex/auth/glm-work.cookie' }
       }
     });
 

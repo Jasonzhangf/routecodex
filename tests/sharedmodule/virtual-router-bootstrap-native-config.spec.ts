@@ -4,7 +4,7 @@ function buildInput(extraVirtualRouter: Record<string, unknown> = {}) {
   return {
     virtualrouter: {
       providers: {
-        iflow: {
+        glm: {
           type: 'openai',
           endpoint: 'https://example.invalid/v1/chat/completions',
           auth: { type: 'apiKey', value: 'test-key' },
@@ -14,7 +14,7 @@ function buildInput(extraVirtualRouter: Record<string, unknown> = {}) {
         }
       },
       routing: {
-        default: ['iflow.kimi-k2']
+        default: ['glm.kimi-k2']
       },
       ...extraVirtualRouter
     }

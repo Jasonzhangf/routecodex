@@ -81,7 +81,7 @@ describe('review servertool followup', () => {
       requestId: 'req-review-1',
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
-      providerKey: 'iflow.1-186.kimi-k2.5',
+      providerKey: 'glm.1-186.kimi-k2.5',
       stream: false,
       sessionId: 'session-review-1',
       metadata: {
@@ -140,7 +140,7 @@ describe('review servertool followup', () => {
     expect(followupBodyJson).toContain('queued for servertool reenter');
     expect(followupBodyJson).not.toContain('client injection');
     expect((capturedFollowupMeta as any)?.clientInjectSource).toBe('servertool.review');
-    expect((capturedFollowupMeta as any)?.__shadowCompareForcedProviderKey).toBe('iflow.1-186.kimi-k2.5');
+    expect((capturedFollowupMeta as any)?.__shadowCompareForcedProviderKey).toBe('glm.1-186.kimi-k2.5');
   });
 
   test('can disable review ai followup via ROUTECODEX_REVIEW_AI_FOLLOWUP_ENABLED=0', async () => {
@@ -167,7 +167,7 @@ describe('review servertool followup', () => {
         requestId: 'req-review-no-ai-default',
         entryEndpoint: '/v1/messages',
         providerProtocol: 'anthropic-messages',
-        providerKey: 'iflow.1-186.kimi-k2.5',
+        providerKey: 'glm.1-186.kimi-k2.5',
         stream: false,
         sessionId: 'session-review-no-ai-default',
         metadata: {
@@ -253,7 +253,7 @@ describe('review servertool followup', () => {
         requestId: 'req-review-ai-enabled',
         entryEndpoint: '/v1/messages',
         providerProtocol: 'anthropic-messages',
-        providerKey: 'iflow.1-186.kimi-k2.5',
+        providerKey: 'glm.1-186.kimi-k2.5',
         stream: false,
         sessionId: 'session-review-ai-enabled',
         metadata: {
@@ -317,7 +317,7 @@ describe('review servertool followup', () => {
       requestId: 'req-review-args-cwd',
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
-      providerKey: 'iflow.1-186.kimi-k2.5',
+      providerKey: 'glm.1-186.kimi-k2.5',
       stream: false,
       sessionId: 'session-review-args-cwd',
       metadata: {},
@@ -357,7 +357,7 @@ describe('review servertool followup', () => {
       requestId: 'req-review-sanitize',
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
-      providerKey: 'iflow.1-186.kimi-k2.5',
+      providerKey: 'glm.1-186.kimi-k2.5',
       stream: false,
       sessionId: 'session-review-sanitize',
       metadata: {},
@@ -409,7 +409,7 @@ describe('review servertool followup', () => {
       requestId: 'req-review-heartbeat',
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
-      providerKey: 'iflow.1-186.kimi-k2.5',
+      providerKey: 'glm.1-186.kimi-k2.5',
       stream: false,
       sessionId: 'session-review-heartbeat',
       metadata: {

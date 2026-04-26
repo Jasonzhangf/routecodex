@@ -611,7 +611,7 @@ describe('token-daemon interactiveRefresh', () => {
     }
   });
 
-  it('keeps camoufox browser for manual iflow interactive OAuth', async () => {
+  it('keeps camoufox browser for manual glm interactive OAuth', async () => {
     jest.resetModules();
     const ensureValidOAuthToken = jest.fn(async () => {});
 
@@ -629,7 +629,7 @@ describe('token-daemon interactiveRefresh', () => {
     const prevOpenOnly = process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
 
     process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
-    process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'iflow';
+    process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'glm';
     process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
     process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = '0';
 
@@ -637,8 +637,8 @@ describe('token-daemon interactiveRefresh', () => {
     const tokenDaemon = await import('../../src/token-daemon/token-daemon.js');
 
     jest.spyOn(tokenDaemon.TokenDaemon, 'findTokenBySelector').mockResolvedValue({
-      provider: 'iflow',
-      filePath: '/tmp/iflow-oauth-3-138.json',
+      provider: 'glm',
+      filePath: '/tmp/glm-oauth-3-138.json',
       sequence: 3,
       alias: '138',
       displayName: '138',
@@ -667,14 +667,14 @@ describe('token-daemon interactiveRefresh', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
     try {
-      await tokenDaemonModule.interactiveRefresh('iflow-oauth-3-138.json', { force: true, mode: 'manual' });
+      await tokenDaemonModule.interactiveRefresh('glm-oauth-3-138.json', { force: true, mode: 'manual' });
       expect(ensureValidOAuthToken).toHaveBeenCalled();
       expect(seenBrowser).toBe('camoufox');
       expect(seenAutoMode).toBe('');
       expect(seenAutoConfirm).toBe('');
       expect(seenOpenOnly).toBe('1');
       expect(process.env.ROUTECODEX_OAUTH_BROWSER).toBe('camoufox');
-      expect(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE).toBe('iflow');
+      expect(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE).toBe('glm');
       expect(process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM).toBe('1');
       expect(process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY).toBe('0');
     } finally {

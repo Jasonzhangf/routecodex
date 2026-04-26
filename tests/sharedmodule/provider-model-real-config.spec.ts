@@ -3,29 +3,29 @@ import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/route
 import type { VirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
 
 describe('provider.model with real config structure', () => {
-  it('should work with iflow provider.model when routing.default has targets', async () => {
+  it('should work with glm provider.model when routing.default has targets', async () => {
     const input: VirtualRouterConfig = {
       virtualrouter: {
         providers: {
-          iflow: {
-            id: 'iflow',
+          glm: {
+            id: 'glm',
             enabled: true,
-            type: 'iflow',
-            baseURL: 'https://apis.iflow.cn/v1',
+            type: 'glm',
+            baseURL: 'https://apis.glm.cn/v1',
             maxContextTokens: 262144,
-            compatibilityProfile: 'chat:iflow',
+            compatibilityProfile: 'chat:glm',
             auth: {
-              type: 'iflow-oauth',
+              type: 'glm-oauth',
               entries: [
                 {
                   alias: '1-186',
-                  type: 'iflow-oauth',
-                  tokenFile: '~/.routecodex/auth/iflow-oauth-1-186.json'
+                  type: 'glm-oauth',
+                  tokenFile: '~/.routecodex/auth/glm-oauth-1-186.json'
                 },
                 {
                   alias: '3-138',
-                  type: 'iflow-oauth',
-                  tokenFile: '~/.routecodex/auth/iflow-oauth-3-138.json'
+                  type: 'glm-oauth',
+                  tokenFile: '~/.routecodex/auth/glm-oauth-3-138.json'
                 }
               ]
             },
@@ -41,7 +41,7 @@ describe('provider.model with real config structure', () => {
               id: 'default-primary',
               priority: 200,
               mode: 'round-robin',
-              targets: ['iflow.kimi-k2.5']
+              targets: ['glm.kimi-k2.5']
             }
           ]
         }
@@ -52,25 +52,25 @@ describe('provider.model with real config structure', () => {
     const engine = new VirtualRouterEngine(config);
 
     const result = await engine.route({
-      model: 'iflow.kimi-k2.5',
+      model: 'glm.kimi-k2.5',
       messages: [{ role: 'user', content: 'Hello' }]
     });
 
     expect(result).toBeDefined();
-    expect(result.target?.providerKey).toMatch(/iflow/);
+    expect(result.target?.providerKey).toMatch(/glm/);
   });
 
   it('should fail when provider is disabled even if in routing', async () => {
     const input: VirtualRouterConfig = {
       virtualrouter: {
         providers: {
-          iflow: {
-            id: 'iflow',
+          glm: {
+            id: 'glm',
             enabled: false,
-            type: 'iflow',
-            baseURL: 'https://apis.iflow.cn/v1',
+            type: 'glm',
+            baseURL: 'https://apis.glm.cn/v1',
             maxContextTokens: 262144,
-            compatibilityProfile: 'chat:iflow',
+            compatibilityProfile: 'chat:glm',
             auth: {
               type: 'apikey',
               apiKey: 'TEST_KEY'
@@ -86,7 +86,7 @@ describe('provider.model with real config structure', () => {
               id: 'default-primary',
               priority: 200,
               mode: 'round-robin',
-              targets: ['iflow.kimi-k2.5']
+              targets: ['glm.kimi-k2.5']
             }
           ]
         }
@@ -97,7 +97,7 @@ describe('provider.model with real config structure', () => {
     const engine = new VirtualRouterEngine(config);
 
     await expect(engine.route({
-      model: 'iflow.kimi-k2.5',
+      model: 'glm.kimi-k2.5',
       messages: [{ role: 'user', content: 'Hello' }]
     })).rejects.toThrow(/PROVIDER_NOT_AVAILABLE/);
   });
@@ -106,13 +106,13 @@ describe('provider.model with real config structure', () => {
     const input: VirtualRouterConfig = {
       virtualrouter: {
         providers: {
-          iflow: {
-            id: 'iflow',
+          glm: {
+            id: 'glm',
             enabled: true,
-            type: 'iflow',
-            baseURL: 'https://apis.iflow.cn/v1',
+            type: 'glm',
+            baseURL: 'https://apis.glm.cn/v1',
             maxContextTokens: 262144,
-            compatibilityProfile: 'chat:iflow',
+            compatibilityProfile: 'chat:glm',
             auth: {
               type: 'apikey',
               apiKey: 'TEST_API_KEY'
@@ -128,7 +128,7 @@ describe('provider.model with real config structure', () => {
               id: 'default-primary',
               priority: 200,
               mode: 'round-robin',
-              targets: ['iflow.kimi-k2.5']
+              targets: ['glm.kimi-k2.5']
             }
           ]
         }
@@ -139,11 +139,11 @@ describe('provider.model with real config structure', () => {
     const engine = new VirtualRouterEngine(config);
 
     const result = await engine.route({
-      model: 'iflow.kimi-k2.5',
+      model: 'glm.kimi-k2.5',
       messages: [{ role: 'user', content: 'Hello' }]
     });
 
     expect(result).toBeDefined();
-    expect(result.target?.providerKey).toMatch(/iflow/);
+    expect(result.target?.providerKey).toMatch(/glm/);
   });
 });

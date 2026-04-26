@@ -96,17 +96,11 @@ const normalizeFlowStyle = (value: string | undefined, fallback: FlowStyle): Flo
   return fallback;
 };
 
-function resolveCallbackTimeoutMs(isIflowOAuth: boolean): number {
+function resolveCallbackTimeoutMs(): number {
   const envRaw = String(process.env.ROUTECODEX_OAUTH_CALLBACK_TIMEOUT_MS || '').trim();
   const parsed = Number.parseInt(envRaw, 10);
   if (Number.isFinite(parsed) && parsed > 0) {
     return parsed;
-  }
-  const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
-  const headful = isTruthyFlag(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE);
-  if (isIflowOAuth && autoMode === 'iflow' && !headful) {
-    // Automatic iFlow auth should fail fast and retry, instead of hanging for 10 minutes.
-    return 90_000;
   }
   return 10 * 60 * 1000;
 }
@@ -282,38 +276,13 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     const state = this.generateState();
     const authUrl = new URL(this.config.endpoints.authorizationUrl);
     const hostname = authUrl.hostname;
-    const isIflowHost = /(?:^|\.)iflow\.cn$/.test(hostname);
     const isGoogleOAuthHost = /(?:^|\.)accounts\.google\.com$/i.test(hostname);
     const googleUiLanguage = resolveGoogleUiLanguageHint();
     if (isGoogleOAuthHost && googleUiLanguage) {
       authUrl.searchParams.set('hl', googleUiLanguage);
     }
-    const styleEnv = (process.env.IFLOW_AUTH_STYLE || '').toLowerCase();
-    const style: FlowStyle = isIflowHost
-      // iFlow default should stay on web-style redirect/state split:
-      // redirect=<callback>&state=<state>&client_id=...
-      // legacy format is still available via IFLOW_AUTH_STYLE=legacy.
-      ? normalizeFlowStyle(styleEnv, 'web')
-      : styleEnv === 'legacy'
-        ? 'legacy'
-        : 'standard';
-
-    if (style === 'web') {
-      // iflow web 风格：redirect 为原始回调 URL，state 顶层参数。
-      const redirectUri = this.config.client.redirectUri!;
-      authUrl.searchParams.set('loginMethod', 'phone');
-      authUrl.searchParams.set('type', 'phone');
-      authUrl.searchParams.set('redirect', redirectUri);
-      authUrl.searchParams.set('state', state);
-      authUrl.searchParams.set('client_id', this.config.client.clientId);
-    } else if (style === 'legacy') {
-      // 老式 iflow Web 登录参数（state 融合在 redirect），兼容历史
-      const redirectUri = this.config.client.redirectUri!;
-      authUrl.searchParams.set('loginMethod', 'phone');
-      authUrl.searchParams.set('type', 'phone');
-      authUrl.searchParams.set('redirect', `${encodeURIComponent(redirectUri)}&state=${state}`);
-      authUrl.searchParams.set('client_id', this.config.client.clientId);
-    } else {
+    // 标准 OAuth2 授权码样式
+    {
       // 标准 OAuth2 授权码样式
       authUrl.searchParams.set('response_type', 'code');
       authUrl.searchParams.set('client_id', this.config.client.clientId);
@@ -377,10 +346,6 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     }
 
     const envPortRaw = String(process.env.OAUTH_CALLBACK_PORT || '').trim();
-    if (this.isIflowOAuthProvider() && !envPortRaw) {
-      // Align with official iFlow CLI: choose ephemeral callback port by default.
-      port = 0;
-    }
     if (envPortRaw) {
       const parsedEnvPort = Number(envPortRaw);
       if (!Number.isFinite(parsedEnvPort) || parsedEnvPort <= 0 || parsedEnvPort > 65535) {
@@ -391,7 +356,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
 
     let timeoutHandle: NodeJS.Timeout | null = null;
     let listeningPort = port;
-    const callbackTimeoutMs = resolveCallbackTimeoutMs(this.isIflowOAuthProvider());
+    const callbackTimeoutMs = resolveCallbackTimeoutMs();
 
     let startupSettled = false;
     let resolveStartup: ((boundPort: number) => void) | null = null;
@@ -678,9 +643,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     if (this.config.features?.supportsApiKeyExchange && this.config.endpoints.userInfoUrl && tokenResponse.access_token) {
       try {
         const userInfoUrl = `${this.config.endpoints.userInfoUrl}?accessToken=${encodeURIComponent(tokenResponse.access_token)}`;
-        const userInfoResponse = this.isIflowOAuthProvider()
-          ? await this.fetchIflowUserInfoWithRetry(userInfoUrl)
-          : await this.makeRequest(userInfoUrl, { method: 'GET' });
+        const userInfoResponse = await this.makeRequest(userInfoUrl, { method: 'GET' });
 
         if (userInfoResponse.ok) {
           const userInfo = await userInfoResponse.json() as UserInfoPayload;
@@ -829,8 +792,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
   }
 
   /**
-   * Token endpoint requests keep headers minimal and bypass provider-level common headers,
-   * matching iFlow CLI behavior and avoiding compat surprises.
+   * Token endpoint requests keep headers minimal and bypass provider-level common headers.
    */
   private async requestTokenEndpoint(formData: URLSearchParams): Promise<Response> {
     return this.httpClient(this.config.endpoints.tokenUrl, {
@@ -840,45 +802,6 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     });
   }
 
-  private isIflowOAuthProvider(): boolean {
-    const authUrl = String(this.config.endpoints.authorizationUrl || '').toLowerCase();
-    const tokenUrl = String(this.config.endpoints.tokenUrl || '').toLowerCase();
-    const userInfoUrl = String(this.config.endpoints.userInfoUrl || '').toLowerCase();
-    return (
-      authUrl.includes('iflow.cn') ||
-      tokenUrl.includes('iflow.cn/oauth/token') ||
-      userInfoUrl.includes('iflow.cn/api/oauth/getuserinfo')
-    );
-  }
-
-  private async fetchIflowUserInfoWithRetry(url: string): Promise<Response> {
-    const retryDelaysMs = [1000, 2000, 3000];
-    let lastError: unknown;
-    for (let attempt = 0; attempt < retryDelaysMs.length; attempt++) {
-      try {
-        const response = await this.httpClient(url, { method: 'GET' });
-        if (response.ok) {
-          return response;
-        }
-        const shouldRetry =
-          (response.status >= 500 || response.status === 408 || response.status === 429) &&
-          attempt < retryDelaysMs.length - 1;
-        if (!shouldRetry) {
-          return response;
-        }
-      } catch (error) {
-        lastError = error;
-        if (attempt >= retryDelaysMs.length - 1) {
-          break;
-        }
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt]));
-    }
-
-    throw lastError instanceof Error ? lastError : new Error('Failed to fetch iFlow user info');
-  }
-
   private applyAuthRedirectParams(
     authUrl: URL,
     flowStyle: FlowStyle,
@@ -886,7 +809,6 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     state: string
   ): void {
     if (flowStyle === 'legacy') {
-      // Keep parity with official iFlow CLI:
       // redirect=<encodeURIComponent(redirectUri)>&state=<state> (state embedded in redirect).
       authUrl.searchParams.delete('state');
       authUrl.searchParams.delete('redirect_uri');
@@ -965,8 +887,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
    */
   async refreshToken(refreshToken: string): Promise<UnknownObject> {
     const configuredMaxAttempts = this.config.retry?.maxAttempts || 3;
-    // Align iFlow CLI auth behavior: refresh endpoint errors should not loop retries.
-    const maxAttempts = this.isIflowOAuthProvider() ? 1 : configuredMaxAttempts;
+    const maxAttempts = configuredMaxAttempts;
     let lastError: unknown;
     let abortedEarly = false;
 

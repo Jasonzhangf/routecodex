@@ -1152,7 +1152,7 @@ describe('HubRequestExecutor failover', () => {
     expect(result).toEqual(expect.objectContaining({ status: 200 }));
   });
   test('preserves first upstream error when retry-exhausted routing reports provider unavailable', async () => {
-    const firstProviderKey = 'iflow.1-186.kimi-k2.5';
+    const firstProviderKey = 'glm.1-186.kimi-k2.5';
     const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
       statusCode: 429,
       code: 'HTTP_429'
@@ -1185,7 +1185,7 @@ describe('HubRequestExecutor failover', () => {
           metadata: {}
         })
         .mockRejectedValueOnce(
-          Object.assign(new Error('All providers unavailable for model iflow.kimi-k2.5'), {
+          Object.assign(new Error('All providers unavailable for model glm.kimi-k2.5'), {
             code: 'PROVIDER_NOT_AVAILABLE'
           })
         ),

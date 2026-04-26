@@ -142,16 +142,16 @@ describe('provider-update command maintenance flows', () => {
 
     answers.push(
       'https://api.changed.example/v1',
-      'iflow-cookie',
-      '~/.rcc/auth/iflow.cookie',
+      'token',
+      '~/.rcc/auth/glm.cookie',
       'gpt-5.2-codex,gpt-4.1-mini',
       'gpt-4.1-mini',
       'y'
     );
     await createProviderUpdateCommand().parseAsync(['node', 'provider', 'change', 'demo', '--root', root], { from: 'node' });
     const changed = JSON.parse(await fs.readFile(createdPath, 'utf8')) as { provider: { auth?: Record<string, unknown>; defaultModel?: string } };
-    expect(changed.provider.auth?.type).toBe('iflow-cookie');
-    expect(changed.provider.auth?.cookieFile).toBe('~/.rcc/auth/iflow.cookie');
+    expect(changed.provider.auth?.type).toBe('token');
+    expect(changed.provider.auth?.cookieFile).toBe('~/.rcc/auth/glm.cookie');
     expect(changed.provider.defaultModel).toBe('gpt-4.1-mini');
 
     answers.push('n');

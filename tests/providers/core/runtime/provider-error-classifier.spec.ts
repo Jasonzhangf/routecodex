@@ -138,9 +138,9 @@ describe('Provider error classifier - internal conversion errors', () => {
     expect(classification.isRateLimit).toBe(false);
   });
 
-  it('treats iflow upstream 434 blocked-account as non-recoverable and health-affecting', () => {
+  it('treats glm upstream 434 blocked-account as non-recoverable and health-affecting', () => {
     const error = Object.assign(
-      new Error('HTTP 400: iFlow business error (434): Access to the current AK has been blocked due to unauthorized requests'),
+      new Error('HTTP 400: GLM business error (434): Access to the current AK has been blocked due to unauthorized requests'),
       {
         response: {
           status: 400,

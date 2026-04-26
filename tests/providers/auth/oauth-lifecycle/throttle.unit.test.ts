@@ -29,7 +29,7 @@ describe('throttle', () => {
     });
 
     it('handles empty tokenFile', () => {
-      expect(keyFor('iflow', '')).toBe('iflow::');
+      expect(keyFor('glm', '')).toBe('glm::');
     });
   });
 

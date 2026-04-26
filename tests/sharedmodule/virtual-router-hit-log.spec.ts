@@ -9,7 +9,7 @@ describe('virtual-router hit log', () => {
     const line = formatVirtualRouterHit(createVirtualRouterHitRecord({
       routeName: 'thinking',
       poolId: 'thinking-primary',
-      providerKey: 'iflow.key1.kimi-k2.5',
+      providerKey: 'glm.key1.kimi-k2.5',
       modelId: 'kimi-k2.5',
       hitReason: 'thinking:user-input',
       requestTokens: 1234.6
@@ -22,7 +22,7 @@ describe('virtual-router hit log', () => {
     const line = formatVirtualRouterHit(createVirtualRouterHitRecord({
       routeName: 'thinking',
       poolId: 'thinking-primary',
-      providerKey: 'iflow.key1.kimi-k2.5',
+      providerKey: 'glm.key1.kimi-k2.5',
       modelId: 'kimi-k2.5',
       hitReason: 'thinking:user-input'
     }));
@@ -34,7 +34,7 @@ describe('virtual-router hit log', () => {
     const line = formatVirtualRouterHit(createVirtualRouterHitRecord({
       routeName: 'thinking',
       poolId: 'thinking-primary',
-      providerKey: 'iflow.key1.kimi-k2.5',
+      providerKey: 'glm.key1.kimi-k2.5',
       modelId: 'kimi-k2.5',
       hitReason: 'thinking:user-input',
       selectionPenalty: 3
@@ -69,7 +69,7 @@ describe('virtual-router hit log', () => {
     const lineA = formatVirtualRouterHit(createVirtualRouterHitRecord({
       routeName: 'thinking',
       poolId: 'thinking-primary',
-      providerKey: 'iflow.key1.kimi-k2.5',
+      providerKey: 'glm.key1.kimi-k2.5',
       modelId: 'kimi-k2.5',
       hitReason: 'thinking:user-input',
       sessionId: 'tmux-alpha-01'
@@ -85,7 +85,7 @@ describe('virtual-router hit log', () => {
     const lineC = formatVirtualRouterHit(createVirtualRouterHitRecord({
       routeName: 'thinking',
       poolId: 'thinking-primary',
-      providerKey: 'iflow.key1.kimi-k2.5',
+      providerKey: 'glm.key1.kimi-k2.5',
       modelId: 'kimi-k2.5',
       hitReason: 'thinking:user-input',
       sessionId: 'tmux-zeta-99'

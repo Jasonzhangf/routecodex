@@ -1041,10 +1041,10 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const pipelineResultWithUndefinedMetadata: PipelineExecutionResult = {
       providerPayload: { data: { messages: [] } },
       target: {
-        providerKey: 'iflow.3-138.kimi-k2.5',
+        providerKey: 'glm.3-138.kimi-k2.5',
         providerType: 'responses',
         outboundProfile: 'openai-responses',
-        runtimeKey: 'runtime:iflow',
+        runtimeKey: 'runtime:glm',
         processMode: 'standard'
       },
       processMode: 'standard',

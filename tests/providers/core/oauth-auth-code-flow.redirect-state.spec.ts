@@ -44,11 +44,11 @@ describe('OAuth auth-code redirect rewrite', () => {
       {
         flowType: 'authorization_code' as any,
         endpoints: {
-          authorizationUrl: 'https://iflow.cn/oauth',
-          tokenUrl: 'https://iflow.cn/oauth/token'
+          authorizationUrl: 'https://glm.com/oauth',
+          tokenUrl: 'https://glm.com/oauth/token'
         },
         client: {
-          clientId: 'iflow-client-id',
+          clientId: 'glm-client-id',
           scopes: ['openid'],
           redirectUri: 'http://localhost:8080/oauth2callback'
         },

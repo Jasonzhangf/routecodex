@@ -3,17 +3,17 @@ import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/route
 import type { VirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
 
 describe('provider.model debug: why PROVIDER_NOT_AVAILABLE', () => {
-  it('should show provider registry state when iflow.kimi-k2.5 fails', async () => {
+  it('should show provider registry state when glm.kimi-k2.5 fails', async () => {
     const input: VirtualRouterConfig = {
       virtualrouter: {
         providers: {
-          iflow: {
-            id: 'iflow',
+          glm: {
+            id: 'glm',
             enabled: true,
-            type: 'iflow',
-            baseURL: 'https://apis.iflow.cn/v1',
+            type: 'glm',
+            baseURL: 'https://api.glm.com/v1',
             maxContextTokens: 262144,
-            compatibilityProfile: 'chat:iflow',
+            compatibilityProfile: 'chat:glm',
             auth: {
               type: 'apikey',
               apiKey: 'TEST_KEY'
@@ -30,7 +30,7 @@ describe('provider.model debug: why PROVIDER_NOT_AVAILABLE', () => {
               id: 'default-primary',
               priority: 200,
               mode: 'round-robin',
-              targets: ['iflow.kimi-k2.5']
+              targets: ['glm.kimi-k2.5']
             }
           ]
         }
@@ -41,8 +41,8 @@ describe('provider.model debug: why PROVIDER_NOT_AVAILABLE', () => {
     const engine = new VirtualRouterEngine(config);
 
     // 检查 providerRegistry
-    const providerKeys = engine['providerRegistry'].listProviderKeys('iflow');
-    console.log('iflow providerKeys:', providerKeys);
+    const providerKeys = engine['providerRegistry'].listProviderKeys('glm');
+    console.log('glm providerKeys:', providerKeys);
 
     // 检查每个 key 的 profile
     providerKeys.forEach(key => {
@@ -52,7 +52,7 @@ describe('provider.model debug: why PROVIDER_NOT_AVAILABLE', () => {
 
     // 尝试路由
     await expect(engine.route({
-      model: 'iflow.kimi-k2.5',
+      model: 'glm.kimi-k2.5',
       messages: [{ role: 'user', content: 'Hello' }]
     })).rejects.toThrow(/PROVIDER_NOT_AVAILABLE/);
   });

@@ -117,19 +117,19 @@ describe('token-helpers', () => {
       expect(state.isExpired).toBe(true);
       expect(state.validAccess).toBe(false);
     });
-    it('does not treat iflow apiKey as perpetual valid credential', () => {
-      const token: StoredOAuthToken = { apiKey: 'iflow-key', expires_at: Date.now() - 10_000 };
-      const state = evaluateTokenState(token, 'iflow');
+    it('does not treat glm apiKey as perpetual valid credential', () => {
+      const token: StoredOAuthToken = { apiKey: 'glm-key', expires_at: Date.now() - 10_000 };
+      const state = evaluateTokenState(token, 'glm');
       expect(state.isExpired).toBe(true);
       expect(state.validAccess).toBe(false);
     });
-    it('treats iflow non-expired access_token as valid', () => {
+    it('treats glm non-expired access_token as valid', () => {
       const token: StoredOAuthToken = {
-        apiKey: 'iflow-key',
-        access_token: 'iflow-access',
+        apiKey: 'glm-key',
+        access_token: 'glm-access',
         expires_at: Date.now() + 120_000
       };
-      const state = evaluateTokenState(token, 'iflow');
+      const state = evaluateTokenState(token, 'glm');
       expect(state.isExpired).toBe(false);
       expect(state.validAccess).toBe(true);
     });

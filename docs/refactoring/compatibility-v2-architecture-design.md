@@ -62,7 +62,6 @@ graph TB
 │   ├── chat-http-provider.ts       # OpenAI Chat 协议 Provider
 │   ├── glm-strategy.ts             # GLM特定策略
 │   ├── qwen-strategy.ts            # Qwen特定策略
-│   └── iflow-strategy.ts           # Iflow特定策略
 ├── utils/                          # 工具类
 │   ├── schema-validator.ts         # Schema验证器
 │   ├── type-converter.ts           # 类型转换器
@@ -174,7 +173,7 @@ export abstract class BaseCompatibility implements ICompatibilityV2 {
 ```
 
 > 注：自 ProviderComposite 引入后，生产蓝图不再显式编排 compatibility 节点，兼容处理在 Provider 内部通过 composite 执行；
-> 现有兼容模块（GLM/LMStudio/iFlow 等）可被 openai-family 聚合器以“适配器”方式复用，职责保持为最小字段修剪/映射/黑名单，避免工具语义和 SSE 路径改动。
+> 现有兼容模块（GLM/LMStudio 等）可被 openai-family 聚合器以“适配器”方式复用，职责保持为最小字段修剪/映射/黑名单，避免工具语义和 SSE 路径改动。
 
 ### 2. 配置驱动转换引擎
 
@@ -702,7 +701,6 @@ export class V1CompatibilityAdapter implements ICompatibilityV2 {
 1. 实现OpenAI标准策略
 2. 实现GLM特定策略
 3. 实现Qwen特定策略
-4. 实现Iflow特定策略
 
 ### 第四阶段：兼容性保证 (2天)
 1. 实现V1适配器

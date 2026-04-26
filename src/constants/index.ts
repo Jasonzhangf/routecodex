@@ -95,8 +95,6 @@ export const DEFAULT_PROVIDER = {
   STREAM_IDLE_TIMEOUT_MS: 900_000,   // 15 分钟
   STREAM_HEADERS_TIMEOUT_MS: 900_000,  // 15 分钟
 
-  // iFlow 签名配置
-  IFLOW_SIGNATURE_ALGORITHM: 'sha256',
 } as const;
 
 // Token Daemon 默认配置

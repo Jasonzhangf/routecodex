@@ -11,12 +11,12 @@ function writeJson(filePath: string, value: unknown): void {
 }
 
 describe('ensureValidOAuthToken non-interactive auth-code guard', () => {
-  test('iflow auth-code refuses interactive flow when openBrowser=false', async () => {
+  test('glm auth-code refuses interactive flow when openBrowser=false', async () => {
     const prevHome = process.env.HOME;
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-oauth-noninteractive-authcode-'));
     process.env.HOME = tmpHome;
 
-    const tokenFile = path.join(tmpHome, '.routecodex', 'auth', 'iflow-oauth-1-default.json');
+    const tokenFile = path.join(tmpHome, '.routecodex', 'auth', 'glm-oauth-1-default.json');
     writeJson(tokenFile, {
       access_token: 'expired-access',
       expires_at: Date.now() - 60_000
@@ -25,9 +25,9 @@ describe('ensureValidOAuthToken non-interactive auth-code guard', () => {
     try {
       await expect(
         ensureValidOAuthToken(
-          'iflow',
+          'glm',
           {
-            type: 'iflow-oauth',
+            type: 'glm-oauth',
             tokenFile
           } as any,
           {

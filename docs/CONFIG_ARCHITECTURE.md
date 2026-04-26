@@ -85,10 +85,10 @@ VirtualRouterArtifacts (virtualRouter + targetRuntime)
 "routing": {
   "default": [
     { "id": "primary", "priority": 200, "targets": ["glm.glm-4.7", "tab.gpt-5.2-codex"] },
-    { "id": "backup", "backup": true, "targets": ["iflow.kimi-k2"] }
+    { "id": "backup", "backup": true, "targets": ["glm.kimi-k2"] }
   ],
   "thinking": [
-    { "id": "thinking-main", "priority": 300, "targets": ["iflow.kimi-k2-thinking"] },
+    { "id": "thinking-main", "priority": 300, "targets": ["glm.kimi-k2-thinking"] },
     { "id": "thinking-secondary", "priority": 100, "targets": ["tab.gpt-5.2-codex"] },
     { "id": "thinking-backup", "backup": true, "targets": ["glm.glm-4.7"] }
   ]

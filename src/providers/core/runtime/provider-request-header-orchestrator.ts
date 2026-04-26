@@ -49,7 +49,6 @@ export async function buildProviderRequestHeaders(options: {
   familyProfile?: ProviderFamilyProfile;
   isGeminiFamily: boolean;
   isAntigravity: boolean;
-  isIflow: boolean;
   providerType: string;
 }): Promise<Record<string, string>> {
   const {
@@ -62,7 +61,6 @@ export async function buildProviderRequestHeaders(options: {
     familyProfile,
     isGeminiFamily,
     isAntigravity,
-    isIflow,
     providerType
   } = options;
 
@@ -138,7 +136,6 @@ export async function buildProviderRequestHeaders(options: {
     defaultUserAgent: DEFAULT_PROVIDER.USER_AGENT,
     isGeminiFamily,
     isAntigravity,
-    isIflow,
     codexUaMode
   });
 }
@@ -153,7 +150,6 @@ export async function finalizeProviderRequestHeaders(options: {
   runtimeMetadata?: ProviderRuntimeMetadata;
   familyProfile?: ProviderFamilyProfile;
   providerType: string;
-  isIflow: boolean;
 }): Promise<Record<string, string>> {
   const { headers, request, finalizeHeaders, runtimeMetadata, familyProfile, providerType } = options;
   const finalized = await finalizeHeaders(headers, request);

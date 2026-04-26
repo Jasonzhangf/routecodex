@@ -51,11 +51,6 @@ export class RuntimeDetector {
     return false;
   }
 
-  isIflow(runtimeMetadata?: ProviderRuntimeMetadata): boolean {
-    void runtimeMetadata;
-    return false;
-  }
-
   isGeminiFamily(): boolean {
     const providerType = this.providerType.toLowerCase();
     return providerType === 'gemini' ||

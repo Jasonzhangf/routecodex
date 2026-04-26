@@ -74,7 +74,7 @@ describe('HttpTransportProvider oauth preflight', () => {
     }
 
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-oauth-preflight-'));
-    const tokenFile = path.join(tempDir, 'iflow-oauth-test.json');
+    const tokenFile = path.join(tempDir, 'glm-oauth-test.json');
     await fs.writeFile(tokenFile, JSON.stringify({ access_token: 'stale-token', expires_at: Date.now() - 60_000 }), 'utf8');
 
     const config: OpenAIStandardConfig = {
@@ -82,8 +82,8 @@ describe('HttpTransportProvider oauth preflight', () => {
       type: 'responses-http-provider',
       config: {
         providerType: 'responses',
-        providerId: 'iflow',
-        auth: { type: 'iflow-oauth', tokenFile } as any,
+        providerId: 'glm',
+        auth: { type: 'glm-oauth', tokenFile } as any,
         overrides: {
           baseUrl: 'https://example.invalid/openai',
           defaultModel: 'gpt-5.1-codex'
@@ -150,8 +150,8 @@ describe('HttpTransportProvider oauth preflight', () => {
 
     attachProviderRuntimeMetadata(providerRequest as Record<string, unknown>, {
       requestId: 'req-oauth-preflight',
-      providerId: 'iflow',
-      providerKey: 'iflow.key1.gpt-5.1-codex',
+      providerId: 'glm',
+      providerKey: 'glm.key1.gpt-5.1-codex',
       providerType: 'responses',
       providerProtocol: 'openai-responses',
       routeName: 'test',
@@ -160,10 +160,10 @@ describe('HttpTransportProvider oauth preflight', () => {
         clientHeaders: { accept: 'application/json' }
       },
       target: {
-        providerKey: 'iflow.key1.gpt-5.1-codex',
+        providerKey: 'glm.key1.gpt-5.1-codex',
         providerType: 'responses',
         compatibilityProfile: undefined,
-        runtimeKey: 'iflow.key1',
+        runtimeKey: 'glm.key1',
         modelId: 'gpt-5.1-codex'
       }
     });
@@ -177,8 +177,8 @@ describe('HttpTransportProvider oauth preflight', () => {
     expect(shouldTriggerInteractiveOAuthRepair).toHaveBeenCalledTimes(1);
     expect(handleUpstreamInvalidOAuthToken).toHaveBeenCalledTimes(1);
     expect(handleUpstreamInvalidOAuthToken).toHaveBeenCalledWith(
-      'iflow',
-      expect.objectContaining({ type: 'iflow-oauth' }),
+      'glm',
+      expect.objectContaining({ type: 'glm-oauth' }),
       expect.objectContaining({ code: 'AUTH_INVALID_TOKEN' }),
       expect.objectContaining({ allowBlocking: false })
     );

@@ -42,7 +42,7 @@ describe('request-id-manager', () => {
   test('enhanced ids remain resolvable and aliases can be swept', () => {
     const base = generateRequestIdentifiers(undefined, {
       entryEndpoint: '/v1/messages',
-      providerId: 'iflow.1-186',
+      providerId: 'glm.1-186',
       model: 'kimi-k2.5'
     }).providerRequestId;
 
@@ -70,13 +70,13 @@ describe('request-id-manager', () => {
 
     const providerRequestId = generateRequestIdentifiers(undefined, {
       entryEndpoint: '/v1/messages',
-      providerId: 'iflow.1-186',
+      providerId: 'glm.1-186',
       model: 'kimi-k2.5'
     }).providerRequestId;
 
     // windowKey 与当前 noon-window key 不一致时，应先 reset 今日计数再递增到 1。
     expect(providerRequestId).toMatch(
-      /^anthropic-messages-iflow\.1-186-kimi-k2\.5-\d{8}T\d{9}-101-1$/
+      /^anthropic-messages-glm\.1-186-kimi-k2\.5-\d{8}T\d{9}-101-1$/
     );
 
     __unsafeSweepRequestIdCaches(Date.now() + 10 * 60 * 1000);

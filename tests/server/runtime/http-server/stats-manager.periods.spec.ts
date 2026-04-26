@@ -49,7 +49,7 @@ describe('StatsManager historical dedupe and periods', () => {
     const stats = new StatsManager();
 
     stats.recordRequestStart('req-1');
-    stats.bindProvider('req-1', { providerKey: 'iflow.2-173.kimi-k2.5', model: 'kimi-k2.5' });
+    stats.bindProvider('req-1', { providerKey: 'glm.2-173.kimi-k2.5', model: 'kimi-k2.5' });
     stats.recordCompletion('req-1', {
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
     });
@@ -57,7 +57,7 @@ describe('StatsManager historical dedupe and periods', () => {
     await stats.persistSnapshot(snap1, { reason: 'periodic' });
 
     stats.recordRequestStart('req-2');
-    stats.bindProvider('req-2', { providerKey: 'iflow.2-173.kimi-k2.5', model: 'kimi-k2.5' });
+    stats.bindProvider('req-2', { providerKey: 'glm.2-173.kimi-k2.5', model: 'kimi-k2.5' });
     stats.recordCompletion('req-2', {
       usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 }
     });

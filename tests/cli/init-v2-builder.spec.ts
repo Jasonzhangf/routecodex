@@ -36,8 +36,8 @@ describe('init-v2-builder', () => {
           default: {
             routing: { default: [] },
             webSearch: {
-              engines: [{ id: 'iflow:web_search', providerKey: 'iflow' }],
-              search: { 'iflow:web_search': { providerKey: 'iflow' } }
+              engines: [{ id: 'glm:web_search', providerKey: 'glm' }],
+              search: { 'glm:web_search': { providerKey: 'glm' } }
             }
           }
         }
@@ -56,7 +56,7 @@ describe('init-v2-builder', () => {
     expect(
       next.virtualrouter.routingPolicyGroups.default.routing.default[0].loadBalancing.weights['tab.gpt-5.2']
     ).toBe(1);
-    expect(next.virtualrouter.routingPolicyGroups.default.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
+    expect(next.virtualrouter.routingPolicyGroups.default.webSearch.search['glm:web_search'].providerKey).toBe('glm');
     expect(next.routing).toBeUndefined();
     expect(next.providers).toBeUndefined();
   });

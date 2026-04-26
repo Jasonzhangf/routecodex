@@ -32,7 +32,7 @@ describe('camoufox-launcher os policy', () => {
   });
 
   test('keeps non-Google URLs unchanged', () => {
-    const raw = 'https://iflow.cn/oauth?foo=bar';
+    const raw = 'https://glm.cn/oauth?foo=bar';
     expect(applyGoogleLocaleHint(raw)).toBe(raw);
   });
 
@@ -85,7 +85,7 @@ describe('camoufox-launcher os policy', () => {
     }
   });
 
-  test('sanitizes iflow CAMOU_CONFIG_1 by removing timezone (keep fingerprint injection)', () => {
+  test('sanitizes glm CAMOU_CONFIG_1 by removing timezone (keep fingerprint injection)', () => {
     const env = {
       CAMOU_CONFIG_1: JSON.stringify({
         'navigator.platform': 'MacIntel',
@@ -94,7 +94,7 @@ describe('camoufox-launcher os policy', () => {
         'locale:language': 'en'
       })
     };
-    const next = sanitizeCamouConfigForOAuth('iflow', env);
+    const next = sanitizeCamouConfigForOAuth('glm', env);
     const parsed = JSON.parse(String(next.CAMOU_CONFIG_1 || '{}')) as Record<string, unknown>;
     expect(parsed['navigator.platform']).toBe('MacIntel');
     expect(parsed['locale:language']).toBe('en');
@@ -102,7 +102,7 @@ describe('camoufox-launcher os policy', () => {
     expect(Object.prototype.hasOwnProperty.call(parsed, 'timezone')).toBe(false);
   });
 
-  test('keeps non-iflow CAMOU_CONFIG_1 unchanged', () => {
+  test('keeps non-glm CAMOU_CONFIG_1 unchanged', () => {
     const env = {
       CAMOU_CONFIG_1: JSON.stringify({
         'navigator.platform': 'MacIntel',
@@ -117,36 +117,36 @@ describe('camoufox-launcher os policy', () => {
 
   test('handles invalid CAMOU_CONFIG_1 payload safely', () => {
     const env = { CAMOU_CONFIG_1: '{bad-json' };
-    const next = sanitizeCamouConfigForOAuth('iflow', env);
+    const next = sanitizeCamouConfigForOAuth('glm', env);
     expect(next.CAMOU_CONFIG_1).toBe('{bad-json');
   });
 
   test('returns empty object when no CAMOU_CONFIG_1 present', () => {
-    const next = sanitizeCamouConfigForOAuth('iflow', {});
+    const next = sanitizeCamouConfigForOAuth('glm', {});
     expect(next).toEqual({});
-    const other = sanitizeCamouConfigForOAuth('iflow', { A: '1' });
+    const other = sanitizeCamouConfigForOAuth('glm', { A: '1' });
     expect(other).toEqual({ A: '1' });
   });
 
-  test('repairs iflow Windows fingerprint on macOS host', () => {
-    expect(shouldRepairCamoufoxFingerprintForOAuth('iflow', 'Win32', 'darwin')).toBe(true);
+  test('repairs glm Windows fingerprint on macOS host', () => {
+    expect(shouldRepairCamoufoxFingerprintForOAuth('glm', 'Win32', 'darwin')).toBe(true);
   });
 
   test('does not repair non-Windows fingerprint on macOS host', () => {
-    expect(shouldRepairCamoufoxFingerprintForOAuth('iflow', 'MacIntel', 'darwin')).toBe(false);
+    expect(shouldRepairCamoufoxFingerprintForOAuth('glm', 'MacIntel', 'darwin')).toBe(false);
   });
 
   test('does not repair Windows fingerprint on non-macOS host', () => {
-    expect(shouldRepairCamoufoxFingerprintForOAuth('iflow', 'Win32', 'linux')).toBe(false);
+    expect(shouldRepairCamoufoxFingerprintForOAuth('glm', 'Win32', 'linux')).toBe(false);
   });
 
-  test('prefers camo-cli for iflow oauth by default', () => {
+  test('prefers camo-cli for glm oauth by default', () => {
     const prev1 = process.env.ROUTECODEX_OAUTH_CAMO_CLI;
     const prev2 = process.env.RCC_OAUTH_CAMO_CLI;
     delete process.env.ROUTECODEX_OAUTH_CAMO_CLI;
     delete process.env.RCC_OAUTH_CAMO_CLI;
     try {
-      expect(shouldPreferCamoCliForOAuth('iflow')).toBe(true);
+      expect(shouldPreferCamoCliForOAuth('glm')).toBe(true);
       expect(shouldPreferCamoCliForOAuth('antigravity')).toBe(true);
       expect(shouldPreferCamoCliForOAuth(undefined)).toBe(true);
     } finally {
@@ -167,7 +167,7 @@ describe('camoufox-launcher os policy', () => {
     const prev = process.env.ROUTECODEX_OAUTH_CAMO_CLI;
     process.env.ROUTECODEX_OAUTH_CAMO_CLI = '0';
     try {
-      expect(shouldPreferCamoCliForOAuth('iflow')).toBe(false);
+      expect(shouldPreferCamoCliForOAuth('glm')).toBe(false);
     } finally {
       if (prev === undefined) {
         delete process.env.ROUTECODEX_OAUTH_CAMO_CLI;

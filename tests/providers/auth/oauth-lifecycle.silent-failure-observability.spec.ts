@@ -78,7 +78,7 @@ describe('oauth-lifecycle silent failure observability', () => {
     }
   });
 
-  it('logs parse failures but still infers iflow client creds from earlier valid line', async () => {
+  it('logs parse failures but still infers glm client creds from earlier valid line', async () => {
     jest.resetModules();
     process.env.ROUTECODEX_OAUTH_DEBUG = '1';
 
@@ -86,7 +86,7 @@ describe('oauth-lifecycle silent failure observability', () => {
     const prevRccHome = process.env.RCC_HOME;
     const prevRouteUserDir = process.env.ROUTECODEX_USER_DIR;
     const prevRouteHome = process.env.ROUTECODEX_HOME;
-    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-oauth-iflow-obsv-'));
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-oauth-glm-obsv-'));
     process.env.HOME = tmpHome;
     process.env.RCC_HOME = path.join(tmpHome, '.rcc');
     process.env.ROUTECODEX_USER_DIR = path.join(tmpHome, '.rcc');
@@ -94,7 +94,7 @@ describe('oauth-lifecycle silent failure observability', () => {
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
 
     try {
-      const logFile = path.join(tmpHome, '.rcc', 'auth', 'iflow-oauth.log');
+      const logFile = path.join(tmpHome, '.rcc', 'auth', 'glm-oauth.log');
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
       fs.writeFileSync(
         logFile,
@@ -107,12 +107,12 @@ describe('oauth-lifecycle silent failure observability', () => {
       );
 
       const { __oauthLifecycleTestables } = await import('../../../src/providers/auth/oauth-lifecycle.js');
-      const creds = await __oauthLifecycleTestables.inferIflowClientCredsFromLog();
+      const creds = await __oauthLifecycleTestables.inferGlmClientCredsFromLog();
 
       expect(creds).toEqual({ clientId: 'client-id', clientSecret: 'client-secret' });
       expect(
         logSpy.mock.calls.some(([message]) =>
-          String(message).includes('inferIflowClientCredsFromLog.parseLine failed (non-blocking)')
+          String(message).includes('inferGlmClientCredsFromLog.parseLine failed (non-blocking)')
         )
       ).toBe(true);
     } finally {

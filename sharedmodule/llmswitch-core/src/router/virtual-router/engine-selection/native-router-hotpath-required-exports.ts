@@ -219,7 +219,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "applyAnthropicClaudeCodeUserIdJson",
   "applyGeminiWebSearchRequestCompatJson",
   "prepareAntigravityThoughtSignatureForGeminiRequestJson",
-  "applyIflowToolTextFallbackJson",
   "applyFieldMappingsJson",
   "fixApplyPatchToolCallsJson",
   "sanitizeToolSchemaGlmShellJson",

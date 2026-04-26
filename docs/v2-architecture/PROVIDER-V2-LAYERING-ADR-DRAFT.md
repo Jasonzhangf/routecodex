@@ -15,7 +15,7 @@
 
 基于当前代码可观察到的典型信号（作为迁移切入点）：
 
-- Kernel 中存在 iFlow/Antigravity/Codex UA 分支逻辑与签名行为。
+- Kernel 中存在 Antigravity/Codex UA 分支逻辑与签名行为。
 - `service-profiles.ts` 既承载基础配置，也承载品牌特定 header 与行为暗约束。
 - Factory 在协议映射、module 选择、brand 归一间承担了超出“构造器”范畴的语义。
 
@@ -55,7 +55,7 @@ Kernel 只保留“与业务语义无关”的纯通用能力：
 
 Kernel 禁止：
 
-- 品牌识别分支（例如 `iflow` / `qwen` / `glm`）
+- 品牌识别分支（例如 `qwen` / `glm`）
 - 特定上游签名算法、header 语义修复
 - 模型级行为修复与策略 fallback
 
@@ -81,7 +81,7 @@ Family Profile 承载“同协议下不同品牌”的差异策略：
 - auth policy（oauthProviderId 解析、token 形态扩展）
 - request policy（字段注入、字段裁剪、模型映射）
 - response policy（错误 envelope 归一、供应商业务码映射）
-- optional signing policy（例如 iFlow 的签名规则）
+- optional signing policy
 
 Profile 必须是声明式 + 小型策略函数，不允许变成第二个 transport kernel。
 
@@ -154,7 +154,6 @@ src/providers/core/
     gemini/
   profiles/
     families/
-      iflow/
       qwen/
       glm/
       antigravity/

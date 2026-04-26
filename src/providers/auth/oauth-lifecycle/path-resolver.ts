@@ -36,9 +36,6 @@ export function defaultTokenFile(providerType: string): string {
   return path.join(resolveRccTokensDir(), `${providerType}-default.json`);
 }
 
-export function resolveIflowCredentialCandidates(): string[] {
-  return [];
-}
 
 import type { OAuthAuth } from '../../core/api/provider-config.js';
 

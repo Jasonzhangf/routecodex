@@ -82,12 +82,7 @@ export class AuthProviderFactory {
     const baseUrl = typeof this.context.config.config.baseUrl === 'string'
       ? this.context.config.config.baseUrl.toLowerCase()
       : '';
-    const isLegacyIflowCookie =
-      providerId === 'iflow' ||
-      baseUrl.includes('apis.iflow.cn') ||
-      baseUrl.includes('iflow.cn') ||
-      rawType === 'iflow-cookie';
-    if (isLegacyIflowCookie) {
+    if (rawType === 'iflow-cookie') {
       throw new Error(
         '[AuthProviderFactory] iflow provider/cookie auth has been removed; please migrate this runtime to a supported provider.'
       );

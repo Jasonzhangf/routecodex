@@ -332,7 +332,6 @@ export function detectProviderType(provider: Record<string, unknown>): string {
   if (match(lexicon, 'anthropic') || match(lexicon, 'claude')) return 'anthropic';
   if (match(lexicon, 'responses')) return 'responses';
   if (match(lexicon, 'gemini')) return 'gemini';
-  if (match(lexicon, 'iflow')) return 'iflow';
   if (match(lexicon, 'qwen')) return 'qwen';
   if (match(lexicon, 'glm')) return 'glm';
   if (match(lexicon, 'lmstudio')) return 'lmstudio';

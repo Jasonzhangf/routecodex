@@ -36,7 +36,7 @@ const STOP_MESSAGE_AUTOMESSAGE_PROMPT_MAX_CHARS = 18_000;
 const STOP_MESSAGE_AUTOMESSAGE_OUTPUT_MAX_CHARS = 1_600;
 const STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS = 200;
 const ANSI_ESCAPE_PATTERN = /\x1B\[[0-?]*[ -/]*[@-~]/g;
-type StopMessageAutoMessageBackend = 'codex' | 'iflow';
+type StopMessageAutoMessageBackend = 'codex';
 export type StopMessageAiFollowupHistoryEntry = {
   ts?: number;
   round?: number;
@@ -287,7 +287,6 @@ export function renderStopMessageAutoFollowupViaAi(args: StopMessageAiFollowupAr
         if (stdout) {
           const approvedMarker = resolveStopMessageAiApprovedMarker(args.approvedMarker);
           const normalizedOutput =
-            backend === 'iflow' && !hasStandaloneMarkerLine(stdout, approvedMarker)
               ? sanitizeFollowupText(args.candidateFollowupText || args.baseStopMessageText || stdout) || stdout
               : stdout;
           logStopMessageAutoMessage({
@@ -397,7 +396,6 @@ export async function renderStopMessageAutoFollowupViaAiAsync(args: StopMessageA
         if (stdout) {
           const approvedMarker = resolveStopMessageAiApprovedMarker(args.approvedMarker);
           const normalizedOutput =
-            backend === 'iflow' && !hasStandaloneMarkerLine(stdout, approvedMarker)
               ? sanitizeFollowupText(args.candidateFollowupText || args.baseStopMessageText || stdout) || stdout
               : stdout;
           logStopMessageAutoMessage({
@@ -601,16 +599,10 @@ function resolveStopMessageAutoMessageBackend(): StopMessageAutoMessageBackend {
       process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND ??
       ''
   ).trim().toLowerCase();
-  if (raw === 'iflow') {
-    return 'iflow';
-  }
   if (raw === 'codex') {
     return 'codex';
   }
   const fromConfig = resolveStopMessageAiFollowupBackendFromConfig();
-  if (fromConfig === 'iflow') {
-    return 'iflow';
-  }
   if (fromConfig === 'codex') {
     return 'codex';
   }
@@ -655,18 +647,6 @@ function resolveStopMessageAutoMessageCodexProfileOrder(): Array<string | undefi
 }
 
 function resolveStopMessageAutoMessageCommand(backend: StopMessageAutoMessageBackend): string {
-  if (backend === 'iflow') {
-    const iflowRaw = String(
-      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN ??
-        process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN ??
-        ''
-    ).trim();
-    if (iflowRaw) {
-      return iflowRaw;
-    }
-    const fromConfig = resolveStopMessageAiFollowupCommandFromConfig(backend);
-    return fromConfig && fromConfig.trim() ? fromConfig.trim() : '';
-  }
   const codexRawFromEnv = String(
     process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN ??
       process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN ??
@@ -736,7 +716,6 @@ function createStopMessageAutoMessageInvocation(
   outputFilePath?: string;
   cleanup: () => void;
 } {
-  if (backend === 'iflow') {
     return {
       args: ['-p', prompt],
       cleanup: () => {

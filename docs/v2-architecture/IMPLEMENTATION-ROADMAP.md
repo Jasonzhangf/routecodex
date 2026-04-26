@@ -175,7 +175,7 @@ This roadmap outlines the implementation plan for V2 pipeline architecture with 
 **Tasks**:
 - [x] Internalize compatibility into Provider (ProviderComposite)
 - [x] Add protocol guards and minimal shape checks (Fail Fast)
-- [x] OpenAI-family aggregator (glm/lmstudio/iflow reuse; qwen safe path)
+- [x] OpenAI-family aggregator (glm/lmstudio reuse; qwen safe path)
 - [x] Factory protocol-first selection; normalize legacy providerType
 - [x] Docs for design/testing/migration
 

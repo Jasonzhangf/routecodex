@@ -32,7 +32,7 @@ function buildContinueExecutionToolCallPayload(): JsonObject {
 
 describe('continue_execution servertool followup provider pin', () => {
   test('pins followup to original provider key to avoid alias drift', async () => {
-    const providerKey = 'iflow.1-186.kimi-k2.5';
+    const providerKey = 'glm.1-186.kimi-k2.5';
     const adapterContext: AdapterContext = {
       requestId: 'req-continue-pin-1',
       entryEndpoint: '/v1/messages',

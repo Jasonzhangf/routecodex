@@ -117,7 +117,7 @@ export interface OAuthFlowConfig {
 }
 
 const DISABLED_CAMOUFOX_AUTO_MODE = new Set(['0', 'false', 'no', 'off', 'manual', 'none']);
-const REMOVED_CAMOUFOX_AUTO_MODE = new Set(['qwen', 'iflow']);
+const REMOVED_CAMOUFOX_AUTO_MODE = new Set(['qwen']);
 
 function resolveDefaultCamoufoxAutoMode(provider?: string | null): string {
   const normalized = String(provider || '').trim().toLowerCase();

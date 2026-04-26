@@ -70,13 +70,13 @@ const supportsProgressConsoleLogs =
   fs.readFileSync(serverToolEngineRuntimePath, 'utf8').includes('[servertool][stop_watch]');
 const testIfProgressConsoleLogs = supportsProgressConsoleLogs ? test : test.skip;
 
-const PROGRESS_MOCK_IFLOW_BIN_PATH = path.join(process.cwd(), 'tmp', 'jest-progress-mock-iflow.sh');
-const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
-const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+const PROGRESS_MOCK_CODEX_BIN_PATH = path.join(process.cwd(), 'tmp', 'jest-progress-mock-codex.sh');
+const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX;
+const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
 
 beforeAll(async () => {
   fs.writeFileSync(
-    PROGRESS_MOCK_IFLOW_BIN_PATH,
+    PROGRESS_MOCK_CODEX_BIN_PATH,
     [
       '#!/usr/bin/env bash',
       'if [ "$1" = "-p" ]; then',
@@ -92,9 +92,9 @@ beforeAll(async () => {
     ].join('\n'),
     { encoding: 'utf8' }
   );
-  fs.chmodSync(PROGRESS_MOCK_IFLOW_BIN_PATH, 0o755);
-  process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW = '1';
-  process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = PROGRESS_MOCK_IFLOW_BIN_PATH;
+  fs.chmodSync(PROGRESS_MOCK_CODEX_BIN_PATH, 0o755);
+  process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX = '1';
+  process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = PROGRESS_MOCK_CODEX_BIN_PATH;
 
   if (!supportsProgressFileLogger) {
     return;
@@ -109,18 +109,18 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  if (ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW === undefined) {
-    delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
+  if (ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX === undefined) {
+    delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX;
   } else {
-    process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW = ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW;
+    process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX = ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX;
   }
-  if (ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN === undefined) {
-    delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+  if (ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN === undefined) {
+    delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
   } else {
-    process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+    process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
   }
-  if (fs.existsSync(PROGRESS_MOCK_IFLOW_BIN_PATH)) {
-    fs.unlinkSync(PROGRESS_MOCK_IFLOW_BIN_PATH);
+  if (fs.existsSync(PROGRESS_MOCK_CODEX_BIN_PATH)) {
+    fs.unlinkSync(PROGRESS_MOCK_CODEX_BIN_PATH);
   }
 });
 

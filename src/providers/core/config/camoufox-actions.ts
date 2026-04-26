@@ -32,15 +32,6 @@ export const CAMO_CLICK_TARGETS: Record<string, CamoClickTarget> = {
       "button[class*='other-login-button']"
     ]
   },
-  iflowAccountSelect: {
-    key: 'iflowAccountSelect',
-    selectors: [
-      "div[class^='accountItem--']",
-      "div[class*='accountItem--']",
-      "div[class^='accountContent--']",
-      "div[class*='accountContent--']"
-    ]
-  },
   googleAccountSelect: {
     key: 'googleAccountSelect',
     selectors: [

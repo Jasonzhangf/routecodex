@@ -48,7 +48,7 @@ describe('snapshot writer error spill in release mode', () => {
         phase: 'provider-request',
         requestId: 'req_err_spill',
         clientRequestId: 'req_err_spill',
-        providerKey: 'iflow.2-173.kimi-k2.5',
+        providerKey: 'glm.2-173.kimi-k2.5',
         entryEndpoint: '/v1/responses',
         data: { step: 'request' }
       });
@@ -59,7 +59,7 @@ describe('snapshot writer error spill in release mode', () => {
         phase: 'provider-response',
         requestId: 'req_err_spill',
         clientRequestId: 'req_err_spill',
-        providerKey: 'iflow.2-173.kimi-k2.5',
+        providerKey: 'glm.2-173.kimi-k2.5',
         entryEndpoint: '/v1/responses',
         data: { step: 'response' }
       });
@@ -70,7 +70,7 @@ describe('snapshot writer error spill in release mode', () => {
         phase: 'provider-error',
         requestId: 'req_err_spill',
         clientRequestId: 'req_err_spill',
-        providerKey: 'iflow.2-173.kimi-k2.5',
+        providerKey: 'glm.2-173.kimi-k2.5',
         entryEndpoint: '/v1/responses',
         data: { step: 'error', message: 'boom' }
       });

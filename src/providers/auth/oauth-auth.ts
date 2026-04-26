@@ -95,7 +95,6 @@ export class OAuthAuthProvider implements IAuthProvider {
       throw new Error('No valid OAuth token available');
     }
 
-    // iFlow 等服务在 userInfo 返回 apiKey 时，优先使用 apiKey 作为 Bearer
     const extendedToken = tokenStorage as unknown as StoredOAuthToken;
     const bearer = extractApiKey(extendedToken) || String(tokenStorage.access_token);
     const headers: Record<string, string> = {

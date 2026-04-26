@@ -15,8 +15,8 @@
 
 ```
 ~/.rcc/auth/
-├── iflow-oauth-1-work.json           # 账号: work@example.com
-├── iflow-oauth-2-personal.json       # 账号: my@gmail.com
+├── glm-oauth-1-work.json           # 账号: work@example.com
+├── glm-oauth-2-personal.json       # 账号: my@gmail.com
 ├── qwen-oauth-1-default.json         # 账号: dev@company.com
 ├── gemini-cli-oauth-1-default.json
 └── antigravity-oauth-1-default.json
@@ -45,8 +45,8 @@ alias > email > name > account_id > 文件名
 
 | 文件名 | 显示名称 |
 |--------|----------|
-| iflow.json | 工作账号 (work@company.com) |
-| iflow-personal.json | 个人账号 (my@gmail.com) |
+| glm.json | 工作账号 (work@company.com) |
+| glm-personal.json | 个人账号 (my@gmail.com) |
 | qwen.json | dev@company.com |
 
 ## 认证流程
@@ -66,7 +66,7 @@ Token 已过期/刷新失败 ──→ 系统通知 ──→ 用户点击
                                         ▼
                     ┌───────────────────────────────────┐
                     │  认证页面显示:                     │
-                    │  - 目标文件: iflow-work.json       │
+                    │  - 目标文件: glm-work.json       │
                     │  - 账号: work@company.com          │
                     │  - [🔐 使用 Google 账号登录]        │
                     └───────────────────────────────────┘
@@ -99,7 +99,7 @@ Token 已过期/刷新失败 ──→ 系统通知 ──→ 用户点击
 
 ⚠️ Token 失效 - 需要重新认证
 
-📄 iflow-work.json
+📄 glm-work.json
 👤 work@company.com
 
 [打开浏览器认证]  [查看详情]  [取消]
@@ -111,7 +111,7 @@ Token 已过期/刷新失败 ──→ 系统通知 ──→ 用户点击
 ┌─────────────────────────────────────────────────────────┐
 │  🌙 Routecodex Token 认证                                │
 ├─────────────────────────────────────────────────────────┤
-│  📄 目标文件: iflow-work.json                            │
+│  📄 目标文件: glm-work.json                            │
 │  👤 账号: work@company.com                               │
 │  📊 状态: Refresh Token 已过期                           │
 │                                                         │
@@ -130,7 +130,7 @@ Token 已过期/刷新失败 ──→ 系统通知 ──→ 用户点击
 │  ✅ 认证成功                                               │
 ├─────────────────────────────────────────────────────────┤
 │  🎉 Token 已更新!                                        │
-│  📄 iflow-work.json                                     │
+│  📄 glm-work.json                                     │
 │  👤 work@company.com                                    │
 │  此窗口可以关闭，Daemon 已恢复监控                         │
 │  [返回终端]                                              │
@@ -142,8 +142,8 @@ Token 已过期/刷新失败 ──→ 系统通知 ──→ 用户点击
 ```
 🌙
  ├─ 📊 状态
- │   ├─ iflow.json ✅ 有效
- │   ├─ iflow-work.json ❌ 失效 [重新认证]
+ │   ├─ glm.json ✅ 有效
+ │   ├─ glm-work.json ❌ 失效 [重新认证]
  │   └─ qwen.json ⚠️ 25分钟后过期
  ├─ 🔄 刷新全部
  └─ ❌ 退出
@@ -162,7 +162,7 @@ routecodex start --daemon
 routecodex token-daemon status
 
 # 手动触发刷新
-routecodex token-daemon refresh iflow-oauth
+routecodex token-daemon refresh glm-oauth
 
 # 查看即将过期的 token
 routecodex token-daemon list --expiring
@@ -180,8 +180,8 @@ PID: 12345
 
 | 文件名              | 显示名称               | 状态   | 过期时间       | 剩余   |
 |---------------------|------------------------|--------|----------------|--------|
-| iflow.json          | 工作账号 (work@co.com) | ✅ 有效 | 2025-12-26 15:30 | 38分钟 |
-| iflow-work.json     | 个人账号 (my@gmail.com) | ❌ 失效 | -              | -      |
+| glm.json          | 工作账号 (work@co.com) | ✅ 有效 | 2025-12-26 15:30 | 38分钟 |
+| glm-work.json     | 个人账号 (my@gmail.com) | ❌ 失效 | -              | -      |
 | qwen.json           | dev@company.com        | ⚠️ 即将过期 | 2025-12-26 14:45 | 3分钟  |
 ```
 
@@ -265,5 +265,5 @@ PID: 12345
 2. [x] 提前刷新时间: 30分钟
 3. [x] 认证方式: 外部浏览器
 4. [x] 回调方式: 本地 HTTP 服务器
-5. [x] alias: 支持显式账号名称（类似 iflow 实现方式），用于多账号识别
+5. [x] alias: 支持显式账号名称，用于多账号识别
 6. [x] 手动刷新: 支持 `routecodex token-daemon refresh <file>`

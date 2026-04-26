@@ -458,7 +458,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
   async refreshToken(refreshToken: string): Promise<StoredToken> {
     const configuredMaxAttempts = this.config.retry?.maxAttempts || 3;
     const tokenUrl = String(this.config.endpoints.tokenUrl || '').toLowerCase();
-    const maxAttempts = tokenUrl.includes('iflow.cn/oauth/token') ? 1 : configuredMaxAttempts;
+    const maxAttempts = configuredMaxAttempts;
     let lastError: unknown;
     let abortedEarly = false;
 

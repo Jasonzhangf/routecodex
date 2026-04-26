@@ -158,11 +158,8 @@ export function isFatalForQuota(event: ProviderErrorEvent): boolean {
   const code = typeof event.code === 'string' ? event.code.toUpperCase() : '';
   const stage = typeof event.stage === 'string' ? event.stage.toLowerCase() : '';
 
-  if (isIflowAkBlocked434(event)) {
-    return true;
-  }
 
-  if (status === 401 || status === 402 || status === 403) {
+  if (status === 401 || status === 402 || status === 403 || status === 434) {
     return true;
   }
   if (code.includes('AUTH') || code.includes('UNAUTHORIZED')) {
@@ -180,7 +177,7 @@ export function isFatalForQuota(event: ProviderErrorEvent): boolean {
   return false;
 }
 
-export function isIflowAkBlocked434(event: ProviderErrorEvent): boolean {
+export function isAkBlocked434(event: ProviderErrorEvent): boolean {
   const status = typeof event.status === 'number' ? event.status : undefined;
   if (status === 434) {
     return true;
@@ -190,7 +187,7 @@ export function isIflowAkBlocked434(event: ProviderErrorEvent): boolean {
   if (message.includes('access to the current ak has been blocked due to unauthorized requests')) {
     return true;
   }
-  if (message.includes('iflow business error (434)')) {
+  if (message.includes('business error (434)')) {
     return true;
   }
 

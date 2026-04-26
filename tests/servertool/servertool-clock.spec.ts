@@ -614,7 +614,7 @@ describe('servertool:clock', () => {
       clockConfig
     );
 
-    const providerKey = 'iflow.test.kimi-k2.5';
+    const providerKey = 'glm.test.kimi-k2.5';
     const chatResponse: JsonObject = {
       id: 'chatcmpl-clock-hold-1',
       object: 'chat.completion',

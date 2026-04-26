@@ -20,7 +20,7 @@ import { isModelCapacityExhausted429, ProviderModelBackoffTracker } from './prov
 import {
   extractAntigravityAlias,
   extractProviderKey,
-  isIflowAkBlocked434,
+  isAkBlocked434,
   isAntigravityReauthRequired403,
   isFatalForQuota,
   listAntigravityProviderKeysByAlias,
@@ -90,8 +90,8 @@ export async function handleProviderQuotaErrorEvent(
     ctx.quotaStates.get(providerKey) ??
     createInitialQuotaState(providerKey, ctx.staticConfigs.get(providerKey), nowMs);
 
-  if (isIflowAkBlocked434(event)) {
-    const blacklistMs = readPositiveNumberFromEnv('ROUTECODEX_IFLOW_434_BLACKLIST_MS', 30 * 24 * 60 * 60_000);
+  if (isAkBlocked434(event)) {
+    const blacklistMs = readPositiveNumberFromEnv('ROUTECODEX_434_BLACKLIST_MS', 30 * 24 * 60 * 60_000);
     const nextState: QuotaState = {
       ...previous,
       inPool: false,
@@ -99,7 +99,7 @@ export async function handleProviderQuotaErrorEvent(
       blacklistUntil: nowMs + blacklistMs,
       cooldownUntil: null,
       lastErrorSeries: 'EFATAL',
-      lastErrorCode: 'IFLOW_434',
+      lastErrorCode: 'AK_BLOCKED_434',
       lastErrorAtMs: nowMs,
       consecutiveErrorCount:
         typeof previous.consecutiveErrorCount === 'number' && previous.consecutiveErrorCount > 0
@@ -114,18 +114,18 @@ export async function handleProviderQuotaErrorEvent(
       await appendProviderErrorEvent({
         ts: tsIso,
         providerKey,
-        code: typeof event.code === 'string' ? event.code : 'IFLOW_434',
+        code: typeof event.code === 'string' ? event.code : 'AK_BLOCKED_434',
         httpStatus: typeof event.status === 'number' ? event.status : undefined,
         message: event.message,
         details: {
           stage: event.stage,
           routeName: (event.runtime as { routeName?: string }).routeName,
           entryEndpoint: (event.runtime as { entryEndpoint?: string }).entryEndpoint,
-          authIssue: { kind: 'iflow_ak_blocked_434', blacklistUntil: nowMs + blacklistMs }
+          authIssue: { kind: 'ak_blocked_434', blacklistUntil: nowMs + blacklistMs }
         }
       });
     } catch (appendError) {
-      logProviderQuotaDaemonEventNonBlockingError('iflow_434.appendProviderErrorEvent', appendError, {
+      logProviderQuotaDaemonEventNonBlockingError('ak_blocked_434.appendProviderErrorEvent', appendError, {
         providerKey
       });
     }

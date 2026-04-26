@@ -41,7 +41,7 @@ test('protocol mismatch fails fast', async () => {
 
 ## 3. 家族聚合回归（openai 协议族）
 
-针对 `glm/lmstudio/iflow`：
+针对 `glm/lmstudio`：
 
 - 入站：构造 openai-chat 形状请求 + 注入 runtime metadata（providerType='openai', providerId='glm' 等），
   - 断言：最小清理生效（如 GLM 删除 tools[].function.strict/无 tools 时删除 tool_choice）。

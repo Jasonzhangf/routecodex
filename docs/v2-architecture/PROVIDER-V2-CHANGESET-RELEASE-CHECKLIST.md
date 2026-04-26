@@ -2,7 +2,7 @@
 
 - Date: 2026-02-09
 - Source branch: `main`
-- Scope: 最近 4 个提交（架构草案 + iflow provider 对齐 + validate 进程清理）
+- Scope: 最近 4 个提交（架构草案 + validate 进程清理）
 
 ## 1) Changeset 映射
 
@@ -10,7 +10,6 @@
 |---|---|---|---|---|
 | `167400e0b` | Provider V2 架构草案全集（113.1~113.5） | 113 规划阶段 | Low | 文档与 `.beads/issues.jsonl` |
 | `8ea3ab778` | 文档约束增强（M10/M13/M16 + 验证门槛） | 113.5 审阅收敛 | Low | 文档与 `.beads/issues.jsonl` |
-| `ecf3dbe70` | iFlow CLI 头/签名对齐 | Wave-1（iflow）预实现 | High | 运行时代码变更 + 单测 |
 | `3857b25e6` | validate 启动/清理避免孤儿进程 | 运维/CLI 稳定性 | Medium | 运行时代码变更 |
 
 ## 2) 推荐 cherry-pick 顺序
@@ -45,14 +44,10 @@
    - `npm run build:dev`
    - `npm run install:global`
 
-## 4) Replay Gate（Wave-1 iflow）
 
-## Same-shape（iflow）
 
 ```bash
 npm run replay:codex-sample -- \
-  --sample <iflow-sample-client-request.json> \
-  --label wave-1-iflow-same-shape
 ```
 
 ## Control（非受影响 provider）
@@ -60,13 +55,11 @@ npm run replay:codex-sample -- \
 ```bash
 npm run replay:codex-sample -- \
   --sample <control-sample-client-request.json> \
-  --label wave-1-iflow-control
 ```
 
 ## 5) 风险与回滚点
 
 - `ecf3dbe70`（High）
-  - 关注：`x-iflow-signature` 计算一致性、`session-id/conversation-id` 映射。
   - 回滚：直接回退该 commit；不影响其它文档提交。
 - `3857b25e6`（Medium）
   - 关注：validate 自启 server 后停止逻辑、异常分支 cleanup。
@@ -74,7 +67,6 @@ npm run replay:codex-sample -- \
 
 ## 6) 发布后观察建议
 
-- 观察 iflow 400/435 比例是否下降。
 - 观察 validate 后是否仍残留 `routecodex`/`rcc start` 进程。
 - 若异常，按单 commit 回滚并保留 same-shape/control 证据。
 

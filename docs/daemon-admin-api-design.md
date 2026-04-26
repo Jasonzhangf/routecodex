@@ -61,11 +61,11 @@
 ```jsonc
 [
   {
-    "id": "iflow-oauth-1-186",
+    "id": "glm-oauth-1-186",
     "kind": "oauth",
     "providerFamily": "gemini",
-    "alias": "iflow-186",
-    "tokenFile": "~/.rcc/auth/iflow-oauth-1-186.json",
+    "alias": "glm-186",
+    "tokenFile": "~/.rcc/auth/glm-oauth-1-186.json",
     "projectId": "my-project",
     "expiresAt": 1736500000000,
     "expiresInSec": 3600,
@@ -86,11 +86,11 @@
 
 ```jsonc
 {
-  "id": "iflow-oauth-1-186",
+  "id": "glm-oauth-1-186",
   "kind": "oauth",
   "providerFamily": "gemini",
-  "alias": "iflow-186",
-  "tokenFile": "~/.rcc/auth/iflow-oauth-1-186.json",
+  "alias": "glm-186",
+  "tokenFile": "~/.rcc/auth/glm-oauth-1-186.json",
   "projectId": "my-project",
   "expiresAt": 1736500000000,
   "expiresInSec": 3600,
@@ -112,7 +112,7 @@
 ```jsonc
 {
   "ok": true,
-  "id": "iflow-oauth-1-186",
+  "id": "glm-oauth-1-186",
   "status": "valid", // valid | invalid | error
   "checkedAt": 1736500100000,
   "message": "Token accepted by upstream."
@@ -131,7 +131,7 @@
 ```jsonc
 {
   "ok": true,
-  "id": "iflow-oauth-1-186",
+  "id": "glm-oauth-1-186",
   "status": "refreshed",
   "expiresAt": 1736503600000
 }
@@ -228,7 +228,7 @@
     "protocol": "gemini-chat",
     "series": "gemini-pro",
     "enabled": true,
-    "boundCredentialId": "iflow-oauth-1-186",
+    "boundCredentialId": "glm-oauth-1-186",
     "health": {
       "status": "ok",
       "lastErrorAt": null,

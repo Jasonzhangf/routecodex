@@ -2,7 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import { Command } from 'commander';
 
 describe('oauth command behavior', () => {
-  it('keeps iflow root oauth path in manual mode', async () => {
+  it('keeps glm root oauth path in manual mode', async () => {
     jest.resetModules();
     let autoModeAtCall = '';
     let autoConfirmAtCall = '';
@@ -15,15 +15,15 @@ describe('oauth command behavior', () => {
       interactiveRefresh,
       validateOAuthTokens: jest.fn(async () => true),
       TokenDaemon: {
-        findTokenBySelector: jest.fn(async () => ({ provider: 'iflow' }))
+        findTokenBySelector: jest.fn(async () => ({ provider: 'glm' }))
       }
     }));
 
     const { createOauthCommand } = await import('../../src/commands/oauth.js');
     const cmd = createOauthCommand();
-    await cmd.parseAsync(['node', 'oauth', 'iflow-oauth-3-138.json'], { from: 'node' });
+    await cmd.parseAsync(['node', 'oauth', 'glm-oauth-3-138.json'], { from: 'node' });
 
-    expect(interactiveRefresh).toHaveBeenCalledWith('iflow-oauth-3-138.json', { force: true, mode: 'manual' });
+    expect(interactiveRefresh).toHaveBeenCalledWith('glm-oauth-3-138.json', { force: true, mode: 'manual' });
     expect(autoModeAtCall).toBe('');
     expect(autoConfirmAtCall).toBe('');
   });
@@ -134,8 +134,8 @@ describe('oauth command behavior', () => {
     const cmd = createOauthCommand();
 
     try {
-      await cmd.parseAsync(['node', 'oauth', 'iflow-oauth-3-138.json'], { from: 'node' });
-      expect(interactiveRefresh).toHaveBeenCalledWith('iflow-oauth-3-138.json', { force: true, mode: 'manual' });
+      await cmd.parseAsync(['node', 'oauth', 'glm-oauth-3-138.json'], { from: 'node' });
+      expect(interactiveRefresh).toHaveBeenCalledWith('glm-oauth-3-138.json', { force: true, mode: 'manual' });
       expect(browserAtCall).toBe('camoufox');
     } finally {
       if (prevBrowser === undefined) {
@@ -146,7 +146,7 @@ describe('oauth command behavior', () => {
     }
   });
 
-  it('honors --headful for oauth <selector> while staying in manual mode for iflow', async () => {
+  it('honors --headful for oauth <selector> while staying in manual mode for glm', async () => {
     jest.resetModules();
     const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
     const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
@@ -160,15 +160,15 @@ describe('oauth command behavior', () => {
     jest.unstable_mockModule('../../src/token-daemon/index.js', () => ({
       interactiveRefresh,
       validateOAuthTokens: jest.fn(async () => true),
-      TokenDaemon: { findTokenBySelector: jest.fn(async () => ({ provider: 'iflow' })) }
+      TokenDaemon: { findTokenBySelector: jest.fn(async () => ({ provider: 'glm' })) }
     }));
 
     const { createOauthCommand } = await import('../../src/commands/oauth.js');
     const cmd = createOauthCommand();
 
     try {
-      await cmd.parseAsync(['node', 'oauth', '--headful', 'iflow-oauth-3-138.json'], { from: 'node' });
-      expect(interactiveRefresh).toHaveBeenCalledWith('iflow-oauth-3-138.json', { force: true, mode: 'manual' });
+      await cmd.parseAsync(['node', 'oauth', '--headful', 'glm-oauth-3-138.json'], { from: 'node' });
+      expect(interactiveRefresh).toHaveBeenCalledWith('glm-oauth-3-138.json', { force: true, mode: 'manual' });
       expect(devModeAtCall).toBe('1');
       expect(browserAtCall).toBe('camoufox');
     } finally {
@@ -216,7 +216,7 @@ describe('oauth command behavior', () => {
     expect(autoConfirmAtCall).toBe('1');
   });
 
-  it('honors --headful for iflow-auto subcommand', async () => {
+  it('honors --headful for glm-auto subcommand', async () => {
     jest.resetModules();
     const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
     const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
@@ -235,7 +235,7 @@ describe('oauth command behavior', () => {
       interactiveRefresh,
       validateOAuthTokens: jest.fn(async () => true),
       TokenDaemon: {
-        findTokenBySelector: jest.fn(async () => ({ provider: 'iflow' }))
+        findTokenBySelector: jest.fn(async () => ({ provider: 'glm' }))
       }
     }));
 
@@ -243,8 +243,8 @@ describe('oauth command behavior', () => {
     const cmd = createOauthCommand();
 
     try {
-      await cmd.parseAsync(['node', 'oauth', 'iflow-auto', 'iflow-oauth-1-186.json', '--headful'], { from: 'node' });
-      expect(interactiveRefresh).toHaveBeenCalledWith('iflow-oauth-1-186.json', {
+      await cmd.parseAsync(['node', 'oauth', 'glm-auto', 'glm-oauth-1-186.json', '--headful'], { from: 'node' });
+      expect(interactiveRefresh).toHaveBeenCalledWith('glm-oauth-1-186.json', {
         force: true,
         mode: 'manual'
       });
@@ -275,7 +275,7 @@ describe('oauth command behavior', () => {
     }
   });
 
-  it('honors --headful for nested routecodex oauth iflow-auto command parsing', async () => {
+  it('honors --headful for nested routecodex oauth glm-auto command parsing', async () => {
     jest.resetModules();
     const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
     const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
@@ -290,7 +290,7 @@ describe('oauth command behavior', () => {
       interactiveRefresh,
       validateOAuthTokens: jest.fn(async () => true),
       TokenDaemon: {
-        findTokenBySelector: jest.fn(async () => ({ provider: 'iflow' }))
+        findTokenBySelector: jest.fn(async () => ({ provider: 'glm' }))
       }
     }));
 
@@ -300,10 +300,10 @@ describe('oauth command behavior', () => {
 
     try {
       await root.parseAsync(
-        ['node', 'routecodex', 'oauth', 'iflow-auto', 'iflow-oauth-1-186.json', '--headful'],
+        ['node', 'routecodex', 'oauth', 'glm-auto', 'glm-oauth-1-186.json', '--headful'],
         { from: 'node' }
       );
-      expect(interactiveRefresh).toHaveBeenCalledWith('iflow-oauth-1-186.json', {
+      expect(interactiveRefresh).toHaveBeenCalledWith('glm-oauth-1-186.json', {
         force: true,
         mode: 'manual'
       });

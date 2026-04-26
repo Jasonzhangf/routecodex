@@ -19,7 +19,6 @@ interface WebSearchEngineConfig {
   modelId?: string;
   maxUses?: number;
   serverToolsDisabled?: boolean;
-  // Optional: backend-specific engine list for providers like iFlow
   searchEngineList?: string[];
 }
 
@@ -323,11 +322,6 @@ function isGeminiWebSearchEngine(engine: WebSearchEngineConfig): boolean {
   );
 }
 
-function isIflowWebSearchEngine(engine: WebSearchEngineConfig): boolean {
-  const key = engine.providerKey.toLowerCase();
-  return key.startsWith('iflow.');
-}
-
 function isQwenWebSearchEngine(engine: WebSearchEngineConfig): boolean {
   const key = engine.providerKey.toLowerCase();
   return key.startsWith('qwen.');
@@ -362,21 +356,7 @@ async function executeWebSearchBackend(args: {
     logServerToolWebSearch(engine, options.requestId, query);
     const requestSuffix = args.requestSuffix;
 
-    // 对于 iFlow，直接通过 providerInvoker 调用 /chat/retrieve，
-    // 即使 reenterPipeline 可用，也不走 Chat 模型 + tools。
-    if (isIflowWebSearchEngine(engine) && options.providerInvoker) {
-      const backendResult = await executeIflowWebSearchViaProvider({
-        options,
-        engine,
-        query,
-        recency,
-        count: args.resultCount,
-        requestSuffix
-      });
-      summary = backendResult.summary;
-      hits = backendResult.hits;
-      ok = backendResult.ok;
-    } else if (isQwenWebSearchEngine(engine) && options.providerInvoker) {
+    if (isQwenWebSearchEngine(engine) && options.providerInvoker) {
       const backendResult = await executeQwenWebSearchViaProvider({
         options,
         engine,
@@ -645,142 +625,6 @@ async function executeWebSearchViaProvider(args: {
   return extractTextFromChatLike(providerResponse);
 }
 
-async function executeIflowWebSearchViaProvider(args: {
-  options: ServerSideToolEngineOptions;
-  engine: WebSearchEngineConfig;
-  query: string;
-  recency?: string;
-  count: number;
-  requestSuffix: string;
-}): Promise<WebSearchBackendResult> {
-  const { options, engine, query, count, requestSuffix } = args;
-  if (!options.providerInvoker) {
-    return {
-      summary: '',
-      hits: [],
-      ok: false
-    };
-  }
-
-  const searchEngineList =
-    Array.isArray(engine.searchEngineList) && engine.searchEngineList.length
-      ? engine.searchEngineList
-      : ['GOOGLE', 'BING', 'SCHOLAR', 'AIPGC', 'PDF'];
-
-  const searchBody: JsonObject = {
-    query,
-    history: {},
-    userId: 2,
-    userIp: '42.120.74.197',
-    appCode: 'SEARCH_CHATBOT',
-    chatId: Date.now(),
-    phase: 'UNIFY',
-    enableQueryRewrite: false,
-    enableRetrievalSecurity: false,
-    enableIntention: false,
-    searchEngineList
-  };
-
-  let providerKey = engine.providerKey;
-  try {
-    const adapter = options.adapterContext && typeof options.adapterContext === 'object'
-      ? (options.adapterContext as unknown as { target?: unknown })
-      : null;
-    const target = adapter && adapter.target && typeof adapter.target === 'object'
-      ? (adapter.target as { providerKey?: unknown })
-      : null;
-    const targetProviderKey =
-      target && typeof target.providerKey === 'string' && target.providerKey.trim()
-        ? target.providerKey.trim()
-        : undefined;
-    if (targetProviderKey) {
-      providerKey = targetProviderKey;
-    }
-  } catch {
-    // best-effort: fallback to engine.providerKey
-  }
-
-  const payload: JsonObject = {
-    data: searchBody,
-    metadata: {
-      entryEndpoint: '/chat/retrieve',
-      iflowWebSearch: true,
-      routeName: 'web_search'
-    }
-  };
-
-  const backend = await options.providerInvoker({
-    providerKey,
-    providerType: undefined,
-    modelId: undefined,
-    providerProtocol: options.providerProtocol,
-    payload,
-    entryEndpoint: '/v1/chat/retrieve',
-    requestId: `${options.requestId}${requestSuffix}`,
-    routeHint: 'web_search'
-  });
-
-  const providerResponse = backend.providerResponse && typeof backend.providerResponse === 'object'
-    ? (backend.providerResponse as JsonObject)
-    : null;
-  if (!providerResponse) {
-    return {
-      summary: '',
-      hits: [],
-      ok: false
-    };
-  }
-
-  const container = providerResponse as { data?: unknown; success?: unknown; message?: unknown };
-  const rawHits = Array.isArray(container.data) ? (container.data as JsonValue[]) : [];
-
-  const hits: WebSearchItem[] = [];
-  for (const item of rawHits) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
-    const record = item as {
-      title?: unknown;
-      url?: unknown;
-      time?: unknown;
-      abstractInfo?: unknown;
-    };
-    const link = typeof record.url === 'string' && record.url.trim() ? record.url.trim() : '';
-    if (!link) continue;
-    const title =
-      typeof record.title === 'string' && record.title.trim() ? record.title.trim() : undefined;
-    const publishDate =
-      typeof record.time === 'string' && record.time.trim() ? record.time.trim() : undefined;
-    const content =
-      typeof record.abstractInfo === 'string' && record.abstractInfo.trim()
-        ? record.abstractInfo.trim()
-        : undefined;
-    hits.push({
-      title,
-      link,
-      publish_date: publishDate,
-      content
-    });
-    if (hits.length >= count) {
-      break;
-    }
-  }
-
-  let summary = '';
-  if (typeof container.message === 'string' && container.message.trim()) {
-    summary = container.message.trim();
-  }
-  if (!summary && hits.length) {
-    summary = formatHitsSummary(hits);
-  }
-
-  const successField = container.success;
-  const ok = typeof successField === 'boolean' ? successField : hits.length > 0;
-
-  return {
-    summary,
-    hits,
-    ok
-  };
-}
 
 async function executeQwenWebSearchViaProvider(args: {
   options: ServerSideToolEngineOptions;

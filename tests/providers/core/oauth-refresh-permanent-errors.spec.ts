@@ -65,14 +65,14 @@ describe('OAuth refreshToken aborts early on permanent errors', () => {
     warn.mockRestore();
   });
 
-  test('iflow auth-code flow does not retry refresh on token endpoint errors', async () => {
+  test('glm auth-code flow does not retry refresh on token endpoint errors', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const calls: string[] = [];
     const strategy = new OAuthAuthCodeFlowStrategy(
       {
         flowType: 'authorization_code' as any,
-        endpoints: { deviceCodeUrl: 'https://x/device', tokenUrl: 'https://iflow.cn/oauth/token' },
-        client: { clientId: 'iflow-code', redirectUri: 'http://localhost:8080/oauth2callback' },
+        endpoints: { deviceCodeUrl: 'https://x/device', tokenUrl: 'https://glm.cn/oauth/token' },
+        client: { clientId: 'glm-code', redirectUri: 'http://localhost:8080/oauth2callback' },
         retry: { maxAttempts: 3, backoffMs: 1 }
       } as any,
       (async (url: string) => {
@@ -95,7 +95,7 @@ describe('OAuth refreshToken aborts early on permanent errors', () => {
       {
         flowType: 'authorization_code' as any,
         endpoints: { deviceCodeUrl: 'https://x/device', tokenUrl: 'https://x/token' },
-        client: { clientId: 'iflow-code', redirectUri: 'http://localhost:8080/oauth2callback' },
+        client: { clientId: 'glm-code', redirectUri: 'http://localhost:8080/oauth2callback' },
         retry: { maxAttempts: 1, backoffMs: 1 }
       } as any,
       (async () =>
@@ -113,17 +113,17 @@ describe('OAuth refreshToken aborts early on permanent errors', () => {
     expect(typeof refreshed.expires_at).toBe('number');
   });
 
-  test('iflow auth-code defaults to official web auth URL shape', async () => {
-    const prev = process.env.IFLOW_AUTH_STYLE;
-    delete process.env.IFLOW_AUTH_STYLE;
+  test('glm auth-code defaults to official web auth URL shape', async () => {
+    const prev = process.env.GLM_AUTH_STYLE;
+    delete process.env.GLM_AUTH_STYLE;
     try {
       const strategy = new OAuthAuthCodeFlowStrategy(
         {
           flowType: 'authorization_code' as any,
           endpoints: {
-            deviceCodeUrl: 'https://iflow.cn/api/oauth2/device/code',
-            tokenUrl: 'https://iflow.cn/oauth/token',
-            authorizationUrl: 'https://iflow.cn/oauth'
+            deviceCodeUrl: 'https://glm.cn/api/oauth2/device/code',
+            tokenUrl: 'https://glm.cn/oauth/token',
+            authorizationUrl: 'https://glm.cn/oauth'
           },
           client: {
             clientId: '10009311001',
@@ -139,7 +139,7 @@ describe('OAuth refreshToken aborts early on permanent errors', () => {
       const authCodeData = await (strategy as any).initiateAuthCodeFlow() as Record<string, string>;
       expect(authCodeData.flowStyle).toBe('web');
       const url = new URL(authCodeData.authUrl);
-      expect(url.origin + url.pathname).toBe('https://iflow.cn/oauth');
+      expect(url.origin + url.pathname).toBe('https://glm.cn/oauth');
       expect(url.searchParams.get('loginMethod')).toBe('phone');
       expect(url.searchParams.get('type')).toBe('phone');
       expect(url.searchParams.get('client_id')).toBe('10009311001');
@@ -148,9 +148,9 @@ describe('OAuth refreshToken aborts early on permanent errors', () => {
       expect(redirect).toBe('http://localhost:11451/oauth2callback');
     } finally {
       if (prev === undefined) {
-        delete process.env.IFLOW_AUTH_STYLE;
+        delete process.env.GLM_AUTH_STYLE;
       } else {
-        process.env.IFLOW_AUTH_STYLE = prev;
+        process.env.GLM_AUTH_STYLE = prev;
       }
     }
   });
@@ -160,15 +160,15 @@ describe('OAuth refreshToken aborts early on permanent errors', () => {
     const strategy = new OAuthAuthCodeFlowStrategy(
       {
         flowType: 'authorization_code' as any,
-        endpoints: { deviceCodeUrl: 'https://x/device', tokenUrl: 'https://iflow.cn/oauth/token' },
+        endpoints: { deviceCodeUrl: 'https://x/device', tokenUrl: 'https://glm.cn/oauth/token' },
         client: {
           clientId: '10009311001',
           clientSecret: 'secret',
           redirectUri: 'http://localhost:11451/oauth2callback'
         },
         headers: {
-          'Origin': 'https://iflow.cn',
-          'Referer': 'https://iflow.cn/oauth',
+          'Origin': 'https://glm.cn',
+          'Referer': 'https://glm.cn/oauth',
           'X-Requested-With': 'XMLHttpRequest'
         },
         retry: { maxAttempts: 1, backoffMs: 1 }

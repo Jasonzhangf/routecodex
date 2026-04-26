@@ -99,12 +99,6 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
   const is402 = statusText.includes('402') || msgLower.includes('402');
   const is500 = statusText.includes('500') || msgLower.includes('500');
   const is524 = statusText.includes('524') || msgLower.includes('524');
-  const isIflowAkBlocked =
-    statusCodeValue === 434 ||
-    upstreamCodeLower === '434' ||
-    msgLower.includes('access to the current ak has been blocked due to unauthorized requests') ||
-    upstreamMessageLower.includes('access to the current ak has been blocked due to unauthorized requests');
-
   const isGenericClientError = isClient4xx && !is401 && !is402 && !isRateLimit;
 
   let recoverable = isRateLimit || isClient400 || isGenericClientError;
@@ -161,12 +155,6 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
   if (isSseToJsonError) {
     recoverable = true;
     affectsHealth = false;
-    forceFatalRateLimit = false;
-  }
-  if (isIflowAkBlocked) {
-    // iFlow 434 = account-level block; never retry automatically.
-    recoverable = false;
-    affectsHealth = true;
     forceFatalRateLimit = false;
   }
 

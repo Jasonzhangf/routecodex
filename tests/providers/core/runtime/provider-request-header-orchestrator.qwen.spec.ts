@@ -35,7 +35,6 @@ describe('provider-request-header-orchestrator (qwen)', () => {
       familyProfile: qwenFamilyProfile,
       isGeminiFamily: false,
       isAntigravity: false,
-      isIflow: false,
       providerType: 'openai'
     });
 
@@ -53,7 +52,6 @@ describe('provider-request-header-orchestrator (qwen)', () => {
       },
       familyProfile: qwenFamilyProfile,
       providerType: 'openai',
-      isIflow: false
     });
 
     expect(headers['Authorization']).toBe('Bearer test-access-token');

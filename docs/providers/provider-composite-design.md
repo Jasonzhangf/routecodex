@@ -34,7 +34,7 @@ output/* → Provider.preprocessRequest(compat.request) → HTTP Provider → Pr
   - `src/providers/core/composite/compat/{responses,anthropic,gemin i}.ts`
 
 - 复用（保持原路径）：
-- 历史上曾存在 `src/providers/compat/*` 模块作为旧实现，现已下线；兼容行为统一迁移至 `sharedmodule/llmswitch-core/src/conversion/compat/*`（通过 `compatibilityProfile` 驱动 GLM / LM Studio / iFlow 等）。
+- 历史上曾存在 `src/providers/compat/*` 模块作为旧实现，现已下线；兼容行为统一迁移至 `sharedmodule/llmswitch-core/src/conversion/compat/*`（通过 `compatibilityProfile` 驱动 GLM / LM Studio 等）。
 
 ## 协议守卫与自动加载
 
@@ -52,7 +52,6 @@ output/* → Provider.preprocessRequest(compat.request) → HTTP Provider → Pr
 - 基于 `providerId/providerKey` 选择最小家族差异：
   - `glm` → 复用 `GLMCompatibility`（最小清理、1210/1214、末条 tool 回显清噪）。
   - `lmstudio` → 复用 `LMStudioCompatibility`（最小字段映射）。
-  - `iflow` → 复用 `iFlowCompatibility`（OpenAI 形状，OAuth 于 Provider 层处理）。
   - `qwen` → 默认走最小路径（保持 OpenAI 形状），不启用旧 `qwen-compat` 的“input/parameters”改形状逻辑。
   - 其他 → passthrough/minimal。
 
@@ -83,12 +82,12 @@ output/* → Provider.preprocessRequest(compat.request) → HTTP Provider → Pr
   - `anthropic` → AnthropicHttpProvider；
   - `gemini` → 预留。
 - 旧配置兼容（规范化）：
-  - 若发现 `providerType` ∈ {`glm`,`qwen`,`iflow`,`lmstudio`}，运行时规范化为 `openai` 并记录告警；品牌保留在 `providerId`，OAuth 方案通过 `auth.type = "<provider>-oauth"` 显式声明。
+  - 若发现 `providerType` ∈ {`glm`,`qwen`,`lmstudio`}，运行时规范化为 `openai` 并记录告警；品牌保留在 `providerId`，OAuth 方案通过 `auth.type = "<provider>-oauth"` 显式声明。
   - 不在 `llmswitch-core` 内判断品牌，品牌差异仅由 compat 聚合器处理（最小清理）。
 
 ## 迁移与兼容
 
-- 配置：将旧 `providerType: 'qwen'|'glm'|'iflow'|'lmstudio'` 规范化为 `providerType: 'openai'`，并通过 `providerId` + `auth.type = '<provider>-oauth'` 表达家族；保留警告日志。
+- 配置：将旧 `providerType: 'qwen'|'glm'|'lmstudio'` 规范化为 `providerType: 'openai'`，并通过 `providerId` + `auth.type = '<provider>-oauth'` 表达家族；保留警告日志。
 - Qwen：默认走 OpenAI 兼容端点 `/v1/chat/completions`；如需 native wire，需新增协议 id 与 codec，不能在 `openai-chat` 协议下改形状。
 
 ### 配置示例（OAuth 品牌）
@@ -124,7 +123,7 @@ ProviderComposite 与 Hook/HTTP 层依赖 `BasePipeline` 回写的元数据：
 
 - 协议守卫：错配触发 `ERR_PROTOCOL_MISMATCH`；家族聚合器若改形状触发 `ERR_COMPAT_PROTOCOL_DRIFT`。
 - GLM 回归：tools 严格字段清理、1210/1214、非流式响应黑名单。
-- LM Studio / iFlow：OpenAI 形状不变；OAuth 流程（iFlow）在 Provider 层。
+- LM Studio：OpenAI 形状不变；OAuth 流程。
 - Qwen：保持 OpenAI 形状直连。
 - Responses：上游 SSE → JSON，对内一律 JSON。
 

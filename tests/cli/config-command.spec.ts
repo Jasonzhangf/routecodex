@@ -700,7 +700,7 @@ describe('cli init command', () => {
     expect(providerV2?.providerId).toBe('openai');
   });
 
-  it('init (non-interactive) injects model-less iflow webSearch defaults when iflow is selected', async () => {
+  it('init (non-interactive) injects model-less glm webSearch defaults when glm is selected', async () => {
     const writes = new Map<string, string>();
     const program = new Command();
     createInitCommand(program, {
@@ -733,18 +733,18 @@ describe('cli init command', () => {
     });
 
     await program.parseAsync(
-      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'iflow', '--force'],
+      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'glm', '--force'],
       { from: 'node' }
     );
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.targets?.[0]).toContain('iflow.');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('iflow:web_search');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.providerKey).toBe('iflow');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['iflow:web_search']?.providerKey).toBe('iflow');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.targets?.[0]).toContain('glm.');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('glm:web_search');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.providerKey).toBe('glm');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['glm:web_search']?.providerKey).toBe('glm');
   });
 
-  it('init (non-interactive) injects qwen as fallback engine when iflow and qwen are selected', async () => {
+  it('init (non-interactive) injects qwen as fallback engine when glm and qwen are selected', async () => {
     const writes = new Map<string, string>();
     const program = new Command();
     createInitCommand(program, {
@@ -777,16 +777,16 @@ describe('cli init command', () => {
     });
 
     await program.parseAsync(
-      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'iflow,qwen', '--force'],
+      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '  --providers', 'glm,qwen', '--force'],
       { from: 'node' }
     );
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.targets).toEqual([
-      expect.stringContaining('iflow.'),
+      expect.stringContaining('glm.'),
       'qwen.qwen3.5-plus'
     ]);
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('iflow:web_search');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('glm:web_search');
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[1]?.id).toBe('qwen:web_search');
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['qwen:web_search']?.providerKey).toBe('qwen.qwen3.5-plus');
   });
@@ -837,7 +837,7 @@ describe('cli init command', () => {
     );
   });
 
-  it('init (non-interactive) prioritizes deepseek then falls back to iflow when both are selected', async () => {
+  it('init (non-interactive) prioritizes deepseek then falls back to glm when both are selected', async () => {
     const writes = new Map<string, string>();
     const program = new Command();
     createInitCommand(program, {
@@ -870,22 +870,22 @@ describe('cli init command', () => {
     });
 
     await program.parseAsync(
-      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'deepseek-web,iflow', '--force'],
+      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'deepseek-web,glm', '--force'],
       { from: 'node' }
     );
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.targets).toEqual([
       'deepseek-web.deepseek-chat',
-      expect.stringContaining('iflow.')
+      expect.stringContaining('glm.')
     ]);
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('deepseek:web_search');
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.default).toBe(true);
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[1]?.id).toBe('iflow:web_search');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[1]?.id).toBe('glm:web_search');
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['deepseek:web_search']?.providerKey).toBe(
       'deepseek-web.deepseek-chat'
     );
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['iflow:web_search']?.providerKey).toBe('iflow');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['glm:web_search']?.providerKey).toBe('glm');
   });
 
   it('init prepares camoufox environment when selected provider requires oauth/deepseek fingerprint', async () => {
@@ -2104,7 +2104,7 @@ describe('init-config', () => {
     expect(parsed.virtualrouter.routingPolicyGroups.default.routing.default[0].targets[0]).toContain('responses.');
   });
 
-  it('writes model-less iflow webSearch defaults when iflow is selected', async () => {
+  it('writes model-less glm webSearch defaults when glm is selected', async () => {
     const writes = new Map<string, string>();
     const result = await initializeConfigV1(
       {
@@ -2116,20 +2116,20 @@ describe('init-config', () => {
         },
         pathImpl: path as any
       },
-      { configPath: '/tmp/config.json', force: true, providers: ['iflow'] }
+      { configPath: '/tmp/config.json', force: true, providers: ['glm'] }
     );
 
     expect(result.ok).toBe(true);
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('iflow:web_search');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].providerKey).toBe('iflow');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('glm:web_search');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].providerKey).toBe('glm');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['glm:web_search'].providerKey).toBe('glm');
     expect(
       Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights)[0]
-    ).toContain('iflow.');
+    ).toContain('glm.');
   });
 
-  it('writes qwen as fallback webSearch engine when iflow and qwen are selected', async () => {
+  it('writes qwen as fallback webSearch engine when glm and qwen are selected', async () => {
     const writes = new Map<string, string>();
     const result = await initializeConfigV1(
       {
@@ -2141,14 +2141,14 @@ describe('init-config', () => {
         },
         pathImpl: path as any
       },
-      { configPath: '/tmp/config.json', force: true, providers: ['iflow', 'qwen'] }
+      { configPath: '/tmp/config.json', force: true, providers: ['glm', 'qwen'] }
     );
 
     expect(result.ok).toBe(true);
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('iflow:web_search');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('glm:web_search');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[1].id).toBe('qwen:web_search');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['glm:web_search'].providerKey).toBe('glm');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['qwen:web_search'].providerKey).toBe('qwen.qwen3.5-plus');
     expect(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights).toMatchObject({
       'qwen.qwen3.5-plus': 1
@@ -2156,7 +2156,7 @@ describe('init-config', () => {
     expect(
       Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights)
     ).toEqual([
-      expect.stringContaining('iflow.'),
+      expect.stringContaining('glm.'),
       'qwen.qwen3.5-plus'
     ]);
   });
@@ -2186,7 +2186,7 @@ describe('init-config', () => {
     ).toBe('deepseek-web.deepseek-chat');
   });
 
-  it('prioritizes deepseek then falls back to iflow when both are selected', async () => {
+  it('prioritizes deepseek then falls back to glm when both are selected', async () => {
     const writes = new Map<string, string>();
     const result = await initializeConfigV1(
       {
@@ -2198,25 +2198,25 @@ describe('init-config', () => {
         },
         pathImpl: path as any
       },
-      { configPath: '/tmp/config.json', force: true, providers: ['deepseek-web', 'iflow'] }
+      { configPath: '/tmp/config.json', force: true, providers: ['deepseek-web', 'glm'] }
     );
 
     expect(result.ok).toBe(true);
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('deepseek:web_search');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].default).toBe(true);
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[1].id).toBe('iflow:web_search');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[1].id).toBe('glm:web_search');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-chat');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['glm:web_search'].providerKey).toBe('glm');
     expect(
       Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights)
     ).toEqual([
       'deepseek-web.deepseek-chat',
-      expect.stringContaining('iflow.')
+      expect.stringContaining('glm.')
     ]);
   });
 
-  it('does not inject webSearch defaults when iflow is not selected', async () => {
+  it('does not inject webSearch defaults when glm is not selected', async () => {
     const writes = new Map<string, string>();
     const result = await initializeConfigV1(
       {

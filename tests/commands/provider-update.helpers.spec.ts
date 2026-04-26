@@ -50,7 +50,7 @@ describe('provider-update helper utilities', () => {
       prefix: undefined
     });
 
-    expect(__providerUpdateTestables.authTypeUsesCredentialFile('iflow-cookie')).toBe(true);
+    expect(__providerUpdateTestables.authTypeUsesCredentialFile('token')).toBe(true);
     expect(__providerUpdateTestables.authTypeUsesCredentialFile('apikey')).toBe(false);
 
     const credential = __providerUpdateTestables.readCredentialFileFromAuthNode({

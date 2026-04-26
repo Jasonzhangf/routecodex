@@ -26,8 +26,8 @@
 
 | Protocol | 受影响 Family（示例） | Same-shape 必测 | Control 必测 | Mandatory 指标 |
 |---|---|---|---|---|
-| openai-chat | iflow / qwen / glm / lmstudio | 1+ 样本（目标 family） | 1+ 样本（openai 或未改 family） | shape 一致、错误分类一致、无新增 P0/P1 |
-| openai-responses | iflow / openai / 其他 responses 路由 | 1+ 样本（目标 family） | 1+ 样本（responses 其他 family） | SSE/JSON 结构一致、工具回合一致 |
+| openai-chat | qwen / glm / lmstudio | 1+ 样本（目标 family） | 1+ 样本（openai 或未改 family） | shape 一致、错误分类一致、无新增 P0/P1 |
+| openai-responses | openai / 其他 responses 路由 | 1+ 样本（目标 family） | 1+ 样本（responses 其他 family） | SSE/JSON 结构一致、工具回合一致 |
 | anthropic-messages | anthropic / 兼容代理 | 1+ 样本（目标 family） | 1+ 样本（anthropic control） | tool alias / message shape 一致 |
 | gemini-chat | gemini / gemini-cli / antigravity | 1+ 样本（目标 family） | 1+ 样本（gemini family control） | header policy 与错误映射一致 |
 

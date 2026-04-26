@@ -267,8 +267,8 @@ describe('Chat semantics stage 1 bridge', () => {
               default: true
             },
             {
-              id: 'iflow:web_search',
-              providerKey: 'iflow'
+              id: 'glm:web_search',
+              providerKey: 'glm'
             }
           ]
         }
@@ -285,7 +285,7 @@ describe('Chat semantics stage 1 bridge', () => {
     const standardized = chatEnvelopeToStandardized(chat, {
       adapterContext,
       endpoint: '/v1/chat/completions',
-      requestId: 'req-sem-iflow-search'
+      requestId: 'req-sem-glm-search'
     });
     standardized.messages = [
       standardized.messages[0],
@@ -301,8 +301,8 @@ describe('Chat semantics stage 1 bridge', () => {
           injectPolicy: 'selective',
           engines: [
             {
-              id: 'iflow:web_search',
-              providerKey: 'iflow',
+              id: 'glm:web_search',
+              providerKey: 'glm',
               default: true
             }
           ]

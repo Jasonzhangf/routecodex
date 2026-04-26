@@ -388,7 +388,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
   it('returns first upstream error when retry-exhausted routing reports provider unavailable', async () => {
     const server = new RouteCodexHttpServer(createTestConfig());
 
-    const providerA = 'iflow.1-186.kimi-k2.5';
+    const providerA = 'glm.1-186.kimi-k2.5';
     const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
       statusCode: 429,
       code: 'HTTP_429'
@@ -399,7 +399,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
         ? input.metadata.excludedProviderKeys
         : [];
       if (excluded.includes(providerA)) {
-        throw Object.assign(new Error('All providers unavailable for model iflow.kimi-k2.5'), {
+        throw Object.assign(new Error('All providers unavailable for model glm.kimi-k2.5'), {
           code: 'PROVIDER_NOT_AVAILABLE'
         });
       }
@@ -422,8 +422,8 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       providerKey: providerA,
       runtimeKey: 'runtime:A',
       providerType: 'openai',
-      providerFamily: 'iflow',
-      providerId: 'iflow',
+      providerFamily: 'glm',
+      providerId: 'glm',
       providerProtocol: 'openai-chat',
       processIncoming: async () => {
         throw firstError;

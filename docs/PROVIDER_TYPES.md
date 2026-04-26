@@ -4,7 +4,7 @@
 - 上游“线协议 / wire”（Chat / Responses / Messages / Gemini 等）
 - Provider V2 选择的传输实现（openai/responses/anthropic/gemini…）
 
-> 品牌/家族（glm、qwen、iflow、lmstudio…）建议通过 `id`、`compatibilityProfile`、`auth.type` 等表达，而不是把品牌写成协议类型。
+> 品牌/家族（glm、qwen、lmstudio…）建议通过 `id`、`compatibilityProfile`、`auth.type` 等表达，而不是把品牌写成协议类型。
 
 ## 推荐使用的 type
 

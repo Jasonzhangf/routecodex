@@ -51,14 +51,14 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
 
     const gate = await import('../../src/utils/snapshot-local-disk-gate.ts');
     const groupRequestId = 'req_snapshot_bucket_messages_1';
-    const providerKey = 'iflow.1-186.minimax-m2.5';
+    const providerKey = 'glm.1-186.minimax-m2.5';
     gate.allowSnapshotLocalDiskWrite(groupRequestId);
     await writeProviderSnapshot({
       phase: 'provider-request',
       requestId: groupRequestId,
       clientRequestId: groupRequestId,
       entryEndpoint: '/v1/messages',
-      url: 'https://apis.iflow.cn/v1/chat/completions',
+      url: 'https://api.glm.com/v1/chat/completions',
       providerKey,
       data: { test: true }
     });
@@ -76,7 +76,7 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
 
     const gate = await import('../../src/utils/snapshot-local-disk-gate.ts');
     const groupRequestId = 'req_snapshot_bucket_messages_2';
-    const providerKey = 'iflow.2-173.minimax-m2.5';
+    const providerKey = 'glm.2-173.minimax-m2.5';
     gate.allowSnapshotLocalDiskWrite(groupRequestId);
     await writeProviderSnapshot({
       phase: 'provider-request',
@@ -85,7 +85,7 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
       entryEndpoint: '/v1/messages',
       providerKey,
       data: {
-        endpoint: 'https://apis.iflow.cn/v1/chat/completions',
+        endpoint: 'https://api.glm.com/v1/chat/completions',
         meta: {
           context: {
             endpoint: '/v1/chat/completions'

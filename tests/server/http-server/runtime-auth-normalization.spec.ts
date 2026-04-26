@@ -20,22 +20,22 @@ function createServerStub(): {
 describe('resolveRuntimeAuth oauth identity normalization', () => {
   it('preserves rawType from auth.type and derives oauthProviderId for provider-specific oauth types', async () => {
     const runtime = {
-      runtimeKey: 'iflow.1-186',
-      providerId: 'iflow',
+      runtimeKey: 'glm.1-186',
+      providerId: 'glm',
       providerType: 'openai',
-      endpoint: 'https://apis.iflow.cn/v1',
+      endpoint: 'https://api.glm.com/v1',
       auth: {
-        type: 'iflow-oauth',
-        tokenFile: '~/.routecodex/auth/iflow-oauth-1-186.json'
+        type: 'glm-oauth',
+        tokenFile: '~/.routecodex/auth/glm-oauth-1-186.json'
       }
     } as unknown as ProviderRuntimeProfile;
 
     const resolved = await resolveRuntimeAuth(createServerStub(), runtime);
 
     expect(resolved.type).toBe('oauth');
-    expect(resolved.rawType).toBe('iflow-oauth');
-    expect(resolved.oauthProviderId).toBe('iflow');
-    expect(resolved.tokenFile).toBe('~/.routecodex/auth/iflow-oauth-1-186.json');
+    expect(resolved.rawType).toBe('glm-oauth');
+    expect(resolved.oauthProviderId).toBe('glm');
+    expect(resolved.tokenFile).toBe('~/.routecodex/auth/glm-oauth-1-186.json');
   });
 
   it('falls back to runtime.providerId when auth type is generic oauth', async () => {

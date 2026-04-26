@@ -210,18 +210,6 @@ export function prepareAntigravityThoughtSignatureForGeminiRequestWithNative(
   );
 }
 
-export function applyIflowToolTextFallbackWithNative(
-  payload: Record<string, unknown>,
-  adapterContext?: Record<string, unknown>,
-  models?: string[],
-): Record<string, unknown> {
-  return invokeRecordCapability('applyIflowToolTextFallbackJson', [
-    payload,
-    adapterContext ?? {},
-    Array.isArray(models) ? models : [],
-  ]);
-}
-
 export function applyLmstudioResponsesInputStringifyWithNative(
   payload: Record<string, unknown>,
   adapterContext?: Record<string, unknown>,

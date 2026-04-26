@@ -11,7 +11,7 @@
 - `type`: provider 协议类型（见 `docs/PROVIDER_TYPES.md`）
 - `baseURL` / `baseUrl` / `endpoint`: 上游 API Base URL（任一字段均可）
 - `auth`: 认证配置（apiKey / oauth / cookie）
-- `compatibilityProfile`: 兼容配置（如 `chat:qwen`、`chat:iflow`、`chat:glm`）
+- `compatibilityProfile`: 兼容配置（如 `chat:qwen`、`chat:glm`）
 - `headers`: 额外请求头
 - `process`: `chat`（默认）或 `passthrough`
 - `models`: 模型列表（键为 modelId；值可写 `supportsStreaming`、`maxTokens`、`maxContext` 等）
@@ -37,7 +37,6 @@
 ### 3) Cookie（cookieFile）
 
 ```jsonc
-"auth": { "type": "iflow-cookie", "cookieFile": "~/.rcc/auth/iflow-work.cookie" }
 ```
 
 ## 各内置 Provider 的参考样本
@@ -81,10 +80,7 @@
 - 关键点：`auth.type: "qwen-oauth"` + `auth.tokenFile: "default"`（或写全路径）；`compatibilityProfile: "chat:qwen"`
 - 你需要：先完成一次 OAuth 登录生成 tokenFile（详见 `docs/OAUTH.md`）
 
-### iFlow（OAuth）
 
-- 样本：`configsamples/provider/iflow/config.v1.json`
-- 关键点：`auth.type: "iflow-oauth"` + `auth.tokenFile`；`compatibilityProfile: "chat:iflow"`
 - 你需要：先完成一次 OAuth 登录生成 tokenFile
 
 ### DeepSeek Web（账号）

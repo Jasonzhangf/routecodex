@@ -5,7 +5,6 @@
  * external login tool that stores OAuth tokens locally. This auth provider reads
  * the token JSON and injects `Authorization: Bearer <access_token>`.
  * 
- * 更新：支持iFlow的API Key模式 - 优先使用api_key字段，回退到access_token
  */
 
 import fs from 'fs';

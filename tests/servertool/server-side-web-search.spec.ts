@@ -498,7 +498,7 @@ describe('ServerTool web_search engine (generic)', () => {
     expect(contentObj.summary).toBe('enabled backend search result');
   });
 
-  test('iflow web_search backend uses retrieve route and does not bind model', async () => {
+  test('glm web_search backend uses retrieve route and does not bind model', async () => {
     const invocations: any[] = [];
     const result = await executeWebSearchBackendPlan({
       plan: {
@@ -509,17 +509,17 @@ describe('ServerTool web_search engine (generic)', () => {
         resultCount: 5,
         engines: [
           {
-            id: 'iflow-engine',
-            providerKey: 'iflow.1-186.minimax-m2.5',
+            id: 'glm-engine',
+            providerKey: 'glm.1-186.minimax-m2.5',
             searchEngineList: ['GOOGLE']
           }
         ]
       } as any,
       options: {
         chatResponse: {},
-        adapterContext: { requestId: 'req-iflow-web', providerProtocol: 'openai-chat' } as any,
+        adapterContext: { requestId: 'req-glm-web', providerProtocol: 'openai-chat' } as any,
         entryEndpoint: '/v1/chat/completions',
-        requestId: 'req-iflow-web',
+        requestId: 'req-glm-web',
         providerProtocol: 'openai-chat',
         providerInvoker: async (options: any) => {
           invocations.push(options);
@@ -545,7 +545,7 @@ describe('ServerTool web_search engine (generic)', () => {
     expect(call.entryEndpoint).toBe('/v1/chat/retrieve');
     expect(call.modelId).toBeUndefined();
     expect(call.payload?.model).toBeUndefined();
-    expect(call.payload?.metadata?.iflowWebSearch).toBe(true);
+    expect(call.payload?.metadata?.glmWebSearch).toBe(true);
     expect(call.payload?.data?.query).toBe('routecodex');
   });
 

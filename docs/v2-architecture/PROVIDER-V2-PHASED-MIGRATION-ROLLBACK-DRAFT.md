@@ -68,7 +68,7 @@
 
 ## Phase 2（新主旧影子切换）
 
-- 按 wave 逐批连线（Wave-1 iflow -> Wave-2 antigravity/gemini-cli -> Wave-3 清理层）。
+- 按 wave 逐批连线（Wave-1 antigravity -> Wave-2 antigravity/gemini-cli -> Wave-3 清理层）。
 - 连线后新实现主路径生效，旧实现影子并行观测。
 
 ### Entry Gate
@@ -127,14 +127,13 @@
 ## 4.3 回滚粒度
 
 - 以 wave 为最小回滚单位。
-- wave 内可按 provider family 子单元回滚（例如仅回滚 iflow）。
+- wave 内可按 provider family 子单元回滚（例如仅回滚 antigravity）。
 
 ## 5. Wave 拆分建议
 
-### Wave-1（iflow）
 
-- 包含 M01~M07 + M18(iflow)。
-- 核心目标：iflowWebSearch 去重、UA/signature、business envelope 归一。
+- 包含 M01~M07 + M18。
+- 核心目标：WebSearch 去重、UA/signature、business envelope 归一。
 
 ### Wave-2（antigravity/gemini-cli）
 

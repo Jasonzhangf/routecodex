@@ -1,6 +1,6 @@
 # Provider 按协议类型划分（Type-only）迁移指南
 
-本文档描述从“按品牌/家族（glm/qwen/iflow/lmstudio）”到“按协议类型（openai/responses/anthropic/gemini）”的迁移要求与示例。
+本文档描述从“按品牌/家族（glm/qwen/lmstudio）”到“按协议类型（openai/responses/anthropic/gemini）”的迁移要求与示例。
 
 ## 目标
 
@@ -15,7 +15,7 @@
 ## 迁移规则
 
 1. 配置层
-   - 将原 `providerType: 'glm'|'qwen'|'iflow'|'lmstudio'` 替换为 `providerType: 'openai'`。
+   - 将原 `providerType: 'glm'|'qwen'|'lmstudio'` 替换为 `providerType: 'openai'`。
    - 将家族名写入：
      - `providerId`（路由家族）；
      - `auth.type = "<provider>-oauth"`（OAuth 场景）。
@@ -55,19 +55,6 @@
 }
 ```
 
-### iFlow（OAuth）
-
-```json
-{
-  "type": "openai-standard",
-  "config": {
-    "providerType": "openai",
-    "baseUrl": "https://api.iflow.com/v1",
-    "auth": { "type": "iflow-oauth" },
-    "models": ["iflow-gpt4-1106"]
-  }
-}
-```
 
 ### Responses（真实 /v1/responses wire）
 

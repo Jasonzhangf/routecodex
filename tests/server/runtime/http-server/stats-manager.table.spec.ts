@@ -45,7 +45,7 @@ describe('StatsManager provider summary table output', () => {
     const stats = new StatsManager();
 
     stats.recordRequestStart('req-1');
-    stats.bindProvider('req-1', { providerKey: 'iflow.3-138.kimi-k2.5', model: 'kimi-k2.5' });
+    stats.bindProvider('req-1', { providerKey: 'glm.3-138.kimi-k2.5', model: 'kimi-k2.5' });
     stats.recordCompletion('req-1', {
       usage: { prompt_tokens: 11, completion_tokens: 22, total_tokens: 33 }
     });
@@ -61,7 +61,7 @@ describe('StatsManager provider summary table output', () => {
     expect(output).toContain('| providerKey');
     expect(output).toContain('| req');
     expect(output).toContain('avgTok(i/o/t)');
-    expect(output).toContain('iflow.3-138.kimi-k2.5');
+    expect(output).toContain('glm.3-138.kimi-k2.5');
     expect(output).toContain('tab.key1.gpt-5.2-codex');
     expect(output).not.toContain('requests=');
     expect(output).not.toContain('totals tokens in/out/total=');
@@ -72,7 +72,7 @@ describe('StatsManager provider summary table output', () => {
     const stats = new StatsManager();
 
     stats.recordRequestStart('req-h1');
-    stats.bindProvider('req-h1', { providerKey: 'iflow.1-186.kimi-k2.5', model: 'kimi-k2.5' });
+    stats.bindProvider('req-h1', { providerKey: 'glm.1-186.kimi-k2.5', model: 'kimi-k2.5' });
     stats.recordCompletion('req-h1', {
       usage: { prompt_tokens: 5, completion_tokens: 6, total_tokens: 11 }
     });
@@ -85,7 +85,7 @@ describe('StatsManager provider summary table output', () => {
     expect(output).toContain('[Stats][historical] Provider summary');
     expect(output).toContain('| window');
     expect(output).toContain('→');
-    expect(output).toContain('iflow.1-186.kimi-k2.5');
+    expect(output).toContain('glm.1-186.kimi-k2.5');
     expect(output).not.toContain('totals tokens in/out/total=');
   });
 
@@ -94,7 +94,7 @@ describe('StatsManager provider summary table output', () => {
     const stats = new StatsManager();
 
     stats.recordRequestStart('req-final-1');
-    stats.bindProvider('req-final-1', { providerKey: 'iflow.2-173', model: 'kimi-k2.5' });
+    stats.bindProvider('req-final-1', { providerKey: 'glm.2-173', model: 'kimi-k2.5' });
     stats.recordCompletion('req-final-1', {
       usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 }
     });
@@ -110,7 +110,7 @@ describe('StatsManager provider summary table output', () => {
     const output = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
     expect(output).toContain('[Stats][final][session]');
     expect(output).toContain('[Stats][final][historical]');
-    expect(output).toContain('iflow.2-173 / kimi-k2.5 calls=1 tokens=10/4/14');
+    expect(output).toContain('glm.2-173 / kimi-k2.5 calls=1 tokens=10/4/14');
     expect(output).toContain('qwen.1 / qwen3.5-plus calls=1 tokens=8/2/10');
   });
 });

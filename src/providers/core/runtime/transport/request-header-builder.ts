@@ -19,7 +19,6 @@ export interface RequestHeaderBuildContext {
   defaultUserAgent: string;
   isGeminiFamily: boolean;
   isAntigravity: boolean;
-  isIflow: boolean;
   codexUaMode: boolean;
 }
 

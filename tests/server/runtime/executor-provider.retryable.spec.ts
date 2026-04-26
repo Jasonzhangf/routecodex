@@ -16,10 +16,10 @@ describe('shouldRetryProviderError', () => {
     expect(shouldRetryProviderError(err)).toBe(false);
   });
 
-  it('retries iflow business 514 model error', () => {
-    const err: any = new Error('HTTP 400: iFlow business error (514): model error');
+  it('retries glm business 514 model error', () => {
+    const err: any = new Error('HTTP 400: GLM business error (514): model error');
     err.statusCode = 400;
-    err.providerFamily = 'iflow';
+    err.providerFamily = 'glm';
     err.response = { data: { error: { code: '514', message: 'model error' } } };
     expect(shouldRetryProviderError(err)).toBe(true);
   });

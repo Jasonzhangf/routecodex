@@ -18,7 +18,7 @@
 - 已存在声明式 profile 输入：`src/providers/profile/provider-profile.ts`。
 - 已存在配置装载器：`src/providers/profile/provider-profile-loader.ts`。
 - 已存在 runtime metadata 承载 `providerProtocol/providerFamily/compatibilityProfile`：`src/providers/core/runtime/provider-runtime-metadata.ts`。
-- 当前 transport 内仍有大量品牌分支（iflow/antigravity 等），需要迁移到 family profile：`src/providers/core/runtime/http-transport-provider.ts`、`src/providers/core/runtime/http-request-executor.ts`。
+- 当前 transport 内仍有大量品牌分支（antigravity 等），需要迁移到 family profile：`src/providers/core/runtime/http-transport-provider.ts`、`src/providers/core/runtime/http-request-executor.ts`。
 
 ## 3. 抽象契约（API 草案）
 
@@ -72,7 +72,7 @@ interface ErrorPolicyInput {
 }
 
 interface ProviderFamilyProfile {
-  id: string;            // e.g. 'iflow/default'
+  id: string;            // e.g. 'antigravity/default'
   providerFamily: string;
 
   applyRequestPolicy?(input: RequestPolicyInput): RequestPolicyInput;
@@ -155,7 +155,7 @@ src/providers/
     profile-contracts.ts             # ProviderFamilyProfile interfaces
     profile-registry.ts              # register/resolve/getProfile
     families/
-      iflow/default-profile.ts
+      antigravity/default-profile.ts
       antigravity/default-profile.ts
       qwen/default-profile.ts
       gemini/default-profile.ts
@@ -173,7 +173,7 @@ src/providers/
 
 - 新增 `provider-directory.ts` + `profile-registry.ts`。
 - 新增 `profile-contracts.ts`。
-- 为 iflow/antigravity 提供最小 default profile（空实现 + 单测）。
+- 为 antigravity 提供最小 default profile（空实现 + 单测）。
 
 ### Step B（仅验证）
 

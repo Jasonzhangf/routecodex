@@ -101,7 +101,6 @@ stopMessage 相关状态挂在 sticky session state（tmux 作用域）：
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_actions.rs`
 - 自动处理器：
   - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
-  - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/iflow-followup.ts`
 
 ## 6. 验证要点
 

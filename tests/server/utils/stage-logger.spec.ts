@@ -22,7 +22,7 @@ describe('stage logger verbosity filtering', () => {
     const { logPipelineStage } = await importStageLogger();
 
     logPipelineStage('provider.send.start', 'req_provider', {
-      providerLabel: 'iflow.key1.kimi-k2.5',
+      providerLabel: 'glm.key1.kimi-k2.5',
       model: 'kimi-k2.5'
     });
 

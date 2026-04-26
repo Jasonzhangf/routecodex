@@ -10,7 +10,6 @@ import path from 'path';
 import os from 'os';
 import { spawnSync } from 'node:child_process';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
-import { fetchIFlowUserInfo, mergeIFlowTokenData } from './iflow-userinfo-helper.js';
 import { fetchQwenUserInfo, mergeQwenTokenData, validateQwenAccessToken } from './qwen-userinfo-helper.js';
 import {
   fetchGeminiCLIUserInfo,
@@ -85,17 +84,9 @@ type InteractiveOAuthLockRecord = {
   callbackPort?: number;
 };
 
-type IflowAutoFailureRecord = {
-  count: number;
-  manualRequired: boolean;
-  updatedAt: number;
-  lastError?: string;
-};
 
 const OAUTH_INTERACTIVE_LOCK_FILE = path.join(resolveRccAuthDir(), '.oauth-interactive.lock.json');
-const IFLOW_AUTO_FAILURE_FILE = path.join(resolveRccAuthDir(), '.iflow-auto-failures.json');
 const OAUTH_THROTTLE_WINDOW_MS = 60_000;
-const IFLOW_REFRESH_FAILURE_BACKOFF_MS = 5 * 60_000;
 
 type EnsureOpts = {
   forceReacquireIfRefreshFails?: boolean;
@@ -287,9 +278,6 @@ function inferProviderTypeFromTokenFilePath(
   if (base.startsWith('antigravity-')) {
     return 'antigravity';
   }
-  if (base.startsWith('iflow-')) {
-    return 'iflow';
-  }
   return '';
 }
 
@@ -372,62 +360,11 @@ async function maybeAdoptOfficialQwenCodeToken(args: {
   return sanitizeToken(prepared) ?? officialToken;
 }
 
-function isIflowRefreshEndpointRejectionMessage(message: string): boolean {
-  const normalized = (message || '').toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-  return (
-    normalized.includes('oauth token endpoint rejected request') ||
-    (normalized.includes('token refresh failed') && normalized.includes('iflow.cn/oauth/token'))
-  );
-}
 
-function isIflowAkBlockedMessage(message: string): boolean {
-  const normalized = (message || '').toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-  return normalized.includes('access to the current ak has been blocked due to unauthorized requests');
-}
 
-function shouldClearIflowTokenOnRefreshFailure(message: string): boolean {
-  const normalized = (message || '').toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-  if (isIflowAkBlockedMessage(normalized)) {
-    return false;
-  }
-  if (normalized.includes('oauth error: invalid_grant')) {
-    return true;
-  }
-  if (normalized.includes('oauth error: invalid_client')) {
-    return true;
-  }
-  if (normalized.includes('oauth error: unauthorized_client')) {
-    return true;
-  }
-  if (
-    normalized.includes('oauth error: invalid_request') &&
-    (
-      normalized.includes('refresh token') ||
-      normalized.includes('refresh_token') ||
-      normalized.includes('client_id')
-    )
-  ) {
-    return true;
-  }
-  return false;
-}
 
-function applyRefreshFailureBackoff(cacheKey: string, providerType: string, message: string): void {
-  if (providerType !== 'iflow' || !isIflowRefreshEndpointRejectionMessage(message)) {
-    return;
-  }
-  // For iFlow refresh endpoint 500/generic failures, avoid hammering token endpoint
-  // from preflight/retry loops. Keep a longer cooldown before next refresh attempt.
-  lastRunAt.set(cacheKey, Date.now() + IFLOW_REFRESH_FAILURE_BACKOFF_MS - OAUTH_THROTTLE_WINDOW_MS);
+function applyRefreshFailureBackoff(_cacheKey: string, _providerType: string, _message: string): void {
+  // no-op: iflow provider removed; backoff logic was iflow-specific
 }
 
 function isElementMissingAutomationFailure(message: string): boolean {
@@ -444,7 +381,7 @@ function isElementMissingAutomationFailure(message: string): boolean {
 
 function isAutoOAuthDisabledProvider(providerType: string): boolean {
   const normalized = String(providerType || '').trim().toLowerCase();
-  return normalized === 'qwen' || normalized === 'iflow';
+  return normalized === 'qwen';
 }
 
 async function runInteractiveRepairWithAutoFallback(args: {
@@ -656,18 +593,6 @@ async function prepareTokenForStorage(
   if (isGeminiCliFamily(providerType)) {
     return await wrapGeminiCliTokenForStorage(tokenData, tokenFilePath);
   }
-  if (providerType === 'iflow') {
-    const token = sanitizeToken(tokenData) ?? (tokenData as StoredOAuthToken);
-    const expiresAt = getExpiresAt(token);
-    if (typeof expiresAt === 'number' && Number.isFinite(expiresAt)) {
-      const expiresAtMs = expiresAt > 10_000_000_000 ? Math.floor(expiresAt) : Math.floor(expiresAt * 1000);
-      return {
-        ...(tokenData as Record<string, unknown>),
-        expires_at: expiresAtMs,
-        expired: new Date(expiresAtMs).toISOString()
-      } as UnknownObject;
-    }
-  }
   if (providerType === 'qwen') {
     const rawExisting = await readRawTokenFile(tokenFilePath);
     const existing = rawExisting && typeof rawExisting === 'object' ? (rawExisting as Record<string, unknown>) : null;
@@ -757,9 +682,6 @@ function logTokenSnapshot(providerType: string, token: StoredOAuthToken | null, 
     logOAuthDebug(
       `[OAuth] token.read: provider=${providerType} exists=${Boolean(token)} hasApiKey=${hasApiKey} hasAccess=${hasAccess} expRaw=${String(expRaw)}`
     );
-    if (providerType === 'iflow') {
-      logOAuthDebug(`[OAuth] iflow endpoints: deviceCodeUrl=${String(endpoints.deviceCodeUrl)} tokenUrl=${String(endpoints.tokenUrl)}`);
-    }
   } catch (error) {
     logOAuthLifecycleNonBlocking('logTokenSnapshot', error, { providerType });
   }
@@ -782,26 +704,6 @@ function buildEndpointOverrides(defaults: OAuthFlowConfig, auth: ExtendedOAuthAu
   return overridden;
 }
 
-async function enrichIflowClientConfig(client: OAuthClientConfig): Promise<OAuthClientConfig> {
-  const next = { ...client };
-  if (hasNonEmptyString(process.env.IFLOW_CLIENT_ID)) {
-    next.clientId = process.env.IFLOW_CLIENT_ID!.trim();
-  }
-  if (hasNonEmptyString(process.env.IFLOW_CLIENT_SECRET)) {
-    next.clientSecret = process.env.IFLOW_CLIENT_SECRET!.trim();
-  }
-  if (!hasNonEmptyString(next.clientId) || !hasNonEmptyString(next.clientSecret)) {
-    const inferred = await inferIflowClientCredsFromLog();
-    if (inferred?.clientId && !hasNonEmptyString(next.clientId)) {
-      next.clientId = inferred.clientId;
-    }
-    if (inferred?.clientSecret && !hasNonEmptyString(next.clientSecret)) {
-      next.clientSecret = inferred.clientSecret;
-    }
-  }
-  return next;
-}
-
 async function buildClientOverrides(defaults: OAuthFlowConfig, auth: ExtendedOAuthAuth, providerType: string): Promise<OAuthClientConfig> {
   const base = { ...defaults.client };
   if (hasNonEmptyString(auth.clientId)) {
@@ -815,9 +717,6 @@ async function buildClientOverrides(defaults: OAuthFlowConfig, auth: ExtendedOAu
   }
   if (hasNonEmptyString(auth.redirectUri)) {
     base.redirectUri = auth.redirectUri;
-  }
-  if (providerType === 'iflow') {
-    return await enrichIflowClientConfig(base);
   }
   return base;
 }
@@ -929,16 +828,6 @@ async function ensureGeminiCLIServicesEnabled(accessToken: string, projectId: st
 
 function buildHeaderOverrides(defaults: OAuthFlowConfig, providerType: string): Record<string, string> {
   const baseHeaders = { ...(defaults.headers || {}) };
-  if (providerType === 'iflow') {
-    return {
-      ...baseHeaders,
-      'User-Agent': 'iFlow-Cli',
-      'X-Requested-With': 'XMLHttpRequest',
-      'Origin': 'https://iflow.cn',
-      'Referer': 'https://iflow.cn/oauth',
-      'Accept': 'application/json'
-    };
-  }
   return baseHeaders;
 }
 
@@ -1090,21 +979,6 @@ async function maybeEnrichToken(
       return tokenData;
     }
   }
-  if (providerType === 'iflow') {
-    const accessToken = extractAccessToken(sanitizeToken(tokenData) ?? null);
-    if (!accessToken) {
-      logOAuthDebug('[OAuth] iFlow: no access_token found in auth result, skipping API Key fetch');
-      return tokenData;
-    }
-    try {
-      const userInfo = await fetchIFlowUserInfo(accessToken);
-      logOAuthDebug(`[OAuth] iFlow: successfully fetched API Key for ${userInfo.email}`);
-      return mergeIFlowTokenData(tokenData, userInfo) as unknown as UnknownObject;
-    } catch (error) {
-      console.error(`[OAuth] iFlow: failed to fetch API Key - ${formatOAuthErrorMessage(error)}`);
-      return tokenData;
-    }
-  }
   if (providerType === 'antigravity') {
     const accessToken = extractAccessToken(sanitizeToken(tokenData) ?? null);
     if (!accessToken) {
@@ -1219,13 +1093,6 @@ function logOAuthSetup(
         `[OAuth] endpoints: deviceCodeUrl=${String(endpoints.deviceCodeUrl || '')} tokenUrl=${String(
           endpoints.tokenUrl
         )} authUrl=${String(endpoints.authorizationUrl || '')} userInfoUrl=${String(endpoints.userInfoUrl || '')}`
-      );
-    }
-    if (providerType === 'iflow') {
-      logOAuthDebug(
-        `[OAuth] iflow client: id=${String(client.clientId || '(missing)')} secret=${
-          client.clientSecret ? '(present)' : '(missing)'
-        } redirect=${String(client.redirectUri || '(default)')}`
       );
     }
   } catch (error) {
@@ -1477,75 +1344,6 @@ async function acquireInteractiveOAuthLock(providerType: string, tokenFilePath: 
   throw new Error('Failed to acquire interactive OAuth lock after multiple attempts');
 }
 
-function readIflowAutoFailureState(): Record<string, IflowAutoFailureRecord> {
-  try {
-    if (!fsSync.existsSync(IFLOW_AUTO_FAILURE_FILE)) {
-      return {};
-    }
-    const raw = fsSync.readFileSync(IFLOW_AUTO_FAILURE_FILE, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return {};
-    }
-    return parsed as Record<string, IflowAutoFailureRecord>;
-  } catch (error) {
-    logOAuthLifecycleNonBlocking('readIflowAutoFailureState', error, {
-      file: IFLOW_AUTO_FAILURE_FILE
-    });
-    return {};
-  }
-}
-
-function writeIflowAutoFailureState(state: Record<string, IflowAutoFailureRecord>): void {
-  try {
-    fsSync.mkdirSync(path.dirname(IFLOW_AUTO_FAILURE_FILE), { recursive: true });
-    fsSync.writeFileSync(IFLOW_AUTO_FAILURE_FILE, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-  } catch (error) {
-    logOAuthLifecycleNonBlocking(
-      'writeIflowAutoFailureState',
-      error,
-      { file: IFLOW_AUTO_FAILURE_FILE },
-      { warn: true }
-    );
-  }
-}
-
-function resolveIflowFailureKey(tokenFilePath: string): string {
-  return path.resolve(tokenFilePath);
-}
-
-function clearIflowAutoFailureState(tokenFilePath: string): void {
-  const state = readIflowAutoFailureState();
-  const key = resolveIflowFailureKey(tokenFilePath);
-  if (!state[key]) {
-    return;
-  }
-  delete state[key];
-  writeIflowAutoFailureState(state);
-}
-
-function markIflowAutoFailureState(tokenFilePath: string, maxAttempts: number, errorText: string): IflowAutoFailureRecord {
-  const state = readIflowAutoFailureState();
-  const key = resolveIflowFailureKey(tokenFilePath);
-  const previous = state[key];
-  const nextCount = (previous?.count || 0) + 1;
-  const record: IflowAutoFailureRecord = {
-    count: nextCount,
-    manualRequired: nextCount >= maxAttempts,
-    updatedAt: Date.now(),
-    lastError: errorText
-  };
-  state[key] = record;
-  writeIflowAutoFailureState(state);
-  return record;
-}
-
-function getIflowAutoFailureState(tokenFilePath: string): IflowAutoFailureRecord | null {
-  const state = readIflowAutoFailureState();
-  const key = resolveIflowFailureKey(tokenFilePath);
-  return state[key] || null;
-}
-
 async function runInteractiveAuthorizationFlow(
   providerType: string,
   overrides: Record<string, unknown>,
@@ -1562,15 +1360,6 @@ async function runInteractiveAuthorizationFlow(
       backupFile = await backupTokenFile(tokenFilePath);
     }
     try {
-      if (providerType === 'iflow') {
-        await runIflowAuthorizationSequence(providerType, overrides, tokenFilePath, forceReauth);
-      } else {
-        const strategy = createStrategy(providerType, overrides, tokenFilePath);
-        const authed = await strategy.authenticate?.({ openBrowser, forceReauthorize: forceReauth });
-        await finalizeTokenWrite(providerType, strategy, tokenFilePath, authed, 'acquired', {
-          strictQwenValidation: providerType === 'qwen'
-        });
-      }
       await discardBackupFile(backupFile);
       if (openBrowser && shouldAutoCloseOAuthBrowserSession()) {
         // Optional: close only after token is fully written; never close browser on failed auth.
@@ -1611,15 +1400,12 @@ async function runInteractiveAuthorizationFlow(
   await queued;
 }
 
-async function runIflowAuthorizationSequence(
-  providerType: string,
   overrides: Record<string, unknown>,
   tokenFilePath: string,
   forceReauth: boolean
 ): Promise<void> {
   const authCodeOverrides = { ...overrides, flowType: OAuthFlowType.AUTHORIZATION_CODE };
   const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
-  if (autoMode === 'iflow') {
     // Auto mode should stay single-path to keep retry lifecycle deterministic.
     await executeAuthFlow(providerType, authCodeOverrides, tokenFilePath, forceReauth);
     return;
@@ -1642,74 +1428,15 @@ async function executeAuthFlow(
   tokenFilePath: string,
   forceReauth: boolean
 ): Promise<void> {
-  const runOnce = async (): Promise<void> => {
-    const strategy = createStrategy(providerType, overrides, tokenFilePath);
-    const authed = await strategy.authenticate?.({ openBrowser: true, forceReauthorize: forceReauth });
-    await finalizeTokenWrite(
-      providerType,
-      strategy,
-      tokenFilePath,
-      authed,
-      overrides.flowType ? `acquired (${String(overrides.flowType)})` : 'acquired'
-    );
-  };
-
-  const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
-  const iflowAutoEnabled = providerType === 'iflow' && autoMode === 'iflow';
-  if (!iflowAutoEnabled) {
-    await runOnce();
-    if (providerType === 'iflow') {
-      clearIflowAutoFailureState(tokenFilePath);
-    }
-    return;
-  }
-  const headfulMode = isTruthyFlag(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE);
-  const maxAutoAttemptsRaw = Number.parseInt(String(process.env.ROUTECODEX_IFLOW_AUTO_MAX_ATTEMPTS || '').trim(), 10);
-  const maxAutoAttempts = Number.isFinite(maxAutoAttemptsRaw) && maxAutoAttemptsRaw > 0 ? maxAutoAttemptsRaw : 3;
-  const retryDelayRaw = Number.parseInt(String(process.env.ROUTECODEX_IFLOW_AUTO_RETRY_DELAY_MS || '').trim(), 10);
-  const retryDelayMs = Number.isFinite(retryDelayRaw) && retryDelayRaw >= 0 ? retryDelayRaw : 1000;
-
-  // Headful run is considered manual trigger; successful manual run clears auto failure gate.
-  if (headfulMode) {
-    await runOnce();
-    clearIflowAutoFailureState(tokenFilePath);
-    return;
-  }
-
-  const existingFailure = getIflowAutoFailureState(tokenFilePath);
-  if (existingFailure?.manualRequired) {
-    throw new Error(
-      `[OAuth] iflow auto auth is disabled for token=${tokenFilePath} after ${existingFailure.count} failures. Manual trigger required.`
-    );
-  }
-
-  let lastError: unknown = null;
-  for (let attempt = 1; attempt <= maxAutoAttempts; attempt += 1) {
-    try {
-      await runOnce();
-      clearIflowAutoFailureState(tokenFilePath);
-      return;
-    } catch (error) {
-      lastError = error;
-      const msg = error instanceof Error ? error.message : String(error || '');
-      const record = markIflowAutoFailureState(tokenFilePath, maxAutoAttempts, msg);
-      logOAuthDebug(
-        `[OAuth] iflow auto auth attempt ${attempt}/${maxAutoAttempts} failed: ${msg} ` +
-          `(failureCount=${record.count} manualRequired=${record.manualRequired ? '1' : '0'})`
-      );
-      if (attempt < maxAutoAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
-      }
-    }
-  }
-
-  const finalRecord = getIflowAutoFailureState(tokenFilePath);
-  if (finalRecord?.manualRequired) {
-    throw new Error(
-      `[OAuth] iflow auto auth failed ${finalRecord.count} times; manual trigger is required and auto retries are suspended.`
-    );
-  }
-  throw (lastError instanceof Error ? lastError : new Error(String(lastError || 'iflow auto auth failed')));
+  const strategy = createStrategy(providerType, overrides, tokenFilePath);
+  const authed = await strategy.authenticate?.({ openBrowser: true, forceReauthorize: forceReauth });
+  await finalizeTokenWrite(
+    providerType,
+    strategy,
+    tokenFilePath,
+    authed,
+    overrides.flowType ? `acquired (${String(overrides.flowType)})` : 'acquired'
+  );
 }
 
 export async function ensureValidOAuthToken(
@@ -1905,10 +1632,6 @@ export async function ensureValidOAuthToken(
           }
         }
         applyRefreshFailureBackoff(cacheKey, providerType, message);
-        if (providerType === 'iflow' && shouldClearIflowTokenOnRefreshFailure(message)) {
-          // Only clear token file for permanent refresh-credential failures.
-          await clearTokenFile(tokenFilePath);
-        }
         if (!opts.forceReacquireIfRefreshFails) {
           throw error;
         }
@@ -1985,18 +1708,7 @@ export async function handleUpstreamInvalidOAuthToken(
   const attemptSilentRefreshOnly = async (
     lowerMessage: string
   ): Promise<boolean> => {
-    if (pt === 'iflow') {
-      logOAuthLifecycleNonBlocking(
-        'handleUpstreamInvalidOAuthToken.iflowAutoDisabled',
-        new Error('iflow auto OAuth has been removed; manual intervention required'),
-        { providerType, tokenFilePath },
-        { warn: true, throttleKey: `iflow-auto-disabled:${tokenFilePath || 'unknown'}` }
-      );
-      return false;
-    }
 
-    const refreshRejectedForIflow = pt === 'iflow' && isIflowRefreshEndpointRejectionMessage(lowerMessage);
-    if (refreshRejectedForIflow) {
       logOAuthLifecycleNonBlocking(
         'handleUpstreamInvalidOAuthToken.refreshRejected',
         new Error('refresh endpoint rejected request; manual re-auth required'),
@@ -2119,8 +1831,6 @@ export async function handleUpstreamInvalidOAuthToken(
         }
         return false;
       }
-      const refreshRejectedForIflow = pt === 'iflow' && isIflowRefreshEndpointRejectionMessage(lower);
-      if (!refreshRejectedForIflow) {
         try {
           await withOAuthRepairEnv(providerType, async () => {
             await ensureValid(providerType, auth, {
@@ -2164,9 +1874,8 @@ export async function handleUpstreamInvalidOAuthToken(
       const interactiveOpts: EnsureOpts = {
         forceReacquireIfRefreshFails: true,
         openBrowser: true,
-        // 上游已经明确返回“认证失效”（包括 iflow 的 406/439），
         // 此时强制跳过节流并允许走完整 OAuth 流程。
-        forceReauthorize: pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity' || pt === 'iflow' || pt === 'qwen'
+        forceReauthorize: pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity' || pt === 'qwen'
       };
       void withOAuthRepairEnv(providerType, async () => {
         await runInteractiveRepairWithAutoFallback({
@@ -2186,9 +1895,8 @@ export async function handleUpstreamInvalidOAuthToken(
     const opts: EnsureOpts = {
       forceReacquireIfRefreshFails: true,
       openBrowser: true,
-      // 上游已经明确返回“认证失效”（包括 iflow 的 406/439），
       // 此时强制跳过节流并允许走完整 OAuth 流程。
-      forceReauthorize: pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity' || pt === 'iflow' || pt === 'qwen'
+      forceReauthorize: pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity' || pt === 'qwen'
     };
     await withOAuthRepairEnv(providerType, async () => {
       await runInteractiveRepairWithAutoFallback({
@@ -2223,10 +1931,6 @@ export function shouldTriggerInteractiveOAuthRepair(providerType: string, upstre
   const lower = msg.toLowerCase();
   const statusCode = extractStatusCode(upstreamError);
 
-  if (pt === 'iflow' && (statusCode === 434 || isIflowAkBlockedMessage(lower))) {
-    // iFlow 434 是账号级封禁，必须人工恢复，不走自动修复。
-    return false;
-  }
 
   // 基本令牌失效判定：只看典型 OAuth 文案
   let looksInvalid =
@@ -2234,19 +1938,6 @@ export function shouldTriggerInteractiveOAuthRepair(providerType: string, upstre
       lower
     );
 
-  // 对于 iflow / qwen，保留基于 401/403 的宽松判定，避免破坏既有行为。
-  if (!looksInvalid && (pt === 'iflow' || pt === 'qwen')) {
-    if (
-      statusCode === 401 ||
-      statusCode === 403 ||
-      /\b401\b|\b403\b|40308/.test(msg)
-    ) {
-      looksInvalid = true;
-    }
-  }
-  if (!looksInvalid && pt === 'iflow' && isIflowRefreshEndpointRejectionMessage(lower)) {
-    looksInvalid = true;
-  }
 
   // 对于 gemini / gemini-cli / antigravity，排除纯服务开关类错误，
   // 但如果明确提示缺少 project_id 或需要重新 OAuth，则视为令牌失效。
@@ -2274,56 +1965,6 @@ export function shouldTriggerInteractiveOAuthRepair(providerType: string, upstre
   return looksInvalid;
 }
 
-async function inferIflowClientCredsFromLog(): Promise<{ clientId?: string; clientSecret?: string } | null> {
-  const file = path.join(resolveRccAuthDir(), 'iflow-oauth.log');
-  try {
-    const txt = await fs.readFile(file, 'utf-8').catch((error) => {
-      logOAuthLifecycleNonBlocking(
-        'inferIflowClientCredsFromLog.readFile',
-        error,
-        { file },
-        { throttleKey: keyFor('iflow-client-creds-log-read', file) }
-      );
-      return '';
-    });
-    if (!txt) {
-      return null;
-    }
-    const lines = txt.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    if (lines.length === 0) {
-      return null;
-    }
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i];
-      try {
-        const obj = JSON.parse(line) as { decoded?: string };
-        const decoded = typeof obj.decoded === 'string' ? obj.decoded : '';
-        if (!decoded.includes(':')) {
-          continue;
-        }
-        const idx = decoded.indexOf(':');
-        const id = decoded.slice(0, idx).trim();
-        const secret = decoded.slice(idx + 1).trim();
-        if (id && secret) {
-          return { clientId: id, clientSecret: secret };
-        }
-      } catch (error) {
-        logOAuthLifecycleNonBlocking(
-          'inferIflowClientCredsFromLog.parseLine',
-          error,
-          { file, line: i + 1 },
-          { throttleKey: keyFor('iflow-client-creds-log-parse', file) }
-        );
-      }
-    }
-    return null;
-  } catch (error) {
-    logOAuthLifecycleNonBlocking('inferIflowClientCredsFromLog', error, { file });
-    return null;
-  }
-}
-
 export const __oauthLifecycleTestables = {
-  inferIflowClientCredsFromLog,
   isProcessAlive
 };

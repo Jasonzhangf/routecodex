@@ -7,11 +7,11 @@ describe('provider.model direct access without routing', () => {
     const input: any = {
       virtualrouter: {
         providers: {
-          iflow: {
-            id: 'iflow',
-            type: 'iflow',
+          glm: {
+            id: 'glm',
+            type: 'glm',
             enabled: true,
-            endpoint: 'https://apis.iflow.cn/v1',
+            endpoint: 'https://apis.glm.cn/v1',
             auth: { type: 'apikey', apiKey: 'TEST_KEY' },
             models: {
               'kimi-k2.5': { maxContextTokens: 262144 },
@@ -31,25 +31,25 @@ describe('provider.model direct access without routing', () => {
 
     const result = await engine.route(
       {
-        model: 'iflow.kimi-k2.5',
+        model: 'glm.kimi-k2.5',
         messages: [{ role: 'user', content: 'Hello' }]
       },
       {}
     );
 
     expect(result).toBeDefined();
-    expect(result.target?.providerKey).toMatch(/iflow/);
+    expect(result.target?.providerKey).toMatch(/glm/);
   });
 
   it('should return PROVIDER_NOT_AVAILABLE when provider is disabled', async () => {
     const input: any = {
       virtualrouter: {
         providers: {
-          iflow: {
-            id: 'iflow',
-            type: 'iflow',
+          glm: {
+            id: 'glm',
+            type: 'glm',
             enabled: false,
-            endpoint: 'https://apis.iflow.cn/v1',
+            endpoint: 'https://apis.glm.cn/v1',
             auth: { type: 'apikey', apiKey: 'TEST_KEY' },
             models: {
               'kimi-k2.5': {}
@@ -68,7 +68,7 @@ describe('provider.model direct access without routing', () => {
 
     expect(() => engine.route(
       {
-        model: 'iflow.kimi-k2.5',
+        model: 'glm.kimi-k2.5',
         messages: [{ role: 'user', content: 'Hello' }]
       },
       {}
@@ -79,11 +79,11 @@ describe('provider.model direct access without routing', () => {
     const input: any = {
       virtualrouter: {
         providers: {
-          iflow: {
-            id: 'iflow',
-            type: 'iflow',
+          glm: {
+            id: 'glm',
+            type: 'glm',
             enabled: true,
-            endpoint: 'https://apis.iflow.cn/v1',
+            endpoint: 'https://apis.glm.cn/v1',
             auth: { type: 'apikey', apiKey: 'TEST_KEY' },
             models: {
               'kimi-k2.5': {}
@@ -91,7 +91,7 @@ describe('provider.model direct access without routing', () => {
           }
         },
         routing: {
-          default: ['iflow.kimi-k2.5']
+          default: ['glm.kimi-k2.5']
         }
       }
     };
@@ -102,25 +102,25 @@ describe('provider.model direct access without routing', () => {
 
     const result = await engine.route(
       {
-        model: 'iflow.kimi-k2.5',
+        model: 'glm.kimi-k2.5',
         messages: [{ role: 'user', content: 'Hello' }]
       },
       {}
     );
 
     expect(result).toBeDefined();
-    expect(result.target?.providerKey).toMatch(/iflow/);
+    expect(result.target?.providerKey).toMatch(/glm/);
   });
 
   it('should work even when routing section is omitted', async () => {
     const input: any = {
       virtualrouter: {
         providers: {
-          iflow: {
-            id: 'iflow',
-            type: 'iflow',
+          glm: {
+            id: 'glm',
+            type: 'glm',
             enabled: true,
-            endpoint: 'https://apis.iflow.cn/v1',
+            endpoint: 'https://apis.glm.cn/v1',
             auth: { type: 'apikey', apiKey: 'TEST_KEY' },
             models: {
               'kimi-k2.5': {}
@@ -136,13 +136,13 @@ describe('provider.model direct access without routing', () => {
 
     const result = await engine.route(
       {
-        model: 'iflow.kimi-k2.5',
+        model: 'glm.kimi-k2.5',
         messages: [{ role: 'user', content: 'Hello' }]
       },
       {}
     );
 
     expect(result).toBeDefined();
-    expect(result.target?.providerKey).toMatch(/iflow/);
+    expect(result.target?.providerKey).toMatch(/glm/);
   });
 });

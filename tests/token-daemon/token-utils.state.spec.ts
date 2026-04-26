@@ -17,30 +17,30 @@ describe('token-daemon token-utils evaluateTokenState', () => {
     expect(state.status).toBe('expired');
   });
 
-  it('does not treat iflow api_key as perpetual valid credential', () => {
+  it('does not treat glm api_key as perpetual valid credential', () => {
     const now = Date.now();
     const state = evaluateTokenState(
       {
         access_token: 'expired-token',
-        api_key: 'stable-iflow-key',
+        api_key: 'stable-glm-key',
         expires_at: now - 60_000
       },
       now,
-      'iflow'
+      'glm'
     );
     expect(state.status).toBe('expired');
   });
 
-  it('treats iflow non-expired access_token as valid', () => {
+  it('treats glm non-expired access_token as valid', () => {
     const now = Date.now();
     const state = evaluateTokenState(
       {
         access_token: 'valid-token',
-        api_key: 'iflow-key',
+        api_key: 'glm-key',
         expires_at: now + 3_600_000
       },
       now,
-      'iflow'
+      'glm'
     );
     expect(state.status).toBe('valid');
   });

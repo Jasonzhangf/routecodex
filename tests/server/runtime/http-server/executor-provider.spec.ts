@@ -46,10 +46,10 @@ describe('executor-provider retry policy', () => {
     expect(shouldRetryProviderError(unauthorized)).toBe(true);
   });
 
-  it('treats iflow business 514 model error as retryable', () => {
-    const error = Object.assign(new Error('HTTP 400: iFlow business error (514): model error'), {
+  it('treats glm business 514 model error as retryable', () => {
+    const error = Object.assign(new Error('HTTP 400: GLM business error (514): model error'), {
       statusCode: 400,
-      providerFamily: 'iflow',
+      providerFamily: 'glm',
       response: {
         data: {
           error: {

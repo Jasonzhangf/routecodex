@@ -648,7 +648,7 @@ export function mapProviderErrorImpl(
       ? ((runtime as { providerId?: string | undefined }).providerId as string)
       : undefined;
   const providerTag = (providerFamily || providerId || '').toLowerCase();
-  const isOAuthAuth406 = statusCode === 406 && (providerTag === 'iflow' || providerTag === 'qwen');
+  const isOAuthAuth406 = statusCode === 406 && (providerTag === 'qwen');
 
   let fatal = !recoverable;
   let reason = deriveReason(code, stage, statusCode);

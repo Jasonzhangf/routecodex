@@ -2,7 +2,7 @@
  * OAuth Token Scanner
  * 自动扫描auth目录下符合命名规范的token文件
  * 命名规范: <provider>-oauth-<序号>-<alias>.json
- * 例如: iflow-oauth-1-work.json, iflow-oauth-2-personal.json
+ * 例如: provider-oauth-1-work.json, provider-oauth-2-personal.json
  */
 
 import fs from 'fs/promises';
@@ -27,7 +27,7 @@ function resolveAuthDir(): string {
 /**
  * 匹配token文件名的正则
  * 格式: <provider>-oauth-<序号>-<alias>.json
- * 例如: iflow-oauth-1-work.json -> provider=iflow, sequence=1, alias=work
+ * 例如: provider-oauth-1-work.json -> provider=provider, sequence=1, alias=work
  */
 const TOKEN_FILE_PATTERN = /^(.+)-oauth-(\d+)(?:-(.+))?\.json$/;
 const DEEPSEEK_ACCOUNT_TOKEN_PATTERN = /^deepseek-account-(.+)\.json$/i;

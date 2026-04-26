@@ -42,7 +42,6 @@ This document records the responsibility split for `routecodex-164.3`:
 | Response postprocessing hooks | `src/providers/core/runtime/provider-response-postprocessor.ts` |
 | Gemini CLI response normalization | `src/providers/core/runtime/gemini-cli-response-postprocessor.ts` |
 | Gemini SSE normalization | `src/providers/core/runtime/gemini-sse-normalizer.ts` |
-| IFlow business-error classifier helpers | `src/providers/core/runtime/provider-iflow-business-error-utils.ts` |
 | Session/Codex header injection helpers | `src/providers/core/runtime/transport/session-header-utils.ts` |
 | OAuth header preflight helpers | `src/providers/core/runtime/transport/oauth-header-preflight.ts` |
 | Request header builder | `src/providers/core/runtime/transport/request-header-builder.ts` |

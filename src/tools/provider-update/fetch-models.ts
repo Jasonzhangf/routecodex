@@ -10,7 +10,6 @@ function resolveProviderType(inType?: string): string {
   if (!t) {return 'openai';}
   if (t.includes('glm')) {return 'glm';}
   if (t.includes('qwen')) {return 'qwen';}
-  if (t.includes('iflow')) {return 'iflow';}
   if (t.includes('anthropic')) {return 'anthropic';}
   if (t.includes('modelscope')) {return 'modelscope';}
   if (t.includes('openai')) {return 'openai';}
@@ -23,7 +22,7 @@ async function buildOAuthHeaders(provider: ProviderInputConfig, providerKind: st
 
   // Only providers with predefined OAuth configs are supported here
   const kind = providerKind.toLowerCase();
-  if (kind !== 'qwen' && kind !== 'iflow') {
+  if (kind !== 'qwen') {
     return {};
   }
 
@@ -44,7 +43,6 @@ async function buildOAuthHeaders(provider: ProviderInputConfig, providerKind: st
     // 统一 tokenFile 路径，避免与运行时 OAuth 流程使用不同文件导致重复授权：
     // - 若显式提供 auth.tokenFile，则优先使用；
     // - qwen: 默认 ~/.routecodex/auth/qwen-oauth.json（对齐 oauth-lifecycle 默认）；
-    // - iflow: 默认保持 upstream/strategy 内置（通常为 ~/.iflow/oauth_creds.json）。
     const home = process.env.HOME || '';
     const tokenFile =
       (typeof auth.tokenFile === 'string' && auth.tokenFile.trim())
