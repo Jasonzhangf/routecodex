@@ -2,6 +2,11 @@ import type { JsonObject } from '../types/json.js';
 import type { StageRecorder } from '../format-adapters/index.js';
 import { resolveHubProtocolSpec } from './protocol-spec.js';
 import { normalizeProviderProtocolTokenWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
+import { loadCompatProfileRegistry, getPolicyOverrides } from '../../compat/profile-registry/registry.js';
+import { shouldSkipPolicy } from '../../compat/profile-registry/policy-overrides.js';
+
+// Load compat registry at module level for config-driven policy overrides
+const policyCompatRegistry = loadCompatProfileRegistry();
 
 export type HubPolicyMode = 'off' | 'observe' | 'enforce';
 
@@ -292,8 +297,11 @@ export function recordHubPolicyObservation(options: {
 
   const compatibilityProfile =
     typeof options.compatibilityProfile === 'string' ? options.compatibilityProfile.trim().toLowerCase() : '';
-  if (compatibilityProfile === 'chat:deepseek-web' || compatibilityProfile === 'chat:qwenchat-web') {
-    return;
+  if (compatibilityProfile) {
+    const overrides = getPolicyOverrides(policyCompatRegistry, compatibilityProfile);
+    if (shouldSkipPolicy(overrides, 'observe')) {
+      return;
+    }
   }
 
   if (!shouldSample(effectivePolicy?.sampleRate)) {
@@ -339,8 +347,11 @@ export function applyHubProviderOutboundPolicy(options: {
   const normalizedProviderProtocol = normalizeHubProviderProtocol(options.providerProtocol);
   const compatibilityProfile =
     typeof options.compatibilityProfile === 'string' ? options.compatibilityProfile.trim().toLowerCase() : '';
-  if (compatibilityProfile === 'chat:deepseek-web' || compatibilityProfile === 'chat:qwenchat-web') {
-    return options.payload;
+  if (compatibilityProfile) {
+    const overrides = getPolicyOverrides(policyCompatRegistry, compatibilityProfile);
+    if (shouldSkipPolicy(overrides, 'enforce')) {
+      return options.payload;
+    }
   }
 
   const result = applyProviderOutboundPolicy(normalizedProviderProtocol, options.payload);
