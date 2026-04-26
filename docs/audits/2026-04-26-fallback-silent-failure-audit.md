@@ -28,7 +28,7 @@ node scripts/ci/silent-failure-audit.mjs --json
 4. `src/server/runtime/http-server/session-scope-resolution.ts`
    - decode/base64/json/url-params/isAlive catch 补日志。
 
-5. `src/providers/core/runtime/qwenchat-http-provider-helpers.ts`
+5. `src/providers/core/runtime/deepseek-http-provider.ts`
    - queue gate / SSE 解析 / 业务错误解析 / destroy 清理 catch 补日志。
 
 6. `src/providers/core/config/camoufox-launcher.ts`

@@ -16,10 +16,6 @@ import { extractUsageFromResult } from './usage-aggregator.js';
 import { deriveFinishReason } from '../../../utils/finish-reason.js';
 import { logPipelineStage } from '../../../utils/stage-logger.js';
 import {
-  QWENCHAT_NONSTREAM_DELIVERY_KEY,
-  QWENCHAT_SSE_PROBE_WRAPPER_KEY
-} from '../../../../providers/core/runtime/qwenchat-http-provider-helpers.js';
-import {
   buildServerToolSseWrapperBody
 } from './servertool-response-normalizer.js';
 import {
@@ -1414,48 +1410,6 @@ function syncHubStageTopBackToPipelineMetadata(options: {
   };
 }
 
-function syncQwenChatSseProbeBackToPipelineMetadata(options: {
-  pipelineMetadata?: Record<string, unknown>;
-  providerResponseBody?: unknown;
-}): void {
-  const pipelineMetadata = asRecord(options.pipelineMetadata);
-  const providerResponseBody = asRecord(options.providerResponseBody);
-  if (!pipelineMetadata || !providerResponseBody) {
-    return;
-  }
-  const probe = asRecord(providerResponseBody[QWENCHAT_SSE_PROBE_WRAPPER_KEY]);
-  if (!probe) {
-    return;
-  }
-  const metadataRt = asRecord((pipelineMetadata as Record<string, unknown>).__rt) ?? {};
-  (pipelineMetadata as Record<string, unknown>).__rt = {
-    ...metadataRt,
-    qwenchatSseProbe: probe
-  };
-}
-
-function syncQwenChatNonstreamDeliveryBackToPipelineMetadata(options: {
-  pipelineMetadata?: Record<string, unknown>;
-  providerResponseBody?: unknown;
-}): void {
-  const pipelineMetadata = asRecord(options.pipelineMetadata);
-  const providerResponseBody = asRecord(options.providerResponseBody);
-  if (!pipelineMetadata || !providerResponseBody) {
-    return;
-  }
-  const deliveryRaw = providerResponseBody[QWENCHAT_NONSTREAM_DELIVERY_KEY];
-  const delivery = typeof deliveryRaw === 'string' ? deliveryRaw.trim().toLowerCase() : '';
-  delete providerResponseBody[QWENCHAT_NONSTREAM_DELIVERY_KEY];
-  if (delivery !== 'json' && delivery !== 'sse_fallback') {
-    return;
-  }
-  const metadataRt = asRecord((pipelineMetadata as Record<string, unknown>).__rt) ?? {};
-  (pipelineMetadata as Record<string, unknown>).__rt = {
-    ...metadataRt,
-    qwenchatNonstreamDelivery: delivery
-  };
-}
-
 export type ConvertProviderResponseOptions = {
   entryEndpoint?: string;
   providerProtocol: string;
@@ -1574,14 +1528,6 @@ export async function convertProviderResponseIfNeeded(
   let adapterContext: Record<string, unknown> | undefined;
   try {
     const metadataBag = asRecord(options.pipelineMetadata);
-    syncQwenChatNonstreamDeliveryBackToPipelineMetadata({
-      pipelineMetadata: metadataBag,
-      providerResponseBody: body as Record<string, unknown>
-    });
-    syncQwenChatSseProbeBackToPipelineMetadata({
-      pipelineMetadata: metadataBag,
-      providerResponseBody: body as Record<string, unknown>
-    });
     const baseContext = buildServerToolAdapterContext({
       metadata: metadataBag,
       originalRequest: options.originalRequest,
