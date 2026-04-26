@@ -2,7 +2,6 @@ import { OpenAIHttpProvider } from './openai-http-provider.js';
 import { ResponsesHttpProvider } from './responses-http-provider.js';
 import { AnthropicHttpProvider } from './anthropic-http-provider.js';
 import { DeepSeekHttpProvider } from './deepseek-http-provider.js';
-import { QwenChatHttpProvider } from './qwenchat-http-provider.js';
 import { ChatHttpProvider } from './chat-http-provider.js';
 import { GeminiHttpProvider } from './gemini-http-provider.js';
 import { MockProvider } from '../../mock/index.js';
@@ -160,6 +159,9 @@ export function resolveProviderModule(value?: string): OpenAIStandardConfig['typ
     return undefined;
   }
   const trimmed = value.trim();
+  if (trimmed === 'qwenchat-http-provider' || trimmed === 'qwenchat') {
+    throw new Error('[ProviderFactory] qwenchat provider has been removed; use qwen or another supported provider.');
+  }
   switch (trimmed) {
     case 'openai-standard':
     case 'openai-http-provider':
@@ -168,13 +170,10 @@ export function resolveProviderModule(value?: string): OpenAIStandardConfig['typ
     case 'gemini-http-provider':
     case 'gemini-cli-http-provider':
     case 'deepseek-http-provider':
-    case 'qwenchat-http-provider':
     case 'mock-provider':
       return trimmed as OpenAIStandardConfig['type'];
     case 'deepseek':
       return 'deepseek-http-provider';
-    case 'qwenchat':
-      return 'qwenchat-http-provider';
     default:
       return undefined;
   }
@@ -202,6 +201,11 @@ export function instantiateProvider(
   config: OpenAIStandardConfig,
   dependencies: ModuleDependencies
 ): IProviderV2 {
+  if (moduleType === 'qwenchat-http-provider' || moduleType === 'qwenchat') {
+    const error = new Error('[ProviderFactory] qwenchat provider has been removed; use qwen or another supported provider.');
+    (error as Error & { code?: string }).code = 'ERR_PROVIDER_REMOVED';
+    throw error;
+  }
   if (moduleType === 'mock-provider') {
     return new MockProvider(config, dependencies);
   }
@@ -213,9 +217,6 @@ export function instantiateProvider(
   }
   if (moduleType === 'deepseek-http-provider') {
     return new DeepSeekHttpProvider(config, dependencies);
-  }
-  if (moduleType === 'qwenchat-http-provider') {
-    return new QwenChatHttpProvider(config, dependencies);
   }
 
   switch (providerType) {

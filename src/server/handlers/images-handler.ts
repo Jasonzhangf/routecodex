@@ -200,7 +200,7 @@ async function handleImageRequest(
     }
     const count = clampCount(payload.n);
     const responseFormat = normalizeResponseFormat(payload.response_format);
-    const model = normalizeInputString(payload.model) || 'qwenchat.qwen3.6-plus';
+    const model = normalizeInputString(payload.model) || 'qwen.qwen3-vl-plus';
     const reqMetadata =
       payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
         ? (payload.metadata as Record<string, unknown>)

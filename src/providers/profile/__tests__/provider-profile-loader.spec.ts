@@ -127,8 +127,8 @@ describe('provider-profile-loader', () => {
   it('extracts concurrency and rpm metadata from provider config', () => {
     const config: Record<string, unknown> = {
       providers: {
-        qwenchat: {
-          type: 'qwenchat',
+        qwen: {
+          type: 'qwen',
           concurrency: {
             maxInFlight: 1,
             acquireTimeoutMs: 45000,
@@ -143,12 +143,12 @@ describe('provider-profile-loader', () => {
     };
 
     const result = buildProviderProfiles(config);
-    expect(result.byId.qwenchat.metadata?.concurrency).toEqual({
+    expect(result.byId.qwen.metadata?.concurrency).toEqual({
       maxInFlight: 1,
       acquireTimeoutMs: 45000,
       staleLeaseMs: 240000
     });
-    expect(result.byId.qwenchat.metadata?.rpm).toEqual({
+    expect(result.byId.qwen.metadata?.rpm).toEqual({
       requestsPerMinute: 80,
       acquireTimeoutMs: 35000
     });
@@ -172,5 +172,16 @@ describe('provider-profile-loader', () => {
     const result = buildProviderProfiles(config);
     expect(result.profiles).toHaveLength(0);
     expect(result.byId).toEqual({});
+  });
+
+  it('rejects removed qwenchat provider type', () => {
+    const config: Record<string, unknown> = {
+      providers: {
+        qwenchat: {
+          type: 'qwenchat'
+        }
+      }
+    };
+    expect(() => buildProviderProfiles(config)).toThrow(/unsupported type \"qwenchat\"/i);
   });
 });

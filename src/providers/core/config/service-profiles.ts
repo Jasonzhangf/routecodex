@@ -30,10 +30,6 @@ function resolveGeminiCliUserAgent(): string {
   return `GeminiCLI/${version} (${system}; ${arch})`;
 }
 
-const DEFAULT_QWENCHAT_USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
-const DEFAULT_QWENCHAT_ACCEPT_LANGUAGE = 'zh-CN,zh;q=0.9,en;q=0.8';
-
 /**
  * 动态服务配置档案构建器
  *
@@ -164,23 +160,6 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     // 对齐官方 @qwen-code/qwen-code DEFAULT_TIMEOUT=120000ms
     timeout: 120000,
     maxRetries: 3
-  },
-
-  qwenchat: {
-    // Qwen Web chat (chat.qwen.ai) flow used by inlined qwenchat-http-provider.
-    defaultBaseUrl: 'https://chat.qwen.ai',
-    defaultEndpoint: '/api/v2/chat/completions',
-    defaultModel: 'qwen3.6-plus',
-    requiredAuth: [],
-    optionalAuth: ['apikey', 'oauth'],
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      'User-Agent': DEFAULT_QWENCHAT_USER_AGENT,
-      'Accept-Language': DEFAULT_QWENCHAT_ACCEPT_LANGUAGE
-    },
-    timeout: 240000,
-    maxRetries: 1
   },
 
   deepseek: {

@@ -182,7 +182,7 @@ function inferRuntimeOnlyBinding(
       notes: `Provider type "${providerType || providerId}" requires the existing RouteCodex runtime path.`
     };
   }
-  if (compatibilityProfile === 'chat:deepseek-web' || compatibilityProfile === 'chat:qwenchat-web') {
+  if (compatibilityProfile === 'chat:deepseek-web') {
     return {
       family: 'custom-runtime',
       supported: false,
