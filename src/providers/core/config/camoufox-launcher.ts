@@ -1027,7 +1027,6 @@ async function maybeAdvanceQwenAuthorization(options: {
   return googleClicked;
 }
 
-}
 
 async function waitForGoogleAuthPage(options: {
   provider?: string | null;

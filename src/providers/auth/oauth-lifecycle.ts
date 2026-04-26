@@ -1360,6 +1360,11 @@ async function runInteractiveAuthorizationFlow(
       backupFile = await backupTokenFile(tokenFilePath);
     }
     try {
+      const strategy = createStrategy(providerType, overrides, tokenFilePath);
+      const authed = await strategy.authenticate?.({ openBrowser, forceReauthorize: forceReauth });
+      await finalizeTokenWrite(providerType, strategy, tokenFilePath, authed, 'acquired', {
+        strictQwenValidation: providerType === 'qwen'
+      });
       await discardBackupFile(backupFile);
       if (openBrowser && shouldAutoCloseOAuthBrowserSession()) {
         // Optional: close only after token is fully written; never close browser on failed auth.
@@ -1398,45 +1403,6 @@ async function runInteractiveAuthorizationFlow(
     () => undefined
   );
   await queued;
-}
-
-  overrides: Record<string, unknown>,
-  tokenFilePath: string,
-  forceReauth: boolean
-): Promise<void> {
-  const authCodeOverrides = { ...overrides, flowType: OAuthFlowType.AUTHORIZATION_CODE };
-  const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
-    // Auto mode should stay single-path to keep retry lifecycle deterministic.
-    await executeAuthFlow(providerType, authCodeOverrides, tokenFilePath, forceReauth);
-    return;
-  }
-  try {
-    await executeAuthFlow(providerType, authCodeOverrides, tokenFilePath, forceReauth);
-    return;
-  } catch (firstError) {
-    logOAuthDebug(
-      `[OAuth] auth_code flow failed: ${firstError instanceof Error ? firstError.message : String(firstError || '')}`
-    );
-  }
-  const deviceOverrides = { ...overrides, flowType: OAuthFlowType.DEVICE_CODE };
-  await executeAuthFlow(providerType, deviceOverrides, tokenFilePath, forceReauth);
-}
-
-async function executeAuthFlow(
-  providerType: string,
-  overrides: Record<string, unknown>,
-  tokenFilePath: string,
-  forceReauth: boolean
-): Promise<void> {
-  const strategy = createStrategy(providerType, overrides, tokenFilePath);
-  const authed = await strategy.authenticate?.({ openBrowser: true, forceReauthorize: forceReauth });
-  await finalizeTokenWrite(
-    providerType,
-    strategy,
-    tokenFilePath,
-    authed,
-    overrides.flowType ? `acquired (${String(overrides.flowType)})` : 'acquired'
-  );
 }
 
 export async function ensureValidOAuthToken(
@@ -1709,15 +1675,6 @@ export async function handleUpstreamInvalidOAuthToken(
     lowerMessage: string
   ): Promise<boolean> => {
 
-      logOAuthLifecycleNonBlocking(
-        'handleUpstreamInvalidOAuthToken.refreshRejected',
-        new Error('refresh endpoint rejected request; manual re-auth required'),
-        { providerType, tokenFilePath },
-        { warn: true, throttleKey: `oauth-refresh-rejected:${providerType}:${tokenFilePath || 'unknown'}` }
-      );
-      return false;
-    }
-
     try {
       await withOAuthRepairEnv(providerType, async () => {
         await ensureValid(providerType, auth, {
@@ -1831,45 +1788,44 @@ export async function handleUpstreamInvalidOAuthToken(
         }
         return false;
       }
-        try {
-          await withOAuthRepairEnv(providerType, async () => {
-            await ensureValid(providerType, auth, {
-              forceReacquireIfRefreshFails: false,
-              openBrowser: false,
-              forceReauthorize: false,
-              forceRefresh: pt === 'qwen'
-            });
+      try {
+        await withOAuthRepairEnv(providerType, async () => {
+          await ensureValid(providerType, auth, {
+            forceReacquireIfRefreshFails: false,
+            openBrowser: false,
+            forceReauthorize: false,
+            forceRefresh: pt === 'qwen'
           });
-          await markInteractiveOAuthRepairSuccess({
-            providerType,
-            tokenFile: tokenFilePath
-          });
-          return true;
-        } catch (error) {
-          const refreshMsg = error instanceof Error ? error.message : String(error);
-          if (pt === 'qwen' && isPermanentOAuthRefreshErrorMessage(refreshMsg)) {
-            await maybeMarkTokenFileNoRefresh(tokenFilePath);
-            logOAuthLifecycleNonBlocking(
-              'handleUpstreamInvalidOAuthToken.qwenPermanentRefreshFailure',
-              new Error('qwen silent refresh permanently failed; standard re-auth required'),
-              { providerType, tokenFilePath, reason: refreshMsg },
-              { warn: true, throttleKey: `qwen-permanent-refresh:${tokenFilePath}` }
-            );
-            return false;
-          }
-          if (pt === 'qwen') {
-            logOAuthLifecycleNonBlocking(
-              'handleUpstreamInvalidOAuthToken.qwenSilentRefreshFailure',
-              new Error('qwen silent refresh failed; standard re-auth required'),
-              { providerType, tokenFilePath, reason: refreshMsg },
-              { warn: true, throttleKey: `qwen-silent-refresh:${tokenFilePath}` }
-            );
-            return false;
-          }
-          logOAuthDebug(
-            `[OAuth] silent refresh failed; falling back to background interactive repair (provider=${providerType}) - ${refreshMsg}`
+        });
+        await markInteractiveOAuthRepairSuccess({
+          providerType,
+          tokenFile: tokenFilePath
+        });
+        return true;
+      } catch (error) {
+        const refreshMsg = error instanceof Error ? error.message : String(error);
+        if (pt === 'qwen' && isPermanentOAuthRefreshErrorMessage(refreshMsg)) {
+          await maybeMarkTokenFileNoRefresh(tokenFilePath);
+          logOAuthLifecycleNonBlocking(
+            'handleUpstreamInvalidOAuthToken.qwenPermanentRefreshFailure',
+            new Error('qwen silent refresh permanently failed; standard re-auth required'),
+            { providerType, tokenFilePath, reason: refreshMsg },
+            { warn: true, throttleKey: `qwen-permanent-refresh:${tokenFilePath}` }
           );
+          return false;
         }
+        if (pt === 'qwen') {
+          logOAuthLifecycleNonBlocking(
+            'handleUpstreamInvalidOAuthToken.qwenSilentRefreshFailure',
+            new Error('qwen silent refresh failed; standard re-auth required'),
+            { providerType, tokenFilePath, reason: refreshMsg },
+            { warn: true, throttleKey: `qwen-silent-refresh:${tokenFilePath}` }
+          );
+          return false;
+        }
+        logOAuthDebug(
+          `[OAuth] silent refresh failed; falling back to background interactive repair (provider=${providerType}) - ${refreshMsg}`
+        );
       }
       const interactiveOpts: EnsureOpts = {
         forceReacquireIfRefreshFails: true,
