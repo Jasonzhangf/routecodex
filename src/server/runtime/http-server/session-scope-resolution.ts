@@ -1,5 +1,8 @@
 import { extractSessionClientScopeIdFromApiKey } from '../../../utils/session-client-token.js';
 
+const SESSION_SCOPE_NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
+const sessionScopeNonBlockingLogState = new Map<string, number>();
+
 type SessionScopeResolutionArgs = {
   userMeta: Record<string, unknown>;
   bodyMeta: Record<string, unknown>;
@@ -15,6 +18,36 @@ export type TmuxSessionResolution = {
   tmuxSessionId?: string;
   source: 'metadata' | 'body_metadata' | 'headers_or_api_key' | 'registry_by_daemon' | 'registry_by_binding' | 'none';
 };
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logSessionScopeResolutionNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  const now = Date.now();
+  const last = sessionScopeNonBlockingLogState.get(stage) ?? 0;
+  if (now - last < SESSION_SCOPE_NON_BLOCKING_LOG_THROTTLE_MS) {
+    return;
+  }
+  sessionScopeNonBlockingLogState.set(stage, now);
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[session-scope-resolution] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // never throw from non-blocking logging
+  }
+}
 
 function readToken(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
@@ -126,8 +159,8 @@ function extractTmuxSessionIdFromTurnMetadata(rawValue: string | undefined): str
   const candidates = [rawValue];
   try {
     candidates.push(decodeURIComponent(rawValue));
-  } catch {
-    // ignore URI decoding errors
+  } catch (error: unknown) {
+    logSessionScopeResolutionNonBlockingError('extractTmuxSessionIdFromTurnMetadata.decodeURIComponent', error);
   }
 
   for (const candidate of [...candidates]) {
@@ -144,8 +177,8 @@ function extractTmuxSessionIdFromTurnMetadata(rawValue: string | undefined): str
       if (decoded) {
         candidates.push(decoded);
       }
-    } catch {
-      // ignore base64 decoding errors
+    } catch (error: unknown) {
+      logSessionScopeResolutionNonBlockingError('extractTmuxSessionIdFromTurnMetadata.base64Decode', error);
     }
   }
 
@@ -156,8 +189,8 @@ function extractTmuxSessionIdFromTurnMetadata(rawValue: string | undefined): str
       if (tmux) {
         return tmux;
       }
-    } catch {
-      // continue to URLSearchParams fallback
+    } catch (error: unknown) {
+      logSessionScopeResolutionNonBlockingError('extractTmuxSessionIdFromTurnMetadata.parseJson', error);
     }
 
     try {
@@ -175,8 +208,8 @@ function extractTmuxSessionIdFromTurnMetadata(rawValue: string | undefined): str
       if (fromParams) {
         return fromParams;
       }
-    } catch {
-      // ignore non-URLSearchParams text
+    } catch (error: unknown) {
+      logSessionScopeResolutionNonBlockingError('extractTmuxSessionIdFromTurnMetadata.parseUrlSearchParams', error);
     }
   }
   return undefined;
@@ -300,7 +333,8 @@ function isTmuxCandidateAlive(args: SessionScopeResolutionArgs, tmuxSessionId: s
   }
   try {
     return args.isTmuxSessionAlive(tmuxSessionId);
-  } catch {
+  } catch (error: unknown) {
+    logSessionScopeResolutionNonBlockingError('isTmuxCandidateAlive', error, { tmuxSessionId });
     return false;
   }
 }

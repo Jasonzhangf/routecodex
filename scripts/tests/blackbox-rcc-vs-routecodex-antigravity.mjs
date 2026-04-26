@@ -357,7 +357,7 @@ async function startMockUpstream() {
                         thoughtSignature: MOCK_THOUGHT_SIGNATURE,
                         functionCall: {
                           name: 'exec_command',
-                          args: { command: 'echo prime' }
+                          args: { cmd: 'echo prime' }
                         }
                       }
                     ]
@@ -408,7 +408,7 @@ async function startMockUpstream() {
                       thoughtSignature: MOCK_THOUGHT_SIGNATURE,
                       functionCall: {
                         name: 'exec_command',
-                        args: { command: 'echo prime' }
+                        args: { cmd: 'echo prime' }
                       }
                     }
                   ]
@@ -449,51 +449,63 @@ async function startMockUpstream() {
 
 function writeTempConfig({ dir, serverPort, upstreamBaseUrl, tokenFile, targetModel }) {
   const cfgPath = path.join(dir, `config-${serverPort}.json`);
+  const providerDir = path.join(dir, 'provider', 'antigravity');
   const modelName = String(targetModel || 'gemini-3-pro-high').trim() || 'gemini-3-pro-high';
-  const cfg = {
-    version: '1.0.0',
-    server: { quotaRoutingEnabled: false },
-    httpserver: { host: '127.0.0.1', port: serverPort, apikey: 'verify-key' },
-    virtualrouter: {
-      providers: {
-        antigravity: {
-          id: 'antigravity',
-          enabled: true,
-          type: 'gemini-cli-http-provider',
-          providerType: 'gemini',
-          compatibilityProfile: 'chat:gemini-cli',
-          baseURL: upstreamBaseUrl,
-          auth: {
-            type: 'antigravity-oauth',
-            entries: [
-              { alias: 'test', type: 'antigravity-oauth', tokenFile }
-            ]
-          },
-          models: {
-            [modelName]: { supportsStreaming: true }
-          }
-        }
-      },
-      routing: {
-        default: [
-          {
-            id: 'default-primary',
-            priority: 200,
-            mode: 'priority',
-            targets: [`antigravity.${modelName}`]
-          }
-        ],
-        thinking: [
-          {
-            id: 'thinking-primary',
-            priority: 200,
-            mode: 'priority',
-            targets: [`antigravity.${modelName}`]
-          }
+  fs.mkdirSync(providerDir, { recursive: true });
+
+  const providerCfg = {
+    version: '2.0.0',
+    providerId: 'antigravity',
+    provider: {
+      id: 'antigravity',
+      enabled: true,
+      type: 'gemini-cli-http-provider',
+      providerType: 'gemini',
+      compatibilityProfile: 'chat:gemini-cli',
+      baseURL: upstreamBaseUrl,
+      auth: {
+        type: 'antigravity-oauth',
+        entries: [
+          { alias: 'test', type: 'antigravity-oauth', tokenFile }
         ]
+      },
+      models: {
+        [modelName]: { supportsStreaming: true }
       }
     }
   };
+
+  const cfg = {
+    version: '2.0.0',
+    virtualrouterMode: 'v2',
+    httpserver: { host: '127.0.0.1', port: serverPort, apikey: 'verify-key' },
+    virtualrouter: {
+      activeRoutingPolicyGroup: 'default',
+      routingPolicyGroups: {
+        default: {
+          routing: {
+            default: [
+              {
+                id: 'default-primary',
+                priority: 200,
+                mode: 'priority',
+                targets: [`antigravity.${modelName}`]
+              }
+            ],
+            thinking: [
+              {
+                id: 'thinking-primary',
+                priority: 200,
+                mode: 'priority',
+                targets: [`antigravity.${modelName}`]
+              }
+            ]
+          }
+        }
+      }
+    }
+  };
+  fs.writeFileSync(path.join(providerDir, 'config.v2.json'), `${JSON.stringify(providerCfg, null, 2)}\n`, 'utf8');
   fs.writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`, 'utf8');
   return cfgPath;
 }
@@ -525,9 +537,18 @@ async function runOnceBlackbox(opts) {
   const env = {
     ...process.env,
     ...(homeDir ? { HOME: homeDir } : {}),
+    ...(homeDir
+      ? {
+          RCC_HOME: homeDir,
+          ROUTECODEX_USER_DIR: homeDir,
+          ROUTECODEX_HOME: homeDir
+        }
+      : {}),
     ROUTECODEX_CONFIG_PATH: configPath,
+    ROUTECODEX_CONFIG: configPath,
     ROUTECODEX_PORT: String(port),
     RCC_CONFIG_PATH: configPath,
+    RCC_CONFIG: configPath,
     RCC_PORT: String(port),
     ROUTECODEX_V2_HOOKS: '0',
     RCC_V2_HOOKS: '0',

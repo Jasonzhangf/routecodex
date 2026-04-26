@@ -2075,7 +2075,6 @@ describe('HubRequestExecutor failover', () => {
         statusCode: 502
       });
     });
-
     const handles = new Map<string, ProviderHandle>([
       [providerA, buildHandle(providerA, failingProcess)],
       [providerB, buildHandle(providerB, failingProcess)]
@@ -2329,4 +2328,54 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
+});
+
+describe('HubRequestExecutor session storm backoff', () => {
+  beforeEach(() => {
+    __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-22T12:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    delete process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS;
+    delete process.env.RCC_SESSION_STORM_BACKOFF_BASE_MS;
+    delete process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS;
+    delete process.env.RCC_SESSION_STORM_BACKOFF_MAX_MS;
+  });
+
+  test('backs off exponentially for repeated provider-unavailable failures', () => {
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '8000';
+
+    const key = __requestExecutorTestables.resolveSessionStormBackoffScope({
+      sessionId: 'session-1'
+    });
+    expect(key).toBe('session:session-1');
+
+    const err = Object.assign(new Error('No available providers after applying routing instructions'), {
+      code: 'PROVIDER_NOT_AVAILABLE'
+    });
+    expect(__requestExecutorTestables.isSessionStormBackoffCandidate(err)).toBe(true);
+
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs(key!)).toBe(1000);
+    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs(key!)).toBe(1000);
+
+    jest.setSystemTime(new Date('2026-04-22T12:00:00.500Z'));
+    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs(key!)).toBe(500);
+
+    jest.setSystemTime(new Date('2026-04-22T12:00:01.000Z'));
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs(key!)).toBe(2000);
+    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs(key!)).toBe(2000);
+
+    __requestExecutorTestables.clearSessionStormBackoff(key!);
+    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs(key!)).toBe(0);
+  });
+
+  test('does not treat generic application errors as storm candidates', () => {
+    expect(
+      __requestExecutorTestables.isSessionStormBackoffCandidate(new Error('boom'))
+    ).toBe(false);
+  });
 });

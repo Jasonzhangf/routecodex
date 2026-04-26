@@ -13,6 +13,13 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - L81-L100 `diagnosis`: PipeDebug 诊断流程
 - L101-L160 `restart`: 服务器重启与热加载（SIGUSR2）
 - L161-L240 `snapshot-startup`: Snapshot 启动策略（默认轻量 + 显式 stage）
+- L241+ `hard-guard`: fallback / 静默失败治理硬规则
+
+## 本技能硬护栏（fallback / 静默失败）
+
+1. **严禁一切 fallback / 静默失败**：禁止吞错、禁止无声降级、禁止“看起来成功”的伪成功路径。
+2. **发现即修（最小切片）**：在当前任务触达范围内发现 fallback/静默失败，必须顺手修复并给出验证证据。
+3. **best-effort 边界**：仅允许用于观测/清理等非主链动作；即使 non-blocking 也必须可观测（日志/事件/节流），不得吞掉主链失败信号。
 
 ## Chat Process 定义
 
@@ -260,6 +267,8 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - Auth 排查硬护栏（2026-04-18）：**除非 Jason 明确要求并授权当前轮触发认证，否则排查 qwen/gemini/iflow/antigravity auth 问题时一律只做静态审计（代码、日志、token 文件、官方实现对照）**；禁止主动拉起 `oauth`/browser/camoufox/device-flow，先证明“为什么现有 token / refresh 链路失效”。
 - qwen daemon auto 边界（2026-04-18）：`token-daemon` 的 qwen 自动鉴权失败后**禁止自动回退 headful manual**；应直接失败并交给 auto-suspend/noRefresh 节流，否则 5555 会反复打印 device-code + manual fallback，形成“无限 OAuth”假象。
 - qwen/iflow auto OAuth 收口（2026-04-19）：`qwen` 与 `iflow` 的 **auto OAuth 已整体移除**；background repair、token-daemon、root `oauth <selector>` 自动探测都不得再注入 `ROUTECODEX_CAMOUFOX_AUTO_MODE=qwen/iflow`。这两类 provider 只允许显式手动 OAuth，不允许请求期/守护进程自动拉起浏览器。
+- qwen 主配置隔离（2026-04-22）：`token-daemon` 会按 **当前 config 的 active routing providers** 决定是否扫描/刷新 token；若 `/Volumes/extension/.rcc/config.json` 仍引用 `qwen/qwenchat`，5555 主 lane 就会把所有 qwen alias 纳入 refresh 评估。可复用动作：把 qwen/qwenchat 全部移到独立 `config.qwen-5520.json`，主配置只保留非 qwen provider，避免 `Auto-refresh failed for qwen (...)` 多账号风暴。
+- qwen 风暴判型（2026-04-22）：若日志先出现**同一个 request id** 的 `provider-switch attempt=...`，随后又刷出一串 **`openai-responses-unknown-unknown-*` 新 request id**，要先判定为“首个请求失败后，上游 client/session 在重发”，不是 `RequestExecutor` 单请求内部重试风暴；前者先查主配置是否仍把不稳定 provider 暴露给主 lane。
 - virtual-router responses 当前轮边界（2026-04-19）：Responses `context.input` 判断 `latestMessageFromUser` 时，**不能只找最后一个 user message**；必须先看**最后一个有效 entry 的角色**（`message/function_call/function_call_output`），并只统计**latest user boundary 之后**的当前轮 tool 信号。否则会把 `user -> function_call -> function_call_output` 的续轮误判成 `thinking:user-input`。
 - responses request replay 保参补口（2026-04-19）：若 `/v1/responses` 出站请求明明带了 `text/modalities` 等参数，但最终 wire 丢失，先查 `responses-mapper-from-chat.ts` 与 `responses-openai-bridge.ts`。**`chat.semantics.responses.requestParameters + 显式字段` 必须先回填到 chat/context，再在 `prepareResponsesRequestEnvelopeWithNative(...)` 之后补一次 missing request params**；否则 native prepare 只保留部分 host-managed 字段，看起来像“语义落盘了但出站没回放”。
 - 协议兼容收口验收（2026-04-19）：**不要只跑 synthetic mapper/unit test。** 若要宣称协议映射“完备/兼容”，至少拿一份真实 `codex-samples` 的 `provider-request.json + provider-response.json`，分别走当前代码的 request replay / response replay，再对比 **hub canonical 输入** 与 **重放后的 outbound/client 输出** 关键字段；这一步会直接暴露像 Anthropic `system` 重复这类纸面测试看不出的真缺口。

@@ -9,6 +9,35 @@ import { loadTokenPortalFingerprintSummary } from '../../../../token-portal/fing
 import { findGoogleAccountVerificationIssue } from '../../../../token-daemon/quota-auth-issue.js';
 import { createQuotaManagerAdapter } from '../../../../manager/modules/quota/quota-adapter.js';
 
+const QUOTA_HANDLER_NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
+const quotaHandlerNonBlockingLogState = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logQuotaHandlerNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  const now = Date.now();
+  const last = quotaHandlerNonBlockingLogState.get(stage) ?? 0;
+  if (now - last < QUOTA_HANDLER_NON_BLOCKING_LOG_THROTTLE_MS) {
+    return;
+  }
+  quotaHandlerNonBlockingLogState.set(stage, now);
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[daemon-admin][quota] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // never throw from best-effort logging
+  }
+}
+
 function getQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerAdapter | null {
   const daemon = options.getManagerDaemon() as
     | {
@@ -69,7 +98,8 @@ function getQuotaRawSnapshot(options: DaemonAdminRouteOptions): Record<string, Q
   }
   try {
     return quotaModule.getRawSnapshot() ?? {};
-  } catch {
+  } catch (error: unknown) {
+    logQuotaHandlerNonBlockingError('getQuotaRawSnapshot', error);
     return {};
   }
 }
@@ -221,12 +251,22 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       const verifyUrlByAlias = new Map<string, string | null>();
       await Promise.allSettled([
         ...Array.from(aliases).map(async (alias) => {
-          const fp = await loadTokenPortalFingerprintSummary('antigravity', alias).catch(() => null);
-          fpByAlias.set(alias, fp);
+          try {
+            const fp = await loadTokenPortalFingerprintSummary('antigravity', alias);
+            fpByAlias.set(alias, fp);
+          } catch (error: unknown) {
+            logQuotaHandlerNonBlockingError('loadTokenPortalFingerprintSummary', error, { alias });
+            fpByAlias.set(alias, null);
+          }
         }),
         ...Array.from(verifyAliases).map(async (alias) => {
-          const issue = await findGoogleAccountVerificationIssue('antigravity', alias).catch(() => null);
-          verifyUrlByAlias.set(alias, normalizeGoogleVerifyUrl(issue?.url ?? null));
+          try {
+            const issue = await findGoogleAccountVerificationIssue('antigravity', alias);
+            verifyUrlByAlias.set(alias, normalizeGoogleVerifyUrl(issue?.url ?? null));
+          } catch (error: unknown) {
+            logQuotaHandlerNonBlockingError('findGoogleAccountVerificationIssue', error, { alias });
+            verifyUrlByAlias.set(alias, null);
+          }
         })
       ]);
 

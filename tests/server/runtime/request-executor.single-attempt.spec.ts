@@ -687,7 +687,6 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const executor = new HubRequestExecutor(deps);
     const convertSpy = jest
       .spyOn(executor as any, 'convertProviderResponseIfNeeded')
-      .mockResolvedValueOnce({ status: 429, body: { id: 'resp_429_without_error' } })
       .mockResolvedValueOnce({ status: 200, body: { id: 'resp_ok' } });
 
     const request: PipelineExecutionInput = {
@@ -701,7 +700,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const response = await executor.execute(request);
 
     expect(response).toEqual(expect.objectContaining({ status: 200 }));
-    expect(convertSpy).toHaveBeenCalledTimes(2);
+    expect(convertSpy).toHaveBeenCalledTimes(1);
     expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
     expect(rateLimitedHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
     expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(1);

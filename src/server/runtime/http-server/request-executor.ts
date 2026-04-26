@@ -111,6 +111,13 @@ const RECOVERABLE_BACKOFF_TTL_MS = 5 * 60_000;
 const recoverableErrorBackoffState = new Map<string, { consecutive: number; updatedAtMs: number }>();
 const recoverableRetryGateState = new Map<string, Promise<void>>();
 const recoverableRetryWaiterState = new Map<string, { activeWaiters: number; updatedAtMs: number }>();
+const SESSION_STORM_BACKOFF_TTL_MS = 10 * 60_000;
+const sessionStormBackoffState = new Map<string, {
+  consecutive: number;
+  updatedAtMs: number;
+  nextAllowedAtMs: number;
+}>();
+const sessionStormBackoffGateState = new Map<string, Promise<void>>();
 const logicalChainRetryState = new Map<string, {
   recoverableRetries: number;
   updatedAtMs: number;
@@ -184,6 +191,24 @@ function formatUnknownError(error: unknown): string {
   } catch {
     return String(error);
   }
+}
+
+function cloneErrorForReporting(error: unknown): unknown {
+  if (!error || typeof error !== 'object') {
+    return error;
+  }
+  if (error instanceof Error) {
+    const cloned = new Error(error.message);
+    cloned.name = error.name;
+    if (typeof error.stack === 'string') {
+      cloned.stack = error.stack;
+    }
+    return Object.assign(cloned, error);
+  }
+  if (Array.isArray(error)) {
+    return [...error];
+  }
+  return { ...(error as Record<string, unknown>) };
 }
 
 function logRequestExecutorNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
@@ -1069,6 +1094,10 @@ function resolveRequestExecutorProviderErrorClassification(args: {
   const reason = String(args.retryError.reason || (args.error as { message?: string } | undefined)?.message || '')
     .trim()
     .toLowerCase();
+
+  if (errorCode === 'CONTEXT_LENGTH_EXCEEDED' || upstreamCode === 'CONTEXT_LENGTH_EXCEEDED') {
+    return 'special_400';
+  }
 
   if (
     errorCode === 'INVALID_REQUEST_ERROR'
@@ -2032,23 +2061,6 @@ async function resolveRequestExecutorProviderFailurePlan(args: {
     retryError: args.retryError,
     fallbackStage: args.stage
   });
-  await reportRequestExecutorProviderError({
-    error: args.error,
-    retryError: args.retryError,
-    requestId: args.requestId,
-    providerKey: args.providerKey,
-    providerId: args.providerId,
-    providerType: args.providerType,
-    providerFamily: args.providerFamily,
-    providerProtocol: args.providerProtocol,
-    routeName: args.routeName,
-    runtimeKey: args.runtimeKey,
-    target: args.target,
-    dependencies: args.dependencies,
-    attempt: args.attempt,
-    logStage: args.logStage,
-    stageHint: reportPlan.stageHint
-  });
   const retryExecutionPlan = await resolveProviderRetryExecutionPlan({
     error: args.error,
     retryError: args.retryError,
@@ -2074,6 +2086,28 @@ async function resolveRequestExecutorProviderFailurePlan(args: {
     status: args.status,
     forceExcludeCurrentProviderOnRetry: args.forceExcludeCurrentProviderOnRetry,
     abortSignal: args.abortSignal
+  });
+  // `reportRequestExecutorProviderError -> emitProviderError` may back-propagate
+  // `recoverable` onto the original error object (`err.retryable = recoverable`).
+  // Retry planning must use the provider's original retry hint, not the router-facing
+  // classification side effect, otherwise retryable 403/compat cases can be downgraded
+  // before host failover sees them.
+  await reportRequestExecutorProviderError({
+    error: cloneErrorForReporting(args.error),
+    retryError: args.retryError,
+    requestId: args.requestId,
+    providerKey: args.providerKey,
+    providerId: args.providerId,
+    providerType: args.providerType,
+    providerFamily: args.providerFamily,
+    providerProtocol: args.providerProtocol,
+    routeName: args.routeName,
+    runtimeKey: args.runtimeKey,
+    target: args.target,
+    dependencies: args.dependencies,
+    attempt: args.attempt,
+    logStage: args.logStage,
+    stageHint: reportPlan.stageHint
   });
   const retryTelemetryPlan =
     retryExecutionPlan.shouldRetry && retryExecutionPlan.retrySwitchPlan && retryExecutionPlan.backoffScope
@@ -2211,6 +2245,23 @@ async function resolveProviderRetryBackoffPlan(args: {
     upstreamCode: args.retryError.upstreamCode,
     reason: args.retryError.reason
   });
+  if (blockingRecoverable) {
+    const logicalChainRetry = consumeLogicalChainRecoverableRetry(args.logicalRequestChainKey);
+    if (!logicalChainRetry.allowed) {
+      args.logStage('provider.retry.logical_chain_limit_hit', args.logicalChainRetryLimitStageRequestId, {
+        providerKey: args.providerKey,
+        logicalRequestChainKey: args.logicalRequestChainKey,
+        logicalChainRecoverableRetries: logicalChainRetry.count,
+        logicalChainRecoverableRetryLimit: logicalChainRetry.limit,
+        attempt: args.attempt,
+        ...(typeof args.retryError.statusCode === 'number' ? { statusCode: args.retryError.statusCode } : {}),
+        ...(args.retryError.errorCode ? { errorCode: args.retryError.errorCode } : {}),
+        ...(args.retryError.upstreamCode ? { upstreamCode: args.retryError.upstreamCode } : {}),
+        reason: args.retryError.reason
+      });
+      throw args.error;
+    }
+  }
   if (args.forceAttemptScopedBackoff) {
     const retryBackoffMs = await waitBeforeRetry(args.error, {
       attempt: args.attempt,
@@ -2255,22 +2306,6 @@ async function resolveProviderRetryBackoffPlan(args: {
       recoverableBackoffMs: 0,
       backoffScope: 'attempt'
     };
-  }
-
-  const logicalChainRetry = consumeLogicalChainRecoverableRetry(args.logicalRequestChainKey);
-  if (!logicalChainRetry.allowed) {
-    args.logStage('provider.retry.logical_chain_limit_hit', args.logicalChainRetryLimitStageRequestId, {
-      providerKey: args.providerKey,
-      logicalRequestChainKey: args.logicalRequestChainKey,
-      logicalChainRecoverableRetries: logicalChainRetry.count,
-      logicalChainRecoverableRetryLimit: logicalChainRetry.limit,
-      attempt: args.attempt,
-      ...(typeof args.retryError.statusCode === 'number' ? { statusCode: args.retryError.statusCode } : {}),
-      ...(args.retryError.errorCode ? { errorCode: args.retryError.errorCode } : {}),
-      ...(args.retryError.upstreamCode ? { upstreamCode: args.retryError.upstreamCode } : {}),
-      reason: args.retryError.reason
-    });
-    throw args.error;
   }
 
   const recoverableKey = buildRecoverableErrorBackoffKey({
@@ -2420,7 +2455,11 @@ async function waitRecoverableBackoffWithGlobalGate(key: string, ms: number, sig
   });
   recoverableRetryGateState.set(normalizedKey, current);
   try {
-    await previous.catch(() => undefined);
+    await previous.catch((error: unknown) => {
+      logRequestExecutorNonBlockingError('waitRecoverableBackoffWithGlobalGate.previous', error, {
+        key: normalizedKey
+      });
+    });
     await waitRecoverableBackoffMs(ms, signal);
   } finally {
     release();
@@ -2518,6 +2557,8 @@ function resetRequestExecutorInternalStateForTests(): void {
   recoverableErrorBackoffState.clear();
   recoverableRetryGateState.clear();
   recoverableRetryWaiterState.clear();
+  sessionStormBackoffState.clear();
+  sessionStormBackoffGateState.clear();
   logicalChainRetryState.clear();
   providerSwitchLogState.clear();
 }
@@ -2833,6 +2874,156 @@ function containsToolRegistryMissingText(value: unknown): boolean {
   return false;
 }
 
+function shouldBypassProviderResponseConversion(normalized: PipelineExecutionResult): boolean {
+  return typeof normalized.status === 'number' && normalized.status >= 400;
+}
+
+function resolveSessionStormBackoffScope(metadata: Record<string, unknown>): string | undefined {
+  const sessionId = readString(metadata.sessionId);
+  if (sessionId) {
+    return `session:${sessionId}`;
+  }
+  const conversationId = readString(metadata.conversationId);
+  if (conversationId) {
+    return `conversation:${conversationId}`;
+  }
+  const workdir =
+    readString(metadata.clientWorkdir)
+    ?? readString(metadata.client_workdir)
+    ?? readString(metadata.workdir)
+    ?? readString(metadata.cwd);
+  if (workdir) {
+    return `workdir:${workdir}`;
+  }
+  return undefined;
+}
+
+function isSessionStormBackoffCandidate(error: unknown): boolean {
+  const codeSource =
+    error && typeof error === 'object'
+      ? (error as { code?: unknown }).code
+      : undefined;
+  const code = normalizeCodeKey(codeSource);
+  if (code === 'PROVIDER_NOT_AVAILABLE' || code === 'ERR_NO_PROVIDER_TARGET') {
+    return true;
+  }
+  const status = extractStatusCodeFromError(error);
+  if (status === 429 || status === 502 || status === 503 || status === 504) {
+    return true;
+  }
+  if (isNetworkTransportLikeError(error)) {
+    return true;
+  }
+  const message =
+    error instanceof Error
+      ? error.message
+      : error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string'
+        ? String((error as { message?: unknown }).message)
+        : String(error ?? '');
+  const normalized = message.trim().toLowerCase();
+  return (
+    normalized.includes('fetch failed')
+    || normalized.includes('all providers unavailable')
+    || normalized.includes('no available providers after applying routing instructions')
+    || normalized.includes('connect timeout')
+    || normalized.includes('request timeout')
+  );
+}
+
+function resolveSessionStormBackoffBaseMs(): number {
+  const raw =
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS
+    ?? process.env.RCC_SESSION_STORM_BACKOFF_BASE_MS
+    ?? '';
+  const parsed = Number.parseInt(String(raw).trim(), 10);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return process.env.NODE_ENV === 'test' ? 200 : 1_000;
+}
+
+function resolveSessionStormBackoffMaxMs(): number {
+  const raw =
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS
+    ?? process.env.RCC_SESSION_STORM_BACKOFF_MAX_MS
+    ?? '';
+  const parsed = Number.parseInt(String(raw).trim(), 10);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return process.env.NODE_ENV === 'test' ? 5_000 : 30_000;
+}
+
+function consumeSessionStormBackoffMs(key: string): number {
+  const now = Date.now();
+  for (const [existingKey, state] of sessionStormBackoffState.entries()) {
+    if (now - state.updatedAtMs >= SESSION_STORM_BACKOFF_TTL_MS) {
+      sessionStormBackoffState.delete(existingKey);
+    }
+  }
+  const previous = sessionStormBackoffState.get(key);
+  const consecutive =
+    previous && now - previous.updatedAtMs < SESSION_STORM_BACKOFF_TTL_MS
+      ? Math.min(previous.consecutive + 1, 16)
+      : 1;
+  const delayMs = Math.min(
+    resolveSessionStormBackoffMaxMs(),
+    resolveSessionStormBackoffBaseMs() * Math.pow(2, Math.max(0, consecutive - 1))
+  );
+  sessionStormBackoffState.set(key, {
+    consecutive,
+    updatedAtMs: now,
+    nextAllowedAtMs: now + delayMs
+  });
+  return delayMs;
+}
+
+function peekSessionStormBackoffWaitMs(key: string): number {
+  const state = sessionStormBackoffState.get(key);
+  if (!state) {
+    return 0;
+  }
+  const now = Date.now();
+  if (now - state.updatedAtMs >= SESSION_STORM_BACKOFF_TTL_MS) {
+    sessionStormBackoffState.delete(key);
+    return 0;
+  }
+  return Math.max(0, state.nextAllowedAtMs - now);
+}
+
+function clearSessionStormBackoff(key?: string): void {
+  if (!key) {
+    return;
+  }
+  sessionStormBackoffState.delete(key);
+}
+
+async function waitSessionStormBackoffWithGate(key: string, ms: number, signal?: AbortSignal): Promise<void> {
+  if (!(ms > 0)) {
+    return;
+  }
+  const normalizedKey = key.trim() || 'session:unknown';
+  const previous = sessionStormBackoffGateState.get(normalizedKey) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  sessionStormBackoffGateState.set(normalizedKey, current);
+  try {
+    await previous.catch((error: unknown) => {
+      logRequestExecutorNonBlockingError('waitSessionStormBackoffWithGate.previous', error, {
+        key: normalizedKey
+      });
+    });
+    await waitWithClientAbortSignal(ms, signal);
+  } finally {
+    release();
+    if (sessionStormBackoffGateState.get(normalizedKey) === current) {
+      sessionStormBackoffGateState.delete(normalizedKey);
+    }
+  }
+}
+
 function detectRetryableEmptyAssistantResponse(body: unknown): { reason: string; marker: string } | null {
   if (!isRecord(body)) {
     return null;
@@ -3118,6 +3309,25 @@ export class HubRequestExecutor implements RequestExecutor {
         const inboundClientHeaders = cloneClientHeaders(initialMetadata?.clientHeaders);
         const providerRequestId = input.requestId;
         const clientRequestId = resolveClientRequestId(initialMetadata, providerRequestId);
+        const sessionStormBackoffScope = resolveSessionStormBackoffScope(initialMetadata);
+        if (sessionStormBackoffScope) {
+          const pendingSessionStormWaitMs = peekSessionStormBackoffWaitMs(sessionStormBackoffScope);
+          if (pendingSessionStormWaitMs > 0) {
+            this.logStage('request.session_storm_backoff_wait', providerRequestId, {
+              scope: sessionStormBackoffScope,
+              waitMs: pendingSessionStormWaitMs
+            });
+            await waitSessionStormBackoffWithGate(
+              sessionStormBackoffScope,
+              pendingSessionStormWaitMs,
+              getClientConnectionAbortSignal(initialMetadata)
+            );
+            this.logStage('request.session_storm_backoff_wait.completed', providerRequestId, {
+              scope: sessionStormBackoffScope,
+              waitMs: pendingSessionStormWaitMs
+            });
+          }
+        }
 
         this.logStage('request.received', providerRequestId, {
           endpoint: input.entryEndpoint,
@@ -3494,6 +3704,7 @@ export class HubRequestExecutor implements RequestExecutor {
         let trafficActiveInFlightAtAcquire = 0;
         let providerSendStartedAtMs = 0;
         let providerSendElapsedMs = 0;
+        const stoplessLogState = resolveStoplessLogState(mergedMetadata);
         const providerRequestedStream =
           typeof (providerPayload as { stream?: unknown } | undefined)?.stream === 'boolean'
             ? Boolean((providerPayload as { stream?: unknown }).stream)
@@ -3549,6 +3760,24 @@ export class HubRequestExecutor implements RequestExecutor {
             pipelineResult.routingDecision && typeof pipelineResult.routingDecision === 'object'
               ? (pipelineResult.routingDecision as Record<string, unknown>)
               : undefined;
+
+          emitVirtualRouterConcurrencyLog({
+            sessionId: readString(mergedMetadata.sessionId) ?? readString(mergedMetadata.conversationId),
+            projectPath:
+              readString(mergedMetadata.clientWorkdir)
+              ?? readString(mergedMetadata.client_workdir)
+              ?? readString(mergedMetadata.workdir)
+              ?? readString(mergedMetadata.cwd),
+            routeName: pipelineResult.routingDecision?.routeName,
+            poolId: readString(routingDecisionRecord?.poolId),
+            providerKey: target.providerKey,
+            model: providerModel,
+            reason: readString(routingDecisionRecord?.reasoning),
+            stoplessMode: stoplessLogState.mode,
+            stoplessArmed: stoplessLogState.armed,
+            activeInFlight: trafficActiveInFlightAtAcquire,
+            maxInFlight: trafficPolicyMaxInFlight
+          });
 
           providerSendStartedAtMs = Date.now();
           this.logStage('provider.send.start', input.requestId, {
@@ -3639,19 +3868,29 @@ export class HubRequestExecutor implements RequestExecutor {
           const qwenChatNonstreamDeliveryHint =
             readQwenChatNonstreamDelivery(mergedMetadata)
             ?? readQwenChatNonstreamDeliveryFromBody(normalized.body);
-          const converted = await this.convertProviderResponseIfNeeded({
-            entryEndpoint: input.entryEndpoint,
-            providerProtocol,
-            providerType: handle.providerType,
-            requestId: input.requestId,
-            serverToolsEnabled,
-            wantsStream: wantsStreamBase,
-            originalRequest: resolveOriginalRequestForResponseConversion(retryPayloadSeed),
-            requestSemantics,
-            processMode: pipelineResult.processMode,
-            response: normalized,
-            pipelineMetadata: mergedMetadata
-          });
+          const converted = shouldBypassProviderResponseConversion(normalized)
+            ? (() => {
+              this.logStage('provider.response_convert.skipped', input.requestId, {
+                providerKey: target.providerKey,
+                status: normalized.status,
+                reason: 'non_success_status_bypass',
+                attempt
+              });
+              return normalized;
+            })()
+            : await this.convertProviderResponseIfNeeded({
+              entryEndpoint: input.entryEndpoint,
+              providerProtocol,
+              providerType: handle.providerType,
+              requestId: input.requestId,
+              serverToolsEnabled,
+              wantsStream: wantsStreamBase,
+              originalRequest: resolveOriginalRequestForResponseConversion(retryPayloadSeed),
+              requestSemantics,
+              processMode: pipelineResult.processMode,
+              response: normalized,
+              pipelineMetadata: mergedMetadata
+            });
           const clientInjectWaitMsRaw = converted.timingBreakdown?.hubResponseExcludedMs;
           const clientInjectWaitMs =
             typeof clientInjectWaitMsRaw === 'number' && Number.isFinite(clientInjectWaitMsRaw)
@@ -3692,7 +3931,6 @@ export class HubRequestExecutor implements RequestExecutor {
             hasBody: converted.body !== undefined && converted.body !== null,
             attempt
           });
-          const stoplessLogState = resolveStoplessLogState(mergedMetadata);
           if (clientInjectWaitMs > 0) {
             this.logStage('client.inject_wait.start', input.requestId, {
               providerKey: target.providerKey,
@@ -3858,25 +4096,10 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt
           });
 
-          emitVirtualRouterConcurrencyLog({
-            sessionId: readString(mergedMetadata.sessionId) ?? readString(mergedMetadata.conversationId),
-            projectPath:
-              readString(mergedMetadata.clientWorkdir)
-              ?? readString(mergedMetadata.client_workdir)
-              ?? readString(mergedMetadata.workdir)
-              ?? readString(mergedMetadata.cwd),
-            routeName: pipelineResult.routingDecision?.routeName,
-            poolId: readString(routingDecisionRecord?.poolId),
-            providerKey: target.providerKey,
-            model: providerModel,
-            reason: readString(routingDecisionRecord?.reasoning),
-            stoplessMode: stoplessLogState.mode,
-            stoplessArmed: stoplessLogState.armed,
-            activeInFlight: trafficActiveInFlightAtAcquire,
-            maxInFlight: trafficPolicyMaxInFlight
-          });
-
           recordAttempt({ usage: aggregatedUsage, error: false });
+          if (sessionStormBackoffScope) {
+            clearSessionStormBackoff(sessionStormBackoffScope);
+          }
           const metadataHubStageTop = readHubStageTop(mergedMetadata);
           const hubDecodeBreakdown = readHubDecodeBreakdown(metadataHubStageTop);
           const qwenChatSseProbeTag = resolveQwenChatProviderDecodeTag({
@@ -3940,6 +4163,18 @@ export class HubRequestExecutor implements RequestExecutor {
           }
           const errorMessage = error instanceof Error ? error.message : String(error ?? 'Unknown error');
           const retryError = extractRetryErrorSnapshot(error);
+          if (sessionStormBackoffScope && isSessionStormBackoffCandidate(error)) {
+            const backoffMs = consumeSessionStormBackoffMs(sessionStormBackoffScope);
+            this.logStage('request.session_storm_backoff.recorded', input.requestId, {
+              scope: sessionStormBackoffScope,
+              backoffMs,
+              consecutive: sessionStormBackoffState.get(sessionStormBackoffScope)?.consecutive ?? 0,
+              reason: retryError.reason,
+              errorCode: retryError.errorCode,
+              upstreamCode: retryError.upstreamCode,
+              statusCode: retryError.statusCode
+            });
+          }
           if (!bypassTrafficGovernor) {
             try {
               await this.trafficGovernor.observeOutcome?.({
@@ -4128,6 +4363,11 @@ export const __requestExecutorTestables = {
   consumeRecoverableErrorBackoffMs,
   detectRetryableEmptyAssistantResponse,
   deriveLogicalRequestChainKey,
+  resolveSessionStormBackoffScope,
+  isSessionStormBackoffCandidate,
+  consumeSessionStormBackoffMs,
+  peekSessionStormBackoffWaitMs,
+  clearSessionStormBackoff,
   prepareRequestPayloadRetrySeed,
   resolveOriginalRequestForResponseConversion,
   resolveRequestExecutorProviderErrorClassification,

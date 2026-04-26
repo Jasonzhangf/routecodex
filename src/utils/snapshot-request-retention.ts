@@ -2,6 +2,38 @@ import fsp from 'fs/promises';
 import path from 'path';
 
 const DEFAULT_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS = 50;
+const SNAPSHOT_RETENTION_NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
+const snapshotRetentionNonBlockingLogState = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logSnapshotRequestRetentionNonBlockingError(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  const now = Date.now();
+  const last = snapshotRetentionNonBlockingLogState.get(stage) ?? 0;
+  if (now - last < SNAPSHOT_RETENTION_NON_BLOCKING_LOG_THROTTLE_MS) {
+    return;
+  }
+  snapshotRetentionNonBlockingLogState.set(stage, now);
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[snapshot-retention] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // never throw from non-blocking logging
+  }
+}
 
 function resolvePositiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(String(value || '').trim(), 10);
@@ -28,7 +60,10 @@ async function hasRuntimeMarker(dir: string): Promise<boolean> {
   try {
     const stat = await fsp.stat(path.join(dir, '__runtime.json'));
     return stat.isFile();
-  } catch {
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') {
+      logSnapshotRequestRetentionNonBlockingError('hasRuntimeMarker.stat', error, { dir });
+    }
     return false;
   }
 }
@@ -64,7 +99,10 @@ export async function pruneSnapshotRequestDirsKeepRecent(parentDir: string, keep
   if (!Number.isFinite(keepRecent) || keepRecent <= 0) {
     return;
   }
-  const entries = await fsp.readdir(parentDir, { withFileTypes: true }).catch(() => []);
+  const entries = await fsp.readdir(parentDir, { withFileTypes: true }).catch((error: unknown) => {
+    logSnapshotRequestRetentionNonBlockingError('pruneSnapshotRequestDirsKeepRecent.readdir', error, { parentDir });
+    return [];
+  });
   const requestDirs: Array<{ dir: string; name: string; mtimeMs: number }> = [];
 
   for (const entry of entries) {
@@ -86,8 +124,10 @@ export async function pruneSnapshotRequestDirsKeepRecent(parentDir: string, keep
         name: entry.name,
         mtimeMs: Number.isFinite(stat.mtimeMs) ? stat.mtimeMs : 0
       });
-    } catch {
-      // ignore concurrent deletions
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') {
+        logSnapshotRequestRetentionNonBlockingError('pruneSnapshotRequestDirsKeepRecent.stat', error, { dir });
+      }
     }
   }
 
@@ -98,7 +138,11 @@ export async function pruneSnapshotRequestDirsKeepRecent(parentDir: string, keep
   requestDirs.sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name));
   await Promise.all(
     requestDirs.slice(keepRecent).map(async (entry) => {
-      await fsp.rm(entry.dir, { recursive: true, force: true }).catch(() => undefined);
+      await fsp.rm(entry.dir, { recursive: true, force: true }).catch((error: unknown) => {
+        logSnapshotRequestRetentionNonBlockingError('pruneSnapshotRequestDirsKeepRecent.rm', error, {
+          dir: entry.dir
+        });
+      });
     })
   );
 }
