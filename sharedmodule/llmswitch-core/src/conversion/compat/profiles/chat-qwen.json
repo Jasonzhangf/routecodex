@@ -3,20 +3,57 @@
   "protocol": "openai-chat",
   "request": {
     "mappings": [
-      { "action": "snapshot", "phase": "compat-pre" },
-      { "action": "dto_unwrap" },
-      { "action": "qwen_request_transform" },
-      { "action": "snapshot", "phase": "compat-post" },
-      { "action": "dto_rewrap" }
+      {
+        "action": "snapshot",
+        "phase": "compat-pre"
+      },
+      {
+        "action": "dto_unwrap"
+      },
+      {
+        "action": "qwen_request_transform"
+      },
+      {
+        "action": "snapshot",
+        "phase": "compat-post"
+      },
+      {
+        "action": "dto_rewrap"
+      }
     ]
   },
   "response": {
     "mappings": [
-      { "action": "snapshot", "phase": "compat-pre" },
-      { "action": "dto_unwrap" },
-      { "action": "qwen_response_transform" },
-      { "action": "snapshot", "phase": "compat-post" },
-      { "action": "dto_rewrap" }
+      {
+        "action": "snapshot",
+        "phase": "compat-pre"
+      },
+      {
+        "action": "dto_unwrap"
+      },
+      {
+        "action": "qwen_response_transform"
+      },
+      {
+        "action": "snapshot",
+        "phase": "compat-post"
+      },
+      {
+        "action": "dto_rewrap"
+      }
     ]
-  }
+  },
+  "headerPolicies": [
+    {
+      "when": {
+        "providerId": "qwen"
+      },
+      "setIfMissing": {
+        "X-DashScope-UserAgent": "QwenCode/0.14.3 (darwin; arm64)",
+        "X-DashScope-CacheControl": "enable",
+        "X-DashScope-AuthType": "qwen-oauth",
+        "User-Agent": "QwenCode/0.14.3 (darwin; arm64)"
+      }
+    }
+  ]
 }

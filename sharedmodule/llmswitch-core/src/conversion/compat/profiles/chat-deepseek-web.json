@@ -3,7 +3,10 @@
   "protocol": "openai-chat",
   "request": {
     "mappings": [
-      { "action": "snapshot", "phase": "compat-pre" },
+      {
+        "action": "snapshot",
+        "phase": "compat-pre"
+      },
       {
         "action": "tool_text_request_guidance",
         "config": {
@@ -12,13 +15,21 @@
           "requireTools": true
         }
       },
-      { "action": "deepseek_web_request" },
-      { "action": "snapshot", "phase": "compat-post" }
+      {
+        "action": "deepseek_web_request"
+      },
+      {
+        "action": "snapshot",
+        "phase": "compat-post"
+      }
     ]
   },
   "response": {
     "mappings": [
-      { "action": "snapshot", "phase": "compat-pre" },
+      {
+        "action": "snapshot",
+        "phase": "compat-pre"
+      },
       {
         "action": "deepseek_web_response",
         "config": {
@@ -32,14 +43,29 @@
               },
               "argumentAliases": {
                 "exec_command": {
-                  "workdir": ["workdir", "cwd", "input.cwd"]
+                  "workdir": [
+                    "workdir",
+                    "cwd",
+                    "input.cwd"
+                  ]
                 }
               }
             }
           }
         }
       },
-      { "action": "snapshot", "phase": "compat-post" }
+      {
+        "action": "snapshot",
+        "phase": "compat-post"
+      }
     ]
+  },
+  "policyOverrides": {
+    "observe": {
+      "skip": true
+    },
+    "enforce": {
+      "skip": true
+    }
   }
 }
