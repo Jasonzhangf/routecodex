@@ -289,7 +289,7 @@ export class TokenDaemon {
         logTokenDaemonNonBlockingError('tick.loadRouteCodexConfig', loadConfigError, {
           configPath: this.configPath || 'default'
         });
-        configuredProviders = new Set();
+        throw loadConfigError;
       }
     }
 
@@ -392,11 +392,15 @@ export class TokenDaemon {
       return;
     }
 
-    const portalReady = await this.ensurePortalEnvironment();
-    if (!portalReady) {
-      this.logDebug(
-        `[daemon] skip refresh provider=${providerType} alias=${token.alias} reason=portal-unavailable`
-      );
+    try {
+      await this.ensurePortalEnvironment();
+    } catch (portalError) {
+      const msg = portalError instanceof Error ? portalError.message : String(portalError);
+      logTokenDaemonNonBlockingError('trySilentRefresh.portalInit', portalError, {
+        provider: providerType,
+        alias: token.alias
+      });
+      console.error(chalk.red('✗'), `Portal init failed, skipping refresh for ${providerType} (${token.alias}): ${msg}`);
       return;
     }
     const startedAt = Date.now();
@@ -734,15 +738,8 @@ export class TokenDaemon {
     console.log(chalk.gray('[token-daemon-debug]'), message);
   }
 
-  private async ensurePortalEnvironment(): Promise<boolean> {
-    try {
-      await ensureLocalTokenPortalEnv();
-      return true;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      this.logDebug(`[daemon] portal init failed: ${msg}`);
-      return false;
-    }
+  private async ensurePortalEnvironment(): Promise<void> {
+    await ensureLocalTokenPortalEnv();
   }
 
   private async recordHistoryEvent(
