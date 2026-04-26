@@ -1279,7 +1279,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
   });
 
-  it('excludes same-runtime provider keys together on PROVIDER_TRAFFIC_SATURATED retry', async () => {
+  it('does not exclude same-runtime provider keys on PROVIDER_TRAFFIC_SATURATED retry', async () => {
     const saturatedError = Object.assign(new Error('provider traffic wait exceeded soft timeout'), {
       statusCode: 429,
       code: 'PROVIDER_TRAFFIC_SATURATED',
@@ -1377,7 +1377,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const excluded = Array.isArray(secondCallMetadata.excludedProviderKeys)
       ? secondCallMetadata.excludedProviderKeys as string[]
       : [];
-    expect(excluded).toEqual(['tab.key1', 'tab.key1.alt']);
+    expect(excluded).toEqual([]);
   });
 
   it('uses soft wait timeout only when route pool has cross-runtime alternatives', async () => {

@@ -16,8 +16,13 @@ export async function readTokenFromFile(file: string): Promise<StoredOAuthToken 
   try {
     const txt = await fs.readFile(file, 'utf-8');
     return sanitizeToken(JSON.parse(txt) as UnknownObject);
-  } catch {
-    return null;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (code === 'ENOENT') {
+      return null;
+    }
+    // Non-ENOENT errors (corrupt JSON, permission denied) must be surfaced
+    throw error;
   }
 }
 
@@ -61,9 +66,9 @@ export async function restoreTokenFileFromBackup(backupFile: string | null, targ
     await fs.copyFile(backupFile, target);
     logOAuthDebug(`[OAuth] token.restore: ${target}`);
   } catch (error) {
-    logOAuthDebug(
-      `[OAuth] token.restore failed (${target}): ${error instanceof Error ? error.message : String(error)}`
-    );
+    const msg = error instanceof Error ? error.message : String(error);
+    logOAuthDebug(`[OAuth] token.restore failed (${target}): ${msg}`);
+    throw error;
   } finally {
     try {
       await fs.unlink(backupFile);

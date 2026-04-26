@@ -32,7 +32,7 @@ function formatUnknownError(error: unknown): string {
   }
 }
 
-function logAntigravitySignatureNonBlockingError(
+function logAntigravitySignatureNonBlocking(
   stage: string,
   error: unknown,
   details?: Record<string, unknown>
@@ -54,8 +54,9 @@ function loadAntigravitySignatureModule(): AntigravitySessionSignatureModule | n
       'conversion/compat/antigravity-session-signature'
     );
   } catch (requireError) {
-    logAntigravitySignatureNonBlockingError('loadAntigravitySignatureModule.requireCoreDist', requireError);
-    cachedAntigravitySignatureModule = null;
+    logAntigravitySignatureNonBlocking('loadAntigravitySignatureModule.requireCoreDist', requireError);
+    // Do NOT cache null here — a transient require failure must not permanently
+    // disable the module for the lifetime of the process.  Next call will retry.
   }
   return cachedAntigravitySignatureModule;
 }
@@ -69,7 +70,7 @@ export async function warmupAntigravitySessionSignatureModule(): Promise<void> {
       try {
         return await importCoreDist<AntigravitySessionSignatureModule>('conversion/compat/antigravity-session-signature');
       } catch (importError) {
-        logAntigravitySignatureNonBlockingError('warmupAntigravitySessionSignatureModule.importCoreDist', importError);
+        logAntigravitySignatureNonBlocking('warmupAntigravitySessionSignatureModule.importCoreDist', importError);
         return null;
       }
     })();
@@ -90,8 +91,8 @@ export function extractAntigravityGeminiSessionId(payload: unknown): string | un
   try {
     return fn(payload);
   } catch (extractError) {
-    logAntigravitySignatureNonBlockingError('extractAntigravityGeminiSessionId', extractError);
-    return undefined;
+    logAntigravitySignatureNonBlocking('extractAntigravityGeminiSessionId', extractError);
+    throw extractError;
   }
 }
 
@@ -118,7 +119,7 @@ export function cacheAntigravitySessionSignature(a: string, b: string, c?: strin
       fn(sessionId, signature, messageCount);
     }
   } catch (cacheError) {
-    logAntigravitySignatureNonBlockingError('cacheAntigravitySessionSignature', cacheError, {
+    logAntigravitySignatureNonBlocking('cacheAntigravitySessionSignature', cacheError, {
       aliasKey,
       sessionId
     });
@@ -138,10 +139,10 @@ export function getAntigravityLatestSignatureSessionIdForAlias(
     const out = fn(aliasKey, options);
     return typeof out === 'string' && out.trim().length ? out.trim() : undefined;
   } catch (lookupLatestError) {
-    logAntigravitySignatureNonBlockingError('getAntigravityLatestSignatureSessionIdForAlias', lookupLatestError, {
+    logAntigravitySignatureNonBlocking('getAntigravityLatestSignatureSessionIdForAlias', lookupLatestError, {
       aliasKey
     });
-    return undefined;
+    throw lookupLatestError;
   }
 }
 
@@ -159,11 +160,11 @@ export function lookupAntigravitySessionSignatureEntry(
     const out = fn(aliasKey, sessionId, options);
     return out && typeof out === 'object' ? (out as Record<string, unknown>) : undefined;
   } catch (lookupEntryError) {
-    logAntigravitySignatureNonBlockingError('lookupAntigravitySessionSignatureEntry', lookupEntryError, {
+    logAntigravitySignatureNonBlocking('lookupAntigravitySessionSignatureEntry', lookupEntryError, {
       aliasKey,
       sessionId
     });
-    return undefined;
+    throw lookupEntryError;
   }
 }
 
@@ -176,7 +177,7 @@ export function invalidateAntigravitySessionSignature(aliasKey: string, sessionI
   try {
     fn(aliasKey, sessionId);
   } catch (invalidateError) {
-    logAntigravitySignatureNonBlockingError('invalidateAntigravitySessionSignature', invalidateError, {
+    logAntigravitySignatureNonBlocking('invalidateAntigravitySessionSignature', invalidateError, {
       aliasKey,
       sessionId
     });
@@ -202,7 +203,7 @@ export function clearAntigravitySessionAliasPins(options?: { hydrate?: boolean }
       : 0;
     return { clearedBySession, clearedByAlias };
   } catch (clearPinsError) {
-    logAntigravitySignatureNonBlockingError('clearAntigravitySessionAliasPins', clearPinsError);
+    logAntigravitySignatureNonBlocking('clearAntigravitySessionAliasPins', clearPinsError);
     return { clearedBySession: 0, clearedByAlias: 0 };
   }
 }
@@ -216,7 +217,7 @@ export function resetAntigravitySessionSignatureCachesForTests(): void {
   try {
     fn();
   } catch (resetError) {
-    logAntigravitySignatureNonBlockingError('resetAntigravitySessionSignatureCachesForTests', resetError);
+    logAntigravitySignatureNonBlocking('resetAntigravitySessionSignatureCachesForTests', resetError);
   }
 }
 
@@ -229,7 +230,7 @@ export function configureAntigravitySessionSignaturePersistence(input: { stateDi
   try {
     fn(input);
   } catch (configureError) {
-    logAntigravitySignatureNonBlockingError('configureAntigravitySessionSignaturePersistence', configureError);
+    logAntigravitySignatureNonBlocking('configureAntigravitySessionSignaturePersistence', configureError);
   }
 }
 
@@ -242,6 +243,6 @@ export function flushAntigravitySessionSignaturePersistenceSync(): void {
   try {
     fn();
   } catch (flushError) {
-    logAntigravitySignatureNonBlockingError('flushAntigravitySessionSignaturePersistenceSync', flushError);
+    logAntigravitySignatureNonBlocking('flushAntigravitySessionSignaturePersistenceSync', flushError);
   }
 }

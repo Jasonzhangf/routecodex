@@ -113,11 +113,9 @@ const PROVIDER_TRAFFIC_RUN_NAMESPACE =
   `run-${process.pid}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 
 const ADAPTIVE_WINDOW_MINUTES = 15;
-const ADAPTIVE_TREND_SPLIT_MINUTES = 5;
-const ADAPTIVE_TREND_THRESHOLD = 0.35;
-const ADAPTIVE_BURST_429_THRESHOLD = 5;
-const ADAPTIVE_COOLDOWN_DOWN_MS = 15 * 60_000;
-const ADAPTIVE_COOLDOWN_UP_MS = 2 * 60_000;
+const ADAPTIVE_STREAK_THRESHOLD = 5;
+const ADAPTIVE_BLOCK_BACKOFF_BASE_MS = 400;
+const ADAPTIVE_BLOCK_BACKOFF_MAX_MS = 8_000;
 const ADAPTIVE_DEFAULT_HARD_MAX = 64;
 const ADAPTIVE_DEFAULT_HARD_MULTIPLIER = 2;
 
@@ -134,8 +132,13 @@ type AdaptiveRuntimeState = {
   minCap: number;
   hardMaxCap: number;
   currentCap: number;
+  tentativeCap: number;
   safeCap: number;
   cooldownUntilMs: number;
+  saturatedNo429Streak: number;
+  saturated429Streak: number;
+  blockedBackoffLevel: number;
+  blockedBackoffUntilMs: number;
   lastDecisionMinute: number;
   triedIncreaseCaps: Set<number>;
   buckets: AdaptiveMinuteBucket[];
@@ -147,8 +150,13 @@ type AdaptivePersistedRuntimeState = {
   minCap: number;
   hardMaxCap: number;
   currentCap: number;
+  tentativeCap: number;
   safeCap: number;
   cooldownUntilMs: number;
+  saturatedNo429Streak: number;
+  saturated429Streak: number;
+  blockedBackoffLevel: number;
+  blockedBackoffUntilMs: number;
   triedIncreaseCaps: number[];
   updatedAtMs: number;
 };
@@ -181,6 +189,20 @@ function clampPositiveInt(value: unknown): number | undefined {
   return undefined;
 }
 
+function clampNonNegativeInt(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const normalized = Math.floor(value);
+    return normalized >= 0 ? normalized : undefined;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value.trim(), 10);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
 function clampInt(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) {
     return min;
@@ -203,6 +225,20 @@ function readAdaptiveEnvInt(keys: string[], fallback: number): number {
     }
   }
   return fallback;
+}
+
+function resolveAdaptiveBlockBackoffBaseMs(): number {
+  return readAdaptiveEnvInt(
+    ['ROUTECODEX_DYNAMIC_CONCURRENCY_BLOCK_BACKOFF_BASE_MS', 'RCC_DYNAMIC_CONCURRENCY_BLOCK_BACKOFF_BASE_MS'],
+    ADAPTIVE_BLOCK_BACKOFF_BASE_MS
+  );
+}
+
+function resolveAdaptiveBlockBackoffMaxMs(): number {
+  return readAdaptiveEnvInt(
+    ['ROUTECODEX_DYNAMIC_CONCURRENCY_BLOCK_BACKOFF_MAX_MS', 'RCC_DYNAMIC_CONCURRENCY_BLOCK_BACKOFF_MAX_MS'],
+    ADAPTIVE_BLOCK_BACKOFF_MAX_MS
+  );
 }
 
 function isRecoverable429Like(event: ProviderTrafficOutcomeEvent): boolean {
@@ -513,8 +549,13 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
             const minCap = clampPositiveInt(row.minCap) ?? 1;
             const hardMaxCap = clampPositiveInt(row.hardMaxCap) ?? this.resolveAdaptiveHardMax(baseCap);
             const currentCap = clampPositiveInt(row.currentCap) ?? baseCap;
+            const tentativeCap = clampPositiveInt(row.tentativeCap) ?? currentCap;
             const safeCap = clampPositiveInt(row.safeCap) ?? baseCap;
             const cooldownUntilMs = clampPositiveInt(row.cooldownUntilMs) ?? 0;
+            const saturatedNo429Streak = clampNonNegativeInt(row.saturatedNo429Streak) ?? 0;
+            const saturated429Streak = clampNonNegativeInt(row.saturated429Streak) ?? 0;
+            const blockedBackoffLevel = clampNonNegativeInt(row.blockedBackoffLevel) ?? 0;
+            const blockedBackoffUntilMs = clampNonNegativeInt(row.blockedBackoffUntilMs) ?? 0;
             const triedIncreaseCaps = Array.isArray(row.triedIncreaseCaps)
               ? row.triedIncreaseCaps
                   .map((entry) => clampPositiveInt(entry))
@@ -527,8 +568,13 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
               minCap: normalizedMin,
               hardMaxCap,
               currentCap: clampInt(currentCap, normalizedMin, hardMaxCap),
+              tentativeCap: clampInt(tentativeCap, normalizedMin, hardMaxCap),
               safeCap: clampInt(safeCap, normalizedMin, hardMaxCap),
               cooldownUntilMs,
+              saturatedNo429Streak,
+              saturated429Streak,
+              blockedBackoffLevel,
+              blockedBackoffUntilMs,
               lastDecisionMinute: -1,
               triedIncreaseCaps: new Set(triedIncreaseCaps),
               buckets: [],
@@ -557,8 +603,13 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
         minCap: state.minCap,
         hardMaxCap: state.hardMaxCap,
         currentCap: state.currentCap,
+        tentativeCap: state.tentativeCap,
         safeCap: state.safeCap,
         cooldownUntilMs: state.cooldownUntilMs,
+        saturatedNo429Streak: state.saturatedNo429Streak,
+        saturated429Streak: state.saturated429Streak,
+        blockedBackoffLevel: state.blockedBackoffLevel,
+        blockedBackoffUntilMs: state.blockedBackoffUntilMs,
         triedIncreaseCaps: Array.from(state.triedIncreaseCaps.values()).sort((a, b) => a - b),
         updatedAtMs: state.updatedAtMs
       };
@@ -604,7 +655,16 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
       existing.hardMaxCap = Math.max(existing.hardMaxCap, hardMaxCap);
       existing.minCap = clampInt(existing.minCap || 1, 1, existing.hardMaxCap);
       existing.currentCap = clampInt(existing.currentCap || existing.baseCap, existing.minCap, existing.hardMaxCap);
+      existing.tentativeCap = clampInt(
+        Math.max(existing.currentCap, existing.tentativeCap || existing.currentCap),
+        existing.currentCap,
+        existing.hardMaxCap
+      );
       existing.safeCap = clampInt(existing.safeCap || existing.baseCap, existing.minCap, existing.hardMaxCap);
+      existing.saturatedNo429Streak = clampNonNegativeInt(existing.saturatedNo429Streak) ?? 0;
+      existing.saturated429Streak = clampNonNegativeInt(existing.saturated429Streak) ?? 0;
+      existing.blockedBackoffLevel = clampNonNegativeInt(existing.blockedBackoffLevel) ?? 0;
+      existing.blockedBackoffUntilMs = clampNonNegativeInt(existing.blockedBackoffUntilMs) ?? 0;
       return existing;
     }
     const state: AdaptiveRuntimeState = {
@@ -613,8 +673,13 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
       minCap: 1,
       hardMaxCap,
       currentCap: clampInt(baseCap, 1, hardMaxCap),
+      tentativeCap: clampInt(baseCap, 1, hardMaxCap),
       safeCap: clampInt(baseCap, 1, hardMaxCap),
       cooldownUntilMs: 0,
+      saturatedNo429Streak: 0,
+      saturated429Streak: 0,
+      blockedBackoffLevel: 0,
+      blockedBackoffUntilMs: 0,
       lastDecisionMinute: -1,
       triedIncreaseCaps: new Set<number>(),
       buckets: [],
@@ -662,75 +727,126 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     return out;
   }
 
-  private maybeEvaluateAdaptiveState(runtimeKey: string, state: AdaptiveRuntimeState, nowMs: number): void {
-    const nowMinute = toMinuteBucket(nowMs);
-    if (state.lastDecisionMinute === nowMinute) {
-      return;
-    }
-    state.lastDecisionMinute = nowMinute;
-    const window = this.getWindowBuckets(state, nowMinute);
-    const total429 = window.reduce((sum, row) => sum + row.http429, 0);
-    const totalRequests = window.reduce((sum, row) => sum + row.requests, 0);
-    const prev5 = window
-      .slice(ADAPTIVE_WINDOW_MINUTES - (ADAPTIVE_TREND_SPLIT_MINUTES * 2), ADAPTIVE_WINDOW_MINUTES - ADAPTIVE_TREND_SPLIT_MINUTES)
-      .reduce((sum, row) => sum + row.http429, 0) / ADAPTIVE_TREND_SPLIT_MINUTES;
-    const last5 = window
-      .slice(ADAPTIVE_WINDOW_MINUTES - ADAPTIVE_TREND_SPLIT_MINUTES)
-      .reduce((sum, row) => sum + row.http429, 0) / ADAPTIVE_TREND_SPLIT_MINUTES;
-    const trendUp = (last5 - prev5) > ADAPTIVE_TREND_THRESHOLD;
-    const latest429 = window[window.length - 1]?.http429 ?? 0;
-    const canAdjustDown = state.currentCap > state.minCap;
-    const cooldownDone = nowMs >= state.cooldownUntilMs;
-    const beforeCap = state.currentCap;
+  private resolveAdaptiveEffectiveCap(state: AdaptiveRuntimeState): number {
+    return clampInt(
+      state.tentativeCap || state.currentCap,
+      state.minCap,
+      state.hardMaxCap
+    );
+  }
+
+  private maybeEvaluateAdaptiveState(
+    runtimeKey: string,
+    state: AdaptiveRuntimeState,
+    event: ProviderTrafficOutcomeEvent,
+    nowMs: number
+  ): void {
+    const configuredCap = clampPositiveInt(event.configuredMaxInFlight)
+      ?? this.resolveAdaptiveEffectiveCap(state);
+    const observedInFlight = clampNonNegativeInt(event.activeInFlight) ?? 0;
+    const saturated = observedInFlight >= Math.max(1, configuredCap);
+    const got429 = !event.success && isRecoverable429Like(event);
+    const beforeCurrentCap = state.currentCap;
+    const beforeTentativeCap = state.tentativeCap;
     let changed = false;
     let reason = '';
 
-    if (cooldownDone && (latest429 >= ADAPTIVE_BURST_429_THRESHOLD || (trendUp && total429 >= 2)) && canAdjustDown) {
-      state.currentCap = clampInt(state.currentCap - 1, state.minCap, state.hardMaxCap);
-      state.cooldownUntilMs = nowMs + ADAPTIVE_COOLDOWN_DOWN_MS;
-      changed = state.currentCap !== beforeCap;
-      reason = latest429 >= ADAPTIVE_BURST_429_THRESHOLD ? 'burst_429' : 'avg_429_trend_up';
-    } else if (total429 === 0 && totalRequests > 0) {
-      const peak = window.reduce((max, row) => Math.max(max, row.peakInFlight), 0);
-      const nextSafeCap = clampInt(Math.max(state.safeCap, peak), state.minCap, state.hardMaxCap);
+    if (observedInFlight > 0) {
+      const nextSafeCap = clampInt(Math.max(state.safeCap, observedInFlight), state.minCap, state.hardMaxCap);
       if (nextSafeCap !== state.safeCap) {
         state.safeCap = nextSafeCap;
         changed = true;
       }
-      const utilizationHigh = peak >= Math.max(1, Math.ceil(state.currentCap * 0.8));
-      const canRecoverToSafeCap =
-        cooldownDone
-        && utilizationHigh
-        && state.currentCap < state.safeCap;
-      const canProbeUp =
-        cooldownDone
-        && utilizationHigh
-        && state.currentCap < state.hardMaxCap
-        && !state.triedIncreaseCaps.has(state.currentCap)
-        && state.currentCap >= state.safeCap;
-      if (canRecoverToSafeCap) {
-        const targetCap = Math.min(state.hardMaxCap, state.safeCap);
-        state.currentCap = clampInt(state.currentCap + 1, state.minCap, targetCap);
-        state.cooldownUntilMs = nowMs + ADAPTIVE_COOLDOWN_UP_MS;
+    }
+
+    if (!saturated) {
+      if (state.tentativeCap !== state.currentCap) {
+        state.tentativeCap = state.currentCap;
         changed = true;
-        reason = 'no_429_recover_safe_cap';
-      } else if (canProbeUp) {
-        const fromCap = state.currentCap;
-        state.triedIncreaseCaps.add(fromCap);
-        state.currentCap = clampInt(fromCap + 1, state.minCap, state.hardMaxCap);
-        state.cooldownUntilMs = nowMs + ADAPTIVE_COOLDOWN_UP_MS;
+      }
+      if (state.saturatedNo429Streak !== 0) {
+        state.saturatedNo429Streak = 0;
         changed = true;
-        reason = 'no_429_probe_up';
+      }
+      if (state.saturated429Streak !== 0) {
+        state.saturated429Streak = 0;
+        changed = true;
+      }
+      if (!got429 && state.blockedBackoffLevel > 0) {
+        state.blockedBackoffLevel = Math.max(0, state.blockedBackoffLevel - 1);
+        changed = true;
+      }
+      if (!got429 && state.blockedBackoffLevel === 0 && state.blockedBackoffUntilMs !== 0) {
+        state.blockedBackoffUntilMs = 0;
+        changed = true;
+      }
+    } else if (got429) {
+      state.saturated429Streak += 1;
+      state.saturatedNo429Streak = 0;
+      const tentativeDown = clampInt(state.currentCap - 1, state.minCap, state.hardMaxCap);
+      if (tentativeDown !== state.tentativeCap) {
+        state.tentativeCap = tentativeDown;
+        changed = true;
+      }
+      state.blockedBackoffLevel = Math.min(16, state.blockedBackoffLevel + 1);
+      const backoffBaseMs = resolveAdaptiveBlockBackoffBaseMs();
+      const backoffMaxMs = Math.max(backoffBaseMs, resolveAdaptiveBlockBackoffMaxMs());
+      const backoffMs = Math.min(
+        backoffMaxMs,
+        backoffBaseMs * Math.pow(2, Math.max(0, state.blockedBackoffLevel - 1))
+      );
+      const nextBackoffUntil = nowMs + backoffMs;
+      if (nextBackoffUntil > state.blockedBackoffUntilMs) {
+        state.blockedBackoffUntilMs = nextBackoffUntil;
+        changed = true;
+      }
+      if (state.saturated429Streak >= ADAPTIVE_STREAK_THRESHOLD && state.currentCap > state.minCap) {
+        state.currentCap = clampInt(state.currentCap - 1, state.minCap, state.hardMaxCap);
+        state.tentativeCap = state.currentCap;
+        state.saturated429Streak = 0;
+        state.saturatedNo429Streak = 0;
+        changed = true;
+        reason = 'saturated_429_commit_down';
+      } else {
+        reason = 'saturated_429_probe_down';
+      }
+    } else {
+      state.saturatedNo429Streak += 1;
+      state.saturated429Streak = 0;
+      if (state.blockedBackoffLevel > 0) {
+        state.blockedBackoffLevel = Math.max(0, state.blockedBackoffLevel - 1);
+        changed = true;
+      }
+      if (state.blockedBackoffLevel === 0 && state.blockedBackoffUntilMs !== 0) {
+        state.blockedBackoffUntilMs = 0;
+        changed = true;
+      }
+      const tentativeUp = clampInt(state.currentCap + 1, state.minCap, state.hardMaxCap);
+      if (tentativeUp > state.tentativeCap) {
+        state.tentativeCap = tentativeUp;
+        changed = true;
+      }
+      if (state.saturatedNo429Streak >= ADAPTIVE_STREAK_THRESHOLD && state.currentCap < state.hardMaxCap) {
+        state.currentCap = clampInt(state.currentCap + 1, state.minCap, state.hardMaxCap);
+        state.tentativeCap = state.currentCap;
+        state.saturatedNo429Streak = 0;
+        state.saturated429Streak = 0;
+        changed = true;
+        reason = 'saturated_no429_commit_up';
+      } else {
+        reason = 'saturated_no429_probe_up';
       }
     }
 
+    state.lastDecisionMinute = toMinuteBucket(nowMs);
     state.updatedAtMs = nowMs;
     if (changed) {
       this.scheduleAdaptivePersist();
       // eslint-disable-next-line no-console
       console.log(
-        `[adaptive-concurrency] runtime=${runtimeKey} cap=${beforeCap}->${state.currentCap} ` +
-          `safe=${state.safeCap} total429=${total429} prev5=${prev5.toFixed(2)} last5=${last5.toFixed(2)} reason=${reason || 'state_update'}`
+        `[adaptive-concurrency] runtime=${runtimeKey} current=${beforeCurrentCap}->${state.currentCap} ` +
+          `tentative=${beforeTentativeCap}->${state.tentativeCap} streak429=${state.saturated429Streak} ` +
+          `streakNo429=${state.saturatedNo429Streak} backoffLevel=${state.blockedBackoffLevel} reason=${reason || 'state_update'}`
       );
     }
   }
@@ -933,7 +1049,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
           concurrency: {
             ...policyBase.concurrency,
             maxInFlight: clampInt(
-              adaptiveState.currentCap,
+              this.resolveAdaptiveEffectiveCap(adaptiveState),
               adaptiveState.minCap,
               adaptiveState.hardMaxCap
             )
@@ -1060,9 +1176,18 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
             const oldest = state.rpmEvents[0];
             rpmWaitMs = Math.max(0, oldest.startedAt + policy.rpm.windowMs - nowAfterCheck);
           }
+          const adaptiveBlockedWaitMs = (() => {
+            if (!adaptiveState || !concurrencyBlocked) {
+              return 0;
+            }
+            if (adaptiveState.blockedBackoffUntilMs <= nowAfterCheck) {
+              return 0;
+            }
+            return Math.max(0, adaptiveState.blockedBackoffUntilMs - nowAfterCheck);
+          })();
           const combinedWaitMs = Math.min(
             ACQUIRE_WAIT_MAX_MS,
-            Math.max(backoffMs, rpmWaitMs)
+            Math.max(backoffMs, rpmWaitMs, adaptiveBlockedWaitMs)
           );
           const jitterMs = Math.floor(Math.random() * ACQUIRE_JITTER_MS);
           delayAfterReleaseMs = Math.max(40, Math.min(combinedWaitMs + jitterMs, deadlineAt - nowAfterCheck));
@@ -1147,7 +1272,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     if (!event.success && isRecoverable429Like(event)) {
       bucket.http429 += 1;
     }
-    this.maybeEvaluateAdaptiveState(runtimeKey, state, nowMs);
+    this.maybeEvaluateAdaptiveState(runtimeKey, state, event, nowMs);
   }
 }
 

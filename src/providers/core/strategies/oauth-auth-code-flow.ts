@@ -216,6 +216,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
           clientId: this.config?.client?.clientId ?? 'unknown',
           redirectUri: serverResult.redirectUri
         });
+        throw error;
       }
 
       const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
@@ -372,6 +373,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       logOAuthAuthCodeNonBlocking('start_callback_server.parse_redirect_uri', error, {
         configured
       });
+      throw error;
     }
 
     const envPortRaw = String(process.env.OAUTH_CALLBACK_PORT || '').trim();

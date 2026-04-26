@@ -486,7 +486,7 @@ describe('provider-traffic-governor', () => {
         requestId: 'conservative-check',
         runtime
       });
-      expect(acquired.policy.concurrency.maxInFlight).toBe(5);
+      expect(acquired.policy.concurrency.maxInFlight).toBe(4);
       await governor.release(acquired.permit);
     } finally {
       await fs.rm(rootDir, { recursive: true, force: true });
@@ -534,7 +534,7 @@ describe('provider-traffic-governor', () => {
         requestId: 'recover-down-check',
         runtime
       });
-      expect(afterDown.policy.concurrency.maxInFlight).toBe(5);
+      expect(afterDown.policy.concurrency.maxInFlight).toBe(4);
       await governor.release(afterDown.permit);
 
       const recoveryStartMs = startMs + 26 * 60_000;
@@ -557,8 +557,8 @@ describe('provider-traffic-governor', () => {
         requestId: 'recover-up-check',
         runtime
       });
-      expect(afterRecovery.policy.concurrency.maxInFlight).toBeGreaterThan(5);
-      expect(afterRecovery.policy.concurrency.maxInFlight).toBeLessThanOrEqual(7);
+      expect(afterRecovery.policy.concurrency.maxInFlight).toBeGreaterThanOrEqual(5);
+      expect(afterRecovery.policy.concurrency.maxInFlight).toBeLessThanOrEqual(6);
       await governor.release(afterRecovery.permit);
     } finally {
       await fs.rm(rootDir, { recursive: true, force: true });

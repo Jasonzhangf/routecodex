@@ -1036,14 +1036,14 @@ async function waitWithClientAbortSignal(ms: number, signal?: AbortSignal): Prom
       clearTimeout(timer);
       try {
         signal?.removeEventListener?.('abort', onAbort as EventListener);
-      } catch {
-        // ignore cleanup errors
+      } catch (error: unknown) {
+        logRequestExecutorNonBlockingError('waitWithClientAbortSignal.removeEventListener', error);
       }
     };
     try {
       signal?.addEventListener?.('abort', onAbort as EventListener, { once: true } as AddEventListenerOptions);
-    } catch {
-      // ignore listener registration failures
+    } catch (error: unknown) {
+      logRequestExecutorNonBlockingError('waitWithClientAbortSignal.addEventListener', error);
     }
   });
 }
@@ -1229,6 +1229,12 @@ function isHealthNeutralProviderError(args: {
   const errorCode = normalizeCodeKey(args.errorCode);
   const upstreamCode = normalizeCodeKey(args.upstreamCode);
   if (errorCode === 'CLIENT_DISCONNECTED' || upstreamCode === 'CLIENT_DISCONNECTED') {
+    return true;
+  }
+  if (
+    errorCode === 'PROVIDER_TRAFFIC_SATURATED'
+    || upstreamCode === 'PROVIDER_TRAFFIC_SATURATED'
+  ) {
     return true;
   }
   if (
@@ -2630,6 +2636,18 @@ function applyRetryExclusionForCurrentProvider(args: {
   return true;
 }
 
+function isProviderTrafficSaturatedRetryError(args: {
+  status?: number;
+  error: unknown;
+}): boolean {
+  const code = normalizeCodeKey((args.error as { code?: unknown } | undefined)?.code);
+  const upstreamCode = normalizeCodeKey((args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode);
+  if (code === 'PROVIDER_TRAFFIC_SATURATED' || upstreamCode === 'PROVIDER_TRAFFIC_SATURATED') {
+    return true;
+  }
+  return args.status === 429 && code === 'PROVIDER_TRAFFIC_SATURATED';
+}
+
 function resolveProviderRetryExclusionPlan(args: {
   providerKey?: string;
   status?: number;
@@ -2654,6 +2672,12 @@ function resolveProviderRetryExclusionPlan(args: {
         providerKey,
         excludedProviderKeys: args.excludedProviderKeys
       }),
+      antigravityRetrySignal: nextAntigravityRetrySignal
+    };
+  }
+  if (isProviderTrafficSaturatedRetryError({ status: args.status, error: args.error })) {
+    return {
+      excludedCurrentProvider: false,
       antigravityRetrySignal: nextAntigravityRetrySignal
     };
   }
@@ -3109,7 +3133,8 @@ function bodyContainsReasoningStopFinalizedMarker(body: unknown): boolean {
   }
   try {
     return JSON.stringify(body).includes(REASONING_STOP_FINALIZED_MARKER);
-  } catch {
+  } catch (error: unknown) {
+    logRequestExecutorNonBlockingError('bodyContainsReasoningStopFinalizedMarker.stringify', error);
     return false;
   }
 }

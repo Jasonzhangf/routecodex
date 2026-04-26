@@ -135,7 +135,8 @@ export class OAuthAuthProvider implements IAuthProvider {
             this.updateStatus(true, true, 'Token refreshed successfully');
             return true;
           } catch (error) {
-            this.updateStatus(true, false, 'Token refresh failed');
+            const msg = error instanceof Error ? error.message : String(error);
+            this.updateStatus(true, false, `Token refresh failed: ${msg}`);
             return false;
           }
         } else {
@@ -342,9 +343,11 @@ class BaseOAuthClient implements IOAuthClient {
         logOAuthDebug(`[OAuth] Token saved to: ${this.tokenFilePath}`);
       }
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
       logOAuthDebug(
-        `[OAuth] failed to persist token (non-blocking) path=${this.tokenFilePath || 'unknown'}: ${error instanceof Error ? error.message : String(error)}`
+        `[OAuth] failed to persist token path=${this.tokenFilePath || 'unknown'}: ${msg}`
       );
+      throw error;
     }
   }
 
@@ -365,8 +368,11 @@ class BaseOAuthClient implements IOAuthClient {
         const code = (error as NodeJS.ErrnoException).code;
         if (code === 'ENOENT') {
           await this.ensureTokenFileExists();
+          // fallthrough to memory for first-run scenario
+        } else {
+          // Non-ENOENT errors (corrupt JSON, permission denied) must not be silently swallowed
+          throw error;
         }
-        // fallthrough to memory
       }
     }
     return this.currentToken;
@@ -388,8 +394,9 @@ class BaseOAuthClient implements IOAuthClient {
       }
     } catch (error) {
       logOAuthDebug(
-        `[OAuth] ensureTokenFileExists failed (non-blocking) path=${this.tokenFilePath}: ${error instanceof Error ? error.message : String(error)}`
+        `[OAuth] ensureTokenFileExists failed path=${this.tokenFilePath}: ${error instanceof Error ? error.message : String(error)}`
       );
+      throw error;
     }
   }
   updateTokenStorage(storage: TokenStorage, tokenData: unknown): void {

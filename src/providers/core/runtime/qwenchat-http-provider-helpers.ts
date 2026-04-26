@@ -207,6 +207,38 @@ const QWENCHAT_PROVIDER_TOOL_OVERRIDE_MARKER = '[routecodex-qwenchat-provider-to
 const QWENCHAT_CREATE_SESSION_MAX_ATTEMPTS = 3;
 const QWENCHAT_CREATE_SESSION_BASE_BACKOFF_MS = 400;
 const QWENCHAT_CREATE_SESSION_MAX_BACKOFF_MS = 8_000;
+const QWENCHAT_HELPERS_NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
+const qwenChatHelpersNonBlockingLogState = new Map<string, number>();
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logQwenChatHelpersNonBlocking(
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  const now = Date.now();
+  const last = qwenChatHelpersNonBlockingLogState.get(stage) ?? 0;
+  if (now - last < QWENCHAT_HELPERS_NON_BLOCKING_LOG_THROTTLE_MS) {
+    return;
+  }
+  qwenChatHelpersNonBlockingLogState.set(stage, now);
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[qwenchat-helpers] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // never throw from non-blocking logging
+  }
+}
 
 type QwenChatCreateSessionBackoffState = {
   consecutiveFailures: number;
@@ -750,8 +782,8 @@ async function readResponseBytesWithLimit(response: Response, maxBytes: number):
     if (total > maxBytes) {
       try {
         await reader.cancel('attachment_too_large');
-      } catch {
-        // ignore
+      } catch (error: unknown) {
+        logQwenChatHelpersNonBlocking('readResponseBytesWithLimit.cancel', error, { maxBytes, total });
       }
       throw new Error(`Attachment exceeds max size (${total} > ${maxBytes})`);
     }
@@ -823,8 +855,8 @@ export async function getQwenBaxiaTokens(cache: BxCacheState): Promise<QwenBaxia
     if (etag) {
       bxUmidToken = etag;
     }
-  } catch {
-    // keep generated fallback token
+  } catch (error: unknown) {
+    logQwenChatHelpersNonBlocking('getQwenBaxiaTokens.fetchEtag', error);
   }
   const next: QwenBaxiaTokens = { bxUa, bxUmidToken, bxV: BAXIA_VERSION };
   cache.tokenCache = next;
@@ -1460,8 +1492,8 @@ function extractUploadedFileId(fileUrl: string): string {
     if (filename.includes('_')) {
       return filename.split('_')[0];
     }
-  } catch {
-    // fallback uuid
+  } catch (error: unknown) {
+    logQwenChatHelpersNonBlocking('extractUploadedFileId.decode', error, { fileUrl });
   }
   return randomUUID();
 }
@@ -1869,9 +1901,13 @@ async function acquireQwenChatCreateSessionQueue(backoffKey?: string): Promise<(
   const current = new Promise<void>((resolve) => {
     releaseQueue = resolve;
   });
-  const queuedTail = waitFor.catch(() => undefined).then(() => current);
+  const queuedTail = waitFor.catch((error: unknown) => {
+    logQwenChatHelpersNonBlocking('acquireQwenChatCreateSessionQueue.queuedTail', error, { key });
+  }).then(() => current);
   state.tail = queuedTail;
-  await waitFor.catch(() => undefined);
+  await waitFor.catch((error: unknown) => {
+    logQwenChatHelpersNonBlocking('acquireQwenChatCreateSessionQueue.waitFor', error, { key });
+  });
   let released = false;
   return () => {
     if (released) {
@@ -1925,7 +1961,8 @@ function detectQwenToolContractViolationFromSseRaw(args: {
       if (violation) {
         return createQwenToolContractViolationError(violation, declaredToolNames);
       }
-    } catch {
+    } catch (error: unknown) {
+      logQwenChatHelpersNonBlocking('detectQwenToolContractViolationFromSseRaw.parseLine', error);
       continue;
     }
   }
@@ -1957,7 +1994,8 @@ function parseQwenUpstreamBusinessErrorFromRaw(rawPayload: string): QwenUpstream
       statusCode,
       code
     };
-  } catch {
+  } catch (error: unknown) {
+    logQwenChatHelpersNonBlocking('parseQwenUpstreamBusinessErrorFromRaw.parse', error);
     return null;
   }
 }
@@ -1984,7 +2022,8 @@ export function shouldFallbackToQwenSseForJsonModeError(rawPayload: string, erro
     const dataNode = isRecord(parsed.data) ? parsed.data : undefined;
     const errorCode = normalizeInputString(dataNode?.code || parsed.code).toLowerCase();
     return errorCode === 'bad_request';
-  } catch {
+  } catch (error: unknown) {
+    logQwenChatHelpersNonBlocking('shouldFallbackToQwenSseForJsonModeError.parse', error);
     return false;
   }
 }
@@ -2092,8 +2131,8 @@ export async function inspectQwenUpstreamStreamPrelude(args: {
         if (typeof destroyFn === 'function') {
           destroyFn.call(args.upstreamStream);
         }
-      } catch {
-        // non-blocking
+      } catch (error: unknown) {
+        logQwenChatHelpersNonBlocking('inspectUpstreamPrelude.finalizeBusinessError.destroy', error);
       }
       resolve({ businessError, rawCapture });
     };
@@ -2111,8 +2150,8 @@ export async function inspectQwenUpstreamStreamPrelude(args: {
         if (typeof destroyFn === 'function') {
           destroyFn.call(args.upstreamStream);
         }
-      } catch {
-        // non-blocking
+      } catch (error: unknown) {
+        logQwenChatHelpersNonBlocking('inspectUpstreamPrelude.finalizeToolContractError.destroy', error);
       }
       resolve({ toolContractError, rawCapture });
     };

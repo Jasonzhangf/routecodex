@@ -202,6 +202,8 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - 可复用动作：把 servertool/followup 默认超时收敛到 120s/90s（并设上限），并对 `reasoning_only_continue/ reasoning_stop_guard/ reasoning_stop_continue` 启用 auto-limit，避免无限续轮卡死。
 - 触发信号：`429`（含 `insufficient_quota`）重试链路出现 64s/120s 级退避，拖慢切换。
 - 可复用动作：recoverable backoff 按错误分级：429 类保持小退避（<=4s）快速换 provider；servertool 类保持中退避（<=12s）避免重放风暴。
+- 触发信号：日志出现 `PROVIDER_TRAFFIC_SATURATED` + `exclude_and_reroute` + `PROVIDER_NOT_AVAILABLE` 连锁风暴。
+- 可复用动作：对 `PROVIDER_TRAFFIC_SATURATED` 统一走 **same-provider 阻塞指数 backoff**（不排除当前 provider、不做 runtime-scope exclusion），并标记为 provider health-neutral；并发自适应只在“满并发样本”上做 **5 次无429升 / 5 次429降**，避免被短时抖动打到 `concurrency=1`。
 - 触发信号：Node 进程 **虚拟内存/常驻内存随运行时间单调上涨**，但 FD / TCP 连接数基本平稳，同时日志里长期存在 `429` / timeout / aborted / provider error。
 - 可复用动作：优先排查 **requestId → meta/context** 的内存 Map（如 codec `ctxMap`、v2 pipeline `requestMetaStore`）；凡是“只在 `convertResponse` 删除、错误路径不清理”的，都必须补 **TTL + 容量上限 + 写入前 prune**，否则失败/中断请求会永久滞留并把 VM 慢慢顶高。
 - 触发信号：热路径里的“仅供观测/调度”的 request Map（如 `StatsManager.inflight`、`RequestActivityTracker.byRequestId`）在长时间运行后缓慢变大，且正常路径理论上应在 `finally/end` 删除。

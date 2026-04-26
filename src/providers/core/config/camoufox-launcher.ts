@@ -262,7 +262,8 @@ function runCamoCliCheck(): boolean {
       return false;
     }
     return result.status === 0;
-  } catch {
+  } catch (error: unknown) {
+    logCamoufoxLauncherNonBlocking('run_camo_cli_check.spawn', error);
     return false;
   }
 }
@@ -371,7 +372,8 @@ function profileDirExists(profileId: string): boolean {
   }
   try {
     return fs.existsSync(path.join(getProfileRoot(), normalized));
-  } catch {
+  } catch (error: unknown) {
+    logCamoufoxLauncherNonBlocking('profile_dir_exists.stat', error, { profileId: normalized });
     return false;
   }
 }
@@ -636,8 +638,8 @@ function loadFingerprintEnv(profileId: string): Record<string, string> | null {
       }
       return env;
     }
-  } catch {
-    // Missing or invalid file – caller will re-generate.
+  } catch (error: unknown) {
+    logCamoufoxLauncherNonBlocking('load_fingerprint_env.read_or_parse', error, { fpPath });
   }
   return null;
 }
@@ -807,7 +809,10 @@ function resolvePortalOauthUrl(rawUrl: string): string | null {
     }
     const normalized = oauthUrl.trim();
     return normalized || null;
-  } catch {
+  } catch (error: unknown) {
+    logCamoufoxLauncherNonBlocking('resolve_portal_oauth_url.parse', error, {
+      rawUrl: String(rawUrl || '').slice(0, 200)
+    });
     return null;
   }
 }
@@ -924,7 +929,10 @@ function isLocalOAuthCallbackUrl(rawUrl: string): boolean {
       return true;
     }
     return parsed.searchParams.has('code') || parsed.searchParams.has('state');
-  } catch {
+  } catch (error: unknown) {
+    logCamoufoxLauncherNonBlocking('is_local_oauth_callback_url.parse', error, {
+      rawUrl: String(rawUrl || '').slice(0, 200)
+    });
     return false;
   }
 }
@@ -1494,6 +1502,10 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
     setCamoufoxLaunchFailureReason(
       `exception:${error instanceof Error ? error.message : String(error)}`
     );
+    logCamoufoxLauncherNonBlocking('open_auth_in_camoufox', error, {
+      provider: options.provider ?? null,
+      alias: options.alias ?? null
+    });
     logOAuthDebug(
       `[OAuth] camo-cli launch failed - ${error instanceof Error ? error.message : String(error)}`
     );

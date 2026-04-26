@@ -382,15 +382,17 @@ function stripToolOutputs(base: JsonObject): void {
 }
 
 function replaceJsonObjectInPlace(target: JsonObject, next: JsonObject): void {
-  try {
-    for (const key of Object.keys(target)) {
+  // Copy new properties first, then remove stale keys.
+  // This ordering guarantees `target` is never left in a half-deleted state
+  // even if an unexpected error occurs mid-operation.
+  const newKeys = new Set(Object.keys(next));
+  for (const [k, v] of Object.entries(next)) {
+    (target as any)[k] = v;
+  }
+  for (const key of Object.keys(target)) {
+    if (!newKeys.has(key)) {
       delete (target as any)[key];
     }
-    for (const [k, v] of Object.entries(next)) {
-      (target as any)[k] = v;
-    }
-  } catch {
-    // ignore
   }
 }
 
