@@ -1,0 +1,6 @@
+{
+  "id": "compat:passthrough",
+  "protocol": "openai-chat",
+  "request": { "mappings": [] },
+  "response": { "mappings": [] }
+}

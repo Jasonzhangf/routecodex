@@ -1,6 +1,12 @@
 /**
  * Provider normalization logic for Virtual Router bootstrap.
  * Extracted from bootstrap.ts to improve modularity and testability.
+ *
+ * Step B: Hardcoded if-chains replaced with config-driven compat profile registry.
+ * - detectProviderType → detectProviderTypeFromConfig (provider-resolution-config.json)
+ * - mapOutboundProfile → resolveOutboundProfileFromConfig (provider-resolution-config.json)
+ * - resolveCompatibilityProfile defaults → resolveDefaultCompatibilityProfileFromConfig
+ * - maybeInjectQwenHeaders / maybeInjectClaudeCodeHeaders → applyHeaderPolicies (profile JSONs)
  */
 import {
   VirtualRouterError,
@@ -13,16 +19,29 @@ import {
   type AnthropicThinkingConfig,
   type AnthropicThinkingBudgetMap
 } from '../types.js';
-import {
-  CLAUDE_CODE_DEFAULT_USER_AGENT,
-  CLAUDE_CODE_DEFAULT_X_APP,
-  CLAUDE_CODE_DEFAULT_ANTHROPIC_BETA,
-  parseClaudeCodeAppVersionFromUserAgent
-} from './claude-code-helpers.js';
 import { normalizeAnthropicThinking, normalizeModelCapabilities, normalizeResponsesConfig, resolveProviderStreamingPreference } from './responses-helpers.js';
 import { normalizeModelStreaming, normalizeModelContextTokens, normalizeModelOutputTokens } from './streaming-helpers.js';
 
+// Step B: Config-driven compat registry
+import { loadCompatProfileRegistry, getHeaderPolicies, getProfile } from '../../../conversion/compat/profile-registry/registry.js';
+import { applyHeaderPolicies } from '../../../conversion/compat/profile-registry/header-policies.js';
+import {
+  detectProviderTypeFromConfig,
+  resolveOutboundProfileFromConfig,
+  resolveDefaultCompatibilityProfileFromConfig
+} from '../../../conversion/compat/profile-registry/provider-resolver.js';
+
 const DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS = 8192;
+
+// Load compat registry at module level (singleton, fail-fast on missing config)
+const compatRegistry = loadCompatProfileRegistry();
+const resolutionConfig = compatRegistry.providerResolutionConfig;
+if (!resolutionConfig) {
+  throw new Error(
+    '[provider-normalization] provider-resolution-config.json not found. ' +
+    'This file is required for config-driven provider type / outbound / compatibility resolution.'
+  );
+}
 
 export interface ProviderAuthEntry {
   keyAlias: string;
@@ -83,7 +102,7 @@ export function normalizeProvider(providerId: string, raw: unknown): NormalizedP
           ? provider.baseUrl.trim()
           : '';
   const compatibilityProfile = resolveCompatibilityProfile(providerId, provider);
-  const headers = maybeInjectClaudeCodeHeaders(
+  const headers = applyProfileHeaders(
     providerId,
     providerType,
     compatibilityProfile,
@@ -150,94 +169,73 @@ export function normalizeProvider(providerId: string, raw: unknown): NormalizedP
   };
 }
 
-function hasHeader(headers: Record<string, string> | undefined, name: string): boolean {
-  if (!headers) {
-    return false;
-  }
-  const lowered = name.trim().toLowerCase();
-  if (!lowered) {
-    return false;
-  }
-  for (const key of Object.keys(headers)) {
-    if (key.trim().toLowerCase() === lowered) {
-      const value = headers[key];
-      if (typeof value === 'string' && value.trim()) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-const QWEN_DEFAULT_USER_AGENT = 'QwenCode/0.14.3 (darwin; arm64)';
+// ---------------------------------------------------------------------------
+// Config-driven header injection
+// Replaces: maybeInjectQwenHeaders + maybeInjectClaudeCodeHeaders
+// ---------------------------------------------------------------------------
 
-function maybeInjectQwenHeaders(
-  providerId: string,
-  compatibilityProfile: string,
-  headers: Record<string, string> | undefined
-): Record<string, string> | undefined {
-  const profile = typeof compatibilityProfile === 'string' ? compatibilityProfile.trim().toLowerCase() : '';
-  if (profile !== 'chat:qwen') {
-    return headers;
-  }
-  // Only inject for qwen provider (portal.qwen.ai)
-  const providerLower = providerId.trim().toLowerCase();
-  if (providerLower !== 'qwen') {
-    return headers;
-  }
-  const base: Record<string, string> = { ...(headers ?? {}) };
-  // Inject X-DashScope headers required by portal.qwen.ai
-  if (!hasHeader(base, 'X-DashScope-UserAgent')) {
-    base['X-DashScope-UserAgent'] = QWEN_DEFAULT_USER_AGENT;
-  }
-  if (!hasHeader(base, 'X-DashScope-CacheControl')) {
-    base['X-DashScope-CacheControl'] = 'enable';
-  }
-  if (!hasHeader(base, 'X-DashScope-AuthType')) {
-    base['X-DashScope-AuthType'] = 'qwen-oauth';
-  }
-  // Ensure User-Agent is set
-  if (!hasHeader(base, 'User-Agent')) {
-    base['User-Agent'] = QWEN_DEFAULT_USER_AGENT;
-  }
-  return base;
-}
-
-function maybeInjectClaudeCodeHeaders(
+function applyProfileHeaders(
   providerId: string,
   providerType: string,
   compatibilityProfile: string,
   headers: Record<string, string> | undefined
 ): Record<string, string> | undefined {
-  // First try qwen headers injection
-  const qwenHeaders = maybeInjectQwenHeaders(providerId, compatibilityProfile, headers);
-  if (qwenHeaders !== headers) {
-    return qwenHeaders;
-  }
-  const profile = typeof compatibilityProfile === 'string' ? compatibilityProfile.trim().toLowerCase() : '';
-  if (!profile || (profile !== 'anthropic:claude-code' && profile !== 'chat:claude-code')) {
-    return headers;
-  }
-  if (!String(providerType).toLowerCase().includes('anthropic')) {
-    return headers;
-  }
-  const base: Record<string, string> = { ...(headers ?? {}) };
-  if (!hasHeader(base, 'User-Agent')) {
-    base['User-Agent'] = CLAUDE_CODE_DEFAULT_USER_AGENT;
-  }
-  if (!hasHeader(base, 'X-App')) {
-    base['X-App'] = CLAUDE_CODE_DEFAULT_X_APP;
-  }
-  if (!hasHeader(base, 'X-App-Version')) {
-    const version = parseClaudeCodeAppVersionFromUserAgent(base['User-Agent'] ?? '');
-    if (version) {
-      base['X-App-Version'] = version;
-    }
-  }
-  if (!hasHeader(base, 'anthropic-beta')) {
-    base['anthropic-beta'] = CLAUDE_CODE_DEFAULT_ANTHROPIC_BETA;
-  }
-  return base;
+  // Look up header policy rules from the compat profile registry
+  const rules = getHeaderPolicies(compatRegistry, compatibilityProfile);
+  const result = applyHeaderPolicies(headers, rules, { providerId, providerType });
+  return result;
 }
+
+// ---------------------------------------------------------------------------
+// Config-driven detectProviderType
+// Delegates to detectProviderTypeFromConfig using provider-resolution-config.json
+// ---------------------------------------------------------------------------
+
+export function detectProviderType(provider: Record<string, unknown>): string {
+  return detectProviderTypeFromConfig(resolutionConfig, provider);
+}
+
+// ---------------------------------------------------------------------------
+// Config-driven mapOutboundProfile
+// Delegates to resolveOutboundProfileFromConfig using provider-resolution-config.json
+// ---------------------------------------------------------------------------
+
+export function mapOutboundProfile(providerType: string): string {
+  return resolveOutboundProfileFromConfig(resolutionConfig, providerType);
+}
+
+// ---------------------------------------------------------------------------
+// Config-driven resolveCompatibilityProfile
+// Explicit compatibilityProfile from provider config takes precedence.
+// Default resolution uses config-driven compatibilityProfileBlocks.
+// ---------------------------------------------------------------------------
+
+function resolveCompatibilityProfile(providerId: string, provider: Record<string, unknown>): string {
+  if (typeof provider.compatibilityProfile === 'string' && provider.compatibilityProfile.trim()) {
+    return provider.compatibilityProfile.trim();
+  }
+  const legacyFields: string[] = [];
+  if (typeof provider.compat === 'string') {
+    legacyFields.push('compat');
+  }
+  if (typeof provider.compatibility_profile === 'string') {
+    legacyFields.push('compatibility_profile');
+  }
+  if (legacyFields.length > 0) {
+    throw new VirtualRouterError(
+      `Provider "${providerId}" uses legacy compatibility field(s): ${legacyFields.join(
+        ', '
+      )}. Rename to "compatibilityProfile".`,
+      VirtualRouterErrorCode.CONFIG_ERROR
+    );
+  }
+  // Config-driven default resolution (replaces hardcoded antigravity/gemini-cli if-chain)
+  return resolveDefaultCompatibilityProfileFromConfig(resolutionConfig, providerId, provider);
+}
+
+// ---------------------------------------------------------------------------
+// Utilities (unchanged)
+// ---------------------------------------------------------------------------
 
 function normalizeDeepSeekOptions(
   provider: Record<string, unknown>
@@ -278,38 +276,6 @@ function normalizeDeepSeekOptions(
   };
 }
 
-function resolveCompatibilityProfile(providerId: string, provider: Record<string, unknown>): string {
-  if (typeof provider.compatibilityProfile === 'string' && provider.compatibilityProfile.trim()) {
-    return provider.compatibilityProfile.trim();
-  }
-  const legacyFields: string[] = [];
-  if (typeof provider.compat === 'string') {
-    legacyFields.push('compat');
-  }
-  if (typeof provider.compatibility_profile === 'string') {
-    legacyFields.push('compatibility_profile');
-  }
-  if (legacyFields.length > 0) {
-    throw new VirtualRouterError(
-      `Provider "${providerId}" uses legacy compatibility field(s): ${legacyFields.join(
-        ', '
-      )}. Rename to "compatibilityProfile".`,
-      VirtualRouterErrorCode.CONFIG_ERROR
-    );
-  }
-  const normalizedId = providerId.trim().toLowerCase();
-  const providerType = String(provider.providerType ?? provider.type ?? provider.protocol ?? '').toLowerCase();
-  if (
-    normalizedId === 'antigravity' ||
-    normalizedId === 'gemini-cli' ||
-    providerType.includes('antigravity') ||
-    providerType.includes('gemini-cli')
-  ) {
-    return 'chat:gemini-cli';
-  }
-  return 'compat:passthrough';
-}
-
 function normalizeProcessMode(value: unknown): 'chat' | 'passthrough' {
   if (typeof value !== 'string') {
     return 'chat';
@@ -321,30 +287,25 @@ function normalizeProcessMode(value: unknown): 'chat' | 'passthrough' {
   return 'chat';
 }
 
-export function detectProviderType(provider: Record<string, unknown>): string {
-  const raw = (provider.providerType || provider.protocol || provider.type || '').toString().toLowerCase();
-  const id = (provider.providerId || provider.id || '').toString().toLowerCase();
-  const match = (value: string, keyword: string) => value.includes(keyword);
-  const source = `${raw}|${id}`;
-  const normalized = (src: string): string => (src && src.trim() ? src.trim() : '');
-  const lexicon = normalized(source);
-  if (!lexicon) return 'openai';
-  if (match(lexicon, 'anthropic') || match(lexicon, 'claude')) return 'anthropic';
-  if (match(lexicon, 'responses')) return 'responses';
-  if (match(lexicon, 'gemini')) return 'gemini';
-  if (match(lexicon, 'qwen')) return 'qwen';
-  if (match(lexicon, 'glm')) return 'glm';
-  if (match(lexicon, 'lmstudio')) return 'lmstudio';
-  return raw || 'openai';
+function hasHeader(headers: Record<string, string> | undefined, name: string): boolean {
+  if (!headers) {
+    return false;
+  }
+  const lowered = name.trim().toLowerCase();
+  if (!lowered) {
+    return false;
+  }
+  for (const key of Object.keys(headers)) {
+    if (key.trim().toLowerCase() === lowered) {
+      const value = headers[key];
+      if (typeof value === 'string' && value.trim()) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
-export function mapOutboundProfile(providerType: string): string {
-  const value = providerType.toLowerCase();
-  if (value === 'anthropic') return 'anthropic-messages';
-  if (value === 'responses') return 'openai-responses';
-  if (value === 'gemini') return 'gemini-chat';
-  return 'openai-chat';
-}
 export function normalizeHeaders(input: unknown): Record<string, string> | undefined {
   if (!input || typeof input !== 'object') {
     return undefined;

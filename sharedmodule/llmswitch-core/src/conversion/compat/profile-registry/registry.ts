@@ -30,7 +30,7 @@ function getProfilesDir(): string {
 function getCompatDir(): string {
   try {
     const selfDir = path.dirname(fileURLToPath(import.meta.url));
-    return path.resolve(selfDir, '..', '..');
+    return path.resolve(selfDir, '..');
   } catch {
     return path.resolve(process.cwd(), 'src', 'conversion', 'compat');
   }
