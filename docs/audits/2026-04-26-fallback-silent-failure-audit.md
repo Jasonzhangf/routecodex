@@ -72,9 +72,48 @@ node scripts/ci/silent-failure-audit.mjs --json
 - `server-side-tools.ts`（其余 9）：trace callback / JSON.stringify 降级 / retry loop / error rethrow → 无吞错。
 - CLI 层 `session-inject/guardian/client/camoufox-fp/index.ts` 等 15 个 `.catch(() => null)` → CLI / 启动路径，非主链。
 
+### 第三轮：token-daemon 主链修复
+
+12. `src/token-daemon/token-daemon.ts`
+    - **L288 `tick.loadRouteCodexConfig`**：config 加载失败改为 `throw`。修复前：`configuredProviders = new Set()` 导致本 tick 所有 token refresh 全部跳过，零可见性。
+    - **L741 `ensurePortalEnvironment`**：移除 boolean-return wrapper（仅 `logDebug`，生产关闭）。改为直接 `await`；调用方 L395 用 `try/catch` + `console.error` + `logTokenDaemonNonBlockingError` 确保 portal 失败可见。
+
 ## 全局趋势
 
 - 第一轮（观测性）：风险 catch `538 → 510`（-28），promise.catch `22 → 15`（-7）
 - 第二轮（语义修复）：11 处 MAIN_PATH_RISK 从"吞错"改为"throw/重试/消除中间态"
+- 第三轮（token-daemon）：2 处 MAIN_PATH_RISK 改为 throw + 可见错误
 
-> 注：审计扫描器按 `catch` 模式计数，不会因 throw 修复而减少计数。关键指标是 MAIN_PATH_RISK 修复数量。
+## 第四轮：全局分层审计（最终扫描结果）
+
+### 已审查确认 BEST_EFFORT_OK 的文件（全部 catch 块均为主链无关）
+
+| 文件 | catch 数 | 理由 |
+|------|:--------:|------|
+| `antigravity-user-agent.ts` | 4 | 磁盘缓存 / 远程版本探测 → floor version fallback 是设计意图 |
+| `http-transport-provider.ts` | 4 | logger 保护 / 超时保护 → 内部 logNonBlockingError 体系 |
+| `runtime-exit-forensics.ts` | 4 | forensic read/write/pid-check → 纯观测 |
+| `provider-response.ts` | 4 | model override / conversation capture / usage persistence → 不影响响应交付 |
+| `server-side-tools.ts` | 9 | trace callback / JSON.stringify 降级 / retry loop / error rethrow → 无吞错 |
+| `oauth-auth-code-flow.ts` | 17 | L214/L371 已修复；其余为 retry loop / callback / listen / cleanup → 正确 rethrow 或 best-effort |
+| 4 × pipeline-semantics | 32 | 全部为 parser fallback（`return null` → pipeline fail-fast at validation）+ `fail('invalid payload')` |
+| `ai-followup.ts` | 9 | process spawn/kill/cleanup/file read/logging → 非阻断 |
+| `pending-session.ts` | 5 | file resolution / stale cleanup / pending read → best-effort |
+| `provider-response-converter.ts` | 10 | JSON parse fallbacks / tool call recovery → 非阻断 |
+| `sse-error-handler.ts` | 3 | error normalization → best-effort |
+| `managed-process-probe.ts` | 7 | pid probe / kill / command read → best-effort |
+| `session-storage-cleanup.ts` | 8 | 全部带 non-blocking 日志 → cleanup 路径 |
+| `tmux-session-probe.ts` | 9 | 全部带 non-blocking 日志或结构化 error return → probe 路径 |
+| `request-id-manager.ts` | 3 | persistence best-effort → 计数器回退到内存 |
+
+### 15 个 `.catch(() => null/undefined)` 确认为非主链
+
+CLI 层（`session-inject` / `guardian/client` / `camoufox-fp` / `index.ts`）、warmup、quota serialized-write chain、token portal → 全部为 CLI / 启动路径 / best-effort 非主链。
+
+### 全局结论
+
+- **已修复 MAIN_PATH_RISK：15 处**（第一轮 0 + 第二轮 11 + 第三轮 2 + replaceJsonObjectInPlace 1 + session storm backoff 1）
+- **剩余 MAIN_PATH_RISK：0**（经 explorer + 手动逐文件审查确认）
+- **扫描器 catchRiskCount：509**（全部为 BEST_EFFORT_OK / LOGGING_ONLY / parser-fallback）
+
+> 注：审计扫描器按 `catch` 模式计数，不会因 throw 修复而减少计数。509 个 catch 经分层审查均不在主链上。
