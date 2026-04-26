@@ -54,7 +54,7 @@ function ensureGlobalBinTarget(binName) {
     return;
   }
 
-  const packageName = binName === 'rcc' ? '@jsonstudio/rcc' : 'routecodex';
+  const packageName = 'routecodex';
   const globalCliPath = path.join(globalRoot, packageName, 'dist', 'cli.js');
   ensureExecutable(globalCliPath);
 }

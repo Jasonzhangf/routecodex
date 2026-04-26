@@ -828,7 +828,7 @@ async function main() {
       try {
         const candidate = path.join(
           process.cwd(),
-          'node_modules/@jsonstudio/rcc/node_modules/@jsonstudio/llms/dist/conversion/compat/antigravity-session-signature.js'
+          'node_modules/routecodex/node_modules/@jsonstudio/llms/dist/conversion/compat/antigravity-session-signature.js'
         );
         return fs.existsSync(candidate);
       } catch {
@@ -1032,7 +1032,7 @@ async function main() {
         const beforeB = upstream.requests.length;
         const rcc = await runOnceBlackbox({
           label: 'rcc',
-          entryScript: 'node_modules/@jsonstudio/rcc/dist/index.js',
+          entryScript: 'node_modules/routecodex/dist/index.js',
           port: 5592,
           configPath: cfg2,
           homeDir: tempDir,

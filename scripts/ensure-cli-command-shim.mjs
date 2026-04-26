@@ -51,7 +51,7 @@ fi
 echo "${binName}: unable to locate CLI entrypoint" >&2
 echo "  tried global package: $GLOBAL_CLI" >&2
 echo "  tried repo dist: $REPO_CLI" >&2
-echo "  run npm run build && npm run install:global (or install:release for rcc)" >&2
+echo "  run npm run build && npm run install:global (or install:release)" >&2
 exit 127
 `;
 
@@ -66,7 +66,7 @@ function main() {
   const shimDirs = resolveShimDirs();
   for (const shimDir of shimDirs) {
     installed.push(writeShim(shimDir, 'routecodex', 'routecodex'));
-    installed.push(writeShim(shimDir, 'rcc', '@jsonstudio/rcc'));
+    installed.push(writeShim(shimDir, 'rcc', 'routecodex'));
   }
 
   for (const file of installed.filter(Boolean)) {

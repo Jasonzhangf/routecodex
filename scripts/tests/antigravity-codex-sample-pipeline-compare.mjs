@@ -185,7 +185,7 @@ async function main() {
   fs.mkdirSync(outDir, { recursive: true });
 
   const leftDist = args.leftDist || path.join(process.cwd(), 'dist');
-  const rightDist = args.rightDist || '/opt/homebrew/lib/node_modules/@jsonstudio/rcc/dist';
+  const rightDist = args.rightDist || '/opt/homebrew/lib/node_modules/routecodex/dist';
 
   const sampleDoc = readJson(samplePath);
   const left = await runPipeline(leftDist, sampleDoc, configPath, 'left');

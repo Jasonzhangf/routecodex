@@ -77,9 +77,6 @@ function isForbiddenCommand(command: string): boolean {
   if (normalized.includes('routecodex/dist/index.js')) {
     return true;
   }
-  if (normalized.includes('@jsonstudio/rcc') && normalized.includes('/dist/index.js')) {
-    return true;
-  }
   return false;
 }
 

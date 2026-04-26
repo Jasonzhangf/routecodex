@@ -1,12 +1,11 @@
 # routecodex & rcc
 
-[![npm version](https://badge.fury.io/js/%40jsonstudio%2Frcc.svg)](https://www.npmjs.com/package/@jsonstudio/rcc)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 RouteCodex 项目提供两个 CLI 工具：
 
 - **`routecodex`** (dev mode) - Development build with local `llmswitch-core` symlink
-- **`rcc`** (release mode) - Production build from npm `@jsonstudio/rcc`
+- **`rcc`** (release mode) - Production build from local source release install
 
 Both provide a **unified gateway for AI providers**, handling **routing + protocol conversion + tool call governance** across different upstream protocols.
 
@@ -79,15 +78,15 @@ routecodex --version
 ### rcc (release mode, recommended for production)
 
 ```bash
-npm install -g @jsonstudio/rcc
+npm run install:release
 rcc --version
 ```
 
 升级/卸载：
 
 ```bash
-npm update -g @jsonstudio/rcc
-npm uninstall -g @jsonstudio/rcc
+npm run install:release
+npm uninstall -g routecodex
 ```
 
 ## 使用
@@ -406,6 +405,6 @@ curl http://127.0.0.1:5555/v1/messages \
 
 ## 相关链接
 
-- [npm package (@jsonstudio/rcc)](https://www.npmjs.com/package/@jsonstudio/rcc)
+- [release 安装脚本（本地源码）](./scripts/install-release.sh)
 - [AGENTS.md](./AGENTS.md) - 项目原则与职责边界
 - [sharedmodule/llmswitch-core](https://github.com/jsonstudio/llmswitch-core) - Hub Pipeline 详细说明

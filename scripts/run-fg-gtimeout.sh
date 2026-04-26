@@ -57,12 +57,6 @@ is_routecodex_process() {
   if [[ "$normalized" == *"routecodex/dist/index.js"* ]]; then
     return 0
   fi
-  if [[ "$normalized" == *"@jsonstudio/rcc"* && "$normalized" == *"/dist/index.js"* ]]; then
-    return 0
-  fi
-  if [[ "$normalized" == *"jsonstudio-rcc"* && "$normalized" == *"/dist/index.js"* ]]; then
-    return 0
-  fi
   return 1
 }
 

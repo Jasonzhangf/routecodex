@@ -103,7 +103,7 @@ describe('managed server pid discovery', () => {
           const joined = Array.isArray(args) ? args.join(' ') : '';
           if (joined.includes('-p 22222')) {
             return {
-              stdout: '/opt/homebrew/bin/node /opt/homebrew/lib/node_modules/@jsonstudio/rcc/dist/index.js config/modules.json',
+              stdout: '/opt/homebrew/bin/node /opt/homebrew/lib/node_modules/routecodex/dist/index.js config/modules.json',
               status: 0,
               error: undefined
             } as any;

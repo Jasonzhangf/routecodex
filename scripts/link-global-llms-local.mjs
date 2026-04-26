@@ -74,7 +74,7 @@ function linkForPackage(globalRoot, packageName) {
 
 function main() {
   const args = parseArgs(process.argv);
-  const targets = args.packageNames.length > 0 ? args.packageNames : ['@jsonstudio/rcc', 'routecodex'];
+  const targets = args.packageNames.length > 0 ? args.packageNames : ['routecodex'];
   ensureLocalLlmsReady();
   const globalRoot = npmRootGlobal();
   const results = targets.map((name) => linkForPackage(globalRoot, name));
@@ -105,4 +105,3 @@ try {
   console.error(`[link-global-llms-local] failed: ${reason}`);
   process.exit(1);
 }
-

@@ -125,7 +125,7 @@ function readLocalLlmsVersion() {
 }
 
 const isDevPkg = args.name === 'routecodex';
-const isRcc = args.name === 'rcc' || args.name === '@jsonstudio/rcc';
+const isRcc = args.name === 'rcc';
 
 let hadDevLink = false;
 hadDevLink = isSymlink(llmsPath);
@@ -183,10 +183,6 @@ try {
     const deps = {
       ...(original.dependencies || {})
     };
-    // Avoid recursive self-dependency when packing @jsonstudio/rcc.
-    if (isRcc && deps['@jsonstudio/rcc']) {
-      delete deps['@jsonstudio/rcc'];
-    }
     mutated.dependencies = {
       ...deps,
       ajv: original.dependencies?.ajv || '^8.17.1',

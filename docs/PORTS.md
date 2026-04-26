@@ -15,7 +15,7 @@
 
 ## CLI 行为差异（rcc vs routecodex）
 
-### `rcc`（release 包）
+### `rcc`（release CLI）
 
 - **严格按配置文件端口启动**（`httpserver.port`）
 - 若端口缺失/非法：`rcc start` 直接失败

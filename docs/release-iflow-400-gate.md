@@ -3,6 +3,7 @@
 Date: 2026-02-15
 Issue: routecodex-75
 Prerequisite bug: routecodex-70 (CLOSED)
+Status: Archived release record (pre-`install:release` pipeline).
 
 ## 1) Preconditions
 - routecodex-70 is closed with replay evidence.
@@ -11,7 +12,7 @@ Prerequisite bug: routecodex-70 (CLOSED)
   - `rc-v0.6.1733-v0.89.1799`
 - Artifacts prepared:
   - `/tmp/jsonstudio-llms-0.6.1733.tgz`
-  - `jsonstudio-rcc-0.89.1799.tgz`
+  - local routecodex release install bundle（旧流程使用 rcc tarball）
 
 ## 2) Mandatory verification gate
 1. Same-shape replay (affected provider: iflow)
@@ -28,7 +29,7 @@ Prerequisite bug: routecodex-70 (CLOSED)
 - `npm run build:dev`
 - `npm run install:global`
 
-## 3) Publish order (manual)
+## 3) Publish order (manual, historical)
 1. Publish llms first
 - `cd sharedmodule/llmswitch-core`
 - `npm publish /tmp/jsonstudio-llms-0.6.1733.tgz`
@@ -37,8 +38,9 @@ Prerequisite bug: routecodex-70 (CLOSED)
 - `cd /Users/fanzhang/Documents/github/routecodex`
 - check `package.json` has `@jsonstudio/llms: 0.6.1733`
 
-3. Publish rcc
-- `npm publish jsonstudio-rcc-0.89.1799.tgz`
+3. Publish rcc (historical path retired)
+- Historical command: `npm publish <legacy-rcc-tarball>.tgz`
+- Current path: `npm run install:release` from repo source (no separate rcc tarball publish).
 
 ## 4) Rollback checklist
 - If llms publish breaks replay gate:

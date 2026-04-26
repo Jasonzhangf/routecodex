@@ -1,17 +1,17 @@
 # 安装与快速上手（rcc / routecodex）
 
-## 1) npm 安装（Release，推荐）
+## 1) Release 安装（推荐，本地源码）
 
 ```bash
-npm install -g @jsonstudio/rcc
+npm run install:release
 rcc --version
 ```
 
 升级/卸载：
 
 ```bash
-npm update -g @jsonstudio/rcc
-npm uninstall -g @jsonstudio/rcc
+npm run install:release
+npm uninstall -g routecodex
 ```
 
 ## 2) 初始化配置（自动生成）
@@ -84,4 +84,4 @@ npm run build:dev
 npm run install:global
 ```
 
-> 注意：`routecodex` 仅用于本地/调试，严禁发布到 npm；release 只能用 `@jsonstudio/rcc`。
+> 注意：release 统一通过本仓库 `npm run install:release` 生成并安装，不再依赖历史 npm rcc 包发布流程。

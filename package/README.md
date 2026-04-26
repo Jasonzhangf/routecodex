@@ -2,25 +2,19 @@
 
 This directory is used for CLI packaging and release artifacts only.
 
-## Release CLI (@jsonstudio/rcc)
+## Release CLI (rcc)
 
-Release builds must use the npm-published `@jsonstudio/llms` dependency and the `rcc` binary.
+Release installs are now built from this repository source and installed globally as `routecodex` + `rcc` shim.
 
-Build and pack:
-
-```bash
-node scripts/pack-mode.mjs --name @jsonstudio/rcc --bin rcc
-```
-
-Publish the generated tarball:
+Build and install:
 
 ```bash
-npm publish jsonstudio-rcc-*.tgz
+npm run install:release
 ```
 
 ## Dev CLI (routecodex)
 
-The `routecodex` CLI is dev-only and must never be published to npm.
+The `routecodex` CLI is dev-only for iterative development.
 
 For dev work:
 
@@ -31,6 +25,6 @@ npm run install:global
 
 ## Rules
 
-- Do not publish `routecodex` to npm.
+- Release no longer depends on publishing legacy npm rcc tarballs.
 - Do not mix release builds with the dev CLI.
 - Do not commit build artifacts; `dist/` is emitted in CI.

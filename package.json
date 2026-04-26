@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.1253",
+  "version": "0.90.1254",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
@@ -84,7 +84,6 @@
     "verify:e2e-gemini-followup-sample": "node scripts/verify-e2e-gemini-followup-sample.mjs",
     "install:global": "./scripts/install-global.sh",
     "install:release": "./scripts/install-release.sh",
-    "release:rcc": "npm run pack:rcc",
     "audit:tool-text": "node scripts/audit-tool-text.mjs",
     "start:bg": "bash scripts/run-bg.sh -- 'node dist/index.js'",
     "start:fg": "bash scripts/run-fg-gtimeout.sh 12 -- 'node dist/index.js'",
@@ -154,11 +153,8 @@
     "mock:validate": "node scripts/mock-provider/validate.mjs",
     "mock:regressions": "node scripts/mock-provider/run-regressions.mjs",
     "mock:clean": "node scripts/mock-provider/clean.mjs",
-    "publish:rcc": "node scripts/publish-rcc.mjs",
-    "pack:rcc": "node scripts/pack-rcc.mjs",
     "fix:cli-permission": "node scripts/ensure-cli-executable.mjs",
-    "fix:cli-shim": "node scripts/ensure-cli-command-shim.mjs",
-    "public:rcc": "npm run publish:rcc --"
+    "fix:cli-shim": "node scripts/ensure-cli-command-shim.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",

@@ -20,6 +20,6 @@
 - 安装后版本/可执行性复核（`routecodex --version` / `rcc --version`）。
 
 ## 发布边界
-- CLI release 用 `@jsonstudio/rcc`。
-- `routecodex` 仅本地/调试路径。
+- CLI release 统一走 `npm run install:release`（本地源码构建 + 全局安装）。
+- `rcc` 与 `routecodex` 均指向同一全局安装产物。
 - 不提交构建产物（`dist/`、tarball）。
