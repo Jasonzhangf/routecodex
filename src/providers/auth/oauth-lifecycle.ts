@@ -364,7 +364,6 @@ async function maybeAdoptOfficialQwenCodeToken(args: {
 
 
 function applyRefreshFailureBackoff(_cacheKey: string, _providerType: string, _message: string): void {
-  // no-op: iflow provider removed; backoff logic was iflow-specific
 }
 
 function isElementMissingAutomationFailure(message: string): boolean {
@@ -1410,9 +1409,6 @@ export async function ensureValidOAuthToken(
   auth: OAuthAuth,
   opts: EnsureOpts = {}
 ): Promise<void> {
-  if (providerType.trim().toLowerCase() === 'iflow') {
-    throw new Error('[OAuth] provider "iflow" has been removed and is no longer supported.');
-  }
   if (!isOAuthConfig(auth)) {
     return;
   }

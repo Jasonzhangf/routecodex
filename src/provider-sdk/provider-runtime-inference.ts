@@ -154,25 +154,11 @@ function inferRuntimeOnlyBinding(
     'deepseek-account',
     'gemini-cli-oauth'
   ]);
-  if (authType === 'iflow-cookie' || authType === 'iflow-oauth') {
-    return {
-      family: 'custom-runtime',
-      supported: false,
-      notes: 'Provider family "iflow" has been removed from RouteCodex.'
-    };
-  }
   if (runtimeOnlyAuths.has(authType)) {
     return {
       family: 'custom-runtime',
       supported: false,
       notes: `Provider auth "${authType}" requires the existing RouteCodex runtime path.`
-    };
-  }
-  if (providerType === 'iflow') {
-    return {
-      family: 'custom-runtime',
-      supported: false,
-      notes: 'Provider family "iflow" has been removed from RouteCodex.'
     };
   }
   if (providerType === 'gemini-cli-http-provider' || providerType === 'gemini-cli') {

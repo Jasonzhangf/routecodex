@@ -433,8 +433,6 @@ export async function resolveRuntimeAuth(server: any, runtime: ProviderRuntimePr
   };
 
   if (authType === 'apikey') {
-    if (rawType === 'iflow-cookie') {
-      throw new Error('[runtime.auth] iflow-cookie auth has been removed; please migrate this provider auth config.');
     }
     if (rawType === 'deepseek-account') {
       const tokenFileRaw = pickString(authRecord.tokenFile, authRecord.token_file);

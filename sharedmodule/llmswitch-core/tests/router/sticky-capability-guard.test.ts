@@ -15,24 +15,24 @@ import type { RoutingInstructionState } from '../../src/router/virtual-router/ro
 
 describe('virtual-router sticky capability guard', () => {
   const providerRegistry = new ProviderRegistry({
-    'iflow.1-186.glm-5': {
-      providerKey: 'iflow.1-186.glm-5',
+    'custom.1-186.glm-5': {
+      providerKey: 'custom.1-186.glm-5',
       providerType: 'openai',
       endpoint: 'https://example.com',
       auth: { type: 'apiKey', value: 'x' },
       outboundProfile: 'openai-chat',
       modelId: 'glm-5'
     } as any,
-    'iflow.2-173.minimax-m2.5': {
-      providerKey: 'iflow.2-173.minimax-m2.5',
+    'custom.2-173.minimax-m2.5': {
+      providerKey: 'custom.2-173.minimax-m2.5',
       providerType: 'openai',
       endpoint: 'https://example.com',
       auth: { type: 'apiKey', value: 'x' },
       outboundProfile: 'openai-chat',
       modelId: 'minimax-m2.5'
     } as any,
-    'iflow.3-138.minimax-m2.5': {
-      providerKey: 'iflow.3-138.minimax-m2.5',
+    'custom.3-138.minimax-m2.5': {
+      providerKey: 'custom.3-138.minimax-m2.5',
       providerType: 'openai',
       endpoint: 'https://example.com',
       auth: { type: 'apiKey', value: 'x' },
@@ -47,7 +47,7 @@ describe('virtual-router sticky capability guard', () => {
         id: 'multimodal-primary',
         priority: 100,
         mode: 'priority',
-        targets: ['iflow.2-173.minimax-m2.5']
+        targets: ['custom.2-173.minimax-m2.5']
       }
     ],
     web_search: [
@@ -55,7 +55,7 @@ describe('virtual-router sticky capability guard', () => {
         id: 'web-search-primary',
         priority: 100,
         mode: 'priority',
-        targets: ['iflow.3-138.minimax-m2.5']
+        targets: ['custom.3-138.minimax-m2.5']
       }
     ],
     default: [
@@ -63,7 +63,7 @@ describe('virtual-router sticky capability guard', () => {
         id: 'default-primary',
         priority: 100,
         mode: 'priority',
-        targets: ['iflow.1-186.glm-5']
+        targets: ['custom.1-186.glm-5']
       }
     ]
   };
@@ -84,7 +84,7 @@ describe('virtual-router sticky capability guard', () => {
 
   function stickyState(): RoutingInstructionState {
     return {
-      stickyTarget: { provider: 'iflow', keyAlias: '1-186' },
+      stickyTarget: { provider: 'custom', keyAlias: '1-186' },
       allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
@@ -137,7 +137,7 @@ describe('virtual-router sticky capability guard', () => {
       baseDeps()
     );
 
-    expect(selection.providerKey).toBe('iflow.2-173.minimax-m2.5');
+    expect(selection.providerKey).toBe('custom.2-173.minimax-m2.5');
     expect(selection.routeUsed).toBe('multimodal');
     expect(selection.poolId).toBe('multimodal-primary');
   });
@@ -156,7 +156,7 @@ describe('virtual-router sticky capability guard', () => {
       baseDeps()
     );
 
-    expect(selection.providerKey).toBe('iflow.3-138.minimax-m2.5');
+    expect(selection.providerKey).toBe('custom.3-138.minimax-m2.5');
     expect(selection.routeUsed).toBe('web_search');
     expect(selection.poolId).toBe('web-search-primary');
   });
@@ -172,7 +172,7 @@ describe('virtual-router sticky capability guard', () => {
       baseDeps()
     );
 
-    expect(selection.providerKey).toBe('iflow.1-186.glm-5');
+    expect(selection.providerKey).toBe('custom.1-186.glm-5');
     expect(selection.routeUsed).toBe('default');
     expect(selection.poolId).toBe('sticky');
   });

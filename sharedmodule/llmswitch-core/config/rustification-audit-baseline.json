@@ -311,48 +311,6 @@
       "topDir": "conversion"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/iflow-kimi-cli-defaults.ts",
-      "loc": 38,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/iflow-kimi-history-media-placeholder.ts",
-      "loc": 30,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/iflow-kimi-thinking-reasoning-fill.ts",
-      "loc": 48,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/iflow-native-compat.ts",
-      "loc": 60,
-      "nativeLinked": false,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/iflow-response-body-unwrap.ts",
-      "loc": 31,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/iflow-tool-text-fallback.ts",
-      "loc": 49,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/iflow-web-search.ts",
-      "loc": 70,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/index.ts",
       "loc": 2,
       "nativeLinked": false,

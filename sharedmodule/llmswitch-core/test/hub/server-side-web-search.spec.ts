@@ -398,7 +398,7 @@ describe('ServerSideToolEngine web_search loop', () => {
     expect(finalContent).toBe('final answer with web search');
   });
 
-  test('web_search server tool works across GLM, Gemini and IFlow backends (providerInvoker loop)', async () => {
+  test('web_search server tool works across GLM and Gemini backends (providerInvoker loop)', async () => {
     const engines = [
       {
         label: 'glm',
@@ -424,19 +424,6 @@ describe('ServerSideToolEngine web_search loop', () => {
         target: {
           providerKey: 'gemini-cli.gemini-2.5-pro',
           modelId: 'gemini-2.5-pro'
-        }
-      },
-      {
-        label: 'iflow',
-        adapterProtocol: 'openai-chat',
-        engineConfig: {
-          id: 'iFlow-ROME-30BA3B',
-          providerKey: 'iflow.iFlow-ROME-30BA3B',
-          description: 'IFlow ROME 30B web search backend'
-        },
-        target: {
-          providerKey: 'iflow-primary',
-          modelId: 'iFlow-ROME-30BA3B'
         }
       }
     ] as const;
@@ -518,32 +505,6 @@ describe('ServerSideToolEngine web_search loop', () => {
             };
           }
 
-          if (label === 'iflow') {
-            const payload = options.payload as any;
-            expect(payload).toHaveProperty('data');
-            expect(payload).toHaveProperty('metadata');
-            expect(payload.metadata.iflowWebSearch).toBe(true);
-            expect(payload.metadata.entryEndpoint).toBe('/chat/retrieve');
-            expect(options.entryEndpoint).toBe('/v1/chat/retrieve');
-
-            const body = payload.data;
-            expect(body.query).toBe('today news');
-
-            return {
-              providerResponse: {
-                data: [
-                  {
-                    title: 'hit-1',
-                    url: 'https://example.com/hit-1',
-                    time: '2024-01-01',
-                    abstractInfo: 'iflow web search hit'
-                  }
-                ],
-                success: true,
-                message: 'ok-from-iflow'
-              } as any
-            };
-          }
 
           const payload = options.payload as any;
           expect(payload.model).toBe(engineConfig.id);

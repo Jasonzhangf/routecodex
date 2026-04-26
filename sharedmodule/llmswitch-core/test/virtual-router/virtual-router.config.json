@@ -18,8 +18,7 @@
           "fc.gpt-5.1-codex-max",
           "c4m.gpt-5.1-codex",
           "glm.glm-4.6",
-          "kimi.kimi-for-coding",
-          "iflow.kimi-k2-thinking"
+          "kimi.kimi-for-coding"
         ]
       }
     ],
@@ -29,7 +28,6 @@
         "priority": 0,
         "targets": [
           "fc.gpt-5.1-codex-max",
-          "iflow.kimi-k2-thinking",
           "c4m.gpt-5.1-codex"
         ]
       }
@@ -42,7 +40,6 @@
           "fc.gpt-5.1-codex-max",
           "glm.glm-4.6",
           "kimi.kimi-for-coding",
-          "iflow.kimi-k2-thinking",
           "c4m.gpt-5.1-codex"
         ]
       }
@@ -51,9 +48,7 @@
       {
         "id": "vision-primary",
         "priority": 0,
-        "targets": [
-          "iflow.qwen3-vl-plus"
-        ]
+        "targets": []
       }
     ],
     "websearch": [
@@ -72,7 +67,6 @@
         "id": "background-primary",
         "priority": 0,
         "targets": [
-          "iflow.minimax-m2",
           "glm.glm-4.6",
           "qwen.qwen3-coder-plus"
         ]
@@ -84,8 +78,7 @@
         "priority": 0,
         "targets": [
           "glm.glm-4.6",
-          "qwen.qwen3-coder-plus",
-          "iflow.kimi-k2-thinking"
+          "qwen.qwen3-coder-plus"
         ]
       }
     ]
@@ -139,30 +132,6 @@
       "compatibilityProfile": "compat:passthrough",
       "defaultModel": "kimi-for-coding"
     },
-    "iflow.kimi-k2-thinking": {
-      "providerKey": "iflow.kimi-k2-thinking",
-      "providerType": "openai",
-      "endpoint": "https://api.fake-iflow/v1/chat/completions",
-      "auth": {
-        "type": "apiKey",
-        "secretRef": "ROUTECODEX_PROVIDER_IFLOW"
-      },
-      "outboundProfile": "openai-chat",
-      "compatibilityProfile": "chat:iflow",
-      "defaultModel": "kimi-k2-thinking"
-    },
-    "iflow.qwen3-vl-plus": {
-      "providerKey": "iflow.qwen3-vl-plus",
-      "providerType": "openai",
-      "endpoint": "https://api.fake-iflow/v1/chat/completions",
-      "auth": {
-        "type": "apiKey",
-        "secretRef": "ROUTECODEX_PROVIDER_IFLOW_VL"
-      },
-      "outboundProfile": "openai-chat",
-      "compatibilityProfile": "chat:iflow",
-      "defaultModel": "qwen3-vl-plus"
-    },
     "qwen.qwen3-coder-plus": {
       "providerKey": "qwen.qwen3-coder-plus",
       "providerType": "openai",
@@ -174,46 +143,34 @@
       "outboundProfile": "openai-chat",
       "compatibilityProfile": "chat:qwen",
       "defaultModel": "qwen3-coder-plus"
-    },
-    "iflow.minimax-m2": {
-      "providerKey": "iflow.minimax-m2",
-      "providerType": "openai",
-      "endpoint": "https://api.fake-iflow/v1/chat/completions",
-      "auth": {
-        "type": "apiKey",
-        "secretRef": "ROUTECODEX_PROVIDER_MINIMAX"
-      },
-      "outboundProfile": "openai-chat",
-      "compatibilityProfile": "chat:iflow",
-      "defaultModel": "minimax-m2"
     }
   },
   "classifier": {
     "longContextThresholdTokens": 6000,
     "thinkingKeywords": [
-      "反思",
-      "逐步",
+      "\u53cd\u601d",
+      "\u9010\u6b65",
       "chain of thought",
-      "让我们一步步",
-      "思考"
+      "\u8ba9\u6211\u4eec\u4e00\u6b65\u6b65",
+      "\u601d\u8003"
     ],
     "codingKeywords": [
       "typescript",
       "javascript",
       "python",
-      "函数",
-      "代码",
+      "\u51fd\u6570",
+      "\u4ee3\u7801",
       "class"
     ],
     "backgroundKeywords": [
-      "后台",
+      "\u540e\u53f0",
       "background",
-      "异步处理",
-      "长期任务"
+      "\u5f02\u6b65\u5904\u7406",
+      "\u957f\u671f\u4efb\u52a1"
     ],
     "visionKeywords": [
-      "图像",
-      "图片",
+      "\u56fe\u50cf",
+      "\u56fe\u7247",
       "vision",
       "image_url"
     ]

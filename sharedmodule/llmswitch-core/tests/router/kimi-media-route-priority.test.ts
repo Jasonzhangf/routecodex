@@ -5,16 +5,16 @@ import { buildRouteCandidates } from '../../src/router/virtual-router/engine-sel
 
 describe('virtual-router multimodal route priority', () => {
   const providerRegistry = new ProviderRegistry({
-    'iflow.1-186.kimi-k2.5': {
-      providerKey: 'iflow.1-186.kimi-k2.5',
+    'custom.1-186.kimi-k2.5': {
+      providerKey: 'custom.1-186.kimi-k2.5',
       providerType: 'openai',
       endpoint: 'https://example.com',
       auth: { type: 'apikey', value: 'x' },
       outboundProfile: 'openai-chat',
       modelId: 'kimi-k2.5'
     },
-    'iflow.1-186.qwen3-vl-plus': {
-      providerKey: 'iflow.1-186.qwen3-vl-plus',
+    'custom.1-186.qwen3-vl-plus': {
+      providerKey: 'custom.1-186.qwen3-vl-plus',
       providerType: 'openai',
       endpoint: 'https://example.com',
       auth: { type: 'apikey', value: 'x' },
@@ -37,7 +37,7 @@ describe('virtual-router multimodal route priority', () => {
         id: 'multimodal-primary',
         priority: 200,
         mode: 'priority',
-        targets: ['iflow.1-186.kimi-k2.5']
+        targets: ['custom.1-186.kimi-k2.5']
       },
       {
         id: 'multimodal-backup',
@@ -52,7 +52,7 @@ describe('virtual-router multimodal route priority', () => {
         id: 'coding-primary',
         priority: 100,
         mode: 'priority',
-        targets: ['iflow.1-186.kimi-k2.5']
+        targets: ['custom.1-186.kimi-k2.5']
       }
     ],
     default: [
@@ -155,9 +155,9 @@ describe('virtual-router multimodal route priority', () => {
     expect(candidates[0]).toBe('multimodal');
   });
 
-  test('uses iflow kimi target first inside multimodal priority pool', () => {
+  test('uses custom kimi target first inside multimodal priority pool', () => {
     const selectionTargets = selectTargetsForRoute(routing.multimodal);
-    expect(selectionTargets[0]).toBe('iflow.1-186.kimi-k2.5');
+    expect(selectionTargets[0]).toBe('custom.1-186.kimi-k2.5');
     expect(selectionTargets).toContain('tab.key1.gpt-5.2-codex');
   });
 });

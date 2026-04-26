@@ -11,7 +11,6 @@ Provider core runtime module contains the actual HTTP transport implementations 
 ├── gemini-http- provider. ts   # Google Gemini API handler
 ├── gemini-cli-http- provider. ts  # Google Gemini CLI handler
 ├── openai-http- provider. ts   # OpenAI legacy protocol handler
-├── iflow-http- provider. ts    # iFlow protocol handler
 ├── http-request-executor. ts   # HTTP request execution and retry logic
 ├── provider-factory. ts        # Factory for creating provider instances
 ├── provider-error- classifier. ts  # Error classification and mapping
