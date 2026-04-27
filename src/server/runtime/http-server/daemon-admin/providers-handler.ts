@@ -129,7 +129,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       res.status(200).json(items);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -144,7 +144,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -182,7 +182,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       res.status(200).json(items);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -209,7 +209,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -270,7 +270,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -298,7 +298,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -326,7 +326,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -490,7 +490,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -554,7 +554,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -577,7 +577,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -601,7 +601,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       res.status(200).json({ ok: true, path: configPath, oauthBrowser });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 }

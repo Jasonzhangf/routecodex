@@ -125,7 +125,7 @@ function readLocalLlmsVersion() {
 }
 
 const isDevPkg = args.name === 'routecodex';
-const isRcc = args.name === 'rcc';
+const isRcc = args.name === 'rcc' || args.name === '@jsonstudio/rcc';
 
 let hadDevLink = false;
 hadDevLink = isSymlink(llmsPath);

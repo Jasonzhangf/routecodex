@@ -88,7 +88,7 @@ export async function handleResponses(
   };
   try {
     if (!ctx.executePipeline) {
-      res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' } });
+      res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' , code: 'not_ready' } });
       return;
     }
     let payload = (req.body && typeof req.body === 'object'
@@ -114,7 +114,7 @@ export async function handleResponses(
         ? payload.response_id
         : options.responseIdFromPath;
       if (!responseId) {
-        res.status(400).json({ error: { message: 'response_id is required for submit_tool_outputs', type: 'invalid_request_error' } });
+        res.status(400).json({ error: { message: 'response_id is required for submit_tool_outputs', type: 'invalid_request_error', code: 'bad_request' } });
         return;
       }
       try {

@@ -361,7 +361,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       console.log(`[models] path=${req.path} failed error=${message}`);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   };
 
@@ -379,7 +379,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -387,7 +387,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
     const sessionId = typeof req.params.sessionId === 'string' ? req.params.sessionId.trim() : '';
     if (!sessionId) {
-      res.status(400).json({ error: { message: 'sessionId is required' } });
+      res.status(400).json({ error: { message: 'sessionId is required' , code: 'bad_request' } });
       return;
     }
     try {
@@ -399,7 +399,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -470,7 +470,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
           source: 'http.routes.shutdown',
           details: { result: 'forbidden', ...shutdownAudit }
         });
-        res.status(403).json({ error: { message: 'forbidden' } });
+        res.status(403).json({ error: { message: 'forbidden' , code: 'forbidden' } });
         return;
       }
 
@@ -574,7 +574,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
       res.status(200).json({ pipelineReady: getPipelineReady() });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 

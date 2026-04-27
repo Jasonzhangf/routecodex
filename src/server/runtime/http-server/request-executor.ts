@@ -4,6 +4,7 @@ import type { HubPipeline, ProviderHandle, ProviderProtocol } from './types.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import {
+  computeProviderFailureBackoffDelayMs,
   describeProviderFailureDecision,
   isBlockingRecoverableProviderFailure,
   resolveProviderFailureExclusionDecision,
@@ -40,7 +41,6 @@ import {
   resolveMaxProviderAttempts,
   describeRetryReason,
   isPromptTooLongError,
-  shouldRetryProviderError,
   waitBeforeRetry
 } from './executor/retry-engine.js';
 import { isClientDisconnectAbortError } from './executor-provider.js';
@@ -1082,7 +1082,7 @@ function resolveReportedProviderErrorRecoverable(args: {
   if (classification === 'recoverable') {
     return true;
   }
-  return shouldRetryProviderError(args.error);
+  return false;
 }
 
 async function reportRequestExecutorProviderError(args: {
@@ -1218,30 +1218,6 @@ function buildRecoverableErrorBackoffKey(args: {
   return `${providerScope}|${statusPart}|${errorPart}|${upstreamPart}|${reasonPart}`;
 }
 
-function resolveRecoverableBackoffCapMs(args: {
-  statusCode?: number;
-  errorCode?: string;
-  upstreamCode?: string;
-  reason?: string;
-}): number {
-  const status = typeof args.statusCode === 'number' ? args.statusCode : undefined;
-  const errorCode = normalizeCodeKey(args.errorCode);
-  const upstreamCode = normalizeCodeKey(args.upstreamCode);
-  const reason = typeof args.reason === 'string' ? args.reason.trim().toLowerCase() : '';
-  // 429/配额类错误统一走阻塞退避；这里只控制上限，不再做“快速换 provider”。
-  if (
-    status === 429
-    || errorCode === 'HTTP_429'
-    || upstreamCode === 'HTTP_429'
-    || errorCode === 'INSUFFICIENT_QUOTA'
-    || upstreamCode === 'INSUFFICIENT_QUOTA'
-    || reason.includes('insufficient_quota')
-  ) {
-    return process.env.NODE_ENV === 'test' ? 800 : 4_000;
-  }
-  return process.env.NODE_ENV === 'test' ? 5_000 : 120_000;
-}
-
 function consumeRecoverableErrorBackoffMs(
   key: string,
   args: {
@@ -1266,23 +1242,11 @@ function consumeRecoverableErrorBackoffMs(
     consecutive,
     updatedAtMs: now
   });
-  const baseMs = (() => {
-    const raw = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS || process.env.RCC_RECOVERABLE_BACKOFF_BASE_MS;
-    const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
-    return process.env.NODE_ENV === 'test' ? 200 : 1_000;
-  })();
-  const maxMs = (() => {
-    const raw = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS || process.env.RCC_RECOVERABLE_BACKOFF_MAX_MS;
-    const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
-    return resolveRecoverableBackoffCapMs(args);
-  })();
-  return Math.min(maxMs, baseMs * Math.pow(2, Math.max(0, consecutive - 1)));
+  return computeProviderFailureBackoffDelayMs({
+    scope: 'recoverable',
+    statusCode: args.statusCode,
+    consecutive
+  });
 }
 
 function isNetworkTransportLikeError(error: unknown): boolean {
@@ -1320,38 +1284,6 @@ function isNetworkTransportLikeError(error: unknown): boolean {
   );
 }
 
-function resolveProviderScopedRetryBackoffCapMs(error: unknown, args: {
-  statusCode?: number;
-}): number {
-  const status = typeof args.statusCode === 'number' ? args.statusCode : undefined;
-  if (status === 429) {
-    const raw = process.env.ROUTECODEX_429_BACKOFF_MAX_MS || process.env.RCC_429_BACKOFF_MAX_MS;
-    const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
-    return process.env.NODE_ENV === 'test' ? 800 : 30_000;
-  }
-  if (isNetworkTransportLikeError(error)) {
-    const raw =
-      process.env.ROUTECODEX_NETWORK_RETRY_BACKOFF_MAX_MS
-      || process.env.RCC_NETWORK_RETRY_BACKOFF_MAX_MS;
-    const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
-    return 12_000;
-  }
-  const raw =
-    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS
-    || process.env.RCC_PROVIDER_RETRY_BACKOFF_MAX_MS;
-  const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
-  if (Number.isFinite(parsed) && parsed > 0) {
-    return parsed;
-  }
-  return process.env.NODE_ENV === 'test' ? 15_000 : 60_000;
-}
-
 function consumeProviderScopedRetryBackoffMs(
   key: string,
   args: {
@@ -1374,39 +1306,12 @@ function consumeProviderScopedRetryBackoffMs(
     consecutive,
     updatedAtMs: now
   });
-  const baseMs = (() => {
-    const status = typeof args.statusCode === 'number' ? args.statusCode : undefined;
-    if (status === 429) {
-      const raw = process.env.ROUTECODEX_429_BACKOFF_BASE_MS || process.env.RCC_429_BACKOFF_BASE_MS;
-      const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
-      if (Number.isFinite(parsed) && parsed > 0) {
-        return parsed;
-      }
-      return process.env.NODE_ENV === 'test' ? 200 : 1_000;
-    }
-    if (isNetworkTransportLikeError(args.error)) {
-      const raw =
-        process.env.ROUTECODEX_NETWORK_RETRY_BACKOFF_BASE_MS
-        || process.env.RCC_NETWORK_RETRY_BACKOFF_BASE_MS;
-      const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
-      if (Number.isFinite(parsed) && parsed > 0) {
-        return parsed;
-      }
-      return 500;
-    }
-    const raw =
-      process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS
-      || process.env.RCC_PROVIDER_RETRY_BACKOFF_BASE_MS;
-    const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
-    return process.env.NODE_ENV === 'test' ? 800 : 2_000;
-  })();
-  const maxMs = resolveProviderScopedRetryBackoffCapMs(args.error, {
-    statusCode: args.statusCode
+  return computeProviderFailureBackoffDelayMs({
+    scope: 'provider',
+    error: args.error,
+    statusCode: args.statusCode,
+    consecutive
   });
-  return Math.min(maxMs, baseMs * Math.pow(2, Math.max(0, consecutive - 1)));
 }
 
 function buildProviderTransportBackoffKey(args: {
@@ -1442,37 +1347,12 @@ function consumeProviderTransportBackoffMs(
     previous && now - previous.updatedAtMs < RECOVERABLE_BACKOFF_TTL_MS
       ? Math.min(previous.consecutive + 1, 16)
       : 1;
-  const delayMs = Math.min(
-    resolveProviderScopedRetryBackoffCapMs(args.error, { statusCode: args.statusCode }),
-    (() => {
-      if (typeof args.statusCode === 'number' && args.statusCode === 429) {
-        const raw = process.env.ROUTECODEX_429_BACKOFF_BASE_MS || process.env.RCC_429_BACKOFF_BASE_MS;
-        const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
-        if (Number.isFinite(parsed) && parsed > 0) {
-          return parsed;
-        }
-        return process.env.NODE_ENV === 'test' ? 200 : 1_000;
-      }
-      if (isNetworkTransportLikeError(args.error)) {
-        const raw =
-          process.env.ROUTECODEX_NETWORK_RETRY_BACKOFF_BASE_MS
-          || process.env.RCC_NETWORK_RETRY_BACKOFF_BASE_MS;
-        const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
-        if (Number.isFinite(parsed) && parsed > 0) {
-          return parsed;
-        }
-        return 500;
-      }
-      const raw =
-        process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS
-        || process.env.RCC_PROVIDER_RETRY_BACKOFF_BASE_MS;
-      const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
-      if (Number.isFinite(parsed) && parsed > 0) {
-        return parsed;
-      }
-      return process.env.NODE_ENV === 'test' ? 800 : 2_000;
-    })() * Math.pow(2, Math.max(0, consecutive - 1))
-  );
+  const delayMs = computeProviderFailureBackoffDelayMs({
+    scope: 'provider',
+    error: args.error,
+    statusCode: args.statusCode,
+    consecutive
+  });
   providerTransportBackoffState.set(key, {
     consecutive,
     updatedAtMs: now,
@@ -1640,7 +1520,6 @@ function resolveProviderRetryEligibilityPlan(args: {
     promptTooLong: args.promptTooLong,
     contextOverflowRetries: args.contextOverflowRetries,
     maxContextOverflowRetries: args.maxContextOverflowRetries ?? MAX_CONTEXT_OVERFLOW_RETRIES,
-    shouldRetryByError: shouldRetryProviderError(args.error),
     allowNonPolicyRetry: antigravityRecoveryEligible,
     stageOutsideProviderFailurePolicy:
       args.stage === 'host.response_contract'
@@ -2293,6 +2172,14 @@ function releaseRecoverableWaiterSlot(key: string): void {
   });
 }
 
+function acquireRecoverableRetryWaiterSlotForTests(key: string): { key: string; activeWaiters: number } {
+  return acquireRecoverableWaiterSlot(key);
+}
+
+function releaseRecoverableRetryWaiterSlotForTests(key: string): void {
+  releaseRecoverableWaiterSlot(key);
+}
+
 async function waitRecoverableBackoffWithGlobalGate(key: string, ms: number, signal?: AbortSignal): Promise<void> {
   const waiter = acquireRecoverableWaiterSlot(key);
   const normalizedKey = waiter.key;
@@ -2411,6 +2298,11 @@ function resetRequestExecutorInternalStateForTests(): void {
   sessionStormBackoffGateState.clear();
   logicalChainRetryState.clear();
   providerSwitchLogState.clear();
+}
+
+function peekRecoverableRetryWaitersForTests(key: string): number {
+  const normalizedKey = key.trim() || 'recoverable:unknown';
+  return recoverableRetryWaiterState.get(normalizedKey)?.activeWaiters ?? 0;
 }
 
 function resolveTrafficRuntimeProfile(
@@ -4363,6 +4255,9 @@ export const __requestExecutorTestables = {
   resolveExcludedProviderReselectionPlan,
   resolveProviderRetryExecutionPlan,
   buildProviderRetryTelemetryPlan,
+  acquireRecoverableRetryWaiterSlotForTests,
+  peekRecoverableRetryWaitersForTests,
+  releaseRecoverableRetryWaiterSlotForTests,
   resetRequestExecutorInternalStateForTests
 };
 

@@ -25,7 +25,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
       res.status(200).json(items);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -33,7 +33,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
     if (reject(req, res)) {return;}
     const id = String(req.params.id || '').trim();
     if (!id) {
-      res.status(400).json({ error: { message: 'id is required' } });
+      res.status(400).json({ error: { message: 'id is required' , code: 'bad_request' } });
       return;
     }
     try {
@@ -68,7 +68,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -76,7 +76,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
     if (reject(req, res)) {return;}
     const id = String(req.params.id || '').trim();
     if (!id) {
-      res.status(400).json({ error: { message: 'id is required' } });
+      res.status(400).json({ error: { message: 'id is required' , code: 'bad_request' } });
       return;
     }
     try {
@@ -97,7 +97,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -174,7 +174,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -207,7 +207,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -347,7 +347,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -437,7 +437,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
       res.status(200).json({ ok: true, provider, alias });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     } finally {
       if (prevAutoInstall === undefined) {
         delete process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL;

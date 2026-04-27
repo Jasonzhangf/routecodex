@@ -1,5 +1,6 @@
 import type { ProviderContext } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
+import { resolveProviderFailureOutcome } from './provider-failure-policy.js';
 
 export type ResponsesStreamingMode = 'auto' | 'always' | 'never';
 
@@ -29,6 +30,7 @@ export type ResponsesFailure = {
   statusCode?: number;
   code?: string;
   recoverable: boolean;
+  affectsHealth: boolean;
   rawError?: Record<string, unknown>;
 };
 
@@ -212,12 +214,20 @@ export function detectResponsesFailure(payload: unknown): ResponsesFailure | nul
     ? (errorRecord.status as number)
     : undefined;
   const statusCode = httpStatus ?? embeddedStatus ?? extractStatusFromErrorCode(code);
-  const recoverable = isRecoverableStatus(statusCode, code);
+  const syntheticError = Object.assign(new Error(message), code ? { code } : {});
+  const outcome = resolveProviderFailureOutcome({
+    error: syntheticError,
+    stage: 'provider.responses',
+    statusCode,
+    errorCode: code,
+    reason: message
+  });
   return {
     message,
     statusCode,
     code,
-    recoverable,
+    recoverable: outcome.recoverable,
+    affectsHealth: outcome.affectsHealth,
     status,
     rawError: errorRecord
   };
@@ -245,15 +255,4 @@ function extractStatusFromErrorCode(code?: string): number | undefined {
     return 429;
   }
   return undefined;
-}
-
-function isRecoverableStatus(statusCode?: number, code?: string): boolean {
-  if (statusCode === 429 || statusCode === 408) {
-    return true;
-  }
-  if (!code) {
-    return false;
-  }
-  const lowered = code.toLowerCase();
-  return lowered.includes('rate') || lowered.includes('timeout') || lowered.includes('retry');
 }

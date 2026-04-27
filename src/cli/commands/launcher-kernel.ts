@@ -1004,11 +1004,14 @@ function createManagedTmuxSession(args: {
     }
     if (disableStandout) {
       try {
-        // Some tmux/terminal stacks map standout/reverse styles to bright background blocks.
-        // Disable standout-related capabilities for managed codex sessions when requested.
+        // Disable standout mode (smso/rmso) to prevent some terminals from rendering
+        // them as bright background blocks.  Intentionally do NOT disable rev here:
+        // when rev@ is set, tmux emulates \e[7m internally via raw fg/bg swap,
+        // which produces harsh high-contrast inverted colors.  Leaving rev
+        // enabled lets the outer terminal handle reverse video natively.
         spawnSyncImpl(
           'tmux',
-          ['set-option', '-t', sessionName, '-ga', 'terminal-overrides', ',*:smso@:rmso@:rev@'],
+          ['set-option', '-t', sessionName, '-ga', 'terminal-overrides', ',*:smso@:rmso@'],
           { encoding: 'utf8' }
         );
       } catch (error) {

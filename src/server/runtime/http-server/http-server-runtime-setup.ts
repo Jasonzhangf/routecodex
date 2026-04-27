@@ -7,6 +7,7 @@ import { applyDefaultStageTimingMode, resolveRuntimeBuildMode } from './stage-ti
 import { registerClockRuntimeHooks } from './clock-runtime-hooks.js';
 import { registerHeartbeatRuntimeHooks } from './heartbeat-runtime-hooks.js';
 import { getSharedProviderTrafficGovernor } from './provider-traffic-governor.js';
+import { preloadCriticalBridgeRuntimeModules } from '../../../modules/llmswitch/bridge.js';
 
 type RoutingProviderScope = {
   providerKeys: string[];
@@ -161,6 +162,10 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(`[provider-traffic] failed to reset state on runtime setup (non-blocking): ${reason}`);
   }
+  const preloadedBridgeModules = await preloadCriticalBridgeRuntimeModules();
+  console.log(
+    `[llmswitch-bridge] preloaded critical modules: ${preloadedBridgeModules.loaded.join(', ')}`
+  );
   const hubCtor = await server.ensureHubPipelineCtor();
   const hubConfig: { virtualRouter: unknown; [key: string]: unknown } = {
     virtualRouter: bootstrapArtifacts.config

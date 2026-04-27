@@ -358,7 +358,7 @@ export abstract class BaseProvider implements IProviderV2 {
     }
 
     const affectsHealth = classification.affectsHealth;
-    const recoverable = classification.forceFatalRateLimit ? false : classification.recoverable;
+    const recoverable = classification.recoverable;
 
     const logErrorMessage = typeof msg === 'string' ? truncateLogMessage(msg) : msg;
     const logUpstreamMessage =

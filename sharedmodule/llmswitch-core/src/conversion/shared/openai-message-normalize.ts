@@ -5,7 +5,6 @@ import {
   normalizeOpenaiToolCallWithNative,
   normalizeOpenaiToolWithNative
 } from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
-import { enforceChatBudgetWithNative } from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
 
 function formatUnknownError(error: unknown): string {
   if (error instanceof Error) {
@@ -145,25 +144,6 @@ export function normalizeChatRequest(request: any): any {
 
   // 注意：不合并/删除多条 system（与 统一标准，避免高风险修改）。
 
-  // 基于“载荷预算”（配置驱动）进行裁剪，统一走 native。
-  try {
-    const msgs: any[] = Array.isArray((normalized as any).messages) ? ((normalized as any).messages as any[]) : [];
-    if (msgs.length) {
-      const modelId = String((normalized as any)?.model || '').trim();
-      const budget = resolveBudgetForModelSync(modelId);
-      const allowed = Math.max(32 * 1024, Math.floor(budget.allowedBytes));
-      const sysLimit = (() => {
-        const raw = (process as any)?.env?.RCC_SYSTEM_TEXT_LIMIT; const n = Number(raw);
-        return Number.isFinite(n) && n >= 0 ? n : 8192;
-      })();
-      normalized = enforceChatBudgetWithNative(normalized, allowed, sysLimit) as any;
-    }
-  } catch (error) {
-    logNormalizeNonBlocking('chat_budget.enforce_native', error, {
-      model: String((normalized as any)?.model ?? '')
-    });
-  }
-
   // Do not invoke legacy tooling stage here; codecs perform canonicalization
   return normalized;
 }
@@ -191,5 +171,3 @@ function normalizeToolCall(tc: any): any {
   const isDisabled = disableShellCoerce === '1' || disableShellCoerce === 'true';
   return normalizeOpenaiToolCallWithNative(tc, isDisabled);
 }
-
-import { resolveBudgetForModelSync } from '../payload-budget.js';

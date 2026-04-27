@@ -13,8 +13,17 @@ type SnapshotHooksModule = {
   writeSnapshotViaHooks?: (options: AnyRecord) => Promise<void> | void;
 };
 
+let cachedSnapshotHooksModule: SnapshotHooksModule | null = null;
+
+async function getSnapshotHooksModule(): Promise<SnapshotHooksModule> {
+  if (!cachedSnapshotHooksModule) {
+    cachedSnapshotHooksModule = await importCoreDist<SnapshotHooksModule>('conversion/snapshot-utils');
+  }
+  return cachedSnapshotHooksModule;
+}
+
 export async function writeSnapshotViaHooks(channelOrOptions: string | AnyRecord, payload?: AnyRecord): Promise<void> {
-  const hooksModule = await importCoreDist<SnapshotHooksModule>('conversion/snapshot-utils');
+  const hooksModule = await getSnapshotHooksModule();
   const writer = hooksModule?.writeSnapshotViaHooks;
   if (typeof writer !== 'function') {
     throw new Error('[llmswitch-bridge] writeSnapshotViaHooks not available');
@@ -51,12 +60,23 @@ type ResponsesConversationModule = {
   rebindResponsesConversationRequestId?: (oldId: string, newId: string) => void;
 };
 
+let cachedResponsesConversationModule: ResponsesConversationModule | null = null;
+
+async function getResponsesConversationModule(): Promise<ResponsesConversationModule> {
+  if (!cachedResponsesConversationModule) {
+    cachedResponsesConversationModule = await importCoreDist<ResponsesConversationModule>(
+      'conversion/shared/responses-conversation-store'
+    );
+  }
+  return cachedResponsesConversationModule;
+}
+
 export async function resumeResponsesConversation(
   responseId: string,
   submitPayload: AnyRecord,
   options?: { requestId?: string }
 ): Promise<{ payload: AnyRecord; meta: AnyRecord }> {
-  const mod = await importCoreDist<ResponsesConversationModule>('conversion/shared/responses-conversation-store');
+  const mod = await getResponsesConversationModule();
   const fn = mod.resumeResponsesConversation;
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-bridge] resumeResponsesConversation not available');
@@ -68,7 +88,7 @@ export async function rebindResponsesConversationRequestId(oldId?: string, newId
   if (!oldId || !newId || oldId === newId) {
     return;
   }
-  const mod = await importCoreDist<ResponsesConversationModule>('conversion/shared/responses-conversation-store');
+  const mod = await getResponsesConversationModule();
   const fn = mod.rebindResponsesConversationRequestId;
   if (typeof fn === 'function') {
     fn(oldId, newId);
@@ -81,7 +101,7 @@ export async function resumeLatestResponsesContinuationByScope(args: {
   conversationId?: string;
   requestId?: string;
 }): Promise<{ payload: AnyRecord; meta: AnyRecord } | null> {
-  const mod = await importCoreDist<ResponsesConversationModule>('conversion/shared/responses-conversation-store');
+  const mod = await getResponsesConversationModule();
   const fn = mod.resumeLatestResponsesContinuationByScope;
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-bridge] resumeLatestResponsesContinuationByScope not available');
@@ -140,6 +160,42 @@ async function getProviderRuntimeIngress(): Promise<ProviderRuntimeIngressExport
     );
   }
   return cachedProviderRuntimeIngress;
+}
+
+export async function preloadCriticalBridgeRuntimeModules(): Promise<{ loaded: string[] }> {
+  const loaded: string[] = [];
+
+  const snapshotHooksModule = await getSnapshotHooksModule();
+  if (typeof snapshotHooksModule.writeSnapshotViaHooks !== 'function') {
+    throw new Error('[llmswitch-bridge] preload failed: writeSnapshotViaHooks not available');
+  }
+  loaded.push('conversion/snapshot-utils');
+
+  const responsesConversationModule = await getResponsesConversationModule();
+  if (
+    typeof responsesConversationModule.resumeResponsesConversation !== 'function'
+    || typeof responsesConversationModule.resumeLatestResponsesContinuationByScope !== 'function'
+  ) {
+    throw new Error('[llmswitch-bridge] preload failed: responses conversation helpers not available');
+  }
+  loaded.push('conversion/shared/responses-conversation-store');
+
+  const sseModule = await importCoreDist<ResponsesSseModule>('sse/sse-to-json/index');
+  if (typeof sseModule.ResponsesSseToJsonConverter !== 'function') {
+    throw new Error('[llmswitch-bridge] preload failed: ResponsesSseToJsonConverter not available');
+  }
+  loaded.push('sse/sse-to-json/index');
+
+  const ingressModule = await getProviderRuntimeIngress();
+  if (
+    typeof ingressModule.reportProviderErrorToRouterPolicy !== 'function'
+    || typeof ingressModule.reportProviderSuccessToRouterPolicy !== 'function'
+  ) {
+    throw new Error('[llmswitch-bridge] preload failed: provider runtime ingress hooks not available');
+  }
+  loaded.push('router/virtual-router/provider-runtime-ingress');
+
+  return { loaded };
 }
 
 export async function reportProviderErrorToRouterPolicy(event: ProviderErrorEvent): Promise<ProviderErrorEvent> {

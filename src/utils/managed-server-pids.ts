@@ -120,6 +120,12 @@ export function isTrustedRouteCodexCommand(command: string): boolean {
   if (normalized.includes('routecodex/dist/index.js')) {
     return true;
   }
+  if (/\/install\/current\/dist\/index\.js(?:\s|$)/.test(normalized)) {
+    return true;
+  }
+  if (/\/install\/releases\/routecodex-[^/\s]+\/dist\/index\.js(?:\s|$)/.test(normalized)) {
+    return true;
+  }
   return false;
 }
 

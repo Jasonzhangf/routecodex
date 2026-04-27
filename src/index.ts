@@ -1649,6 +1649,43 @@ function resolveRestartEntryScript(argv: string[]): string | null {
   return path.isAbsolute(raw) ? raw : path.resolve(safeProcessCwd(), raw);
 }
 
+function resolveInstalledSnapshotRoot(): string | null {
+  const candidates = [
+    String(process.env.ROUTECODEX_INSTALL_ROOT || '').trim(),
+    String(process.env.RCC_INSTALL_ROOT || '').trim(),
+    resolveRccPathForRead('install', 'current')
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    const resolved = path.resolve(candidate);
+    if (fsSync.existsSync(path.join(resolved, 'package.json'))) {
+      return resolved;
+    }
+  }
+  return null;
+}
+
+function resolveRestartArgv(argv: string[]): { argv: string[]; installRoot?: string; replacedEntry: boolean } {
+  const currentArgv = Array.isArray(argv) ? [...argv] : [];
+  if (currentArgv.length < 1) {
+    return { argv: currentArgv, replacedEntry: false };
+  }
+  const installRoot = resolveInstalledSnapshotRoot();
+  if (!installRoot) {
+    return { argv: currentArgv, replacedEntry: false };
+  }
+  const currentEntry = resolveRestartEntryScript(currentArgv);
+  const currentBase = currentEntry ? path.basename(currentEntry).toLowerCase() : '';
+  const preferredEntries = currentBase === 'cli.js'
+    ? [path.join(installRoot, 'dist', 'cli.js'), path.join(installRoot, 'dist', 'index.js')]
+    : [path.join(installRoot, 'dist', 'index.js'), path.join(installRoot, 'dist', 'cli.js')];
+  const nextEntry = preferredEntries.find((candidate) => fsSync.existsSync(candidate));
+  if (!nextEntry) {
+    return { argv: currentArgv, installRoot, replacedEntry: false };
+  }
+  currentArgv[0] = nextEntry;
+  return { argv: currentArgv, installRoot, replacedEntry: true };
+}
+
 function parseRestartEntryWaitMs(): number {
   const raw = process.env.ROUTECODEX_RESTART_ENTRY_WAIT_MS;
   const parsed = typeof raw === 'string' ? Number(raw.trim()) : NaN;
@@ -1761,7 +1798,8 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
     process.exit(75);
   }
 
-  const argv = process.argv.slice(1);
+  const restartArgvPlan = resolveRestartArgv(process.argv.slice(1));
+  const argv = restartArgvPlan.argv;
   const env = { ...process.env } as NodeJS.ProcessEnv;
   const currentServerConfig = app.getServerConfig();
   if (currentServerConfig?.port && Number.isFinite(currentServerConfig.port) && currentServerConfig.port > 0) {
@@ -1776,6 +1814,12 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
   // IMPORTANT: avoid inheriting a stale ROUTECODEX_VERSION across restarts.
   // The child process should re-resolve version from the current code/package on disk.
   delete env.ROUTECODEX_VERSION;
+  if (restartArgvPlan.installRoot) {
+    env.ROUTECODEX_INSTALL_ROOT = restartArgvPlan.installRoot;
+    env.RCC_INSTALL_ROOT = restartArgvPlan.installRoot;
+    env.ROUTECODEX_BASEDIR = restartArgvPlan.installRoot;
+    env.RCC_BASEDIR = restartArgvPlan.installRoot;
+  }
 
   const entryCheck = await ensureRestartEntryReady(argv);
   if (!entryCheck.ready) {
@@ -1810,7 +1854,13 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
     logProcessLifecycle({
       event: 'restart_spawn_child',
       source: 'index.restartSelf',
-      details: { signal, childPid: child.pid ?? null, argv }
+      details: {
+        signal,
+        childPid: child.pid ?? null,
+        argv,
+        installRoot: restartArgvPlan.installRoot ?? null,
+        replacedEntry: restartArgvPlan.replacedEntry
+      }
     });
     console.log(`[routecodex:restart] spawned pid=${child.pid ?? 'unknown'}`);
   } catch (error) {

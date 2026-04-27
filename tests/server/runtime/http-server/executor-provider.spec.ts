@@ -38,12 +38,12 @@ describe('executor-provider retry policy', () => {
     expect(shouldRetryProviderError(payloadTooLarge)).toBe(true);
   });
 
-  it('treats HTTP 401 unauthorized as retryable for provider failover', () => {
+  it('treats HTTP 401 unauthorized as unrecoverable', () => {
     const unauthorized = Object.assign(new Error('HTTP 401: Unauthorized'), {
       statusCode: 401,
       retryable: false
     });
-    expect(shouldRetryProviderError(unauthorized)).toBe(true);
+    expect(shouldRetryProviderError(unauthorized)).toBe(false);
   });
 
   it('treats glm business 514 model error as retryable', () => {

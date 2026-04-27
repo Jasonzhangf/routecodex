@@ -14,8 +14,16 @@ import type {
   VirtualRouterConfig,
   VirtualRouterHealthStore
 } from './types.js';
-import { VirtualRouterError, VirtualRouterErrorCode } from './types.js';
+import {
+  VirtualRouterError,
+  VirtualRouterErrorCode,
+} from './types.js';
 import { createVirtualRouterEngineProxy, type NativeVirtualRouterEngineProxy } from './engine-selection/native-virtual-router-engine-proxy.js';
+import {
+  extractVirtualRouterNativeErrorMessage,
+  parseVirtualRouterNativeError,
+  VIRTUAL_ROUTER_ERROR_PREFIX
+} from './engine-selection/native-router-hotpath-loader.js';
 import { ProviderRegistry } from './provider-registry.js';
 import { loadRoutingInstructionStateSync } from './sticky-session-store.js';
 import { mergeStopMessageFromPersisted } from './stop-message-state-sync.js';
@@ -167,17 +175,15 @@ export class VirtualRouterEngine {
   }
 }
 
-const VIRTUAL_ROUTER_ERROR_PREFIX = 'VIRTUAL_ROUTER_ERROR:';
-
 function normalizeNativeVirtualRouterError(error: unknown): Error {
   if (error instanceof VirtualRouterError) {
     return error;
   }
-  const message = extractNativeErrorMessage(error);
-  const parsed = parseVirtualRouterErrorMessage(message);
+  const parsed = parseVirtualRouterNativeError(error);
   if (parsed) {
-    return new VirtualRouterError(parsed.message, parsed.code);
+    return parsed;
   }
+  const message = extractVirtualRouterNativeErrorMessage(error);
   if (isVirtualRouterErrorLike(error)) {
     return new VirtualRouterError(
       typeof error.message === 'string' && error.message.trim() ? error.message : 'Virtual router error',
@@ -246,43 +252,6 @@ function mergeStopMessageSnapshotWithPersisted(
     stopMessageAiSeedPrompt: merged.stopMessageAiSeedPrompt,
     stopMessageAiHistory: merged.stopMessageAiHistory
   };
-}
-
-function extractNativeErrorMessage(error: unknown): string {
-  if (typeof error === 'string') {
-    return error;
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  if (error && typeof error === 'object') {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === 'string') {
-      return message;
-    }
-  }
-  return '';
-}
-
-function parseVirtualRouterErrorMessage(message: string): { code: VirtualRouterErrorCode; message: string } | null {
-  if (!message) {
-    return null;
-  }
-  const normalized = message.startsWith('Error:') ? message.replace(/^Error:\s*/, '') : message;
-  if (!normalized.startsWith(VIRTUAL_ROUTER_ERROR_PREFIX)) {
-    return null;
-  }
-  const remainder = normalized.slice(VIRTUAL_ROUTER_ERROR_PREFIX.length);
-  const idx = remainder.indexOf(':');
-  if (idx <= 0) {
-    return null;
-  }
-  const code = remainder.slice(0, idx);
-  const detail = remainder.slice(idx + 1).trim();
-  if (!isVirtualRouterErrorCode(code)) {
-    return null;
-  }
-  return { code, message: detail || 'Virtual router error' };
 }
 
 function isVirtualRouterErrorCode(value: string): value is VirtualRouterErrorCode {

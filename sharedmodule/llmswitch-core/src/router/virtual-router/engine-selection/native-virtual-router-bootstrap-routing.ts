@@ -1,9 +1,12 @@
-import { VirtualRouterError, VirtualRouterErrorCode, type RoutePoolTier } from '../types.js';
+import {
+  VirtualRouterError,
+  VirtualRouterErrorCode,
+  type RoutePoolTier
+} from '../types.js';
 import type { NormalizedRoutePoolConfig } from '../bootstrap/routing-config.js';
+import { parseVirtualRouterNativeError } from './native-router-hotpath-loader.js';
 import { isNativeDisabledByEnv, makeNativeRequiredError } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBinding } from './native-router-hotpath-loader.js';
-
-const VIRTUAL_ROUTER_ERROR_PREFIX = 'VIRTUAL_ROUTER_ERROR:';
 
 type NativeRoutingBootstrapPayload = {
   routingSource: Record<string, NormalizedRoutePoolConfig[]>;
@@ -26,37 +29,6 @@ function requireNativeFunction(exportName: string): (...args: string[]) => unkno
     throw makeNativeRequiredError(exportName);
   }
   return fn as (...args: string[]) => unknown;
-}
-
-function extractErrorMessage(error: unknown): string {
-  if (typeof error === 'string') return error;
-  if (error instanceof Error) return error.message;
-  if (error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string') {
-    return (error as { message: string }).message;
-  }
-  return String(error ?? 'unknown error');
-}
-
-function parseVirtualRouterNativeError(error: unknown): VirtualRouterError | null {
-  const message = extractErrorMessage(error);
-  if (!message) {
-    return null;
-  }
-  const normalized = message.startsWith('Error:') ? message.replace(/^Error:\s*/, '') : message;
-  if (!normalized.startsWith(VIRTUAL_ROUTER_ERROR_PREFIX)) {
-    return null;
-  }
-  const remainder = normalized.slice(VIRTUAL_ROUTER_ERROR_PREFIX.length);
-  const index = remainder.indexOf(':');
-  if (index <= 0) {
-    return null;
-  }
-  const code = remainder.slice(0, index);
-  const detail = remainder.slice(index + 1).trim() || 'Virtual router error';
-  if (!Object.values(VirtualRouterErrorCode).includes(code as VirtualRouterErrorCode)) {
-    return null;
-  }
-  return new VirtualRouterError(detail, code as VirtualRouterErrorCode);
 }
 
 function isStringArray(value: unknown): value is string[] {

@@ -21,6 +21,19 @@ describe('managed server pid discovery', () => {
     expect(isTrustedRouteCodexCommand('/opt/homebrew/bin/node /Users/me/routecodex/dist/index.js config/modules.json')).toBe(true);
   });
 
+  it('isTrustedRouteCodexCommand accepts release snapshot entry', () => {
+    expect(
+      isTrustedRouteCodexCommand(
+        '/opt/homebrew/bin/node /Users/me/.rcc/install/releases/routecodex-0.90.1270-2026-04-27T080040Z/dist/index.js config/modules.json'
+      )
+    ).toBe(true);
+    expect(
+      isTrustedRouteCodexCommand(
+        '/opt/homebrew/bin/node /Users/me/.rcc/install/current/dist/index.js config/modules.json'
+      )
+    ).toBe(true);
+  });
+
   it('isTrustedRouteCodexCommand rejects unrelated commands', () => {
     expect(isTrustedRouteCodexCommand('/usr/bin/node /tmp/random-script.js')).toBe(false);
   });
@@ -115,6 +128,33 @@ describe('managed server pid discovery', () => {
     });
 
     expect(pids).toEqual([22222]);
+  });
+
+  it('listManagedServerPidsByPort accepts snapshot pid from pid file', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-managed-pids-snapshot-'));
+    fs.writeFileSync(path.join(home, 'server-5555.pid'), String(process.pid), 'utf8');
+
+    const pids = listManagedServerPidsByPort(5555, {
+      routeCodexHomeDir: home,
+      processKill: ((pid: number, signal?: NodeJS.Signals | number) => {
+        if (signal === 0 && pid === process.pid) {
+          return true as any;
+        }
+        throw new Error('unexpected processKill call');
+      }) as any,
+      spawnSyncImpl: ((cmd: string) => {
+        if (cmd === 'ps') {
+          return {
+            stdout: '/opt/homebrew/bin/node /Users/me/.rcc/install/releases/routecodex-0.90.1270-2026-04-27T080040Z/dist/index.js config/modules.json',
+            status: 0,
+            error: undefined
+          } as any;
+        }
+        throw new Error('unexpected command');
+      }) as any
+    });
+
+    expect(pids).toEqual([process.pid]);
   });
 
   it('listZombieChildrenByParentPids filters zombie processes by parent pid', () => {

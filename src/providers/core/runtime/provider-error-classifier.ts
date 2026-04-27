@@ -3,11 +3,9 @@ import type { ProviderErrorAugmented } from './provider-error-types.js';
 import { RateLimitCooldownError } from './rate-limit-manager.js';
 import {
   extractProviderFailureStatusCode,
-  isProviderFailureClientDisconnect,
-  isProviderFailureHealthNeutral,
   isProviderFailureNetworkTransportLike,
-  normalizeProviderFailureCodeKey,
-  resolveProviderFailureClassification
+  resolveProviderFailureOutcome,
+  type ProviderFailureRateLimitKind
 } from './provider-failure-policy.js';
 
 export type ProviderErrorClassification = {
@@ -32,23 +30,10 @@ export type ProviderErrorClassifierOptions = {
   authMode?: 'apikey' | 'oauth';
 };
 
-function isClientDisconnectAbortError(error: ProviderErrorAugmented, msgLower: string): boolean {
-  return isProviderFailureClientDisconnect(error)
-    || (
-      error.name === 'AbortError'
-      && (
-        msgLower.includes('client_request_aborted')
-        || msgLower.includes('client_response_closed')
-        || msgLower.includes('client_timeout_hint_expired')
-      )
-    );
-}
-
 export function classifyProviderError(options: ProviderErrorClassifierOptions): ProviderErrorClassification {
   const err: ProviderErrorAugmented =
     (options.error instanceof Error ? options.error : new Error(String(options.error))) as ProviderErrorAugmented;
   const message = typeof err.message === 'string' ? err.message : String(options.error ?? 'unknown error');
-  const codeUpper = normalizeProviderFailureCodeKey(err.code) ?? '';
   let statusCode = extractStatusCodeFromError(err);
   if (!statusCode) {
     const match = message.match(/HTTP\s+(\d{3})/i);
@@ -66,31 +51,11 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
 
   const statusText = String(statusCode ?? '');
   const msgLower = message.toLowerCase();
-  const isClientDisconnect = isClientDisconnectAbortError(err, msgLower);
-  const isAbortError = err.name === 'AbortError' || msgLower.includes('operation was aborted');
-  const isNetworkError = !statusCode && !isClientDisconnect && (looksLikeNetworkTransportError(err, msgLower) || isAbortError);
 
   const isRateLimit = statusText.includes('429') || msgLower.includes('429');
   const isDailyLimit429 = isRateLimit && options.detectDailyLimit(msgLower, upstreamMessageLower);
   const isSyntheticCooldown = err instanceof RateLimitCooldownError;
-  const isSseToJsonError = codeUpper === 'SSE_TO_JSON_ERROR' || msgLower.includes('sse_to_json_error');
-  const classification = resolveProviderFailureClassification({
-    error: err,
-    stage: 'provider.http',
-    statusCode,
-    errorCode: typeof err.code === 'string' ? err.code : undefined,
-    upstreamCode: typeof upstreamCode === 'string' ? upstreamCode : undefined,
-    reason: message
-  });
-  let recoverable = classification === 'recoverable';
-  let affectsHealth = !isProviderFailureHealthNeutral({
-    stage: 'provider.http',
-    error: err,
-    errorCode: typeof err.code === 'string' ? err.code : undefined,
-    upstreamCode: typeof upstreamCode === 'string' ? upstreamCode : undefined,
-    statusCode,
-    classification
-  });
+  let rateLimitKind: ProviderFailureRateLimitKind | undefined;
   let forceFatalRateLimit = false;
 
   if (isRateLimit) {
@@ -100,38 +65,30 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
     // - 日额度耗尽类 429（detectDailyLimit=true）：属于硬性限流，直接标记为不可恢复并影响健康。
     // - 其他短期 429：始终视为可恢复错误，允许 Virtual Router 根据健康状态与冷却信息做降级与重试。
     if (isSyntheticCooldown) {
-      recoverable = true;
-      affectsHealth = false;
+      rateLimitKind = 'synthetic_cooldown';
       forceFatalRateLimit = false;
     } else if (isDailyLimit429) {
       options.forceRateLimitFailure(options.context.providerKey, options.context.model);
-      affectsHealth = true;
-      recoverable = false;
+      rateLimitKind = 'daily_limit';
       forceFatalRateLimit = true;
     } else {
       // 短期 429：记账但不再毒化 provider health；实际 backoff/reroute 由统一 failure policy 决定。
       options.registerRateLimitFailure(options.context.providerKey, options.context.model);
-      recoverable = true;
-      affectsHealth = false;
+      rateLimitKind = 'short_lived';
       forceFatalRateLimit = false;
     }
   }
-  if (isClientDisconnect) {
-    recoverable = false;
-    affectsHealth = false;
-  }
-  if (isAbortError && !isClientDisconnect) {
-    recoverable = true;
-    affectsHealth = false;
-  }
-  // Internal conversion errors (client-side) must not poison provider health.
-  // Example: SSE_TO_JSON_ERROR can be triggered by downstream stream termination or
-  // converter state, and does not imply the upstream/provider is unhealthy.
-  if (isSseToJsonError) {
-    recoverable = true;
-    affectsHealth = false;
-    forceFatalRateLimit = false;
-  }
+  const outcome = resolveProviderFailureOutcome({
+    error: err,
+    stage: 'provider.http',
+    statusCode,
+    errorCode: typeof err.code === 'string' ? err.code : undefined,
+    upstreamCode: typeof upstreamCode === 'string' ? upstreamCode : undefined,
+    reason: message,
+    rateLimitKind
+  });
+  const recoverable = outcome.recoverable;
+  const affectsHealth = outcome.affectsHealth;
 
   return {
     error: err,

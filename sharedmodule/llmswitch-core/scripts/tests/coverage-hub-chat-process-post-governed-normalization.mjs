@@ -90,8 +90,8 @@ async function main() {
     });
     assert.equal(out.metadata.hasImageAttachment, true);
     assert.equal(Array.isArray(out.messages[0].content), true);
-    assert.equal(out.messages[0].content[1].type, 'text');
-    assert.equal(out.messages[0].content[1].text, '[Image omitted]');
+    assert.equal(out.messages[0].content[1].type, 'image_url');
+    assert.deepEqual(out.messages[0].content[1].image_url, { url: 'https://example.com/1.png' });
   }
 
   {

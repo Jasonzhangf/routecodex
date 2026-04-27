@@ -29,7 +29,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
   const requestId = providerRequestId;
   try {
     if (!ctx.executePipeline) {
-      res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' } });
+      res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' , code: 'not_ready' } });
       return;
     }
     const payload = (req.body && typeof req.body === 'object'

@@ -1,5 +1,5 @@
 use napi::Env;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
 use super::tier_load_balancing::{
@@ -8,7 +8,9 @@ use super::tier_load_balancing::{
 use super::types::SelectionResult;
 use super::VirtualRouterEngineCore;
 use crate::virtual_router_engine::classifier::{ClassificationResult, DEFAULT_ROUTE};
-use crate::virtual_router_engine::error::format_virtual_router_error;
+use crate::virtual_router_engine::error::{
+    format_virtual_router_error, format_virtual_router_error_with_details,
+};
 use crate::virtual_router_engine::features::RoutingFeatures;
 use crate::virtual_router_engine::health_weighted::{
     compute_health_weight, resolve_health_weighted_config,
@@ -507,8 +509,33 @@ impl VirtualRouterEngineCore {
                 }
             }
         }
-        Err(format_virtual_router_error(
-            "PROVIDER_NOT_AVAILABLE",
+        let mut candidate_keys = Vec::new();
+        for route_name in build_route_queue(
+            requested_route,
+            &classification.candidates,
+            features,
+            &self.routing,
+        ) {
+            for pool in self.routing.get(&route_name) {
+                for key in filter_candidates_by_state(
+                    &pool.targets,
+                    routing_state,
+                    &self.provider_registry,
+                ) {
+                    if excluded_keys.contains(&key) {
+                        continue;
+                    }
+                    if !candidate_keys.contains(&key) {
+                        candidate_keys.push(key);
+                    }
+                }
+            }
+        }
+
+        Err(build_provider_not_available_error(
+            self,
+            env,
+            &candidate_keys,
             "No available providers after applying routing instructions",
         ))
     }
@@ -623,4 +650,131 @@ fn alias_base(alias_key: &str) -> Option<String> {
         return None;
     }
     Some(base.to_string())
+}
+
+#[derive(Debug, Clone)]
+struct RecoverableCooldownHint {
+    provider_key: String,
+    wait_ms: i64,
+    source: &'static str,
+}
+
+fn record_recoverable_cooldown(
+    provider_key: &str,
+    wait_ms_raw: i64,
+    source: &'static str,
+    min_recoverable_cooldown_ms: &mut Option<i64>,
+    hints: &mut Vec<RecoverableCooldownHint>,
+) {
+    let wait_ms = wait_ms_raw.max(1);
+    match min_recoverable_cooldown_ms {
+        Some(current) if wait_ms < *current => *min_recoverable_cooldown_ms = Some(wait_ms),
+        None => *min_recoverable_cooldown_ms = Some(wait_ms),
+        _ => {}
+    }
+
+    if let Some(existing) = hints
+        .iter_mut()
+        .find(|item| item.provider_key == provider_key && item.source == source)
+    {
+        if wait_ms < existing.wait_ms {
+            existing.wait_ms = wait_ms;
+        }
+        return;
+    }
+    hints.push(RecoverableCooldownHint {
+        provider_key: provider_key.to_string(),
+        wait_ms,
+        source,
+    });
+}
+
+fn collect_recoverable_cooldown_for_key(
+    core: &VirtualRouterEngineCore,
+    env: Env,
+    provider_key: &str,
+    now_ms: i64,
+    min_recoverable_cooldown_ms: &mut Option<i64>,
+    hints: &mut Vec<RecoverableCooldownHint>,
+) {
+    if let Some(ref quota_view) = core.quota_view {
+        if let Some(entry) = call_quota_view(env, quota_view, provider_key) {
+            if let Some(blacklist_until) = entry.blacklist_until {
+                if blacklist_until > now_ms {
+                    return;
+                }
+            }
+            if let Some(cooldown_until) = entry.cooldown_until {
+                if cooldown_until > now_ms {
+                    record_recoverable_cooldown(
+                        provider_key,
+                        cooldown_until - now_ms,
+                        "quota.cooldown",
+                        min_recoverable_cooldown_ms,
+                        hints,
+                    );
+                }
+            }
+            return;
+        }
+    }
+
+    if let Some(wait_ms) = core
+        .health_manager
+        .cooldown_remaining_ms(provider_key, now_ms)
+    {
+        record_recoverable_cooldown(
+            provider_key,
+            wait_ms,
+            "health.cooldown",
+            min_recoverable_cooldown_ms,
+            hints,
+        );
+    }
+}
+
+pub(crate) fn build_provider_not_available_error(
+    core: &VirtualRouterEngineCore,
+    env: Env,
+    candidate_keys: &[String],
+    message: impl AsRef<str>,
+) -> String {
+    let now_ms = now_ms();
+    let mut min_recoverable_cooldown_ms: Option<i64> = None;
+    let mut hints: Vec<RecoverableCooldownHint> = Vec::new();
+
+    for provider_key in candidate_keys {
+        collect_recoverable_cooldown_for_key(
+            core,
+            env,
+            provider_key,
+            now_ms,
+            &mut min_recoverable_cooldown_ms,
+            &mut hints,
+        );
+    }
+
+    if let Some(min_wait_ms) = min_recoverable_cooldown_ms {
+        let mut sorted_hints = hints;
+        sorted_hints.sort_by_key(|item| item.wait_ms);
+        let details = json!({
+            "minRecoverableCooldownMs": min_wait_ms,
+            "recoverableCooldownHints": sorted_hints
+                .into_iter()
+                .take(8)
+                .map(|item| json!({
+                    "providerKey": item.provider_key,
+                    "waitMs": item.wait_ms,
+                    "source": item.source,
+                }))
+                .collect::<Vec<Value>>()
+        });
+        return format_virtual_router_error_with_details(
+            "PROVIDER_NOT_AVAILABLE",
+            message,
+            &details,
+        );
+    }
+
+    format_virtual_router_error("PROVIDER_NOT_AVAILABLE", message)
 }

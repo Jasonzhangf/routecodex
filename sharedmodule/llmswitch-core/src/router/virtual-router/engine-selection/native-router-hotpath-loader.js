@@ -2,8 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
+import { VirtualRouterError, VirtualRouterErrorCode } from "../types.js";
 import { hasCompleteNativeBinding } from "./native-router-hotpath-policy.js";
 import { REQUIRED_NATIVE_HOTPATH_EXPORTS } from "./native-router-hotpath-required-exports.js";
+export const VIRTUAL_ROUTER_ERROR_PREFIX = "VIRTUAL_ROUTER_ERROR:";
 function resolveLoaderModulePath() {
     if (typeof __filename === "string" && __filename.length > 0) {
         return __filename;
@@ -162,5 +164,74 @@ export function resolveNativeModuleUrlFromEnv() {
         ? modulePath
         : path.resolve(process.cwd(), modulePath);
     return pathToFileURL(normalized).href;
+}
+export function extractVirtualRouterNativeErrorMessage(error) {
+    if (typeof error === "string")
+        return error;
+    if (error instanceof Error)
+        return error.message;
+    if (error && typeof error === "object" && typeof error.message === "string") {
+        return error.message;
+    }
+    return String(error ?? "unknown error");
+}
+export function parseVirtualRouterNativeErrorPayload(message) {
+    if (!message) {
+        return null;
+    }
+    const normalized = message.startsWith("Error:") ? message.replace(/^Error:\s*/, "") : message;
+    if (!normalized.startsWith(VIRTUAL_ROUTER_ERROR_PREFIX)) {
+        return null;
+    }
+    const remainder = normalized.slice(VIRTUAL_ROUTER_ERROR_PREFIX.length);
+    const index = remainder.indexOf(":");
+    if (index <= 0) {
+        return null;
+    }
+    const code = remainder.slice(0, index);
+    if (!Object.values(VirtualRouterErrorCode).includes(code)) {
+        return null;
+    }
+    const rawPayload = remainder.slice(index + 1).trim();
+    const fallbackMessage = rawPayload || "Virtual router error";
+    if (!rawPayload.startsWith("{")) {
+        return {
+            code,
+            message: fallbackMessage,
+        };
+    }
+    try {
+        const parsed = JSON.parse(rawPayload);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return {
+                code,
+                message: fallbackMessage,
+            };
+        }
+        const parsedMessage = typeof parsed.message === "string" && parsed.message.trim()
+            ? parsed.message.trim()
+            : fallbackMessage;
+        const details = parsed.details && typeof parsed.details === "object" && !Array.isArray(parsed.details)
+            ? parsed.details
+            : undefined;
+        return {
+            code,
+            message: parsedMessage,
+            ...(details ? { details } : {}),
+        };
+    }
+    catch {
+        return {
+            code,
+            message: fallbackMessage,
+        };
+    }
+}
+export function parseVirtualRouterNativeError(error) {
+    const parsed = parseVirtualRouterNativeErrorPayload(extractVirtualRouterNativeErrorMessage(error));
+    if (!parsed) {
+        return null;
+    }
+    return new VirtualRouterError(parsed.message, parsed.code, parsed.details);
 }
 //# sourceMappingURL=native-router-hotpath-loader.js.map

@@ -184,18 +184,18 @@ async function handleImageRequest(
   const requestId = providerRequestId;
   try {
     if (!ctx.executePipeline) {
-      res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' } });
+      res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' , code: 'not_ready' } });
       return;
     }
     const payload = (req.body && typeof req.body === 'object' ? req.body : {}) as ImageGenerationPayload;
     const prompt = normalizeInputString(payload.prompt);
     if (!prompt) {
-      res.status(400).json({ error: { message: 'prompt is required', type: 'invalid_request_error' } });
+      res.status(400).json({ error: { message: 'prompt is required', type: 'invalid_request_error', code: 'bad_request' } });
       return;
     }
     const inputImages = collectInputImages(payload);
     if (options.requireInputImage && inputImages.length < 1) {
-      res.status(400).json({ error: { message: 'image is required for /v1/images/edits', type: 'invalid_request_error' } });
+      res.status(400).json({ error: { message: 'image is required for /v1/images/edits', type: 'invalid_request_error', code: 'bad_request' } });
       return;
     }
     const count = clampCount(payload.n);
@@ -260,14 +260,14 @@ async function handleImageRequest(
 
     if ((result.status ?? 200) >= 400) {
       logRequestError(entryEndpoint, requestId, new Error(`upstream failed with status=${result.status ?? 500}`));
-      res.status(result.status ?? 500).json((result.body as Record<string, unknown>) || { error: { message: 'upstream error' } });
+      res.status(result.status ?? 500).json((result.body as Record<string, unknown>) || { error: { message: 'upstream error', code: 'upstream_error' } });
       return;
     }
 
     const content = extractAssistantContent(result);
     const urls = collectImageUrlsFromText(content).slice(0, count);
     if (urls.length < 1) {
-      res.status(502).json({ error: { message: 'Upstream returned no image URLs', type: 'api_error' } });
+      res.status(502).json({ error: { message: 'Upstream returned no image URLs', type: 'api_error', code: 'upstream_error' } });
       return;
     }
 
@@ -281,7 +281,7 @@ async function handleImageRequest(
         return;
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
-        res.status(502).json({ error: { message: reason, type: 'api_error' } });
+        res.status(502).json({ error: { message: reason, type: 'api_error', code: 'upstream_error' } });
         return;
       }
     }

@@ -1,6 +1,7 @@
 use napi::Env;
 use serde_json::{json, Value};
 
+use super::selection::build_provider_not_available_error;
 use super::types::{PendingAliasBinding, SelectionResult};
 use super::VirtualRouterEngineCore;
 use crate::virtual_router_engine::classifier::ClassificationResult;
@@ -423,6 +424,7 @@ impl VirtualRouterEngineCore {
                         &routing_state_for_selection,
                         &self.provider_registry,
                     );
+                    let cooldown_candidate_keys = eligible.clone();
                     let excluded_keys = extract_excluded_provider_keys(metadata);
                     let mut available: Vec<String> = eligible
                         .into_iter()
@@ -444,8 +446,10 @@ impl VirtualRouterEngineCore {
                         }
                     }
                     if available.is_empty() {
-                        return Err(format_virtual_router_error(
-                            "PROVIDER_NOT_AVAILABLE",
+                        return Err(build_provider_not_available_error(
+                            self,
+                            env,
+                            &cooldown_candidate_keys,
                             format!(
                                 "All providers unavailable for model {}.{}",
                                 provider_id, model_id

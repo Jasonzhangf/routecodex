@@ -305,7 +305,7 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
       parseString(req.query.sessionId) ||
       parseString(req.query.daemonId && registry.findByDaemonId(String(req.query.daemonId))?.tmuxSessionId);
     if (!tmuxSessionId) {
-      res.status(400).json({ ok: false, reason: 'tmuxSessionId is required' });
+      res.status(400).json({ error: { message: 'tmuxSessionId is required', code: 'bad_request' } });
       return;
     }
     const state = await loadHeartbeatStateSnapshot(tmuxSessionId);
@@ -321,7 +321,7 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
       parseString(req.query.sessionId) ||
       parseString(req.query.daemonId && registry.findByDaemonId(String(req.query.daemonId))?.tmuxSessionId);
     if (!tmuxSessionId) {
-      res.status(400).json({ ok: false, reason: 'tmuxSessionId is required' });
+      res.status(400).json({ error: { message: 'tmuxSessionId is required', code: 'bad_request' } });
       return;
     }
     const limit = parsePositiveInt(req.query.limit) || 100;
@@ -366,7 +366,7 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
       source: parseString(body.source)
     });
     if (!result.ok) {
-      res.status(503).json({ ok: false, reason: result.reason || 'inject_failed' });
+      res.status(503).json({ error: { message: result.reason || 'inject_failed', code: 'service_unavailable' } });
       return;
     }
     res.status(200).json({ ok: true, daemonId: result.daemonId });
@@ -384,7 +384,7 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
       parseString(body.sessionId) ||
       (daemonId ? parseString(registry.findByDaemonId(daemonId)?.tmuxSessionId) : undefined);
     if (!tmuxSessionId) {
-      res.status(400).json({ ok: false, reason: 'tmuxSessionId is required' });
+      res.status(400).json({ error: { message: 'tmuxSessionId is required', code: 'bad_request' } });
       return;
     }
 
@@ -460,7 +460,7 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
       return;
     }
 
-    res.status(400).json({ ok: false, reason: 'action must be on|off|trigger' });
+    res.status(400).json({ error: { message: 'action must be on|off|trigger', code: 'bad_request' } });
   });
 
   app.get('/daemon/session/tasks', async (req: Request, res: Response) => {
@@ -469,7 +469,7 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
     }
     const sessionConfig = await resolveClockConfigSnapshot(undefined);
     if (!sessionConfig) {
-      res.status(500).json({ ok: false, reason: 'session_config_unavailable' });
+      res.status(500).json({ error: { message: 'session_config_unavailable', code: 'internal_error' } });
       return;
     }
 
@@ -496,18 +496,18 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
     const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
     const sessionId = normalizeClockSessionIdInput(body.sessionId);
     if (!sessionId) {
-      res.status(400).json({ ok: false, reason: 'sessionId is required and must resolve to tmux scope' });
+      res.status(400).json({ error: { message: 'sessionId is required and must resolve to tmux scope', code: 'bad_request' } });
       return;
     }
     const normalized = normalizeTaskCreateItems(body);
     if (normalized.error) {
-      res.status(400).json({ ok: false, reason: normalized.error });
+      res.status(400).json({ error: { message: normalized.error, code: 'bad_request' } });
       return;
     }
 
     const sessionConfig = await resolveClockConfigSnapshot(undefined);
     if (!sessionConfig) {
-      res.status(500).json({ ok: false, reason: 'session_config_unavailable' });
+      res.status(500).json({ error: { message: 'session_config_unavailable', code: 'internal_error' } });
       return;
     }
 
@@ -528,19 +528,19 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
     const sessionId = normalizeClockSessionIdInput(body.sessionId);
     const taskId = parseString(body.taskId);
     if (!sessionId || !taskId) {
-      res.status(400).json({ ok: false, reason: 'sessionId and taskId are required; sessionId must resolve to tmux scope' });
+      res.status(400).json({ error: { message: 'sessionId and taskId are required; sessionId must resolve to tmux scope', code: 'bad_request' } });
       return;
     }
 
     const normalizedPatch = normalizeTaskPatch(body);
     if (normalizedPatch.error) {
-      res.status(400).json({ ok: false, reason: normalizedPatch.error });
+      res.status(400).json({ error: { message: normalizedPatch.error, code: 'bad_request' } });
       return;
     }
 
     const sessionConfig = await resolveClockConfigSnapshot(undefined);
     if (!sessionConfig) {
-      res.status(500).json({ ok: false, reason: 'session_config_unavailable' });
+      res.status(500).json({ error: { message: 'session_config_unavailable', code: 'internal_error' } });
       return;
     }
 
@@ -552,7 +552,7 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
     });
 
     if (!updated) {
-      res.status(404).json({ ok: false, reason: 'task_not_found_or_invalid_patch' });
+      res.status(404).json({ error: { message: 'task_not_found_or_invalid_patch', code: 'not_found' } });
       return;
     }
 
@@ -566,13 +566,13 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
     const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
     const sessionId = normalizeClockSessionIdInput(body.sessionId);
     if (!sessionId) {
-      res.status(400).json({ ok: false, reason: 'sessionId is required and must resolve to tmux scope' });
+      res.status(400).json({ error: { message: 'sessionId is required and must resolve to tmux scope', code: 'bad_request' } });
       return;
     }
 
     const sessionConfig = await resolveClockConfigSnapshot(undefined);
     if (!sessionConfig) {
-      res.status(500).json({ ok: false, reason: 'session_config_unavailable' });
+      res.status(500).json({ error: { message: 'session_config_unavailable', code: 'internal_error' } });
       return;
     }
 
@@ -597,14 +597,14 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
 
     const sessionConfig = await resolveClockConfigSnapshot(undefined);
     if (!sessionConfig) {
-      res.status(500).json({ ok: false, reason: 'session_config_unavailable' });
+      res.status(500).json({ error: { message: 'session_config_unavailable', code: 'internal_error' } });
       return;
     }
 
     if (mode === 'unbind') {
       const sessionScope = parseString(body.sessionScope) || parseString(body.conversationSessionId);
       if (!sessionScope) {
-        res.status(400).json({ ok: false, reason: 'sessionScope is required for mode=unbind' });
+        res.status(400).json({ error: { message: 'sessionScope is required for mode=unbind', code: 'bad_request' } });
         return;
       }
       const normalizedSessionScope = sessionScope.startsWith('sessiond.') || sessionScope.startsWith('tmux:')

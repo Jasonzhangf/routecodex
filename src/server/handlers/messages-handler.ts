@@ -31,7 +31,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
   const requestId = providerRequestId;
   try {
     if (!ctx.executePipeline) {
-      res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' } });
+      res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' , code: 'not_ready' } });
       return;
     }
     const contentType = typeof req.headers['content-type'] === 'string'

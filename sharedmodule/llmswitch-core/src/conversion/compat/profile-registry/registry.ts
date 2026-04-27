@@ -12,6 +12,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { CompatProfileEntry, CompatProfileRegistry, HeaderPolicyRule, PolicyOverrideConfig, ProviderResolutionConfig } from './types.js';
 
 // Re-export types for consumers
@@ -19,6 +20,38 @@ export type { CompatProfileEntry, CompatProfileRegistry, HeaderPolicyRule, Polic
 
 function getProfilesDir(): string {
   return path.join(getCompatDir(), 'profiles');
+}
+
+function findPackageRoot(startDir: string): string | null {
+  let current = startDir;
+  while (true) {
+    if (fs.existsSync(path.join(current, 'package.json'))) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
+}
+
+function findCompatDirFromModule(): string | null {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const packageRoot = findPackageRoot(moduleDir);
+  if (!packageRoot) {
+    return null;
+  }
+  const candidates = [
+    path.join(packageRoot, 'dist', 'conversion', 'compat'),
+    path.join(packageRoot, 'src', 'conversion', 'compat')
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, 'profiles'))) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 function findCompatDirFromCwd(): string {
@@ -47,6 +80,10 @@ function findCompatDirFromCwd(): string {
 }
 
 function getCompatDir(): string {
+  const fromModule = findCompatDirFromModule();
+  if (fromModule) {
+    return fromModule;
+  }
   return findCompatDirFromCwd();
 }
 

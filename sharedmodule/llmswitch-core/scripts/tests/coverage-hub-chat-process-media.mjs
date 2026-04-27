@@ -68,8 +68,8 @@ async function main() {
       { role: 'tool', content: 'result' }
     ];
     const out = stripHistoricalImageAttachments(original);
-    assert.notEqual(out, original);
-    assert.deepEqual(out[0].content, [{ type: 'text', text: '[Image omitted]' }]);
+    assert.equal(out, original);
+    assert.deepEqual(out[0], original[0]);
   }
 
   {
@@ -80,9 +80,9 @@ async function main() {
       userText('latest user text')
     ];
     const out = stripHistoricalImageAttachments(original);
-    assert.notEqual(out, original);
-    assert.deepEqual(out[0].content, [{ type: 'text', text: '[Image omitted]' }]);
-    assert.deepEqual(out[2].content, [{ type: 'text', text: '[Image omitted]' }]);
+    assert.equal(out, original);
+    assert.deepEqual(out[0], original[0]);
+    assert.deepEqual(out[2], original[2]);
     assert.deepEqual(out[3], original[3]);
   }
 
@@ -93,7 +93,8 @@ async function main() {
       { role: 'user', content: [{ type: 'text', text: 'latest user turn' }] }
     ];
     const out = stripHistoricalImageAttachments(original);
-    assert.deepEqual(out[1].content, [{ type: 'text', text: '[Image omitted]' }, { type: 'text', text: 'x' }]);
+    assert.equal(out, original);
+    assert.deepEqual(out[1], original[1]);
     assert.deepEqual(out[2], original[2]);
   }
 
@@ -216,7 +217,7 @@ async function main() {
       ];
       const out = modNative.stripHistoricalImageAttachments(input);
       assert.equal(out, input);
-      assert.equal(global.__chatProcessMediaStripCalls, 1);
+      assert.equal(global.__chatProcessMediaStripCalls, 0);
     }
   );
 

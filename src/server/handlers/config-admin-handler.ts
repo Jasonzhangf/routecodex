@@ -80,7 +80,8 @@ export async function handleGetUserConfig(req: Request, res: Response): Promise<
       res.status(500).json({
         error: {
           message: 'Configuration file root must be an object',
-          type: 'config_read_error'
+          type: 'config_read_error',
+          code: 'internal_error'
         }
       });
       return;
@@ -90,7 +91,8 @@ export async function handleGetUserConfig(req: Request, res: Response): Promise<
     res.status(500).json({
       error: {
         message: formatErrorMessage(error),
-        type: 'config_read_error'
+        type: 'config_read_error',
+        code: 'internal_error'
       }
     });
   }
@@ -201,7 +203,8 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
     res.status(500).json({
       error: {
         message: formatErrorMessage(error),
-        type: 'provider_templates_error'
+        type: 'provider_templates_error',
+        code: 'internal_error'
       }
     });
   }
@@ -212,13 +215,13 @@ export async function handleValidateUserConfig(req: Request, res: Response): Pro
     const draftConfig: JsonObject = isRecord(req.body) ? req.body : {};
     const errors = validateUserConfig(draftConfig);
     if (errors.length) {
-      res.status(400).json({ ok: false, errors });
+      res.status(400).json({ error: { message: 'validation failed', code: 'bad_request' }, errors });
     } else {
       res.json({ ok: true });
     }
   } catch (error: unknown) {
     res.status(500).json({
-      ok: false,
+      error: { message: formatErrorMessage(error), code: 'internal_error' },
       errors: [formatErrorMessage(error)]
     });
   }
@@ -230,7 +233,7 @@ export async function handleSaveUserConfig(req: Request, res: Response): Promise
     const draftConfig: JsonObject = isRecord(req.body) ? req.body : {};
     const errors = validateUserConfig(draftConfig);
     if (errors.length) {
-      res.status(400).json({ ok: false, errors });
+      res.status(400).json({ error: { message: 'validation failed', code: 'bad_request' }, errors });
       return;
     }
 
@@ -247,7 +250,7 @@ export async function handleSaveUserConfig(req: Request, res: Response): Promise
     } catch (reloadError: unknown) {
       // 配置文件已写入，但运行时重载失败，向调用方明确返回错误信息
       res.status(500).json({
-        ok: false,
+        error: { message: 'Config saved but runtime reload failed', code: 'internal_error' },
         errors: [
           'Config saved but runtime reload failed',
           formatErrorMessage(reloadError)
@@ -259,7 +262,7 @@ export async function handleSaveUserConfig(req: Request, res: Response): Promise
     res.json({ ok: true, path: userConfigPath });
   } catch (error: unknown) {
     res.status(500).json({
-      ok: false,
+      error: { message: formatErrorMessage(error), code: 'internal_error' },
       errors: [formatErrorMessage(error)]
     });
   }

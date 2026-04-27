@@ -34,12 +34,19 @@ if [ -n "${GLOBAL_NODE_MODULES:-}" ] && [ -d "${GLOBAL_NODE_MODULES}/@jsonstudio
   rm -rf "${GLOBAL_NODE_MODULES}/@jsonstudio/rcc"
 fi
 
+echo "🧹 清理 release 侧 npm 全局 routecodex 历史残留（若存在）..."
+npm uninstall -g routecodex >/dev/null 2>&1 || true
+if [ -n "${GLOBAL_NODE_MODULES:-}" ] && [ -e "${GLOBAL_NODE_MODULES}/routecodex" ]; then
+  echo "🧹 删除旧全局包: ${GLOBAL_NODE_MODULES}/routecodex"
+  rm -rf "${GLOBAL_NODE_MODULES}/routecodex"
+fi
+
 echo "🔨 构建 release dist（本地源码）..."
 BUILD_MODE=release ROUTECODEX_SKIP_AUTO_BUMP=${ROUTECODEX_SKIP_AUTO_BUMP:-1} npm run build:min
 npm run fix:cli-permission
 
-echo "🌍 全局安装 routecodex（release 产物）..."
-npm install -g . --no-audit --no-fund --omit=optional --ignore-scripts
+echo "📦 安装 release snapshot（不可变运行时）..."
+node scripts/install-release-snapshot.mjs
 node scripts/ensure-cli-command-shim.mjs || true
 node scripts/ensure-cli-executable.mjs || true
 
@@ -108,5 +115,5 @@ else
 fi
 
 echo ""
-echo "🎉 release 安装完成（本地源码模式）！"
+echo "🎉 release 安装完成（snapshot 模式）！"
 echo "使用命令: rcc"

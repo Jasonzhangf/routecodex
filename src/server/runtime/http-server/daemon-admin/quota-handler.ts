@@ -197,7 +197,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -305,7 +305,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       res.status(200).json({ updatedAt: Date.now(), providers, ...(unifiedDto ? { schema: 'v2' } : {}) });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 
@@ -491,7 +491,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
+      res.status(500).json({ error: { message, code: 'internal_error' } });
     }
   });
 

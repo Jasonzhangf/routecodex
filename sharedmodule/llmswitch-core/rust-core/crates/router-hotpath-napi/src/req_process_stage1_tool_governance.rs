@@ -5,10 +5,7 @@ use serde_json::json;
 use serde_json::{Map, Value};
 
 use crate::chat_clock_tool_schema_ops::build_clock_tool_append_operations_json;
-use crate::chat_process_media_semantics::{
-    analyze_chat_process_media, strip_chat_process_historical_images,
-    strip_responses_context_input_historical_media,
-};
+use crate::chat_process_media_semantics::analyze_chat_process_media;
 use crate::chat_servertool_orchestration::{
     build_continue_execution_operations_json, build_review_operations_json,
     plan_chat_servertool_orchestration_bundle_json,
@@ -125,56 +122,19 @@ fn apply_anthropic_tool_alias_semantics(request: &mut Map<String, Value>, entry_
 }
 
 fn apply_post_governed_media_cleanup(request: &mut Map<String, Value>) {
-    const PLACEHOLDER_TEXT: &str = "[Image omitted]";
-
     let current_messages = request
         .get("messages")
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
     if !current_messages.is_empty() {
-        let stripped = strip_chat_process_historical_images(
-            current_messages.clone(),
-            PLACEHOLDER_TEXT.to_string(),
-        );
-        let effective_messages = if stripped.changed {
-            request.insert(
-                "messages".to_string(),
-                Value::Array(stripped.messages.clone()),
-            );
-            stripped.messages
-        } else {
-            current_messages
-        };
-
-        let media_analysis = analyze_chat_process_media(effective_messages);
+        let media_analysis = analyze_chat_process_media(current_messages);
         if media_analysis.contains_current_turn_image {
             let metadata = request
                 .entry("metadata".to_string())
                 .or_insert_with(|| Value::Object(Map::new()));
             if let Some(metadata_obj) = metadata.as_object_mut() {
                 metadata_obj.insert("hasImageAttachment".to_string(), Value::Bool(true));
-            }
-        }
-    }
-
-    let maybe_context_input = request
-        .get_mut("semantics")
-        .and_then(|v| v.as_object_mut())
-        .and_then(|semantics| semantics.get_mut("responses"))
-        .and_then(|v| v.as_object_mut())
-        .and_then(|responses| responses.get_mut("context"))
-        .and_then(|v| v.as_object_mut())
-        .and_then(|context| context.get_mut("input"));
-
-    if let Some(input_value) = maybe_context_input {
-        if let Some(input_entries) = input_value.as_array().cloned() {
-            let stripped = strip_responses_context_input_historical_media(
-                input_entries,
-                PLACEHOLDER_TEXT.to_string(),
-            );
-            if stripped.changed {
-                *input_value = Value::Array(stripped.messages);
             }
         }
     }
@@ -969,7 +929,7 @@ mod tests {
     }
 
     #[test]
-    fn test_post_governed_media_cleanup_strips_historical_media_from_followup_messages_and_context()
+    fn test_post_governed_media_cleanup_preserves_followup_messages_and_context()
     {
         let input = ToolGovernanceInput {
             request: serde_json::json!({
@@ -1027,8 +987,11 @@ mod tests {
         let processed = result.processed_request.as_object().unwrap();
         let messages = processed["messages"].as_array().unwrap();
         let first_content = messages[0]["content"].as_array().unwrap();
-        assert_eq!(first_content[1]["type"].as_str(), Some("text"));
-        assert_eq!(first_content[1]["text"].as_str(), Some("[Image omitted]"));
+        assert_eq!(first_content[1]["type"].as_str(), Some("input_image"));
+        assert_eq!(
+            first_content[1]["image_url"].as_str(),
+            Some("data:image/png;base64,AAA")
+        );
         assert!(processed["metadata"]
             .as_object()
             .and_then(|meta| meta.get("hasImageAttachment"))
@@ -1040,11 +1003,11 @@ mod tests {
         let context_first_content = context_input[0]["content"].as_array().unwrap();
         assert_eq!(
             context_first_content[1]["type"].as_str(),
-            Some("input_text")
+            Some("input_image")
         );
         assert_eq!(
-            context_first_content[1]["text"].as_str(),
-            Some("[Image omitted]")
+            context_first_content[1]["image_url"].as_str(),
+            Some("data:image/png;base64,AAA")
         );
     }
 

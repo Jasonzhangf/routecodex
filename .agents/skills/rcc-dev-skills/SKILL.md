@@ -20,6 +20,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 1. **严禁一切 fallback / 静默失败**：禁止吞错、禁止无声降级、禁止“看起来成功”的伪成功路径。
 2. **发现即修（最小切片）**：在当前任务触达范围内发现 fallback/静默失败，必须顺手修复并给出验证证据。
 3. **best-effort 边界**：仅允许用于观测/清理等非主链动作；即使 non-blocking 也必须可观测（日志/事件/节流），不得吞掉主链失败信号。
+4. **proxy payload 语义边界**：主传输链 payload 必须完整翻译/转发、保持语义等价；禁止用 budget/history/media placeholder/自动续接 去裁切或改写真实主链。仅允许内部派生 followup 链做显式桥接（附件仅当前请求存在、不入历史；非视觉模型可注入 vision summary），且不得冒充主链 payload，也不得作为 fallback/静默补偿。
 
 ## Chat Process 定义
 
@@ -208,6 +209,8 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - 可复用动作：这类 **网络传输层错误** 必须按 **same-provider 阻塞 backoff + health-neutral** 处理；禁止把当前 provider 打进 reroute exclusion / router cooldown，否则单 provider 路由会被瞬时毒化成跨请求不可用。
 - 触发信号：某个请求已经进入 recoverable backoff，但并发里的**新 sibling 请求**仍直接冲到同一 provider，继续刷 429 / fetch failed。
 - 可复用动作：不要只做 session/request 内 backoff；必须额外加 **provider-scoped 全局等待闸门**，让 fresh requests 在 `provider.send` 前先阻塞，避免匿名请求或 `unknown-unknown` 会话绕过 session backoff 继续打风暴。
+- 触发信号：recoverable 失败后，fresh requests 还没到 `provider.send` 就直接连刷 `unknown-unknown + PROVIDER_NOT_AVAILABLE`。
+- 可复用动作：先查 **Rust virtual-router hotpath** 是否把 `minRecoverableCooldownMs / recoverableCooldownHints` 通过 `VirtualRouterError.details` 回传给 host；如果 native 只回 bare `PROVIDER_NOT_AVAILABLE` 字符串，host 就拿不到 `route_pool_cooldown_wait` 线索，前门一定会空池风暴。
 - 全局判定铁律（2026-04-27）：**不可恢复错误 = 直接返回，不得 retry / reroute；可恢复错误 = 只能 block + 指数 backoff。** 先判断 recoverability，再决定是否等待；禁止把“所有错误都先切 provider 试试”当默认策略。
 - 触发信号：Node 进程 **虚拟内存/常驻内存随运行时间单调上涨**，但 FD / TCP 连接数基本平稳，同时日志里长期存在 `429` / timeout / aborted / provider error。
 - 可复用动作：优先排查 **requestId → meta/context** 的内存 Map（如 codec `ctxMap`、v2 pipeline `requestMetaStore`）；凡是“只在 `convertResponse` 删除、错误路径不清理”的，都必须补 **TTL + 容量上限 + 写入前 prune**，否则失败/中断请求会永久滞留并把 VM 慢慢顶高。
@@ -396,14 +399,17 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 ### Jason 重启固定动作（2026-04-14）
 - 触发信号：Jason 直接要求“编译 / 全局安装 / 重启 5555 和 5520”，或用户明确要让**运行中的端口吃到本地新代码**。
 - 固定顺序：**先 build，再 install，再 restart，再验活**；不要现场猜是 `SIGUSR2`、`start` 还是别的路径。
+- Release snapshot 精华（2026-04-27）：**release 运行时绝不能直接吃 repo `dist/` 或 npm 全局 symlink**；必须先 `npm run install:release` 生成 `~/.rcc/install/current` 不可变快照，再让端口进程切到该 snapshot。若现网进程仍是 repo 路径，优先 `rcc start --config <cfg> --port <port>` 让 CLI 接管端口并重启到 snapshot，不要继续信任旧进程自重启。
 - 当前项目已验证可复用命令：
   1. `npm run build:min`
   2. `npm run install:global`
-  3. `routecodex restart --port 5555`
-  4. `routecodex restart --port 5520`
-  5. `curl -s http://127.0.0.1:5555/health && curl -s http://127.0.0.1:5520/health`
-  6. `lsof -nP -iTCP:5555 -sTCP:LISTEN && lsof -nP -iTCP:5520 -sTCP:LISTEN`
-  7. `tail -n 30 ~/.rcc/logs/process-lifecycle.jsonl && tail -n 30 ~/.rcc/logs/server-5555.log && tail -n 30 ~/.rcc/logs/server-5520.log`
+  3. `npm run install:release`
+  4. `rcc start --config /Volumes/extension/.rcc/config.mimo.json --port 5555`
+  5. `routecodex restart --port 5520`
+  6. `curl -s http://127.0.0.1:5555/health && curl -s http://127.0.0.1:5520/health`
+  7. `lsof -nP -iTCP:5555 -sTCP:LISTEN && lsof -nP -iTCP:5520 -sTCP:LISTEN`
+  8. `ps -p <PID> -o pid=,ppid=,command=`
+  9. `tail -n 30 ~/.rcc/logs/process-lifecycle.jsonl && tail -n 30 ~/.rcc/logs/server-5555.log && tail -n 30 ~/.rcc/logs/server-5520.log`
 - 成功信号：`/health.version` 等于新版本、PID 发生变化、日志出现 `Server started on 0.0.0.0:<PORT>`。
 - 反模式：没 build/install 就猜“为什么线上还是旧代码”；或者 5520 又切回 `start` / 手动 kill / broad kill。
 

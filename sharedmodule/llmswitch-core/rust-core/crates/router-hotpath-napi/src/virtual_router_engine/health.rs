@@ -176,6 +176,15 @@ impl ProviderHealthManager {
             .collect()
     }
 
+    pub(crate) fn cooldown_remaining_ms(&self, provider_key: &str, now_ms: i64) -> Option<i64> {
+        let state = self.states.get(provider_key)?;
+        let expiry = state.cooldown_expires_at?;
+        if expiry <= now_ms {
+            return None;
+        }
+        Some(expiry - now_ms)
+    }
+
     pub(crate) fn config(&self) -> ProviderHealthConfigNormalized {
         self.config.clone()
     }

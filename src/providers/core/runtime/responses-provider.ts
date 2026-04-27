@@ -21,7 +21,6 @@ import {
 import type { HttpClient } from '../utils/http-client.js';
 import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
 import { emitProviderError, buildRuntimeFromProviderContext } from '../utils/provider-error-reporter.js';
-import { isProviderFailureHealthNeutral } from './provider-failure-policy.js';
 import {
   buildSubmitToolOutputsEndpoint,
   buildTargetUrl,
@@ -375,13 +374,6 @@ export class ResponsesProvider extends HttpTransportProvider {
     }
     const err = new Error(failure.message) as Error & { code?: string };
     err.code = failure.code ?? 'RESPONSES_FAILED';
-    const affectsHealth = !isProviderFailureHealthNeutral({
-      stage: 'provider.responses',
-      error: err,
-      errorCode: err.code,
-      statusCode: failure.statusCode,
-      classification: failure.recoverable ? 'recoverable' : 'unrecoverable'
-    });
     emitProviderError({
       error: err,
       stage: 'provider.responses',
@@ -389,7 +381,7 @@ export class ResponsesProvider extends HttpTransportProvider {
       dependencies: this.dependencies,
       statusCode: failure.statusCode,
       recoverable: failure.recoverable,
-      affectsHealth,
+      affectsHealth: failure.affectsHealth,
       details: {
         status: failure.status,
         code: failure.code,

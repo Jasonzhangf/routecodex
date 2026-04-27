@@ -3,6 +3,11 @@ export type ProviderFailureClassification =
   | 'recoverable'
   | 'special_400';
 
+export type ProviderFailureRateLimitKind =
+  | 'synthetic_cooldown'
+  | 'daily_limit'
+  | 'short_lived';
+
 export type ProviderFailureRetryAction =
   | 'retry_same_provider'
   | 'reroute_explicit_alternative';
@@ -47,6 +52,12 @@ export type ProviderFailureRetryEligibilityPlan = {
   classification?: ProviderFailureClassification;
   blockingRecoverable: boolean;
   shouldRetry: boolean;
+};
+
+export type ProviderFailureOutcome = {
+  classification?: ProviderFailureClassification;
+  recoverable: boolean;
+  affectsHealth: boolean;
 };
 
 export type ProviderFailureExclusionDecision = {
@@ -194,6 +205,36 @@ function isPromptTooLongLike(args: {
   );
 }
 
+function readNestedProviderErrorDetails(error: unknown): {
+  code?: string;
+  type?: string;
+  param?: string;
+  message?: string;
+} {
+  if (!error || typeof error !== 'object') {
+    return {};
+  }
+  const response = (error as { response?: unknown }).response;
+  if (!response || typeof response !== 'object') {
+    return {};
+  }
+  const data = (response as { data?: unknown }).data;
+  if (!data || typeof data !== 'object') {
+    return {};
+  }
+  const nested = (data as { error?: unknown }).error;
+  if (!nested || typeof nested !== 'object' || Array.isArray(nested)) {
+    return {};
+  }
+  const record = nested as Record<string, unknown>;
+  return {
+    code: typeof record.code === 'string' ? record.code : undefined,
+    type: typeof record.type === 'string' ? record.type : undefined,
+    param: typeof record.param === 'string' ? record.param : undefined,
+    message: typeof record.message === 'string' ? record.message : undefined
+  };
+}
+
 export function resolveProviderFailureClassification(args: {
   error: unknown;
   stage?: string;
@@ -201,9 +242,16 @@ export function resolveProviderFailureClassification(args: {
   errorCode?: string;
   upstreamCode?: string;
   reason?: string;
+  rateLimitKind?: ProviderFailureRateLimitKind;
 }): ProviderFailureClassification | undefined {
   if (args.stage === 'provider.followup' || isHostFailureStage(args.stage)) {
     return undefined;
+  }
+  if (args.rateLimitKind === 'daily_limit') {
+    return 'unrecoverable';
+  }
+  if (args.rateLimitKind === 'synthetic_cooldown') {
+    return 'recoverable';
   }
   if (isProviderFailureClientDisconnect(args.error)) {
     return 'unrecoverable';
@@ -216,11 +264,38 @@ export function resolveProviderFailureClassification(args: {
     typeof args.statusCode === 'number'
       ? args.statusCode
       : extractProviderFailureStatusCode(args.error);
+  const nested = readNestedProviderErrorDetails(args.error);
+  const nestedCode = normalizeProviderFailureCodeKey(nested.code);
+  const nestedType = normalizeProviderFailureCodeKey(nested.type);
+  const nestedParam = typeof nested.param === 'string' ? nested.param.trim().toLowerCase() : '';
   const reason = String(args.reason || (args.error as { message?: unknown } | undefined)?.message || '')
     .trim()
     .toLowerCase();
+  const nestedMessage = typeof nested.message === 'string' ? nested.message.toLowerCase() : '';
+
+  if (
+    reason.includes('glm business error (514)')
+    || errorCode === '514'
+    || upstreamCode === '514'
+    || nestedCode === '514'
+  ) {
+    return 'recoverable';
+  }
 
   if (errorCode === 'CONTEXT_LENGTH_EXCEEDED' || upstreamCode === 'CONTEXT_LENGTH_EXCEEDED') {
+    return 'special_400';
+  }
+  if (
+    nestedParam.startsWith('tools.')
+    || nestedParam.startsWith('messages.')
+    || nestedParam.startsWith('input.')
+  ) {
+    return 'special_400';
+  }
+  if (
+    (nestedType === 'INVALID_REQUEST_ERROR' || String(nestedType).startsWith('INVALID_') || String(nestedCode).startsWith('INVALID_'))
+    && !isPromptTooLongLike({ ...args, statusCode, errorCode, upstreamCode, reason: nestedMessage || reason })
+  ) {
     return 'special_400';
   }
   if (statusCode === 400 && !isPromptTooLongLike({ ...args, statusCode, errorCode, upstreamCode, reason })) {
@@ -272,6 +347,41 @@ export function resolveProviderFailureClassification(args: {
     return 'unrecoverable';
   }
   return 'recoverable';
+}
+
+export function resolveProviderFailureOutcome(args: {
+  error: unknown;
+  stage?: string;
+  statusCode?: number;
+  errorCode?: string;
+  upstreamCode?: string;
+  reason?: string;
+  classification?: ProviderFailureClassification;
+  rateLimitKind?: ProviderFailureRateLimitKind;
+}): ProviderFailureOutcome {
+  const classification =
+    args.classification
+    ?? resolveProviderFailureClassification({
+      error: args.error,
+      stage: args.stage,
+      statusCode: args.statusCode,
+      errorCode: args.errorCode,
+      upstreamCode: args.upstreamCode,
+      reason: args.reason,
+      rateLimitKind: args.rateLimitKind
+    });
+  return {
+    classification,
+    recoverable: classification === 'recoverable',
+    affectsHealth: !isProviderFailureHealthNeutral({
+      stage: args.stage,
+      error: args.error,
+      errorCode: args.errorCode,
+      upstreamCode: args.upstreamCode,
+      statusCode: args.statusCode,
+      classification
+    })
+  };
 }
 
 export function isBlockingRecoverableProviderFailure(args: {
@@ -358,6 +468,28 @@ export function resolveProviderFailureBackoffPlan(args: {
   };
 }
 
+export function computeProviderFailureBackoffDelayMs(args: {
+  scope: Exclude<ProviderFailureBackoffScope, 'none'>;
+  error?: unknown;
+  statusCode?: number;
+  attempt?: number;
+  consecutive?: number;
+}): number {
+  const plan = resolveProviderFailureBackoffPlan({
+    scope: args.scope,
+    error: args.error,
+    statusCode: args.statusCode
+  });
+  const stepRaw =
+    typeof args.consecutive === 'number' && Number.isFinite(args.consecutive)
+      ? args.consecutive
+      : args.attempt;
+  const step = Math.max(1, Math.floor(typeof stepRaw === 'number' && Number.isFinite(stepRaw) ? stepRaw : 1));
+  const exponentialMs = Math.min(plan.maxMs, plan.baseMs * Math.pow(2, Math.max(0, step - 1)));
+  const retryAfterMs = readRetryAfterHeaderMs(args.error, args.statusCode, plan.maxMs);
+  return Math.max(exponentialMs, retryAfterMs);
+}
+
 export function resolveProviderFailureActionPlan(args: {
   error: unknown;
   stage?: string;
@@ -366,6 +498,7 @@ export function resolveProviderFailureActionPlan(args: {
   upstreamCode?: string;
   reason?: string;
   classification?: ProviderFailureClassification;
+  rateLimitKind?: ProviderFailureRateLimitKind;
   attempt?: number;
   maxAttempts?: number;
   promptTooLong?: boolean;
@@ -381,7 +514,8 @@ export function resolveProviderFailureActionPlan(args: {
       statusCode: args.statusCode,
       errorCode: args.errorCode,
       upstreamCode: args.upstreamCode,
-      reason: args.reason
+      reason: args.reason,
+      rateLimitKind: args.rateLimitKind
     });
   const affectsHealth = !isProviderFailureHealthNeutral({
     stage: args.stage,
@@ -458,12 +592,13 @@ export function resolveProviderFailureRetryEligibility(args: {
   upstreamCode?: string;
   reason?: string;
   classification?: ProviderFailureClassification;
+  rateLimitKind?: ProviderFailureRateLimitKind;
   attempt: number;
   maxAttempts: number;
   promptTooLong?: boolean;
   contextOverflowRetries?: number;
   maxContextOverflowRetries?: number;
-  shouldRetryByError: boolean;
+  shouldRetryByError?: boolean;
   allowNonPolicyRetry?: boolean;
   stageOutsideProviderFailurePolicy?: boolean;
 }): ProviderFailureRetryEligibilityPlan {
@@ -475,6 +610,7 @@ export function resolveProviderFailureRetryEligibility(args: {
     upstreamCode: args.upstreamCode,
     reason: args.reason,
     classification: args.classification,
+    rateLimitKind: args.rateLimitKind,
     attempt: args.attempt,
     maxAttempts: args.maxAttempts,
     promptTooLong: args.promptTooLong
@@ -492,7 +628,7 @@ export function resolveProviderFailureRetryEligibility(args: {
     return {
       classification: actionPlan.classification,
       blockingRecoverable,
-      shouldRetry: args.shouldRetryByError
+      shouldRetry: false
     };
   }
   if (actionPlan.classification === 'special_400') {
@@ -528,13 +664,13 @@ export function resolveProviderFailureRetryEligibility(args: {
     return {
       classification: actionPlan.classification,
       blockingRecoverable,
-      shouldRetry: actionPlan.shouldRetry && args.shouldRetryByError
+      shouldRetry: actionPlan.shouldRetry
     };
   }
   return {
     classification: actionPlan.classification,
     blockingRecoverable,
-    shouldRetry: (actionPlan.shouldRetry && args.shouldRetryByError) || Boolean(args.allowNonPolicyRetry)
+    shouldRetry: actionPlan.shouldRetry || Boolean(args.allowNonPolicyRetry)
   };
 }
 
@@ -767,4 +903,52 @@ function readPositiveIntFromEnv(keys: string[], fallback: number): number {
     }
   }
   return fallback;
+}
+
+function readRetryAfterHeaderMs(error: unknown, statusCode: number | undefined, maxMs: number): number {
+  if (statusCode !== 429 || !error || typeof error !== 'object') {
+    return 0;
+  }
+  const record = error as {
+    response?: { headers?: Record<string, unknown> };
+    details?: { response?: { headers?: Record<string, unknown> } };
+  };
+  const headers =
+    (record.response && typeof record.response === 'object' && record.response.headers && typeof record.response.headers === 'object'
+      ? record.response.headers
+      : undefined)
+    ?? (record.details
+      && typeof record.details === 'object'
+      && record.details.response
+      && typeof record.details.response === 'object'
+      && record.details.response.headers
+      && typeof record.details.response.headers === 'object'
+      ? record.details.response.headers
+      : undefined);
+  if (!headers) {
+    return 0;
+  }
+  const retryAfterRaw =
+    headers['retry-after']
+    ?? headers['Retry-After']
+    ?? headers['retry_after']
+    ?? headers['Retry_After'];
+  if (typeof retryAfterRaw === 'number' && Number.isFinite(retryAfterRaw) && retryAfterRaw > 0) {
+    return Math.min(maxMs, Math.round(retryAfterRaw * 1000));
+  }
+  if (typeof retryAfterRaw === 'string') {
+    const trimmed = retryAfterRaw.trim();
+    const asSeconds = Number.parseFloat(trimmed);
+    if (Number.isFinite(asSeconds) && asSeconds > 0) {
+      return Math.min(maxMs, Math.round(asSeconds * 1000));
+    }
+    const parsedDate = Date.parse(trimmed);
+    if (Number.isFinite(parsedDate)) {
+      const deltaMs = parsedDate - Date.now();
+      if (deltaMs > 0) {
+        return Math.min(maxMs, deltaMs);
+      }
+    }
+  }
+  return 0;
 }

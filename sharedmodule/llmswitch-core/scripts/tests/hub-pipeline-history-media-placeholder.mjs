@@ -60,16 +60,6 @@ function collectInlineBase64Strings(value, out = []) {
   return out;
 }
 
-function hasPlaceholderInResponsesContextInput(value) {
-  if (!Array.isArray(value)) {
-    return false;
-  }
-  return value.some((entry) =>
-    Array.isArray(entry?.content) &&
-    entry.content.some((part) => part?.type === 'input_text' && part?.text === '[Image omitted]')
-  );
-}
-
 async function main() {
   const { HubPipeline } = await import(
     path.join(projectRoot, 'dist', 'conversion', 'hub', 'pipeline', 'hub-pipeline.js')
@@ -150,40 +140,18 @@ async function main() {
   });
 
   const providerPayload = result.providerPayload;
-  const contextInput =
-    result.processedRequest?.semantics?.responses?.context?.input ??
-    result.standardizedRequest?.semantics?.responses?.context?.input;
   assert.ok(providerPayload && typeof providerPayload === 'object', 'expected provider payload');
-  assert.ok(Array.isArray(contextInput), 'expected responses context input');
 
   const inlineBase64 = collectInlineBase64Strings(providerPayload);
   assert.equal(
-    inlineBase64.length,
-    0,
-    'historical inline image base64 should be stripped before provider payload build',
+    inlineBase64.length > 0,
+    true,
+    'historical inline image base64 should remain in provider payload for proxy semantics',
   );
 
   const serialized = JSON.stringify(providerPayload);
-  assert.match(
-    serialized,
-    /\[Image omitted\]/,
-    'expected historical image placeholder to remain in message history',
-  );
-  assert.equal(
-    collectInlineBase64Strings(contextInput).length,
-    0,
-    'responses context input should not keep historical inline image base64',
-  );
-  assert.equal(
-    hasPlaceholderInResponsesContextInput(contextInput),
-    true,
-    'responses context input should keep placeholder text for stripped historical image',
-  );
-  assert.match(
-    JSON.stringify(providerPayload),
-    /\[Image omitted\]/,
-    'provider payload should keep placeholder for scrubbed visual tool output',
-  );
+  assert.doesNotMatch(serialized, /\[Image omitted\]/);
+  assert.doesNotMatch(JSON.stringify(providerPayload), /\[Image omitted\]/);
 
   hubPipeline.dispose();
   console.log('✅ hub pipeline historical media placeholder regression passed');

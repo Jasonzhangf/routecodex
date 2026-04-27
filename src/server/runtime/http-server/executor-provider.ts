@@ -1,4 +1,8 @@
 import type { ProviderError } from '../../../providers/core/api/provider-types.js';
+import {
+  computeProviderFailureBackoffDelayMs,
+  resolveProviderFailureRetryEligibility
+} from '../../../providers/core/runtime/provider-failure-policy.js';
 
 const NETWORK_ERROR_CODE_SET = new Set([
   'ECONNRESET',
@@ -97,242 +101,49 @@ export function isNetworkTransportError(error: unknown): boolean {
 }
 
 export function shouldRetryProviderError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-  if (isClientDisconnectAbortError(error)) {
-    return false;
-  }
-  const status = extractErrorStatusCode(error);
-  // Deterministic context overflow must fail fast for the current request payload.
-  // Replaying the same oversized prompt across providers in the same pool creates
-  // retry storms and hides the real issue (continuation/state restore failed).
   if (isPromptTooLongError(error)) {
     return false;
   }
+  const status = extractErrorStatusCode(error);
   // virtualRouterSeriesCooldown 表示 provider 已经把 alias 从池子里拉黑，需要切换到下一位。
   // 这类错误仍然属于「可恢复」，因为虚拟路由会根据 cooldown 信息选择新的目标。
   if (hasVirtualRouterSeriesCooldown(error)) {
     return true;
   }
-  if (isGlmBusiness514RetryableError(error, status)) {
-    return true;
-  }
-  // Deterministic request-shape validation errors (especially malformed tools/input schema)
-  // must not be retried; repeated retries with the same payload only create retry storms.
-  if (isDeterministicInvalidRequestError(error, status)) {
-    return false;
-  }
-  if (status === 401 || status === 429 || status === 413 || status === 408 || status === 425) {
-    return true;
-  }
-  if (typeof status === 'number' && status >= 500) {
-    return true;
-  }
   const providerError = error as ProviderError;
-  if (providerError.retryable === true) {
-    return true;
-  }
-  if (providerError.retryable === false) {
-    return false;
-  }
-  if (isNetworkTransportError(error)) {
-    return true;
-  }
-  return false;
+  const upstreamCode =
+    typeof (providerError as ProviderError & { upstreamCode?: unknown }).upstreamCode === 'string'
+      ? ((providerError as ProviderError & { upstreamCode?: string }).upstreamCode)
+      : undefined;
+  return resolveProviderFailureRetryEligibility({
+    error,
+    stage: 'provider.send',
+    statusCode: status,
+    errorCode: typeof providerError.code === 'string' ? providerError.code : undefined,
+    upstreamCode,
+    reason: typeof providerError.message === 'string' ? providerError.message : undefined,
+    attempt: 1,
+    maxAttempts: 2,
+    promptTooLong: false,
+    contextOverflowRetries: 0,
+    maxContextOverflowRetries: 0
+  }).shouldRetry;
 }
-
-
-
 type WaitBeforeRetryOptions = {
   attempt?: number;
   signal?: AbortSignal;
 };
 
-function readNestedProviderError(error: unknown): Record<string, unknown> | undefined {
-  if (!error || typeof error !== 'object') {
-    return undefined;
-  }
-  const response = (error as { response?: unknown }).response;
-  if (!response || typeof response !== 'object') {
-    return undefined;
-  }
-  const data = (response as { data?: unknown }).data;
-  if (!data || typeof data !== 'object') {
-    return undefined;
-  }
-  const nested = (data as { error?: unknown }).error;
-  return nested && typeof nested === 'object' && !Array.isArray(nested)
-    ? (nested as Record<string, unknown>)
-    : undefined;
-}
-
-function isDeterministicInvalidRequestError(error: unknown, statusHint?: number): boolean {
-  const status = typeof statusHint === 'number' ? statusHint : extractErrorStatusCode(error);
-  if (status !== 400) {
-    return false;
-  }
-  const nested = readNestedProviderError(error);
-  const code = String(
-    (error as { code?: unknown })?.code ??
-      (nested?.code as unknown) ??
-      ''
-  )
-    .trim()
-    .toLowerCase();
-  const type = String(
-    (error as { type?: unknown })?.type ??
-      (nested?.type as unknown) ??
-      ''
-  )
-    .trim()
-    .toLowerCase();
-  const param = String((nested?.param as unknown) ?? '').trim().toLowerCase();
-  const messageParts = [
-    (error as { message?: unknown })?.message,
-    nested?.message
-  ]
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    .map((value) => value.toLowerCase());
-  const message = messageParts.join(' | ');
-
-  if (param.startsWith('tools.') || param.startsWith('messages.') || param.startsWith('input.')) {
-    return true;
-  }
-  if (type === 'invalid_request_error') {
-    return true;
-  }
-  if (type.startsWith('invalid_') || code.startsWith('invalid_')) {
-    return true;
-  }
-  if (message.includes('invalid') && !message.includes('temporar')) {
-    return true;
-  }
-  return false;
-}
-
-function isGlmBusiness514RetryableError(error: unknown, statusHint?: number): boolean {
-  const status = typeof statusHint === 'number' ? statusHint : extractErrorStatusCode(error);
-  if (status !== 400 || !error || typeof error !== 'object') {
-    return false;
-  }
-  const providerFamily = String((error as { providerFamily?: unknown }).providerFamily ?? '')
-    .trim()
-    .toLowerCase();
-  const nested = readNestedProviderError(error);
-  const nestedCode = String(nested?.code ?? '')
-    .trim()
-    .toLowerCase();
-  const messageParts = [
-    (error as { message?: unknown }).message,
-    nested?.message
-  ]
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    .map((value) => value.toLowerCase());
-  const message = messageParts.join(' | ');
-  return providerFamily === 'glm' && (nestedCode === '514' || message.includes('glm business error (514)'));
-}
-
-function parsePositiveInt(raw: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(String(raw ?? '').trim(), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function readRetryAfterHeaderSeconds(error: unknown): number | undefined {
-  if (!error || typeof error !== 'object') {
-    return undefined;
-  }
-  const record = error as {
-    response?: { headers?: Record<string, unknown> };
-    details?: { response?: { headers?: Record<string, unknown> } };
-  };
-  const headers =
-    (record.response && typeof record.response === 'object' && record.response.headers && typeof record.response.headers === 'object'
-      ? record.response.headers
-      : undefined)
-    ?? (record.details &&
-      typeof record.details === 'object' &&
-      record.details.response &&
-      typeof record.details.response === 'object' &&
-      record.details.response.headers &&
-      typeof record.details.response.headers === 'object'
-      ? record.details.response.headers
-      : undefined);
-  if (!headers) {
-    return undefined;
-  }
-  const retryAfterRaw =
-    headers['retry-after']
-    ?? headers['Retry-After']
-    ?? headers['retry_after']
-    ?? headers['Retry_After'];
-  if (typeof retryAfterRaw === 'number' && Number.isFinite(retryAfterRaw) && retryAfterRaw > 0) {
-    return retryAfterRaw;
-  }
-  if (typeof retryAfterRaw === 'string') {
-    const trimmed = retryAfterRaw.trim();
-    const asSeconds = Number.parseFloat(trimmed);
-    if (Number.isFinite(asSeconds) && asSeconds > 0) {
-      return asSeconds;
-    }
-    const parsedDate = Date.parse(trimmed);
-    if (Number.isFinite(parsedDate)) {
-      const deltaSeconds = Math.ceil((parsedDate - Date.now()) / 1000);
-      if (deltaSeconds > 0) {
-        return deltaSeconds;
-      }
-    }
-  }
-  return undefined;
-}
-
 export function computeRetryDelayMs(error: unknown, options?: WaitBeforeRetryOptions): number {
   const status = extractErrorStatusCode(error);
   const attemptRaw = typeof options?.attempt === 'number' && Number.isFinite(options.attempt) ? options.attempt : 1;
   const attempt = Math.max(1, Math.floor(attemptRaw));
-  if (status === 429) {
-    const baseMs = parsePositiveInt(
-      process.env.ROUTECODEX_429_BACKOFF_BASE_MS || process.env.RCC_429_BACKOFF_BASE_MS,
-      1000
-    );
-    const maxMs = parsePositiveInt(
-      process.env.ROUTECODEX_429_BACKOFF_MAX_MS || process.env.RCC_429_BACKOFF_MAX_MS,
-      30000
-    );
-    const exponentialMs = Math.min(maxMs, baseMs * Math.pow(2, Math.max(0, attempt - 1)));
-    const retryAfterSeconds = readRetryAfterHeaderSeconds(error);
-    const retryAfterMs =
-      typeof retryAfterSeconds === 'number' && Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
-        ? Math.min(maxMs, Math.round(retryAfterSeconds * 1000))
-        : 0;
-    return Math.max(exponentialMs, retryAfterMs);
-  }
-  if (isNetworkTransportError(error)) {
-    const networkBaseMs = parsePositiveInt(
-      process.env.ROUTECODEX_NETWORK_RETRY_BACKOFF_BASE_MS || process.env.RCC_NETWORK_RETRY_BACKOFF_BASE_MS,
-      500
-    );
-    const networkMaxMs = parsePositiveInt(
-      process.env.ROUTECODEX_NETWORK_RETRY_BACKOFF_MAX_MS || process.env.RCC_NETWORK_RETRY_BACKOFF_MAX_MS,
-      12000
-    );
-    return Math.min(networkMaxMs, networkBaseMs * Math.pow(2, Math.max(0, attempt - 1)));
-  }
-  // Single-provider pools can only retry the same provider key; enforce exponential
-  // backoff to avoid retry storms when upstream is temporarily or deterministically failing.
-  // 2026-04: under provider-switch storms, 800ms base was still too aggressive at scale.
-  // Raise default generic backoff so switch/failover traffic naturally slows down.
-  const genericDefaultBaseMs = process.env.NODE_ENV === 'test' ? 800 : 2000;
-  const genericDefaultMaxMs = process.env.NODE_ENV === 'test' ? 15000 : 60000;
-  const genericBaseMs = parsePositiveInt(
-    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS || process.env.RCC_PROVIDER_RETRY_BACKOFF_BASE_MS,
-    genericDefaultBaseMs
-  );
-  const genericMaxMs = parsePositiveInt(
-    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS || process.env.RCC_PROVIDER_RETRY_BACKOFF_MAX_MS,
-    genericDefaultMaxMs
-  );
-  return Math.min(genericMaxMs, genericBaseMs * Math.pow(2, Math.max(0, attempt - 1)));
+  return computeProviderFailureBackoffDelayMs({
+    scope: 'attempt',
+    error,
+    statusCode: status,
+    attempt
+  });
 }
 
 export async function waitBeforeRetry(error: unknown, options?: WaitBeforeRetryOptions): Promise<number> {

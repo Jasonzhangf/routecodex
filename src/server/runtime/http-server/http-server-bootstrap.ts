@@ -14,6 +14,7 @@ import type { HubPipeline, HubPipelineCtor, VirtualRouterArtifacts } from './typ
 import { resolveProviderIdentity } from './provider-utils.js';
 import { initializeRouteErrorHub as initializeRouteErrorHubImpl } from '../../../error-handling/route-error-hub.js';
 import { formatErrorForErrorCenter } from '../../../utils/error-center-payload.js';
+import { resolveRuntimePathFromModuleUrl } from '../../../utils/runtime-package-root.js';
 
 function formatUnknownError(error: unknown): string {
   if (error instanceof Error) {
@@ -54,6 +55,10 @@ export function getModuleDependencies(server: any): ModuleDependencies {
 }
 
 export function registerDaemonAdminUiRoute(server: any): void {
+  const packagedBuiltIndex = resolveRuntimePathFromModuleUrl(import.meta.url, 'dist', 'daemon-admin-ui', 'index.html');
+  const packagedLegacyFile = resolveRuntimePathFromModuleUrl(import.meta.url, 'docs', 'daemon-admin-ui.html');
+  const packagedBuiltRoot = resolveRuntimePathFromModuleUrl(import.meta.url, 'dist', 'daemon-admin-ui');
+
   server.app.get('/', (_req: unknown, res: any) => {
     res.redirect(302, '/daemon/admin');
   });
@@ -61,23 +66,21 @@ export function registerDaemonAdminUiRoute(server: any): void {
   server.app.get(['/daemon/admin', '/daemon/admin/'], async (_req: unknown, res: any) => {
     try {
       const fs = await import('node:fs/promises');
-      const path = await import('node:path');
-      const builtIndex = path.join(process.cwd(), 'dist', 'daemon-admin-ui', 'index.html');
-      const legacyFile = path.join(process.cwd(), 'docs', 'daemon-admin-ui.html');
       let html = '';
       try {
-        html = await fs.readFile(builtIndex, 'utf8');
+        html = await fs.readFile(packagedBuiltIndex, 'utf8');
       } catch (error) {
-        logBootstrapNonBlockingError('registerDaemonAdminUiRoute.readBuiltIndex', error, { builtIndex });
+        logBootstrapNonBlockingError('registerDaemonAdminUiRoute.readBuiltIndex', error, {
+          builtIndex: packagedBuiltIndex
+        });
         try {
-          const filePath = new URL('../../../../docs/daemon-admin-ui.html', import.meta.url);
-          html = await fs.readFile(filePath, 'utf8');
+          html = await fs.readFile(packagedLegacyFile, 'utf8');
         } catch (innerError) {
           logBootstrapNonBlockingError('registerDaemonAdminUiRoute.readPackagedIndex', innerError, {
-            builtIndex,
-            fallback: '../../../../docs/daemon-admin-ui.html'
+            builtIndex: packagedBuiltIndex,
+            fallback: packagedLegacyFile
           });
-          html = await fs.readFile(legacyFile, 'utf8');
+          throw innerError;
         }
       }
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -102,15 +105,14 @@ export function registerDaemonAdminUiRoute(server: any): void {
     try {
       const path = await import('node:path');
       const fs = await import('node:fs/promises');
-      const root = path.join(process.cwd(), 'dist', 'daemon-admin-ui');
       const relPath = String(req.path || '').replace(/^\/daemon\/admin\/?/, '').trim();
       if (!relPath) {
         next();
         return;
       }
       const normalized = path.normalize(relPath).replace(/^(\.\.(\/|\\|$))+/, '');
-      const target = path.join(root, normalized);
-      if (!target.startsWith(root)) {
+      const target = path.join(packagedBuiltRoot, normalized);
+      if (!target.startsWith(packagedBuiltRoot)) {
         res.status(404).end();
         return;
       }

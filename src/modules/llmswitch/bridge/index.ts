@@ -33,6 +33,7 @@ export {
 export { createCoreQuotaManager } from './quota-manager.js';
 export {
   writeSnapshotViaHooks,
+  preloadCriticalBridgeRuntimeModules,
   resumeResponsesConversation,
   resumeLatestResponsesContinuationByScope,
   rebindResponsesConversationRequestId,

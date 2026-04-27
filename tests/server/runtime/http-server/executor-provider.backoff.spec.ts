@@ -29,7 +29,7 @@ describe('executor-provider waitBeforeRetry', () => {
 
     expect(timerSpy).toHaveBeenCalled();
     const delay = timerSpy.mock.calls.at(-1)?.[1];
-    expect(delay).toBe(4000);
+    expect(delay).toBe(800);
 
     jest.runOnlyPendingTimers();
     await pending;
@@ -52,7 +52,7 @@ describe('executor-provider waitBeforeRetry', () => {
 
     expect(timerSpy).toHaveBeenCalled();
     const delay = timerSpy.mock.calls.at(-1)?.[1];
-    expect(delay).toBe(8000);
+    expect(delay).toBe(800);
 
     jest.runOnlyPendingTimers();
     await pending;

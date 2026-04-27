@@ -198,6 +198,7 @@ export async function reportRouteError(
 
 function ensureFallbackHub(): RouteErrorHub {
   if (!fallbackCenter) {
+    console.warn('[RouteErrorHub] ensureFallbackHub called before initializeRouteErrorHub — creating implicit fallback. This violates the no-fallback guard.');
     fallbackCenter = new ErrorHandlingCenter();
   }
   if (!currentHub) {
