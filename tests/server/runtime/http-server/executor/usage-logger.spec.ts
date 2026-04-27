@@ -91,6 +91,29 @@ describe('usage logger timing summary', () => {
     homedirSpy.mockRestore();
   });
 
+  it('records token totals even when finishReason is tool_calls', async () => {
+    const fakeHome = path.join(os.tmpdir(), `usage-logger-tool-calls-${process.pid}-${randomUUID()}`);
+    const homedirSpy = jest.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+    const { getTokenTotals } = await import('../../../../../src/server/runtime/http-server/executor/token-stats-store.js');
+
+    logUsageSummary('req_tokens_tool_calls', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      finishReason: 'tool_calls',
+      latencyMs: 120,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    });
+
+    const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(getTokenTotals()).toEqual({ alltimeTokens: 15, dailyTokens: 15 });
+    expect(lines.some((line) => line.includes('[usage] request req_tokens_tool_calls'))).toBe(false);
+
+    await fs.rm(fakeHome, { recursive: true, force: true });
+    homedirSpy.mockRestore();
+  });
+
   it('prints breakdown in dev usage summary when summary mode is enabled and scoped timings exist', async () => {
     process.env.NODE_ENV = 'development';
     process.env.ROUTECODEX_BUILD_MODE = 'dev';
@@ -434,7 +457,8 @@ describe('usage logger timing summary', () => {
     const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
     expect(lines.some((line) => line.includes('[usage][1m]'))).toBe(true);
     expect(lines.some((line) => line.includes('default/tools-primary'))).toBe(true);
-    expect(lines.some((line) => line.includes('provider=qwen.1.qwen3.6-plus calls=2'))).toBe(true);
+    expect(lines.some((line) => line.includes('provider=qwen.1.qwen3.6-plus'))).toBe(true);
+    expect(lines.some((line) => line.includes('calls=2'))).toBe(true);
     expect(lines.some((line) => line.includes('avg.total=1100ms'))).toBe(true);
     expect(lines.some((line) => line.includes('avg.internal=450ms'))).toBe(true);
     expect(lines.some((line) => line.includes('avg.external=650ms'))).toBe(true);

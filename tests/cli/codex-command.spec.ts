@@ -71,7 +71,15 @@ function createDirectoryFs(existingDirs: string[]) {
 
 
 function createConfigFs(port: number, apiKey = 'sk-config-key', host = '0.0.0.0') {
-  const configPath = '/home/test/.rcc/config.json';
+  return createConfigFsWithPath('/home/test/.rcc/config.json', port, apiKey, host);
+}
+
+function createConfigFsWithPath(
+  configPath: string,
+  port: number,
+  apiKey = 'sk-config-key',
+  host = '0.0.0.0'
+) {
   const config = JSON.stringify({ httpserver: { port, apikey: apiKey, host } });
   return {
     existsSync: (target: string) => String(target) === configPath,
@@ -716,7 +724,7 @@ describe('cli codex command', () => {
   });
 
 
-  it('does not probe server readiness in tmux-only mode when config exists', async () => {
+  it('probes server readiness for codex launch when config exists', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const fetchCalls: string[] = [];
     const program = new Command();
@@ -735,7 +743,7 @@ describe('cli codex command', () => {
       sleep: async () => {},
       fetch: (async (url: string) => {
         fetchCalls.push(String(url));
-        throw new Error('fetch should not be called in tmux-only mode');
+        return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
       }) as any,
       spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
       spawn: (command, args, options) => {
@@ -752,12 +760,12 @@ describe('cli codex command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'codex'], { from: 'node' });
 
-    expect(fetchCalls).toHaveLength(0);
+    expect(fetchCalls.some((url) => url.includes(':7788'))).toBe(true);
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0].command).toBe('codex');
   });
 
-  it('does not probe server readiness in tmux-only mode even when --url is provided', async () => {
+  it('probes configured server readiness for codex launch before tmux attach flow', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const probeUrls: string[] = [];
     const program = new Command();
@@ -776,7 +784,7 @@ describe('cli codex command', () => {
       sleep: async () => {},
       fetch: (async (url: string) => {
         probeUrls.push(String(url));
-        throw new Error('fetch should not be called in tmux-only mode');
+        return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
       }) as any,
       spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
       spawn: (command, args, options) => {
@@ -793,12 +801,12 @@ describe('cli codex command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'codex'], { from: 'node' });
 
-    expect(probeUrls).toHaveLength(0);
+    expect(probeUrls.some((url) => url.includes('127.0.0.1:5520'))).toBe(true);
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0].command).toBe('codex');
   });
 
-  it('does not probe server readiness in tmux-only mode when --port is provided', async () => {
+  it('probes overridden server port for codex launch', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const fetchCalls: string[] = [];
     const program = new Command();
@@ -817,7 +825,7 @@ describe('cli codex command', () => {
       sleep: async () => {},
       fetch: (async (url: string) => {
         fetchCalls.push(String(url));
-        throw new Error('fetch should not be called in tmux-only mode');
+        return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
       }) as any,
       spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
       spawn: (command, args, options) => {
@@ -834,7 +842,7 @@ describe('cli codex command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'codex', '--port', '8899'], { from: 'node' });
 
-    expect(fetchCalls).toHaveLength(0);
+    expect(fetchCalls.some((url) => url.includes(':8899'))).toBe(true);
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0].command).toBe('codex');
   });
@@ -927,7 +935,7 @@ describe('cli codex command', () => {
   });
 
 
-  it('does not probe server readiness in tmux-only mode when --url is explicit', async () => {
+  it('probes explicit url readiness for codex launch', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const fetchCalls: string[] = [];
     const program = new Command();
@@ -946,7 +954,7 @@ describe('cli codex command', () => {
       sleep: async () => {},
       fetch: (async (url: string) => {
         fetchCalls.push(String(url));
-        throw new Error('fetch should not be called in tmux-only mode');
+        return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
       }) as any,
       spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
       spawn: (command, args, options) => {
@@ -963,7 +971,7 @@ describe('cli codex command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520'], { from: 'node' });
 
-    expect(fetchCalls).toHaveLength(0);
+    expect(fetchCalls.some((url) => url.includes('127.0.0.1:5520'))).toBe(true);
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0].command).toBe('codex');
   });
@@ -1928,9 +1936,11 @@ describe('cli codex command', () => {
     expect(shellCommand).not.toContain("while true; do;");
   });
 
-  it('does not auto-start server when routecodex is unavailable', async () => {
+  it('auto-starts server for codex and writes config-scoped logs when routecodex is unavailable', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
+    const openedLogPaths: string[] = [];
     let readyChecks = 0;
+    const configPath = '/Volumes/extension/.rcc/config.mimo.json';
 
     const program = new Command();
     createCodexCommand(program, {
@@ -1941,14 +1951,22 @@ describe('cli codex command', () => {
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: { ROUTECODEX_SESSION_RECLAIM_REQUIRED: '0' },
-      rawArgv: ['codex', '--', '--help'],
-      fsImpl: createStubFs(),
+      rawArgv: ['codex', '--config', configPath, '--', '--help'],
+      fsImpl: {
+        ...createConfigFsWithPath(configPath, 5555),
+        statSync: () => ({ isFile: () => true, size: 1 } as any),
+        mkdirSync: () => {},
+        openSync: (target: string) => {
+          openedLogPaths.push(String(target));
+          return 1;
+        }
+      } as any,
       homedir: () => '/home/test',
       sleep: async () => {},
       fetch: (async (url: string) => {
         if (url.endsWith('/ready') || url.endsWith('/health')) {
           readyChecks += 1;
-          if (readyChecks <= 2) {
+          if (readyChecks <= 4) {
             return { ok: false, status: 503, json: async () => ({}) } as any;
           }
           return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
@@ -1968,10 +1986,12 @@ describe('cli codex command', () => {
       }
     });
 
-    await program.parseAsync(['node', 'routecodex', 'codex', '--', '--help'], { from: 'node' });
+    await program.parseAsync(['node', 'routecodex', 'codex', '--config', configPath, '--', '--help'], { from: 'node' });
 
-    expect(spawnCalls).toHaveLength(1);
-    expect(spawnCalls[0].command).toBe('codex');
+    expect(spawnCalls).toHaveLength(2);
+    expect(spawnCalls[0].command).toBe('node');
+    expect(spawnCalls[1].command).toBe('codex');
+    expect(openedLogPaths).toContain('/home/test/.rcc/log/config.mimo/server-5555.log');
   });
 
 });

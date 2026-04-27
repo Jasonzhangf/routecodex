@@ -7,7 +7,7 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import type { Command } from 'commander';
 
 import { LOCAL_HOSTS } from '../../constants/index.js';
-import { resolveRccConfigFileForRead, resolveRccLogsDir, resolveRccUserDir } from '../../config/user-data-paths.js';
+import { resolveRccConfigFileForRead, resolveRccUserDir } from '../../config/user-data-paths.js';
 import {
   encodeSessionClientApiKey,
   extractSessionClientDaemonIdFromApiKey,
@@ -132,8 +132,9 @@ function resolveLauncherConfigPath(
   let configPath = typeof options.config === 'string' && options.config.trim() ? options.config.trim() : '';
   if (!configPath) {
     const resolved = resolveRouteCodexConfigPath();
-    configPath = resolved && resolved.trim()
-      ? resolved
+    const normalizedResolved = resolved && resolved.trim() ? resolved.trim() : '';
+    configPath = normalizedResolved && fsImpl.existsSync(normalizedResolved)
+      ? normalizedResolved
       : resolveRccConfigFileForRead(ctx.homedir());
   }
   return configPath;
@@ -460,10 +461,36 @@ function rotateLogFile(fsImpl: typeof fs, filePath: string, maxBytes = 8 * 1024 
   }
 }
 
-function ensureServerLogPath(ctx: LauncherCommandContext, fsImpl: typeof fs, pathImpl: typeof path, port: number): string {
-  const logsDir = resolveRccLogsDir();
+function sanitizeLauncherLogSegment(value: string): string {
+  const trimmed = String(value || '').trim();
+  const withoutJson = trimmed.replace(/\.json$/i, '') || trimmed;
+  const sanitized = withoutJson
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '');
+  return sanitized || 'config';
+}
+
+function resolveLauncherConfigLogDir(
+  ctx: LauncherCommandContext,
+  pathImpl: typeof path,
+  configPath: string
+): string {
+  const userDir = resolveRccUserDir(ctx.homedir());
+  const configBaseName = pathImpl.basename(String(configPath || '').trim() || 'config');
+  const configSegment = sanitizeLauncherLogSegment(configBaseName);
+  return pathImpl.join(userDir, 'log', configSegment);
+}
+
+function ensureServerLogPath(
+  ctx: LauncherCommandContext,
+  fsImpl: typeof fs,
+  pathImpl: typeof path,
+  resolved: ResolvedServerConnection
+): string {
+  const logsDir = resolveLauncherConfigLogDir(ctx, pathImpl, resolved.configPath);
   fsImpl.mkdirSync(logsDir, { recursive: true });
-  const logPath = pathImpl.join(logsDir, `server-${port}.log`);
+  const logPath = pathImpl.join(logsDir, `server-${resolved.port}.log`);
   rotateLogFile(fsImpl, logPath);
   return logPath;
 }
@@ -488,11 +515,11 @@ async function ensureServerReady(
 
   const hasExplicitUrl = typeof options.url === 'string' && options.url.trim().length > 0;
   if (hasExplicitUrl) {
-    throw new Error('RouteCodex server is not reachable with --url; auto-start is disabled for explicit URLs');
+    return { started: false, ready: false };
   }
 
   spinner.info('RouteCodex server is not running, starting it in background...');
-  const logPath = ensureServerLogPath(ctx, fsImpl, pathImpl, resolved.port);
+  const logPath = ensureServerLogPath(ctx, fsImpl, pathImpl, resolved);
 
   const logFd = fsImpl.openSync(logPath, 'a');
   // Launcher auto-started server follows launcher lifecycle by default.
@@ -1534,7 +1561,7 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
     try {
       const tmuxOnly = spec.commandName === 'codex';
       const configPath = resolveLauncherConfigPath(ctx, fsImpl, pathImpl, options);
-      const resolved = tmuxOnly ? undefined : resolveServerConnection(ctx, fsImpl, pathImpl, options, configPath);
+      const resolved = resolveServerConnection(ctx, fsImpl, pathImpl, options, configPath);
       const requireResolved = (): ResolvedServerConnection => {
         if (!resolved) {
           throw new Error('RouteCodex server connection is not available for this launcher');
@@ -1543,20 +1570,20 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
       };
       let ensureResult: { ready: boolean; started?: boolean; logPath?: string } | null = null;
       if (!tmuxOnly) {
-        const server = requireResolved();
         await ctx.ensureGuardianDaemon?.();
-        ensureResult = await ensureServerReady(
-          ctx,
-          fsImpl,
-          pathImpl,
-          spinner,
-          options,
-          server,
-          spec.allowAutoStartServer === true
-        );
-        if (!ensureResult.ready) {
-          spinner.info('RouteCodex server is not running; launcher will continue and wait for your next requests.');
-        }
+      }
+      const server = requireResolved();
+      ensureResult = await ensureServerReady(
+        ctx,
+        fsImpl,
+        pathImpl,
+        spinner,
+        options,
+        server,
+        spec.allowAutoStartServer === true
+      );
+      if (!ensureResult.ready) {
+        spinner.info('RouteCodex server is not running; launcher will continue and wait for your next requests.');
       }
 
       spinner.text = `Launching ${spec.displayName}...`;
