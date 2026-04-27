@@ -299,6 +299,13 @@ function formatMs(value: number): string {
   return `${Math.max(0, Math.round(value))}ms`;
 }
 
+function formatWholeNumber(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '0';
+  }
+  return Math.round(Math.max(0, value)).toLocaleString('en-US');
+}
+
 function formatRatio(numerator: number, denominator: number): string {
   if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) {
     return '0.0%';
@@ -823,21 +830,17 @@ export function flushLogRollup(trigger: 'interval' | 'beforeExit' | 'exit' | 'ma
   );
   const tokenSnap = getTokenStatsSnapshot();
   if (tokenSnap.alltime.totalTokens > 0) {
+    const at = tokenSnap.alltime;
+    const dt = tokenSnap.daily;
     console.log(
-      colorize(
-        `${ANSI_BOLD}[tokens][1m]${ANSI_RESET} alltime: prompt=${tokenSnap.alltime.promptTokens} completion=${tokenSnap.alltime.completionTokens} total=${tokenSnap.alltime.totalTokens} | daily(${tokenSnap.dailyDate}): prompt=${tokenSnap.daily.promptTokens} completion=${tokenSnap.daily.completionTokens} total=${tokenSnap.daily.totalTokens}`,
-        ANSI_USAGE
-      )
+      `${colorize(`${ANSI_BOLD}[tokens][1m]${ANSI_RESET}`, ANSI_USAGE)} prompt=${formatWholeNumber(at.promptTokens)} completion=${formatWholeNumber(at.completionTokens)} total=${formatWholeNumber(at.totalTokens)}${colorize(` | daily(${tokenSnap.dailyDate}):`, ANSI_USAGE)} prompt=${formatWholeNumber(dt.promptTokens)} completion=${formatWholeNumber(dt.completionTokens)} total=${formatWholeNumber(dt.totalTokens)}`
     );
     const topProviders = tokenSnap.providers.slice(0, TOKEN_PROVIDER_TOP_N);
     const remainingProviders = Math.max(0, tokenSnap.providers.length - topProviders.length);
     for (const tp of topProviders) {
       if (tp.totalTokens > 0) {
         console.log(
-          colorize(
-            `  ${tp.providerKey}.${tp.model}: prompt=${tp.promptTokens} completion=${tp.completionTokens} total=${tp.totalTokens}`,
-            ANSI_USAGE
-          )
+          `${colorize(`  ${tp.providerKey}.${tp.model}:`, ANSI_USAGE)} prompt=${formatWholeNumber(tp.promptTokens)} completion=${formatWholeNumber(tp.completionTokens)} total=${formatWholeNumber(tp.totalTokens)}`
         );
       }
     }
@@ -890,10 +893,7 @@ export function flushLogRollup(trigger: 'interval' | 'beforeExit' | 'exit' | 'ma
   }
 
   console.log(
-    colorize(
-      `${ANSI_BOLD}[usage][1m]${ANSI_RESET} groups=${usageRows.length} requests=${usageTotalCalls} rate=${formatPerSecond(usageTotalCalls, windowSeconds)}`,
-      ANSI_USAGE
-    )
+    `${colorize(`${ANSI_BOLD}[usage][1m]${ANSI_RESET}`, ANSI_USAGE)} groups=${formatWholeNumber(usageRows.length)} requests=${formatWholeNumber(usageTotalCalls)}${colorize(` rate=${formatPerSecond(usageTotalCalls, windowSeconds)}`, ANSI_USAGE)}`
   );
   if (usageRows.length === 0) {
     console.log(colorize('  - no usage records in this window', ANSI_DIM));
@@ -920,10 +920,7 @@ export function flushLogRollup(trigger: 'interval' | 'beforeExit' | 'exit' | 'ma
     const provider = formatProvider(row.providerKey, row.model);
     console.log(colorize(`  ${idx + 1}) ${routePool}`, ANSI_USAGE));
     console.log(
-      colorize(
-        `     provider=${provider} calls=${row.calls} share=${formatRatio(row.calls, usageTotalCalls)}`,
-        ANSI_USAGE
-      )
+      `${colorize(`     provider=${provider}`, ANSI_USAGE)} calls=${formatWholeNumber(row.calls)}${colorize(` share=${formatRatio(row.calls, usageTotalCalls)}`, ANSI_USAGE)}`
     );
     console.log(
       colorize(

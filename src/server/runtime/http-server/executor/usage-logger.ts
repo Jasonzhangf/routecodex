@@ -165,11 +165,11 @@ export function logUsageSummary(
       : '');
   const cumulativeTotals = getTokenTotals();
   const tokenSuffix = cumulativeTotals.alltimeTokens > 0
-    ? ` tokens.alltime=${cumulativeTotals.alltimeTokens} tokens.daily=${cumulativeTotals.dailyTokens}`
+    ? ` \x1b[97mtokens.alltime=${cumulativeTotals.alltimeTokens} tokens.daily=${cumulativeTotals.dailyTokens}\x1b[0m`
     : '';
-  const line = `[usage] request ${requestId} provider=${providerLabel} latency=${latency}ms (${usageText})${extraBreakdown}${tokenSuffix}${timingSuffix}${hubStageTopSuffix}`;
+  const line = `[usage] request ${requestId} provider=${providerLabel} latency=${latency}ms (${usageText})${extraBreakdown}${timingSuffix}${hubStageTopSuffix}`;
   console.log(colorizeRequestLog(line, requestId, {
     sessionId: info.sessionId,
     conversationId: info.conversationId
-  }));
+  }) + tokenSuffix);
 }
