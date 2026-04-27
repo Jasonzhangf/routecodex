@@ -1,6 +1,7 @@
 import { resolveBoolFromEnv } from './utils.js';
 import { resolveSessionAnsiColor } from '../../../../utils/session-log-color.js';
 import { getSessionClientRegistry } from '../session-client-registry.js';
+import { getTokenStatsSnapshot } from './token-stats-store.js';
 
 type VirtualRouterHitRecord = {
   routeName?: string;
@@ -125,6 +126,7 @@ const DEFAULT_MAX_BUCKETS = 4096;
 const DEFAULT_MAX_SESSION_EVENTS = 10;
 const DEFAULT_SESSION_TTL_MS = 300_000; // 5 minutes
 const DEFAULT_TOP_N = 20;
+const TOKEN_PROVIDER_TOP_N = 5;
 const ANSI_RESET = '\x1b[0m';
 const ANSI_DIM = '\x1b[90m';
 const ANSI_BOLD = '\x1b[1m';
@@ -137,6 +139,8 @@ const ANSI_WHITE = '\x1b[97m';
 let flushTimer: NodeJS.Timeout | undefined;
 let windowStartedAtMs = Date.now();
 let lastSessionTtlCleanAtMs = Date.now();
+let beforeExitHook: (() => void) | undefined;
+let exitHook: (() => void) | undefined;
 
 const virtualRouterHits = new Map<string, VirtualRouterHitAgg>();
 const usageRollups = new Map<string, UsageRollupAgg>();
@@ -246,8 +250,10 @@ function bindExitHooksOnce(): void {
     return;
   }
   exitHookBound = true;
-  process.once('beforeExit', () => flushLogRollup('beforeExit'));
-  process.once('exit', () => flushLogRollup('exit'));
+  beforeExitHook = () => flushLogRollup('beforeExit');
+  exitHook = () => flushLogRollup('exit');
+  process.once('beforeExit', beforeExitHook);
+  process.once('exit', exitHook);
 }
 
 
@@ -815,6 +821,30 @@ export function flushLogRollup(trigger: 'interval' | 'beforeExit' | 'exit' | 'ma
       ANSI_HEADER
     )
   );
+  const tokenSnap = getTokenStatsSnapshot();
+  if (tokenSnap.alltime.totalTokens > 0) {
+    console.log(
+      colorize(
+        `${ANSI_BOLD}[tokens][1m]${ANSI_RESET} alltime: prompt=${tokenSnap.alltime.promptTokens} completion=${tokenSnap.alltime.completionTokens} total=${tokenSnap.alltime.totalTokens} | daily(${tokenSnap.dailyDate}): prompt=${tokenSnap.daily.promptTokens} completion=${tokenSnap.daily.completionTokens} total=${tokenSnap.daily.totalTokens}`,
+        ANSI_USAGE
+      )
+    );
+    const topProviders = tokenSnap.providers.slice(0, TOKEN_PROVIDER_TOP_N);
+    const remainingProviders = Math.max(0, tokenSnap.providers.length - topProviders.length);
+    for (const tp of topProviders) {
+      if (tp.totalTokens > 0) {
+        console.log(
+          colorize(
+            `  ${tp.providerKey}.${tp.model}: prompt=${tp.promptTokens} completion=${tp.completionTokens} total=${tp.totalTokens}`,
+            ANSI_USAGE
+          )
+        );
+      }
+    }
+    if (remainingProviders > 0) {
+      console.log(colorize(`  ... +${remainingProviders} more token providers`, ANSI_DIM));
+    }
+  }
   console.log(
     colorize(
       `${ANSI_BOLD}[virtual-router-hit][1m]${ANSI_RESET} groups=${vrRows.length} hits=${vrTotalHits} rate=${formatPerSecond(vrTotalHits, windowSeconds)}`,
@@ -1138,5 +1168,14 @@ export function __resetLogRollupForTest(): void {
     clearInterval(flushTimer);
     flushTimer = undefined;
   }
+  if (beforeExitHook) {
+    process.off('beforeExit', beforeExitHook);
+    beforeExitHook = undefined;
+  }
+  if (exitHook) {
+    process.off('exit', exitHook);
+    exitHook = undefined;
+  }
+  exitHookBound = false;
   clearWindow(Date.now());
 }

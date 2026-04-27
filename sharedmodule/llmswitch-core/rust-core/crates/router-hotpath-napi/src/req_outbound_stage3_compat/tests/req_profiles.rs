@@ -1450,9 +1450,7 @@ fn test_req_profile_chat_deepseek_web_native_applied() {
     assert!(prompt.contains("Evidence first for code/debug tasks"));
     assert!(prompt.contains("<<SYSTEM_PROMPT"));
     assert!(prompt.contains("\nSYSTEM_PROMPT"));
-    assert!(prompt.contains(
-        "<｜end▁of▁sentence｜>\n<<SYSTEM_PROMPT"
-    ));
+    assert!(prompt.contains("<｜end▁of▁sentence｜>\n<<SYSTEM_PROMPT"));
     assert!(!prompt.contains("[Authoritative RouteCodex system instruction"));
     assert!(!prompt.contains("Follow the system instruction above exactly"));
     assert!(!prompt.contains("<｜User｜><<SYSTEM_PROMPT"));
@@ -1554,9 +1552,7 @@ fn test_req_profile_chat_deepseek_web_wraps_history_tool_calls_and_drops_empty_t
     assert!(prompt.contains("confidential project"));
     assert!(prompt.contains("Evidence first for code/debug tasks"));
     assert!(prompt.contains("<<SYSTEM_PROMPT"));
-    assert!(prompt.contains(
-        "<｜end▁of▁sentence｜>\n<<SYSTEM_PROMPT"
-    ));
+    assert!(prompt.contains("<｜end▁of▁sentence｜>\n<<SYSTEM_PROMPT"));
     assert!(prompt.contains("follow contract"));
     assert!(prompt.contains("If a tool is needed, emit the tool-call container directly."));
     assert!(prompt.contains("confidential project"));
@@ -1635,9 +1631,7 @@ fn test_req_profile_chat_deepseek_web_reinjects_override_after_prior_tool_round_
     assert!(prompt.contains("pwd output: /workspace"));
     assert!(!prompt.contains("old injected guidance should be stripped before fresh reinjection"));
     assert!(prompt.matches("Tool-call output contract (STRICT)").count() >= 2);
-    assert!(prompt.contains(
-        "<｜end▁of▁sentence｜>\n<<SYSTEM_PROMPT"
-    ));
+    assert!(prompt.contains("<｜end▁of▁sentence｜>\n<<SYSTEM_PROMPT"));
     assert!(prompt.contains("\nSYSTEM_PROMPT"));
     assert!(!prompt.contains("Follow the system instruction above exactly"));
 }
@@ -1858,7 +1852,8 @@ fn test_req_profile_chat_deepseek_web_thinking_route_with_tools_forces_tool_requ
     assert!(prompt.contains("prefer one focused inspection call at a time"));
     assert!(prompt.contains("One successful read is not enough."));
     assert!(prompt.contains("<read_file>, <file_read>, <execute_command>, <tool_call>, <invoke>, <parameter>, <previous_tool_call>"));
-    assert!(prompt.contains("Do not invent read_file, file_read, shell_command, command, cwd, or workdir."));
+    assert!(prompt
+        .contains("Do not invent read_file, file_read, shell_command, command, cwd, or workdir."));
     assert!(prompt.contains("请直接调用 exec_command"));
 }
 

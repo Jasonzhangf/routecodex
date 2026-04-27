@@ -365,6 +365,16 @@ export async function resolveReportedRouteErrorHttpResponse(args: {
     }
   } catch (error) {
     args.onReportError?.(error);
+    // Hub not initialized — propagate routePayload code into the error for correct mapping
+    const routeCode = typeof args.routePayload.code === 'string' ? args.routePayload.code : undefined;
+    if (routeCode && routeCode !== mapped.body?.error?.code) {
+      const augmented = Object.assign(new Error(args.normalizedError.message), {
+        name: args.normalizedError.name,
+        code: routeCode,
+        status: (args.normalizedError as any).status ?? (args.normalizedError as any).statusCode,
+      });
+      mapped = mapErrorToHttp(augmented);
+    }
   }
   const requestId = typeof args.routePayload.requestId === 'string' ? args.routePayload.requestId : undefined;
   if (requestId && mapped.body?.error && !mapped.body.error.request_id) {

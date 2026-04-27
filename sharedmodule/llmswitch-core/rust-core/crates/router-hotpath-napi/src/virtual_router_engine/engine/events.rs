@@ -55,7 +55,10 @@ impl VirtualRouterEngineCore {
         }
         let reason = extract_error_reason(event);
         let now = now_ms();
-        let fatal = event.get("fatal").and_then(|v| v.as_bool()).unwrap_or(false);
+        let fatal = event
+            .get("fatal")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let status_code = extract_status_code(event);
         let cooldown_override_ms = extract_cooldown_override_ms(event);
         let cooldown_ms = cooldown_override_ms.or_else(|| {

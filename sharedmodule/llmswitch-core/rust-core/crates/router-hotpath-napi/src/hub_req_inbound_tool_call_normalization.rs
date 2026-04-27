@@ -696,7 +696,10 @@ mod tests {
         let out = payload["input"][1]["output"].as_str().expect("output text");
         assert_eq!(
             out,
-            format!("Command: /bin/zsh -lc 'cat long.txt'\nOutput:\n{}", very_long)
+            format!(
+                "Command: /bin/zsh -lc 'cat long.txt'\nOutput:\n{}",
+                very_long
+            )
         );
     }
 

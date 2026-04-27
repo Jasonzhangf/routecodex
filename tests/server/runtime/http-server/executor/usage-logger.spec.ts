@@ -1,4 +1,9 @@
 import { jest } from '@jest/globals';
+import fsSync from 'node:fs';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 describe('usage logger timing summary', () => {
   const originalEnv = { ...process.env };
@@ -7,6 +12,12 @@ describe('usage logger timing summary', () => {
     try {
       const { __resetLogRollupForTest } = await import('../../../../../src/server/runtime/http-server/executor/log-rollup.js');
       __resetLogRollupForTest();
+    } catch {
+      // ignore dynamic import failures during module reset
+    }
+    try {
+      const { __resetTokenStatsForTest } = await import('../../../../../src/server/runtime/http-server/executor/token-stats-store.js');
+      __resetTokenStatsForTest();
     } catch {
       // ignore dynamic import failures during module reset
     }
@@ -38,6 +49,46 @@ describe('usage logger timing summary', () => {
     });
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[usage] request req_usage_timing'));
+  });
+
+  it('prints cumulative token totals without requiring hot-path sync writes', async () => {
+    const fakeHome = path.join(os.tmpdir(), `usage-logger-token-stats-${process.pid}-${randomUUID()}`);
+    const homedirSpy = jest.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const writeFileSyncSpy = jest.spyOn(fsSync, 'writeFileSync');
+    const writeDir = path.join(fakeHome, '.rcc');
+    const statsPath = path.join(writeDir, 'token-stats.json');
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+    const { flushTokenStats } = await import('../../../../../src/server/runtime/http-server/executor/token-stats-store.js');
+
+    logUsageSummary('req_tokens_1', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      finishReason: 'stop',
+      latencyMs: 120,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    });
+    logUsageSummary('req_tokens_2', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      finishReason: 'stop',
+      latencyMs: 130,
+      usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 }
+    });
+
+    const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    expect(rendered).toContain('tokens.alltime=25');
+    expect(rendered).toContain('tokens.daily=25');
+    expect(writeFileSyncSpy).not.toHaveBeenCalled();
+
+    flushTokenStats();
+    const persisted = JSON.parse(await fs.readFile(statsPath, 'utf8'));
+    expect(persisted.alltime.totalTokens).toBe(25);
+    expect(persisted.providers['demo.key1|demo-model'].totalTokens).toBe(25);
+
+    await fs.rm(fakeHome, { recursive: true, force: true });
+    homedirSpy.mockRestore();
   });
 
   it('prints breakdown in dev usage summary when summary mode is enabled and scoped timings exist', async () => {
@@ -350,6 +401,8 @@ describe('usage logger timing summary', () => {
   it('rolls up non-stop usage logs into 1-minute summary', async () => {
     process.env.ROUTECODEX_BUILD_MODE = 'release';
     process.env.ROUTECODEX_USAGE_TIMING = '1';
+    process.env.ROUTECODEX_LOG_ROLLUP = '1';
+    process.env.ROUTECODEX_LOG_ROLLUP_REALTIME = '0';
 
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');

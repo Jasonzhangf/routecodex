@@ -14,8 +14,7 @@ fn shared_tooling_repair_find_meta_json() {
 
 #[test]
 fn shared_tooling_repair_find_meta_json_escapes_bare_parens() {
-    let input =
-        json!("find . -type f ( -name \"*.ts\" -o -name \"*.tsx\" ) -print").to_string();
+    let input = json!("find . -type f ( -name \"*.ts\" -o -name \"*.tsx\" ) -print").to_string();
     let raw = repair_find_meta_json(input).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
     let repaired = parsed.as_str().unwrap_or("");

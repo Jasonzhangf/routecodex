@@ -929,8 +929,7 @@ mod tests {
     }
 
     #[test]
-    fn test_post_governed_media_cleanup_preserves_followup_messages_and_context()
-    {
+    fn test_post_governed_media_cleanup_preserves_followup_messages_and_context() {
         let input = ToolGovernanceInput {
             request: serde_json::json!({
               "model": "kimi-k2.5",

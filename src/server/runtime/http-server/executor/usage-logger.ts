@@ -5,6 +5,7 @@ import { buildProviderLabel } from './provider-response-utils.js';
 import { colorizeRequestLog, registerRequestLogContext } from '../../../utils/request-log-color.js';
 import { formatRequestTimingSummary, isUsageTimingOutputEnabled } from '../../../utils/stage-logger.js';
 import { recordUsageRollup } from './log-rollup.js';
+import { recordTokens, getTokenTotals } from './token-stats-store.js';
 
 type HubStageTopEntry = {
   stage: string;
@@ -142,6 +143,15 @@ export function logUsageSummary(
     retryCount,
     finishReason: info.finishReason
   });
+  // Record token consumption for persistent cumulative tracking
+  {
+    const pt = info.usage?.prompt_tokens ?? 0;
+    const ct = info.usage?.completion_tokens ?? 0;
+    const tt = info.usage?.total_tokens ?? (pt + ct);
+    if (pt > 0 || ct > 0 || tt > 0) {
+      recordTokens(info.providerKey ?? 'unknown', info.model ?? '-', pt, ct, tt);
+    }
+  }
   const finishReason = typeof info.finishReason === 'string' ? info.finishReason.trim().toLowerCase() : '';
   if (finishReason !== 'stop') {
     return;
@@ -153,7 +163,11 @@ export function logUsageSummary(
     + (typeof info.providerDecodeTag === 'string' && info.providerDecodeTag.trim()
       ? ` ${info.providerDecodeTag.trim()}`
       : '');
-  const line = `[usage] request ${requestId} provider=${providerLabel} latency=${latency}ms (${usageText})${extraBreakdown}${timingSuffix}${hubStageTopSuffix}`;
+  const cumulativeTotals = getTokenTotals();
+  const tokenSuffix = cumulativeTotals.alltimeTokens > 0
+    ? ` tokens.alltime=${cumulativeTotals.alltimeTokens} tokens.daily=${cumulativeTotals.dailyTokens}`
+    : '';
+  const line = `[usage] request ${requestId} provider=${providerLabel} latency=${latency}ms (${usageText})${extraBreakdown}${tokenSuffix}${timingSuffix}${hubStageTopSuffix}`;
   console.log(colorizeRequestLog(line, requestId, {
     sessionId: info.sessionId,
     conversationId: info.conversationId

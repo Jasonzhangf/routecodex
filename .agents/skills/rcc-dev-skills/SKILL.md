@@ -153,6 +153,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - helper 对齐规则（2026-04-12）：若 TS/client helper（如 `processChatResponseTools`）与 chat pipeline 行为漂移，优先检查它是否绕开 `resp_process_stage1_tool_governance`。helper 必须先复用 unified resp-process native entry；旧 `hub_reasoning_tool_normalizer` 只能做**显式 name 的 malformed 文本 salvage**，不得恢复缺 name 的 shell/apply_patch 调用。
 - Provider snapshot 背压精华（2026-04-13）：**provider snapshot 不要在请求路径直接 await 写盘**；必须走**有界异步队列**，并在队列满或内存预算超限时**丢弃最旧 pending item**。仅靠“本地最近 N 条保留”不能阻止慢磁盘/失败写盘把待写 payload 长时间堆在内存里。
 - Errorsamples 背压精华（2026-04-13）：**errorsamples 也不能同步直写**；必须和 snapshot 一样走**有界异步队列 + drop oldest pending**。`429/502` 这类瞬时上游错误默认**直接跳过写盘**，否则最容易在重试风暴里把磁盘和内存一起打爆。
+- Token/usage 观测热路径精华（2026-04-27）：`usage` / token 累计这类**纯观测统计**禁止在请求主链同步写盘；请求路径只允许**内存累加**，落盘必须走**后台异步 flush + 原子 rename**，rollup 日志只打 **top N**，避免磁盘抖动和日志风暴反噬主链。
 - Snapshot 固定文件并发写精华（2026-04-18）：`__runtime.json` 这类**固定文件名**若会被 Rust hook 与 TS mirror 共同落盘，必须使用**create-if-missing / 原子链接或 rename**；禁止对同一路径直接 `fs::write` 覆盖，否则会出现“前半段旧 JSON + 后半段新尾巴”的拼接坏样本。
 - Snapshot 双实现扫描动作（2026-04-18）：排查样本坏文件时，先 grep 同名文件是否同时存在 **native hook 写盘** 与 **host mirror 写盘** 两套实现；如果两边都写同一路径，只允许一边 `create_new`，另一边只能幂等跳过。
 - DeepSeek 静默失败排查（2026-04-12）：若日志出现 `finish_reason=stop` + `no assistant content`，先查 `resp_process_stage1_tool_governance::sanitize_reasoning_fields_after_tool_harvest`。**ChunkingError / 沙箱失败正文只有在 message 已成功带上非空 `tool_calls` 后才允许去噪；无 tool_calls 时必须保留原始失败正文。**

@@ -25,9 +25,7 @@ fn extract_request_system_text(block_text: &str) -> String {
     trimmed.to_string()
 }
 
-fn build_authoritative_system_override_block(
-    merged: &[PromptMessage],
-) -> Option<String> {
+fn build_authoritative_system_override_block(merged: &[PromptMessage]) -> Option<String> {
     let request_system_text = merged
         .first()
         .filter(|first| first.role == "system")

@@ -1,4 +1,7 @@
 import { jest } from '@jest/globals';
+import os from 'node:os';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 describe('log rollup', () => {
   const originalEnv = { ...process.env };
@@ -7,6 +10,12 @@ describe('log rollup', () => {
     try {
       const { __resetLogRollupForTest } = await import('../../../../../src/server/runtime/http-server/executor/log-rollup.js');
       __resetLogRollupForTest();
+    } catch {
+      // ignore cleanup failure during module reset
+    }
+    try {
+      const { __resetTokenStatsForTest } = await import('../../../../../src/server/runtime/http-server/executor/token-stats-store.js');
+      __resetTokenStatsForTest();
     } catch {
       // ignore cleanup failure during module reset
     }
@@ -224,5 +233,46 @@ describe('log rollup', () => {
     expect(lines.some((line) => line.includes('[rollup][1m]'))).toBe(false);
     expect(lines.some((line) => line.includes('[virtual-router-hit][1m]'))).toBe(false);
     expect(lines.some((line) => line.includes('[usage][1m]'))).toBe(false);
+  });
+
+  it('limits token provider rollup output to top 5 entries', async () => {
+    process.env.ROUTECODEX_LOG_ROLLUP = '1';
+    process.env.ROUTECODEX_LOG_ROLLUP_REALTIME = '0';
+    const fakeHome = path.join(os.tmpdir(), `log-rollup-token-stats-${process.pid}-${randomUUID()}`);
+    const homedirSpy = jest.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { recordTokens } = await import('../../../../../src/server/runtime/http-server/executor/token-stats-store.js');
+    const {
+      recordUsageRollup,
+      flushLogRollup
+    } = await import('../../../../../src/server/runtime/http-server/executor/log-rollup.js');
+
+    for (let index = 1; index <= 7; index += 1) {
+      recordTokens(`provider.${index}`, `model.${index}`, index, index, index * 10);
+    }
+    recordUsageRollup({
+      requestId: 'req-token-topn',
+      routeName: 'default',
+      poolId: 'p1',
+      providerKey: 'provider.1',
+      model: 'model.1',
+      sessionId: 'sid-topn',
+      latencyMs: 100,
+      internalLatencyMs: 40,
+      externalLatencyMs: 60
+    });
+
+    flushLogRollup('manual');
+    const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(lines.some((line) => line.includes('provider.7.model.7:'))).toBe(true);
+    expect(lines.some((line) => line.includes('provider.6.model.6:'))).toBe(true);
+    expect(lines.some((line) => line.includes('provider.5.model.5:'))).toBe(true);
+    expect(lines.some((line) => line.includes('provider.4.model.4:'))).toBe(true);
+    expect(lines.some((line) => line.includes('provider.3.model.3:'))).toBe(true);
+    expect(lines.some((line) => line.includes('provider.2.model.2:'))).toBe(false);
+    expect(lines.some((line) => line.includes('provider.1.model.1:'))).toBe(false);
+    expect(lines.some((line) => line.includes('... +2 more token providers'))).toBe(true);
+
+    homedirSpy.mockRestore();
   });
 });

@@ -137,14 +137,15 @@ fn collect_allowed_tool_names(tools: Option<&Value>) -> Vec<String> {
     names
 }
 
-pub(super) fn build_required_tool_call_tail_reminder_for_tools(
-    tools: Option<&Value>,
-) -> String {
+pub(super) fn build_required_tool_call_tail_reminder_for_tools(tools: Option<&Value>) -> String {
     let allowed_names = collect_allowed_tool_names(tools);
     let allowed_names_line = if allowed_names.is_empty() {
         "Allowed tool names this turn: (use only declared names from the tool list).".to_string()
     } else {
-        format!("Allowed tool names this turn: {}.", allowed_names.join(", "))
+        format!(
+            "Allowed tool names this turn: {}.",
+            allowed_names.join(", ")
+        )
     };
     let exec_shape_line = if allowed_names.iter().any(|name| name == "exec_command") {
         Some(
