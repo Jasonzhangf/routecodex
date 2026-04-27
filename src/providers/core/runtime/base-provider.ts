@@ -411,16 +411,25 @@ export abstract class BaseProvider implements IProviderV2 {
       requestId: _context.requestId
     };
 
-    emitProviderError({
-      error: augmentedError,
-      stage: 'provider.http',
-      runtime: buildRuntimeFromProviderContext(_context),
-      dependencies: this.dependencies,
-      statusCode,
-      recoverable,
-      affectsHealth,
-      details: enrichedDetails
-    });
+    try {
+      emitProviderError({
+        error: augmentedError,
+        stage: 'provider.http',
+        runtime: buildRuntimeFromProviderContext(_context),
+        dependencies: this.dependencies,
+        statusCode,
+        recoverable,
+        affectsHealth,
+        details: enrichedDetails
+      });
+    } catch (reportError) {
+      this.dependencies.logger?.logModule(this.getLogId(), 'provider-error-report-failed', {
+        requestId: _context.requestId,
+        providerKey,
+        runtimeKey: runtimeProfile?.runtimeKey,
+        message: reportError instanceof Error ? reportError.message : String(reportError ?? 'unknown reporter error')
+      });
+    }
   }
 
   private enforceRateLimitWindow(_context: ProviderContext): void {

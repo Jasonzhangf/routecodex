@@ -374,8 +374,8 @@ describe('HubRequestExecutor provider error reporting', () => {
           details: expect.objectContaining({
             source: 'provider.send',
             errorClassification: 'recoverable',
-            errorCode: 'new_api_error',
-            upstreamCode: 'new_api_error',
+            errorCode: 'NEW_API_ERROR',
+            upstreamCode: 'NEW_API_ERROR',
             reason: 'database is locked (5) (SQLITE_BUSY)'
           })
         })

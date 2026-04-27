@@ -863,15 +863,15 @@ describe('HubRequestExecutor failover', () => {
   });
 
 
-  test('retries with alternate provider after recoverable error', async () => {
+  test('keeps recoverable 429 on the same provider even when an alternative provider exists', async () => {
     const firstProviderKey = 'antigravity.1-geetasamodgeetasamoda.claude-sonnet-4-5-thinking';
     const secondProviderKey = 'antigravity.2-geetasamodgeetasamoda.claude-sonnet-4-5-thinking';
     const failingError = new Error('HTTP 429: quota exhausted');
     (failingError as any).statusCode = 429;
 
-    const failingProcess = jest.fn(async () => {
-      throw failingError;
-    });
+    const failingProcess = jest.fn()
+      .mockRejectedValueOnce(failingError)
+      .mockResolvedValueOnce({ status: 200, data: { id: 'ok_after_same_provider_wait' } });
     const failureHandle = buildHandle(firstProviderKey, failingProcess);
     const successPayload = { status: 200, data: { id: 'ok' } };
     const successProcess = jest.fn(async () => successPayload);
@@ -938,9 +938,12 @@ describe('HubRequestExecutor failover', () => {
     });
 
     expect(pipeline.execute).toHaveBeenCalledTimes(2);
-    expect(failingProcess).toHaveBeenCalledTimes(1);
-    expect(successProcess).toHaveBeenCalledTimes(1);
+    expect(failingProcess).toHaveBeenCalledTimes(2);
+    expect(successProcess).toHaveBeenCalledTimes(0);
     expect(result).toEqual(expect.objectContaining({ status: 200 }));
+
+    const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
+    expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
   });
 
   test('prints retry switch reason and error code to console on same-provider recoverable backoff', async () => {
@@ -1515,7 +1518,7 @@ describe('HubRequestExecutor failover', () => {
     expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
   });
 
-  test('backs off the last remaining 429 provider instead of excluding it again', async () => {
+  test('does not exclude provider on repeated 429 even when route pool has another candidate', async () => {
     const providerA = 'openrouter.key1.qwen/qwen3.6-plus:free';
     const providerB = 'qwen.2-135.qwen3.6-plus';
     const error429A = Object.assign(new Error('HTTP 429: provider A rate limited'), {
@@ -1526,16 +1529,11 @@ describe('HubRequestExecutor failover', () => {
       statusCode: 429,
       code: 'HTTP_429'
     });
-    const processA = jest.fn(async () => {
-      throw error429A;
-    });
-    let providerBAttempt = 0;
+    const processA = jest.fn()
+      .mockRejectedValueOnce(error429A)
+      .mockResolvedValueOnce({ status: 200, data: { id: 'ok_after_same_provider_wait' } });
     const processB = jest.fn(async () => {
-      providerBAttempt += 1;
-      if (providerBAttempt === 1) {
-        throw error429B;
-      }
-      return { status: 200, data: { id: 'ok_after_last_provider_wait' } };
+      throw error429B;
     });
 
     const handles = new Map<string, ProviderHandle>([
@@ -1606,14 +1604,12 @@ describe('HubRequestExecutor failover', () => {
       });
 
       expect(result).toEqual(expect.objectContaining({ status: 200 }));
-      expect(pipeline.execute).toHaveBeenCalledTimes(3);
-      expect(processA).toHaveBeenCalledTimes(1);
-      expect(processB).toHaveBeenCalledTimes(2);
+      expect(pipeline.execute).toHaveBeenCalledTimes(2);
+      expect(processA).toHaveBeenCalledTimes(2);
+      expect(processB).toHaveBeenCalledTimes(0);
 
       const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
-      expect(secondCallMetadata.excludedProviderKeys).toEqual([providerA]);
-      const thirdCallMetadata = pipeline.execute.mock.calls[2][0].metadata as Record<string, unknown>;
-      expect(thirdCallMetadata.excludedProviderKeys).toEqual([providerA]);
+      expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
     } finally {
       if (previousBase === undefined) {
         delete process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
@@ -1719,7 +1715,7 @@ describe('HubRequestExecutor failover', () => {
         .filter((line) => line.includes('[provider-switch]'));
       expect(switchLines).toHaveLength(1);
       expect(switchLines[0]).toContain(`provider=${providerA}`);
-      expect(switchLines[0]).toContain('backoff=1ms');
+      expect(switchLines[0]).toMatch(/backoff=\d+ms/);
       expect(switchLines[0]).toContain('backoffScope=recoverable');
       expect(switchLines[0]).toContain('decision=recoverable_backoff_same_provider');
       expect(processB).toHaveBeenCalledTimes(0);

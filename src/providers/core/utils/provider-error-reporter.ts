@@ -50,8 +50,8 @@ interface EmitOptions {
   runtime: ExtendedRuntimeMetadata;
   dependencies: ModuleDependencies;
   statusCode?: number;
-  recoverable?: boolean;
-  affectsHealth?: boolean;
+  recoverable: boolean;
+  affectsHealth: boolean;
   details?: Record<string, unknown>;
 }
 
@@ -59,7 +59,10 @@ export function emitProviderError(options: EmitOptions): void {
   const err = normalizeError(options.error);
   const code = normalizeCode(err, options.stage);
   const status = determineStatusCode(err, options.statusCode);
-  const recoverable = options.recoverable ?? (err.retryable === true);
+  if (typeof options.recoverable !== 'boolean' || typeof options.affectsHealth !== 'boolean') {
+    throw new Error('[provider-error-reporter] explicit recoverable/affectsHealth is required');
+  }
+  const recoverable = options.recoverable;
 
   // 组装细粒度 details：优先使用错误自身的 details，再叠加调用方附加信息。
   let mergedDetails: Record<string, unknown> | undefined = extractRecord(err.details);
@@ -95,15 +98,7 @@ export function emitProviderError(options: EmitOptions): void {
     timestamp: Date.now(),
     details: mergedDetails
   };
-  // Explicit affectsHealth from caller must win; otherwise default to
-  // "non-recoverable affects health, recoverable usually affects health".
-  if (typeof options.affectsHealth === 'boolean') {
-    event.affectsHealth = options.affectsHealth;
-  } else if (!recoverable) {
-    event.affectsHealth = true;
-  } else {
-    event.affectsHealth = true;
-  }
+  event.affectsHealth = options.affectsHealth;
   // Propagate recoverable flag back to original error for callers that want
   // to implement custom retry/failover behaviour.
   if (typeof recoverable === 'boolean') {

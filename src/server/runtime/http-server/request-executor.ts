@@ -3,6 +3,17 @@ import type { PipelineExecutionInput, PipelineExecutionResult } from '../../hand
 import type { HubPipeline, ProviderHandle, ProviderProtocol } from './types.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
+import {
+  describeProviderFailureDecision,
+  isBlockingRecoverableProviderFailure,
+  resolveProviderFailureExclusionDecision,
+  isProviderFailureHealthNeutral,
+  normalizeProviderFailureCodeKey,
+  resolveProviderFailureRetryEligibility,
+  resolveProviderFailureClassification,
+  resolveProviderFailureActionPlan,
+  type ProviderFailureClassification
+} from '../../../providers/core/runtime/provider-failure-policy.js';
 import type { StatsManager } from './stats-manager.js';
 import {
   buildRequestMetadata,
@@ -816,10 +827,7 @@ type RequestExecutorProviderErrorStage =
   | 'provider.sse_decode'
   | 'provider.http';
 
-type RequestExecutorProviderErrorClassification =
-  | 'unrecoverable'
-  | 'recoverable'
-  | 'special_400';
+type RequestExecutorProviderErrorClassification = ProviderFailureClassification;
 
 function createClientDisconnectedAbortError(reason?: unknown): Error & { code: string; name: string; retryable?: boolean } {
   const message =
@@ -897,79 +905,21 @@ function resolveRequestExecutorProviderErrorClassification(args: {
   retryError: RetryErrorSnapshot;
   stage?: RequestExecutorProviderErrorStage;
 }): RequestExecutorProviderErrorClassification | undefined {
-  const stage = args.stage;
-  if (stage === 'provider.followup' || isHostRequestExecutorErrorStage(stage ?? 'provider.send')) {
-    return undefined;
-  }
-  if (isClientDisconnectAbortError(args.error)) {
-    return 'unrecoverable';
-  }
-  const statusCode =
-    typeof args.retryError.statusCode === 'number'
-      ? args.retryError.statusCode
-      : extractStatusCodeFromError(args.error);
-  if (statusCode === 400 && !isPromptTooLongError(args.error)) {
-    return 'special_400';
-  }
-  const errorCode =
-    normalizeCodeKey((args.error as { code?: unknown } | undefined)?.code)
-    ?? normalizeCodeKey(args.retryError.errorCode);
-  const upstreamCode =
-    normalizeCodeKey((args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode)
-    ?? normalizeCodeKey(args.retryError.upstreamCode);
-  const reason = String(args.retryError.reason || (args.error as { message?: string } | undefined)?.message || '')
-    .trim()
-    .toLowerCase();
-
-  if (errorCode === 'CONTEXT_LENGTH_EXCEEDED' || upstreamCode === 'CONTEXT_LENGTH_EXCEEDED') {
-    return 'special_400';
-  }
-
-  if (
-    errorCode === 'INVALID_REQUEST_ERROR'
-    || upstreamCode === 'INVALID_REQUEST_ERROR'
-    || reason.includes('invalid request payload')
-    || reason.includes('signature-invalid')
-  ) {
-    return 'special_400';
-  }
-
-  const unrecoverableCodeSet = new Set([
-    'INVALID_API_KEY',
-    'INVALID_ACCESS_TOKEN',
-    'INSUFFICIENT_QUOTA',
-    'MODEL_NOT_SUPPORTED',
-    'MODEL_DISABLED',
-    'NO_SUCH_MODEL',
-    'ACCOUNT_DISABLED',
-    'ACCOUNT_SUSPENDED',
-    'ACCESS_DENIED',
-    'FORBIDDEN'
-  ]);
-  if (typeof statusCode === 'number' && (statusCode === 401 || statusCode === 402 || statusCode === 403)) {
-    return 'unrecoverable';
-  }
-  if (
-    (errorCode && unrecoverableCodeSet.has(errorCode))
-    || (upstreamCode && unrecoverableCodeSet.has(upstreamCode))
-  ) {
-    return 'unrecoverable';
-  }
-  if (
-    reason.includes('invalid api key')
-    || reason.includes('invalid access token')
-    || reason.includes('token expired')
-    || reason.includes('insufficient_quota')
-    || reason.includes('quota exceeded')
-    || reason.includes('model is not supported')
-    || reason.includes('model not supported')
-    || reason.includes('access denied')
-    || reason.includes('account suspended')
-    || reason.includes('account disabled')
-  ) {
-    return 'unrecoverable';
-  }
-  return 'recoverable';
+  return resolveProviderFailureClassification({
+    error: args.error,
+    stage: args.stage,
+    statusCode:
+      typeof args.retryError.statusCode === 'number'
+        ? args.retryError.statusCode
+        : extractStatusCodeFromError(args.error),
+    errorCode:
+      normalizeProviderFailureCodeKey((args.error as { code?: unknown } | undefined)?.code)
+      ?? normalizeProviderFailureCodeKey(args.retryError.errorCode),
+    upstreamCode:
+      normalizeProviderFailureCodeKey((args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode)
+      ?? normalizeProviderFailureCodeKey(args.retryError.upstreamCode),
+    reason: String(args.retryError.reason || (args.error as { message?: string } | undefined)?.message || '')
+  });
 }
 
 function isLastAvailableProvider429(args: {
@@ -1004,22 +954,20 @@ function shouldApplyProviderTransportBackoff(args: {
   if (stage === 'provider.followup' || isHostRequestExecutorErrorStage(stage)) {
     return false;
   }
-  if (isNetworkTransportLikeError(args.error)) {
+  // Fast path: blocking-recoverable errors (429/5xx/network/traffic-saturated etc.)
+  // always get transport backoff.  Reuses shared provider-failure policy to avoid
+  // duplicate status/code predicate logic.
+  if (isBlockingRecoverableProviderFailure({
+    statusCode: args.retryError.statusCode,
+    errorCode: args.retryError.errorCode,
+    upstreamCode: args.retryError.upstreamCode,
+    reason: args.retryError.reason
+  })) {
     return true;
   }
-  const status = typeof args.retryError.statusCode === 'number' ? args.retryError.statusCode : undefined;
-  const errorCode = normalizeCodeKey(args.retryError.errorCode);
-  const upstreamCode = normalizeCodeKey(args.retryError.upstreamCode);
-  if (
-    status === 429
-    || status === 408
-    || status === 425
-    || (typeof status === 'number' && status >= 500)
-    || errorCode === 'PROVIDER_TRAFFIC_SATURATED'
-    || upstreamCode === 'PROVIDER_TRAFFIC_SATURATED'
-  ) {
-    return true;
-  }
+  // Broader catch: also apply for any classified-recoverable error (includes network
+  // transport codes like ECONNRESET that aren't covered by blocking-recoverable's
+  // status/code checks).
   return resolveRequestExecutorProviderErrorClassification({
     error: args.error,
     retryError: args.retryError,
@@ -1102,45 +1050,14 @@ function isHealthNeutralProviderError(args: {
   statusCode?: number;
   classification?: RequestExecutorProviderErrorClassification;
 }): boolean {
-  if (args.stage === 'provider.followup' || isHostRequestExecutorErrorStage(args.stage)) {
-    return true;
-  }
-  if (args.classification === 'special_400') {
-    return true;
-  }
-  if (args.classification === 'recoverable') {
-    return true;
-  }
-  const errorCode = normalizeCodeKey(args.errorCode);
-  const upstreamCode = normalizeCodeKey(args.upstreamCode);
-  if (errorCode === 'CLIENT_DISCONNECTED' || upstreamCode === 'CLIENT_DISCONNECTED') {
-    return true;
-  }
-  if (
-    errorCode === 'PROVIDER_TRAFFIC_SATURATED'
-    || upstreamCode === 'PROVIDER_TRAFFIC_SATURATED'
-  ) {
-    return true;
-  }
-  if (
-    errorCode === 'CLIENT_TOOL_ARGS_INVALID'
-  ) {
-    return true;
-  }
-  if (isNetworkTransportLikeError(args.error)) {
-    return true;
-  }
-  if (
-    isServerToolFollowupErrorCode(errorCode)
-    && typeof args.statusCode !== 'number'
-    && !upstreamCode
-  ) {
-    return true;
-  }
-  if (upstreamCode === 'CLIENT_INJECT_FAILED') {
-    return true;
-  }
-  return false;
+  return isProviderFailureHealthNeutral({
+    stage: args.stage,
+    error: args.error,
+    errorCode: args.errorCode,
+    upstreamCode: args.upstreamCode,
+    statusCode: args.statusCode,
+    classification: args.classification
+  });
 }
 
 function resolveReportedProviderErrorRecoverable(args: {
@@ -1264,65 +1181,6 @@ async function reportRequestExecutorProviderError(args: {
       attempt: args.attempt
     });
   }
-}
-
-function isBlockingRecoverableRetryError(args: {
-  statusCode?: number;
-  errorCode?: string;
-  upstreamCode?: string;
-  reason?: string;
-}): boolean {
-  const status = typeof args.statusCode === 'number' ? args.statusCode : undefined;
-  const errorCode = normalizeCodeKey(args.errorCode);
-  const upstreamCode = normalizeCodeKey(args.upstreamCode);
-  const reason = typeof args.reason === 'string' ? args.reason.trim().toLowerCase() : '';
-  if (status === 408 || status === 425 || status === 429 || (typeof status === 'number' && status >= 500)) {
-    return true;
-  }
-  if (
-    errorCode === 'PROVIDER_TRAFFIC_SATURATED'
-    || errorCode === 'HTTP_429'
-    || errorCode === 'HTTP_500'
-    || errorCode === 'HTTP_502'
-    || errorCode === 'HTTP_503'
-    || errorCode === 'HTTP_504'
-    || errorCode === 'SSE_TO_JSON_ERROR'
-    || errorCode === 'SSE_DECODE_ERROR'
-    || errorCode === 'UPSTREAM_EMPTY_OUTPUT'
-  ) {
-    return true;
-  }
-  if (
-    upstreamCode === 'HTTP_429'
-    || upstreamCode === 'HTTP_500'
-    || upstreamCode === 'HTTP_502'
-    || upstreamCode === 'HTTP_503'
-    || upstreamCode === 'HTTP_504'
-    || upstreamCode === 'SSE_TO_JSON_ERROR'
-    || upstreamCode === 'SSE_DECODE_ERROR'
-    || upstreamCode === 'UPSTREAM_EMPTY_OUTPUT'
-  ) {
-    return true;
-  }
-  if (
-    reason.includes('fetch failed')
-    || reason.includes('building not completed')
-    || reason.includes('network')
-    || reason.includes('timeout')
-    || reason.includes('temporarily unavailable')
-  ) {
-    return true;
-  }
-  return false;
-}
-
-function shouldBlockRetryOnCurrentProvider(args: {
-  statusCode?: number;
-  errorCode?: string;
-  upstreamCode?: string;
-  reason?: string;
-}): boolean {
-  return isBlockingRecoverableRetryError(args);
 }
 
 function buildRecoverableErrorBackoffKey(args: {
@@ -1747,28 +1605,6 @@ type RequestExecutorProviderFailurePlan = {
   retryTelemetryPlan?: ProviderRetryTelemetryPlan;
 };
 
-function describeProviderRetryDecision(args: {
-  switchAction: ProviderRetrySwitchAction;
-  backoffScope: ProviderRetryBackoffScope;
-}): string {
-  if (args.switchAction === 'exclude_and_reroute') {
-    if (args.backoffScope === 'provider') {
-      return 'provider_backoff_then_reroute';
-    }
-    if (args.backoffScope === 'recoverable') {
-      return 'recoverable_backoff_then_reroute';
-    }
-    return 'attempt_backoff_then_reroute';
-  }
-  if (args.backoffScope === 'provider') {
-    return 'provider_backoff_same_provider';
-  }
-  if (args.backoffScope === 'recoverable') {
-    return 'recoverable_backoff_same_provider';
-  }
-  return 'attempt_backoff_same_provider';
-}
-
 function resolveProviderRetryEligibilityPlan(args: {
   error: unknown;
   retryError: RetryErrorSnapshot;
@@ -1783,52 +1619,36 @@ function resolveProviderRetryEligibilityPlan(args: {
   isReauth?: boolean;
   allowAntigravityRecovery?: boolean;
 }): ProviderRetryEligibilityPlan {
-  const classification = resolveRequestExecutorProviderErrorClassification({
-    error: args.error,
-    retryError: args.retryError,
-    stage: args.stage
-  });
   const antigravityRecoveryEligible =
     args.allowAntigravityRecovery
     && isAntigravityProviderKey(args.providerKey)
     && (args.isVerify || args.isReauth);
-  const blockingRecoverable = isBlockingRecoverableRetryError({
+  const eligibility = resolveProviderFailureRetryEligibility({
+    error: args.error,
+    stage: args.stage,
     statusCode: args.retryError.statusCode,
     errorCode: args.retryError.errorCode,
     upstreamCode: args.retryError.upstreamCode,
-    reason: args.retryError.reason
+    reason: args.retryError.reason,
+    classification: resolveRequestExecutorProviderErrorClassification({
+      error: args.error,
+      retryError: args.retryError,
+      stage: args.stage
+    }),
+    attempt: args.attempt,
+    maxAttempts: args.maxAttempts,
+    promptTooLong: args.promptTooLong,
+    contextOverflowRetries: args.contextOverflowRetries,
+    maxContextOverflowRetries: args.maxContextOverflowRetries ?? MAX_CONTEXT_OVERFLOW_RETRIES,
+    shouldRetryByError: shouldRetryProviderError(args.error),
+    allowNonPolicyRetry: antigravityRecoveryEligible,
+    stageOutsideProviderFailurePolicy:
+      args.stage === 'host.response_contract'
+      || args.stage === 'host.stopless_contract'
   });
-  if (args.stage === 'provider.followup') {
-    return { shouldRetry: false, blockingRecoverable };
-  }
-  if (classification === 'special_400') {
-    return { shouldRetry: false, blockingRecoverable: false };
-  }
-  if (!(args.attempt < args.maxAttempts)) {
-    return { shouldRetry: false, blockingRecoverable };
-  }
-  if (classification === 'unrecoverable') {
-    return {
-      shouldRetry: false,
-      blockingRecoverable: false
-    };
-  }
-  if (args.promptTooLong) {
-    return {
-      shouldRetry:
-        (args.contextOverflowRetries ?? 0) < (args.maxContextOverflowRetries ?? MAX_CONTEXT_OVERFLOW_RETRIES),
-      blockingRecoverable: false
-    };
-  }
-  if (blockingRecoverable) {
-    return {
-      shouldRetry: shouldRetryProviderError(args.error),
-      blockingRecoverable
-    };
-  }
   return {
-    shouldRetry: shouldRetryProviderError(args.error) || Boolean(antigravityRecoveryEligible),
-    blockingRecoverable
+    shouldRetry: eligibility.shouldRetry,
+    blockingRecoverable: eligibility.blockingRecoverable
   };
 }
 
@@ -1955,7 +1775,7 @@ async function resolveProviderRetryExecutionPlan(args: {
     abortSignal: args.abortSignal,
     logStage: args.logStage
   });
-  const retrySwitchPlan = resolveProviderRetrySwitchPlan({
+  const retrySwitchPlan = buildProviderRetrySwitchPlan({
     runtimeKey: args.runtimeKey,
     routePool: args.routePool,
     runtimeManager: args.runtimeManager,
@@ -2262,12 +2082,17 @@ async function resolveProviderRetryBackoffPlan(args: {
   abortSignal?: AbortSignal;
   logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => void;
 }): Promise<ProviderRetryBackoffPlan> {
-  const blockingRecoverable = isBlockingRecoverableRetryError({
+  const actionPlan = resolveProviderFailureActionPlan({
+    error: args.error,
     statusCode: args.retryError.statusCode,
     errorCode: args.retryError.errorCode,
     upstreamCode: args.retryError.upstreamCode,
-    reason: args.retryError.reason
+    reason: args.retryError.reason,
+    forceProviderScopedBackoff: args.forceProviderScopedBackoff,
+    forceAttemptScopedBackoff: args.forceAttemptScopedBackoff,
+    retryAction: args.forceProviderScopedBackoff ? 'reroute_explicit_alternative' : 'retry_same_provider'
   });
+  const blockingRecoverable = actionPlan.blockingRecoverable;
   if (blockingRecoverable) {
     const logicalChainRetry = consumeLogicalChainRecoverableRetry(args.logicalRequestChainKey);
     if (!logicalChainRetry.allowed) {
@@ -2285,7 +2110,7 @@ async function resolveProviderRetryBackoffPlan(args: {
       throw args.error;
     }
   }
-  if (args.forceAttemptScopedBackoff) {
+  if (actionPlan.backoff.scope === 'attempt') {
     const retryBackoffMs = await waitBeforeRetry(args.error, {
       attempt: args.attempt,
       signal: args.abortSignal
@@ -2297,7 +2122,7 @@ async function resolveProviderRetryBackoffPlan(args: {
       backoffScope: 'attempt'
     };
   }
-  if (args.forceProviderScopedBackoff) {
+  if (actionPlan.backoff.scope === 'provider') {
     const providerScopedKey = buildRecoverableErrorBackoffKey({
       providerKey: args.providerKey,
       runtimeKey: args.runtimeKey,
@@ -2318,7 +2143,7 @@ async function resolveProviderRetryBackoffPlan(args: {
       backoffScope: 'provider'
     };
   }
-  if (!blockingRecoverable) {
+  if (actionPlan.backoff.scope !== 'recoverable') {
     const retryBackoffMs = await waitBeforeRetry(args.error, {
       attempt: args.attempt,
       signal: args.abortSignal
@@ -2354,7 +2179,7 @@ async function resolveProviderRetryBackoffPlan(args: {
   };
 }
 
-function resolveProviderRetrySwitchPlan(args: {
+function buildProviderRetrySwitchPlan(args: {
   runtimeKey?: string;
   routePool?: string[];
   runtimeManager?: RequestExecutorDeps['runtimeManager'];
@@ -2389,8 +2214,8 @@ function resolveProviderRetrySwitchPlan(args: {
   }
   return {
     switchAction,
-    decisionLabel: describeProviderRetryDecision({
-      switchAction,
+    decisionLabel: describeProviderFailureDecision({
+      action: switchAction === 'exclude_and_reroute' ? 'reroute_explicit_alternative' : 'retry_same_provider',
       backoffScope: args.backoffScope
     }),
     runtimeScopeExcluded,
@@ -2687,52 +2512,25 @@ function resolveProviderRetryExclusionPlan(args: {
       antigravityRetrySignal: nextAntigravityRetrySignal
     };
   }
-  if (args.promptTooLong) {
-    return {
-      excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
-        providerKey,
-        excludedProviderKeys: args.excludedProviderKeys
-      }),
-      antigravityRetrySignal: nextAntigravityRetrySignal
-    };
-  }
-  if (args.classification === 'recoverable') {
-    return {
-      excludedCurrentProvider: false,
-      antigravityRetrySignal: nextAntigravityRetrySignal
-    };
-  }
-  if (isProviderTrafficSaturatedRetryError({ status: args.status, error: args.error })) {
-    return {
-      excludedCurrentProvider: false,
-      antigravityRetrySignal: nextAntigravityRetrySignal
-    };
-  }
-  if (isNetworkTransportLikeError(args.error)) {
-    return {
-      excludedCurrentProvider: false,
-      antigravityRetrySignal: nextAntigravityRetrySignal
-    };
-  }
-  // [rcc] Generalized last-provider guard: never exclude the current provider when
-  // the route pool contains no alternative candidate.  Previously this guard
-  // only applied to 429; extending it to all status codes prevents draining
-  // the pool on 500 / upstream_empty_output / transient errors.
-  if (
-    !hasExplicitAlternativeRouteCandidate({
+  const isAntigravity = isAntigravityProviderKey(providerKey);
+  const is429 = args.status === 429;
+  const exclusionDecision = resolveProviderFailureExclusionDecision({
+    promptTooLong: args.promptTooLong,
+    classification: args.classification,
+    isProviderTrafficSaturated: isProviderTrafficSaturatedRetryError({ status: args.status, error: args.error }),
+    isNetworkTransport: isNetworkTransportLikeError(args.error),
+    hasAlternativeCandidate: hasExplicitAlternativeRouteCandidate({
       providerKey,
       routePool: args.routePool,
       excludedProviderKeys: args.excludedProviderKeys
-    })
-  ) {
-    return {
-      excludedCurrentProvider: false,
-      antigravityRetrySignal: nextAntigravityRetrySignal
-    };
-  }
-  const isAntigravity = isAntigravityProviderKey(providerKey);
-  const is429 = args.status === 429;
-  if (isAntigravity && (args.isVerify || is429)) {
+    }),
+    isAntigravity,
+    is429,
+    isVerify: args.isVerify,
+    isReauth: args.isReauth,
+    shouldRotateAntigravityAlias: shouldRotateAntigravityAliasOnRetry(args.error)
+  });
+  if (exclusionDecision.excludeCurrentProvider && isAntigravity && (args.isVerify || is429)) {
     const excludedCurrentProvider = applyRetryExclusionForCurrentProvider({
       providerKey,
       excludedProviderKeys: args.excludedProviderKeys
@@ -2745,7 +2543,7 @@ function resolveProviderRetryExclusionPlan(args: {
       antigravityRetrySignal: nextAntigravityRetrySignal
     };
   }
-  if (isAntigravity && args.isReauth) {
+  if (exclusionDecision.excludeCurrentProvider && isAntigravity && args.isReauth) {
     return {
       excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
         providerKey,
@@ -2754,7 +2552,7 @@ function resolveProviderRetryExclusionPlan(args: {
       antigravityRetrySignal: nextAntigravityRetrySignal
     };
   }
-  if (!isAntigravity || shouldRotateAntigravityAliasOnRetry(args.error)) {
+  if (exclusionDecision.excludeCurrentProvider) {
     return {
       excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
         providerKey,

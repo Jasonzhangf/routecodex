@@ -35,7 +35,7 @@ describe('Provider error classifier - 429 handling', () => {
     expect(classification.isDailyLimitRateLimit).toBe(false);
     expect(classification.recoverable).toBe(true);
     expect(classification.forceFatalRateLimit).toBe(false);
-    expect(classification.affectsHealth).toBe(true);
+    expect(classification.affectsHealth).toBe(false);
   });
 
   it('marks daily-limit 429 as non-recoverable and fatal', () => {
