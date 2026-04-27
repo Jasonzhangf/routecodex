@@ -50,6 +50,11 @@ describe('Shape B: handler 503 not_ready when pipeline is null', () => {
       '/v1/images/generations',
       async () => (await import('../../../src/server/handlers/images-handler.js')).handleImageGenerations,
     ],
+    [
+      'responses-handler',
+      '/v1/responses',
+      async () => (await import('../../../src/server/handlers/responses-handler.js')).handleResponses,
+    ],
   ];
 
   for (const [name, route, loadHandler] of cases) {
@@ -63,7 +68,7 @@ describe('Shape B: handler 503 not_ready when pipeline is null', () => {
         const response = await fetch(`${baseUrl}${route}`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ model: 'test', messages: [], prompt: 'test' }),
+          body: JSON.stringify({ model: 'test', messages: [], prompt: 'test', input: 'test' }),
         });
         expect(response.status).toBe(503);
         const body = await response.json();
@@ -128,6 +133,55 @@ describe('Shape C: OpenAI-compat errors with type + code', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// Shape D: session-client-routes register → 400 { error: { message, code } }
+// ═══════════════════════════════════════════════════════════════════
+describe('Shape D: session-client-routes unified error shape', () => {
+  it('/daemon/session-client/register without required fields → 400 { error } not { ok, reason }', async () => {
+    const { registerSessionClientRoutes } = await import(
+      '../../../src/server/runtime/http-server/session-client-routes.js'
+    );
+
+    const app = express();
+    app.use(express.json());
+    registerSessionClientRoutes(app);
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/daemon/session-client/register`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      assertErrorShape(body, 'bad_request');
+      expect(body.error.message).toContain('daemonId and callbackUrl are required');
+    });
+  });
+
+  it('/daemon/session-client/inject without tmuxSessionId → 400 { error }', async () => {
+    const { registerSessionClientRoutes } = await import(
+      '../../../src/server/runtime/http-server/session-client-routes.js'
+    );
+
+    const app = express();
+    app.use(express.json());
+    registerSessionClientRoutes(app);
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/daemon/session-client/inject`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'hello' }),
+      });
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      assertErrorShape(body, 'bad_request');
+      expect(body.error.message).toContain('tmuxSessionId is required');
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // Shape E: { error: { message, code }, errors[] } — config-admin
 // ═══════════════════════════════════════════════════════════════════
 describe('Shape E: config-admin-handler error shapes', () => {
@@ -158,8 +212,6 @@ describe('Shape E: config-admin-handler error shapes', () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-test-'));
     const tmpConfig = path.join(tmpDir, 'config.json');
     try {
-      // Write a valid JSON array (not object) so pickUserConfigPath finds it
-      // but isRecord() fails → triggers the 500 path
       await fs.writeFile(tmpConfig, JSON.stringify([1, 2, 3]));
       process.env.RCC4_CONFIG_PATH = tmpConfig;
 
@@ -207,17 +259,7 @@ describe('Shape E: config-admin-handler error shapes', () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════
-// Shape D: session-client-routes — KNOWN GAP
-// ═══════════════════════════════════════════════════════════════════
-// session-client-routes.ts transitively imports from bridge.ts which
-// triggers a createRequire conflict in Jest's CJS runtime. The existing
-// session-client-routes.spec.ts has the same pre-existing failure.
-// Shape D was verified by grep audit (0 remaining { ok: false, reason } shapes).
-// TODO: resolve bridge.ts import chain for Jest, then add runtime test here.
-describe('Shape D: session-client-routes (grep-verified, runtime test deferred)', () => {
-  it.skip('register without required fields → 400 { error } — blocked by bridge.ts import chain', async () => {
-    // This test requires jest.unstable_mockModule for bridge.ts ESM mock.
-    // Deferred until bridge.ts import chain is resolved for Jest.
-  });
-});
+// routes.ts Shape B error paths (500/400/403/503) are covered by:
+// - routes.invalid-json.spec.ts (malformed JSON → 400)
+// - daemon-admin.e2e.spec.ts (admin auth/restart paths)
+// - grep audit: all res.status().json({ error:... }) have `code` field

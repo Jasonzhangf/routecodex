@@ -1485,6 +1485,14 @@ type RequestExecutorProviderFailurePlan = {
   retryTelemetryPlan?: ProviderRetryTelemetryPlan;
 };
 
+type BlockingRecoverableRouteHoldState = {
+  providerKey?: string;
+  runtimeKey?: string;
+  retryError: RetryErrorSnapshot;
+  holdOnLastAvailable429: boolean;
+  explicitSingletonPool: boolean;
+};
+
 function resolveProviderRetryEligibilityPlan(args: {
   error: unknown;
   retryError: RetryErrorSnapshot;
@@ -1972,23 +1980,6 @@ async function resolveProviderRetryBackoffPlan(args: {
     retryAction: args.forceProviderScopedBackoff ? 'reroute_explicit_alternative' : 'retry_same_provider'
   });
   const blockingRecoverable = actionPlan.blockingRecoverable;
-  if (blockingRecoverable) {
-    const logicalChainRetry = consumeLogicalChainRecoverableRetry(args.logicalRequestChainKey);
-    if (!logicalChainRetry.allowed) {
-      args.logStage('provider.retry.logical_chain_limit_hit', args.logicalChainRetryLimitStageRequestId, {
-        providerKey: args.providerKey,
-        logicalRequestChainKey: args.logicalRequestChainKey,
-        logicalChainRecoverableRetries: logicalChainRetry.count,
-        logicalChainRecoverableRetryLimit: logicalChainRetry.limit,
-        attempt: args.attempt,
-        ...(typeof args.retryError.statusCode === 'number' ? { statusCode: args.retryError.statusCode } : {}),
-        ...(args.retryError.errorCode ? { errorCode: args.retryError.errorCode } : {}),
-        ...(args.retryError.upstreamCode ? { upstreamCode: args.retryError.upstreamCode } : {}),
-        reason: args.retryError.reason
-      });
-      throw args.error;
-    }
-  }
   if (actionPlan.backoff.scope === 'attempt') {
     const retryBackoffMs = await waitBeforeRetry(args.error, {
       attempt: args.attempt,
@@ -3162,21 +3153,24 @@ export class HubRequestExecutor implements RequestExecutor {
         const pipelineLabel = 'hub';
         let aggregatedUsage: UsageMetrics | undefined;
         const excludedProviderKeys = new Set<string>();
-        let maxAttempts = resolveMaxProviderAttempts();
+        const maxAttempts = resolveMaxProviderAttempts();
         const retryPayloadSeed = prepareRequestPayloadRetrySeed(input.body);
         let attempt = 0;
+        let allowBlockingRecoverableRetryBeyondAttemptBudget = false;
         let lastError: unknown;
         let initialRoutePool: string[] | null = null;
         let antigravityRetrySignal: AntigravityRetrySignal | null = null;
         let poolCooldownWaitBudgetMs = 60 * 1000;
         let forcedRouteHint: string | undefined;
         let contextOverflowRetries = 0;
+        let blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null = null;
         let cumulativeExternalLatencyMs = 0;
         let cumulativeTrafficWaitMs = 0;
         let cumulativeClientInjectWaitMs = 0;
 
-        while (attempt < maxAttempts) {
+        while (attempt < maxAttempts || allowBlockingRecoverableRetryBeyondAttemptBudget) {
         attempt += 1;
+        allowBlockingRecoverableRetryBeyondAttemptBudget = false;
         // Ensure each attempt starts from the base requestId so pipeline snapshots
         // don't inherit a provider-specific id from a previous attempt.
         input.requestId = providerRequestId;
@@ -3235,6 +3229,38 @@ export class HubRequestExecutor implements RequestExecutor {
           if (isPoolExhaustedPipelineError(pipelineError)) {
             const cooldownWaitMs = resolvePoolCooldownWaitMs(pipelineError);
             if (
+              blockingRecoverableRouteHoldState?.holdOnLastAvailable429
+              && blockingRecoverableRouteHoldState.explicitSingletonPool
+            ) {
+              const blockingRetryBackoffMs =
+                cooldownWaitMs
+                ?? consumeRecoverableErrorBackoffMs(
+                  buildRecoverableErrorBackoffKey({
+                    providerKey: blockingRecoverableRouteHoldState.providerKey,
+                    runtimeKey: blockingRecoverableRouteHoldState.runtimeKey,
+                    statusCode: blockingRecoverableRouteHoldState.retryError.statusCode,
+                    errorCode: blockingRecoverableRouteHoldState.retryError.errorCode,
+                    upstreamCode: blockingRecoverableRouteHoldState.retryError.upstreamCode,
+                    reason: blockingRecoverableRouteHoldState.retryError.reason
+                  }),
+                  {
+                    statusCode: blockingRecoverableRouteHoldState.retryError.statusCode,
+                    errorCode: blockingRecoverableRouteHoldState.retryError.errorCode,
+                    upstreamCode: blockingRecoverableRouteHoldState.retryError.upstreamCode,
+                    reason: blockingRecoverableRouteHoldState.retryError.reason
+                  }
+                );
+              this.logStage('provider.route_pool_cooldown_wait', providerRequestId, {
+                attempt,
+                waitMs: blockingRetryBackoffMs,
+                holdOnLastAvailable429: true,
+                reason: 'last_available_provider_429'
+              });
+              await waitWithClientAbortSignal(blockingRetryBackoffMs, clientAbortSignal);
+              attempt = Math.max(0, attempt - 1);
+              continue;
+            }
+            if (
               cooldownWaitMs &&
               attempt < maxAttempts &&
               poolCooldownWaitBudgetMs >= cooldownWaitMs
@@ -3263,6 +3289,7 @@ export class HubRequestExecutor implements RequestExecutor {
           }
           throw pipelineError;
         }
+        blockingRecoverableRouteHoldState = null;
         const pipelineMetadata = pipelineResult.metadata ?? {};
         const mergedMetadata = mergeMetadataPreservingDefined(metadataForAttempt, pipelineMetadata);
         throwIfClientAbortSignalAborted(clientAbortSignal);
@@ -3426,6 +3453,19 @@ export class HubRequestExecutor implements RequestExecutor {
           }
           if (!providerFailurePlan.retryTelemetryPlan) {
             throw error;
+          }
+          blockingRecoverableRouteHoldState =
+            retryExecutionPlan.blockingRecoverable
+              ? {
+                providerKey: target.providerKey,
+                runtimeKey,
+                retryError,
+                holdOnLastAvailable429: retryExecutionPlan.holdOnLastAvailable429,
+                explicitSingletonPool: Array.isArray(routePoolForAttempt) && routePoolForAttempt.length === 1
+              }
+              : null;
+          if (retryExecutionPlan.blockingRecoverable && attempt >= maxAttempts) {
+            allowBlockingRecoverableRetryBeyondAttemptBudget = true;
           }
           emitRequestExecutorProviderRetryTelemetry({
             requestId: input.requestId,
@@ -4154,6 +4194,19 @@ export class HubRequestExecutor implements RequestExecutor {
           antigravityRetrySignal = retryExecutionPlan.antigravityRetrySignal;
           if (!providerFailurePlan.retryTelemetryPlan) {
             throw error;
+          }
+          blockingRecoverableRouteHoldState =
+            retryExecutionPlan.blockingRecoverable
+              ? {
+                providerKey: target.providerKey,
+                runtimeKey,
+                retryError,
+                holdOnLastAvailable429: retryExecutionPlan.holdOnLastAvailable429,
+                explicitSingletonPool: Array.isArray(routePoolForAttempt) && routePoolForAttempt.length === 1
+              }
+              : null;
+          if (retryExecutionPlan.blockingRecoverable && attempt >= maxAttempts) {
+            allowBlockingRecoverableRetryBeyondAttemptBudget = true;
           }
           emitRequestExecutorProviderRetryTelemetry({
             requestId: input.requestId,

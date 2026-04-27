@@ -543,7 +543,7 @@ export function resolveProviderFailureActionPlan(args: {
   if (
     classification !== 'recoverable'
     || args.promptTooLong
-    || !hasAttemptsBudget
+    || (!hasAttemptsBudget && !blockingRecoverable)
   ) {
     return {
       classification,
@@ -638,13 +638,6 @@ export function resolveProviderFailureRetryEligibility(args: {
       shouldRetry: false
     };
   }
-  if (!(args.attempt < args.maxAttempts)) {
-    return {
-      classification: actionPlan.classification,
-      blockingRecoverable,
-      shouldRetry: false
-    };
-  }
   if (actionPlan.classification === 'unrecoverable') {
     return {
       classification: actionPlan.classification,
@@ -665,6 +658,13 @@ export function resolveProviderFailureRetryEligibility(args: {
       classification: actionPlan.classification,
       blockingRecoverable,
       shouldRetry: actionPlan.shouldRetry
+    };
+  }
+  if (!(args.attempt < args.maxAttempts)) {
+    return {
+      classification: actionPlan.classification,
+      blockingRecoverable,
+      shouldRetry: false
     };
   }
   return {

@@ -495,7 +495,8 @@ describe('session-client routes', () => {
         sessionId: 's_not_found'
       });
       expect(unmatched.status).toBe(503);
-      expect(unmatched.payload?.reason).toBe('no_matching_tmux_session_daemon');
+      expect(unmatched.payload?.error?.message).toBe('no_matching_tmux_session_daemon');
+      expect(unmatched.payload?.error?.code).toBe('service_unavailable');
 
       const matched = await localFetch(baseUrl, '/daemon/session-client/inject', {
         text: 'hello-session-1',
@@ -600,7 +601,8 @@ describe('session-client routes', () => {
         workdir: workdirB
       });
       expect(injectWrongWorkdir.status).toBe(503);
-      expect(injectWrongWorkdir.payload?.reason).toBe('workdir_mismatch');
+      expect(injectWrongWorkdir.payload?.error?.message).toBe('workdir_mismatch');
+      expect(injectWrongWorkdir.payload?.error?.code).toBe('service_unavailable');
       expect(injectHitA).toBe(1);
       expect(injectHitB).toBe(0);
     } finally {
@@ -689,7 +691,8 @@ describe('session-client routes', () => {
         workdir: '/tmp/routecodex-route-workdir-missing'
       });
       expect(injectMismatch.status).toBe(503);
-      expect(injectMismatch.payload?.reason).toBe('workdir_mismatch');
+      expect(injectMismatch.payload?.error?.message).toBe('workdir_mismatch');
+      expect(injectMismatch.payload?.error?.code).toBe('service_unavailable');
     } finally {
       await new Promise<void>((resolve) => callbackServerA.close(() => resolve()));
       await new Promise<void>((resolve) => callbackServerB.close(() => resolve()));

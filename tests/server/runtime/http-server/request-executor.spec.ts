@@ -1355,16 +1355,16 @@ describe('HubRequestExecutor failover', () => {
     const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
     expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
   });
-  test('preserves first upstream error when singleton selected pool reroute reports provider unavailable', async () => {
+  test('keeps blocking on singleton 429 when reroute temporarily reports provider unavailable', async () => {
     const firstProviderKey = 'glm.key1.glm-4.7';
     const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
       statusCode: 429,
       code: 'HTTP_429'
     });
 
-    const failingProcess = jest.fn(async () => {
-      throw firstError;
-    });
+    const failingProcess = jest.fn()
+      .mockRejectedValueOnce(firstError)
+      .mockResolvedValueOnce({ status: 200, data: { id: 'ok-after-blocking-hold' } });
     const failureHandle = buildHandle(firstProviderKey, failingProcess);
 
     const handles = new Map<string, ProviderHandle>([[firstProviderKey, failureHandle]]);
@@ -1392,9 +1392,26 @@ describe('HubRequestExecutor failover', () => {
           Object.assign(new Error('All providers unavailable for model glm.glm-4.7'), {
             code: 'PROVIDER_NOT_AVAILABLE'
           })
-        ),
+        )
+        .mockResolvedValueOnce({
+          requestId: 'req-single-pool-unavailable',
+          providerPayload: {},
+          target: {
+            providerKey: firstProviderKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
+            runtimeKey: firstProviderKey
+          },
+          routingDecision: { routeName: 'direct', pool: [firstProviderKey] },
+          metadata: {}
+        }),
       updateVirtualRouterConfig: jest.fn()
     };
+
+    const previous429Base = process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
+    const previous429Max = process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
+    process.env.ROUTECODEX_429_BACKOFF_BASE_MS = '1';
+    process.env.ROUTECODEX_429_BACKOFF_MAX_MS = '1';
 
     const deps = {
       runtimeManager,
@@ -1409,22 +1426,40 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const executor = createRequestExecutor(deps);
+    try {
+      const result = await executor.execute({
+        requestId: 'req-single-pool-unavailable',
+        entryEndpoint: '/v1/chat/completions',
+        body: {},
+        headers: {},
+        metadata: {}
+      });
 
-    await expect(executor.execute({
-      requestId: 'req-single-pool-unavailable',
-      entryEndpoint: '/v1/chat/completions',
-      body: {},
-      headers: {},
-      metadata: {}
-    })).rejects.toMatchObject({
-      message: 'HTTP 429: quota exhausted',
-      statusCode: 429,
-      code: 'HTTP_429'
-    });
-
-    expect(pipeline.execute).toHaveBeenCalledTimes(2);
-    const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
-    expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
+      expect(result).toEqual(expect.objectContaining({ status: 200 }));
+      expect(pipeline.execute).toHaveBeenCalledTimes(3);
+      expect(failingProcess).toHaveBeenCalledTimes(2);
+      const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
+      expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
+      expect(
+        deps.logStage.mock.calls.some(
+          (call: unknown[]) =>
+            call[0] === 'provider.route_pool_cooldown_wait'
+            && call[2]?.holdOnLastAvailable429 === true
+            && call[2]?.reason === 'last_available_provider_429'
+        )
+      ).toBe(true);
+    } finally {
+      if (previous429Base === undefined) {
+        delete process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
+      } else {
+        process.env.ROUTECODEX_429_BACKOFF_BASE_MS = previous429Base;
+      }
+      if (previous429Max === undefined) {
+        delete process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
+      } else {
+        process.env.ROUTECODEX_429_BACKOFF_MAX_MS = previous429Max;
+      }
+    }
   });
 
   test('holds on same provider 429 when route pool exposes no alternative candidate', async () => {
@@ -2084,22 +2119,28 @@ describe('HubRequestExecutor failover', () => {
     );
   });
 
-  test('caps recoverable retry storms within the same logical request chain', async () => {
+  test('blocking recoverable retries ignore logical-chain caps and keep waiting until success', async () => {
     const providerA = 'storm.a.glm-5';
-    const providerB = 'storm.b.glm-5';
-    const providerC = 'storm.c.glm-5';
     const retryable429 = () => Object.assign(new Error('HTTP 429: rate limited'), {
       statusCode: 429,
       code: 'HTTP_429'
     });
-    const failingProcess = jest.fn(async () => {
-      throw retryable429();
+    let failuresLeft = 2;
+    const processIncoming = jest.fn(async () => {
+      if (failuresLeft > 0) {
+        failuresLeft -= 1;
+        throw retryable429();
+      }
+      return {
+        status: 200,
+        body: {
+          choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }]
+        }
+      };
     });
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, failingProcess)],
-      [providerB, buildHandle(providerB, failingProcess)],
-      [providerC, buildHandle(providerC, failingProcess)]
+      [providerA, buildHandle(providerA, processIncoming)]
     ]);
 
     const runtimeManager = {
@@ -2107,39 +2148,33 @@ describe('HubRequestExecutor failover', () => {
       getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
     };
 
-    const pool = [providerA, providerB, providerC];
+    const pool = [providerA];
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
-        const excluded = new Set<string>(
-          Array.isArray(input.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
-        );
-        const providerKey = pool.find((key) => !excluded.has(key)) ?? providerA;
-        return {
-          requestId: input.id,
-          providerPayload: {},
-          target: {
-            providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: providerKey
-          },
-          routingDecision: { routeName: 'default', pool },
-          metadata: {}
-        };
-      }),
+      execute: jest.fn(async (input: any) => ({
+        requestId: input.id,
+        providerPayload: {},
+        target: {
+          providerKey: providerA,
+          providerType: 'openai',
+          outboundProfile: 'openai-chat',
+          runtimeKey: providerA
+        },
+        routingDecision: { routeName: 'default', pool },
+        metadata: {}
+      })),
       updateVirtualRouterConfig: jest.fn()
     };
 
     const previousLimit = process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT;
     const previousBase = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
     const previousMax = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
-    process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT = '2';
+    process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT = '1';
     process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = '1';
     process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = '1';
 
     try {
       const logStage = jest.fn();
-      const deps = {
+      const executor = createRequestExecutor({
         runtimeManager,
         getHubPipeline: () => pipeline,
         getModuleDependencies: () => ({
@@ -2149,26 +2184,27 @@ describe('HubRequestExecutor failover', () => {
         }),
         logStage,
         stats: new StatsManager()
-      };
+      });
+      jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
+        status: 200,
+        body: {
+          choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }]
+        }
+      });
 
-      const executor = createRequestExecutor(deps);
-      await expect(executor.execute({
+      const result = await executor.execute({
         requestId: 'req-storm-root:reasoning_stop_guard',
         entryEndpoint: '/v1/responses',
         body: {},
         headers: {},
         metadata: {}
-      })).rejects.toMatchObject({
-        statusCode: 429,
-        code: 'HTTP_429'
       });
 
+      expect(result.status).toBe(200);
       expect(pipeline.execute).toHaveBeenCalledTimes(3);
       expect(
-        logStage.mock.calls.some(
-          (call) => call[0] === 'provider.retry.logical_chain_limit_hit' && call[2]?.logicalRequestChainKey === 'req-storm-root'
-        )
-      ).toBe(true);
+        logStage.mock.calls.some((call) => call[0] === 'provider.retry.logical_chain_limit_hit')
+      ).toBe(false);
     } finally {
       if (previousLimit === undefined) {
         delete process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT;
@@ -2188,45 +2224,47 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-  test('caps blocking recoverable retries at maxAttempts without overflowing next attempt logs', async () => {
+  test('blocking recoverable retries can exceed maxAttempts without overflowing next-attempt logs', async () => {
     const providerA = 'storm.fetch.a';
-    const providerB = 'storm.fetch.b';
-    const failingProcess = jest.fn(async () => {
-      throw Object.assign(new Error('fetch failed'), {
-        code: 'HTTP_502',
-        statusCode: 502
-      });
+    let failuresLeft = 2;
+    const processIncoming = jest.fn(async () => {
+      if (failuresLeft > 0) {
+        failuresLeft -= 1;
+        throw Object.assign(new Error('fetch failed'), {
+          code: 'HTTP_502',
+          statusCode: 502
+        });
+      }
+      return {
+        status: 200,
+        body: {
+          choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }]
+        }
+      };
     });
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, failingProcess)],
-      [providerB, buildHandle(providerB, failingProcess)]
+      [providerA, buildHandle(providerA, processIncoming)]
     ]);
 
-    const pool = [providerA, providerB];
+    const pool = [providerA];
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
       getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
-        const excluded = new Set<string>(
-          Array.isArray(input.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
-        );
-        const providerKey = pool.find((key) => !excluded.has(key)) ?? providerA;
-        return {
-          requestId: input.id,
-          providerPayload: {},
-          target: {
-            providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-responses',
-            runtimeKey: providerKey
-          },
-          routingDecision: { routeName: 'tools', pool },
-          metadata: {}
-        };
-      }),
+      execute: jest.fn(async (input: any) => ({
+        requestId: input.id,
+        providerPayload: {},
+        target: {
+          providerKey: providerA,
+          providerType: 'openai',
+          outboundProfile: 'openai-responses',
+          runtimeKey: providerA
+        },
+        routingDecision: { routeName: 'tools', pool },
+        metadata: {}
+      })),
       updateVirtualRouterConfig: jest.fn()
     };
 
@@ -2250,24 +2288,28 @@ describe('HubRequestExecutor failover', () => {
         logStage: jest.fn(),
         stats: new StatsManager()
       });
+      jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
+        status: 200,
+        body: {
+          choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }]
+        }
+      });
 
-      await expect(executor.execute({
+      const result = await executor.execute({
         requestId: 'req-fetch-failed-cap',
         entryEndpoint: '/v1/responses',
         body: {},
         headers: {},
         metadata: {}
-      })).rejects.toMatchObject({
-        statusCode: 502
       });
 
-      expect(pipeline.execute).toHaveBeenCalledTimes(2);
+      expect(result.status).toBe(200);
+      expect(pipeline.execute).toHaveBeenCalledTimes(3);
       const switchLines = warnSpy.mock.calls
         .map((call) => String(call[0] ?? ''))
         .filter((line) => line.includes('[provider-switch]'));
-      expect(switchLines).toHaveLength(1);
-      expect(switchLines[0]).toContain('attempt=1/2 -> 2/2');
-      expect(switchLines[0]).not.toContain('3/2');
+      expect(switchLines.length).toBeGreaterThan(0);
+      expect(switchLines.some((line) => line.includes('3/2'))).toBe(false);
     } finally {
       warnSpy.mockRestore();
       if (prevAttempts === undefined) {

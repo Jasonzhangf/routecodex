@@ -2,7 +2,7 @@ import type { Response } from 'express';
 import type { IncomingHttpHeaders } from 'http';
 import chalk from 'chalk';
 import type { HandlerContext } from './types.js';
-import { mapErrorToHttp } from '../utils/http-error-mapper.js';
+import { mapErrorToHttp, type HttpErrorPayload } from '../utils/http-error-mapper.js';
 import { buildInfo } from '../../build-info.js';
 import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js';
 import { reportRouteError } from '../../error-handling/route-error-hub.js';
@@ -302,18 +302,11 @@ export async function respondWithPipelineError(
     },
     originalError: normalizedError
   };
-  let mapped = mapErrorToHttp(normalizedError);
-  try {
-    const { http } = await reportRouteError(routePayload, { includeHttpResult: true });
-    if (http) {
-      mapped = http;
-    }
-  } catch (error) {
-    logHandlerNonBlockingError(`reportRouteError:${effectiveRequestId}`, error);
-  }
-  if (effectiveRequestId && mapped.body?.error && !mapped.body.error.request_id) {
-    mapped.body.error.request_id = effectiveRequestId;
-  }
+  const mapped = await resolveReportedRouteErrorHttpResponse({
+    routePayload,
+    normalizedError,
+    onReportError: (reportError) => logHandlerNonBlockingError(`reportRouteError:${effectiveRequestId}`, reportError)
+  });
   if (options?.forceSse) {
     // For streaming clients, return an SSE error event so the client can surface the failure.
     // Use the mapped HTTP status so clients can fail fast; embed the status in the event payload as well.
@@ -357,6 +350,27 @@ export async function respondWithPipelineError(
     });
   }
   res.status(mapped.status).json(mapped.body);
+}
+
+export async function resolveReportedRouteErrorHttpResponse(args: {
+  routePayload: RouteErrorPayload;
+  normalizedError: Error & Record<string, unknown>;
+  onReportError?: (error: unknown) => void;
+}): Promise<HttpErrorPayload> {
+  let mapped = mapErrorToHttp(args.normalizedError);
+  try {
+    const { http } = await reportRouteError(args.routePayload, { includeHttpResult: true });
+    if (http) {
+      mapped = http;
+    }
+  } catch (error) {
+    args.onReportError?.(error);
+  }
+  const requestId = typeof args.routePayload.requestId === 'string' ? args.routePayload.requestId : undefined;
+  if (requestId && mapped.body?.error && !mapped.body.error.request_id) {
+    mapped.body.error.request_id = requestId;
+  }
+  return mapped;
 }
 
 export function captureClientHeaders(headers: IncomingHttpHeaders | undefined): Record<string, string> {

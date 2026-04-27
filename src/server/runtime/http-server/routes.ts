@@ -4,9 +4,8 @@ import { handleImageEdits, handleImageGenerations } from '../../handlers/images-
 import { handleMessages } from '../../handlers/messages-handler.js';
 import { handleResponses } from '../../handlers/responses-handler.js';
 import type { HandlerContext } from '../../handlers/types.js';
+import { resolveReportedRouteErrorHttpResponse } from '../../handlers/handler-utils.js';
 import type { ServerConfigV2 } from './types.js';
-import { reportRouteError } from '../../../error-handling/route-error-hub.js';
-import { mapErrorToHttp } from '../../utils/http-error-mapper.js';
 import { renderTokenPortalPage } from '../../../token-portal/render.js';
 import { loadTokenPortalFingerprintSummary } from '../../../token-portal/fingerprint-summary.js';
 import { registerDaemonAdminRoutes, rejectNonLocalOrUnauthorizedAdmin } from './daemon-admin-routes.js';
@@ -648,9 +647,8 @@ export function registerHttpRoutes(options: RouteOptions): void {
     const isMalformedJsonRequest =
       httpStatus === 400
       && normalizedError.name === 'SyntaxError';
-    let mapped = mapErrorToHttp(normalizedError);
-    try {
-      const { http } = await reportRouteError({
+    const mapped = await resolveReportedRouteErrorHttpResponse({
+      routePayload: {
         code: isMalformedJsonRequest
           ? 'MALFORMED_REQUEST'
           : typeof errorRecord.code === 'string'
@@ -669,17 +667,16 @@ export function registerHttpRoutes(options: RouteOptions): void {
           status: httpStatus
         },
         originalError: normalizedError
-      }, { includeHttpResult: true });
-      if (http) {
-        mapped = http;
+      },
+      normalizedError: normalizedError as Error & Record<string, unknown>,
+      onReportError: (hubError) => {
+        logRoutesNonBlockingError('globalMiddleware.reportRouteError', hubError, {
+          requestId: typeof req.headers['x-request-id'] === 'string' ? req.headers['x-request-id'] : undefined,
+          path: req.path,
+          method: req.method
+        });
       }
-    } catch (hubError) {
-      logRoutesNonBlockingError('globalMiddleware.reportRouteError', hubError, {
-        requestId: typeof req.headers['x-request-id'] === 'string' ? req.headers['x-request-id'] : undefined,
-        path: req.path,
-        method: req.method
-      });
-    }
+    });
     res.status(mapped.status).json(mapped.body);
   });
 

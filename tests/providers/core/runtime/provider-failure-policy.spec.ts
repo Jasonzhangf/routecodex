@@ -171,6 +171,33 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
+  it('does not force direct return when blocking recoverable 429 reaches maxAttempts', () => {
+    const error = Object.assign(new Error('HTTP 429: transient limit'), {
+      statusCode: 429,
+      code: 'HTTP_429'
+    });
+
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 429,
+      errorCode: 'HTTP_429',
+      reason: 'HTTP 429: transient limit',
+      attempt: 6,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'recoverable',
+      affectsHealth: false,
+      blockingRecoverable: true,
+      shouldRetry: true,
+      action: 'retry_same_provider',
+      decisionLabel: 'recoverable_backoff_same_provider',
+      backoff: expect.objectContaining({
+        scope: 'recoverable'
+      })
+    }));
+  });
+
   it('treats transport fetch failed as recoverable same-provider blocking backoff', () => {
     const error = Object.assign(new Error('fetch failed'), {
       code: 'HTTP_502',

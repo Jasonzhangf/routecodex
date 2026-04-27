@@ -41,6 +41,15 @@ export interface RouteErrorHubDeps {
   errorHandlingCenter: ErrorHandlingCenter;
 }
 
+export class RouteErrorHubNotInitializedError extends Error {
+  public readonly code = 'ROUTE_ERROR_HUB_NOT_INITIALIZED';
+
+  constructor() {
+    super('RouteErrorHub has not been initialized');
+    this.name = 'RouteErrorHubNotInitializedError';
+  }
+}
+
 export class RouteErrorHub {
   private readonly registry = ErrorHandlerRegistry.getInstance();
   private initialized = false;
@@ -176,11 +185,9 @@ export class RouteErrorHub {
 }
 
 let currentHub: RouteErrorHub | null = null;
-let fallbackCenter: ErrorHandlingCenter | null = null;
 
 export function initializeRouteErrorHub(deps: RouteErrorHubDeps): RouteErrorHub {
   currentHub = new RouteErrorHub(deps);
-  fallbackCenter = null;
   return currentHub;
 }
 
@@ -192,17 +199,9 @@ export async function reportRouteError(
   payload: RouteErrorPayload,
   options?: RouteErrorReportOptions
 ): Promise<RouteErrorReportResult> {
-  const hub = currentHub ?? ensureFallbackHub();
-  return hub.report(payload, options);
-}
-
-function ensureFallbackHub(): RouteErrorHub {
-  if (!fallbackCenter) {
-    console.warn('[RouteErrorHub] ensureFallbackHub called before initializeRouteErrorHub — creating implicit fallback. This violates the no-fallback guard.');
-    fallbackCenter = new ErrorHandlingCenter();
-  }
   if (!currentHub) {
-    currentHub = new RouteErrorHub({ errorHandlingCenter: fallbackCenter });
+    throw new RouteErrorHubNotInitializedError();
   }
-  return currentHub;
+  const hub = currentHub;
+  return hub.report(payload, options);
 }
