@@ -6,7 +6,7 @@ import { warmupCheckAntigravityAlias } from '../../../src/providers/auth/antigra
 import { readAntigravityReauthRequiredState } from '../../../src/providers/auth/antigravity-reauth-state.js';
 
 async function writeCamoufoxFingerprint(homeDir: string, alias: string, camouConfig: Record<string, unknown>): Promise<void> {
-  const fpDir = path.join(homeDir, '.routecodex', 'camoufox-fp');
+  const fpDir = path.join(homeDir, '.rcc', 'camoufox-fp');
   await fs.mkdir(fpDir, { recursive: true });
   const fpPath = path.join(fpDir, `rc-gemini.${alias}.json`);
   await fs.writeFile(fpPath, JSON.stringify({ env: { CAMOU_CONFIG_1: JSON.stringify(camouConfig) } }, null, 2));
@@ -81,7 +81,7 @@ describe('antigravity-warmup', () => {
   });
 
   test('fails when alias is marked reauth-required', async () => {
-    const stateDir = path.join(tempHome, '.routecodex', 'state');
+    const stateDir = path.join(tempHome, '.rcc', 'state');
     await fs.mkdir(stateDir, { recursive: true });
     await fs.writeFile(
       path.join(stateDir, 'antigravity-reauth-required.json'),
@@ -121,13 +121,13 @@ describe('antigravity-warmup', () => {
     });
 
     // Create a token file with a newer mtime than the marker so warmup can verify freshness.
-    const tokenDir = path.join(tempHome, '.routecodex', 'auth');
+    const tokenDir = path.join(tempHome, '.rcc', 'auth');
     await fs.mkdir(tokenDir, { recursive: true });
     const tokenPath = path.join(tokenDir, 'antigravity-oauth-1-test.json');
     await fs.writeFile(tokenPath, JSON.stringify({ dummy: true }, null, 2), 'utf8');
 
     const updatedAt = Date.now() - 60_000;
-    const stateDir = path.join(tempHome, '.routecodex', 'state');
+    const stateDir = path.join(tempHome, '.rcc', 'state');
     await fs.mkdir(stateDir, { recursive: true });
     await fs.writeFile(
       path.join(stateDir, 'antigravity-reauth-required.json'),
@@ -163,13 +163,13 @@ describe('antigravity-warmup', () => {
       'navigator.userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0'
     });
 
-    const tokenDir = path.join(tempHome, '.routecodex', 'auth');
+    const tokenDir = path.join(tempHome, '.rcc', 'auth');
     await fs.mkdir(tokenDir, { recursive: true });
     const tokenPath = path.join(tokenDir, 'antigravity-oauth-3-test.json');
     await fs.writeFile(tokenPath, JSON.stringify({ dummy: true }, null, 2), 'utf8');
 
     const updatedAt = Date.now() - 60_000;
-    const stateDir = path.join(tempHome, '.routecodex', 'state');
+    const stateDir = path.join(tempHome, '.rcc', 'state');
     await fs.mkdir(stateDir, { recursive: true });
     await fs.writeFile(
       path.join(stateDir, 'antigravity-reauth-required.json'),

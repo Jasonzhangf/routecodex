@@ -6,8 +6,16 @@ import {
   type ProviderCatalogWebSearchBinding
 } from '../cli/config/init-provider-catalog.js';
 import type { UnknownRecord } from '../config/virtual-router-types.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export type ProviderCapabilityMap = Record<string, boolean>;
+type CompatProfileRuntimeMetadata = {
+  sdkBinding?: ProviderCatalogSdkBinding;
+};
+
+const compatProfileRuntimeMetadataCache = new Map<string, CompatProfileRuntimeMetadata | null>();
 
 function isRecord(value: unknown): value is UnknownRecord {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -49,6 +57,46 @@ function normalizeSdkBinding(binding: unknown): ProviderCatalogSdkBinding | unde
     supported: binding.supported === false ? false : true,
     ...(readString(binding.notes) ? { notes: readString(binding.notes) } : {})
   };
+}
+
+function resolveCompatProfileConfigCandidates(profileId: string): string[] {
+  const filename = `${profileId.replace(/:/g, '-')}.json`;
+  const selfDir = path.dirname(fileURLToPath(import.meta.url));
+  const repoRoot = path.resolve(selfDir, '..', '..');
+  return [
+    path.join(repoRoot, 'sharedmodule', 'llmswitch-core', 'src', 'conversion', 'compat', 'profiles', filename),
+    path.join(repoRoot, 'sharedmodule', 'llmswitch-core', 'dist', 'conversion', 'compat', 'profiles', filename),
+    path.join(repoRoot, 'node_modules', '@jsonstudio', 'llms', 'dist', 'conversion', 'compat', 'profiles', filename)
+  ];
+}
+
+function readCompatProfileRuntimeMetadata(profileId: string): CompatProfileRuntimeMetadata | undefined {
+  const normalizedProfile = lower(profileId);
+  if (!normalizedProfile) {
+    return undefined;
+  }
+  if (compatProfileRuntimeMetadataCache.has(normalizedProfile)) {
+    return compatProfileRuntimeMetadataCache.get(normalizedProfile) ?? undefined;
+  }
+
+  for (const candidate of resolveCompatProfileConfigCandidates(normalizedProfile)) {
+    if (!fs.existsSync(candidate)) {
+      continue;
+    }
+    const raw = fs.readFileSync(candidate, 'utf8');
+    const parsed = JSON.parse(raw) as UnknownRecord;
+    const metadata: CompatProfileRuntimeMetadata = {};
+    const sdkBinding = normalizeSdkBinding(parsed.sdkBinding);
+    if (sdkBinding) {
+      metadata.sdkBinding = sdkBinding;
+    }
+    const resolved = Object.keys(metadata).length ? metadata : null;
+    compatProfileRuntimeMetadataCache.set(normalizedProfile, resolved);
+    return resolved ?? undefined;
+  }
+
+  compatProfileRuntimeMetadataCache.set(normalizedProfile, null);
+  return undefined;
 }
 
 function normalizeWebSearchBinding(binding: unknown, args: { providerId: string; defaultModel: string }): ProviderCatalogWebSearchBinding | undefined {
@@ -146,8 +194,7 @@ function mergeCapabilities(
 function inferRuntimeOnlyBinding(
   providerId: string,
   providerType: string,
-  authType: string,
-  compatibilityProfile: string
+  authType: string
 ): ProviderCatalogSdkBinding | undefined {
   const runtimeOnlyAuths = new Set([
     'antigravity-oauth',
@@ -179,9 +226,13 @@ function inferSdkBindingFromConfig(providerId: string, providerNode: UnknownReco
   const providerType = lower(providerNode.type);
   const authType = lower(isRecord(providerNode.auth) ? providerNode.auth.type : undefined);
   const compatibilityProfile = lower(providerNode.compatibilityProfile);
-  const runtimeOnly = inferRuntimeOnlyBinding(providerId, providerType, authType, compatibilityProfile);
+  const runtimeOnly = inferRuntimeOnlyBinding(providerId, providerType, authType);
   if (runtimeOnly) {
     return runtimeOnly;
+  }
+  const compatProfileRuntimeMetadata = readCompatProfileRuntimeMetadata(compatibilityProfile);
+  if (compatProfileRuntimeMetadata?.sdkBinding) {
+    return compatProfileRuntimeMetadata.sdkBinding;
   }
   if (providerType === 'anthropic') {
     return { family: 'anthropic-compatible', supported: true };

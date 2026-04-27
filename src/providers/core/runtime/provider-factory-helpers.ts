@@ -13,7 +13,7 @@ import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pi
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 
 type ApiKeyAuthExtended = ApiKeyAuth & { secretRef?: string; rawType?: string; accountAlias?: string };
-type OAuthAuthExtended = OAuthAuth & { oauthProviderId?: string };
+type OAuthAuthExtended = OAuthAuth & { oauthProviderId?: string; rawType?: string };
 
 export type RuntimeFactoryAuthConfig = ApiKeyAuthExtended | OAuthAuthExtended;
 
@@ -171,6 +171,14 @@ export function resolveProviderModule(value?: string): OpenAIStandardConfig['typ
       return trimmed as OpenAIStandardConfig['type'];
     case 'deepseek':
       return 'deepseek-http-provider';
+    case 'anthropic':
+      return 'anthropic-http-provider';
+    case 'openai':
+      return 'openai-http-provider';
+    case 'responses':
+      return 'responses-http-provider';
+    case 'gemini':
+      return 'gemini-http-provider';
     default:
       return undefined;
   }

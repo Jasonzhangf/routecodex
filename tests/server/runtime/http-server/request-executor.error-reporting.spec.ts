@@ -52,7 +52,10 @@ jest.unstable_mockModule('../../../../src/providers/core/utils/provider-error-re
   emitProviderError: mockEmitProviderError
 }));
 
-const { HubRequestExecutor } = await import('../../../../src/server/runtime/http-server/request-executor.js');
+const {
+  HubRequestExecutor,
+  __requestExecutorTestables
+} = await import('../../../../src/server/runtime/http-server/request-executor.js');
 
 function createRuntimeHandle(processImpl: () => Promise<unknown>): ProviderHandle {
   return {
@@ -116,6 +119,7 @@ function createExecutor(pipelineResult: PipelineExecutionResult, handle: Provide
 describe('HubRequestExecutor provider error reporting', () => {
   beforeEach(() => {
     mockEmitProviderError.mockReset();
+    __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
     fs.rmSync(SESSION_DIR, { recursive: true, force: true });
     fs.mkdirSync(SESSION_DIR, { recursive: true });
@@ -274,6 +278,117 @@ describe('HubRequestExecutor provider error reporting', () => {
     );
   });
 
+  it('keeps provider.send network transport failures health-neutral', async () => {
+    const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
+    const pipelineResult: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'deepseek.key1.deepseek-v4-pro',
+        providerType: 'anthropic',
+        outboundProfile: 'anthropic-messages',
+        runtimeKey: 'runtime:key',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const handle = createRuntimeHandle(async () => {
+      throw Object.assign(new Error('fetch failed'), {
+        code: 'HTTP_502',
+        status: 502,
+        statusCode: 502,
+        retryable: true
+      });
+    });
+    const { executor, request } = createExecutor(pipelineResult, handle);
+
+    try {
+      await expect(executor.execute(request)).rejects.toMatchObject({
+        code: 'HTTP_502',
+        statusCode: 502
+      });
+
+      expect(mockEmitProviderError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stage: 'provider.send',
+          statusCode: 502,
+          recoverable: true,
+          affectsHealth: false,
+          details: expect.objectContaining({
+            source: 'provider.send',
+            errorClassification: 'recoverable',
+            errorCode: 'HTTP_502',
+            reason: 'fetch failed'
+          })
+        })
+      );
+    } finally {
+      if (previousAttempts === undefined) {
+        delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      } else {
+        process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousAttempts;
+      }
+    }
+  });
+
+  it('keeps provider.send SQLITE_BUSY recoverable failures health-neutral', async () => {
+    const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
+    const pipelineResult: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'deepseek.key1.deepseek-v4-pro',
+        providerType: 'anthropic',
+        outboundProfile: 'anthropic-messages',
+        runtimeKey: 'runtime:key',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const handle = createRuntimeHandle(async () => {
+      throw Object.assign(new Error('database is locked (5) (SQLITE_BUSY)'), {
+        code: 'new_api_error',
+        upstreamCode: 'new_api_error',
+        status: 500,
+        statusCode: 500,
+        retryable: true
+      });
+    });
+    const { executor, request } = createExecutor(pipelineResult, handle);
+
+    try {
+      await expect(executor.execute(request)).rejects.toMatchObject({
+        code: 'new_api_error',
+        upstreamCode: 'new_api_error',
+        statusCode: 500
+      });
+
+      expect(mockEmitProviderError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stage: 'provider.send',
+          statusCode: 500,
+          recoverable: true,
+          affectsHealth: false,
+          details: expect.objectContaining({
+            source: 'provider.send',
+            errorClassification: 'recoverable',
+            errorCode: 'new_api_error',
+            upstreamCode: 'new_api_error',
+            reason: 'database is locked (5) (SQLITE_BUSY)'
+          })
+        })
+      );
+    } finally {
+      if (previousAttempts === undefined) {
+        delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      } else {
+        process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousAttempts;
+      }
+    }
+  });
+
   it('prefers provider stage marker from error details when top-level marker is absent', async () => {
     const pipelineResult: PipelineExecutionResult = {
       providerPayload: { data: { messages: [] } },
@@ -414,7 +529,7 @@ describe('HubRequestExecutor provider error reporting', () => {
           stage: 'provider.http',
           statusCode: 429,
           recoverable: true,
-          affectsHealth: true,
+          affectsHealth: false,
           runtime: expect.objectContaining({
             requestId: 'req_test',
             providerKey: 'tabglm.key1.glm-5.1'

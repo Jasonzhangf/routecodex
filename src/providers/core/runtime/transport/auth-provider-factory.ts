@@ -82,8 +82,6 @@ export class AuthProviderFactory {
     const baseUrl = typeof this.context.config.config.baseUrl === 'string'
       ? this.context.config.config.baseUrl.toLowerCase()
       : '';
-      );
-    }
 
     // 检查是否有多 key entries，有则使用轮询模式
     const authWithEntries = auth as ApiKeyAuthWithEntries;

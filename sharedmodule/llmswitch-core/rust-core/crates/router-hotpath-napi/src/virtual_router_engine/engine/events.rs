@@ -46,13 +46,42 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn handle_provider_failure(&mut self, event: &Value) {
+        if !event_affects_health(event) {
+            return;
+        }
         let provider_key = resolve_provider_key(event).unwrap_or_default();
         if provider_key.is_empty() {
             return;
         }
         let reason = extract_error_reason(event);
+        let now = now_ms();
+        let fatal = event.get("fatal").and_then(|v| v.as_bool()).unwrap_or(false);
+        let status_code = extract_status_code(event);
+        let cooldown_override_ms = extract_cooldown_override_ms(event);
+        let cooldown_ms = cooldown_override_ms.or_else(|| {
+            if status_code == Some(429) && is_daily_limit_exceeded(event) {
+                Some(compute_cooldown_until_next_local_midnight_ms(now))
+            } else {
+                None
+            }
+        });
+        if fatal {
+            self.health_manager
+                .trip_provider(&provider_key, reason, cooldown_ms, now);
+            return;
+        }
+        if matches!(status_code, Some(429)) {
+            self.health_manager
+                .cooldown_provider(&provider_key, reason, cooldown_ms, now);
+            return;
+        }
+        if cooldown_override_ms.is_some() {
+            self.health_manager
+                .cooldown_provider(&provider_key, reason, cooldown_override_ms, now);
+            return;
+        }
         self.health_manager
-            .record_failure(&provider_key, reason, now_ms());
+            .record_failure(&provider_key, reason, now);
     }
 
     pub(crate) fn handle_provider_error(&mut self, event: &Value) {
@@ -230,11 +259,26 @@ fn event_affects_health(event: &Value) -> bool {
 
 fn resolve_provider_key(event: &Value) -> Option<String> {
     event
-        .get("runtime")
-        .and_then(|v| v.get("providerKey"))
+        .get("providerKey")
         .and_then(|v| v.as_str())
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+        .or_else(|| {
+            event
+                .get("target")
+                .and_then(|v| v.get("providerKey"))
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        })
+        .or_else(|| {
+            event
+                .get("runtime")
+                .and_then(|v| v.get("providerKey"))
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        })
         .or_else(|| {
             event
                 .get("runtime")
@@ -244,6 +288,27 @@ fn resolve_provider_key(event: &Value) -> Option<String> {
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty())
         })
+}
+
+fn extract_status_code(event: &Value) -> Option<i64> {
+    event
+        .get("statusCode")
+        .and_then(as_i64_like)
+        .or_else(|| event.get("status").and_then(as_i64_like))
+}
+
+fn extract_cooldown_override_ms(event: &Value) -> Option<i64> {
+    event
+        .get("cooldownOverrideMs")
+        .and_then(as_i64_like)
+        .filter(|value| *value > 0)
+}
+
+fn as_i64_like(value: &Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_u64().map(|value| value as i64))
+        .or_else(|| value.as_f64().map(|value| value.round() as i64))
 }
 
 fn extract_error_reason(event: &Value) -> Option<String> {

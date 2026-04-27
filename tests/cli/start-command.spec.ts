@@ -278,6 +278,66 @@ describe('cli start command', () => {
     expect(captured.env?.ROUTECODEX_SYSTEM_PROMPT_SOURCE).toBeUndefined();
   });
 
+  it('spawns server child from package root and injects base dir env', async () => {
+    const program = new Command();
+    const spawns: Array<{ cwd?: string; env?: Record<string, string> }> = [];
+    createStartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5520,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        statSync: () => ({ isDirectory: () => false } as any),
+        readFileSync: () => JSON.stringify({ httpserver: { port: 5520, host: '127.0.0.1' } }),
+        writeFileSync: () => {},
+        mkdtempSync: () => '/tmp/rc',
+        mkdirSync: () => {},
+        createWriteStream: () => ({ write: () => true, end: () => {} } as any)
+      } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/'),
+        dirname: (value: string) => value.split('/').slice(0, -1).join('/') || '/',
+        basename: (value: string) => value.split('/').filter(Boolean).pop() || ''
+      } as any,
+      homedir: () => '/home/test',
+      tmpdir: () => '/tmp',
+      sleep: async () => {},
+      ensureLocalTokenPortalEnv: async () => {},
+      ensureTokenDaemonAutoStart: async () => {},
+      ensurePortAvailable: async () => {},
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/repo/dist/index.js',
+      spawn: (_bin, _args, options) => {
+        spawns.push(options as { cwd?: string; env?: Record<string, string> });
+        return {
+          pid: 2001,
+          stdout: null,
+          stderr: null,
+          on: () => {},
+          kill: () => true
+        } as any;
+      },
+      fetch: (async () => ({ ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) })) as any,
+      setupKeypress: () => () => {},
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(program.parseAsync(['node', 'routecodex', 'start'], { from: 'node' })).resolves.toBe(program);
+    expect(spawns[0]?.cwd).toBe('/repo');
+    expect(spawns[0]?.env?.ROUTECODEX_BASEDIR).toBe('/repo');
+    expect(spawns[0]?.env?.RCC_BASEDIR).toBe('/repo');
+  });
+
   it('exits when config is missing', async () => {
     const errors: string[] = [];
     const program = new Command();

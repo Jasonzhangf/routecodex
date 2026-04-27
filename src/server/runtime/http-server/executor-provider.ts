@@ -115,6 +115,9 @@ export function shouldRetryProviderError(error: unknown): boolean {
   if (hasVirtualRouterSeriesCooldown(error)) {
     return true;
   }
+  if (isGlmBusiness514RetryableError(error, status)) {
+    return true;
+  }
   // Deterministic request-shape validation errors (especially malformed tools/input schema)
   // must not be retried; repeated retries with the same payload only create retry storms.
   if (isDeterministicInvalidRequestError(error, status)) {
@@ -206,6 +209,28 @@ function isDeterministicInvalidRequestError(error: unknown, statusHint?: number)
     return true;
   }
   return false;
+}
+
+function isGlmBusiness514RetryableError(error: unknown, statusHint?: number): boolean {
+  const status = typeof statusHint === 'number' ? statusHint : extractErrorStatusCode(error);
+  if (status !== 400 || !error || typeof error !== 'object') {
+    return false;
+  }
+  const providerFamily = String((error as { providerFamily?: unknown }).providerFamily ?? '')
+    .trim()
+    .toLowerCase();
+  const nested = readNestedProviderError(error);
+  const nestedCode = String(nested?.code ?? '')
+    .trim()
+    .toLowerCase();
+  const messageParts = [
+    (error as { message?: unknown }).message,
+    nested?.message
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.toLowerCase());
+  const message = messageParts.join(' | ');
+  return providerFamily === 'glm' && (nestedCode === '514' || message.includes('glm business error (514)'));
 }
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {

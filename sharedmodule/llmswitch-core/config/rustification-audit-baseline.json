@@ -1,30 +1,30 @@
 {
-  "generatedAt": "2026-04-19T02:02:07.993Z",
+  "generatedAt": "2026-04-27T00:39:42.800Z",
   "scope": "sharedmodule/llmswitch-core/src",
   "metrics": {
-    "prodTsFileCount": 610,
-    "prodTsLocTotal": 106367,
-    "nonNativeFileCount": 313,
-    "nonNativeLocTotal": 61520
+    "prodTsFileCount": 607,
+    "prodTsLocTotal": 106373,
+    "nonNativeFileCount": 317,
+    "nonNativeLocTotal": 61632
   },
   "byTopDir": {
     "router": {
       "prodTsFiles": 155,
-      "prodTsLoc": 32581,
+      "prodTsLoc": 32568,
       "nonNativeFiles": 75,
-      "nonNativeLoc": 14768
+      "nonNativeLoc": 14747
     },
     "conversion": {
-      "prodTsFiles": 289,
-      "prodTsLoc": 31997,
-      "nonNativeFiles": 78,
-      "nonNativeLoc": 8079
+      "prodTsFiles": 286,
+      "prodTsLoc": 32178,
+      "nonNativeFiles": 82,
+      "nonNativeLoc": 8399
     },
     "servertool": {
       "prodTsFiles": 63,
-      "prodTsLoc": 19209,
+      "prodTsLoc": 19021,
       "nonNativeFiles": 60,
-      "nonNativeLoc": 16657
+      "nonNativeLoc": 16469
     },
     "sse": {
       "prodTsFiles": 44,
@@ -34,9 +34,9 @@
     },
     "tools": {
       "prodTsFiles": 25,
-      "prodTsLoc": 4150,
+      "prodTsLoc": 4151,
       "nonNativeFiles": 24,
-      "nonNativeLoc": 3983
+      "nonNativeLoc": 3984
     },
     "filters": {
       "prodTsFiles": 21,
@@ -341,12 +341,6 @@
       "topDir": "conversion"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/qwenchat-web-request.ts",
-      "loc": 95,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/request-rules.ts",
       "loc": 31,
       "nativeLinked": true,
@@ -404,6 +398,36 @@
       "path": "sharedmodule/llmswitch-core/src/conversion/compat/antigravity-session-signature.ts",
       "loc": 1338,
       "nativeLinked": true,
+      "topDir": "conversion"
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/compat/profile-registry/header-policies.ts",
+      "loc": 98,
+      "nativeLinked": false,
+      "topDir": "conversion"
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/compat/profile-registry/policy-overrides.ts",
+      "loc": 35,
+      "nativeLinked": false,
+      "topDir": "conversion"
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/compat/profile-registry/provider-resolver.ts",
+      "loc": 78,
+      "nativeLinked": false,
+      "topDir": "conversion"
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/compat/profile-registry/registry.ts",
+      "loc": 162,
+      "nativeLinked": false,
+      "topDir": "conversion"
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/compat/profile-registry/types.ts",
+      "loc": 111,
+      "nativeLinked": false,
       "topDir": "conversion"
     },
     {
@@ -678,7 +702,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-types.ts",
-      "loc": 209,
+      "loc": 54,
       "nativeLinked": false,
       "topDir": "conversion"
     },
@@ -714,7 +738,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage-inbound.ts",
-      "loc": 339,
+      "loc": 345,
       "nativeLinked": true,
       "topDir": "conversion"
     },
@@ -792,7 +816,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts",
-      "loc": 172,
+      "loc": 180,
       "nativeLinked": false,
       "topDir": "conversion"
     },
@@ -846,7 +870,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage3_context_capture/responses-context-snapshot.ts",
-      "loc": 52,
+      "loc": 58,
       "nativeLinked": true,
       "topDir": "conversion"
     },
@@ -990,7 +1014,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/policy/policy-engine.ts",
-      "loc": 362,
+      "loc": 373,
       "nativeLinked": true,
       "topDir": "conversion"
     },
@@ -1542,7 +1566,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/utils.ts",
-      "loc": 214,
+      "loc": 229,
       "nativeLinked": false,
       "topDir": "conversion"
     },
@@ -1566,7 +1590,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-request.ts",
-      "loc": 371,
+      "loc": 423,
       "nativeLinked": true,
       "topDir": "conversion"
     },
@@ -1584,7 +1608,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils.ts",
-      "loc": 305,
+      "loc": 333,
       "nativeLinked": false,
       "topDir": "conversion"
     },
@@ -1668,7 +1692,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts",
-      "loc": 403,
+      "loc": 441,
       "nativeLinked": true,
       "topDir": "conversion"
     },
@@ -1752,13 +1776,13 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/shared/tool-governor-guards.ts",
-      "loc": 254,
+      "loc": 317,
       "nativeLinked": true,
       "topDir": "conversion"
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/shared/tool-governor.ts",
-      "loc": 544,
+      "loc": 562,
       "nativeLinked": true,
       "topDir": "conversion"
     },
@@ -1782,7 +1806,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/snapshot-utils.ts",
-      "loc": 404,
+      "loc": 432,
       "nativeLinked": true,
       "topDir": "conversion"
     },
@@ -2016,13 +2040,13 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap/provider-normalization.ts",
-      "loc": 364,
+      "loc": 324,
       "nativeLinked": false,
       "topDir": "router"
     },
     {
       "path": "sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap/responses-helpers.ts",
-      "loc": 402,
+      "loc": 423,
       "nativeLinked": true,
       "topDir": "router"
     },
@@ -2034,7 +2058,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap/streaming-helpers.ts",
-      "loc": 192,
+      "loc": 211,
       "nativeLinked": false,
       "topDir": "router"
     },
@@ -2208,7 +2232,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-compat-action-semantics.ts",
-      "loc": 366,
+      "loc": 354,
       "nativeLinked": true,
       "topDir": "router"
     },
@@ -2448,7 +2472,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts",
-      "loc": 348,
+      "loc": 347,
       "nativeLinked": false,
       "topDir": "router"
     },
@@ -3132,7 +3156,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/ai-followup.ts",
-      "loc": 1347,
+      "loc": 1321,
       "nativeLinked": false,
       "topDir": "servertool"
     },
@@ -3144,7 +3168,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.ts",
-      "loc": 305,
+      "loc": 297,
       "nativeLinked": false,
       "topDir": "servertool"
     },
@@ -3174,7 +3198,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/servertool/handlers/web-search.ts",
-      "loc": 1122,
+      "loc": 966,
       "nativeLinked": false,
       "topDir": "servertool"
     },
@@ -3264,7 +3288,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts",
-      "loc": 1038,
+      "loc": 1040,
       "nativeLinked": false,
       "topDir": "servertool"
     },
@@ -3642,7 +3666,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/tools/apply-patch/structured.ts",
-      "loc": 687,
+      "loc": 688,
       "nativeLinked": false,
       "topDir": "tools"
     },

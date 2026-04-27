@@ -301,7 +301,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     }
 
     // 记录样式供后续交换 token 逻辑使用
-    const flowStyle = style;
+    const flowStyle: FlowStyle = 'standard';
     const flowState: AuthCodeFlowState = {
       authUrl: authUrl.toString(),
       state,

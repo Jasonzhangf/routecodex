@@ -200,10 +200,15 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - client disconnect / timeout hint 续跑真因（2026-04-20）：若 5520/5555 已出现 `CLIENT_TIMEOUT_HINT_EXPIRED` / `CLIENT_RESPONSE_CLOSED`，但请求仍继续 provider-switch / backoff，先查 **attempt metadata clone** 是否把 `clientConnectionState` 上的**非枚举 abort signal**丢了；`decorateMetadataForAttempt` 这类 clone 步骤必须回填原始 state 引用。另一个高频坑是 **不要在 `req.close` 提前清掉 timeout hint watcher**，否则 `x-stainless-timeout` 会表面存在、实际失效。
 - 触发信号：`SERVERTOOL_TIMEOUT` 出现 `followup timeout after 500000ms`，且伴随多 provider 重试风暴。
 - 可复用动作：把 servertool/followup 默认超时收敛到 120s/90s（并设上限），并对 `reasoning_only_continue/ reasoning_stop_guard/ reasoning_stop_continue` 启用 auto-limit，避免无限续轮卡死。
-- 触发信号：`429`（含 `insufficient_quota`）重试链路出现 64s/120s 级退避，拖慢切换。
-- 可复用动作：recoverable backoff 按错误分级：429 类保持小退避（<=4s）快速换 provider；servertool 类保持中退避（<=12s）避免重放风暴。
+- 触发信号：`429`（含 `insufficient_quota`）后立刻连刷 `provider-switch` / `PROVIDER_NOT_AVAILABLE` / `unknown-unknown-*` 新请求。
+- 可复用动作：`429` 必须先按 **provider 维度阻塞 + 指数 backoff**；只有**已确认存在显式替代候选**时才允许 reroute。若无显式替代候选（尤其单 provider / singleton pool / routePool 缺证据），必须 **hold 当前 provider 等待**，禁止先自杀式 exclude 再把请求打成 `PROVIDER_NOT_AVAILABLE`。
 - 触发信号：日志出现 `PROVIDER_TRAFFIC_SATURATED` + `exclude_and_reroute` + `PROVIDER_NOT_AVAILABLE` 连锁风暴。
 - 可复用动作：对 `PROVIDER_TRAFFIC_SATURATED` 统一走 **same-provider 阻塞指数 backoff**（不排除当前 provider、不做 runtime-scope exclusion），并标记为 provider health-neutral；并发自适应只在“满并发样本”上做 **5 次无429升 / 5 次429降**，避免被短时抖动打到 `concurrency=1`。
+- 触发信号：`provider.send` 命中 `fetch failed` / `ECONNRESET` / `socket hang up` / `network timeout` 后，下一批请求立刻出现 `PROVIDER_NOT_AVAILABLE`。
+- 可复用动作：这类 **网络传输层错误** 必须按 **same-provider 阻塞 backoff + health-neutral** 处理；禁止把当前 provider 打进 reroute exclusion / router cooldown，否则单 provider 路由会被瞬时毒化成跨请求不可用。
+- 触发信号：某个请求已经进入 recoverable backoff，但并发里的**新 sibling 请求**仍直接冲到同一 provider，继续刷 429 / fetch failed。
+- 可复用动作：不要只做 session/request 内 backoff；必须额外加 **provider-scoped 全局等待闸门**，让 fresh requests 在 `provider.send` 前先阻塞，避免匿名请求或 `unknown-unknown` 会话绕过 session backoff 继续打风暴。
+- 全局判定铁律（2026-04-27）：**不可恢复错误 = 直接返回，不得 retry / reroute；可恢复错误 = 只能 block + 指数 backoff。** 先判断 recoverability，再决定是否等待；禁止把“所有错误都先切 provider 试试”当默认策略。
 - 触发信号：Node 进程 **虚拟内存/常驻内存随运行时间单调上涨**，但 FD / TCP 连接数基本平稳，同时日志里长期存在 `429` / timeout / aborted / provider error。
 - 可复用动作：优先排查 **requestId → meta/context** 的内存 Map（如 codec `ctxMap`、v2 pipeline `requestMetaStore`）；凡是“只在 `convertResponse` 删除、错误路径不清理”的，都必须补 **TTL + 容量上限 + 写入前 prune**，否则失败/中断请求会永久滞留并把 VM 慢慢顶高。
 - 触发信号：热路径里的“仅供观测/调度”的 request Map（如 `StatsManager.inflight`、`RequestActivityTracker.byRequestId`）在长时间运行后缓慢变大，且正常路径理论上应在 `finally/end` 删除。

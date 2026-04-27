@@ -283,7 +283,8 @@ export function resolveSessionColor(sessionId?: string): string {
   hash ^= hash >>> 15;
   hash = Math.imul(hash, 0x846ca68b) >>> 0;
   hash ^= hash >>> 16;
-  return palette[hash % palette.length];
+  const normalizedHash = hash >>> 0;
+  return palette[normalizedHash % palette.length];
 }
 
 function describeContextUsage(

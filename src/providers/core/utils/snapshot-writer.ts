@@ -39,6 +39,7 @@ type ProviderSnapshotWriteOptions = {
   clientRequestId?: string;
   providerKey?: string;
   providerId?: string;
+  forceLocalDiskWriteWhenDisabled?: boolean;
 };
 
 type ProviderSnapshotQueueItem = {
@@ -613,6 +614,14 @@ export async function writeProviderSnapshot(options: ProviderSnapshotWriteOption
   const snapshot = buildProviderSnapshotPersistInput(options);
 
   if (!runtimeFlags.snapshotsEnabled) {
+    if (options.forceLocalDiskWriteWhenDisabled) {
+      try {
+        await mirrorSnapshotToLocalDisk(snapshot);
+      } catch (error) {
+        logSnapshotNonBlockingError(`forceLocalDiskWrite:${snapshot.stage}`, error);
+      }
+      return;
+    }
     if (isErrorPhase(snapshot.stage)) {
       try {
         await writeProviderErrorsample(snapshot);

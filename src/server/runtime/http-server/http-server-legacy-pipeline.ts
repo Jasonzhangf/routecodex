@@ -1,5 +1,39 @@
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
 
+function readSessionToken(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function attachSessionHeaders(
+  result: PipelineExecutionResult,
+  metadata: Record<string, unknown> | undefined
+): PipelineExecutionResult {
+  const sessionId =
+    readSessionToken(metadata?.sessionId)
+    ?? readSessionToken(metadata?.session_id);
+  const conversationId =
+    readSessionToken(metadata?.conversationId)
+    ?? readSessionToken(metadata?.conversation_id)
+    ?? sessionId;
+  if (!sessionId && !conversationId) {
+    return result;
+  }
+  const headers: Record<string, string> = {
+    ...(result.headers && typeof result.headers === 'object' ? result.headers : {})
+  };
+  if (sessionId && !readSessionToken(headers.session_id)) {
+    headers.session_id = sessionId;
+  }
+  if (conversationId && !readSessionToken(headers.conversation_id)) {
+    headers.conversation_id = conversationId;
+  }
+  return { ...result, headers };
+}
+
 export async function executePipelineViaLegacyOverride(
   server: any,
   input: PipelineExecutionInput,
@@ -63,5 +97,5 @@ export async function executePipelineViaLegacyOverride(
           pipelineMetadata: pipelineResult?.metadata
         })
       : normalized;
-  return converted;
+  return attachSessionHeaders(converted, (input.metadata as Record<string, unknown>) ?? {});
 }

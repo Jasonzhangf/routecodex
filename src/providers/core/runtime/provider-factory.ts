@@ -260,8 +260,10 @@ export class ProviderFactory {
       extensions: (runtime as unknown as { extensions?: Record<string, unknown> }).extensions,
       metadata: (runtime as unknown as { metadata?: Record<string, unknown> }).metadata
     });
+    const isDeepSeekAccountAuth = authConfig.rawType === 'deepseek-account';
     if (
       deepseekOptions &&
+      isDeepSeekAccountAuth &&
       isDeepSeekRuntimeIdentity({
         providerFamily,
         providerId: runtime.providerId,

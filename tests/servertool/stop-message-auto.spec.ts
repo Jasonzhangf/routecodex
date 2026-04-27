@@ -15,15 +15,12 @@ import { resolveStickyKey } from '../../sharedmodule/llmswitch-core/src/serverto
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-sessions');
 const USER_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-userdir');
 const DEFAULT_MOCK_CODEX_BIN_PATH = path.join(USER_DIR, 'mock-codex-default.sh');
-const DEFAULT_MOCK_CODEX_BIN_PATH = path.join(USER_DIR, 'mock-codex-default.sh');
 const EXECUTION_APPEND_TEXT = '请直接继续执行，不要进行状态汇总';
 const ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_ENABLED = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED;
 const ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_BACKEND = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
 const ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
-const ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
 const ORIGINAL_STOPMESSAGE_AI_APPROVED_MARKER = process.env.ROUTECODEX_STOPMESSAGE_AI_APPROVED_MARKER;
 const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX;
-const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
 const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_BACKEND = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND;
 const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
 const ORIGINAL_STOPMESSAGE_DEFAULT_ENABLED = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED;
@@ -229,9 +226,7 @@ describe('stop_message_auto servertool', () => {
     process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED = '1';
     process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = 'codex';
     process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = DEFAULT_MOCK_CODEX_BIN_PATH;
-    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = DEFAULT_MOCK_CODEX_BIN_PATH;
     process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX = '1';
-    process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = DEFAULT_MOCK_CODEX_BIN_PATH;
     process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND = 'codex';
     process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = DEFAULT_MOCK_CODEX_BIN_PATH;
     process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '0';
@@ -248,11 +243,6 @@ describe('stop_message_auto servertool', () => {
       delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
     } else {
       process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
-    }
-    if (ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN === undefined) {
-      delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
-    } else {
-      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
     }
     if (ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN === undefined) {
       delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
@@ -279,11 +269,6 @@ describe('stop_message_auto servertool', () => {
     } else {
       process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND = ORIGINAL_STOPMESSAGE_AUTOMESSAGE_BACKEND;
     }
-    if (ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN === undefined) {
-      delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
-    } else {
-      process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
-    }
     if (ORIGINAL_STOPMESSAGE_DEFAULT_ENABLED === undefined) {
       delete process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED;
     } else {
@@ -293,9 +278,6 @@ describe('stop_message_auto servertool', () => {
       delete process.env.ROUTECODEX_REASONING_STOP_GUARD_ENABLED;
     } else {
       process.env.ROUTECODEX_REASONING_STOP_GUARD_ENABLED = ORIGINAL_REASONING_STOP_GUARD_ENABLED;
-    }
-    if (fs.existsSync(DEFAULT_MOCK_CODEX_BIN_PATH)) {
-      fs.unlinkSync(DEFAULT_MOCK_CODEX_BIN_PATH);
     }
     if (fs.existsSync(DEFAULT_MOCK_CODEX_BIN_PATH)) {
       fs.unlinkSync(DEFAULT_MOCK_CODEX_BIN_PATH);
@@ -529,9 +511,7 @@ describe('stop_message_auto servertool', () => {
 
     const previousAiBackend = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
     const previousAiCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
-    const previousAiCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
     const previousBackend = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND;
-    const previousCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
     const previousCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
     const mockCodexBinPath = path.join(USER_DIR, 'mock-codex-fallback-after-codex.sh');
 
@@ -597,12 +577,8 @@ describe('stop_message_auto servertool', () => {
       else process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = previousAiBackend;
       if (previousAiCodexBin === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
       else process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = previousAiCodexBin;
-      if (previousAiCodexBin === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
-      else process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = previousAiCodexBin;
       if (previousBackend === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND;
       else process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND = previousBackend;
-      if (previousCodexBin === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
-      else process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = previousCodexBin;
       if (previousCodexBin === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
       else process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = previousCodexBin;
       if (fs.existsSync(mockCodexBinPath)) {
@@ -611,7 +587,7 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
-  test('auto mode uses codex -p output as followup text', async () => {
+  test('auto mode uses codex exec output as followup text', async () => {
     const sessionId = 'stopmessage-spec-session-codex-followup';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -644,9 +620,23 @@ describe('stop_message_auto servertool', () => {
         mockCodexBinPath,
         [
           '#!/usr/bin/env bash',
-          `printf '%s' "$2" > ${JSON.stringify(promptCapturePath)}`,
-          "if [ \"$1\" = \"-p\" ]; then",
-          "  echo '请继续完成当前拆分，并先运行构建验证。'",
+          'if [ "$1" = "exec" ]; then',
+          '  output=""',
+          '  idx=1',
+          '  while [ $idx -le $# ]; do',
+          '    arg="${!idx}"',
+          '    if [ "$arg" = "--output-last-message" ]; then',
+          '      idx=$((idx + 1))',
+          '      output="${!idx}"',
+          '      idx=$((idx + 1))',
+          '      continue',
+          '    fi',
+          '    idx=$((idx + 1))',
+          '  done',
+          `  printf '%s' "\${!#}" > ${JSON.stringify(promptCapturePath)}`,
+          '  if [ -n "$output" ]; then',
+          "    printf '%s\\n' '请继续完成当前拆分，并先运行构建验证。' > \"$output\"",
+          '  fi',
           '  exit 0',
           'fi',
           'exit 2'
@@ -693,7 +683,7 @@ describe('stop_message_auto servertool', () => {
     expect(followup?.injection).toBeUndefined();
       const injectMeta = readClientInjectMeta(followup);
       expect(injectMeta.clientInjectOnly).toBe(true);
-      expect(injectMeta.clientInjectText).toContain('继续推进并执行下一步');
+      expect(injectMeta.clientInjectText).toContain('请继续完成当前拆分，并先运行构建验证。');
       expect(injectMeta.clientInjectText).toContain(EXECUTION_APPEND_TEXT);
 
       if (fs.existsSync(promptCapturePath)) {
@@ -764,11 +754,23 @@ describe('stop_message_auto servertool', () => {
         mockCodexBinPath,
         [
           '#!/usr/bin/env bash',
-          "if [ \"$1\" = \"-p\" ]; then",
-          "  if printf '%s' \"$2\" | grep -q 'completionClaimedByMainModel: yes'; then",
-          "    echo '继续执行：先补充完成证据并运行验证，再决定是否结束。'",
+          'if [ "$1" = "exec" ]; then',
+          '  output=""',
+          '  idx=1',
+          '  while [ $idx -le $# ]; do',
+          '    arg="${!idx}"',
+          '    if [ "$arg" = "--output-last-message" ]; then',
+          '      idx=$((idx + 1))',
+          '      output="${!idx}"',
+          '      idx=$((idx + 1))',
+          '      continue',
+          '    fi',
+          '    idx=$((idx + 1))',
+          '  done',
+          "  if printf '%s' \"${!#}\" | grep -q 'completionClaimedByMainModel: yes'; then",
+          "    [ -n \"$output\" ] && printf '%s\\n' '继续执行：先补充完成证据并运行验证，再决定是否结束。' > \"$output\"",
           '  else',
-          "    echo '继续执行'",
+          "    [ -n \"$output\" ] && printf '%s\\n' '继续执行' > \"$output\"",
           '  fi',
           '  exit 0',
           'fi',
@@ -815,7 +817,7 @@ describe('stop_message_auto servertool', () => {
       const followup = result.execution?.followup as any;
       const injectMeta = readClientInjectMeta(followup);
       expect(injectMeta.clientInjectOnly).toBe(true);
-      expect(injectMeta.clientInjectText).toContain('继续推进并执行下一步');
+      expect(injectMeta.clientInjectText).toContain('继续执行：先补充完成证据并运行验证，再决定是否结束。');
       expect(injectMeta.clientInjectText).toContain(EXECUTION_APPEND_TEXT);
 
       const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
@@ -866,11 +868,23 @@ describe('stop_message_auto servertool', () => {
         mockCodexBinPath,
         [
           '#!/usr/bin/env bash',
-          "if [ \"$1\" = \"-p\" ]; then",
-          "  if printf '%s' \"$2\" | grep -q 'completionClaimedByMainModel: yes'; then",
-          "    echo '[STOPMESSAGE_APPROVED]'",
+          'if [ "$1" = "exec" ]; then',
+          '  output=""',
+          '  idx=1',
+          '  while [ $idx -le $# ]; do',
+          '    arg="${!idx}"',
+          '    if [ "$arg" = "--output-last-message" ]; then',
+          '      idx=$((idx + 1))',
+          '      output="${!idx}"',
+          '      idx=$((idx + 1))',
+          '      continue',
+          '    fi',
+          '    idx=$((idx + 1))',
+          '  done',
+          "  if printf '%s' \"${!#}\" | grep -q 'completionClaimedByMainModel: yes'; then",
+          "    [ -n \"$output\" ] && printf '%s\\n' '[STOPMESSAGE_APPROVED]' > \"$output\"",
           '  else',
-          "    echo '继续执行'",
+          "    [ -n \"$output\" ] && printf '%s\\n' '继续执行' > \"$output\"",
           '  fi',
           '  exit 0',
           'fi',
@@ -963,9 +977,7 @@ describe('stop_message_auto servertool', () => {
 
     const prevBdMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
     const prevAiCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
-    const prevAiCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
     const prevCodexEnabled = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX;
-    const prevCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
     const prevCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
     const mockCodexBinPath = path.join(USER_DIR, 'mock-codex-fail.sh');
 
@@ -1040,16 +1052,6 @@ describe('stop_message_auto servertool', () => {
       } else {
         process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = prevCodexBin;
       }
-      if (prevAiCodexBin === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = prevAiCodexBin;
-      }
-      if (prevCodexBin === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = prevCodexBin;
-      }
       if (fs.existsSync(mockCodexBinPath)) {
         fs.unlinkSync(mockCodexBinPath);
       }
@@ -1076,9 +1078,7 @@ describe('stop_message_auto servertool', () => {
 
     const prevBdMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
     const prevAiCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
-    const prevAiCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
     const prevCodexEnabled = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX;
-    const prevCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
     const prevCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
     const mockCodexBinPath = path.join(USER_DIR, 'mock-codex-fail-file.sh');
 
@@ -1142,16 +1142,6 @@ describe('stop_message_auto servertool', () => {
         delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX;
       } else {
         process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX = prevCodexEnabled;
-      }
-      if (prevAiCodexBin === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = prevAiCodexBin;
-      }
-      if (prevCodexBin === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = prevCodexBin;
       }
       if (prevAiCodexBin === undefined) {
         delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;

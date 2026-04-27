@@ -433,7 +433,6 @@ export async function resolveRuntimeAuth(server: any, runtime: ProviderRuntimePr
   };
 
   if (authType === 'apikey') {
-    }
     if (rawType === 'deepseek-account') {
       const tokenFileRaw = pickString(authRecord.tokenFile, authRecord.token_file);
       const tokenFile = tokenFileRaw

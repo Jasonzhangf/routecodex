@@ -332,19 +332,46 @@ describe('HubRequestExecutor failover', () => {
       providerKey: 'antigravity.alias1.gemini-3-pro-high',
       status: 429,
       error: Object.assign(new Error('HTTP 429: overload'), { statusCode: 429 }),
+      classification: 'recoverable',
       promptTooLong: false,
       isVerify: false,
       isReauth: false,
       antigravityRetrySignal: { signature: 'sig-1', consecutive: 2 },
+      routePool: [
+        'antigravity.alias1.gemini-3-pro-high',
+        'antigravity.alias2.gemini-3-pro-high'
+      ],
       excludedProviderKeys
     });
-    expect(exclusionPlan.excludedCurrentProvider).toBe(true);
+    expect(exclusionPlan.excludedCurrentProvider).toBe(false);
     expect(exclusionPlan.antigravityRetrySignal).toEqual({
       signature: 'sig-1',
-      consecutive: 2,
-      avoidAllOnRetry: true
+      consecutive: 2
     });
-    expect(Array.from(excludedProviderKeys)).toEqual(['antigravity.alias1.gemini-3-pro-high']);
+    expect(Array.from(excludedProviderKeys)).toEqual([]);
+
+    const singleton429ExclusionPlan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
+      providerKey: 'mimo.key1.mimo-v2.5-pro',
+      status: 429,
+      error: Object.assign(new Error('HTTP 429: overload'), { statusCode: 429 }),
+      promptTooLong: false,
+      isVerify: false,
+      isReauth: false,
+      antigravityRetrySignal: null,
+      routePool: ['mimo.key1.mimo-v2.5-pro'],
+      excludedProviderKeys: new Set<string>()
+    });
+    expect(singleton429ExclusionPlan.excludedCurrentProvider).toBe(false);
+    expect(__requestExecutorTestables.isLastAvailableProvider429({
+      providerKey: 'mimo.key1.mimo-v2.5-pro',
+      routePool: ['mimo.key1.mimo-v2.5-pro'],
+      excludedProviderKeys: new Set<string>(),
+      retryError: {
+        statusCode: 429,
+        errorCode: 'HTTP_429',
+        reason: 'HTTP 429: overload'
+      }
+    })).toBe(true);
 
     const promptTooLongPlan = __requestExecutorTestables.resolveProviderRetryEligibilityPlan({
       error: new Error('context exceeded'),
@@ -411,7 +438,7 @@ describe('HubRequestExecutor failover', () => {
       allowAntigravityRecovery: true
     });
     expect(antigravityEligibilityPlan).toEqual({
-      shouldRetry: true,
+      shouldRetry: false,
       blockingRecoverable: false
     });
 
@@ -439,8 +466,12 @@ describe('HubRequestExecutor failover', () => {
 
     const previous429Base = process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
     const previous429Max = process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
+    const previousRecoverableBase = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
+    const previousRecoverableMax = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
     process.env.ROUTECODEX_429_BACKOFF_BASE_MS = '1';
     process.env.ROUTECODEX_429_BACKOFF_MAX_MS = '1';
+    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = '1';
+    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = '1';
     try {
       const orchestratorExcluded = new Set<string>();
       const recordAttempt = jest.fn();
@@ -472,17 +503,16 @@ describe('HubRequestExecutor failover', () => {
       });
       expect(recordAttempt).toHaveBeenCalledWith({ error: true });
       expect(executionPlan.shouldRetry).toBe(true);
-      expect(executionPlan.backoffScope).toBe('provider');
+      expect(executionPlan.backoffScope).toBe('recoverable');
       expect(executionPlan.retrySwitchPlan).toEqual(expect.objectContaining({
-        switchAction: 'exclude_and_reroute',
-        decisionLabel: 'provider_backoff_then_reroute'
+        switchAction: 'retry_same_provider',
+        decisionLabel: 'recoverable_backoff_same_provider'
       }));
       expect(executionPlan.antigravityRetrySignal).toEqual({
         signature: 'sig-1',
-        consecutive: 2,
-        avoidAllOnRetry: true
+        consecutive: 2
       });
-      expect(Array.from(orchestratorExcluded)).toEqual(['antigravity.alias1.gemini-3-pro-high']);
+      expect(Array.from(orchestratorExcluded)).toEqual([]);
 
       const telemetryPlan = __requestExecutorTestables.buildProviderRetryTelemetryPlan({
         requestId: 'req-helper',
@@ -498,18 +528,101 @@ describe('HubRequestExecutor failover', () => {
       });
       expect(telemetryPlan.switchLogArgs).toEqual(expect.objectContaining({
         requestId: 'req-helper',
-        switchAction: 'exclude_and_reroute',
-        backoffScope: 'provider',
-        decisionLabel: 'provider_backoff_then_reroute',
+        switchAction: 'retry_same_provider',
+        backoffScope: 'recoverable',
+        decisionLabel: 'recoverable_backoff_same_provider',
         stage: 'provider.send'
       }));
       expect(telemetryPlan.retryStageDetails).toEqual(expect.objectContaining({
         providerKey: 'antigravity.alias1.gemini-3-pro-high',
         routeHint: 'thinking',
-        switchAction: 'exclude_and_reroute',
-        backoffScope: 'provider',
-        decisionLabel: 'provider_backoff_then_reroute'
+        switchAction: 'retry_same_provider',
+        backoffScope: 'recoverable',
+        decisionLabel: 'recoverable_backoff_same_provider'
       }));
+
+      const networkExcluded = new Set<string>();
+      const networkExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+        error: Object.assign(new Error('fetch failed'), {
+          code: 'HTTP_502',
+          statusCode: 502
+        }),
+        retryError: {
+          statusCode: 502,
+          errorCode: 'HTTP_502',
+          reason: 'fetch failed'
+        },
+        attempt: 1,
+        maxAttempts: 6,
+        providerKey: 'deepseek.key1.deepseek-v4-pro',
+        runtimeKey: 'runtime:deepseek',
+        logicalRequestChainKey: 'req-network-fetch-failed',
+        logicalChainRetryLimitStageRequestId: 'req-network-fetch-failed',
+        routePool: [
+          'deepseek.key1.deepseek-v4-pro',
+          'deepseek.key2.deepseek-v4-pro'
+        ],
+        runtimeManager: {
+          resolveRuntimeKey: () => 'runtime:deepseek'
+        },
+        excludedProviderKeys: networkExcluded,
+        recordAttempt,
+        logStage: () => undefined,
+        status: 502
+      });
+      expect(networkExecutionPlan).toEqual(expect.objectContaining({
+        shouldRetry: true,
+        excludedCurrentProvider: false,
+        retrySwitchPlan: expect.objectContaining({
+          switchAction: 'retry_same_provider',
+          decisionLabel: 'recoverable_backoff_same_provider'
+        })
+      }));
+      expect(Array.from(networkExcluded)).toEqual([]);
+
+      const sqliteBusyExcluded = new Set<string>();
+      const sqliteBusyExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+        error: Object.assign(new Error('database is locked (5) (SQLITE_BUSY)'), {
+          code: 'new_api_error',
+          upstreamCode: 'new_api_error',
+          statusCode: 500,
+          retryable: true
+        }),
+        retryError: {
+          statusCode: 500,
+          errorCode: 'new_api_error',
+          upstreamCode: 'new_api_error',
+          reason: 'database is locked (5) (SQLITE_BUSY)'
+        },
+        attempt: 1,
+        maxAttempts: 6,
+        providerKey: 'deepseek.key1.deepseek-v4-pro',
+        runtimeKey: 'runtime:deepseek',
+        logicalRequestChainKey: 'req-sqlite-busy',
+        logicalChainRetryLimitStageRequestId: 'req-sqlite-busy',
+        routePool: [
+          'deepseek.key1.deepseek-v4-pro',
+          'deepseek.key2.deepseek-v4-pro'
+        ],
+        runtimeManager: {
+          resolveRuntimeKey: () => 'runtime:deepseek'
+        },
+        excludedProviderKeys: sqliteBusyExcluded,
+        recordAttempt,
+        logStage: () => undefined,
+        status: 500
+      });
+      expect(sqliteBusyExecutionPlan).toEqual(expect.objectContaining({
+        shouldRetry: true,
+        blockingRecoverable: true,
+        excludedCurrentProvider: false,
+        backoffScope: 'recoverable',
+        retrySwitchPlan: expect.objectContaining({
+          switchAction: 'retry_same_provider',
+          decisionLabel: 'recoverable_backoff_same_provider'
+        })
+      }));
+      expect(Array.from(sqliteBusyExcluded)).toEqual([]);
 
       const followupExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
         error: Object.assign(new Error('followup failed'), {
@@ -544,6 +657,7 @@ describe('HubRequestExecutor failover', () => {
         shouldRetry: false,
         blockingRecoverable: false,
         excludedCurrentProvider: false,
+        holdOnLastAvailable429: false,
         retryBackoffMs: 0,
         recoverableBackoffMs: 0,
         antigravityRetrySignal: null
@@ -558,6 +672,16 @@ describe('HubRequestExecutor failover', () => {
         delete process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
       } else {
         process.env.ROUTECODEX_429_BACKOFF_MAX_MS = previous429Max;
+      }
+      if (previousRecoverableBase === undefined) {
+        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
+      } else {
+        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = previousRecoverableBase;
+      }
+      if (previousRecoverableMax === undefined) {
+        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
+      } else {
+        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = previousRecoverableMax;
       }
     }
 
@@ -782,7 +906,10 @@ describe('HubRequestExecutor failover', () => {
             outboundProfile: 'gemini-chat',
             runtimeKey: providerKey
           },
-          routingDecision: { routeName: 'thinking' },
+          routingDecision: {
+            routeName: 'thinking',
+            pool: [firstProviderKey, secondProviderKey]
+          },
           metadata: {}
         };
       }),
@@ -816,7 +943,7 @@ describe('HubRequestExecutor failover', () => {
     expect(result).toEqual(expect.objectContaining({ status: 200 }));
   });
 
-  test('prints retry switch reason and error code to console on failover', async () => {
+  test('prints retry switch reason and error code to console on same-provider recoverable backoff', async () => {
     const firstProviderKey = 'crs.key2.gpt-5.3-codex';
     const secondProviderKey = 'crs.key1.gpt-5.3-codex';
     const failingError = new Error('Upstream SSE parser terminated');
@@ -824,11 +951,11 @@ describe('HubRequestExecutor failover', () => {
     (failingError as any).code = 'SSE_TO_JSON_ERROR';
     (failingError as any).upstreamCode = 'rate_limit_error';
 
-    const failingProcess = jest.fn(async () => {
-      throw failingError;
-    });
+    const failingProcess = jest.fn()
+      .mockRejectedValueOnce(failingError)
+      .mockResolvedValueOnce({ status: 200, data: { id: 'ok-after-retry' } });
     const failureHandle = buildHandle(firstProviderKey, failingProcess);
-    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'ok-after-retry' } }));
+    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'unused-fallback' } }));
     const successHandle = buildHandle(secondProviderKey, successProcess);
 
     const handles = new Map<string, ProviderHandle>([
@@ -842,28 +969,21 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
-        const disabled = new Set<string>(
-          Array.isArray(input.metadata?.excludedProviderKeys)
-            ? input.metadata.excludedProviderKeys
-            : []
-        );
-        const providerKey = disabled.has(firstProviderKey)
-          ? secondProviderKey
-          : firstProviderKey;
-        return {
-          requestId: input.id,
-          providerPayload: {},
-          target: {
-            providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-responses',
-            runtimeKey: providerKey
-          },
-          routingDecision: { routeName: 'longcontext' },
-          metadata: {}
-        };
-      }),
+      execute: jest.fn(async (input: any) => ({
+        requestId: input.id,
+        providerPayload: {},
+        target: {
+          providerKey: firstProviderKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-responses',
+          runtimeKey: firstProviderKey
+        },
+        routingDecision: {
+          routeName: 'longcontext',
+          pool: [firstProviderKey, secondProviderKey]
+        },
+        metadata: {}
+      })),
       updateVirtualRouterConfig: jest.fn()
     };
 
@@ -891,20 +1011,22 @@ describe('HubRequestExecutor failover', () => {
       });
 
       expect(result).toEqual(expect.objectContaining({ status: 200 }));
+      expect(failingProcess).toHaveBeenCalledTimes(2);
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('[provider-switch]'));
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('status=429'));
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('code=SSE_TO_JSON_ERROR'));
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('upstreamCode=rate_limit_error'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('switch=exclude_and_reroute'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('decision=provider_backoff_then_reroute'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('backoffScope=provider'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('switch=retry_same_provider'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('decision=recoverable_backoff_same_provider'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('backoffScope=recoverable'));
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('provider=crs.key2.gpt-5.3-codex'));
+      expect(successProcess).toHaveBeenCalledTimes(0);
     } finally {
       warnSpy.mockRestore();
     }
   });
 
-  test('reroutes away from current provider on 429 even when current pool is singleton', async () => {
+  test('keeps 429 on same provider even when route pool exposes an alternative provider', async () => {
     const firstProviderKey = 'tabglm.key1.glm-5.1';
     const secondProviderKey = 'crs.key2.gpt-5.3-codex';
     const failingError = Object.assign(new Error('HTTP 429: model overloaded'), {
@@ -912,11 +1034,11 @@ describe('HubRequestExecutor failover', () => {
       retryable: true
     });
 
-    const failingProcess = jest.fn(async () => {
-      throw failingError;
-    });
+    const failingProcess = jest.fn()
+      .mockRejectedValueOnce(failingError)
+      .mockResolvedValueOnce({ status: 200, data: { id: 'ok-after-retry' } });
     const failureHandle = buildHandle(firstProviderKey, failingProcess);
-    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'ok-after-reroute' } }));
+    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'unused-fallback' } }));
     const successHandle = buildHandle(secondProviderKey, successProcess);
 
     const handles = new Map<string, ProviderHandle>([
@@ -946,7 +1068,10 @@ describe('HubRequestExecutor failover', () => {
             outboundProfile: 'openai-responses',
             runtimeKey: useFallback ? secondProviderKey : firstProviderKey
           },
-          routingDecision: { routeName: 'thinking', pool: useFallback ? [secondProviderKey] : [firstProviderKey] },
+          routingDecision: {
+            routeName: 'thinking',
+            pool: [firstProviderKey, secondProviderKey]
+          },
           metadata: {}
         };
       }),
@@ -982,17 +1107,19 @@ describe('HubRequestExecutor failover', () => {
 
       expect(result).toEqual(expect.objectContaining({ status: 200 }));
       expect(pipeline.execute).toHaveBeenCalledTimes(2);
-      expect(successProcess).toHaveBeenCalledTimes(1);
+      expect(failingProcess).toHaveBeenCalledTimes(2);
+      expect(successProcess).toHaveBeenCalledTimes(0);
       expect(
         logStage.mock.calls.some(
           (call) =>
             call[0] === 'provider.retry' &&
-            call[2]?.switchAction === 'exclude_and_reroute' &&
+            call[2]?.switchAction === 'retry_same_provider' &&
             Array.isArray(call[2]?.excluded) &&
-            call[2]?.excluded.includes(firstProviderKey)
+            call[2]?.excluded.length === 0
         )
       ).toBe(true);
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('switch=exclude_and_reroute'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('switch=retry_same_provider'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('decision=recoverable_backoff_same_provider'));
     } finally {
       warnSpy.mockRestore();
     }
@@ -1074,7 +1201,7 @@ describe('HubRequestExecutor failover', () => {
     expect(routeHints[1]).toBe('longcontext');
   });
 
-  test('rotates antigravity alias on 403 OAuth reauth-required error', async () => {
+  test('surfaces 403 OAuth reauth-required error without alias rotation', async () => {
     const firstProviderKey = 'antigravity.alias1.gemini-3-pro-high';
     const secondProviderKey = 'antigravity.alias2.gemini-3-pro-high';
     const failingError = new Error('HTTP 403: Please authenticate with Google OAuth first');
@@ -1138,18 +1265,20 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const executor = createRequestExecutor(deps);
-    const result = await executor.execute({
+    await expect(executor.execute({
       requestId: 'req-403-reauth',
       entryEndpoint: '/v1/responses',
       body: {},
       headers: {},
       metadata: {}
+    })).rejects.toMatchObject({
+      message: 'HTTP 403: Please authenticate with Google OAuth first',
+      statusCode: 403
     });
 
-    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    expect(pipeline.execute).toHaveBeenCalledTimes(1);
     expect(failingProcess).toHaveBeenCalledTimes(1);
-    expect(successProcess).toHaveBeenCalledTimes(1);
-    expect(result).toEqual(expect.objectContaining({ status: 200 }));
+    expect(successProcess).toHaveBeenCalledTimes(0);
   });
   test('preserves first upstream error when retry-exhausted routing reports provider unavailable', async () => {
     const firstProviderKey = 'glm.1-186.kimi-k2.5';
@@ -1220,7 +1349,7 @@ describe('HubRequestExecutor failover', () => {
 
     expect(pipeline.execute).toHaveBeenCalledTimes(2);
     const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
-    expect(secondCallMetadata.excludedProviderKeys).toEqual([firstProviderKey]);
+    expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
   });
   test('preserves first upstream error when singleton selected pool reroute reports provider unavailable', async () => {
     const firstProviderKey = 'glm.key1.glm-4.7';
@@ -1291,10 +1420,10 @@ describe('HubRequestExecutor failover', () => {
 
     expect(pipeline.execute).toHaveBeenCalledTimes(2);
     const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
-    expect(secondCallMetadata.excludedProviderKeys).toEqual([firstProviderKey]);
+    expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
   });
 
-  test('reroutes on 429 when selected pool is singleton but lower-priority fallback pool still exists', async () => {
+  test('holds on same provider 429 when route pool exposes no alternative candidate', async () => {
     const primaryProviderKey = 'glm.key1.glm-4.7';
     const fallbackProviderKey = 'qwen.key2.qwen3.5-27b';
     const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
@@ -1302,8 +1431,16 @@ describe('HubRequestExecutor failover', () => {
       code: 'HTTP_429'
     });
 
+    let primaryAttempt = 0;
     const primaryProcess = jest.fn(async () => {
-      throw firstError;
+      primaryAttempt += 1;
+      if (primaryAttempt === 1) {
+        throw firstError;
+      }
+      return {
+        status: 200,
+        data: { id: 'ok_after_same_provider_backoff' }
+      };
     });
     const fallbackProcess = jest.fn(async () => ({
       status: 200,
@@ -1371,14 +1508,14 @@ describe('HubRequestExecutor failover', () => {
 
     expect(result).toEqual(expect.objectContaining({ status: 200 }));
     expect(pipeline.execute).toHaveBeenCalledTimes(2);
-    expect(primaryProcess).toHaveBeenCalledTimes(1);
-    expect(fallbackProcess).toHaveBeenCalledTimes(1);
+    expect(primaryProcess).toHaveBeenCalledTimes(2);
+    expect(fallbackProcess).toHaveBeenCalledTimes(0);
 
     const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
-    expect(secondCallMetadata.excludedProviderKeys).toEqual([primaryProviderKey]);
+    expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
   });
 
-  test('keeps excluding each 429 provider instead of hammering the last one again', async () => {
+  test('backs off the last remaining 429 provider instead of excluding it again', async () => {
     const providerA = 'openrouter.key1.qwen/qwen3.6-plus:free';
     const providerB = 'qwen.2-135.qwen3.6-plus';
     const error429A = Object.assign(new Error('HTTP 429: provider A rate limited'), {
@@ -1476,7 +1613,7 @@ describe('HubRequestExecutor failover', () => {
       const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
       expect(secondCallMetadata.excludedProviderKeys).toEqual([providerA]);
       const thirdCallMetadata = pipeline.execute.mock.calls[2][0].metadata as Record<string, unknown>;
-      expect(thirdCallMetadata.excludedProviderKeys).toEqual([providerA, providerB]);
+      expect(thirdCallMetadata.excludedProviderKeys).toEqual([providerA]);
     } finally {
       if (previousBase === undefined) {
         delete process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
@@ -1491,23 +1628,18 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-  test('keeps generic reroute backoff provider-scoped instead of raising across different providers', async () => {
+  test('keeps generic recoverable 500 on same provider with blocking backoff', async () => {
     const providerA = 'tabglm.key1.glm-5.1';
     const providerB = 'crs.key2.gpt-5.3-codex';
     const providerC = 'ali-coding-plan.key1.qwen3.6-plus';
-    const authErrorA = Object.assign(new Error('HTTP 401: provider A unauthorized'), {
-      statusCode: 401
+    const authErrorA = Object.assign(new Error('HTTP 500: provider A overloaded'), {
+      statusCode: 500
     });
-    const authErrorB = Object.assign(new Error('HTTP 401: provider B unauthorized'), {
-      statusCode: 401
-    });
-    const processA = jest.fn(async () => {
-      throw authErrorA;
-    });
-    const processB = jest.fn(async () => {
-      throw authErrorB;
-    });
-    const processC = jest.fn(async () => ({ status: 200, data: { id: 'ok_after_provider_scoped_reroute' } }));
+    const processA = jest.fn()
+      .mockRejectedValueOnce(authErrorA)
+      .mockResolvedValueOnce({ status: 200, data: { id: 'ok_after_same_provider_backoff' } });
+    const processB = jest.fn(async () => ({ status: 200, data: { id: 'unused_provider_b' } }));
+    const processC = jest.fn(async () => ({ status: 200, data: { id: 'unused_provider_c' } }));
 
     const handles = new Map<string, ProviderHandle>([
       [providerA, buildHandle(providerA, processA)],
@@ -1571,10 +1703,10 @@ describe('HubRequestExecutor failover', () => {
       });
       jest
         .spyOn(executor as any, 'convertProviderResponseIfNeeded')
-        .mockResolvedValue({ status: 200, body: { output_text: 'ok_after_provider_scoped_reroute' } });
+        .mockResolvedValue({ status: 200, body: { output_text: 'ok_after_same_provider_backoff' } });
 
       const result = await executor.execute({
-        requestId: 'req-provider-scoped-reroute-backoff',
+        requestId: 'req-same-provider-500-backoff',
         entryEndpoint: '/v1/responses',
         body: {},
         headers: {},
@@ -1585,15 +1717,13 @@ describe('HubRequestExecutor failover', () => {
       const switchLines = warnSpy.mock.calls
         .map((call) => String(call[0] ?? ''))
         .filter((line) => line.includes('[provider-switch]'));
-      expect(switchLines).toHaveLength(2);
+      expect(switchLines).toHaveLength(1);
       expect(switchLines[0]).toContain(`provider=${providerA}`);
       expect(switchLines[0]).toContain('backoff=1ms');
-      expect(switchLines[0]).toContain('backoffScope=provider');
-      expect(switchLines[0]).toContain('decision=provider_backoff_then_reroute');
-      expect(switchLines[1]).toContain(`provider=${providerB}`);
-      expect(switchLines[1]).toContain('backoff=1ms');
-      expect(switchLines[1]).toContain('backoffScope=provider');
-      expect(switchLines[1]).toContain('decision=provider_backoff_then_reroute');
+      expect(switchLines[0]).toContain('backoffScope=recoverable');
+      expect(switchLines[0]).toContain('decision=recoverable_backoff_same_provider');
+      expect(processB).toHaveBeenCalledTimes(0);
+      expect(processC).toHaveBeenCalledTimes(0);
     } finally {
       warnSpy.mockRestore();
       if (previousBase === undefined) {
@@ -1609,23 +1739,25 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-  test('retries failover when upstream SSE error event is retryable network failure', async () => {
+  test('retries same provider when upstream SSE error event is retryable network failure', async () => {
     const firstProviderKey = 'deepseek-web.primary.deepseek-chat';
     const secondProviderKey = 'deepseek-web.backup.deepseek-chat';
 
-    const failingProcess = jest.fn(async () => ({
-      status: 200,
-      data: {
-        mode: 'sse',
-        error: {
-          type: 'error',
+    const failingProcess = jest.fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          mode: 'sse',
           error: {
-            type: 'api_error',
-            message: 'Internal Network Failure'
+            type: 'error',
+            error: {
+              type: 'api_error',
+              message: 'Internal Network Failure'
+            }
           }
         }
-      }
-    }));
+      })
+      .mockResolvedValueOnce({ status: 200, data: { id: 'resp_ok' } });
     const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'resp_ok' } }));
 
     const handles = new Map<string, ProviderHandle>([
@@ -1639,28 +1771,18 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
-        const disabled = new Set<string>(
-          Array.isArray(input.metadata?.excludedProviderKeys)
-            ? input.metadata.excludedProviderKeys
-            : []
-        );
-        const providerKey = disabled.has(firstProviderKey)
-          ? secondProviderKey
-          : firstProviderKey;
-        return {
-          requestId: input.id,
-          providerPayload: {},
-          target: {
-            providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: providerKey
-          },
-          routingDecision: { routeName: 'deepseek' },
-          metadata: {}
-        };
-      }),
+      execute: jest.fn(async (input: any) => ({
+        requestId: input.id,
+        providerPayload: {},
+        target: {
+          providerKey: firstProviderKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-chat',
+          runtimeKey: firstProviderKey
+        },
+        routingDecision: { routeName: 'deepseek' },
+        metadata: {}
+      })),
       updateVirtualRouterConfig: jest.fn()
     };
 
@@ -1686,12 +1808,12 @@ describe('HubRequestExecutor failover', () => {
     });
 
     expect(pipeline.execute).toHaveBeenCalledTimes(2);
-    expect(failingProcess).toHaveBeenCalledTimes(1);
-    expect(successProcess).toHaveBeenCalledTimes(1);
+    expect(failingProcess).toHaveBeenCalledTimes(2);
+    expect(successProcess).toHaveBeenCalledTimes(0);
     expect(result).toEqual(expect.objectContaining({ status: 200 }));
   });
 
-  test('fails over on converted HTTP 401 and returns next provider success', async () => {
+  test('surfaces converted HTTP 401 without provider failover', async () => {
     const firstProviderKey = 'opencode-zen-free.key1.mimo-v2-pro-free';
     const secondProviderKey = 'opencode-zen-free.key2.mimo-v2-pro-free';
 
@@ -1751,18 +1873,21 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const executor = createRequestExecutor(deps);
-    const result = await executor.execute({
+    await expect(executor.execute({
       requestId: 'req-401-failover',
       entryEndpoint: '/v1/responses',
       body: {},
       headers: {},
       metadata: {}
+    })).rejects.toMatchObject({
+      statusCode: 401,
+      status: 401,
+      message: 'Upstream authentication failed'
     });
 
-    expect(result).toEqual(expect.objectContaining({ status: 200 }));
-    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    expect(pipeline.execute).toHaveBeenCalledTimes(1);
     expect(unauthorizedProcess).toHaveBeenCalledTimes(1);
-    expect(successProcess).toHaveBeenCalledTimes(1);
+    expect(successProcess).toHaveBeenCalledTimes(0);
     expect(
       logStage.mock.calls.some(
         (call) =>
@@ -2377,5 +2502,82 @@ describe('HubRequestExecutor session storm backoff', () => {
     expect(
       __requestExecutorTestables.isSessionStormBackoffCandidate(new Error('boom'))
     ).toBe(false);
+  });
+});
+
+describe('HubRequestExecutor provider transport backoff', () => {
+  beforeEach(() => {
+    __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-22T13:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    delete process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
+    delete process.env.RCC_429_BACKOFF_BASE_MS;
+    delete process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
+    delete process.env.RCC_429_BACKOFF_MAX_MS;
+  });
+
+  test('records provider-scoped exponential backoff for repeated 429s', () => {
+    process.env.ROUTECODEX_429_BACKOFF_BASE_MS = '1000';
+    process.env.ROUTECODEX_429_BACKOFF_MAX_MS = '4000';
+
+    const key = __requestExecutorTestables.buildProviderTransportBackoffKey({
+      providerKey: 'mimo.key1.mimo-v2.5-pro',
+      runtimeKey: 'runtime:mimo'
+    });
+    expect(key).toBe('runtime:runtime:mimo');
+
+    const retryable429 = {
+      error: Object.assign(new Error('HTTP 429: overload'), { statusCode: 429 }),
+      statusCode: 429
+    };
+
+    expect(__requestExecutorTestables.consumeProviderTransportBackoffMs(key!, retryable429)).toBe(1000);
+    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(1000);
+
+    jest.setSystemTime(new Date('2026-04-22T13:00:00.500Z'));
+    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(500);
+
+    jest.setSystemTime(new Date('2026-04-22T13:00:01.000Z'));
+    expect(__requestExecutorTestables.consumeProviderTransportBackoffMs(key!, retryable429)).toBe(2000);
+    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(2000);
+
+    __requestExecutorTestables.clearProviderTransportBackoff(key!);
+    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(0);
+  });
+
+  test('treats transport and retryable upstream failures as provider backoff candidates', () => {
+    expect(__requestExecutorTestables.shouldApplyProviderTransportBackoff({
+      error: new Error('fetch failed'),
+      retryError: {
+        statusCode: 502,
+        errorCode: 'HTTP_502',
+        reason: 'fetch failed'
+      },
+      stage: 'provider.send'
+    })).toBe(true);
+
+    expect(__requestExecutorTestables.shouldApplyProviderTransportBackoff({
+      error: Object.assign(new Error('HTTP 429: overload'), { statusCode: 429 }),
+      retryError: {
+        statusCode: 429,
+        errorCode: 'HTTP_429',
+        reason: 'HTTP 429: overload'
+      },
+      stage: 'provider.send'
+    })).toBe(true);
+
+    expect(__requestExecutorTestables.shouldApplyProviderTransportBackoff({
+      error: Object.assign(new Error('HTTP 401: unauthorized'), { statusCode: 401 }),
+      retryError: {
+        statusCode: 401,
+        errorCode: 'INVALID_API_KEY',
+        reason: 'HTTP 401: unauthorized'
+      },
+      stage: 'provider.send'
+    })).toBe(false);
   });
 });

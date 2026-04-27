@@ -67,7 +67,7 @@ describe('token-daemon interactiveRefresh', () => {
     const prevHome = process.env.HOME;
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-quota-authissue-'));
     process.env.HOME = tmpHome;
-    const quotaPath = path.join(tmpHome, '.routecodex', 'quota', 'quota-manager.json');
+    const quotaPath = path.join(tmpHome, '.rcc', 'quota', 'quota-manager.json');
     fs.mkdirSync(path.dirname(quotaPath), { recursive: true });
     fs.writeFileSync(
       quotaPath,
@@ -158,7 +158,7 @@ describe('token-daemon interactiveRefresh', () => {
     process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-quota-authissue-open-'));
     process.env.HOME = tmpHome;
-    const quotaPath = path.join(tmpHome, '.routecodex', 'quota', 'quota-manager.json');
+    const quotaPath = path.join(tmpHome, '.rcc', 'quota', 'quota-manager.json');
     fs.mkdirSync(path.dirname(quotaPath), { recursive: true });
     fs.writeFileSync(
       quotaPath,
@@ -255,7 +255,7 @@ describe('token-daemon interactiveRefresh', () => {
     process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-quota-authissue-escaped-'));
     process.env.HOME = tmpHome;
-    const quotaPath = path.join(tmpHome, '.routecodex', 'quota', 'quota-manager.json');
+    const quotaPath = path.join(tmpHome, '.rcc', 'quota', 'quota-manager.json');
     fs.mkdirSync(path.dirname(quotaPath), { recursive: true });
     fs.writeFileSync(
       quotaPath,
@@ -352,7 +352,7 @@ describe('token-daemon interactiveRefresh', () => {
     process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-quota-authissue-recover-'));
     process.env.HOME = tmpHome;
-    const quotaDir = path.join(tmpHome, '.routecodex', 'quota');
+    const quotaDir = path.join(tmpHome, '.rcc', 'quota');
     const quotaPath = path.join(quotaDir, 'quota-manager.json');
     const errorLogPath = path.join(quotaDir, 'provider-errors.ndjson');
     fs.mkdirSync(path.dirname(quotaPath), { recursive: true });
@@ -468,7 +468,7 @@ describe('token-daemon interactiveRefresh', () => {
     process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-quota-authissue-truncated-'));
     process.env.HOME = tmpHome;
-    const quotaPath = path.join(tmpHome, '.routecodex', 'quota', 'quota-manager.json');
+    const quotaPath = path.join(tmpHome, '.rcc', 'quota', 'quota-manager.json');
     fs.mkdirSync(path.dirname(quotaPath), { recursive: true });
     fs.writeFileSync(
       quotaPath,

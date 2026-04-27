@@ -335,10 +335,28 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
 
         const nodeBin = ctx.nodeBin || process.execPath;
         const serverEntry = ctx.resolveServerEntryPath();
+        const resolveServerRuntimeCwd = (): string => {
+          const dirname =
+            typeof (pathImpl as typeof path).dirname === 'function'
+              ? (pathImpl as typeof path).dirname.bind(pathImpl)
+              : path.dirname;
+          const basename =
+            typeof (pathImpl as typeof path).basename === 'function'
+              ? (pathImpl as typeof path).basename.bind(pathImpl)
+              : path.basename;
+          const entryDir = dirname(serverEntry);
+          if (basename(entryDir) === 'dist') {
+            return dirname(entryDir);
+          }
+          return entryDir;
+        };
+        const serverRuntimeCwd = resolveServerRuntimeCwd();
 
         const env = { ...ctx.env } as NodeJS.ProcessEnv;
         env.ROUTECODEX_CONFIG = configPath;
         env.ROUTECODEX_CONFIG_PATH = configPath;
+        env.ROUTECODEX_BASEDIR = env.ROUTECODEX_BASEDIR || serverRuntimeCwd;
+        env.RCC_BASEDIR = env.RCC_BASEDIR || serverRuntimeCwd;
         if (ctx.isDevPackage) {
           env.ROUTECODEX_PORT = String(resolvedPort);
         }
@@ -408,7 +426,8 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           const daemonProc = ctx.spawn(nodeBin, daemonArgs, {
             stdio: 'ignore',
             env: daemonEnv,
-            detached: true
+            detached: true,
+            cwd: serverRuntimeCwd
           });
           writePidFile(daemonProc.pid);
           try {
@@ -456,7 +475,11 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               ctx.exit(0);
             }
 
-            const childProc = ctx.spawn(nodeBin, args, { stdio: 'inherit', env: childProcessEnv });
+            const childProc = ctx.spawn(nodeBin, args, {
+              stdio: 'inherit',
+              env: childProcessEnv,
+              cwd: serverRuntimeCwd
+            });
             writePidFile(childProc.pid);
 
             const exitInfo = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
@@ -506,13 +529,13 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
 
         let serverLogPath: string | null = null;
         let serverLogStream: fs.WriteStream | null = null;
-        let spawnOptions: any = { stdio: 'inherit', env: childProcessEnv };
+        let spawnOptions: any = { stdio: 'inherit', env: childProcessEnv, cwd: serverRuntimeCwd };
         try {
           const logsDir = pathImpl.join(routeCodexHome, 'logs');
           fsImpl.mkdirSync(logsDir, { recursive: true });
           serverLogPath = pathImpl.join(logsDir, `server-${resolvedPort}.log`);
           serverLogStream = fsImpl.createWriteStream(serverLogPath, { flags: 'a' });
-          spawnOptions = { stdio: ['inherit', 'pipe', 'pipe'], env: childProcessEnv };
+          spawnOptions = { stdio: ['inherit', 'pipe', 'pipe'], env: childProcessEnv, cwd: serverRuntimeCwd };
         } catch {
           if (serverLogStream) {
             try {
@@ -525,7 +548,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             serverLogStream = null;
           }
           serverLogPath = null;
-          spawnOptions = { stdio: 'inherit', env: childProcessEnv };
+          spawnOptions = { stdio: 'inherit', env: childProcessEnv, cwd: serverRuntimeCwd };
         }
 
         const restartExitCode = 75;

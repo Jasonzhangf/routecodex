@@ -74,6 +74,7 @@ import { registerRequestLogContext } from '../../utils/request-log-color.js';
 import { getClientConnectionAbortSignal } from '../../utils/client-connection-state.js';
 import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../../utils/finish-reason.js';
 import { allowSnapshotLocalDiskWrite } from '../../../utils/snapshot-local-disk-gate.js';
+import { writeProviderSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 import {
   REASONING_STOP_FINALIZED_FLAG_KEY,
   REASONING_STOP_FINALIZED_MARKER
@@ -111,6 +112,12 @@ const RECOVERABLE_BACKOFF_TTL_MS = 5 * 60_000;
 const recoverableErrorBackoffState = new Map<string, { consecutive: number; updatedAtMs: number }>();
 const recoverableRetryGateState = new Map<string, Promise<void>>();
 const recoverableRetryWaiterState = new Map<string, { activeWaiters: number; updatedAtMs: number }>();
+const providerTransportBackoffState = new Map<string, {
+  consecutive: number;
+  updatedAtMs: number;
+  nextAllowedAtMs: number;
+}>();
+const providerTransportBackoffGateState = new Map<string, Promise<void>>();
 const SESSION_STORM_BACKOFF_TTL_MS = 10 * 60_000;
 const sessionStormBackoffState = new Map<string, {
   consecutive: number;
@@ -965,6 +972,61 @@ function resolveRequestExecutorProviderErrorClassification(args: {
   return 'recoverable';
 }
 
+function isLastAvailableProvider429(args: {
+  providerKey?: string;
+  routePool?: string[];
+  excludedProviderKeys: Set<string>;
+  retryError: RetryErrorSnapshot;
+}): boolean {
+  const status = typeof args.retryError.statusCode === 'number' ? args.retryError.statusCode : undefined;
+  const errorCode = normalizeCodeKey(args.retryError.errorCode);
+  const upstreamCode = normalizeCodeKey(args.retryError.upstreamCode);
+  const is429 = status === 429 || errorCode === 'HTTP_429' || upstreamCode === 'HTTP_429';
+  if (!is429 || !readString(args.providerKey)) {
+    return false;
+  }
+  if (!Array.isArray(args.routePool) || args.routePool.length === 0) {
+    return true;
+  }
+  return !hasAlternativeRouteCandidate({
+    providerKey: args.providerKey,
+    routePool: args.routePool,
+    excludedProviderKeys: args.excludedProviderKeys
+  });
+}
+
+function shouldApplyProviderTransportBackoff(args: {
+  error: unknown;
+  retryError: RetryErrorSnapshot;
+  stage?: RequestExecutorProviderErrorStage;
+}): boolean {
+  const stage = args.stage ?? 'provider.send';
+  if (stage === 'provider.followup' || isHostRequestExecutorErrorStage(stage)) {
+    return false;
+  }
+  if (isNetworkTransportLikeError(args.error)) {
+    return true;
+  }
+  const status = typeof args.retryError.statusCode === 'number' ? args.retryError.statusCode : undefined;
+  const errorCode = normalizeCodeKey(args.retryError.errorCode);
+  const upstreamCode = normalizeCodeKey(args.retryError.upstreamCode);
+  if (
+    status === 429
+    || status === 408
+    || status === 425
+    || (typeof status === 'number' && status >= 500)
+    || errorCode === 'PROVIDER_TRAFFIC_SATURATED'
+    || upstreamCode === 'PROVIDER_TRAFFIC_SATURATED'
+  ) {
+    return true;
+  }
+  return resolveRequestExecutorProviderErrorClassification({
+    error: args.error,
+    retryError: args.retryError,
+    stage
+  }) === 'recoverable';
+}
+
 function extractRequestExecutorProviderErrorStage(error: unknown): RequestExecutorProviderErrorStage | undefined {
   if (!error || typeof error !== 'object') {
     return undefined;
@@ -1034,6 +1096,7 @@ function resolveRequestExecutorProviderErrorReportPlan(args: {
 
 function isHealthNeutralProviderError(args: {
   stage: RequestExecutorProviderErrorStage;
+  error?: unknown;
   errorCode?: string;
   upstreamCode?: string;
   statusCode?: number;
@@ -1043,6 +1106,9 @@ function isHealthNeutralProviderError(args: {
     return true;
   }
   if (args.classification === 'special_400') {
+    return true;
+  }
+  if (args.classification === 'recoverable') {
     return true;
   }
   const errorCode = normalizeCodeKey(args.errorCode);
@@ -1059,6 +1125,9 @@ function isHealthNeutralProviderError(args: {
   if (
     errorCode === 'CLIENT_TOOL_ARGS_INVALID'
   ) {
+    return true;
+  }
+  if (isNetworkTransportLikeError(args.error)) {
     return true;
   }
   if (
@@ -1133,6 +1202,7 @@ async function reportRequestExecutorProviderError(args: {
   });
   const affectsHealth = !isHealthNeutralProviderError({
     stage,
+    error: args.error,
     errorCode,
     upstreamCode,
     statusCode,
@@ -1206,27 +1276,31 @@ function isBlockingRecoverableRetryError(args: {
   const errorCode = normalizeCodeKey(args.errorCode);
   const upstreamCode = normalizeCodeKey(args.upstreamCode);
   const reason = typeof args.reason === 'string' ? args.reason.trim().toLowerCase() : '';
-  if (status === 429 || status === 502 || status === 503 || status === 504) {
+  if (status === 408 || status === 425 || status === 429 || (typeof status === 'number' && status >= 500)) {
     return true;
   }
   if (
     errorCode === 'PROVIDER_TRAFFIC_SATURATED'
     || errorCode === 'HTTP_429'
+    || errorCode === 'HTTP_500'
     || errorCode === 'HTTP_502'
     || errorCode === 'HTTP_503'
     || errorCode === 'HTTP_504'
     || errorCode === 'SSE_TO_JSON_ERROR'
     || errorCode === 'SSE_DECODE_ERROR'
+    || errorCode === 'UPSTREAM_EMPTY_OUTPUT'
   ) {
     return true;
   }
   if (
     upstreamCode === 'HTTP_429'
+    || upstreamCode === 'HTTP_500'
     || upstreamCode === 'HTTP_502'
     || upstreamCode === 'HTTP_503'
     || upstreamCode === 'HTTP_504'
     || upstreamCode === 'SSE_TO_JSON_ERROR'
     || upstreamCode === 'SSE_DECODE_ERROR'
+    || upstreamCode === 'UPSTREAM_EMPTY_OUTPUT'
   ) {
     return true;
   }
@@ -1296,7 +1370,7 @@ function resolveRecoverableBackoffCapMs(args: {
   const errorCode = normalizeCodeKey(args.errorCode);
   const upstreamCode = normalizeCodeKey(args.upstreamCode);
   const reason = typeof args.reason === 'string' ? args.reason.trim().toLowerCase() : '';
-  // 429 类错误按“快速换 provider”策略：小步快跑，不做长阻塞。
+  // 429/配额类错误统一走阻塞退避；这里只控制上限，不再做“快速换 provider”。
   if (
     status === 429
     || errorCode === 'HTTP_429'
@@ -1477,6 +1551,124 @@ function consumeProviderScopedRetryBackoffMs(
   return Math.min(maxMs, baseMs * Math.pow(2, Math.max(0, consecutive - 1)));
 }
 
+function buildProviderTransportBackoffKey(args: {
+  providerKey?: string;
+  runtimeKey?: string;
+}): string | undefined {
+  const runtimeKey = normalizeRuntimeKey(args.runtimeKey);
+  if (runtimeKey) {
+    return `runtime:${runtimeKey}`;
+  }
+  const providerKey = readString(args.providerKey);
+  if (providerKey) {
+    return `provider:${providerKey}`;
+  }
+  return undefined;
+}
+
+function consumeProviderTransportBackoffMs(
+  key: string,
+  args: {
+    error: unknown;
+    statusCode?: number;
+  }
+): number {
+  const now = Date.now();
+  for (const [existingKey, state] of providerTransportBackoffState.entries()) {
+    if (now - state.updatedAtMs >= RECOVERABLE_BACKOFF_TTL_MS) {
+      providerTransportBackoffState.delete(existingKey);
+    }
+  }
+  const previous = providerTransportBackoffState.get(key);
+  const consecutive =
+    previous && now - previous.updatedAtMs < RECOVERABLE_BACKOFF_TTL_MS
+      ? Math.min(previous.consecutive + 1, 16)
+      : 1;
+  const delayMs = Math.min(
+    resolveProviderScopedRetryBackoffCapMs(args.error, { statusCode: args.statusCode }),
+    (() => {
+      if (typeof args.statusCode === 'number' && args.statusCode === 429) {
+        const raw = process.env.ROUTECODEX_429_BACKOFF_BASE_MS || process.env.RCC_429_BACKOFF_BASE_MS;
+        const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
+        if (Number.isFinite(parsed) && parsed > 0) {
+          return parsed;
+        }
+        return process.env.NODE_ENV === 'test' ? 200 : 1_000;
+      }
+      if (isNetworkTransportLikeError(args.error)) {
+        const raw =
+          process.env.ROUTECODEX_NETWORK_RETRY_BACKOFF_BASE_MS
+          || process.env.RCC_NETWORK_RETRY_BACKOFF_BASE_MS;
+        const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
+        if (Number.isFinite(parsed) && parsed > 0) {
+          return parsed;
+        }
+        return 500;
+      }
+      const raw =
+        process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS
+        || process.env.RCC_PROVIDER_RETRY_BACKOFF_BASE_MS;
+      const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+      return process.env.NODE_ENV === 'test' ? 800 : 2_000;
+    })() * Math.pow(2, Math.max(0, consecutive - 1))
+  );
+  providerTransportBackoffState.set(key, {
+    consecutive,
+    updatedAtMs: now,
+    nextAllowedAtMs: now + delayMs
+  });
+  return delayMs;
+}
+
+function peekProviderTransportBackoffWaitMs(key: string): number {
+  const state = providerTransportBackoffState.get(key);
+  if (!state) {
+    return 0;
+  }
+  const now = Date.now();
+  if (now - state.updatedAtMs >= RECOVERABLE_BACKOFF_TTL_MS) {
+    providerTransportBackoffState.delete(key);
+    return 0;
+  }
+  return Math.max(0, state.nextAllowedAtMs - now);
+}
+
+function clearProviderTransportBackoff(key?: string): void {
+  if (!key) {
+    return;
+  }
+  providerTransportBackoffState.delete(key);
+}
+
+async function waitProviderTransportBackoffWithGate(key: string, ms: number, signal?: AbortSignal): Promise<void> {
+  if (!(ms > 0)) {
+    return;
+  }
+  const normalizedKey = key.trim() || 'provider:unknown';
+  const previous = providerTransportBackoffGateState.get(normalizedKey) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  providerTransportBackoffGateState.set(normalizedKey, current);
+  try {
+    await previous.catch((error: unknown) => {
+      logRequestExecutorNonBlockingError('waitProviderTransportBackoffWithGate.previous', error, {
+        key: normalizedKey
+      });
+    });
+    await waitWithClientAbortSignal(ms, signal);
+  } finally {
+    release();
+    if (providerTransportBackoffGateState.get(normalizedKey) === current) {
+      providerTransportBackoffGateState.delete(normalizedKey);
+    }
+  }
+}
+
 type ProviderRetryBackoffPlan = {
   blockingRecoverable: boolean;
   retryBackoffMs: number;
@@ -1509,6 +1701,7 @@ type ProviderRetryExecutionPlan = {
   shouldRetry: boolean;
   blockingRecoverable: boolean;
   excludedCurrentProvider: boolean;
+  holdOnLastAvailable429: boolean;
   retryBackoffMs: number;
   recoverableBackoffMs: number;
   backoffScope?: ProviderRetryBackoffScope;
@@ -1616,7 +1809,7 @@ function resolveProviderRetryEligibilityPlan(args: {
   }
   if (classification === 'unrecoverable') {
     return {
-      shouldRetry: shouldRetryProviderError(args.error) || Boolean(antigravityRecoveryEligible),
+      shouldRetry: false,
       blockingRecoverable: false
     };
   }
@@ -1692,6 +1885,7 @@ async function resolveProviderRetryExecutionPlan(args: {
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
       excludedCurrentProvider: false,
+      holdOnLastAvailable429: false,
       retryBackoffMs: 0,
       recoverableBackoffMs: 0,
       antigravityRetrySignal: args.antigravityRetrySignal ?? null
@@ -1719,12 +1913,20 @@ async function resolveProviderRetryExecutionPlan(args: {
       providerKey: args.providerKey,
       status: args.status,
       error: args.error,
+      classification,
       promptTooLong: Boolean(args.promptTooLong),
       isVerify: Boolean(args.isVerify),
       isReauth: Boolean(args.isReauth),
       antigravityRetrySignal: args.antigravityRetrySignal ?? null,
+      routePool: args.routePool,
       excludedProviderKeys: args.excludedProviderKeys
     });
+  const holdOnLastAvailable429 = isLastAvailableProvider429({
+    providerKey: args.providerKey,
+    routePool: args.routePool,
+    excludedProviderKeys: args.excludedProviderKeys,
+    retryError: args.retryError
+  });
   if (
     classification === 'unrecoverable'
     && !exclusionPlan.excludedCurrentProvider
@@ -1734,6 +1936,7 @@ async function resolveProviderRetryExecutionPlan(args: {
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
       excludedCurrentProvider: false,
+      holdOnLastAvailable429,
       retryBackoffMs: 0,
       recoverableBackoffMs: 0,
       antigravityRetrySignal: exclusionPlan.antigravityRetrySignal
@@ -1776,6 +1979,7 @@ async function resolveProviderRetryExecutionPlan(args: {
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
       excludedCurrentProvider: exclusionPlan.excludedCurrentProvider,
+      holdOnLastAvailable429,
       retryBackoffMs: 0,
       recoverableBackoffMs: 0,
       antigravityRetrySignal: exclusionPlan.antigravityRetrySignal
@@ -1785,6 +1989,7 @@ async function resolveProviderRetryExecutionPlan(args: {
     shouldRetry: true,
     blockingRecoverable: eligibilityPlan.blockingRecoverable,
     excludedCurrentProvider: exclusionPlan.excludedCurrentProvider,
+    holdOnLastAvailable429,
     retryBackoffMs: retryBackoffPlan.retryBackoffMs,
     recoverableBackoffMs: retryBackoffPlan.recoverableBackoffMs,
     backoffScope: retryBackoffPlan.backoffScope,
@@ -2020,7 +2225,7 @@ function buildProviderRetryTelemetryPlan(args: {
     ...(retrySwitchPlan.runtimeScopeExcludedCount > 0
       ? { runtimeScopeExcludedCount: retrySwitchPlan.runtimeScopeExcludedCount }
       : {}),
-    holdOnLastAvailable429: false,
+    holdOnLastAvailable429: args.retryExecutionPlan.holdOnLastAvailable429,
     blockingRecoverable: args.retryExecutionPlan.blockingRecoverable,
     ...(args.promptTooLong
       ? {
@@ -2375,6 +2580,8 @@ function resetRequestExecutorInternalStateForTests(): void {
   recoverableErrorBackoffState.clear();
   recoverableRetryGateState.clear();
   recoverableRetryWaiterState.clear();
+  providerTransportBackoffState.clear();
+  providerTransportBackoffGateState.clear();
   sessionStormBackoffState.clear();
   sessionStormBackoffGateState.clear();
   logicalChainRetryState.clear();
@@ -2464,10 +2671,12 @@ function resolveProviderRetryExclusionPlan(args: {
   providerKey?: string;
   status?: number;
   error: unknown;
+  classification?: RequestExecutorProviderErrorClassification;
   promptTooLong: boolean;
   isVerify: boolean;
   isReauth: boolean;
   antigravityRetrySignal: AntigravityRetrySignal | null;
+  routePool?: string[];
   excludedProviderKeys: Set<string>;
 }): ProviderRetryExclusionPlan {
   const providerKey = readString(args.providerKey);
@@ -2487,7 +2696,35 @@ function resolveProviderRetryExclusionPlan(args: {
       antigravityRetrySignal: nextAntigravityRetrySignal
     };
   }
+  if (args.classification === 'recoverable') {
+    return {
+      excludedCurrentProvider: false,
+      antigravityRetrySignal: nextAntigravityRetrySignal
+    };
+  }
   if (isProviderTrafficSaturatedRetryError({ status: args.status, error: args.error })) {
+    return {
+      excludedCurrentProvider: false,
+      antigravityRetrySignal: nextAntigravityRetrySignal
+    };
+  }
+  if (isNetworkTransportLikeError(args.error)) {
+    return {
+      excludedCurrentProvider: false,
+      antigravityRetrySignal: nextAntigravityRetrySignal
+    };
+  }
+  // [rcc] Generalized last-provider guard: never exclude the current provider when
+  // the route pool contains no alternative candidate.  Previously this guard
+  // only applied to 429; extending it to all status codes prevents draining
+  // the pool on 500 / upstream_empty_output / transient errors.
+  if (
+    !hasExplicitAlternativeRouteCandidate({
+      providerKey,
+      routePool: args.routePool,
+      excludedProviderKeys: args.excludedProviderKeys
+    })
+  ) {
     return {
       excludedCurrentProvider: false,
       antigravityRetrySignal: nextAntigravityRetrySignal
@@ -2562,6 +2799,17 @@ function excludeProvidersSharingRuntimeFromRoutePool(args: {
     added.push(normalizedProviderKey);
   }
   return added;
+}
+
+function hasExplicitAlternativeRouteCandidate(args: {
+  providerKey?: string;
+  routePool?: string[];
+  excludedProviderKeys: Set<string>;
+}): boolean {
+  if (!Array.isArray(args.routePool) || args.routePool.length === 0) {
+    return false;
+  }
+  return hasAlternativeRouteCandidate(args);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -2937,6 +3185,66 @@ function detectRetryableEmptyAssistantResponse(body: unknown): { reason: string;
   }
 
   return null;
+}
+
+async function persistEmptyAssistantProviderSnapshots(args: {
+  requestId: string;
+  entryEndpoint?: string;
+  providerKey?: string;
+  providerId?: string;
+  providerRequestPayload: unknown;
+  providerRequestHeaders?: Record<string, unknown>;
+  providerRequestUrl?: string;
+  normalizedResponse: PipelineExecutionResult;
+  convertedResponse: PipelineExecutionResult;
+  emptyAssistantSignal: { reason: string; marker: string };
+}): Promise<void> {
+  const requestPayload =
+    args.providerRequestPayload && typeof args.providerRequestPayload === 'object'
+      ? args.providerRequestPayload
+      : { payload: args.providerRequestPayload };
+  await writeProviderSnapshot({
+    phase: 'provider-request',
+    requestId: args.requestId,
+    clientRequestId: args.requestId,
+    entryEndpoint: args.entryEndpoint,
+    providerKey: args.providerKey,
+    providerId: args.providerId,
+    headers: args.providerRequestHeaders,
+    url: args.providerRequestUrl,
+    data: requestPayload,
+    forceLocalDiskWriteWhenDisabled: true
+  });
+  await writeProviderSnapshot({
+    phase: 'provider-response',
+    requestId: args.requestId,
+    clientRequestId: args.requestId,
+    entryEndpoint: args.entryEndpoint,
+    providerKey: args.providerKey,
+    providerId: args.providerId,
+    headers:
+      args.normalizedResponse.headers && typeof args.normalizedResponse.headers === 'object'
+        ? args.normalizedResponse.headers
+        : undefined,
+    url:
+      typeof (args.normalizedResponse as { url?: unknown }).url === 'string'
+        ? String((args.normalizedResponse as { url?: unknown }).url)
+        : args.providerRequestUrl,
+    data: {
+      emptyAssistantSignal: args.emptyAssistantSignal,
+      normalizedResponse: {
+        status: args.normalizedResponse.status ?? null,
+        headers: args.normalizedResponse.headers ?? null,
+        body: args.normalizedResponse.body ?? null
+      },
+      convertedResponse: {
+        status: args.convertedResponse.status ?? null,
+        headers: args.convertedResponse.headers ?? null,
+        body: args.convertedResponse.body ?? null
+      }
+    },
+    forceLocalDiskWriteWhenDisabled: true
+  });
 }
 
 function bodyContainsReasoningStopFinalizedMarker(body: unknown): boolean {
@@ -3517,6 +3825,10 @@ export class HubRequestExecutor implements RequestExecutor {
           runtimeKey,
           attempt
         });
+        const providerTransportBackoffKey = buildProviderTransportBackoffKey({
+          providerKey: target.providerKey,
+          runtimeKey
+        });
 
         let trafficPermit: ProviderTrafficPermit | null = null;
         let trafficPolicyMaxInFlight = 0;
@@ -3531,6 +3843,28 @@ export class HubRequestExecutor implements RequestExecutor {
         const bypassTrafficGovernor = isServerToolFollowupRequest(metadataForAttempt);
         try {
           throwIfClientAbortSignalAborted(clientAbortSignal);
+          if (providerTransportBackoffKey) {
+            const pendingProviderTransportWaitMs = peekProviderTransportBackoffWaitMs(providerTransportBackoffKey);
+            if (pendingProviderTransportWaitMs > 0) {
+              this.logStage('provider.transport_backoff_wait', input.requestId, {
+                providerKey: target.providerKey,
+                runtimeKey,
+                waitMs: pendingProviderTransportWaitMs,
+                attempt
+              });
+              await waitProviderTransportBackoffWithGate(
+                providerTransportBackoffKey,
+                pendingProviderTransportWaitMs,
+                clientAbortSignal
+              );
+              this.logStage('provider.transport_backoff_wait.completed', input.requestId, {
+                providerKey: target.providerKey,
+                runtimeKey,
+                waitMs: pendingProviderTransportWaitMs,
+                attempt
+              });
+            }
+          }
           if (bypassTrafficGovernor) {
             this.logStage('provider.traffic.acquire.bypassed', input.requestId, {
               providerKey: target.providerKey,
@@ -3809,6 +4143,7 @@ export class HubRequestExecutor implements RequestExecutor {
             convertedStatus,
             attempt
           });
+          clearProviderTransportBackoff(providerTransportBackoffKey);
           if (!bypassTrafficGovernor) {
             try {
               await this.trafficGovernor.observeOutcome?.({
@@ -3835,6 +4170,32 @@ export class HubRequestExecutor implements RequestExecutor {
           const emptyAssistantSignal = detectRetryableEmptyAssistantResponse(converted.body);
           if (emptyAssistantSignal) {
             const bodyForError = converted.body as Record<string, unknown>;
+            try {
+              await persistEmptyAssistantProviderSnapshots({
+                requestId: input.requestId,
+                entryEndpoint: input.entryEndpoint,
+                providerKey: target.providerKey,
+                providerId: handle.providerId,
+                providerRequestPayload: providerPayload,
+                providerRequestHeaders:
+                  providerPayload && typeof providerPayload === 'object'
+                    ? ((providerPayload as Record<string, unknown>).headers as Record<string, unknown> | undefined)
+                    : undefined,
+                providerRequestUrl:
+                  providerPayload && typeof providerPayload === 'object' && typeof (providerPayload as Record<string, unknown>).url === 'string'
+                    ? String((providerPayload as Record<string, unknown>).url)
+                    : undefined,
+                normalizedResponse: normalized,
+                convertedResponse: converted,
+                emptyAssistantSignal
+              });
+            } catch (snapshotError) {
+              logRequestExecutorNonBlockingError('host.response_contract.empty_assistant.snapshot', snapshotError, {
+                requestId: input.requestId,
+                providerKey: target.providerKey,
+                marker: emptyAssistantSignal.marker
+              });
+            }
             const errorToThrow: any = new Error(
               `Upstream returned empty assistant payload: ${emptyAssistantSignal.reason}`
             );
@@ -4018,6 +4379,31 @@ export class HubRequestExecutor implements RequestExecutor {
             typeof retryError.statusCode === 'number'
               ? retryError.statusCode
               : extractStatusCodeFromError(error);
+          if (
+            providerTransportBackoffKey
+            && shouldApplyProviderTransportBackoff({
+              error,
+              retryError,
+              stage: 'provider.send'
+            })
+          ) {
+            const providerBackoffMs = consumeProviderTransportBackoffMs(providerTransportBackoffKey, {
+              error,
+              statusCode: status
+            });
+            this.logStage('provider.transport_backoff.recorded', input.requestId, {
+              providerKey: target.providerKey,
+              runtimeKey,
+              backoffKey: providerTransportBackoffKey,
+              backoffMs: providerBackoffMs,
+              consecutive: providerTransportBackoffState.get(providerTransportBackoffKey)?.consecutive ?? 0,
+              reason: retryError.reason,
+              errorCode: retryError.errorCode,
+              upstreamCode: retryError.upstreamCode,
+              statusCode: status,
+              attempt
+            });
+          }
           const nextAntigravityRetrySignal = isAntigravityProviderKey(target.providerKey)
             ? (() => {
             const signature = extractRetryErrorSignature(error);
@@ -4155,8 +4541,14 @@ export const __requestExecutorTestables = {
   extractRetryErrorSnapshot,
   truncateReason,
   isHealthNeutralProviderError,
+  isLastAvailableProvider429,
+  shouldApplyProviderTransportBackoff,
   buildRecoverableErrorBackoffKey,
   consumeRecoverableErrorBackoffMs,
+  buildProviderTransportBackoffKey,
+  consumeProviderTransportBackoffMs,
+  peekProviderTransportBackoffWaitMs,
+  clearProviderTransportBackoff,
   detectRetryableEmptyAssistantResponse,
   deriveLogicalRequestChainKey,
   resolveSessionStormBackoffScope,
