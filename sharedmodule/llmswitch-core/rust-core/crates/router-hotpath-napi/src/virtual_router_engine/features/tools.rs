@@ -11,14 +11,15 @@ pub(super) struct ToolClassification {
 fn tool_category_priority(category: &str) -> i32 {
     match category {
         "websearch" => 4,
-        "write" => 3,
+        "coding" => 3,
         "search" => 2,
-        "read" => 1,
+        "thinking" => 1,
         _ => 0,
     }
 }
 
-const READ_TOOL_EXACT: &[&str] = &[
+const THINKING_TOOL_EXACT: &[&str] = &[
+    "update_plan",
     "read",
     "read_file",
     "read_text",
@@ -60,8 +61,8 @@ const SEARCH_TOOL_EXACT: &[&str] = &[
     "list_dir",
 ];
 
-const READ_TOOL_KEYWORDS: &[&str] = &[
-    "read", "view", "download", "open", "show", "fetch", "inspect",
+const THINKING_TOOL_KEYWORDS: &[&str] = &[
+    "read", "view", "download", "open", "show", "fetch", "inspect", "plan",
 ];
 const WRITE_TOOL_KEYWORDS: &[&str] = &[
     "write", "patch", "modify", "edit", "create", "update", "append", "replace", "save",
@@ -78,9 +79,7 @@ const WEB_TOOL_KEYWORDS: &[&str] = &[
     "internet_search",
 ];
 const SHELL_TOOL_NAMES: &[&str] = &["shell_command", "shell", "bash", "exec_command"];
-const SHELL_READ_COMMANDS: &[&str] = &[
-    "cat", "head", "tail", "awk", "strings", "less", "more", "nl",
-];
+const SHELL_THINKING_COMMANDS: &[&str] = &["cat", "head", "tail", "strings", "less", "more", "nl"];
 const SHELL_SEARCH_COMMANDS: &[&str] = &[
     "rg",
     "ripgrep",
@@ -178,7 +177,7 @@ pub(super) fn detect_coding_tool(tools: Option<&Value>) -> bool {
         if name.is_empty() && desc.is_empty() {
             return false;
         }
-        if write_exact.iter().any(|item| *item == name) {
+        if write_exact.iter().any(|item| *item == name) || name == "exec_command" {
             return true;
         }
         write_keywords
@@ -322,10 +321,10 @@ fn classify_tool_call(call: &Value) -> Option<ToolClassification> {
         .any(|keyword| function_name.contains(keyword))
     {
         "websearch".to_string()
-    } else if name_category == "write" || shell_category == "write" {
-        "write".to_string()
-    } else if name_category == "read" || shell_category == "read" {
-        "read".to_string()
+    } else if name_category == "coding" || shell_category == "coding" {
+        "coding".to_string()
+    } else if name_category == "thinking" || shell_category == "thinking" {
+        "thinking".to_string()
     } else if name_category == "search" || shell_category == "search" {
         "search".to_string()
     } else {
@@ -437,23 +436,15 @@ fn categorize_tool_name(name: &str) -> String {
     {
         return "search".to_string();
     }
-    if READ_TOOL_EXACT.iter().any(|item| *item == normalized) {
-        return "read".to_string();
+    if THINKING_TOOL_EXACT.iter().any(|item| *item == normalized)
+        || THINKING_TOOL_KEYWORDS
+            .iter()
+            .any(|keyword| normalized.contains(keyword))
+    {
+        return "thinking".to_string();
     }
     if WRITE_TOOL_EXACT.iter().any(|item| *item == normalized) {
-        return "write".to_string();
-    }
-    if READ_TOOL_KEYWORDS
-        .iter()
-        .any(|keyword| normalized.contains(keyword))
-    {
-        return "read".to_string();
-    }
-    if WRITE_TOOL_KEYWORDS
-        .iter()
-        .any(|keyword| normalized.contains(keyword))
-    {
-        return "write".to_string();
+        return "coding".to_string();
     }
     String::from("other")
 }
@@ -464,26 +455,32 @@ fn classify_shell_command(command: &str) -> String {
         return "other".to_string();
     }
     if normalized.contains("<<") {
-        return "write".to_string();
+        return "coding".to_string();
     }
     if SHELL_WRITE_COMMANDS
         .iter()
         .any(|cmd| contains_command(&normalized, cmd))
     {
-        return "write".to_string();
+        return "coding".to_string();
     }
-    if contains_command(&normalized, "sed") && normalized.contains(" -i") {
-        return "write".to_string();
+    if contains_command(&normalized, "sed") {
+        return "coding".to_string();
+    }
+    if contains_command(&normalized, "awk") {
+        return "coding".to_string();
     }
     if contains_command(&normalized, "perl") && normalized.contains("-pi") {
-        return "write".to_string();
+        return "coding".to_string();
+    }
+    if normalized.contains("replace") {
+        return "coding".to_string();
     }
     if SHELL_REDIRECT_WRITE_BINARIES
         .iter()
         .any(|cmd| contains_command(&normalized, cmd))
         && has_output_redirect(&normalized)
     {
-        return "write".to_string();
+        return "coding".to_string();
     }
     if SHELL_SEARCH_COMMANDS
         .iter()
@@ -501,14 +498,14 @@ fn classify_shell_command(command: &str) -> String {
     if contains_command(&normalized, "bd") && normalized.contains(" search") {
         return "search".to_string();
     }
-    if SHELL_READ_COMMANDS
+    if SHELL_THINKING_COMMANDS
         .iter()
         .any(|cmd| contains_command(&normalized, cmd))
     {
-        return "read".to_string();
+        return "thinking".to_string();
     }
-    if contains_command(&normalized, "sed") {
-        return "read".to_string();
+    if contains_command(&normalized, "update_plan") {
+        return "thinking".to_string();
     }
     "other".to_string()
 }
@@ -574,7 +571,10 @@ fn has_output_redirect(command: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_last_assistant_tool_category, extract_meaningful_declared_tool_names};
+    use super::{
+        classify_tool_call_for_report, detect_last_assistant_tool_category,
+        extract_meaningful_declared_tool_names,
+    };
     use serde_json::json;
 
     #[test]
@@ -627,5 +627,81 @@ mod tests {
 
         let result = extract_meaningful_declared_tool_names(Some(&tools));
         assert_eq!(result, vec!["exec_command".to_string()]);
+    }
+
+    #[test]
+    fn update_plan_is_classified_as_thinking() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "update_plan",
+                "arguments": "{\"plan\":[{\"step\":\"inspect\",\"status\":\"in_progress\"}]}"
+            }
+        });
+
+        let result = classify_tool_call_for_report(&call).expect("classification");
+        assert_eq!(result.category, "thinking");
+    }
+
+    #[test]
+    fn exec_command_grep_and_find_are_classified_as_search() {
+        let grep = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"grep -n route README.md\"}"
+            }
+        });
+        let find = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"find src -name '*.ts'\"}"
+            }
+        });
+
+        assert_eq!(
+            classify_tool_call_for_report(&grep)
+                .expect("classification")
+                .category,
+            "search"
+        );
+        assert_eq!(
+            classify_tool_call_for_report(&find)
+                .expect("classification")
+                .category,
+            "search"
+        );
+    }
+
+    #[test]
+    fn exec_command_sed_and_awk_are_classified_as_coding() {
+        let sed = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"sed -i '' 's/old/new/g' src/a.ts\"}"
+            }
+        });
+        let awk = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"awk '{gsub(/old/,\\\"new\\\")}1' src/a.ts\"}"
+            }
+        });
+
+        assert_eq!(
+            classify_tool_call_for_report(&sed)
+                .expect("classification")
+                .category,
+            "coding"
+        );
+        assert_eq!(
+            classify_tool_call_for_report(&awk)
+                .expect("classification")
+                .category,
+            "coding"
+        );
     }
 }

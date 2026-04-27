@@ -70,18 +70,18 @@ impl RoutingClassifier {
         let web_search_continuation = last_tool_category == "websearch";
         let local_tool_continuation = matches!(
             last_tool_category.as_str(),
-            "read" | "write" | "search" | "other"
+            "thinking" | "coding" | "search" | "other"
         );
         let reached_long_context = features.estimated_tokens >= self.long_context_threshold_tokens;
         let has_tool_activity =
             features.has_tools || (!latest_message_from_user && features.has_tool_call_responses);
-        let thinking_continuation = last_tool_category == "read";
+        let thinking_continuation = last_tool_category == "thinking";
         // Jason 规则：当前轮是用户输入时始终优先 thinking，
         // 但不再引用历史 last-tool continuation 影响本轮判断。
         // （tools 仍可作为并行诊断信号，避免“thinking 与 tools 冲突”）
         let thinking_from_user = latest_message_from_user;
         let thinking_from_read = !thinking_from_user && thinking_continuation;
-        let coding_continuation = last_tool_category == "write";
+        let coding_continuation = last_tool_category == "coding";
         let search_continuation = last_tool_category == "search";
         let tools_continuation = last_tool_category == "other";
         let has_remote_video_attachment =
@@ -104,7 +104,7 @@ impl RoutingClassifier {
             if thinking_from_user {
                 "thinking:user-input".to_string()
             } else {
-                "thinking:last-tool-read".to_string()
+                "thinking:last-tool-thinking".to_string()
             },
         ));
         evaluation.push((
@@ -115,7 +115,7 @@ impl RoutingClassifier {
         evaluation.push((
             "coding".to_string(),
             coding_continuation,
-            "coding:last-tool-write".to_string(),
+            "coding:last-tool-coding".to_string(),
         ));
         evaluation.push((
             "web_search".to_string(),
@@ -281,14 +281,14 @@ mod tests {
             latest_message_from_user: false,
             has_tools: true,
             has_tool_call_responses: true,
-            last_assistant_tool_category: Some("read".to_string()),
+            last_assistant_tool_category: Some("thinking".to_string()),
             ..Default::default()
         };
 
         let result = classifier().classify(&features);
 
         assert_eq!(result.route_name, "thinking");
-        assert!(result.reasoning.contains("thinking:last-tool-read"));
+        assert!(result.reasoning.contains("thinking:last-tool-thinking"));
     }
 
     #[test]

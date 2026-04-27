@@ -650,7 +650,7 @@ mod tests {
         assert!(features.has_tool_call_responses);
         assert_eq!(
             features.last_assistant_tool_category.as_deref(),
-            Some("read")
+            Some("thinking")
         );
     }
 

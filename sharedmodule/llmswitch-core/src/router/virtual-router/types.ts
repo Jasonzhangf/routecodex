@@ -2,35 +2,35 @@
  * Virtual Router 类型定义
  */
 
-import type { ChatContinuationSemantics } from '../../conversion/hub/types/chat-envelope.js';
-import type { StandardizedRequest } from '../../conversion/hub/types/standardized.js';
+import type { ChatContinuationSemantics } from "../../conversion/hub/types/chat-envelope.js";
+import type { StandardizedRequest } from "../../conversion/hub/types/standardized.js";
 
 export const DEFAULT_MODEL_CONTEXT_TOKENS = 200_000;
 
-export const DEFAULT_ROUTE = 'default';
+export const DEFAULT_ROUTE = "default";
 export const ROUTE_PRIORITY: string[] = [
-  'video',
-  'multimodal',
-  'longcontext',
-  'web_search',
-  'thinking',
-  'coding',
-  'search',
-  'tools',
-  'background',
-  DEFAULT_ROUTE
+  "video",
+  "multimodal",
+  "longcontext",
+  "web_search",
+  "thinking",
+  "coding",
+  "search",
+  "tools",
+  "background",
+  DEFAULT_ROUTE,
 ];
 
-export type RoutingInstructionMode = 'force' | 'sticky' | 'none';
+export type RoutingInstructionMode = "force" | "sticky" | "none";
 
-export type RoutePoolMode = 'round-robin' | 'priority';
+export type RoutePoolMode = "round-robin" | "priority";
 
 export interface RoutePoolLoadBalancingPolicy {
   /**
    * Optional pool-level override for provider selection strategy.
    * When omitted, Virtual Router falls back to the global loadBalancing.strategy.
    */
-  strategy?: 'round-robin' | 'weighted' | 'sticky';
+  strategy?: "round-robin" | "weighted" | "sticky";
   /**
    * Optional pool-local weights. Keys may target runtime keys, provider.model groups, or provider ids.
    */
@@ -68,10 +68,10 @@ export interface RoutePoolTier {
 
 export type RoutingPools = Record<string, RoutePoolTier[]>;
 
-export type StreamingPreference = 'auto' | 'always' | 'never';
+export type StreamingPreference = "auto" | "always" | "never";
 
 export interface ProviderAuthConfig {
-  type: 'apiKey' | 'oauth';
+  type: "apiKey" | "oauth";
   secretRef?: string;
   value?: string;
   tokenFile?: string;
@@ -89,20 +89,28 @@ export interface ProviderAuthConfig {
 
 export interface DeepSeekCompatRuntimeOptions {
   strictToolRequired?: boolean;
-  toolProtocol?: 'native' | 'text';
+  toolProtocol?: "native" | "text";
 }
 
-export type AnthropicThinkingEffort = 'low' | 'medium' | 'high' | 'max';
+export type AnthropicThinkingEffort = "low" | "medium" | "high" | "max";
 
 export interface AnthropicThinkingConfig {
-  mode?: 'disabled' | 'enabled' | 'adaptive';
+  mode?: "disabled" | "enabled" | "adaptive";
   budgetTokens?: number;
   effort?: AnthropicThinkingEffort;
 }
 
-export type AnthropicThinkingBudgetMap = Partial<Record<AnthropicThinkingEffort, number>>;
+export type AnthropicThinkingBudgetMap = Partial<
+  Record<AnthropicThinkingEffort, number>
+>;
 
-export type ModelCapability = 'text' | 'reasoning' | 'multimodal' | 'video' | 'thinking' | 'web_search';
+export type ModelCapability =
+  | "text"
+  | "reasoning"
+  | "multimodal"
+  | "video"
+  | "thinking"
+  | "web_search";
 
 export interface ProviderProfile {
   providerKey: string;
@@ -114,7 +122,7 @@ export interface ProviderProfile {
   compatibilityProfile?: string;
   runtimeKey?: string;
   modelId?: string;
-  processMode?: 'chat' | 'passthrough';
+  processMode?: "chat" | "passthrough";
   responsesConfig?: ResponsesProviderConfig;
   streaming?: StreamingPreference;
   maxOutputTokens?: number;
@@ -149,7 +157,7 @@ export interface ProviderRuntimeProfile {
   outboundProfile: string;
   compatibilityProfile?: string;
   modelId?: string;
-  processMode?: 'chat' | 'passthrough';
+  processMode?: "chat" | "passthrough";
   responsesConfig?: ResponsesProviderConfig;
   streaming?: StreamingPreference;
   modelStreaming?: Record<string, StreamingPreference>;
@@ -188,7 +196,7 @@ export interface VirtualRouterClassifierConfig {
 }
 
 export interface LoadBalancingPolicy {
-  strategy: 'round-robin' | 'weighted' | 'sticky';
+  strategy: "round-robin" | "weighted" | "sticky";
   weights?: Record<string, number>;
   /**
    * Alias-level selection strategy (provider auth aliases).
@@ -244,7 +252,7 @@ export interface HealthWeightedLoadBalancingConfig {
   recoverToBestOnRetry?: boolean;
 }
 
-export type AliasSelectionStrategy = 'none' | 'sticky-queue';
+export type AliasSelectionStrategy = "none" | "sticky-queue";
 
 export interface AliasSelectionConfig {
   /**
@@ -271,7 +279,7 @@ export interface AliasSelectionConfig {
    * - "strict": once a session binds to an alias, it will not switch to another alias; on failure it must
    *   fall back to other providers/routes rather than trying a different Antigravity alias.
    */
-  antigravitySessionBinding?: 'lease' | 'strict';
+  antigravitySessionBinding?: "lease" | "strict";
 }
 
 export interface ContextWeightedLoadBalancingConfig {
@@ -302,8 +310,8 @@ export interface ProviderHealthConfig {
   fatalCooldownMs?: number;
 }
 
-export type VirtualRouterWebSearchExecutionMode = 'servertool' | 'direct';
-export type VirtualRouterWebSearchDirectActivation = 'route' | 'builtin';
+export type VirtualRouterWebSearchExecutionMode = "servertool" | "direct";
+export type VirtualRouterWebSearchDirectActivation = "route" | "builtin";
 
 export interface VirtualRouterWebSearchEngineConfig {
   id: string;
@@ -341,7 +349,7 @@ export interface VirtualRouterWebSearchEngineConfig {
 
 export interface VirtualRouterWebSearchConfig {
   engines: VirtualRouterWebSearchEngineConfig[];
-  injectPolicy?: 'always' | 'selective';
+  injectPolicy?: "always" | "selective";
   /**
    * When true, always prefer server-side web_search orchestration
    * over upstream builtin behaviours (e.g. OpenAI Responses builtin web_search).
@@ -422,7 +430,9 @@ export interface VirtualRouterBootstrapInput extends Record<string, unknown> {
   health?: ProviderHealthConfig;
   contextRouting?: VirtualRouterContextRoutingConfig;
   webSearch?: VirtualRouterWebSearchConfig | Record<string, unknown>;
-  execCommandGuard?: VirtualRouterExecCommandGuardConfig | Record<string, unknown>;
+  execCommandGuard?:
+    | VirtualRouterExecCommandGuardConfig
+    | Record<string, unknown>;
   clock?: VirtualRouterClockConfig | Record<string, unknown>;
 }
 
@@ -439,11 +449,11 @@ export interface VirtualRouterBootstrapResult {
 export interface RouterMetadataInput {
   requestId: string;
   entryEndpoint: string;
-  processMode: 'chat' | 'passthrough';
+  processMode: "chat" | "passthrough";
   stream: boolean;
-  direction: 'request' | 'response';
+  direction: "request" | "response";
   providerProtocol?: string;
-  stage?: 'inbound' | 'outbound' | 'response';
+  stage?: "inbound" | "outbound" | "response";
   routeHint?: string;
   /**
    * Antigravity-Manager alignment: stable sessionId derived from the first user message text.
@@ -534,7 +544,12 @@ export interface RoutingFeatures {
   hasCodingTool: boolean;
   hasThinkingKeyword: boolean;
   estimatedTokens: number;
-  lastAssistantToolCategory?: 'read' | 'write' | 'search' | 'websearch' | 'other';
+  lastAssistantToolCategory?:
+    | "thinking"
+    | "coding"
+    | "search"
+    | "websearch"
+    | "other";
   lastAssistantToolSnippet?: string;
   lastAssistantToolLabel?: string;
   latestMessageFromUser?: boolean;
@@ -566,7 +581,7 @@ export interface TargetMetadata {
   compatibilityProfile?: string;
   runtimeKey?: string;
   modelId: string;
-  processMode?: 'chat' | 'passthrough';
+  processMode?: "chat" | "passthrough";
   responsesConfig?: ResponsesProviderConfig;
   streaming?: StreamingPreference;
   maxOutputTokens?: number;
@@ -585,24 +600,24 @@ export interface TargetMetadata {
 }
 
 export interface ResponsesProviderConfig {
-  toolCallIdStyle?: 'fc' | 'preserve';
+  toolCallIdStyle?: "fc" | "preserve";
 }
 
 export enum VirtualRouterErrorCode {
-  NO_STANDARDIZED_REQUEST = 'NO_STANDARDIZED_REQUEST',
-  ROUTE_NOT_FOUND = 'ROUTE_NOT_FOUND',
-  PROVIDER_NOT_AVAILABLE = 'PROVIDER_NOT_AVAILABLE',
-  CONFIG_ERROR = 'CONFIG_ERROR'
+  NO_STANDARDIZED_REQUEST = "NO_STANDARDIZED_REQUEST",
+  ROUTE_NOT_FOUND = "ROUTE_NOT_FOUND",
+  PROVIDER_NOT_AVAILABLE = "PROVIDER_NOT_AVAILABLE",
+  CONFIG_ERROR = "CONFIG_ERROR",
 }
 
 export class VirtualRouterError extends Error {
   constructor(
     message: string,
     public readonly code: VirtualRouterErrorCode,
-    public readonly details?: Record<string, unknown>
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message);
-    this.name = 'VirtualRouterError';
+    this.name = "VirtualRouterError";
   }
 }
 
@@ -619,20 +634,20 @@ export interface RoutingDiagnostics {
 export interface StopMessageStateSnapshot {
   stopMessageText?: string;
   stopMessageMaxRepeats: number;
-   /**
-    * stopMessage 来源：
-    * - 'explicit'：来自用户显式指令
-    * - 'auto'：系统基于空响应/错误自动推导
-    */
-   stopMessageSource?: string;
+  /**
+   * stopMessage 来源：
+   * - 'explicit'：来自用户显式指令
+   * - 'auto'：系统基于空响应/错误自动推导
+   */
+  stopMessageSource?: string;
   stopMessageUsed?: number;
   stopMessageUpdatedAt?: number;
   stopMessageLastUsedAt?: number;
-  stopMessageStageMode?: 'on' | 'off' | 'auto';
-  stopMessageAiMode?: 'on' | 'off';
+  stopMessageStageMode?: "on" | "off" | "auto";
+  stopMessageAiMode?: "on" | "off";
   stopMessageAiSeedPrompt?: string;
   stopMessageAiHistory?: Array<Record<string, unknown>>;
-  reasoningStopMode?: 'on' | 'off' | 'endless';
+  reasoningStopMode?: "on" | "off" | "endless";
 }
 
 export interface PreCommandStateSnapshot {
@@ -654,7 +669,7 @@ export interface RoutingStatusSnapshot {
         requestTokens?: number;
         selectionPenalty?: number;
         stopMessageActive: boolean;
-        stopMessageMode?: 'on' | 'off' | 'auto';
+        stopMessageMode?: "on" | "off" | "auto";
         stopMessageRemaining?: number;
       };
     }
@@ -664,7 +679,7 @@ export interface RoutingStatusSnapshot {
 
 export interface ProviderHealthState {
   providerKey: string;
-  state: 'healthy' | 'tripped';
+  state: "healthy" | "tripped";
   failureCount: number;
   cooldownExpiresAt?: number;
   reason?: string;
@@ -729,7 +744,10 @@ export interface ProviderSuccessEvent {
 }
 
 export interface FeatureBuilder {
-  build(request: StandardizedRequest, metadata: RouterMetadataInput): RoutingFeatures;
+  build(
+    request: StandardizedRequest,
+    metadata: RouterMetadataInput,
+  ): RoutingFeatures;
 }
 
 export interface ProviderCooldownState {
@@ -788,4 +806,6 @@ export interface ProviderQuotaViewEntry {
   blacklistUntil?: number | null;
 }
 
-export type ProviderQuotaView = (providerKey: string) => ProviderQuotaViewEntry | null;
+export type ProviderQuotaView = (
+  providerKey: string,
+) => ProviderQuotaViewEntry | null;
