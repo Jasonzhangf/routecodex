@@ -6,6 +6,7 @@ use crate::hub_req_inbound_context_capture::map_bridge_tools_to_chat;
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
 use crate::shared_metadata_semantics::ensure_protocol_state_mut;
 use crate::shared_openai_message_normalize::normalize_openai_chat_messages;
+use crate::shared_tool_mapping::flatten_chat_tools_for_function_calling;
 
 const APPLY_PATCH_HINT: &str = "\n\n[apply_patch hint] 在使用 apply_patch 之前，请先读取目标文件的最新内容，并基于该内容生成补丁；同时确保补丁格式符合工具规范（统一补丁格式或结构化参数），避免上下文不匹配或语法错误。";
 const APPLY_PATCH_MISSING_INPUT: &str = "\n\n[RouteCodex precheck] apply_patch 参数解析失败：缺少字段 \"input\"。当前 RouteCodex 期望 { input, patch } 形态，并且两个字段都应包含完整统一 diff 文本。";
@@ -754,7 +755,15 @@ fn map_openai_chat_from_chat(chat: Value, context: Value) -> Result<Value, Strin
     let mut payload = Map::new();
     payload.insert("messages".to_string(), Value::Array(messages));
     if let Some(tools) = tools {
-        payload.insert("tools".to_string(), Value::Array(tools));
+        let flattened_tools = flatten_chat_tools_for_function_calling(tools.as_slice(), "responses");
+        payload.insert(
+            "tools".to_string(),
+            Value::Array(if flattened_tools.is_empty() {
+                tools
+            } else {
+                flattened_tools
+            }),
+        );
     } else if should_emit_empty_tools {
         payload.insert("tools".to_string(), Value::Array(Vec::new()));
     }

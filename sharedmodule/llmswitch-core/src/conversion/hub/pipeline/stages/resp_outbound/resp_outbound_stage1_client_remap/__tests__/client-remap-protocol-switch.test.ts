@@ -311,6 +311,70 @@ describe('client-remap-protocol-switch', () => {
     expect((result as any).required_action.submit_tool_outputs.tool_calls[0].name).toBe('mailbox.status');
   });
 
+  it('remaps flattened namespace child tools back to responses namespace shape', () => {
+    const payload = {
+      id: 'resp_ns_1',
+      object: 'response',
+      status: 'requires_action',
+      output: [
+        {
+          type: 'function_call',
+          call_id: 'call_1',
+          name: 'mcp__computer_use__get_app_state',
+          arguments: '{"app":"Chrome"}'
+        }
+      ],
+      required_action: {
+        type: 'submit_tool_outputs',
+        submit_tool_outputs: {
+          tool_calls: [
+            {
+              id: 'call_1',
+              type: 'function',
+              name: 'mcp__computer_use__get_app_state',
+              arguments: '{"app":"Chrome"}'
+            }
+          ]
+        }
+      }
+    };
+
+    const requestSemantics = {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'namespace',
+            name: 'mcp__computer_use__',
+            tools: [
+              {
+                type: 'function',
+                name: 'get_app_state',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    app: { type: 'string' }
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    };
+
+    const result = buildClientPayloadForProtocol({
+      payload: payload as any,
+      clientProtocol: 'openai-responses',
+      requestId: 'req-test-remap-responses-namespace',
+      requestSemantics: requestSemantics as any
+    });
+
+    expect((result as any).output[0].name).toBe('get_app_state');
+    expect((result as any).output[0].namespace).toBe('mcp__computer_use__');
+    expect((result as any).required_action.submit_tool_outputs.tool_calls[0].name).toBe('get_app_state');
+    expect((result as any).required_action.submit_tool_outputs.tool_calls[0].namespace).toBe('mcp__computer_use__');
+  });
+
   it('throws when responses tool names cannot be mapped into the current request tool list', () => {
     const payload = {
       id: 'resp_2',

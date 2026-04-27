@@ -127,6 +127,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "chatToolToBridgeDefinitionJson",
   "mapBridgeToolsToChatWithOptionsJson",
   "mapChatToolsToBridgeWithOptionsJson",
+  "flattenChatToolsForFunctionCallingWithOptionsJson",
   "collectToolCallsFromResponsesJson",
   "resolveFinishReasonJson",
   "buildChatResponseFromResponsesJson",

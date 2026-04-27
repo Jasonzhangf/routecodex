@@ -78,4 +78,35 @@ describe('chat-envelope validator native bridge', () => {
       })
     ).not.toThrow();
   });
+
+  test('accepts namespace tools with child functions', () => {
+    const envelope = createValidEnvelope();
+    (envelope as Record<string, unknown>).tools = [
+      {
+        type: 'namespace',
+        name: 'mcp__computer_use__',
+        description: 'Computer Use tools',
+        tools: [
+          {
+            type: 'function',
+            name: 'get_app_state',
+            defer_loading: true,
+            parameters: {
+              type: 'object',
+              properties: {
+                app: { type: 'string' }
+              }
+            }
+          }
+        ]
+      }
+    ];
+
+    expect(() =>
+      validateChatEnvelopeWithNative(envelope, {
+        stage: 'req_inbound',
+        direction: 'request'
+      })
+    ).not.toThrow();
+  });
 });

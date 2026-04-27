@@ -3,6 +3,7 @@ import type { BridgeToolDefinition } from '../types/bridge-message-types.js';
 import {
   bridgeToolToChatDefinitionWithNative,
   chatToolToBridgeDefinitionWithNative,
+  flattenChatToolsForFunctionCallingWithNative,
   mapBridgeToolsToChatWithNative,
   mapChatToolsToBridgeWithNative
 } from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
@@ -33,6 +34,7 @@ function assertToolMappingNativeAvailable(): void {
   if (
     typeof bridgeToolToChatDefinitionWithNative !== 'function' ||
     typeof chatToolToBridgeDefinitionWithNative !== 'function' ||
+    typeof flattenChatToolsForFunctionCallingWithNative !== 'function' ||
     typeof mapBridgeToolsToChatWithNative !== 'function' ||
     typeof mapChatToolsToBridgeWithNative !== 'function'
   ) {
@@ -101,4 +103,17 @@ export function mapChatToolsToBridge(
   const sanitizeMode = resolveSanitizeMode(options, 'responses');
   const mapped = mapChatToolsToBridgeWithNative(rawTools, { sanitizeMode });
   return mapped.length ? (mapped as BridgeToolDefinition[]) : undefined;
+}
+
+export function flattenChatToolsForFunctionCalling(
+  rawTools: unknown,
+  options?: BridgeToolMapOptions
+): ChatToolDefinition[] | undefined {
+  if (!Array.isArray(rawTools) || rawTools.length === 0) {
+    return undefined;
+  }
+  assertToolMappingNativeAvailable();
+  const sanitizeMode = resolveSanitizeMode(options, 'responses');
+  const mapped = flattenChatToolsForFunctionCallingWithNative(rawTools, { sanitizeMode });
+  return mapped.length ? (mapped as ChatToolDefinition[]) : undefined;
 }

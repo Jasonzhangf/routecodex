@@ -27,7 +27,22 @@ export type BridgeToolDefinition = {
   name?: string;
   description?: string;
   strict?: boolean;
+  defer_loading?: boolean;
   parameters?: unknown;
+  tools?: Array<{
+    type?: string;
+    name?: string;
+    description?: string;
+    strict?: boolean;
+    defer_loading?: boolean;
+    parameters?: unknown;
+    function?: {
+      name?: string;
+      description?: string;
+      strict?: boolean;
+      parameters?: unknown;
+    };
+  }>;
   function?: {
     name?: string;
     description?: string;

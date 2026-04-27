@@ -207,6 +207,108 @@ fn validate_tools(
             .unwrap_or(false)
     }
 
+    fn has_namespace_tool_shape(row: &Map<String, Value>) -> bool {
+        let is_namespace = row
+            .get("type")
+            .and_then(|v| v.as_str())
+            .map(|value| value.trim().eq_ignore_ascii_case("namespace"))
+            .unwrap_or(false);
+        if !is_namespace {
+            return false;
+        }
+        let has_name = row
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
+        let has_tools = row
+            .get("tools")
+            .and_then(|v| v.as_array())
+            .map(|items| !items.is_empty())
+            .unwrap_or(false);
+        has_name && has_tools
+    }
+
+    fn validate_namespace_children(
+        row: &Map<String, Value>,
+        index: usize,
+        stage: &str,
+        direction: &str,
+        source: Option<&str>,
+    ) -> Result<(), napi::Error> {
+        let Some(children) = row.get("tools").and_then(|v| v.as_array()) else {
+            return Err(build_validation_error(
+                stage,
+                direction,
+                "tools_namespace_children",
+                format!("tools[{index}].tools must be a non-empty array").as_str(),
+                source,
+            ));
+        };
+        if children.is_empty() {
+            return Err(build_validation_error(
+                stage,
+                direction,
+                "tools_namespace_children",
+                format!("tools[{index}].tools must be a non-empty array").as_str(),
+                source,
+            ));
+        }
+        for (child_index, child) in children.iter().enumerate() {
+            let child_row = expect_object(
+                child,
+                stage,
+                direction,
+                "tools_namespace_child_shape",
+                format!("tools[{index}].tools[{child_index}] must be an object").as_str(),
+                source,
+            )?;
+            let child_type = child_row
+                .get("type")
+                .and_then(|v| v.as_str())
+                .map(|value| value.trim().eq_ignore_ascii_case("function"))
+                .unwrap_or(false);
+            if !child_type {
+                return Err(build_validation_error(
+                    stage,
+                    direction,
+                    "tools_namespace_child_type",
+                    format!(
+                        "tools[{index}].tools[{child_index}].type must equal \"function\""
+                    )
+                    .as_str(),
+                    source,
+                ));
+            }
+            let has_name = child_row
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(|value| !value.trim().is_empty())
+                .or_else(|| {
+                    child_row
+                        .get("function")
+                        .and_then(|v| v.as_object())
+                        .and_then(|fn_row| fn_row.get("name"))
+                        .and_then(|v| v.as_str())
+                        .map(|value| !value.trim().is_empty())
+                })
+                .unwrap_or(false);
+            if !has_name {
+                return Err(build_validation_error(
+                    stage,
+                    direction,
+                    "tools_namespace_child_name",
+                    format!(
+                        "tools[{index}].tools[{child_index}].name must be a string"
+                    )
+                    .as_str(),
+                    source,
+                ));
+            }
+        }
+        Ok(())
+    }
+
     let Some(tools) = tools else {
         return Ok(());
     };
@@ -233,9 +335,11 @@ fn validate_tools(
         let is_function = is_function_tool_type(raw_type);
         let is_builtin_web_search = has_builtin_web_search_type(raw_type);
         let has_builtin_gemini_shape = has_gemini_builtin_tool_shape(row);
+        let is_namespace_tool = has_namespace_tool_shape(row);
         if !is_function
             && !is_builtin_web_search
             && !has_builtin_gemini_shape
+            && !is_namespace_tool
             && !has_function_node_with_name(row)
         {
             return Err(build_validation_error(
@@ -243,11 +347,15 @@ fn validate_tools(
         direction,
         "tools_type",
         format!(
-          "tools[{index}].type must be \"function\" or supported builtin tool type (e.g. \"web_search\")"
+          "tools[{index}].type must be \"function\", \"namespace\", or supported builtin tool type (e.g. \"web_search\")"
         )
         .as_str(),
         source,
       ));
+        }
+        if is_namespace_tool {
+            validate_namespace_children(row, index, stage, direction, source)?;
+            continue;
         }
         if !is_function {
             continue;

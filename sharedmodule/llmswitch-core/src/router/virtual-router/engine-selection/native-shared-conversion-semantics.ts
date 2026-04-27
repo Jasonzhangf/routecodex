@@ -114,6 +114,7 @@ export {
   bridgeToolToChatDefinitionWithNative,
   chatToolToBridgeDefinitionWithNative,
   collectToolCallsFromResponsesWithNative,
+  flattenChatToolsForFunctionCallingWithNative,
   mapBridgeToolsToChatWithNative,
   mapChatToolsToBridgeWithNative
 } from './native-shared-conversion-semantics-tool-definitions.js';

@@ -26,6 +26,7 @@ export interface ClientRemapProtocolSwitchOptions {
 
 type IndexedClientTool = {
   declaredName: string;
+  namespace?: string;
   tool: BridgeToolDefinition;
 };
 
@@ -35,6 +36,7 @@ type ClientToolIndex = {
   byCanonicalLower: Map<string, IndexedClientTool>;
   byCompactLower: Map<string, IndexedClientTool>;
   byFamily: Map<string, IndexedClientTool>;
+  byNamespaceName: Map<string, IndexedClientTool>;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -56,6 +58,25 @@ function stripFunctionNamespace(raw: string): string {
     return trimmed.slice('function.'.length).trim();
   }
   return trimmed;
+}
+
+function namespaceJoiner(namespace: string): string {
+  return /(__|[_.\/-])$/.test(namespace.trim()) ? '' : '__';
+}
+
+function buildNamespaceAlias(namespace: string, rawName: string): string {
+  const ns = namespace.trim();
+  const name = rawName.trim();
+  if (!ns || !name) {
+    return '';
+  }
+  return `${ns}${namespaceJoiner(ns)}${name}`;
+}
+
+function buildNamespaceLookupKey(namespace: string, rawName: string): string {
+  const ns = namespace.trim().toLowerCase();
+  const name = rawName.trim().toLowerCase();
+  return ns && name ? `${ns}::${name}` : '';
 }
 
 function toCanonicalToolName(raw: string): string {
@@ -103,19 +124,12 @@ function extractClientToolIndex(
   const byCanonicalLower = new Map<string, IndexedClientTool>();
   const byCompactLower = new Map<string, IndexedClientTool>();
   const byFamily = new Map<string, IndexedClientTool>();
-  for (const tool of clientToolsRaw ?? []) {
-    const functionBag = asRecord(tool.function);
-    const rawName =
-      (typeof functionBag?.name === 'string' ? functionBag.name : undefined)
-      ?? (typeof tool.name === 'string' ? tool.name : undefined);
+  const byNamespaceName = new Map<string, IndexedClientTool>();
+  const register = (entry: IndexedClientTool, rawName: string) => {
     const normalizedName = typeof rawName === 'string' ? rawName.trim() : '';
     if (!normalizedName) {
-      continue;
+      return;
     }
-    const entry: IndexedClientTool = {
-      declaredName: normalizedName,
-      tool
-    };
     const exactLower = normalizedName.toLowerCase();
     const strippedLower = stripFunctionNamespace(normalizedName).toLowerCase();
     const canonicalLower = toCanonicalToolName(normalizedName);
@@ -136,14 +150,63 @@ function extractClientToolIndex(
     if (family && !byFamily.has(family)) {
       byFamily.set(family, entry);
     }
+  };
+  for (const tool of clientToolsRaw ?? []) {
+    const toolType = typeof (tool as any)?.type === 'string' ? String((tool as any).type).trim().toLowerCase() : 'function';
+    if (toolType === 'namespace') {
+      const namespace = typeof (tool as any)?.name === 'string' ? String((tool as any).name).trim() : '';
+      const childTools = Array.isArray((tool as any)?.tools) ? ((tool as any).tools as Array<Record<string, unknown>>) : [];
+      for (const child of childTools) {
+        const childFunction = asRecord((child as any).function);
+        const rawChildName =
+          (typeof childFunction?.name === 'string' ? childFunction.name : undefined)
+          ?? (typeof (child as any)?.name === 'string' ? String((child as any).name) : undefined);
+        const childName = typeof rawChildName === 'string' ? rawChildName.trim() : '';
+        if (!namespace || !childName) {
+          continue;
+        }
+        const entry: IndexedClientTool = {
+          declaredName: childName,
+          namespace,
+          tool: child as unknown as BridgeToolDefinition
+        };
+        const namespaceKey = buildNamespaceLookupKey(namespace, childName);
+        if (namespaceKey && !byNamespaceName.has(namespaceKey)) {
+          byNamespaceName.set(namespaceKey, entry);
+        }
+        register(entry, childName);
+        const alias = buildNamespaceAlias(namespace, childName);
+        if (alias) {
+          register(entry, alias);
+        }
+      }
+      continue;
+    }
+    const functionBag = asRecord(tool.function);
+    const rawName =
+      (typeof functionBag?.name === 'string' ? functionBag.name : undefined)
+      ?? (typeof tool.name === 'string' ? tool.name : undefined);
+    const normalizedName = typeof rawName === 'string' ? rawName.trim() : '';
+    if (!normalizedName) {
+      continue;
+    }
+    const entry: IndexedClientTool = {
+      declaredName: normalizedName,
+      tool
+    };
+    register(entry, normalizedName);
   }
-  return { byExactLower, byStrippedLower, byCanonicalLower, byCompactLower, byFamily };
+  return { byExactLower, byStrippedLower, byCanonicalLower, byCompactLower, byFamily, byNamespaceName };
 }
 
-function resolveClientToolFromIndex(index: ClientToolIndex, rawName: string): IndexedClientTool | undefined {
+function resolveClientToolFromIndex(index: ClientToolIndex, rawName: string, namespace?: string): IndexedClientTool | undefined {
   const trimmed = rawName.trim();
   if (!trimmed) {
     return undefined;
+  }
+  const namespaceKey = namespace ? buildNamespaceLookupKey(namespace, trimmed) : '';
+  if (namespaceKey && index.byNamespaceName.has(namespaceKey)) {
+    return index.byNamespaceName.get(namespaceKey);
   }
   const exactLower = trimmed.toLowerCase();
   const strippedLower = stripFunctionNamespace(trimmed).toLowerCase();
@@ -181,7 +244,7 @@ function remapChatToolCallsToClientNames(
   };
   const readSchema = (entry: IndexedClientTool | undefined): unknown => {
     const functionBag = asRecord(entry?.tool.function);
-    return functionBag?.parameters;
+    return functionBag?.parameters ?? (entry?.tool as any)?.parameters;
   };
 
   const choices = Array.isArray((payload as Record<string, unknown>).choices)
@@ -196,7 +259,8 @@ function remapChatToolCallsToClientNames(
       if (!currentName) {
         continue;
       }
-      const matchedTool = resolveClientToolFromIndex(toolIndex, currentName);
+      const namespace = typeof (toolCall as any)?.namespace === 'string' ? String((toolCall as any).namespace) : undefined;
+      const matchedTool = resolveClientToolFromIndex(toolIndex, currentName, namespace);
       if (!matchedTool) {
         pushUnknown(currentName);
         continue;
@@ -256,12 +320,16 @@ function remapResponsesToolCallsToClientNames(
     if (!rawName) {
       continue;
     }
-    const matched = resolveClientToolFromIndex(toolIndex, rawName);
+    const namespace = typeof callBag.namespace === 'string' ? callBag.namespace : undefined;
+    const matched = resolveClientToolFromIndex(toolIndex, rawName, namespace);
     if (!matched) {
       pushUnknown(rawName);
       continue;
     }
     callBag.name = matched.declaredName;
+    if (matched.namespace) {
+      callBag.namespace = matched.namespace;
+    }
   }
 
   const outputItems = Array.isArray((payload as any)?.output) ? ((payload as any).output as unknown[]) : [];
@@ -278,12 +346,16 @@ function remapResponsesToolCallsToClientNames(
     if (!rawName) {
       continue;
     }
-    const matched = resolveClientToolFromIndex(toolIndex, rawName);
+    const namespace = typeof itemBag.namespace === 'string' ? itemBag.namespace : undefined;
+    const matched = resolveClientToolFromIndex(toolIndex, rawName, namespace);
     if (!matched) {
       pushUnknown(rawName);
       continue;
     }
     itemBag.name = matched.declaredName;
+    if (matched.namespace) {
+      itemBag.namespace = matched.namespace;
+    }
   }
 
   return unknownNames;

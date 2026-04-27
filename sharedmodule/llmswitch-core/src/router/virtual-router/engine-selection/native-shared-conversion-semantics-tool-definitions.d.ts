@@ -10,4 +10,7 @@ export declare function mapBridgeToolsToChatWithNative(rawTools: unknown, option
 export declare function mapChatToolsToBridgeWithNative(rawTools: unknown, options?: {
     sanitizeMode?: string;
 }): Array<Record<string, unknown>>;
+export declare function flattenChatToolsForFunctionCallingWithNative(rawTools: unknown, options?: {
+    sanitizeMode?: string;
+}): Array<Record<string, unknown>>;
 export declare function collectToolCallsFromResponsesWithNative(response: Record<string, unknown>): Array<Record<string, unknown>>;

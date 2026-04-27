@@ -172,6 +172,88 @@ fn normalize_tools(tools: Option<&Value>) -> Vec<Value> {
         let Some(tool_row) = tool.as_object() else {
             continue;
         };
+        if tool_row.get("type").and_then(|v| v.as_str()) == Some("namespace") {
+            let Some(namespace_name) = tool_row
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+            else {
+                continue;
+            };
+            let child_tools = tool_row
+                .get("tools")
+                .and_then(|v| v.as_array())
+                .map(|children| {
+                    children
+                        .iter()
+                        .filter_map(|child| {
+                            let child_row = child.as_object()?;
+                            let child_fn_row = child_row.get("function").and_then(as_object);
+                            let child_name = child_fn_row
+                                .and_then(|row| row.get("name"))
+                                .or_else(|| child_row.get("name"))
+                                .and_then(|v| v.as_str())
+                                .map(|v| v.trim().to_string())
+                                .filter(|v| !v.is_empty())?;
+                            let mut out_child = Map::new();
+                            out_child.insert("type".to_string(), Value::String("function".to_string()));
+                            out_child.insert("name".to_string(), Value::String(child_name));
+                            if let Some(description) = child_fn_row
+                                .and_then(|row| row.get("description"))
+                                .or_else(|| child_row.get("description"))
+                                .and_then(|v| v.as_str())
+                            {
+                                out_child.insert("description".to_string(), Value::String(description.to_string()));
+                            }
+                            out_child.insert(
+                                "parameters".to_string(),
+                                child_fn_row
+                                    .and_then(|row| row.get("parameters"))
+                                    .or_else(|| child_row.get("parameters"))
+                                    .cloned()
+                                    .unwrap_or_else(|| {
+                                        let mut fallback = Map::new();
+                                        fallback.insert("type".to_string(), Value::String("object".to_string()));
+                                        fallback.insert("properties".to_string(), Value::Object(Map::new()));
+                                        Value::Object(fallback)
+                                    }),
+                            );
+                            if let Some(strict) = child_fn_row
+                                .and_then(|row| row.get("strict"))
+                                .or_else(|| child_row.get("strict"))
+                                .and_then(|v| v.as_bool())
+                            {
+                                out_child.insert("strict".to_string(), Value::Bool(strict));
+                            }
+                            if child_fn_row
+                                .and_then(|row| row.get("defer_loading"))
+                                .or_else(|| child_fn_row.and_then(|row| row.get("deferLoading")))
+                                .or_else(|| child_row.get("defer_loading"))
+                                .or_else(|| child_row.get("deferLoading"))
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
+                            {
+                                out_child.insert("defer_loading".to_string(), Value::Bool(true));
+                            }
+                            Some(Value::Object(out_child))
+                        })
+                        .collect::<Vec<Value>>()
+                })
+                .unwrap_or_default();
+            if child_tools.is_empty() {
+                continue;
+            }
+            let mut namespace_out = Map::new();
+            namespace_out.insert("type".to_string(), Value::String("namespace".to_string()));
+            namespace_out.insert("name".to_string(), Value::String(namespace_name));
+            if let Some(description) = tool_row.get("description").and_then(|v| v.as_str()) {
+                namespace_out.insert("description".to_string(), Value::String(description.to_string()));
+            }
+            namespace_out.insert("tools".to_string(), Value::Array(child_tools));
+            normalized.push(Value::Object(namespace_out));
+            continue;
+        }
         if tool_row.get("type").and_then(|v| v.as_str()) != Some("function") {
             continue;
         }
@@ -464,6 +546,79 @@ fn map_standardized_tools(tools: Option<&Value>) -> Option<Value> {
         .filter_map(|tool| {
             let tool_row = tool.as_object()?;
             let tool_type = tool_row.get("type")?.as_str()?.to_string();
+            if tool_type.trim().eq_ignore_ascii_case("namespace") {
+                let namespace_name = tool_row
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())?;
+                let child_tools = tool_row
+                    .get("tools")
+                    .and_then(|v| v.as_array())
+                    .map(|children| {
+                        children
+                            .iter()
+                            .filter_map(|child| {
+                                let child_row = child.as_object()?;
+                                let child_fn_row = child_row.get("function").and_then(as_object);
+                                let name = child_fn_row
+                                    .and_then(|row| row.get("name"))
+                                    .or_else(|| child_row.get("name"))
+                                    .and_then(|v| v.as_str())
+                                    .map(|v| v.trim().to_string())
+                                    .filter(|v| !v.is_empty())?;
+                                let mut out_child = Map::new();
+                                out_child.insert("type".to_string(), Value::String("function".to_string()));
+                                out_child.insert("name".to_string(), Value::String(name));
+                                if let Some(description) = child_fn_row
+                                    .and_then(|row| row.get("description"))
+                                    .or_else(|| child_row.get("description"))
+                                    .and_then(|v| v.as_str())
+                                {
+                                    out_child.insert("description".to_string(), Value::String(description.to_string()));
+                                }
+                                out_child.insert(
+                                    "parameters".to_string(),
+                                    child_fn_row
+                                        .and_then(|row| row.get("parameters"))
+                                        .or_else(|| child_row.get("parameters"))
+                                        .cloned()
+                                        .unwrap_or_else(|| Value::Object(Map::new())),
+                                );
+                                if let Some(strict) = child_fn_row
+                                    .and_then(|row| row.get("strict"))
+                                    .or_else(|| child_row.get("strict"))
+                                    .and_then(|v| v.as_bool())
+                                {
+                                    out_child.insert("strict".to_string(), Value::Bool(strict));
+                                }
+                                if child_fn_row
+                                    .and_then(|row| row.get("defer_loading"))
+                                    .or_else(|| child_fn_row.and_then(|row| row.get("deferLoading")))
+                                    .or_else(|| child_row.get("defer_loading"))
+                                    .or_else(|| child_row.get("deferLoading"))
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false)
+                                {
+                                    out_child.insert("defer_loading".to_string(), Value::Bool(true));
+                                }
+                                Some(Value::Object(out_child))
+                            })
+                            .collect::<Vec<Value>>()
+                    })
+                    .unwrap_or_default();
+                if child_tools.is_empty() {
+                    return None;
+                }
+                let mut out_namespace = Map::new();
+                out_namespace.insert("type".to_string(), Value::String("namespace".to_string()));
+                out_namespace.insert("name".to_string(), Value::String(namespace_name));
+                if let Some(description) = tool_row.get("description").and_then(|v| v.as_str()) {
+                    out_namespace.insert("description".to_string(), Value::String(description.to_string()));
+                }
+                out_namespace.insert("tools".to_string(), Value::Array(child_tools));
+                return Some(Value::Object(out_namespace));
+            }
             let fn_row = tool_row.get("function").and_then(|v| v.as_object())?;
             let name = fn_row.get("name")?.as_str()?.to_string();
             let description = fn_row
@@ -755,5 +910,43 @@ mod tests {
         assert!(patch.starts_with("*** Begin Patch"));
         assert!(patch.contains("*** Add File: src/demo.ts"));
         assert!(!patch.starts_with("apply_patch "));
+    }
+
+    #[test]
+    fn standardization_preserves_namespace_tool_surface() {
+        let chat = json!({
+            "messages": [{ "role": "user", "content": "continue" }],
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "mcp__computer_use",
+                    "description": "Computer Use",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "get_app_state",
+                            "description": "Inspect app state",
+                            "parameters": { "type": "object", "properties": {} },
+                            "defer_loading": true
+                        }
+                    ]
+                }
+            ],
+            "parameters": { "model": "gpt-5.4" },
+            "metadata": {}
+        });
+
+        let standardized = chat_envelope_to_standardized_impl(
+            &chat,
+            &json!({}),
+            "/v1/responses",
+            Some("req_namespace"),
+        )
+        .expect("standardized");
+
+        assert_eq!(standardized["tools"][0]["type"], "namespace");
+        assert_eq!(standardized["tools"][0]["name"], "mcp__computer_use");
+        assert_eq!(standardized["tools"][0]["tools"][0]["name"], "get_app_state");
+        assert_eq!(standardized["tools"][0]["tools"][0]["defer_loading"], Value::Bool(true));
     }
 }

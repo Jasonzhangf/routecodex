@@ -2,6 +2,7 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::Deserialize;
 use serde_json::{Map, Value};
+use std::collections::HashSet;
 
 use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
 
@@ -23,6 +24,20 @@ struct ToolMappingSingleInput {
 struct ToolMappingListInput {
     tools: Value,
     options: Option<ToolMappingOptions>,
+}
+
+fn namespace_match_joiner(namespace: &str) -> &'static str {
+    let trimmed = namespace.trim();
+    if trimmed.ends_with("__")
+        || trimmed.ends_with('_')
+        || trimmed.ends_with('.')
+        || trimmed.ends_with('/')
+        || trimmed.ends_with('-')
+    {
+        ""
+    } else {
+        "__"
+    }
 }
 
 fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
@@ -225,11 +240,172 @@ fn resolve_tool_name(candidates: &[Option<&Value>], sanitize_mode: &str) -> Opti
     None
 }
 
+fn read_defer_loading(value: Option<&Value>) -> Option<bool> {
+    value.and_then(|v| v.as_bool()).filter(|flag| *flag)
+}
+
+fn normalize_namespace_name(value: Option<&Value>) -> Option<String> {
+    read_trimmed_string(value)
+}
+
+pub(crate) fn build_flattened_namespace_child_alias(
+    namespace: &str,
+    child_name: &str,
+    sanitize_mode: &str,
+    used_aliases: &HashSet<String>,
+) -> Option<String> {
+    let namespace = namespace.trim();
+    let child_name = child_name.trim();
+    if namespace.is_empty() || child_name.is_empty() {
+        return None;
+    }
+
+    let base_raw = format!(
+        "{}{}{}",
+        namespace,
+        namespace_match_joiner(namespace),
+        child_name
+    );
+    let base_alias = normalize_tool_name(Some(base_raw.as_str()), sanitize_mode)
+        .or_else(|| normalize_tool_name(Some(child_name), sanitize_mode))?;
+    if !used_aliases.contains(base_alias.as_str()) {
+        return Some(base_alias);
+    }
+
+    for suffix in 2..=999 {
+        let candidate_raw = format!("{base_raw}__{suffix}");
+        if let Some(candidate) = normalize_tool_name(Some(candidate_raw.as_str()), sanitize_mode) {
+            if !used_aliases.contains(candidate.as_str()) {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+fn build_namespace_child_function(
+    tool_row: &Map<String, Value>,
+    sanitize_mode: &str,
+) -> Option<Value> {
+    let fn_row = tool_row.get("function").and_then(|v| v.as_object());
+    let name = resolve_tool_name(
+        &[fn_row.and_then(|row| row.get("name")), tool_row.get("name")],
+        sanitize_mode,
+    )?;
+    let description = read_trimmed_string(
+        fn_row
+            .and_then(|row| row.get("description"))
+            .or_else(|| tool_row.get("description")),
+    );
+    let parameters = enforce_builtin_tool_schema(
+        name.as_str(),
+        fn_row
+            .and_then(|row| row.get("parameters"))
+            .or_else(|| tool_row.get("parameters")),
+    );
+    let strict = fn_row
+        .and_then(|row| row.get("strict"))
+        .or_else(|| tool_row.get("strict"))
+        .and_then(|v| v.as_bool());
+    let defer_loading = read_defer_loading(
+        fn_row
+            .and_then(|row| row.get("defer_loading"))
+            .or_else(|| fn_row.and_then(|row| row.get("deferLoading")))
+            .or_else(|| tool_row.get("defer_loading"))
+            .or_else(|| tool_row.get("deferLoading")),
+    );
+
+    let mut out = Map::new();
+    out.insert("type".to_string(), Value::String("function".to_string()));
+    out.insert("name".to_string(), Value::String(name));
+    if let Some(text) = description {
+        out.insert("description".to_string(), Value::String(text));
+    }
+    if let Some(params) = parameters {
+        out.insert("parameters".to_string(), params);
+    }
+    if let Some(flag) = strict {
+        out.insert("strict".to_string(), Value::Bool(flag));
+    }
+    if let Some(flag) = defer_loading {
+        out.insert("defer_loading".to_string(), Value::Bool(flag));
+    }
+    Some(Value::Object(out))
+}
+
+fn bridge_namespace_to_chat_definition(
+    tool_row: &Map<String, Value>,
+    sanitize_mode: &str,
+) -> Option<Value> {
+    let namespace_name = normalize_namespace_name(tool_row.get("name"))?;
+    let description = read_trimmed_string(tool_row.get("description"));
+    let child_tools = tool_row
+        .get("tools")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|entry| {
+                    let child_row = entry.as_object()?;
+                    build_namespace_child_function(child_row, sanitize_mode)
+                })
+                .collect::<Vec<Value>>()
+        })
+        .unwrap_or_default();
+    if child_tools.is_empty() {
+        return None;
+    }
+
+    let mut out = Map::new();
+    out.insert("type".to_string(), Value::String("namespace".to_string()));
+    out.insert("name".to_string(), Value::String(namespace_name));
+    if let Some(text) = description {
+        out.insert("description".to_string(), Value::String(text));
+    }
+    out.insert("tools".to_string(), Value::Array(child_tools));
+    Some(Value::Object(out))
+}
+
+fn chat_namespace_to_bridge_definition(
+    tool_row: &Map<String, Value>,
+    sanitize_mode: &str,
+) -> Option<Value> {
+    let namespace_name = normalize_namespace_name(tool_row.get("name"))?;
+    let description = read_trimmed_string(tool_row.get("description"));
+    let child_tools = tool_row
+        .get("tools")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|entry| {
+                    let child_row = entry.as_object()?;
+                    build_namespace_child_function(child_row, sanitize_mode)
+                })
+                .collect::<Vec<Value>>()
+        })
+        .unwrap_or_default();
+    if child_tools.is_empty() {
+        return None;
+    }
+
+    let mut out = Map::new();
+    out.insert("type".to_string(), Value::String("namespace".to_string()));
+    out.insert("name".to_string(), Value::String(namespace_name));
+    if let Some(text) = description {
+        out.insert("description".to_string(), Value::String(text));
+    }
+    out.insert("tools".to_string(), Value::Array(child_tools));
+    Some(Value::Object(out))
+}
+
 fn bridge_tool_to_chat_definition_impl(tool: &Value, sanitize_mode: &str) -> Option<Value> {
     let tool_row = tool.as_object()?;
     let fn_row = tool_row.get("function").and_then(|v| v.as_object());
     let raw_type =
         read_trimmed_string(tool_row.get("type")).unwrap_or_else(|| "function".to_string());
+    if raw_type.trim().eq_ignore_ascii_case("namespace") {
+        return bridge_namespace_to_chat_definition(tool_row, sanitize_mode);
+    }
 
     let mut name = resolve_tool_name(
         &[fn_row.and_then(|row| row.get("name")), tool_row.get("name")],
@@ -285,6 +461,11 @@ fn bridge_tool_to_chat_definition_impl(tool: &Value, sanitize_mode: &str) -> Opt
 
 fn chat_tool_to_bridge_definition_impl(tool: &Value, sanitize_mode: &str) -> Option<Value> {
     let tool_row = tool.as_object()?;
+    let raw_type =
+        read_trimmed_string(tool_row.get("type")).unwrap_or_else(|| "function".to_string());
+    if raw_type.trim().eq_ignore_ascii_case("namespace") {
+        return chat_namespace_to_bridge_definition(tool_row, sanitize_mode);
+    }
     let fn_row = tool_row.get("function").and_then(|v| v.as_object());
     let name = resolve_tool_name(
         &[fn_row.and_then(|row| row.get("name")), tool_row.get("name")],
@@ -299,8 +480,7 @@ fn chat_tool_to_bridge_definition_impl(tool: &Value, sanitize_mode: &str) -> Opt
         .or_else(|| tool_row.get("strict"))
         .and_then(|v| v.as_bool());
 
-    let normalized_type =
-        read_trimmed_string(tool_row.get("type")).unwrap_or_else(|| "function".to_string());
+    let normalized_type = raw_type;
 
     let mut out = Map::new();
     out.insert("type".to_string(), Value::String(normalized_type));
@@ -329,6 +509,111 @@ fn chat_tool_to_bridge_definition_impl(tool: &Value, sanitize_mode: &str) -> Opt
     out.insert("function".to_string(), Value::Object(fn_out));
 
     Some(Value::Object(out))
+}
+
+fn flatten_namespace_chat_tool(
+    tool_row: &Map<String, Value>,
+    sanitize_mode: &str,
+    used_aliases: &mut HashSet<String>,
+) -> Vec<Value> {
+    let Some(namespace_name) = normalize_namespace_name(tool_row.get("name")) else {
+        return Vec::new();
+    };
+    let Some(child_rows) = tool_row.get("tools").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+
+    let mut flattened = Vec::new();
+    for child in child_rows {
+        let Some(child_row) = child.as_object() else {
+            continue;
+        };
+        let Some(child_def) = build_namespace_child_function(child_row, sanitize_mode) else {
+            continue;
+        };
+        let Some(child_def_row) = child_def.as_object() else {
+            continue;
+        };
+        let Some(child_name) = child_def_row.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(flattened_name) = build_flattened_namespace_child_alias(
+            namespace_name.as_str(),
+            child_name,
+            sanitize_mode,
+            used_aliases,
+        ) else {
+            continue;
+        };
+        used_aliases.insert(flattened_name.clone());
+
+        let mut fn_row = Map::new();
+        fn_row.insert("name".to_string(), Value::String(flattened_name.clone()));
+        if let Some(description) = child_def_row.get("description").cloned() {
+            fn_row.insert("description".to_string(), description);
+        }
+        if let Some(parameters) = child_def_row.get("parameters").cloned() {
+            fn_row.insert("parameters".to_string(), parameters);
+        }
+        if let Some(strict) = child_def_row.get("strict").cloned() {
+            fn_row.insert("strict".to_string(), strict);
+        }
+
+        let mut out = Map::new();
+        out.insert("type".to_string(), Value::String("function".to_string()));
+        out.insert("function".to_string(), Value::Object(fn_row));
+        if let Some(defer_loading) = child_def_row.get("defer_loading").cloned() {
+            out.insert("defer_loading".to_string(), defer_loading);
+        }
+        flattened.push(Value::Object(out));
+    }
+
+    flattened
+}
+
+pub(crate) fn flatten_chat_tools_for_function_calling(
+    tools: &[Value],
+    sanitize_mode: &str,
+) -> Vec<Value> {
+    let mut flattened = Vec::new();
+    let mut used_aliases = HashSet::<String>::new();
+
+    for tool in tools {
+        let Some(tool_row) = tool.as_object() else {
+            continue;
+        };
+        let raw_type =
+            read_trimmed_string(tool_row.get("type")).unwrap_or_else(|| "function".to_string());
+        if raw_type.trim().eq_ignore_ascii_case("namespace") {
+            flattened.extend(flatten_namespace_chat_tool(
+                tool_row,
+                sanitize_mode,
+                &mut used_aliases,
+            ));
+            continue;
+        }
+
+        if let Some(name) = tool_row
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|row| row.get("name"))
+            .and_then(Value::as_str)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                tool_row
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            })
+        {
+            used_aliases.insert(name);
+        }
+        flattened.push(Value::Object(tool_row.clone()));
+    }
+
+    flattened
 }
 
 fn resolve_sanitize_mode(options: Option<&ToolMappingOptions>) -> String {
@@ -386,6 +671,19 @@ pub fn map_chat_tools_to_bridge_with_options_json(input_json: String) -> NapiRes
         }
     }
     serde_json::to_string(&Value::Array(mapped))
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn flatten_chat_tools_for_function_calling_with_options_json(
+    input_json: String,
+) -> NapiResult<String> {
+    let input: ToolMappingListInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let sanitize_mode = resolve_sanitize_mode(input.options.as_ref());
+    let rows = input.tools.as_array().cloned().unwrap_or_default();
+    let flattened = flatten_chat_tools_for_function_calling(rows.as_slice(), sanitize_mode.as_str());
+    serde_json::to_string(&Value::Array(flattened))
         .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -501,5 +799,114 @@ mod tests {
         assert_eq!(user["parameters"]["type"], "object");
         assert!(user["parameters"]["properties"].is_object());
         assert_eq!(user["parameters"]["additionalProperties"], true);
+    }
+
+    #[test]
+    fn bridge_tool_to_chat_definition_preserves_namespace_child_tools() {
+        let input = serde_json::json!({
+          "tool": {
+            "type": "namespace",
+            "name": "mcp__computer_use",
+            "description": "Computer Use",
+            "tools": [
+              {
+                "type": "function",
+                "name": "get_app_state",
+                "description": "Inspect app state",
+                "parameters": { "type": "object", "properties": {} },
+                "defer_loading": true
+              }
+            ]
+          },
+          "options": { "sanitizeMode": "responses" }
+        });
+        let raw = bridge_tool_to_chat_definition_json(input.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed["type"], "namespace");
+        assert_eq!(parsed["name"], "mcp__computer_use");
+        assert_eq!(parsed["tools"][0]["name"], "get_app_state");
+        assert_eq!(parsed["tools"][0]["defer_loading"], Value::Bool(true));
+    }
+
+    #[test]
+    fn chat_tool_to_bridge_definition_preserves_namespace_child_tools() {
+        let input = serde_json::json!({
+          "tool": {
+            "type": "namespace",
+            "name": "mcp__computer_use",
+            "description": "Computer Use",
+            "tools": [
+              {
+                "type": "function",
+                "name": "press_key",
+                "description": "Press a key",
+                "parameters": { "type": "object", "properties": {} },
+                "defer_loading": true
+              }
+            ]
+          },
+          "options": { "sanitizeMode": "responses" }
+        });
+        let raw = chat_tool_to_bridge_definition_json(input.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed["type"], "namespace");
+        assert_eq!(parsed["name"], "mcp__computer_use");
+        assert_eq!(parsed["tools"][0]["name"], "press_key");
+        assert_eq!(parsed["tools"][0]["defer_loading"], Value::Bool(true));
+    }
+
+    #[test]
+    fn flatten_chat_tools_for_function_calling_flattens_namespace_children() {
+        let input = serde_json::json!({
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "mcp__computer_use__",
+                    "description": "Computer Use tools",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "get_app_state",
+                            "description": "Read app state",
+                            "defer_loading": true,
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "app": { "type": "string" }
+                                }
+                            }
+                        },
+                        {
+                            "type": "function",
+                            "name": "click",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "x": { "type": "number" }
+                                }
+                            }
+                        }
+                    ]
+                }
+            ],
+            "options": {
+                "sanitizeMode": "responses"
+            }
+        });
+
+        let raw =
+            flatten_chat_tools_for_function_calling_with_options_json(input.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        let arr = parsed.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(
+            arr[0]["function"]["name"],
+            Value::String("mcp__computer_use__get_app_state".to_string())
+        );
+        assert_eq!(arr[0]["defer_loading"], Value::Bool(true));
+        assert_eq!(
+            arr[1]["function"]["name"],
+            Value::String("mcp__computer_use__click".to_string())
+        );
     }
 }

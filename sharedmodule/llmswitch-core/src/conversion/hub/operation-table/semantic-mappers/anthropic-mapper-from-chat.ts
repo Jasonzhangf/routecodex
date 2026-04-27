@@ -4,6 +4,7 @@ import { isJsonObject, jsonClone, type JsonObject, type JsonValue } from '../../
 import { buildAnthropicRequestFromOpenAIChat } from '../../../codecs/anthropic-openai-codec.js';
 import { buildAnthropicFromOpenAIChatWithNative } from '../../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
 import { encodeMetadataPassthrough } from '../../../metadata-passthrough.js';
+import { mapChatToolsToAnthropicTools } from '../../../shared/anthropic-message-utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../pipeline/hub-stage-timing.js';
 import {
   applyEffortBudget,
@@ -154,7 +155,7 @@ export function buildAnthropicFormatEnvelopeFromChat(
   const baseRequest: Record<string, unknown> = {
     model,
     messages: chat.messages,
-    tools: chat.tools
+    tools: mapChatToolsToAnthropicTools(chat.tools)
   };
   const explicitEmptyTools = hasExplicitEmptyToolsSemantics(chat);
 

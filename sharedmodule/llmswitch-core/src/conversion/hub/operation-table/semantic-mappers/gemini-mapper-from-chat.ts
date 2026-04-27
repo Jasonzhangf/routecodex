@@ -1,7 +1,7 @@
 import type { AdapterContext, ChatEnvelope, ChatToolDefinition, ChatToolOutput, ChatToolCall } from '../../types/chat-envelope.js';
 import { isJsonObject, jsonClone, type JsonObject, type JsonValue } from '../../types/json.js';
 import { encodeMetadataPassthrough } from '../../../metadata-passthrough.js';
-import { mapChatToolsToBridge } from '../../../shared/tool-mapping.js';
+import { flattenChatToolsForFunctionCalling, mapChatToolsToBridge } from '../../../shared/tool-mapping.js';
 import { buildGeminiToolsFromBridge } from '../../../shared/gemini-tool-utils.js';
 import { getProtocolState } from '../../../protocol-state.js';
 import {
@@ -91,7 +91,12 @@ export function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnv
   const semanticsNode = readGeminiSemantics(chat);
   const systemTextBlocksFromSemantics = readSystemTextBlocksFromSemantics(chat);
 
-  const bridgeDefs = chat.tools && chat.tools.length ? mapChatToolsToBridge(chat.tools) : undefined;
+  const flattenedChatTools = chat.tools && chat.tools.length
+    ? (flattenChatToolsForFunctionCalling(chat.tools) ?? chat.tools)
+    : undefined;
+  const bridgeDefs = flattenedChatTools && flattenedChatTools.length
+    ? mapChatToolsToBridge(flattenedChatTools)
+    : undefined;
   if (bridgeDefs && bridgeDefs.length) {
     for (const def of bridgeDefs) {
       if (!def || typeof def !== 'object') continue;
@@ -214,7 +219,7 @@ export function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnv
     protocolStateSystemInstruction: geminiState?.systemInstruction as JsonValue | undefined,
     systemTextBlocksFromSemantics
   });
-  if (allowFunctionCallingProtocol && chat.tools && chat.tools.length) {
+  if (allowFunctionCallingProtocol && flattenedChatTools && flattenedChatTools.length) {
     const geminiTools = buildGeminiToolsFromBridge(bridgeDefs, {
       mode: isAntigravityProvider ? 'antigravity' : 'default'
     });

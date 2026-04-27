@@ -226,6 +226,75 @@ pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
         let function_row = tool_row.get("function").and_then(|v| v.as_object());
         let raw_type =
             read_trimmed_string(tool_row.get("type")).unwrap_or_else(|| "function".to_string());
+        if raw_type.trim().eq_ignore_ascii_case("namespace") {
+            let namespace_name = read_trimmed_string(tool_row.get("name"));
+            let child_tools = tool_row
+                .get("tools")
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(|child| {
+                            let child_row = child.as_object()?;
+                            let child_function = child_row.get("function").and_then(|v| v.as_object());
+                            let child_name = read_trimmed_string(
+                                child_function
+                                    .and_then(|v| v.get("name"))
+                                    .or_else(|| child_row.get("name")),
+                            )?;
+                            let mut child_out = Map::new();
+                            child_out.insert("type".to_string(), Value::String("function".to_string()));
+                            child_out.insert("name".to_string(), Value::String(child_name));
+                            if let Some(description) = read_trimmed_string(
+                                child_function
+                                    .and_then(|v| v.get("description"))
+                                    .or_else(|| child_row.get("description")),
+                            ) {
+                                child_out.insert("description".to_string(), Value::String(description));
+                            }
+                            if let Some(parameters) = normalize_tool_parameters(
+                                child_function
+                                    .and_then(|v| v.get("parameters"))
+                                    .or_else(|| child_row.get("parameters")),
+                            ) {
+                                child_out.insert("parameters".to_string(), parameters);
+                            }
+                            if let Some(strict) = read_bool(
+                                child_function
+                                    .and_then(|v| v.get("strict"))
+                                    .or_else(|| child_row.get("strict")),
+                            ) {
+                                child_out.insert("strict".to_string(), Value::Bool(strict));
+                            }
+                            if read_bool(
+                                child_function
+                                    .and_then(|v| v.get("defer_loading"))
+                                    .or_else(|| child_function.and_then(|v| v.get("deferLoading")))
+                                    .or_else(|| child_row.get("defer_loading"))
+                                    .or_else(|| child_row.get("deferLoading")),
+                            )
+                            .unwrap_or(false)
+                            {
+                                child_out.insert("defer_loading".to_string(), Value::Bool(true));
+                            }
+                            Some(Value::Object(child_out))
+                        })
+                        .collect::<Vec<Value>>()
+                })
+                .unwrap_or_default();
+            if let Some(namespace_name) = namespace_name {
+                if !child_tools.is_empty() {
+                    let mut namespace_out = Map::new();
+                    namespace_out.insert("type".to_string(), Value::String("namespace".to_string()));
+                    namespace_out.insert("name".to_string(), Value::String(namespace_name));
+                    if let Some(description) = read_trimmed_string(tool_row.get("description")) {
+                        namespace_out.insert("description".to_string(), Value::String(description));
+                    }
+                    namespace_out.insert("tools".to_string(), Value::Array(child_tools));
+                    mapped.push(Value::Object(namespace_out));
+                }
+            }
+            continue;
+        }
         let mut name = read_trimmed_string(function_row.and_then(|v| v.get("name")))
             .or_else(|| read_trimmed_string(tool_row.get("name")));
         if name.is_none() {
@@ -931,5 +1000,30 @@ mod tests {
                 .cloned()
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn map_bridge_tools_to_chat_preserves_namespace_tools() {
+        let raw_tools = vec![json!({
+          "type": "namespace",
+          "name": "mcp__computer_use",
+          "description": "Computer Use",
+          "tools": [
+            {
+              "type": "function",
+              "name": "get_app_state",
+              "description": "Inspect app state",
+              "parameters": { "type": "object", "properties": {} },
+              "defer_loading": true
+            }
+          ]
+        })];
+
+        let mapped = map_bridge_tools_to_chat(raw_tools.as_slice());
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0]["type"], "namespace");
+        assert_eq!(mapped[0]["name"], "mcp__computer_use");
+        assert_eq!(mapped[0]["tools"][0]["name"], "get_app_state");
+        assert_eq!(mapped[0]["tools"][0]["defer_loading"], Value::Bool(true));
     }
 }

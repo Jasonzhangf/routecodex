@@ -551,6 +551,13 @@ pub fn map_chat_tools_to_bridge_with_options_json(input_json: String) -> NapiRes
 }
 
 #[napi]
+pub fn flatten_chat_tools_for_function_calling_with_options_json(
+    input_json: String,
+) -> NapiResult<String> {
+    shared_tool_mapping::flatten_chat_tools_for_function_calling_with_options_json(input_json)
+}
+
+#[napi]
 pub fn normalize_tools_json(tools_json: String) -> NapiResult<String> {
     shared_args_mapping::normalize_tools_json(tools_json)
 }

@@ -1,4 +1,4 @@
-import { mapBridgeToolsToChat, mapChatToolsToBridge } from './tool-mapping.js';
+import { flattenChatToolsForFunctionCalling, mapBridgeToolsToChat, mapChatToolsToBridge } from './tool-mapping.js';
 import type { BridgeToolDefinition } from '../types/bridge-message-types.js';
 import type { ChatToolDefinition, MissingField } from '../hub/types/chat-envelope.js';
 import { jsonClone, type JsonValue, type JsonObject } from '../hub/types/json.js';
@@ -249,7 +249,10 @@ export function mapChatToolsToAnthropicTools(rawTools: unknown): Record<string, 
   if (!Array.isArray(rawTools) || rawTools.length === 0) {
     return undefined;
   }
-  const bridgeDefs = mapChatToolsToBridge(rawTools, { sanitizeName: denormalizeAnthropicToolName });
+  const flattenedTools = flattenChatToolsForFunctionCalling(rawTools, {
+    sanitizeName: denormalizeAnthropicToolName
+  }) ?? rawTools;
+  const bridgeDefs = mapChatToolsToBridge(flattenedTools, { sanitizeName: denormalizeAnthropicToolName });
   if (!bridgeDefs || !bridgeDefs.length) {
     return undefined;
   }

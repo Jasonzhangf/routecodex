@@ -28,7 +28,18 @@ export interface ChatMessage {
 
 export interface ChatToolDefinition {
   type: 'function' | string;
-  function: {
+  name?: string;
+  description?: string;
+  defer_loading?: boolean;
+  tools?: Array<{
+    type?: 'function' | string;
+    name?: string;
+    description?: string;
+    parameters?: JsonValue;
+    strict?: boolean;
+    defer_loading?: boolean;
+  }>;
+  function?: {
     name: string;
     description?: string;
     parameters?: JsonValue;

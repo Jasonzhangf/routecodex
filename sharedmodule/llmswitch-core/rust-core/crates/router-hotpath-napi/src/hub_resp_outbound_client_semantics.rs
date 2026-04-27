@@ -10,6 +10,7 @@ use crate::hub_reasoning_tool_normalizer::{
     project_message_reasoning_text,
 };
 use crate::shared_responses_tool_utils::strip_internal_tooling_metadata_impl;
+use crate::shared_tool_mapping::build_flattened_namespace_child_alias;
 
 fn normalize_alias_map(candidate: &Value) -> Option<Map<String, Value>> {
     let row = candidate.as_object()?;
@@ -1302,8 +1303,16 @@ pub(crate) fn build_anthropic_response_from_chat_value(
 
 #[derive(Clone, Debug)]
 struct ClientToolDefinition {
+    declared_name: String,
+    namespace: Option<String>,
     format: Option<String>,
     parameters: Option<Map<String, Value>>,
+}
+
+#[derive(Default)]
+struct ClientToolIndex {
+    by_name: HashMap<String, ClientToolDefinition>,
+    by_namespace_name: HashMap<String, ClientToolDefinition>,
 }
 
 fn try_parse_json_string(value: &str) -> Option<Value> {
@@ -1455,8 +1464,64 @@ fn repair_tool_args_by_schema_keys(
     Some(out)
 }
 
-fn build_client_tool_index(tools_raw: &Value) -> HashMap<String, ClientToolDefinition> {
-    let mut index = HashMap::<String, ClientToolDefinition>::new();
+fn build_namespace_lookup_key(namespace: &str, name: &str) -> Option<String> {
+    let namespace = namespace.trim();
+    let name = name.trim();
+    if namespace.is_empty() || name.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{}::{}",
+        namespace.to_ascii_lowercase(),
+        name.to_ascii_lowercase()
+    ))
+}
+
+fn read_client_tool_definition(
+    row: &Map<String, Value>,
+    explicit_name: Option<String>,
+    namespace: Option<String>,
+) -> Option<ClientToolDefinition> {
+    let fn_row = row.get("function").and_then(|v| v.as_object());
+    let name = explicit_name
+        .or_else(|| {
+            fn_row
+                .and_then(|fn_row| fn_row.get("name").and_then(|v| v.as_str()))
+                .map(|v| v.trim().to_string())
+        })
+        .or_else(|| row.get("name").and_then(|v| v.as_str()).map(|v| v.trim().to_string()))
+        .filter(|v| !v.is_empty())?;
+    let format = row
+        .get("format")
+        .and_then(|v| v.as_str())
+        .or_else(|| fn_row.and_then(|fn_row| fn_row.get("format").and_then(|v| v.as_str())))
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let parameters = fn_row
+        .and_then(|fn_row| fn_row.get("parameters").and_then(|v| v.as_object()).cloned())
+        .or_else(|| row.get("parameters").and_then(|v| v.as_object()).cloned());
+
+    Some(ClientToolDefinition {
+        declared_name: name,
+        namespace,
+        format,
+        parameters,
+    })
+}
+
+fn register_client_tool(index: &mut ClientToolIndex, key: String, definition: &ClientToolDefinition) {
+    if key.trim().is_empty() {
+        return;
+    }
+    index
+        .by_name
+        .entry(key)
+        .or_insert_with(|| definition.clone());
+}
+
+fn build_client_tool_index(tools_raw: &Value) -> ClientToolIndex {
+    let mut index = ClientToolIndex::default();
+    let mut used_aliases = HashSet::<String>::new();
     let Some(items) = tools_raw.as_array() else {
         return index;
     };
@@ -1464,39 +1529,75 @@ fn build_client_tool_index(tools_raw: &Value) -> HashMap<String, ClientToolDefin
         let Some(row) = tool.as_object() else {
             continue;
         };
-        let fn_row = row.get("function").and_then(|v| v.as_object());
-        let name = fn_row
-            .and_then(|fn_row| fn_row.get("name").and_then(|v| v.as_str()))
-            .or_else(|| row.get("name").and_then(|v| v.as_str()))
-            .map(|v| v.trim().to_string())
-            .unwrap_or_default();
-        if name.is_empty() {
+        let tool_type = row
+            .get("type")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_ascii_lowercase())
+            .unwrap_or_else(|| "function".to_string());
+
+        if tool_type == "namespace" {
+            let Some(namespace) = row
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+            else {
+                continue;
+            };
+            let Some(children) = row.get("tools").and_then(|v| v.as_array()) else {
+                continue;
+            };
+            for child in children {
+                let Some(child_row) = child.as_object() else {
+                    continue;
+                };
+                let explicit_name = child_row
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty());
+                let Some(definition) =
+                    read_client_tool_definition(child_row, explicit_name, Some(namespace.clone()))
+                else {
+                    continue;
+                };
+                if let Some(lookup_key) = build_namespace_lookup_key(
+                    namespace.as_str(),
+                    definition.declared_name.as_str(),
+                ) {
+                    index
+                        .by_namespace_name
+                        .entry(lookup_key)
+                        .or_insert_with(|| definition.clone());
+                }
+                register_client_tool(&mut index, definition.declared_name.clone(), &definition);
+                if let Some(flattened_alias) = build_flattened_namespace_child_alias(
+                    namespace.as_str(),
+                    definition.declared_name.as_str(),
+                    "responses",
+                    &used_aliases,
+                ) {
+                    used_aliases.insert(flattened_alias.clone());
+                    register_client_tool(&mut index, flattened_alias, &definition);
+                }
+            }
             continue;
         }
-        let format = row
-            .get("format")
-            .and_then(|v| v.as_str())
-            .or_else(|| fn_row.and_then(|fn_row| fn_row.get("format").and_then(|v| v.as_str())))
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty());
-        let parameters = fn_row
-            .and_then(|fn_row| {
-                fn_row
-                    .get("parameters")
-                    .and_then(|v| v.as_object())
-                    .cloned()
-            })
-            .or_else(|| row.get("parameters").and_then(|v| v.as_object()).cloned());
 
-        index.insert(name, ClientToolDefinition { format, parameters });
+        let Some(definition) = read_client_tool_definition(row, None, None) else {
+            continue;
+        };
+        used_aliases.insert(definition.declared_name.clone());
+        register_client_tool(&mut index, definition.declared_name.clone(), &definition);
     }
     index
 }
 
 fn resolve_client_tool_name(
-    tool_index: &HashMap<String, ClientToolDefinition>,
+    tool_index: &ClientToolIndex,
+    namespace: Option<&str>,
     raw_tool_name: &str,
-) -> Option<String> {
+) -> Option<ClientToolDefinition> {
     fn normalize_tool_name_for_match(value: &str) -> String {
         let trimmed = value.trim();
         if trimmed.is_empty() {
@@ -1523,13 +1624,23 @@ fn resolve_client_tool_name(
     if trimmed.is_empty() {
         return None;
     }
-    if tool_index.contains_key(trimmed) {
-        return Some(trimmed.to_string());
+    if let Some(namespace_value) = namespace.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then_some(trimmed)
+    }) {
+        if let Some(lookup_key) = build_namespace_lookup_key(namespace_value, trimmed) {
+            if let Some(entry) = tool_index.by_namespace_name.get(lookup_key.as_str()) {
+                return Some(entry.clone());
+            }
+        }
+    }
+    if let Some(entry) = tool_index.by_name.get(trimmed) {
+        return Some(entry.clone());
     }
     let lower = trimmed.to_ascii_lowercase();
-    for key in tool_index.keys() {
+    for (key, value) in tool_index.by_name.iter() {
         if key.to_ascii_lowercase() == lower {
-            return Some(key.to_string());
+            return Some(value.clone());
         }
     }
 
@@ -1539,13 +1650,13 @@ fn resolve_client_tool_name(
         None
     };
     if let Some(suffix) = maybe_prefixed {
-        if tool_index.contains_key(suffix) {
-            return Some(suffix.to_string());
+        if let Some(entry) = tool_index.by_name.get(suffix) {
+            return Some(entry.clone());
         }
         let suffix_lower = suffix.to_ascii_lowercase();
-        for key in tool_index.keys() {
+        for (key, value) in tool_index.by_name.iter() {
             if key.to_ascii_lowercase() == suffix_lower {
-                return Some(key.to_string());
+                return Some(value.clone());
             }
         }
     }
@@ -1555,11 +1666,13 @@ fn resolve_client_tool_name(
         return None;
     }
 
-    let mut keys = tool_index.keys().cloned().collect::<Vec<String>>();
+    let mut keys = tool_index.by_name.keys().cloned().collect::<Vec<String>>();
     keys.sort();
     for key in keys {
         if normalize_tool_name_for_match(key.as_str()) == normalized {
-            return Some(key);
+            if let Some(value) = tool_index.by_name.get(key.as_str()) {
+                return Some(value.clone());
+            }
         }
     }
 
@@ -1628,7 +1741,7 @@ fn normalize_responses_tool_call_arguments_for_client(
     let mut payload = payload_row.clone();
 
     let tool_index = build_client_tool_index(tools_raw);
-    if tool_index.is_empty() {
+    if tool_index.by_name.is_empty() && tool_index.by_namespace_name.is_empty() {
         return Value::Object(payload);
     }
 
@@ -1654,20 +1767,33 @@ fn normalize_responses_tool_call_arguments_for_client(
             if name.is_empty() {
                 continue;
             }
-            let Some(target_name) = resolve_client_tool_name(&tool_index, name.as_str()) else {
+            let namespace = item_row.get("namespace").and_then(|v| v.as_str());
+            let Some(spec) = resolve_client_tool_name(&tool_index, namespace, name.as_str()) else {
                 continue;
             };
-            if target_name != name {
-                item_row.insert("name".to_string(), Value::String(target_name.clone()));
+            if spec.declared_name != name {
+                item_row.insert(
+                    "name".to_string(),
+                    Value::String(spec.declared_name.clone()),
+                );
             }
-            if let Some(spec) = tool_index.get(target_name.as_str()) {
-                let args_raw = item_row
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or_else(|| Value::Null);
-                let normalized = normalize_call_args(target_name.as_str(), &args_raw, spec);
-                item_row.insert("arguments".to_string(), normalized);
+            match spec.namespace.as_ref() {
+                Some(namespace_name) => {
+                    item_row.insert(
+                        "namespace".to_string(),
+                        Value::String(namespace_name.clone()),
+                    );
+                }
+                None => {
+                    item_row.remove("namespace");
+                }
             }
+            let args_raw = item_row
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| Value::Null);
+            let normalized = normalize_call_args(spec.declared_name.as_str(), &args_raw, &spec);
+            item_row.insert("arguments".to_string(), normalized);
         }
     }
 
@@ -1700,12 +1826,36 @@ fn normalize_responses_tool_call_arguments_for_client(
             if name.is_empty() {
                 continue;
             }
-            let Some(target_name) = resolve_client_tool_name(&tool_index, name.as_str()) else {
+            let namespace = call_row
+                .get("namespace")
+                .and_then(|v| v.as_str())
+                .or_else(|| {
+                    call_row
+                        .get("function")
+                        .and_then(|v| v.as_object())
+                        .and_then(|v| v.get("namespace"))
+                        .and_then(|v| v.as_str())
+                });
+            let Some(spec) = resolve_client_tool_name(&tool_index, namespace, name.as_str()) else {
                 continue;
             };
             if let Some(name_value) = call_row.get("name") {
-                if name_value.is_string() && target_name != name {
-                    call_row.insert("name".to_string(), Value::String(target_name.clone()));
+                if name_value.is_string() && spec.declared_name != name {
+                    call_row.insert(
+                        "name".to_string(),
+                        Value::String(spec.declared_name.clone()),
+                    );
+                }
+            }
+            match spec.namespace.as_ref() {
+                Some(namespace_name) => {
+                    call_row.insert(
+                        "namespace".to_string(),
+                        Value::String(namespace_name.clone()),
+                    );
+                }
+                None => {
+                    call_row.remove("namespace");
                 }
             }
             let fn_args = call_row
@@ -1716,13 +1866,25 @@ fn normalize_responses_tool_call_arguments_for_client(
             let call_args = call_row.get("arguments").cloned();
             let args_raw = fn_args.or(call_args).unwrap_or(Value::Null);
 
-            if let Some(spec) = tool_index.get(target_name.as_str()) {
-                let normalized = normalize_call_args(target_name.as_str(), &args_raw, spec);
-                call_row.insert("arguments".to_string(), normalized.clone());
-                if let Some(fn_row) = call_row.get_mut("function").and_then(|v| v.as_object_mut()) {
-                    fn_row.insert("name".to_string(), Value::String(target_name.clone()));
-                    fn_row.insert("arguments".to_string(), normalized);
+            let normalized = normalize_call_args(spec.declared_name.as_str(), &args_raw, &spec);
+            call_row.insert("arguments".to_string(), normalized.clone());
+            if let Some(fn_row) = call_row.get_mut("function").and_then(|v| v.as_object_mut()) {
+                fn_row.insert(
+                    "name".to_string(),
+                    Value::String(spec.declared_name.clone()),
+                );
+                match spec.namespace.as_ref() {
+                    Some(namespace_name) => {
+                        fn_row.insert(
+                            "namespace".to_string(),
+                            Value::String(namespace_name.clone()),
+                        );
+                    }
+                    None => {
+                        fn_row.remove("namespace");
+                    }
                 }
+                fn_row.insert("arguments".to_string(), normalized);
             }
         }
     }
@@ -3599,6 +3761,81 @@ mod tests {
         assert_eq!(
             output["required_action"]["submit_tool_outputs"]["tool_calls"][0]["name"],
             Value::String("mailbox.status".to_string())
+        );
+    }
+
+    #[test]
+    fn build_responses_payload_from_chat_restores_namespace_tool_shape_from_tools_raw() {
+        let payload = serde_json::json!({
+            "id": "resp_namespace_restore",
+            "model": "qwen3.6-plus",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "mcp__computer_use__get_app_state",
+                                    "arguments": "{\"app\":\"Chrome\"}"
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        });
+        let context = serde_json::json!({
+            "toolsRaw": [
+                {
+                    "type": "namespace",
+                    "name": "mcp__computer_use__",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "get_app_state",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "app": { "type": "string" }
+                                },
+                                "required": ["app"],
+                                "additionalProperties": false
+                            }
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let output =
+            build_responses_payload_from_chat_core(&payload, Some("req_tool_namespace"), &context)
+                .expect("build responses payload");
+
+        let function_call = output["output"]
+            .as_array()
+            .expect("output array")
+            .iter()
+            .find(|item| item["type"] == Value::String("function_call".to_string()))
+            .expect("function_call item");
+        assert_eq!(
+            function_call["name"],
+            Value::String("get_app_state".to_string())
+        );
+        assert_eq!(
+            function_call["namespace"],
+            Value::String("mcp__computer_use__".to_string())
+        );
+        assert_eq!(
+            output["required_action"]["submit_tool_outputs"]["tool_calls"][0]["name"],
+            Value::String("get_app_state".to_string())
+        );
+        assert_eq!(
+            output["required_action"]["submit_tool_outputs"]["tool_calls"][0]["namespace"],
+            Value::String("mcp__computer_use__".to_string())
         );
     }
 

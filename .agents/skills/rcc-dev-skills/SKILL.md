@@ -50,6 +50,9 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 
 ## 工具治理唯一真源
 
+- Codex namespace/deferred tools（2026-04-27）：`type="namespace"` + child `tools[]` + `defer_loading` 必须先在 **ingress/canonical** 原样保真；**只允许**在 non-responses outbound compat/request-build 侧做 namespace child flatten，responses-capable upstream 禁止提前 flatten。
+- namespace tool 闭环（2026-04-27）：若 non-responses provider 需要 function-only tools，flatten alias 后**必须**在 client remap 用 `clientToolsRaw` 恢复成 `name + namespace` 客户端语义；禁止靠 provider capability 猜测或 host 侧硬编码补 computer-use。
+
 ### 请求引导（注入 heredoc）
 
 | 文件 | 作用 |
