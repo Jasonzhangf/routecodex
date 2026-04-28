@@ -156,6 +156,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - helper 对齐规则（2026-04-12）：若 TS/client helper（如 `processChatResponseTools`）与 chat pipeline 行为漂移，优先检查它是否绕开 `resp_process_stage1_tool_governance`。helper 必须先复用 unified resp-process native entry；旧 `hub_reasoning_tool_normalizer` 只能做**显式 name 的 malformed 文本 salvage**，不得恢复缺 name 的 shell/apply_patch 调用。
 - Provider snapshot 背压精华（2026-04-13）：**provider snapshot 不要在请求路径直接 await 写盘**；必须走**有界异步队列**，并在队列满或内存预算超限时**丢弃最旧 pending item**。仅靠“本地最近 N 条保留”不能阻止慢磁盘/失败写盘把待写 payload 长时间堆在内存里。
 - Errorsamples 背压精华（2026-04-13）：**errorsamples 也不能同步直写**；必须和 snapshot 一样走**有界异步队列 + drop oldest pending**。`429/502` 这类瞬时上游错误默认**直接跳过写盘**，否则最容易在重试风暴里把磁盘和内存一起打爆。
+- 空 payload/空响应取证精华（2026-04-27）：即使未开启 `--snap`，凡是命中**provider request 空消息/空 input** 或 **assistant sanitize 后变空**，也要**默认写 `errorsamples/payload-contract-error`**；这类样本属于 payload contract 断裂，不能只依赖 snapshot 开关。
 - Token/usage 观测热路径精华（2026-04-27）：`usage` / token 累计这类**纯观测统计**禁止在请求主链同步写盘；请求路径只允许**内存累加**，落盘必须走**后台异步 flush + 原子 rename**，rollup 日志只打 **top N**，避免磁盘抖动和日志风暴反噬主链。
 - Snapshot 固定文件并发写精华（2026-04-18）：`__runtime.json` 这类**固定文件名**若会被 Rust hook 与 TS mirror 共同落盘，必须使用**create-if-missing / 原子链接或 rename**；禁止对同一路径直接 `fs::write` 覆盖，否则会出现“前半段旧 JSON + 后半段新尾巴”的拼接坏样本。
 - Snapshot 双实现扫描动作（2026-04-18）：排查样本坏文件时，先 grep 同名文件是否同时存在 **native hook 写盘** 与 **host mirror 写盘** 两套实现；如果两边都写同一路径，只允许一边 `create_new`，另一边只能幂等跳过。
@@ -404,6 +405,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - 触发信号：Jason 直接要求“编译 / 全局安装 / 重启 5555 和 5520”，或用户明确要让**运行中的端口吃到本地新代码**。
 - 固定顺序：**先 build，再 install，再 restart，再验活**；不要现场猜是 `SIGUSR2`、`start` 还是别的路径。
 - Release snapshot 精华（2026-04-27）：**release 运行时绝不能直接吃 repo `dist/` 或 npm 全局 symlink**；必须先 `npm run install:release` 生成 `~/.rcc/install/current` 不可变快照，再让端口进程切到该 snapshot。若现网进程仍是 repo 路径，优先 `rcc start --config <cfg> --port <port>` 让 CLI 接管端口并重启到 snapshot，不要继续信任旧进程自重启。
+- Launcher auto-start 生命周期精华（2026-04-27）：`rcc codex/claude` 自动拉起 server 时，必须使用**config-scoped lock + lease**，并在 **ready 超时/启动失败** 时对**本次 spawn 的明确 PID**做主动回收；不能只靠 parent guard 被动善后，否则会留下短时孤儿与启动竞争风暴。
 - 当前项目已验证可复用命令：
   1. `npm run build:min`
   2. `npm run install:global`

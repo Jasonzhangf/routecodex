@@ -21,6 +21,7 @@ function createStubFs() {
     readFileSync: () => {
       throw new Error('unexpected readFileSync');
     },
+    writeFileSync: () => {},
     statSync: () => ({ isFile: () => true, size: 1 } as any),
     mkdirSync: () => {},
     openSync: () => 1,
@@ -89,6 +90,7 @@ function createConfigFsWithPath(
       }
       throw new Error(`unexpected readFileSync:${target}`);
     },
+    writeFileSync: () => {},
     statSync: () => ({ isFile: () => true, size: 1 } as any),
     mkdirSync: () => {},
     openSync: () => 1,
@@ -114,6 +116,7 @@ function createCodexProfileFs(profile = 'rcm') {
       }
       throw new Error(`unexpected readFileSync:${target}`);
     },
+    writeFileSync: () => {},
     statSync: () => ({ isFile: () => true, size: 1 } as any),
     mkdirSync: () => {},
     openSync: () => 1,
@@ -1939,8 +1942,12 @@ describe('cli codex command', () => {
   it('auto-starts server for codex and writes config-scoped logs when routecodex is unavailable', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const openedLogPaths: string[] = [];
+    const writtenPaths: string[] = [];
+    const unlinkedPaths: string[] = [];
     let readyChecks = 0;
     const configPath = '/Volumes/extension/.rcc/config.mimo.json';
+    const configContent = JSON.stringify({ httpserver: { port: 5555, apikey: 'sk-config-key', host: '0.0.0.0' } });
+    const existingPaths = new Set<string>([configPath]);
 
     const program = new Command();
     createCodexCommand(program, {
@@ -1953,12 +1960,36 @@ describe('cli codex command', () => {
       env: { ROUTECODEX_SESSION_RECLAIM_REQUIRED: '0' },
       rawArgv: ['codex', '--config', configPath, '--', '--help'],
       fsImpl: {
-        ...createConfigFsWithPath(configPath, 5555),
+        existsSync: (target: string) => existingPaths.has(String(target)),
+        readFileSync: (target: string) => {
+          if (String(target) === configPath) {
+            return configContent;
+          }
+          throw new Error(`unexpected readFileSync:${target}`);
+        },
         statSync: () => ({ isFile: () => true, size: 1 } as any),
         mkdirSync: () => {},
-        openSync: (target: string) => {
-          openedLogPaths.push(String(target));
+        openSync: (target: string, flags?: string) => {
+          const resolved = String(target);
+          if (flags === 'wx' && existingPaths.has(resolved)) {
+            const error = new Error(`EEXIST:${resolved}`) as NodeJS.ErrnoException;
+            error.code = 'EEXIST';
+            throw error;
+          }
+          existingPaths.add(resolved);
+          openedLogPaths.push(resolved);
           return 1;
+        },
+        closeSync: () => {},
+        writeFileSync: (target: string) => {
+          const resolved = String(target);
+          existingPaths.add(resolved);
+          writtenPaths.push(resolved);
+        },
+        unlinkSync: (target: string) => {
+          const resolved = String(target);
+          existingPaths.delete(resolved);
+          unlinkedPaths.push(resolved);
         }
       } as any,
       homedir: () => '/home/test',
@@ -1966,7 +1997,7 @@ describe('cli codex command', () => {
       fetch: (async (url: string) => {
         if (url.endsWith('/ready') || url.endsWith('/health')) {
           readyChecks += 1;
-          if (readyChecks <= 4) {
+          if (readyChecks <= 8) {
             return { ok: false, status: 503, json: async () => ({}) } as any;
           }
           return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
@@ -1992,6 +2023,108 @@ describe('cli codex command', () => {
     expect(spawnCalls[0].command).toBe('node');
     expect(spawnCalls[1].command).toBe('codex');
     expect(openedLogPaths).toContain('/home/test/.rcc/log/config.mimo/server-5555.log');
+    expect(spawnCalls[0].options?.env?.ROUTECODEX_LAUNCHER_SERVER_LEASE_PATH)
+      .toBe('/home/test/.rcc/run/config.mimo/server-5555.json');
+    expect(spawnCalls[0].options?.env?.ROUTECODEX_EXPECT_PARENT_PID).toBe(String(process.pid));
+    expect(writtenPaths).toContain('/home/test/.rcc/run/config.mimo/server-5555.lock');
+    expect(writtenPaths).toContain('/home/test/.rcc/run/config.mimo/server-5555.json');
+    expect(unlinkedPaths).toContain('/home/test/.rcc/run/config.mimo/server-5555.lock');
   });
+
+  it('kills timed-out auto-started server and cleans lock/lease files', async () => {
+    const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
+    const writtenPaths: string[] = [];
+    const unlinkedPaths: string[] = [];
+    const configPath = '/Volumes/extension/.rcc/config.mimo.json';
+    const configContent = JSON.stringify({ httpserver: { port: 5555, apikey: 'sk-config-key', host: '0.0.0.0' } });
+    const existingPaths = new Set<string>([configPath]);
+    const program = new Command();
+    const killSpy = jest.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: number | NodeJS.Signals) => {
+      if (signal === 0) {
+        return true as never;
+      }
+      return true as never;
+    }) as typeof process.kill);
+
+    try {
+      createCodexCommand(program, {
+        isDevPackage: true,
+        isWindows: false,
+        defaultDevPort: 5555,
+        nodeBin: 'node',
+        createSpinner: async () => createStubSpinner(),
+        logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+        env: { ROUTECODEX_SESSION_RECLAIM_REQUIRED: '0' },
+        rawArgv: ['codex', '--config', configPath, '--', '--help'],
+        fsImpl: {
+          existsSync: (target: string) => existingPaths.has(String(target)),
+          readFileSync: (target: string) => {
+            if (String(target) === configPath) {
+              return configContent;
+            }
+            throw new Error(`unexpected readFileSync:${target}`);
+          },
+          statSync: () => ({ isFile: () => true, size: 1 } as any),
+          mkdirSync: () => {},
+          openSync: (target: string, flags?: string) => {
+            const resolved = String(target);
+            if (flags === 'wx' && existingPaths.has(resolved)) {
+              const error = new Error(`EEXIST:${resolved}`) as NodeJS.ErrnoException;
+              error.code = 'EEXIST';
+              throw error;
+            }
+            existingPaths.add(resolved);
+            return 1;
+          },
+          closeSync: () => {},
+          writeFileSync: (target: string) => {
+            const resolved = String(target);
+            existingPaths.add(resolved);
+            writtenPaths.push(resolved);
+          },
+          unlinkSync: (target: string) => {
+            const resolved = String(target);
+            existingPaths.delete(resolved);
+            unlinkedPaths.push(resolved);
+          }
+        } as any,
+        homedir: () => '/home/test',
+        sleep: async () => {},
+        fetch: (async (url: string) => {
+          if (url.endsWith('/ready') || url.endsWith('/health')) {
+            return { ok: false, status: 503, json: async () => ({}) } as any;
+          }
+          return { ok: true, status: 200, json: async () => ({}) } as any;
+        }) as any,
+        spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+        spawn: (command, args, options) => {
+          spawnCalls.push({ command, args, options });
+          if (command === 'node') {
+            return { pid: 77777, on: () => {}, unref: () => {} } as any;
+          }
+          return { on: () => {}, kill: () => true } as any;
+        },
+        getModulesConfigPath: () => '/tmp/modules.json',
+        resolveServerEntryPath: () => '/tmp/index.js',
+        waitForever: async () => {},
+        exit: (code) => {
+          throw new Error(`exit:${code}`);
+        }
+      });
+
+      await expect(
+        program.parseAsync(['node', 'routecodex', 'codex', '--config', configPath, '--', '--help'], { from: 'node' })
+      ).rejects.toThrow('exit:1');
+      expect(spawnCalls[0].command).toBe('node');
+      expect(killSpy).toHaveBeenCalledWith(77777, 'SIGTERM');
+      expect(killSpy).toHaveBeenCalledWith(77777, 'SIGKILL');
+      expect(writtenPaths).toContain('/home/test/.rcc/run/config.mimo/server-5555.lock');
+      expect(writtenPaths).toContain('/home/test/.rcc/run/config.mimo/server-5555.json');
+      expect(unlinkedPaths).toContain('/home/test/.rcc/run/config.mimo/server-5555.lock');
+      expect(unlinkedPaths).toContain('/home/test/.rcc/run/config.mimo/server-5555.json');
+    } finally {
+      killSpy.mockRestore();
+    }
+  }, 15000);
 
 });

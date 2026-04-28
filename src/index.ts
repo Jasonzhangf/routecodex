@@ -104,6 +104,30 @@ function resolveExpectedParentPid(): number | null {
   return parsed;
 }
 
+function resolveLauncherServerLeasePath(): string | null {
+  const raw = String(
+    process.env.ROUTECODEX_LAUNCHER_SERVER_LEASE_PATH
+      ?? process.env.RCC_LAUNCHER_SERVER_LEASE_PATH
+      ?? ''
+  ).trim();
+  return raw || null;
+}
+
+function clearLauncherServerLeasePathBestEffort(stage: string): void {
+  const leasePath = resolveLauncherServerLeasePath();
+  if (!leasePath) {
+    return;
+  }
+  try {
+    if (!fsSync.existsSync(leasePath)) {
+      return;
+    }
+    fsSync.unlinkSync(leasePath);
+  } catch (error) {
+    logNonBlockingError(`${stage} leasePath=${leasePath}`, error);
+  }
+}
+
 function shouldPrintShutdownSummary(): boolean {
   return resolveBoolFromEnv(process.env.ROUTECODEX_SHUTDOWN_CONSOLE ?? process.env.RCC_SHUTDOWN_CONSOLE, false);
 }
@@ -401,6 +425,7 @@ function recordShutdownReason(reason: ShutdownReason): void {
 }
 
 process.on('exit', (code) => {
+  clearLauncherServerLeasePathBestEffort('process.on.exit.clear_launcher_server_lease');
   const reason = lastShutdownReason;
   const payload: Record<string, unknown> = {
     kind: reason.kind,
@@ -1559,6 +1584,7 @@ async function gracefulShutdown(app: RouteCodexApp): Promise<void> {
   });
   try {
     await app.stop();
+    clearLauncherServerLeasePathBestEffort('gracefulShutdown.clear_launcher_server_lease');
     logProcessLifecycle({
       event: 'graceful_shutdown',
       source: 'index.gracefulShutdown',

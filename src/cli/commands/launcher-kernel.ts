@@ -482,6 +482,219 @@ function resolveLauncherConfigLogDir(
   return pathImpl.join(userDir, 'log', configSegment);
 }
 
+function resolveLauncherConfigRuntimeDir(
+  ctx: LauncherCommandContext,
+  pathImpl: typeof path,
+  configPath: string
+): string {
+  const userDir = resolveRccUserDir(ctx.homedir());
+  const configBaseName = pathImpl.basename(String(configPath || '').trim() || 'config');
+  const configSegment = sanitizeLauncherLogSegment(configBaseName);
+  return pathImpl.join(userDir, 'run', configSegment);
+}
+
+type LauncherServerLeaseRecord = {
+  version: 1;
+  kind: 'launcher_autostart_server';
+  launcherPid: number;
+  serverPid?: number | null;
+  configPath: string;
+  port: number;
+  serverUrl: string;
+  logPath?: string;
+  status: 'starting' | 'ready';
+  parentGuardEnabled: boolean;
+  launchToken: string;
+  updatedAt: string;
+};
+
+function writeLauncherJsonRecord(
+  fsImpl: typeof fs,
+  filePath: string,
+  payload: Record<string, unknown>,
+  stage: string
+): void {
+  try {
+    fsImpl.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  } catch (error) {
+    logLauncherNonBlocking(stage, error, { filePath });
+  }
+}
+
+function unlinkLauncherPathBestEffort(fsImpl: typeof fs, filePath: string, stage: string): void {
+  try {
+    if (!fsImpl.existsSync(filePath)) {
+      return;
+    }
+    fsImpl.unlinkSync(filePath);
+  } catch (error) {
+    logLauncherNonBlocking(stage, error, { filePath });
+  }
+}
+
+function isLauncherPidAlive(pid: number | null | undefined): boolean {
+  if (!Number.isFinite(pid) || Number(pid) <= 0) {
+    return false;
+  }
+  try {
+    process.kill(Number(pid), 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readLauncherLockOwnerPid(fsImpl: typeof fs, lockPath: string): number | null {
+  try {
+    const raw = String(fsImpl.readFileSync(lockPath, 'utf8') || '').trim();
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as { launcherPid?: unknown };
+    const launcherPid = Number(parsed.launcherPid);
+    return Number.isFinite(launcherPid) && launcherPid > 0 ? launcherPid : null;
+  } catch {
+    return null;
+  }
+}
+
+function acquireLauncherAutoStartLock(
+  fsImpl: typeof fs,
+  runtimeDir: string,
+  lockPath: string,
+  lockPayload: Record<string, unknown>
+): { acquired: true; release: () => void } | { acquired: false; ownerPid: number | null } {
+  fsImpl.mkdirSync(runtimeDir, { recursive: true });
+
+  const tryAcquire = (): { acquired: true; release: () => void } | { acquired: false; ownerPid: number | null } => {
+    try {
+      const fd = fsImpl.openSync(lockPath, 'wx');
+      try {
+        fsImpl.closeSync(fd);
+      } catch (error) {
+        logLauncherNonBlocking('launcher_autostart_lock.close_fd', error, { lockPath });
+      }
+      writeLauncherJsonRecord(fsImpl, lockPath, lockPayload, 'launcher_autostart_lock.write');
+      return {
+        acquired: true,
+        release: () => {
+          unlinkLauncherPathBestEffort(fsImpl, lockPath, 'launcher_autostart_lock.release');
+        }
+      };
+    } catch (error: unknown) {
+      const code = typeof error === 'object' && error && 'code' in error
+        ? String((error as { code?: unknown }).code || '')
+        : '';
+      if (code && code !== 'EEXIST') {
+        throw error;
+      }
+      return {
+        acquired: false,
+        ownerPid: readLauncherLockOwnerPid(fsImpl, lockPath)
+      };
+    }
+  };
+
+  const firstAttempt = tryAcquire();
+  if (firstAttempt.acquired) {
+    return firstAttempt;
+  }
+  if (firstAttempt.ownerPid && !isLauncherPidAlive(firstAttempt.ownerPid)) {
+    unlinkLauncherPathBestEffort(fsImpl, lockPath, 'launcher_autostart_lock.reap_stale');
+    return tryAcquire();
+  }
+  return firstAttempt;
+}
+
+async function cleanupAutoStartedServerProcess(args: {
+  pid: number | null;
+  port: number;
+  logPath: string;
+  reason: string;
+  sleep: (ms: number) => Promise<void>;
+}): Promise<void> {
+  const pid = Number(args.pid);
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return;
+  }
+
+  try {
+    process.kill(pid, 'SIGTERM');
+    logProcessLifecycle({
+      event: 'detached_spawn_cleanup',
+      source: 'cli.launcher.ensureServerReady',
+      details: {
+        result: 'sigterm_sent',
+        targetPid: pid,
+        port: args.port,
+        logPath: args.logPath,
+        reason: args.reason
+      }
+    });
+  } catch (error) {
+    logProcessLifecycle({
+      event: 'detached_spawn_cleanup',
+      source: 'cli.launcher.ensureServerReady',
+      details: {
+        result: 'sigterm_failed',
+        targetPid: pid,
+        port: args.port,
+        logPath: args.logPath,
+        reason: args.reason,
+        error
+      }
+    });
+    return;
+  }
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await args.sleep(100);
+    if (!isLauncherPidAlive(pid)) {
+      logProcessLifecycle({
+        event: 'detached_spawn_cleanup',
+        source: 'cli.launcher.ensureServerReady',
+        details: {
+          result: 'exited_after_sigterm',
+          targetPid: pid,
+          port: args.port,
+          logPath: args.logPath,
+          reason: args.reason,
+          attempts: attempt
+        }
+      });
+      return;
+    }
+  }
+
+  try {
+    process.kill(pid, 'SIGKILL');
+    logProcessLifecycle({
+      event: 'detached_spawn_cleanup',
+      source: 'cli.launcher.ensureServerReady',
+      details: {
+        result: 'sigkill_sent',
+        targetPid: pid,
+        port: args.port,
+        logPath: args.logPath,
+        reason: args.reason
+      }
+    });
+  } catch (error) {
+    logProcessLifecycle({
+      event: 'detached_spawn_cleanup',
+      source: 'cli.launcher.ensureServerReady',
+      details: {
+        result: 'sigkill_failed',
+        targetPid: pid,
+        port: args.port,
+        logPath: args.logPath,
+        reason: args.reason,
+        error
+      }
+    });
+  }
+}
+
 function ensureServerLogPath(
   ctx: LauncherCommandContext,
   fsImpl: typeof fs,
@@ -520,10 +733,10 @@ async function ensureServerReady(
 
   spinner.info('RouteCodex server is not running, starting it in background...');
   const logPath = ensureServerLogPath(ctx, fsImpl, pathImpl, resolved);
-
-  const logFd = fsImpl.openSync(logPath, 'a');
-  // Launcher auto-started server follows launcher lifecycle by default.
-  // This is intentionally different from `routecodex start`, which is persistent by default.
+  const runtimeDir = resolveLauncherConfigRuntimeDir(ctx, pathImpl, resolved.configPath);
+  const leasePath = pathImpl.join(runtimeDir, `server-${resolved.port}.json`);
+  const lockPath = pathImpl.join(runtimeDir, `server-${resolved.port}.lock`);
+  const launchToken = crypto.randomUUID();
   const bindServerToParent = resolveBoolFromEnv(
     ctx.env.ROUTECODEX_LAUNCHER_SERVER_PARENT_GUARD
       ?? ctx.env.RCC_LAUNCHER_SERVER_PARENT_GUARD
@@ -531,12 +744,55 @@ async function ensureServerReady(
       ?? ctx.env.RCC_SERVER_PARENT_GUARD,
     true
   );
+  const lockPayload = {
+    version: 1,
+    kind: 'launcher_autostart_lock',
+    launcherPid: process.pid,
+    configPath: resolved.configPath,
+    port: resolved.port,
+    serverUrl: resolved.serverUrl,
+    logPath,
+    launchToken,
+    updatedAt: new Date().toISOString()
+  };
+  let lockOwnerPid: number | null = null;
+  let lock = acquireLauncherAutoStartLock(fsImpl, runtimeDir, lockPath, lockPayload);
+  if (!lock.acquired) {
+    lockOwnerPid = lock.ownerPid;
+    spinner.text = 'Another RouteCodex launcher is starting this server; waiting for readiness...';
+    for (let attempt = 0; attempt < 45; attempt++) {
+      await ctx.sleep(1000);
+      const ready = await checkServerReady(ctx, resolved.serverUrl, resolved.configuredApiKey, 1500);
+      if (ready) {
+        return { started: false, ready: true, logPath };
+      }
+      const ownerPid = readLauncherLockOwnerPid(fsImpl, lockPath);
+      if (ownerPid && isLauncherPidAlive(ownerPid)) {
+        lockOwnerPid = ownerPid;
+        continue;
+      }
+      lock = acquireLauncherAutoStartLock(fsImpl, runtimeDir, lockPath, lockPayload);
+      if (lock.acquired) {
+        break;
+      }
+      lockOwnerPid = lock.ownerPid;
+    }
+    if (!lock.acquired) {
+      throw new Error(
+        `Timed out waiting for RouteCodex server start lock on port ${resolved.port} (ownerPid=${lockOwnerPid ?? 'unknown'}). Check logs: ${logPath}`
+      );
+    }
+  }
+
+  const logFd = fsImpl.openSync(logPath, 'a');
   const env = {
     ...ctx.env,
     ROUTECODEX_CONFIG: resolved.configPath,
     ROUTECODEX_CONFIG_PATH: resolved.configPath,
     ROUTECODEX_PORT: String(resolved.port),
     RCC_PORT: String(resolved.port),
+    ROUTECODEX_LAUNCHER_SERVER_LEASE_PATH: leasePath,
+    RCC_LAUNCHER_SERVER_LEASE_PATH: leasePath,
     ...(bindServerToParent
       ? {
         ROUTECODEX_EXPECT_PARENT_PID: String(process.pid),
@@ -544,6 +800,24 @@ async function ensureServerReady(
       }
       : {})
   } as NodeJS.ProcessEnv;
+  let serverPid: number | null = null;
+  const writeLease = (status: LauncherServerLeaseRecord['status']): void => {
+    const payload: LauncherServerLeaseRecord = {
+      version: 1,
+      kind: 'launcher_autostart_server',
+      launcherPid: process.pid,
+      serverPid,
+      configPath: resolved.configPath,
+      port: resolved.port,
+      serverUrl: resolved.serverUrl,
+      logPath,
+      status,
+      parentGuardEnabled: bindServerToParent,
+      launchToken,
+      updatedAt: new Date().toISOString()
+    };
+    writeLauncherJsonRecord(fsImpl, leasePath, payload, 'launcher_server_lease.write');
+  };
 
   logProcessLifecycle({
     event: 'detached_spawn',
@@ -559,12 +833,21 @@ async function ensureServerReady(
   });
 
   try {
+    const becameReadyWhileLocked = await checkServerReady(ctx, resolved.serverUrl, resolved.configuredApiKey, 1500);
+    if (becameReadyWhileLocked) {
+      return { started: false, ready: true, logPath };
+    }
+
     try {
       const serverProcess = ctx.spawn(ctx.nodeBin, [ctx.resolveServerEntryPath(), ctx.getModulesConfigPath()], {
         stdio: ['ignore', logFd, logFd],
         env,
         detached: true
       });
+      serverPid = typeof serverProcess.pid === 'number' && Number.isFinite(serverProcess.pid)
+        ? Math.floor(serverProcess.pid)
+        : null;
+      writeLease('starting');
       logProcessLifecycle({
         event: 'detached_spawn',
         source: 'cli.launcher.ensureServerReady',
@@ -574,7 +857,7 @@ async function ensureServerReady(
           port: resolved.port,
           command: ctx.nodeBin,
           args: [ctx.resolveServerEntryPath(), ctx.getModulesConfigPath()],
-          childPid: serverProcess.pid ?? null,
+          childPid: serverPid,
           logPath
         }
       });
@@ -588,7 +871,7 @@ async function ensureServerReady(
             port: resolved.port,
             command: ctx.nodeBin,
             args: [ctx.resolveServerEntryPath(), ctx.getModulesConfigPath()],
-            childPid: serverProcess.pid ?? null,
+            childPid: serverPid,
             logPath,
             error
           }
@@ -603,9 +886,16 @@ async function ensureServerReady(
         serverProcess.unref?.();
       } catch (error) {
         logLauncherNonBlocking('ensure_server_ready_unref_child', error, { port: resolved.port, logPath });
-        // ignore
       }
     } catch (error) {
+      await cleanupAutoStartedServerProcess({
+        pid: serverPid,
+        port: resolved.port,
+        logPath,
+        reason: 'spawn_failure',
+        sleep: ctx.sleep
+      });
+      unlinkLauncherPathBestEffort(fsImpl, leasePath, 'launcher_server_lease.unlink_failure');
       logProcessLifecycle({
         event: 'detached_spawn',
         source: 'cli.launcher.ensureServerReady',
@@ -621,36 +911,47 @@ async function ensureServerReady(
       });
       throw error;
     }
+
+    spinner.text = 'Waiting for RouteCodex server to become ready...';
+    for (let attempt = 0; attempt < 45; attempt++) {
+      await ctx.sleep(1000);
+      const ready = await checkServerReady(ctx, resolved.serverUrl, resolved.configuredApiKey, 1500);
+      if (ready) {
+        writeLease('ready');
+        return { started: true, ready: true, logPath };
+      }
+    }
+
+    logProcessLifecycle({
+      event: 'detached_spawn',
+      source: 'cli.launcher.ensureServerReady',
+      details: {
+        role: 'routecodex-server',
+        result: 'not_ready_timeout',
+        port: resolved.port,
+        logPath,
+        childPid: serverPid
+      }
+    });
+    await cleanupAutoStartedServerProcess({
+      pid: serverPid,
+      port: resolved.port,
+      logPath,
+      reason: 'ready_timeout',
+      sleep: ctx.sleep
+    });
+    unlinkLauncherPathBestEffort(fsImpl, leasePath, 'launcher_server_lease.unlink_timeout');
+    throw new Error(`RouteCodex server did not become ready in time. Check logs: ${logPath}`);
   } finally {
+    if (lock.acquired) {
+      lock.release();
+    }
     try {
       fsImpl.closeSync(logFd);
     } catch (error) {
       logLauncherNonBlocking('ensure_server_ready_close_log_fd', error, { port: resolved.port, logPath });
-      // ignore
     }
   }
-
-  spinner.text = 'Waiting for RouteCodex server to become ready...';
-  for (let attempt = 0; attempt < 45; attempt++) {
-    await ctx.sleep(1000);
-    const ready = await checkServerReady(ctx, resolved.serverUrl, resolved.configuredApiKey, 1500);
-    if (ready) {
-      return { started: true, ready: true, logPath };
-    }
-  }
-
-  logProcessLifecycle({
-    event: 'detached_spawn',
-    source: 'cli.launcher.ensureServerReady',
-    details: {
-      role: 'routecodex-server',
-      result: 'not_ready_timeout',
-      port: resolved.port,
-      logPath
-    }
-  });
-
-  throw new Error(`RouteCodex server did not become ready in time. Check logs: ${logPath}`);
 }
 
 function resolveWorkingDirectory(ctx: LauncherCommandContext, fsImpl: typeof fs, pathImpl: typeof path, requested?: string): string {

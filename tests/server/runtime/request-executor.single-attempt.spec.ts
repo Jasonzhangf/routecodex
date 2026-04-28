@@ -159,6 +159,38 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
   });
 
+  it('writes payload-contract-error errorsample for empty provider request payload by default', async () => {
+    const errorsDir = fs.mkdtempSync(
+      path.join(process.cwd(), 'tmp', 'jest-request-executor-errorsamples-empty-request-')
+    );
+    process.env.ROUTECODEX_ERRORSAMPLES_DIR = errorsDir;
+    const { __resetErrorsampleQueueForTests, __flushErrorsampleQueueForTests } = await import(
+      '../../../src/utils/errorsamples.js'
+    );
+    __resetErrorsampleQueueForTests();
+    try {
+      const handle = createRuntimeHandle(async () => ({ ok: true }));
+      const { executor, request } = createExecutor(pipelineResult, handle);
+      jest
+        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+        .mockResolvedValue({ status: 200, body: { output_text: 'ok' } });
+
+      await executor.execute(request);
+      await __flushErrorsampleQueueForTests();
+
+      const groupDir = path.join(errorsDir, 'payload-contract-error');
+      const files = fs.readdirSync(groupDir);
+      expect(files.length).toBeGreaterThan(0);
+      const payload = JSON.parse(fs.readFileSync(path.join(groupDir, files[0]), 'utf8'));
+      expect(payload.phase).toBe('provider-request');
+      expect(payload.marker).toBe('provider_request_empty_messages');
+    } finally {
+      __resetErrorsampleQueueForTests();
+      delete process.env.ROUTECODEX_ERRORSAMPLES_DIR;
+      fs.rmSync(errorsDir, { recursive: true, force: true });
+    }
+  });
+
   it('unlocks local snapshot gate before provider runtime starts writing snapshots', async () => {
     const handle = createRuntimeHandle(async () => {
       expect(canWriteSnapshotToLocalDisk('req_test')).toBe(true);
@@ -531,6 +563,128 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const secondCallMetadata = fakePipeline.execute.mock.calls[1][0]
       .metadata as Record<string, unknown>;
     expect(secondCallMetadata.excludedProviderKeys ?? []).toEqual([]);
+  });
+
+  it('writes payload-contract-error errorsample for empty assistant response by default', async () => {
+    const errorsDir = fs.mkdtempSync(
+      path.join(process.cwd(), 'tmp', 'jest-request-executor-errorsamples-empty-response-')
+    );
+    process.env.ROUTECODEX_ERRORSAMPLES_DIR = errorsDir;
+    const { __resetErrorsampleQueueForTests, __flushErrorsampleQueueForTests } = await import(
+      '../../../src/utils/errorsamples.js'
+    );
+    __resetErrorsampleQueueForTests();
+    try {
+      const handle = createRuntimeHandle(async () => ({ status: 200, data: { ok: true } }));
+      const pipelineResult: PipelineExecutionResult = {
+        providerPayload: { data: { messages: [{ role: 'user', content: 'retry me' }] } },
+        target: {
+          providerKey: 'qwenchat.aliasA',
+          providerType: 'openai',
+          outboundProfile: 'openai-chat',
+          runtimeKey: 'runtime:one',
+          processMode: 'standard'
+        },
+        processMode: 'standard',
+        metadata: {}
+      };
+      const { executor } = createExecutor(pipelineResult, handle);
+      jest
+        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+        .mockResolvedValue({
+          status: 200,
+          body: { choices: [{ finish_reason: 'stop', message: { content: '' } }] }
+        });
+
+      await expect(executor.execute({
+        requestId: 'req_empty_assistant_errorsample',
+        entryEndpoint: '/v1/chat/completions',
+        headers: {},
+        body: { messages: [{ role: 'user', content: 'retry me' }] },
+        metadata: { stream: false, inboundStream: false }
+      })).rejects.toThrow('Upstream returned empty assistant payload');
+      await __flushErrorsampleQueueForTests();
+
+      const groupDir = path.join(errorsDir, 'payload-contract-error');
+      const files = fs.readdirSync(groupDir);
+      const payloads = files.map((file) =>
+        JSON.parse(fs.readFileSync(path.join(groupDir, file), 'utf8'))
+      );
+      expect(
+        payloads.some((payload) =>
+          payload.phase === 'provider-response' && payload.marker === 'chat_empty_assistant'
+        )
+      ).toBe(true);
+    } finally {
+      __resetErrorsampleQueueForTests();
+      delete process.env.ROUTECODEX_ERRORSAMPLES_DIR;
+      fs.rmSync(errorsDir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes payload-contract-error errorsample when assistant response was repaired by sanitize placeholder', async () => {
+    const errorsDir = fs.mkdtempSync(
+      path.join(process.cwd(), 'tmp', 'jest-request-executor-errorsamples-sanitized-placeholder-')
+    );
+    process.env.ROUTECODEX_ERRORSAMPLES_DIR = errorsDir;
+    const { __resetErrorsampleQueueForTests, __flushErrorsampleQueueForTests } = await import(
+      '../../../src/utils/errorsamples.js'
+    );
+    __resetErrorsampleQueueForTests();
+    try {
+      const handle = createRuntimeHandle(async () => ({ status: 200, data: { ok: true } }));
+      const pipelineResult: PipelineExecutionResult = {
+        providerPayload: { data: { messages: [{ role: 'user', content: 'retry me' }] } },
+        target: {
+          providerKey: 'qwenchat.aliasA',
+          providerType: 'openai',
+          outboundProfile: 'openai-chat',
+          runtimeKey: 'runtime:one',
+          processMode: 'standard'
+        },
+        processMode: 'standard',
+        metadata: {}
+      };
+      const { executor } = createExecutor(pipelineResult, handle);
+      jest
+        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+        .mockResolvedValue({
+          status: 200,
+          body: {
+            choices: [{
+              finish_reason: 'stop',
+              message: {
+                content: '[RouteCodex] assistant response became empty after response sanitization.'
+              }
+            }]
+          }
+        });
+
+      const response = await executor.execute({
+        requestId: 'req_sanitized_placeholder_errorsample',
+        entryEndpoint: '/v1/chat/completions',
+        headers: {},
+        body: { messages: [{ role: 'user', content: 'retry me' }] },
+        metadata: { stream: false, inboundStream: false }
+      });
+      expect(response.status).toBe(200);
+      await __flushErrorsampleQueueForTests();
+
+      const groupDir = path.join(errorsDir, 'payload-contract-error');
+      const files = fs.readdirSync(groupDir);
+      const payloads = files.map((file) =>
+        JSON.parse(fs.readFileSync(path.join(groupDir, file), 'utf8'))
+      );
+      expect(
+        payloads.some((payload) =>
+          payload.phase === 'provider-response' && payload.marker === 'assistant_sanitized_empty_placeholder'
+        )
+      ).toBe(true);
+    } finally {
+      __resetErrorsampleQueueForTests();
+      delete process.env.ROUTECODEX_ERRORSAMPLES_DIR;
+      fs.rmSync(errorsDir, { recursive: true, force: true });
+    }
   });
 
   it('logs provider-switch status/code/upstreamCode parsed from raw error text', async () => {

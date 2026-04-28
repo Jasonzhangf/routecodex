@@ -85,6 +85,7 @@ import { registerRequestLogContext } from '../../utils/request-log-color.js';
 import { getClientConnectionAbortSignal } from '../../utils/client-connection-state.js';
 import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../../utils/finish-reason.js';
 import { allowSnapshotLocalDiskWrite } from '../../../utils/snapshot-local-disk-gate.js';
+import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import { writeProviderSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 import {
   REASONING_STOP_FINALIZED_FLAG_KEY,
@@ -2695,6 +2696,23 @@ function isSessionStormBackoffCandidate(error: unknown): boolean {
   );
 }
 
+const EMPTY_ASSISTANT_SANITIZED_PLACEHOLDER =
+  '[RouteCodex] assistant response became empty after response sanitization.';
+
+function containsEmptyAssistantSanitizedPlaceholder(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.includes(EMPTY_ASSISTANT_SANITIZED_PLACEHOLDER);
+  }
+  if (Array.isArray(value)) {
+    return value.some((entry) => containsEmptyAssistantSanitizedPlaceholder(entry));
+  }
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  return Object.values(value as Record<string, unknown>)
+    .some((entry) => containsEmptyAssistantSanitizedPlaceholder(entry));
+}
+
 function resolveSessionStormBackoffBaseMs(): number {
   const raw =
     process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS
@@ -2925,6 +2943,135 @@ async function persistEmptyAssistantProviderSnapshots(args: {
       }
     },
     forceLocalDiskWriteWhenDisabled: true
+  });
+}
+
+type PayloadContractSignal = {
+  reason: string;
+  marker: string;
+};
+
+function valueHasNonEmptyPayloadContent(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+  if (Array.isArray(value)) {
+    return value.some((entry) => valueHasNonEmptyPayloadContent(entry));
+  }
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return [
+    record.content,
+    record.text,
+    record.prompt,
+    record.input_text,
+    record.query,
+    record.instructions,
+    record.instruction,
+    record.message,
+    record.messages,
+    record.input,
+    record.contents,
+    record.parts
+  ].some((entry) => valueHasNonEmptyPayloadContent(entry));
+}
+
+function unwrapProviderRequestPayloadBody(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+  const root = payload as Record<string, unknown>;
+  if (root.data && typeof root.data === 'object' && !Array.isArray(root.data)) {
+    return root.data as Record<string, unknown>;
+  }
+  return root;
+}
+
+function detectEmptyProviderRequestPayload(providerPayload: unknown): PayloadContractSignal | null {
+  const body = unwrapProviderRequestPayloadBody(providerPayload);
+  if (!body) {
+    return null;
+  }
+  const hasPromptLikeContentOutsideMessages =
+    valueHasNonEmptyPayloadContent(body.input)
+    || valueHasNonEmptyPayloadContent(body.prompt)
+    || valueHasNonEmptyPayloadContent(body.contents)
+    || valueHasNonEmptyPayloadContent(body.content)
+    || valueHasNonEmptyPayloadContent(body.text)
+    || valueHasNonEmptyPayloadContent(body.query)
+    || valueHasNonEmptyPayloadContent(body.instructions)
+    || valueHasNonEmptyPayloadContent(body.instruction);
+  if (Array.isArray(body.messages) && body.messages.length === 0 && !hasPromptLikeContentOutsideMessages) {
+    return {
+      reason: 'provider request messages[] is empty and no other prompt/input content exists',
+      marker: 'provider_request_empty_messages'
+    };
+  }
+  const hasPromptLikeContentOutsideInput =
+    valueHasNonEmptyPayloadContent(body.messages)
+    || valueHasNonEmptyPayloadContent(body.prompt)
+    || valueHasNonEmptyPayloadContent(body.contents)
+    || valueHasNonEmptyPayloadContent(body.content)
+    || valueHasNonEmptyPayloadContent(body.text)
+    || valueHasNonEmptyPayloadContent(body.query)
+    || valueHasNonEmptyPayloadContent(body.instructions)
+    || valueHasNonEmptyPayloadContent(body.instruction);
+  if (Array.isArray(body.input) && body.input.length === 0 && !hasPromptLikeContentOutsideInput) {
+    return {
+      reason: 'provider request input[] is empty and no other prompt/message content exists',
+      marker: 'provider_request_empty_input'
+    };
+  }
+  return null;
+}
+
+function detectAssistantSanitizationPlaceholder(body: unknown): PayloadContractSignal | null {
+  if (!body || typeof body !== 'object') {
+    return null;
+  }
+  if (!containsEmptyAssistantSanitizedPlaceholder(body)) {
+    return null;
+  }
+  return {
+    reason: 'assistant response was repaired with the empty-after-sanitization placeholder',
+    marker: 'assistant_sanitized_empty_placeholder'
+  };
+}
+
+function queuePayloadContractErrorsample(args: {
+  phase: 'provider-request' | 'provider-response';
+  requestId: string;
+  entryEndpoint?: string;
+  providerKey?: string;
+  providerId?: string;
+  marker: string;
+  reason: string;
+  observation: unknown;
+}): void {
+  void writeErrorsampleJson({
+    group: 'payload-contract-error',
+    kind: `${args.phase}.${args.marker}`,
+    payload: {
+      kind: 'payload_contract_error',
+      timestamp: new Date().toISOString(),
+      phase: args.phase,
+      marker: args.marker,
+      reason: args.reason,
+      requestId: args.requestId,
+      endpoint: args.entryEndpoint,
+      providerKey: args.providerKey,
+      providerId: args.providerId,
+      observation: args.observation
+    }
+  }).catch((error) => {
+    logRequestExecutorNonBlockingError('payload_contract_errorsample.write', error, {
+      requestId: args.requestId,
+      providerKey: args.providerKey,
+      marker: args.marker,
+      phase: args.phase
+    });
   });
 }
 
@@ -3555,6 +3702,27 @@ export class HubRequestExecutor implements RequestExecutor {
           runtimeKey,
           attempt
         });
+        const emptyProviderRequestSignal = detectEmptyProviderRequestPayload(providerPayload);
+        if (emptyProviderRequestSignal) {
+          queuePayloadContractErrorsample({
+            phase: 'provider-request',
+            requestId: input.requestId,
+            entryEndpoint: input.entryEndpoint,
+            providerKey: target.providerKey,
+            providerId: handle.providerId,
+            marker: emptyProviderRequestSignal.marker,
+            reason: emptyProviderRequestSignal.reason,
+            observation: {
+              providerPayload
+            }
+          });
+          this.logStage('host.request_contract.empty_provider_payload', input.requestId, {
+            providerKey: target.providerKey,
+            marker: emptyProviderRequestSignal.marker,
+            reason: emptyProviderRequestSignal.reason,
+            attempt
+          });
+        }
         const providerTransportBackoffKey = buildProviderTransportBackoffKey({
           providerKey: target.providerKey,
           runtimeKey
@@ -3900,6 +4068,28 @@ export class HubRequestExecutor implements RequestExecutor {
           const emptyAssistantSignal = detectRetryableEmptyAssistantResponse(converted.body);
           if (emptyAssistantSignal) {
             const bodyForError = converted.body as Record<string, unknown>;
+            queuePayloadContractErrorsample({
+              phase: 'provider-response',
+              requestId: input.requestId,
+              entryEndpoint: input.entryEndpoint,
+              providerKey: target.providerKey,
+              providerId: handle.providerId,
+              marker: emptyAssistantSignal.marker,
+              reason: emptyAssistantSignal.reason,
+              observation: {
+                providerRequestPayload: providerPayload,
+                normalizedResponse: {
+                  status: normalized.status ?? null,
+                  headers: normalized.headers ?? null,
+                  body: normalized.body ?? null
+                },
+                convertedResponse: {
+                  status: converted.status ?? null,
+                  headers: converted.headers ?? null,
+                  body: converted.body ?? null
+                }
+              }
+            });
             try {
               await persistEmptyAssistantProviderSnapshots({
                 requestId: input.requestId,
@@ -3942,6 +4132,37 @@ export class HubRequestExecutor implements RequestExecutor {
               attempt
             });
             throw errorToThrow;
+          }
+          const assistantSanitizationPlaceholderSignal = detectAssistantSanitizationPlaceholder(converted.body);
+          if (assistantSanitizationPlaceholderSignal) {
+            queuePayloadContractErrorsample({
+              phase: 'provider-response',
+              requestId: input.requestId,
+              entryEndpoint: input.entryEndpoint,
+              providerKey: target.providerKey,
+              providerId: handle.providerId,
+              marker: assistantSanitizationPlaceholderSignal.marker,
+              reason: assistantSanitizationPlaceholderSignal.reason,
+              observation: {
+                providerRequestPayload: providerPayload,
+                normalizedResponse: {
+                  status: normalized.status ?? null,
+                  headers: normalized.headers ?? null,
+                  body: normalized.body ?? null
+                },
+                convertedResponse: {
+                  status: converted.status ?? null,
+                  headers: converted.headers ?? null,
+                  body: converted.body ?? null
+                }
+              }
+            });
+            this.logStage('host.response_contract.assistant_sanitize_placeholder', input.requestId, {
+              providerKey: target.providerKey,
+              marker: assistantSanitizationPlaceholderSignal.marker,
+              reason: assistantSanitizationPlaceholderSignal.reason,
+              attempt
+            });
           }
           const stoplessTerminationSignal = detectStoplessTerminationWithoutFinalization(
             converted.body,
