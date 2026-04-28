@@ -64,8 +64,8 @@ async function main() {
    model: 'gpt-test',
    messages: [{ role: 'user', content: 'Please search the web for latest news today' }]
  });
-   assert(caseWebIntent.result.routeName === 'web_search', `web intent should route to web_search (via keywords), got ${caseWebIntent.result.routeName}`);
-   assert(caseWebIntent.result.reasoning.includes('web_search:intent-keyword'), 'web intent reason should be intent-keyword');
+   assert(caseWebIntent.result.routeName === 'thinking', `web intent should stay on thinking user-input route, got ${caseWebIntent.result.routeName}`);
+   assert(caseWebIntent.result.reasoning.includes('thinking:user-input'), 'web intent reason should be thinking:user-input');
 
    // Test: merely declaring web_search tool must not force web_search route.
    // Current SSOT requires explicit intent, serverToolRequired, or prior web_search continuation.
@@ -208,8 +208,8 @@ async function main() {
     ],
     tools: []
   });
-  assert(caseRead.features.lastAssistantToolCategory === 'read', 'cat should classify as read tool');
-  assert(caseRead.result.routeName === 'thinking', `read continuation should route to thinking, got ${caseRead.result.routeName}`);
+  assert(caseRead.features.lastAssistantToolCategory === 'thinking', 'cat should classify as thinking-style read continuation');
+  assert(caseRead.result.routeName === 'thinking', `cat continuation should route to thinking, got ${caseRead.result.routeName}`);
 
   const caseWrite = classify('route-case-write', {
     model: 'gpt-test',
@@ -232,8 +232,8 @@ async function main() {
     ],
     tools: []
   });
-  assert(caseWrite.features.lastAssistantToolCategory === 'write', 'apply_patch should classify as write tool');
-  assert(caseWrite.result.routeName === 'coding', `write continuation should route to coding, got ${caseWrite.result.routeName}`);
+  assert(caseWrite.features.lastAssistantToolCategory === 'coding', 'apply_patch should classify as coding continuation');
+  assert(caseWrite.result.routeName === 'coding', `apply_patch continuation should route to coding, got ${caseWrite.result.routeName}`);
 
   console.log('[web-search-vs-search-route] ok', {
     gitLogRoute: caseGitLog.result.routeName,

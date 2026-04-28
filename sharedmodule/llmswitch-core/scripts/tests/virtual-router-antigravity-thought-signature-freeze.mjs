@@ -15,7 +15,7 @@ const KEY_OTHER_RUNTIME = 'antigravity.b.gemini-3-pro-high';
 async function main() {
   const { ProviderRegistry } = await import(path.resolve(repoRoot, 'dist/router/virtual-router/provider-registry.js'));
   const { ProviderHealthManager } = await import(path.resolve(repoRoot, 'dist/router/virtual-router/health-manager.js'));
-  const { applyAntigravityRiskPolicyImpl } = await import(path.resolve(repoRoot, 'dist/router/virtual-router/engine-health.js'));
+  const { applyAntigravityRiskPolicyImpl } = await import(path.resolve(repoRoot, 'dist/router/virtual-router/engine/health/index.js'));
 
   const registry = new ProviderRegistry(buildProfiles());
   const health = new ProviderHealthManager();
@@ -92,4 +92,3 @@ main().catch((err) => {
   console.error('[virtual-router-antigravity-thought-signature-freeze] failed:', err);
   process.exit(1);
 });
-

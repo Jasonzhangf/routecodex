@@ -140,7 +140,8 @@ const stageRecorder = (() => {
     "/v1/chat/completions";
   try {
     return createSnapshotRecorder(adapterContext, effectiveEndpoint);
-  } catch {
+  } catch (snapshotError) {
+    console.warn(`[hub-pipeline] Snapshot recorder creation failed (non-blocking): ${snapshotError instanceof Error ? snapshotError.message : String(snapshotError)}`);
     return undefined;
   }
 })();

@@ -5,6 +5,7 @@ import {
   buildAnthropicResponseFromChatWithNative,
   resolveAnthropicChatCompletionOutcomeWithNative
 } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
+import { buildChatResponseFromResponsesWithNative } from '../../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
 import {
   registerResponsesReasoning,
   consumeResponsesReasoning,
@@ -32,6 +33,62 @@ import {
 export interface AnthropicResponseOptions {
   aliasMap?: ToolAliasMap;
   includeToolCallIds?: boolean;
+}
+
+function cloneJsonRecord(value: Record<string, unknown>): Record<string, unknown> | undefined {
+  try {
+    const structuredCloneImpl = (globalThis as { structuredClone?: <T>(input: T) => T }).structuredClone;
+    if (typeof structuredCloneImpl === 'function') {
+      return structuredCloneImpl(value);
+    }
+  } catch {
+    /* ignore structuredClone failures */
+  }
+  try {
+    return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+  } catch {
+    return { ...value };
+  }
+}
+
+function stripInternalContinuationRequestId(chat: Record<string, unknown>): void {
+  const semantics =
+    chat?.semantics && typeof chat.semantics === 'object' && !Array.isArray(chat.semantics)
+      ? (chat.semantics as Record<string, unknown>)
+      : undefined;
+  const continuation =
+    semantics?.continuation && typeof semantics.continuation === 'object' && !Array.isArray(semantics.continuation)
+      ? (semantics.continuation as Record<string, unknown>)
+      : undefined;
+  const resumeFrom =
+    continuation?.resumeFrom && typeof continuation.resumeFrom === 'object' && !Array.isArray(continuation.resumeFrom)
+      ? (continuation.resumeFrom as Record<string, unknown>)
+      : undefined;
+  if (resumeFrom && typeof resumeFrom.requestId === 'string') {
+    delete resumeFrom.requestId;
+  }
+}
+
+function restoreResponsesSemanticsFromSnapshot(
+  chatResponse: JsonObject,
+  payloadSnapshot: Record<string, unknown> | undefined
+): void {
+  if (!payloadSnapshot || typeof payloadSnapshot !== 'object' || Array.isArray(payloadSnapshot)) {
+    return;
+  }
+  const restored = buildChatResponseFromResponsesWithNative(payloadSnapshot);
+  if (!restored || typeof restored !== 'object' || Array.isArray(restored)) {
+    return;
+  }
+  stripInternalContinuationRequestId(restored);
+  const semantics =
+    restored.semantics && typeof restored.semantics === 'object' && !Array.isArray(restored.semantics)
+      ? cloneJsonRecord(restored.semantics as Record<string, unknown>)
+      : undefined;
+  if (!semantics) {
+    return;
+  }
+  (chatResponse as any).semantics = semantics;
 }
 
 export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options?: AnthropicResponseOptions): JsonObject {
@@ -240,6 +297,7 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
     if (typeof (chatResponse as any).request_id !== 'string') {
       (chatResponse as any).request_id = chatResponse.id;
     }
+    restoreResponsesSemanticsFromSnapshot(chatResponse, payloadSnapshot);
   }
   const passthroughPayload = consumeResponsesPassthroughByAliases(retentionAliases);
   if (passthroughPayload) {
@@ -280,6 +338,24 @@ export function buildAnthropicResponseFromChat(chatResponse: JsonObject, options
   }
   if ((chatResponse as any)?.__responses_output_text_meta) {
     registerResponsesOutputTextMeta(sanitized.id, (chatResponse as any).__responses_output_text_meta);
+  }
+  const retainedSnapshot = (chatResponse as any)?.__responses_payload_snapshot;
+  if (retainedSnapshot && typeof retainedSnapshot === 'object' && !Array.isArray(retainedSnapshot)) {
+    for (const candidate of new Set(
+      [sanitized.id, (sanitized as any)?.request_id, (chatResponse as any)?.id, (chatResponse as any)?.request_id]
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    )) {
+      registerResponsesPayloadSnapshot(candidate, retainedSnapshot as Record<string, unknown>, { clone: false });
+    }
+  }
+  const retainedPassthrough = (chatResponse as any)?.__responses_passthrough;
+  if (retainedPassthrough && typeof retainedPassthrough === 'object' && !Array.isArray(retainedPassthrough)) {
+    for (const candidate of new Set(
+      [sanitized.id, (sanitized as any)?.request_id, (chatResponse as any)?.id, (chatResponse as any)?.request_id]
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    )) {
+      registerResponsesPassthrough(candidate, retainedPassthrough as Record<string, unknown>, { clone: false });
+    }
   }
   return sanitized;
 }

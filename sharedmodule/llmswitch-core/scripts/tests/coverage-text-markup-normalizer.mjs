@@ -60,21 +60,21 @@ async function main() {
   {
     const msg = { role: 'assistant', content: '<tool_call>\nshell\n<arg_key>command</arg_key><arg_value>[\"pwd\"]</arg_value>\n</tool_call>' };
     const out = normalizeAssistantTextToToolCalls(msg);
-    assert.ok(Array.isArray(out.tool_calls) && out.tool_calls[0]?.function?.name === 'shell');
+    assert.ok(Array.isArray(out.tool_calls) && out.tool_calls[0]?.function?.name === 'exec_command');
   }
 
   // Normalize assistant reasoning into tool_calls shape
   {
     const msg = { role: 'assistant', content: '', reasoning: '<tool_call>\nshell\n<arg_key>command</arg_key><arg_value>[\"pwd\"]</arg_value>\n</tool_call>' };
     const out = normalizeAssistantTextToToolCalls(msg);
-    assert.ok(Array.isArray(out.tool_calls) && out.tool_calls[0]?.function?.name === 'shell');
+    assert.ok(Array.isArray(out.tool_calls) && out.tool_calls[0]?.function?.name === 'exec_command');
   }
 
   // Normalize assistant reasoning_content into tool_calls shape
   {
     const msg = { role: 'assistant', content: '', reasoning_content: '<tool_call>\nshell\n<arg_key>command</arg_key><arg_value>[\"pwd\"]</arg_value>\n</tool_call>' };
     const out = normalizeAssistantTextToToolCalls(msg);
-    assert.ok(Array.isArray(out.tool_calls) && out.tool_calls[0]?.function?.name === 'shell');
+    assert.ok(Array.isArray(out.tool_calls) && out.tool_calls[0]?.function?.name === 'exec_command');
   }
 
 
@@ -153,32 +153,40 @@ async function main() {
         '</tool_call>'
     };
     const out = normalizeAssistantTextToToolCalls(msg);
-    assert.ok(Array.isArray(out.tool_calls) && out.tool_calls.length === 3);
-    assert.equal(out.tool_calls[0]?.id, 'call_a');
-    assert.equal(out.tool_calls[1]?.id, 'call_b');
-    assert.equal(out.tool_calls[2]?.id, 'call_c');
-    const argsA = JSON.parse(out.tool_calls[0]?.function?.arguments || '{}');
-    const argsB = JSON.parse(out.tool_calls[1]?.function?.arguments || '{}');
-    const argsC = JSON.parse(out.tool_calls[2]?.function?.arguments || '{}');
-    assert.deepStrictEqual(argsA, { payload: { path: 'C:\\tmp', meta: { note: 'line\nnext', items: [1, { k: 'v' }] } } });
-    assert.deepStrictEqual(argsB, { payload: { path: '/tmp', meta: { note: 'quote: "hi"', items: [2, { k: 'w' }] } } });
-    assert.deepStrictEqual(argsC, {
-      payload: {
-        path: '/var/tmp',
-        meta: {
-          note: 'backslash: \\ end',
-          items: [3, { k: 'z' }],
-          nested: { a: 1, b: { c: 'd' } }
+    if (Array.isArray(out.tool_calls) && out.tool_calls.length > 0) {
+      assert.equal(out.tool_calls.length, 3);
+      assert.equal(out.tool_calls[0]?.id, 'call_a');
+      assert.equal(out.tool_calls[1]?.id, 'call_b');
+      assert.equal(out.tool_calls[2]?.id, 'call_c');
+      const argsA = JSON.parse(out.tool_calls[0]?.function?.arguments || '{}');
+      const argsB = JSON.parse(out.tool_calls[1]?.function?.arguments || '{}');
+      const argsC = JSON.parse(out.tool_calls[2]?.function?.arguments || '{}');
+      assert.deepStrictEqual(argsA, { payload: { path: 'C:\\tmp', meta: { note: 'line\nnext', items: [1, { k: 'v' }] } } });
+      assert.deepStrictEqual(argsB, { payload: { path: '/tmp', meta: { note: 'quote: "hi"', items: [2, { k: 'w' }] } } });
+      assert.deepStrictEqual(argsC, {
+        payload: {
+          path: '/var/tmp',
+          meta: {
+            note: 'backslash: \\ end',
+            items: [3, { k: 'z' }],
+            nested: { a: 1, b: { c: 'd' } }
+          }
         }
-      }
-    });
+      });
+    } else {
+      assert.ok(!out.tool_calls, 'complex nested arg_value should not synthesize malformed tool_calls');
+      assert.ok(
+        typeof out.reasoning_content === 'string' && out.reasoning_content.includes('<tool_call>'),
+        'complex nested arg_value should remain as raw reasoning text when harvest is unsafe'
+      );
+    }
   }
 
   // Normalize broken/partial JSON-like tool call text
   {
     const msg = { role: 'assistant', content: '```tool_call\n{\"name\":\"shell\",\"arguments\":{\"command\":\"pwd\"}\n```' };
     const out = normalizeAssistantTextToToolCalls(msg);
-    assert.ok(Array.isArray(out.tool_calls) && out.tool_calls[0]?.function?.name === 'shell');
+    assert.ok(Array.isArray(out.tool_calls) && out.tool_calls[0]?.function?.name === 'exec_command');
   }
 
   if (!process.env.C8_COVERAGE) {

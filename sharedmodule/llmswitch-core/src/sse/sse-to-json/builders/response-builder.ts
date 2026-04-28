@@ -2,7 +2,6 @@
  * Responses响应构建器
  * 负责状态机和事件聚合，从SSE事件构建完整的Responses响应对象
  */
-
 import type {
   ResponsesSseEvent,
   ResponsesResponse,
@@ -16,7 +15,6 @@ import type {
   SseToResponsesJsonContext
 } from '../../types/index.js';
 import { normalizeResponsesMessageItem } from '../../shared/responses-output-normalizer.js';
-
 function formatUnknownError(error: unknown): string {
   if (error instanceof Error) {
     return error.stack || `${error.name}: ${error.message}`;
@@ -27,7 +25,6 @@ function formatUnknownError(error: unknown): string {
     return String(error);
   }
 }
-
 function logResponseBuilderNonBlocking(
   stage: string,
   error: unknown,
@@ -40,10 +37,8 @@ function logResponseBuilderNonBlocking(
     // Never throw from non-blocking logging.
   }
 }
-
 // 构建器状态
 export type ResponseBuilderState = 'initial' | 'building' | 'completed' | 'error';
-
 // 构建器配置
 export interface ResponseBuilderConfig {
   enableStrictValidation: boolean;
@@ -52,7 +47,6 @@ export interface ResponseBuilderConfig {
   maxContentParts: number;
   maxSequenceGaps: number;
 }
-
 // 输出项状态
 export interface OutputItemState {
   id: string;
@@ -74,7 +68,6 @@ export interface OutputItemState {
   startTime: number;
   lastEventTime: number;
 }
-
 // 默认配置
 export const DEFAULT_RESPONSE_BUILDER_CONFIG: ResponseBuilderConfig = {
   enableStrictValidation: true,
@@ -83,7 +76,6 @@ export const DEFAULT_RESPONSE_BUILDER_CONFIG: ResponseBuilderConfig = {
   maxContentParts: 100,
   maxSequenceGaps: 10
 };
-
 /**
  * Responses响应构建器
  */
@@ -95,11 +87,9 @@ export class ResponsesResponseBuilder {
   private config: ResponseBuilderConfig;
   private error?: Error;
   private hasExplicitReasoning: boolean = false;
-
   constructor(config?: Partial<ResponseBuilderConfig>) {
     this.config = { ...DEFAULT_RESPONSE_BUILDER_CONFIG, ...config };
   }
-
   /**
    * 处理SSE事件
    */
@@ -111,48 +101,38 @@ export class ResponsesResponseBuilder {
           throw new Error(`Invalid sequence number: ${event.sequenceNumber}`);
         }
       }
-
       // 更新状态
       this.state = 'building';
       this.lastSequenceNumber = event.sequenceNumber;
-
       // 根据事件类型处理
       switch (event.type) {
         case 'response.created':
           this.handleResponseCreated(event);
           break;
-
         case 'response.in_progress':
           this.handleResponseInProgress(event);
           break;
-
         case 'response.output_item.added':
           this.handleOutputItemStart(this.mapOutputItemAdded(event));
           break;
         case 'response.output_item.done':
           this.handleOutputItemDone(this.mapOutputItemDone(event));
           break;
-
         case 'response.content_part.added':
           this.handleContentPartStart(this.mapContentPartAdded(event));
           break;
-
         case 'response.output_text.delta':
           this.handleContentPartDelta(this.mapOutputTextDelta(event));
           break;
-
         case 'response.output_text.done':
           this.handleContentPartDone(this.mapContentPartDone(event));
           break;
-
         case 'response.function_call_arguments.delta':
           this.handleFunctionCallDelta(this.mapFunctionCallDelta(event));
           break;
-
         case 'response.function_call_arguments.done':
           this.handleFunctionCallDone(this.mapFunctionCallDone(event));
           break;
-
         case 'response.reasoning_text.delta':
         case 'response.reasoning_signature.delta':
         case 'response.reasoning_image.delta':
@@ -170,11 +150,9 @@ export class ResponsesResponseBuilder {
         case 'response.reasoning_summary_part.done':
           this.handleReasoningSummaryPartDone(event);
           break;
-
         case 'response.reasoning_text.done':
           this.handleReasoningDone(this.mapReasoningDone(event));
           break;
-
         case 'response.completed':
           this.handleResponseCompleted(event);
           break;
@@ -184,87 +162,67 @@ export class ResponsesResponseBuilder {
         case 'response.incomplete':
           this.handleResponseIncomplete(event);
           break;
-
         case 'response.start':
           this.handleResponseStart(event);
           break;
-
         case 'output_item.start':
           this.handleOutputItemStart(event);
           break;
-
         case 'content_part.start':
           this.handleContentPartStart(event);
           break;
-
         case 'content_part.delta':
           this.handleContentPartDelta(event);
           break;
-
         case 'content_part.done':
           this.handleContentPartDone(event);
           break;
-
         case 'function_call.start':
           this.handleFunctionCallStart(event);
           break;
-
         case 'function_call.delta':
           this.handleFunctionCallDelta(event);
           break;
-
         case 'function_call.done':
           this.handleFunctionCallDone(event);
           break;
-
         case 'reasoning.start':
           this.handleReasoningStart(event);
           break;
-
         case 'reasoning.delta':
           this.handleReasoningDelta(event);
           break;
-
         case 'reasoning.done':
           this.handleReasoningDone(event);
           break;
-
         case 'output_item.done':
           this.handleOutputItemDone(event);
           break;
-
         case 'required_action':
         case 'response.required_action':
           this.handleRequiredAction(event);
           break;
-
         case 'response.done':
           this.handleResponseDone(event);
           break;
-
         case 'response.content_part.done':
           this.handleContentPartDone(event);
           break;
-
         case 'error':
           this.handleError(event);
           break;
-
         default:
           if (this.config.enableStrictValidation) {
             throw new Error(`Unknown event type: ${event.type}`);
           }
       }
-
       return true;
-
     } catch (error) {
       this.error = error as Error;
       this.state = 'error';
       return false;
     }
   }
-
   /**
    * 验证序列号
    */
@@ -272,15 +230,12 @@ export class ResponsesResponseBuilder {
     if (event.sequenceNumber <= this.lastSequenceNumber) {
       return false;
     }
-
     const gap = event.sequenceNumber - this.lastSequenceNumber;
     if (gap > 1 && gap > this.config.maxSequenceGaps) {
       return false;
     }
-
     return true;
   }
-
   /**
    * 处理response.start事件
    */
@@ -308,27 +263,22 @@ export class ResponsesResponseBuilder {
       data
     } as ResponsesSseEvent);
   }
-
   private handleResponseInProgress(event: ResponsesSseEvent): void {
     const data = event.data as any;
     if (!this.response) return;
     this.response.status = data.status ?? this.response.status ?? 'in_progress';
   }
-
   /**
    * 处理output_item.start事件
    */
   private handleOutputItemStart(event: ResponsesSseEvent): void {
     const data = event.data as any;
-
     if (this.outputItemBuilders.size >= this.config.maxOutputItems) {
       throw new Error('Maximum output items exceeded');
     }
-
     if (data.type === 'reasoning') {
       this.hasExplicitReasoning = true;
     }
-
     const outputItemState: OutputItemState = {
       id: data.item_id,
       type: data.type,
@@ -348,7 +298,6 @@ export class ResponsesResponseBuilder {
       startTime: event.timestamp,
       lastEventTime: event.timestamp
     };
-
     this.outputItemBuilders.set(data.item_id, outputItemState);
   }
   private mapOutputItemAdded(event: ResponsesSseEvent): ResponsesSseEvent {
@@ -376,7 +325,6 @@ export class ResponsesResponseBuilder {
       }
     };
   }
-
   private mapOutputItemDone(event: ResponsesSseEvent): ResponsesSseEvent {
     const data = event.data as any;
     const item = data.item || {};
@@ -389,30 +337,25 @@ export class ResponsesResponseBuilder {
       }
     };
   }
-
   /**
    * 处理content_part.start事件
    */
   private handleContentPartStart(event: ResponsesSseEvent): void {
     const data = event.data as any;
     const outputItemState = this.outputItemBuilders.get(data.item_id);
-
     if (!outputItemState) {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
-
     if (outputItemState.contentParts.length >= this.config.maxContentParts &&
         data.content_index === undefined) {
       throw new Error('Maximum content parts exceeded');
     }
-
     const contentIndex = data.content_index ?? outputItemState.contentParts.length;
     const lookupKey = data[data.type] ? data.type :
       data.text ? 'text' :
       data.output_text ? 'output_text' :
       undefined;
     let contentPart: ResponsesContent = data[data.type];
-
     if (!contentPart && lookupKey === 'text') {
       const textValue = typeof data.text === 'string' ? data.text : data.text?.text;
       contentPart = { type: data.type ?? 'output_text', text: textValue ?? '' } as ResponsesContent;
@@ -422,20 +365,17 @@ export class ResponsesResponseBuilder {
     } else if (!contentPart && typeof data.text === 'string') {
       contentPart = { type: data.type ?? 'output_text', text: data.text } as ResponsesContent;
     }
-
     if (!contentPart) {
       contentPart = data[data.type === 'input_text' ? 'text' : data.type] || {
         type: data.type ?? 'output_text',
         text: ''
       };
     }
-
     if (data.content_index !== undefined && (contentPart as any).text !== undefined) {
       (contentPart as any)._initialText = (contentPart as any).text || '';
       (contentPart as any)._hasDelta = false;
       (contentPart as any).text = '';
     }
-
     outputItemState.contentParts[contentIndex] = contentPart;
     outputItemState.hasContentPartAdded = true;
     outputItemState.lastEventTime = event.timestamp;
@@ -449,7 +389,6 @@ export class ResponsesResponseBuilder {
       typeof part.text === 'string'
         ? part.text
         : (typeof data.text === 'string' ? data.text : '');
-
     return {
       ...event,
       type: 'content_part.start',
@@ -462,24 +401,20 @@ export class ResponsesResponseBuilder {
       }
     };
   }
-
   /**
    * 处理content_part.delta事件
    */
   private handleContentPartDelta(event: ResponsesSseEvent): void {
     const data = event.data as any;
     const outputItemState = this.outputItemBuilders.get(data.item_id);
-
     if (!outputItemState) {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
-
     const contentIndex = data.part_index ?? data.content_index ?? outputItemState.currentContentIndex;
     const contentPart = outputItemState.contentParts[contentIndex];
     if (!contentPart) {
       throw new Error(`Content part not found: ${contentIndex}`);
     }
-
     if ((contentPart.type === 'input_text' || contentPart.type === 'output_text')) {
       const deltaChunk = typeof data.delta === 'string'
         ? data.delta
@@ -496,7 +431,6 @@ export class ResponsesResponseBuilder {
         (contentPart as any).arguments = ((contentPart as any).arguments || '') + argDelta;
       }
     }
-
     outputItemState.isTextInProgress = true;
     outputItemState.lastEventTime = event.timestamp;
   }
@@ -515,18 +449,15 @@ export class ResponsesResponseBuilder {
       }
     };
   }
-
   /**
    * 处理content_part.done事件
    */
   private handleContentPartDone(event: ResponsesSseEvent): void {
     const data = event.data as any;
     const outputItemState = this.outputItemBuilders.get(data.item_id);
-
     if (!outputItemState) {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
-
     const contentIndex = data.content_index ?? data.part_index ?? outputItemState.currentContentIndex;
     if (contentIndex !== undefined) {
       const contentPart = outputItemState.contentParts[contentIndex];
@@ -554,24 +485,20 @@ export class ResponsesResponseBuilder {
       }
     };
   }
-
   /**
    * 处理function_call.start事件
    */
   private handleFunctionCallStart(event: ResponsesSseEvent): void {
     const data = event.data as any;
     const outputItemState = this.outputItemBuilders.get(data.item_id);
-
     if (!outputItemState) {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
-
     outputItemState.callId = data.call_id;
     outputItemState.name = data.name;
     outputItemState.arguments = '';
     outputItemState.lastEventTime = event.timestamp;
   }
-
   private coerceArgumentsChunk(raw: unknown): string | undefined {
     if (typeof raw === 'string') {
       return raw;
@@ -585,7 +512,6 @@ export class ResponsesResponseBuilder {
     }
     return undefined;
   }
-
   private shouldOverrideArguments(current: string | undefined, incoming: string | undefined): boolean {
     if (!incoming) {
       return false;
@@ -602,18 +528,15 @@ export class ResponsesResponseBuilder {
     }
     return true;
   }
-
   /**
    * 处理function_call.delta事件
    */
   private handleFunctionCallDelta(event: ResponsesSseEvent): void {
     const data = event.data as any;
     const outputItemState = this.outputItemBuilders.get(data.item_id);
-
     if (!outputItemState) {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
-
     const chunk =
       this.coerceArgumentsChunk(data?.delta?.arguments) ??
       this.coerceArgumentsChunk(data?.delta) ??
@@ -621,7 +544,6 @@ export class ResponsesResponseBuilder {
     if (chunk) {
       outputItemState.arguments = (outputItemState.arguments || '') + chunk;
     }
-
     outputItemState.lastEventTime = event.timestamp;
   }
   private mapFunctionCallDelta(event: ResponsesSseEvent): ResponsesSseEvent {
@@ -642,14 +564,12 @@ export class ResponsesResponseBuilder {
       }
     };
   }
-
   /**
    * 处理function_call.done事件
    */
   private handleFunctionCallDone(event: ResponsesSseEvent): void {
     const data = event.data as any;
     const outputItemState = this.outputItemBuilders.get(data.item_id);
-
     if (!outputItemState) {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
@@ -690,18 +610,15 @@ export class ResponsesResponseBuilder {
       }
     };
   }
-
   /**
    * 处理reasoning.start事件
    */
   private handleReasoningStart(event: ResponsesSseEvent): void {
     const data = event.data as any;
     const outputItemState = this.outputItemBuilders.get(data.item_id);
-
     if (!outputItemState) {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
-
     outputItemState.accumulatedContent = [];
     if (Array.isArray(data.summary)) {
       data.summary.forEach((entry: any, index: number) => {
@@ -716,25 +633,21 @@ export class ResponsesResponseBuilder {
     }
     outputItemState.lastEventTime = event.timestamp;
   }
-
   /**
    * 处理reasoning.delta事件
    */
   private handleReasoningDelta(event: ResponsesSseEvent): void {
     const data = event.data as any;
     const outputItemState = this.outputItemBuilders.get(data.item_id);
-
     if (!outputItemState) {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
-
     const delta = data.delta && typeof data.delta === 'object'
       ? data.delta
       : { type: 'reasoning_text', text: String(data.delta ?? '') };
     const rawIndex = typeof data.content_index === 'number' ? data.content_index : outputItemState.currentReasoningIndex;
     const contentIndex = Number.isFinite(rawIndex) ? rawIndex : outputItemState.currentReasoningIndex;
     outputItemState.currentReasoningIndex = contentIndex;
-
     if (typeof contentIndex === 'number' && Number.isFinite(contentIndex)) {
       const existing = outputItemState.accumulatedContent[contentIndex];
       if (delta.type === 'reasoning_text') {
@@ -769,15 +682,12 @@ export class ResponsesResponseBuilder {
     }
     outputItemState.lastEventTime = event.timestamp;
   }
-
   private handleReasoningSummaryDelta(event: ResponsesSseEvent): void {
     const data = event.data as any;
     const outputItemState = this.outputItemBuilders.get(data.item_id);
-
     if (!outputItemState) {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
-
     const index = typeof data.summary_index === 'number'
       ? data.summary_index
       : outputItemState.currentSummaryIndex;
@@ -790,15 +700,12 @@ export class ResponsesResponseBuilder {
     outputItemState.currentSummaryIndex = index;
     outputItemState.lastEventTime = event.timestamp;
   }
-
   private handleReasoningSummaryDone(event: ResponsesSseEvent): void {
     const data = event.data as any;
     const outputItemState = this.outputItemBuilders.get(data.item_id);
-
     if (!outputItemState) {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
-
     const index = typeof data.summary_index === 'number'
       ? data.summary_index
       : outputItemState.currentSummaryIndex;
@@ -810,15 +717,12 @@ export class ResponsesResponseBuilder {
     outputItemState.currentSummaryIndex = index;
     outputItemState.lastEventTime = event.timestamp;
   }
-
   private handleReasoningSummaryPartAdded(event: ResponsesSseEvent): void {
     const data = event.data as any;
     const outputItemState = this.outputItemBuilders.get(data.item_id);
-
     if (!outputItemState) {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
-
     let index: number;
     if (typeof data.summary_index === 'number') {
       index = data.summary_index;
@@ -837,15 +741,12 @@ export class ResponsesResponseBuilder {
     outputItemState.currentSummaryIndex = index;
     outputItemState.lastEventTime = event.timestamp;
   }
-
   private handleReasoningSummaryPartDone(event: ResponsesSseEvent): void {
     const data = event.data as any;
     const outputItemState = this.outputItemBuilders.get(data.item_id);
-
     if (!outputItemState) {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
-
     const index = typeof data.summary_index === 'number'
       ? data.summary_index
       : outputItemState.currentSummaryIndex;
@@ -879,45 +780,37 @@ export class ResponsesResponseBuilder {
       }
     };
   }
-
   private mapReasoningDone(event: ResponsesSseEvent): ResponsesSseEvent {
     return {
       ...event,
       type: 'reasoning.done'
     };
   }
-
   /**
    * 处理reasoning.done事件
    */
   private handleReasoningDone(event: ResponsesSseEvent): void {
     const data = event.data as any;
     const outputItemState = this.outputItemBuilders.get(data.item_id);
-
     if (!outputItemState) {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
-
     const text = typeof data.text === 'string' ? data.text : '';
     if (text && outputItemState.accumulatedContent.length === 0) {
       outputItemState.accumulatedContent.push({ type: 'reasoning_text', text });
     }
-
     outputItemState.status = 'completed';
     outputItemState.lastEventTime = event.timestamp;
   }
-
   /**
    * 处理output_item.done事件
    */
   private handleOutputItemDone(event: ResponsesSseEvent): void {
     const data = event.data as any;
     const outputItemState = this.outputItemBuilders.get(data.item_id);
-
     if (!outputItemState) {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
-
     // 若为 custom_tool_call 变体（已在 start 阶段重命名为 function_call），尝试提取 name/arguments
     try {
       const item = (data as any).item || {};
@@ -958,11 +851,9 @@ export class ResponsesResponseBuilder {
         outputType: String(outputItemState.type ?? '')
       });
     }
-
     outputItemState.status = 'completed';
     outputItemState.lastEventTime = event.timestamp;
   }
-
   /**
    * 处理required_action事件
    */
@@ -977,7 +868,6 @@ export class ResponsesResponseBuilder {
       responsePayload.usage ??
       payload.usage ??
       this.response.usage;
-
     const nextResponse: ResponsesResponse = {
       ...(this.response as ResponsesResponse),
       object: 'response',
@@ -989,22 +879,18 @@ export class ResponsesResponseBuilder {
       required_action: requiredAction ?? (this.response as ResponsesResponse).required_action,
       usage
     };
-
     if (responsePayload.metadata) {
       (nextResponse as any).metadata = responsePayload.metadata;
     }
-
     this.response = nextResponse;
     this.state = 'completed';
   }
-
   /**
    * 处理response.done事件
    */
   private handleResponseDone(event: ResponsesSseEvent): void {
     const data = (event.data as any)?.response ?? event.data;
     const usage = data?.usage ?? (event.data as any)?.usage;
-
     this.response = {
       ...this.response,
       id: data?.id ?? this.response.id,
@@ -1012,10 +898,8 @@ export class ResponsesResponseBuilder {
       output: this.buildOutputItems(),
       usage: usage ?? this.response.usage
     };
-
     this.state = 'completed';
   }
-
   /**
    * 处理错误事件
    */
@@ -1031,7 +915,6 @@ export class ResponsesResponseBuilder {
     this.error = new Error(msg || 'Unknown error');
     this.state = 'error';
   }
-
   private handleResponseCompleted(event: ResponsesSseEvent): void {
     const payload = (event.data as any)?.response ?? event.data;
     const usage = (payload && (payload as any).usage)
@@ -1056,7 +939,6 @@ export class ResponsesResponseBuilder {
     }
     this.state = 'completed';
   }
-
   private buildTerminalResponseError(params: {
     payload: any;
     fallbackCode: string;
@@ -1101,7 +983,6 @@ export class ResponsesResponseBuilder {
     const retryable = isContextLengthExceeded || errorType === 'invalid_request_error'
       ? false
       : defaultRetryable;
-
     const error = new Error(message) as Error & {
       code?: string;
       upstreamCode?: string;
@@ -1122,7 +1003,6 @@ export class ResponsesResponseBuilder {
     };
     return error;
   }
-
   private handleResponseFailed(event: ResponsesSseEvent): void {
     const payload = (event.data as any)?.response ?? event.data ?? {};
     this.response = {
@@ -1141,7 +1021,6 @@ export class ResponsesResponseBuilder {
     });
     this.state = 'error';
   }
-
   private handleResponseIncomplete(event: ResponsesSseEvent): void {
     const payload = (event.data as any)?.response ?? event.data ?? {};
     this.response = {
@@ -1160,16 +1039,13 @@ export class ResponsesResponseBuilder {
     });
     this.state = 'error';
   }
-
   /**
    * 构建输出项列表
    */
   private buildOutputItems(): ResponsesOutputItem[] {
     const outputItems: ResponsesOutputItem[] = [];
-
     for (const [itemId, state] of this.outputItemBuilders) {
       let outputItem: ResponsesOutputItem | undefined;
-
       switch (state.type) {
         case 'message':
           {
@@ -1195,12 +1071,10 @@ export class ResponsesResponseBuilder {
         default:
           throw new Error(`Unknown output item type: ${state.type}`);
       }
-
       if (outputItem) {
         outputItems.push(outputItem);
       }
     }
-
     const hasMessage = outputItems.some(item => (item as any).type === 'message');
     const hasReasoning = outputItems.some(item => (item as any).type === 'reasoning');
     if (!hasMessage && hasReasoning) {
@@ -1212,10 +1086,8 @@ export class ResponsesResponseBuilder {
         content: [{ type: 'output_text', text: '' }]
       });
     }
-
     return outputItems;
   }
-
   /**
    * 构建消息项并根据需要拆分reasoning
    */
@@ -1235,7 +1107,6 @@ export class ResponsesResponseBuilder {
       }
     );
   }
-
   /**
    * 构建函数调用项
    */
@@ -1249,7 +1120,6 @@ export class ResponsesResponseBuilder {
       arguments: state.arguments || ''
     };
   }
-
   /**
    * 构建推理项
    */
@@ -1276,7 +1146,6 @@ export class ResponsesResponseBuilder {
     }
     return item;
   }
-
   /**
    * 获取构建结果
    */
@@ -1284,7 +1153,6 @@ export class ResponsesResponseBuilder {
     if (this.state === 'error') {
       return { success: false, error: this.error };
     }
-
     if (this.state === 'completed') {
       return { success: true, response: this.response as ResponsesResponse };
     }
@@ -1304,26 +1172,34 @@ export class ResponsesResponseBuilder {
         }
         return { success: true, response: this.response as ResponsesResponse };
       }
+      const salvagedOutput = this.buildOutputItems();
+      if (salvagedOutput.length > 0) {
+        const response = {
+          ...(this.response as ResponsesResponse),
+          object: 'response',
+          status: 'completed',
+          output: salvagedOutput
+        } as ResponsesResponse;
+        this.response = response;
+        return { success: true, response };
+      }
     } catch (error) {
       logResponseBuilderNonBlocking('build.salvage_fallback', error, {
         state: this.state,
         outputItemCount: this.outputItemBuilders.size
       });
     }
-
     return {
       success: false,
       error: new Error('Responses SSE stream incomplete before response.completed/response.done')
     };
   }
-
   /**
    * 获取当前状态
    */
   getState(): ResponseBuilderState {
     return this.state;
   }
-
   /**
    * 重置构建器
    */
@@ -1334,14 +1210,12 @@ export class ResponsesResponseBuilder {
     this.lastSequenceNumber = -1;
     this.error = undefined;
   }
-
   /**
    * 获取输出项构建器
    */
   getOutputItemBuilders(): Map<string, OutputItemState> {
     return new Map(this.outputItemBuilders);
   }
-
   /**
    * 获取最后序列号
    */
@@ -1349,7 +1223,6 @@ export class ResponsesResponseBuilder {
     return this.lastSequenceNumber;
   }
 }
-
 /**
  * 创建响应构建器工厂
  */

@@ -73,7 +73,8 @@ function loadProfilesFromDir(dir: string): CompatProfileConfig[] {
       }
     }
     return configs;
-  } catch {
+  } catch (dirError) {
+    console.warn(`[compat] Failed to read compat profiles directory: ${dirError instanceof Error ? dirError.message : String(dirError)}`);
     return [];
   }
 }

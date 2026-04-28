@@ -151,16 +151,16 @@ fn read_payload_error_fallback(payload: &Value) -> Option<String> {
     }
 }
 
-fn normalize_choices(payload: &mut Value) {
+fn normalize_choices(payload: &mut Value) -> bool {
     let error_fallback = read_payload_error_fallback(payload);
     let Some(choices) = payload.get_mut("choices").and_then(|v| v.as_array_mut()) else {
-        return;
+        return false;
     };
     let Some(first_choice) = choices.first_mut() else {
-        return;
+        return false;
     };
     let Some(first_choice_obj) = first_choice.as_object_mut() else {
-        return;
+        return false;
     };
     let original_finish_reason = first_choice_obj
         .get("finish_reason")
@@ -170,10 +170,10 @@ fn normalize_choices(payload: &mut Value) {
         .to_ascii_lowercase();
     let (has_tool_calls, has_message_text) = {
         let Some(message_value) = first_choice_obj.get_mut("message") else {
-            return;
+            return false;
         };
         let Some(message_obj) = message_value.as_object_mut() else {
-            return;
+            return false;
         };
 
         let mut has_tool_calls = false;
@@ -208,10 +208,11 @@ fn normalize_choices(payload: &mut Value) {
                 Value::String("tool_calls".to_string()),
             );
         }
-        return;
+        return false;
     }
 
     let mut repaired_finish_reason = original_finish_reason.clone();
+    let mut inserted_placeholder = false;
     if original_finish_reason == "tool_calls" && !has_message_text {
         first_choice_obj.insert(
             "finish_reason".to_string(),
@@ -229,11 +230,15 @@ fn normalize_choices(payload: &mut Value) {
                 Value::String(
                     error_fallback
                         .clone()
-                        .unwrap_or_else(|| EMPTY_STOP_RESPONSE_PLACEHOLDER.to_string()),
+                        .unwrap_or_else(|| {
+                            inserted_placeholder = true;
+                            EMPTY_STOP_RESPONSE_PLACEHOLDER.to_string()
+                        }),
                 ),
             );
         }
     }
+    inserted_placeholder
 }
 
 fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
@@ -412,11 +417,32 @@ fn apply_reasoning_policy(payload: &mut Value, mode: Option<&str>) {
 }
 
 pub fn finalize_chat_response(input: FinalizeInput) -> Value {
+    let endpoint = input
+        .endpoint
+        .clone()
+        .unwrap_or_else(|| "/unknown".to_string());
+    let request_id = input
+        .request_id
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string());
     let mut payload = input.payload;
     normalize_reasoning_in_chat_payload(&mut payload);
-    normalize_choices(&mut payload);
+    let inserted_placeholder = normalize_choices(&mut payload);
     normalize_messages(&mut payload);
     apply_reasoning_policy(&mut payload, input.reasoning_mode.as_deref());
+    if inserted_placeholder {
+        crate::hub_snapshot_hooks::enqueue_payload_contract_errorsample(
+            endpoint.as_str(),
+            request_id.as_str(),
+            None,
+            "provider-response",
+            "assistant_sanitized_empty_placeholder",
+            "assistant response was repaired with the empty-after-sanitization placeholder",
+            json!({
+              "finalizedPayload": payload.clone()
+            }),
+        );
+    }
     payload
 }
 

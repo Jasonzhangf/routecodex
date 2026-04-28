@@ -94,15 +94,23 @@ interface LegacyCompatibilityManager {
   setDebugConfig: (config: UnknownObject) => void;
 }
 
-// 导入独立Hook系统（可选）。若不存在，则降级为兼容的空实现以保证启动成功。
+// 导入独立Hook系统（可选）。模块不存在时返回 null；模块存在但加载失败时必须抛错。
 async function resolveHookSystemFactory(): Promise<HooksSystemFactory | null> {
   try {
     const moduleUrl = new URL('../../../../hooks/index.js', import.meta.url);
     const hookModule = await import(moduleUrl.href);
     const factory = (hookModule as { createHooksSystem?: HooksSystemFactory }).createHooksSystem;
     return typeof factory === 'function' ? factory : null;
-  } catch {
-    return null;
+  } catch (error) {
+    // MODULE_NOT_FOUND (ERR_MODULE_NOT_FOUND) is expected — the hooks module is optional.
+    // Any other error (syntax, runtime, etc.) must propagate to expose the real failure.
+    const isModuleNotFound =
+      (error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ERR_MODULE_NOT_FOUND') ||
+      (error instanceof Error && /Cannot find module|ERR_MODULE_NOT_FOUND/i.test(error.message));
+    if (isModuleNotFound) {
+      return null;
+    }
+    throw error;
   }
 }
 

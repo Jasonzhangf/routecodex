@@ -96,8 +96,9 @@ export async function executeRequestStageInbound<TContext = Record<string, unkno
       );
       (rt as Record<string, unknown>).applyPatchToolMode = applyPatchToolMode;
     }
-  } catch {
+  } catch (toolScanError) {
     // best-effort: do not block request handling due to tool scan failures
+    console.warn(`[hub-pipeline] applyPatchToolMode scan failed (non-blocking): ${toolScanError instanceof Error ? toolScanError.message : String(toolScanError)}`);
   }
 
   if (isCompactionRequest(rawRequest)) {

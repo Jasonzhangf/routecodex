@@ -2886,7 +2886,7 @@ function detectRetryableEmptyAssistantResponse(body: unknown): { reason: string;
   return null;
 }
 
-async function persistEmptyAssistantProviderSnapshots(args: {
+async function persistPayloadContractProviderSnapshots(args: {
   requestId: string;
   entryEndpoint?: string;
   providerKey?: string;
@@ -2896,7 +2896,7 @@ async function persistEmptyAssistantProviderSnapshots(args: {
   providerRequestUrl?: string;
   normalizedResponse: PipelineExecutionResult;
   convertedResponse: PipelineExecutionResult;
-  emptyAssistantSignal: { reason: string; marker: string };
+  payloadContractSignal: { reason: string; marker: string };
 }): Promise<void> {
   const requestPayload =
     args.providerRequestPayload && typeof args.providerRequestPayload === 'object'
@@ -2930,7 +2930,7 @@ async function persistEmptyAssistantProviderSnapshots(args: {
         ? String((args.normalizedResponse as { url?: unknown }).url)
         : args.providerRequestUrl,
     data: {
-      emptyAssistantSignal: args.emptyAssistantSignal,
+      payloadContractSignal: args.payloadContractSignal,
       normalizedResponse: {
         status: args.normalizedResponse.status ?? null,
         headers: args.normalizedResponse.headers ?? null,
@@ -4091,7 +4091,7 @@ export class HubRequestExecutor implements RequestExecutor {
               }
             });
             try {
-              await persistEmptyAssistantProviderSnapshots({
+              await persistPayloadContractProviderSnapshots({
                 requestId: input.requestId,
                 entryEndpoint: input.entryEndpoint,
                 providerKey: target.providerKey,
@@ -4107,7 +4107,7 @@ export class HubRequestExecutor implements RequestExecutor {
                     : undefined,
                 normalizedResponse: normalized,
                 convertedResponse: converted,
-                emptyAssistantSignal
+                payloadContractSignal: emptyAssistantSignal
               });
             } catch (snapshotError) {
               logRequestExecutorNonBlockingError('host.response_contract.empty_assistant.snapshot', snapshotError, {
@@ -4157,6 +4157,32 @@ export class HubRequestExecutor implements RequestExecutor {
                 }
               }
             });
+            try {
+              await persistPayloadContractProviderSnapshots({
+                requestId: input.requestId,
+                entryEndpoint: input.entryEndpoint,
+                providerKey: target.providerKey,
+                providerId: handle.providerId,
+                providerRequestPayload: providerPayload,
+                providerRequestHeaders:
+                  providerPayload && typeof providerPayload === 'object'
+                    ? ((providerPayload as Record<string, unknown>).headers as Record<string, unknown> | undefined)
+                    : undefined,
+                providerRequestUrl:
+                  providerPayload && typeof providerPayload === 'object' && typeof (providerPayload as Record<string, unknown>).url === 'string'
+                    ? String((providerPayload as Record<string, unknown>).url)
+                    : undefined,
+                normalizedResponse: normalized,
+                convertedResponse: converted,
+                payloadContractSignal: assistantSanitizationPlaceholderSignal
+              });
+            } catch (snapshotError) {
+              logRequestExecutorNonBlockingError('host.response_contract.assistant_sanitize_placeholder.snapshot', snapshotError, {
+                requestId: input.requestId,
+                providerKey: target.providerKey,
+                marker: assistantSanitizationPlaceholderSignal.marker
+              });
+            }
             this.logStage('host.response_contract.assistant_sanitize_placeholder', input.requestId, {
               providerKey: target.providerKey,
               marker: assistantSanitizationPlaceholderSignal.marker,

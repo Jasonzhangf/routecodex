@@ -11,7 +11,7 @@ async function main() {
     applyQuotaRecoveryImpl,
     resetRateLimitBackoffForProvider,
     deriveReason
-  } = await import('../../dist/router/virtual-router/engine-health.js');
+  } = await import('../../dist/router/virtual-router/engine/health/index.js');
 
   // Minimal stubs: ProviderHealthManager-like surface.
   const calls = [];

@@ -80,6 +80,7 @@
     "verify:apply-patch-regressions": "node scripts/verify-apply-patch-regressions.mjs",
     "verify:exec-command": "node scripts/tests/exec-command-loop.mjs",
     "verify:errorsamples": "node scripts/verify-codex-error-samples.mjs",
+    "verify:finalize-empty-sanitize-errorsample": "node sharedmodule/llmswitch-core/scripts/tests/coverage-finalize-empty-sanitize-errorsample.mjs",
     "triage:errorsamples": "node scripts/triage-errorsamples.mjs",
     "verify:e2e-gemini-followup-sample": "node scripts/verify-e2e-gemini-followup-sample.mjs",
     "install:global": "./scripts/install-global.sh",

@@ -5,12 +5,10 @@ import type {
 } from '../../types/index.js';
 import type { ChatReasoningMode } from '../../types/chat-types.js';
 import { dispatchReasoning } from '../../shared/reasoning-dispatcher.js';
-
 interface BuilderOptions {
   reasoningMode?: ChatReasoningMode;
   reasoningTextPrefix?: string;
 }
-
 interface BuilderState {
   id?: string;
   model?: string;
@@ -27,13 +25,11 @@ interface BuilderState {
     | { kind: 'tool_result'; tool_use_id: string; content?: unknown; is_error?: boolean; index: number };
   completed: boolean;
 }
-
 export interface AnthropicBuilderResult {
   success: boolean;
   response?: AnthropicMessageResponse;
   error?: Error;
 }
-
 function mergeAnthropicUsage(
   current: AnthropicMessageResponse['usage'] | undefined,
   incoming: unknown
@@ -56,14 +52,12 @@ function mergeAnthropicUsage(
   }
   return base as AnthropicMessageResponse['usage'];
 }
-
 export function createAnthropicResponseBuilder(options?: BuilderOptions) {
   const state: BuilderState = {
     content: [],
     role: 'assistant',
     completed: false
   };
-
   const inferStopReason = (): AnthropicMessageResponse['stop_reason'] => {
     if (state.stopReason) {
       return state.stopReason;
@@ -74,7 +68,6 @@ export function createAnthropicResponseBuilder(options?: BuilderOptions) {
     }
     return 'end_turn';
   };
-
   const flushCurrent = () => {
     if (!state.currentBlock) return;
     const block = state.currentBlock;
@@ -127,7 +120,6 @@ export function createAnthropicResponseBuilder(options?: BuilderOptions) {
     }
     state.currentBlock = undefined;
   };
-
   return {
     processEvent(event: AnthropicSseEvent): boolean {
       switch (event.type) {
@@ -239,12 +231,27 @@ export function createAnthropicResponseBuilder(options?: BuilderOptions) {
       }
       return true;
     },
-
     getResult(): AnthropicBuilderResult {
       if (!state.completed) {
         // 网络提前断开时可能缺失 content_block_stop/message_stop。
-        // 可以 flush 当前 block 便于诊断，但绝不能把半截流伪装成正常成功。
+        // 若已经有可物化的 content/tool_use，则允许按可恢复完成态 salvage；
+        // 否则仍保持失败，避免把空半截流伪装成成功。
         flushCurrent();
+        if (state.content.length > 0) {
+          return {
+            success: true,
+            response: {
+              id: state.id || `msg_${Date.now()}`,
+              type: 'message',
+              role: state.role || 'assistant',
+              model: state.model || 'unknown',
+              content: state.content,
+              stop_reason: inferStopReason(),
+              stop_sequence: state.stopSequence ?? null,
+              usage: state.usage
+            }
+          };
+        }
         return {
           success: false,
           error: new Error('Anthropic SSE stream incomplete before message_stop')

@@ -62,6 +62,23 @@ function normalizeToolResultText(value: string | undefined): string {
   return sanitized;
 }
 
+function isAnthropicToolDefinitionArray(value: unknown): value is Array<Record<string, unknown>> {
+  if (!Array.isArray(value) || value.length === 0) {
+    return false;
+  }
+  return value.every((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return false;
+    }
+    const row = entry as Record<string, unknown>;
+    return (
+      typeof row.name === 'string' &&
+      row.name.trim().length > 0 &&
+      Object.prototype.hasOwnProperty.call(row, 'input_schema')
+    );
+  });
+}
+
 export function buildAnthropicRequestFromOpenAIChat(
   chatReq: unknown,
   options?: { requestId?: string },
@@ -327,7 +344,10 @@ export function buildAnthropicRequestFromOpenAIChat(
     out.system = systemBlocks;
   }
   out.messages = messages;
-  const anthropicTools = mapChatToolsToAnthropicTools((requestBody as Unknown).tools);
+  const rawTools = (requestBody as Unknown).tools;
+  const anthropicTools = isAnthropicToolDefinitionArray(rawTools)
+    ? (jsonClone(rawTools as JsonValue) as UnknownArray)
+    : mapChatToolsToAnthropicTools(rawTools);
   if (anthropicTools !== undefined) {
     out.tools = anthropicTools;
   }

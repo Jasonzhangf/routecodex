@@ -14,7 +14,7 @@ const KEY_B1 = 'antigravity.b.model1';
 async function main() {
   const { ProviderRegistry } = await import(path.resolve(repoRoot, 'dist/router/virtual-router/provider-registry.js'));
   const { ProviderHealthManager } = await import(path.resolve(repoRoot, 'dist/router/virtual-router/health-manager.js'));
-  const { applyAntigravityRiskPolicyImpl } = await import(path.resolve(repoRoot, 'dist/router/virtual-router/engine-health.js'));
+  const { applyAntigravityRiskPolicyImpl } = await import(path.resolve(repoRoot, 'dist/router/virtual-router/engine/health/index.js'));
 
   {
     // Google account verification should only cooldown the failing runtimeKey.
@@ -121,4 +121,3 @@ main().catch((err) => {
   console.error('[virtual-router-antigravity-risk-scope] failed:', err);
   process.exit(1);
 });
-

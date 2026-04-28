@@ -496,7 +496,7 @@ function selectFromCandidates(
     typeof features.estimatedTokens === 'number' && Number.isFinite(features.estimatedTokens)
       ? Math.max(0, features.estimatedTokens)
       : 0;
-  const webSearchRouteRequested = isWebSearchRouteRequested(classification.routeName, classification);
+  const webSearchRouteRequested = isWebSearchRouteRequested(classification.routeName, classification, features);
   const multimodalRouteRequested = isMultimodalRouteRequested(classification.routeName, classification, features);
   const defaultWebSearchPools = filterPoolsByCapability(
     deps.routing[DEFAULT_ROUTE],
@@ -641,11 +641,13 @@ function filterPoolsByCapability(
 
 function isWebSearchRouteRequested(
   requestedRoute: string,
-  classification: ClassificationResult
+  classification: ClassificationResult,
+  features: RoutingFeatures
 ): boolean {
   return (
     normalizeRouteAlias(requestedRoute || DEFAULT_ROUTE) === 'web_search' ||
-    normalizeRouteAlias(classification.routeName || DEFAULT_ROUTE) === 'web_search'
+    normalizeRouteAlias(classification.routeName || DEFAULT_ROUTE) === 'web_search' ||
+    features.hasWebSearchToolDeclared === true
   );
 }
 

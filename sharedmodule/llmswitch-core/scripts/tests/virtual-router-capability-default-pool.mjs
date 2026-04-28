@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { VirtualRouterEngine } from '../../dist/router/virtual-router/engine.js';
 import { bootstrapVirtualRouterConfig } from '../../dist/router/virtual-router/bootstrap.js';
 
-function createRequest({ content, tools }) {
+function createRequest({ content, tools, messages }) {
   return {
     model: 'gpt-4o',
-    messages: [{ role: 'user', content }],
+    messages: messages ?? [{ role: 'user', content }],
     ...(tools ? { tools } : {}),
     parameters: {},
     metadata: { originalEndpoint: '/v1/chat/completions' }
@@ -107,14 +107,21 @@ engine.initialize(config);
 
 {
   const request = createRequest({
-    content: [{ type: 'input_text', text: 'search the web for today news' }],
-    tools: [
+    messages: [
+      { role: 'user', content: '继续' },
       {
-        type: 'function',
-        function: {
-          name: 'web_search',
-          description: 'search the web'
-        }
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          {
+            id: 'call_web_search_1',
+            type: 'function',
+            function: {
+              name: 'web_search',
+              arguments: JSON.stringify({ query: 'today news' })
+            }
+          }
+        ]
       }
     ]
   });
@@ -130,14 +137,21 @@ engine.initialize(config);
   const weightedSequence = [];
   for (let i = 0; i < 4; i += 1) {
     const request = createRequest({
-      content: [{ type: 'input_text', text: `search the web for latest news ${i}` }],
-      tools: [
+      messages: [
+        { role: 'user', content: '继续' },
         {
-          type: 'function',
-          function: {
-            name: 'web_search',
-            description: 'search the web'
-          }
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: `call_web_search_weighted_${i}`,
+              type: 'function',
+              function: {
+                name: 'web_search',
+                arguments: JSON.stringify({ query: `latest news ${i}` })
+              }
+            }
+          ]
         }
       ]
     });
@@ -202,7 +216,23 @@ engine.initialize(config);
   explicitEngine.initialize(explicitConfig);
 
   const request = createRequest({
-    content: [{ type: 'input_text', text: 'search the web for explicit-route result' }]
+    messages: [
+      { role: 'user', content: '继续' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          {
+            id: 'call_web_search_explicit',
+            type: 'function',
+            function: {
+              name: 'web_search',
+              arguments: JSON.stringify({ query: 'explicit-route result' })
+            }
+          }
+        ]
+      }
+    ]
   });
   const decision = explicitEngine.route(request, createMetadata('req_capability_web_search_explicit_route'));
   assert.equal(

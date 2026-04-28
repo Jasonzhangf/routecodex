@@ -5,8 +5,12 @@ import { createRequire } from 'node:module';
 
 export type LlmsImpl = 'ts' | 'engine';
 
+// Built-in sharedmodule path (relative to project root) — this is the primary source.
+const BUILTIN_SHARED_MODULE_REL = path.join('sharedmodule', 'llmswitch-core');
+
 const PACKAGE_CANDIDATES_BY_IMPL: Record<LlmsImpl, string[]> = {
   ts: [
+    BUILTIN_SHARED_MODULE_REL,
     path.join('node_modules', '@jsonstudio', 'llms'),
     path.join('node_modules', 'rcc-llmswitch-core')
   ],
@@ -49,6 +53,23 @@ function resolveCorePackageDir(impl: LlmsImpl): string {
   const cached = corePackageDirByImpl[impl];
   if (cached) {
     return cached;
+  }
+
+  // 0) Prefer the built-in sharedmodule when it has a dist/ directory.
+  //    Resolve relative to the project root (directory containing package.json).
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const builtinCandidates = [
+    // From compiled dist/modules/llmswitch/ → ../../sharedmodule/llmswitch-core
+    path.resolve(moduleDir, '..', '..', '..', BUILTIN_SHARED_MODULE_REL),
+    // From project CWD (runtime launch directory)
+    path.resolve(process.cwd(), BUILTIN_SHARED_MODULE_REL),
+  ];
+  for (const builtinDir of builtinCandidates) {
+    const distDir = path.join(builtinDir, 'dist');
+    if (fs.existsSync(distDir) && fs.existsSync(path.join(distDir, 'index.js'))) {
+      corePackageDirByImpl[impl] = builtinDir;
+      return builtinDir;
+    }
   }
 
   // 1) Prefer Node's resolver when possible (more robust under global installs and Jest ESM).

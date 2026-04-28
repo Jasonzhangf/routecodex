@@ -1,0 +1,30 @@
+{
+  "requestId": "iflow-reasoning-missing-sample-20260206",
+  "providerId": "iflow",
+  "controlProviderId": "openai",
+  "payload": {
+    "model": "kimi-k2.5",
+    "stream": true,
+    "max_tokens": 8192,
+    "messages": [
+      {
+        "role": "user",
+        "content": "run a command"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"pwd\"}"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -8,7 +8,6 @@ import {
 } from './followup-request-builder.js';
 import { reenterServerToolBackend } from '../reenter-backend.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
-
 interface WebSearchEngineConfig {
   id: string;
   providerKey: string;
@@ -21,13 +20,11 @@ interface WebSearchEngineConfig {
   serverToolsDisabled?: boolean;
   searchEngineList?: string[];
 }
-
 interface WebSearchConfig {
   engines: WebSearchEngineConfig[];
   injectPolicy?: 'always' | 'selective';
   force?: boolean;
 }
-
 interface WebSearchItem {
   title?: string;
   link: string;
@@ -36,17 +33,14 @@ interface WebSearchItem {
   content?: string;
   refer?: string;
 }
-
 interface WebSearchBackendResult {
   summary: string;
   hits: WebSearchItem[];
   ok: boolean;
 }
-
 const FLOW_ID = 'web_search_flow';
 const LEGACY_TOOL_NAME = 'web_search';
 const SERVERTOOL_TOOL_NAME = 'websearch';
-
 function resolveWebSearchToolName(raw: unknown): string {
   const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
   if (normalized === 'websearch' || normalized === 'web-search') {
@@ -57,7 +51,6 @@ function resolveWebSearchToolName(raw: unknown): string {
   }
   return SERVERTOOL_TOOL_NAME;
 }
-
 const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promise<ServerToolHandlerPlan | null> => {
   const toolCall = ctx.toolCall;
   if (!toolCall) {
@@ -66,7 +59,6 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
   if (!ctx.capabilities.providerInvoker && !ctx.capabilities.reenterPipeline) {
     return null;
   }
-
   const webSearchConfig = getWebSearchConfig(ctx.adapterContext);
   const hasConfig = !!webSearchConfig && Array.isArray(webSearchConfig.engines) && webSearchConfig.engines.length > 0;
   const forceMode = webSearchConfig?.force === true;
@@ -74,21 +66,17 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
   if (!hasConfig && !forceMode && !envEnabled) {
     return null;
   }
-
   const parsedArgs = parseToolArguments(toolCall);
   const query =
     typeof parsedArgs.query === 'string' && parsedArgs.query.trim() ? (parsedArgs.query as string).trim() : undefined;
   if (!query) {
     return null;
   }
-
   const engines = webSearchConfig ? buildEnginePriorityList(webSearchConfig, parsedArgs.engine) : [];
   if (!engines.length) {
     return null;
   }
-
   const resultCount = normalizeResultCount(parsedArgs.count);
-
   const recency =
     typeof parsedArgs.recency === 'string' && parsedArgs.recency.trim() ? (parsedArgs.recency as string).trim() : undefined;
   const backend: ServerToolBackendPlan = {
@@ -99,7 +87,6 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
     resultCount,
     engines
   };
-
   return {
     flowId: FLOW_ID,
     backend,
@@ -120,12 +107,10 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
         query,
         backendResult.result
       );
-
       const seed = extractCapturedChatSeed((ctx.adapterContext as any)?.capturedChatRequest);
       const assistantMessage = seed ? extractAssistantMessage(patched) : null;
       const toolMessages = seed ? buildToolMessages(patched) : [];
       const canFollowup = Boolean(seed && assistantMessage && toolMessages.length > 0);
-
       return {
         chatResponse: patched,
         execution: {
@@ -157,9 +142,7 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
     }
   };
 };
-
 registerServerToolHandler('web_search', handler);
-
 function parseToolArguments(toolCall: ToolCall): Record<string, unknown> {
   if (!toolCall.arguments || typeof toolCall.arguments !== 'string') {
     return {};
@@ -170,7 +153,6 @@ function parseToolArguments(toolCall: ToolCall): Record<string, unknown> {
     return {};
   }
 }
-
 function getWebSearchConfig(ctx: unknown): WebSearchConfig | undefined {
   const rt = readRuntimeMetadata(ctx as Record<string, unknown>);
   const raw = rt ? (rt as any).webSearch : undefined;
@@ -264,7 +246,6 @@ function getWebSearchConfig(ctx: unknown): WebSearchConfig | undefined {
   }
   return config;
 }
-
 function resolveWebSearchEngine(config: WebSearchConfig, engineId?: unknown): WebSearchEngineConfig | undefined {
   const trimmedId = typeof engineId === 'string' && engineId.trim() ? engineId.trim() : undefined;
   if (trimmedId) {
@@ -283,7 +264,6 @@ function resolveWebSearchEngine(config: WebSearchConfig, engineId?: unknown): We
   }
   return undefined;
 }
-
 function buildEnginePriorityList(config: WebSearchConfig, engineId?: unknown): WebSearchEngineConfig[] {
   const engines = (Array.isArray(config.engines) ? config.engines : []).filter(
     (engine) => !engine.serverToolsDisabled && (engine.executionMode ?? 'servertool') === 'servertool'
@@ -303,7 +283,6 @@ function buildEnginePriorityList(config: WebSearchConfig, engineId?: unknown): W
   }
   return ordered;
 }
-
 function resolveEnvServerSideToolsEnabled(): boolean {
   const raw =
     (process.env.ROUTECODEX_SERVER_SIDE_TOOLS || process.env.RCC_SERVER_SIDE_TOOLS || '').trim().toLowerCase();
@@ -312,7 +291,6 @@ function resolveEnvServerSideToolsEnabled(): boolean {
   if (raw === 'web_search' || raw === 'websearch') return true;
   return false;
 }
-
 function isGeminiWebSearchEngine(engine: WebSearchEngineConfig): boolean {
   const key = engine.providerKey.toLowerCase();
   return (
@@ -321,12 +299,13 @@ function isGeminiWebSearchEngine(engine: WebSearchEngineConfig): boolean {
     key.startsWith('gemini.')
   );
 }
-
 function isQwenWebSearchEngine(engine: WebSearchEngineConfig): boolean {
   const key = engine.providerKey.toLowerCase();
   return key.startsWith('qwen.');
 }
-
+function isIflowRetrieveWebSearchEngine(engine: WebSearchEngineConfig): boolean {
+  return Array.isArray(engine.searchEngineList) && engine.searchEngineList.length > 0;
+}
 function normalizeResultCount(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) {
     const normalized = Math.trunc(value);
@@ -336,7 +315,6 @@ function normalizeResultCount(value: unknown): number {
   }
   return 10;
 }
-
 async function executeWebSearchBackend(args: {
   options: ServerSideToolEngineOptions;
   engine: WebSearchEngineConfig;
@@ -348,19 +326,29 @@ async function executeWebSearchBackend(args: {
   const { options, engine, query } = args;
   const recency =
     typeof args.recency === 'string' && args.recency.trim() ? (args.recency as string).trim() : undefined;
-
   let summary = '';
   let hits: WebSearchItem[] = [];
   let ok = true;
   try {
     logServerToolWebSearch(engine, options.requestId, query);
     const requestSuffix = args.requestSuffix;
-
     if (isQwenWebSearchEngine(engine) && options.providerInvoker) {
       const backendResult = await executeQwenWebSearchViaProvider({
         options,
         engine,
         query,
+        count: args.resultCount,
+        requestSuffix
+      });
+      summary = backendResult.summary;
+      hits = backendResult.hits;
+      ok = backendResult.ok;
+    } else if (isIflowRetrieveWebSearchEngine(engine) && options.providerInvoker) {
+      const backendResult = await executeIflowRetrieveWebSearchViaProvider({
+        options,
+        engine,
+        query,
+        recency,
         count: args.resultCount,
         requestSuffix
       });
@@ -414,7 +402,6 @@ async function executeWebSearchBackend(args: {
       `web_search failed: ${message}. ` +
       '请调整搜索关键词（例如减少敏感描述或换一种说法）后重试，这只是当前查询被阻止。';
   }
-
   if (!summary) {
     if (hits.length) {
       summary = formatHitsSummary(hits);
@@ -424,7 +411,6 @@ async function executeWebSearchBackend(args: {
         '可以尝试修改搜索词、增加时间范围或换一个更具体的描述后再次搜索。';
     }
   }
-
   try {
     const preview = summary.length > 120 ? `${summary.slice(0, 117)}...` : summary;
     // eslint-disable-next-line no-console
@@ -435,7 +421,6 @@ async function executeWebSearchBackend(args: {
   } catch {
     /* logging best-effort */
   }
-
   const finalHits = limitHits(hits);
   if (!summary) {
     summary = formatHitsSummary(finalHits);
@@ -445,7 +430,6 @@ async function executeWebSearchBackend(args: {
   }
   return { summary, hits: finalHits, ok };
 }
-
 export async function executeWebSearchBackendPlan(args: {
   plan: Extract<ServerToolBackendPlan, { kind: 'web_search' }>;
   options: ServerSideToolEngineOptions;
@@ -456,11 +440,9 @@ export async function executeWebSearchBackendPlan(args: {
   if (!engines.length) {
     return { kind: 'web_search', result: { ok: false, summary: '', hits: [] } };
   }
-
   let chosenEngine: WebSearchEngineConfig | undefined;
   let chosenResult: WebSearchBackendResult | undefined;
   let lastFailure: { engine: WebSearchEngineConfig; result: WebSearchBackendResult } | undefined;
-
   for (const engine of engines) {
     const requestSuffix = `${plan.requestIdSuffix}:${engine.id}`;
     const backendResult = await executeWebSearchBackend({
@@ -478,7 +460,6 @@ export async function executeWebSearchBackendPlan(args: {
     }
     lastFailure = { engine, result: backendResult };
   }
-
   if (!chosenEngine || !chosenResult) {
     if (!lastFailure) {
       return { kind: 'web_search', result: { ok: false, summary: '', hits: [] } };
@@ -486,14 +467,12 @@ export async function executeWebSearchBackendPlan(args: {
     chosenEngine = lastFailure.engine;
     chosenResult = lastFailure.result;
   }
-
   return {
     kind: 'web_search',
     chosenEngine: { id: chosenEngine.id, providerKey: chosenEngine.providerKey },
     result: { ok: chosenResult.ok, summary: chosenResult.summary, hits: chosenResult.hits }
   };
 }
-
 function buildWebSearchReenterPayload(
   engine: WebSearchEngineConfig,
   query: string,
@@ -501,7 +480,6 @@ function buildWebSearchReenterPayload(
   resultCount: number
 ): JsonObject {
   const systemPrompt = buildWebSearchSystemPrompt(resultCount);
-
   const basePayload: JsonObject = {
     model: engine.id,
     messages: [
@@ -516,11 +494,9 @@ function buildWebSearchReenterPayload(
     ],
     stream: false
   };
-
   if (isGeminiWebSearchEngine(engine)) {
     return basePayload;
   }
-
   return {
     ...basePayload,
     web_search: {
@@ -531,7 +507,6 @@ function buildWebSearchReenterPayload(
     }
   } as JsonObject;
 }
-
 async function executeWebSearchViaProvider(args: {
   options: ServerSideToolEngineOptions;
   engine: WebSearchEngineConfig;
@@ -544,7 +519,6 @@ async function executeWebSearchViaProvider(args: {
   if (!options.providerInvoker) {
     return '';
   }
-
   if (isGeminiWebSearchEngine(engine)) {
     const geminiPayload: JsonObject = {
       model: engine.id,
@@ -564,7 +538,6 @@ async function executeWebSearchViaProvider(args: {
         }
       ]
     };
-
     const backend = await options.providerInvoker({
       providerKey: engine.providerKey,
       providerType: undefined,
@@ -584,7 +557,6 @@ async function executeWebSearchViaProvider(args: {
     const chatLike = buildOpenAIChatFromGeminiResponse(providerResponse);
     return chatLike ? extractTextFromChatLike(chatLike) : '';
   }
-
   const backendPayload: JsonObject = {
     model: engine.id,
     messages: [
@@ -605,7 +577,6 @@ async function executeWebSearchViaProvider(args: {
       engine: engine.id
     }
   };
-
   const backend = await options.providerInvoker({
     providerKey: engine.providerKey,
     providerType: undefined,
@@ -624,8 +595,6 @@ async function executeWebSearchViaProvider(args: {
   }
   return extractTextFromChatLike(providerResponse);
 }
-
-
 async function executeQwenWebSearchViaProvider(args: {
   options: ServerSideToolEngineOptions;
   engine: WebSearchEngineConfig;
@@ -634,14 +603,7 @@ async function executeQwenWebSearchViaProvider(args: {
   requestSuffix: string;
 }): Promise<WebSearchBackendResult> {
   const { options, engine, query, count, requestSuffix } = args;
-  if (!options.providerInvoker) {
-    return {
-      summary: '',
-      hits: [],
-      ok: false
-    };
-  }
-
+  if (!options.providerInvoker) return { summary: '', hits: [], ok: false };
   const payload: JsonObject = {
     data: {
       model: engine.id,
@@ -655,7 +617,6 @@ async function executeQwenWebSearchViaProvider(args: {
       routeName: 'web_search'
     }
   };
-
   const backend = await options.providerInvoker({
     providerKey: engine.providerKey,
     providerType: undefined,
@@ -666,18 +627,10 @@ async function executeQwenWebSearchViaProvider(args: {
     requestId: `${options.requestId}${requestSuffix}`,
     routeHint: 'web_search'
   });
-
   const providerResponse = backend.providerResponse && typeof backend.providerResponse === 'object'
     ? (backend.providerResponse as JsonObject)
     : null;
-  if (!providerResponse) {
-    return {
-      summary: '',
-      hits: [],
-      ok: false
-    };
-  }
-
+  if (!providerResponse) return { summary: '', hits: [], ok: false };
   const container = providerResponse as {
     status?: unknown;
     message?: unknown;
@@ -691,16 +644,13 @@ async function executeQwenWebSearchViaProvider(args: {
       : typeof container.msg === 'string' && container.msg.trim()
         ? container.msg.trim()
         : '';
-
   if (status !== undefined && status !== 0) {
     throw new Error(message || `qwen web_search failed with status=${status}`);
   }
-
   const dataNode = container.data && typeof container.data === 'object' && !Array.isArray(container.data)
     ? (container.data as { docs?: unknown })
     : undefined;
   const rawDocs = Array.isArray(dataNode?.docs) ? (dataNode?.docs as JsonValue[]) : [];
-
   const hits: WebSearchItem[] = [];
   for (const item of rawDocs) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
@@ -739,28 +689,80 @@ async function executeQwenWebSearchViaProvider(args: {
             : undefined;
     const media =
       typeof record.source === 'string' && record.source.trim() ? record.source.trim() : undefined;
-    hits.push({
-      title,
-      link: linkCandidate,
-      content,
-      publish_date: publishDate,
-      media
-    });
-    if (hits.length >= count) {
-      break;
-    }
+    hits.push({ title, link: linkCandidate, content, publish_date: publishDate, media });
+    if (hits.length >= count) break;
   }
-
   const summary = message || (hits.length ? formatHitsSummary(hits) : '');
   const ok = status === 0 || hits.length > 0;
-
-  return {
-    summary,
-    hits,
-    ok
-  };
+  return { summary, hits, ok };
 }
-
+async function executeIflowRetrieveWebSearchViaProvider(args: {
+  options: ServerSideToolEngineOptions;
+  engine: WebSearchEngineConfig;
+  query: string;
+  recency?: string;
+  count: number;
+  requestSuffix: string;
+}): Promise<WebSearchBackendResult> {
+  const { options, engine, query, recency, count, requestSuffix } = args;
+  if (!options.providerInvoker) return { summary: '', hits: [], ok: false };
+  const payload: JsonObject = {
+    model: engine.id,
+    query,
+    ...(recency ? { recency } : {}),
+    count,
+    ...(Array.isArray(engine.searchEngineList) && engine.searchEngineList.length
+      ? { searchEngineList: [...engine.searchEngineList] }
+      : {})
+  };
+  const backend = await options.providerInvoker({
+    providerKey: engine.providerKey,
+    providerType: undefined,
+    modelId: engine.id,
+    providerProtocol: options.providerProtocol,
+    payload,
+    entryEndpoint: '/v1/chat/retrieve',
+    requestId: `${options.requestId}${requestSuffix}`,
+    routeHint: 'web_search'
+  });
+  const providerResponse = backend.providerResponse && typeof backend.providerResponse === 'object' && !Array.isArray(backend.providerResponse)
+    ? (backend.providerResponse as JsonObject)
+    : null;
+  if (!providerResponse) return { summary: '', hits: [], ok: false };
+  const success = providerResponse.success;
+  const rawMessage = typeof providerResponse.message === 'string' ? providerResponse.message.trim() : '';
+  const rawData = Array.isArray(providerResponse.data) ? providerResponse.data : [];
+  const hits: WebSearchItem[] = [];
+  for (const item of rawData) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    const link = typeof row.link === 'string' && row.link.trim()
+      ? row.link.trim()
+      : typeof row.url === 'string' && row.url.trim()
+        ? row.url.trim()
+        : '';
+    if (!link) continue;
+    hits.push({
+      title: typeof row.title === 'string' && row.title.trim() ? row.title.trim() : undefined,
+      link,
+      media: typeof row.media === 'string' && row.media.trim() ? row.media.trim() : undefined,
+      publish_date:
+        typeof row.publish_date === 'string' && row.publish_date.trim()
+          ? row.publish_date.trim()
+          : typeof row.publishDate === 'string' && row.publishDate.trim()
+            ? row.publishDate.trim()
+            : undefined,
+      content:
+        typeof row.content === 'string' && row.content.trim()
+          ? row.content.trim()
+          : typeof row.snippet === 'string' && row.snippet.trim()
+            ? row.snippet.trim()
+            : undefined
+    });
+    if (hits.length >= count) break;
+  }
+  return { summary: rawMessage || (hits.length ? formatHitsSummary(hits) : ''), hits, ok: success === true && hits.length > 0 };
+}
 function injectWebSearchToolResult(
   base: JsonObject,
   toolCall: ToolCall,
@@ -796,7 +798,6 @@ function injectWebSearchToolResult(
   ];
   return cloned;
 }
-
 function extractAssistantMessage(chatResponse: JsonObject): JsonObject | null {
   const choices = Array.isArray((chatResponse as { choices?: unknown }).choices)
     ? ((chatResponse as { choices: JsonValue[] }).choices as JsonValue[])
@@ -806,12 +807,10 @@ function extractAssistantMessage(chatResponse: JsonObject): JsonObject | null {
     ? (choices[0] as JsonObject)
     : null;
   if (!firstChoice) return null;
-  const assistantMessage = firstChoice.message && typeof firstChoice.message === 'object'
+  return firstChoice.message && typeof firstChoice.message === 'object'
     ? (firstChoice.message as JsonObject)
     : null;
-  return assistantMessage;
 }
-
 function buildToolMessages(chatResponse: JsonObject): JsonObject[] {
   const toolOutputs = Array.isArray((chatResponse as { tool_outputs?: unknown }).tool_outputs)
     ? ((chatResponse as { tool_outputs: JsonValue[] }).tool_outputs as JsonValue[])
@@ -846,7 +845,6 @@ function buildToolMessages(chatResponse: JsonObject): JsonObject[] {
   }
   return messages;
 }
-
 function logServerToolWebSearch(engine: WebSearchEngineConfig, requestId: string, query: string): void {
   const providerAlias = engine.providerKey.split('.')[0] || engine.providerKey;
   const backendLabel = `${providerAlias}:${engine.id}`;
@@ -854,14 +852,12 @@ function logServerToolWebSearch(engine: WebSearchEngineConfig, requestId: string
   const line = `${prefix} requestId=${requestId} query=${JSON.stringify(query)}`;
   // eslint-disable-next-line no-console
   console.log(`\x1b[38;5;27m${line}\x1b[0m`);
-
   const vrPrefix = `[virtual-router][servertool][web_search]`;
   const vrBackend = `${engine.providerKey}:${engine.id}`;
   const vrLine = `${vrPrefix} requestId=${requestId} backend=${vrBackend}`;
   // eslint-disable-next-line no-console
   console.log(`\x1b[31m${vrLine}\x1b[0m`);
 }
-
 function findWebSearchArray(payload: JsonObject): JsonValue[] | undefined {
   let current: JsonObject | undefined = payload;
   const visited = new Set<JsonObject>();
@@ -885,7 +881,6 @@ function findWebSearchArray(payload: JsonObject): JsonValue[] | undefined {
   }
   return undefined;
 }
-
 function collectWebSearchHits(payload: JsonObject): WebSearchItem[] {
   const array = findWebSearchArray(payload);
   if (!array) {
@@ -908,7 +903,6 @@ function collectWebSearchHits(payload: JsonObject): WebSearchItem[] {
   }
   return hits;
 }
-
 function limitHits(hits: WebSearchItem[]): WebSearchItem[] {
   if (!hits.length) return [];
   const filtered = hits.slice(0, 15);
@@ -917,7 +911,6 @@ function limitHits(hits: WebSearchItem[]): WebSearchItem[] {
   }
   return filtered;
 }
-
 function formatHitsSummary(hits: WebSearchItem[]): string {
   if (!hits.length) {
     return '';
@@ -935,11 +928,9 @@ function formatHitsSummary(hits: WebSearchItem[]): string {
   });
   return segments.join('\n\n');
 }
-
 function getArray(value: unknown): JsonValue[] {
   return Array.isArray(value) ? (value as JsonValue[]) : [];
 }
-
 function sanitizeBackendError(message: string): string {
   const lowered = message.toLowerCase();
   if (lowered.includes('contentfilter')) {
@@ -950,7 +941,6 @@ function sanitizeBackendError(message: string): string {
   }
   return message;
 }
-
 function buildWebSearchSystemPrompt(targetCount: number): string {
   const normalizedTarget = Math.max(5, Math.min(15, targetCount));
   const instructions = [

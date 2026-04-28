@@ -134,6 +134,58 @@ function createProviderHandle(args: {
 describe('HTTP handler -> request-executor unified semantics E2E', () => {
   jest.setTimeout(20_000);
 
+function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
+  const functionTool = (name: string) => ({
+    type: 'function',
+    name,
+    parameters: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false
+    }
+  });
+
+  return [
+    functionTool('exec_command'),
+    functionTool('write_stdin'),
+    functionTool('apply_patch'),
+    functionTool('update_plan'),
+    {
+      type: 'namespace',
+      name: 'mcp__computer_use__',
+      description: 'Computer Use tools',
+      tools: [
+        {
+          type: 'function',
+          name: 'get_app_state',
+          defer_loading: true,
+          parameters: {
+            type: 'object',
+            properties: {
+              app: { type: 'string' }
+            },
+            required: ['app'],
+            additionalProperties: false
+          }
+        },
+        {
+          type: 'function',
+          name: 'click',
+          parameters: {
+            type: 'object',
+            properties: {
+              app: { type: 'string' },
+              element_index: { type: 'string' }
+            },
+            required: ['app'],
+            additionalProperties: false
+          }
+        }
+      ]
+    }
+  ];
+}
+
   beforeEach(() => {
     __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
     mockCreateSnapshotRecorder.mockClear();
@@ -453,6 +505,120 @@ describe('HTTP handler -> request-executor unified semantics E2E', () => {
         model: 'claude-sonnet-4-5',
         messages: [{ role: 'user', content: '继续执行 submit_tool_outputs 整链验证' }]
       }));
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+
+  it('keeps namespace tools intact at /v1/responses handler boundary before pipeline routing', async () => {
+    const pipelineExecute = jest.fn(async (_input: any) => ({
+      providerPayload: {
+        model: 'claude-sonnet-4-5',
+        messages: [{ role: 'user', content: 'check Chrome state' }]
+      },
+      standardizedRequest: {
+        model: 'claude-sonnet-4-5',
+        messages: [{ role: 'user', content: 'check Chrome state' }]
+      },
+      processedRequest: {
+        model: 'claude-sonnet-4-5',
+        messages: [{ role: 'user', content: 'check Chrome state' }]
+      },
+      target: {
+        providerKey: 'mock.anthropic.namespace',
+        providerType: 'anthropic',
+        outboundProfile: 'anthropic-messages',
+        runtimeKey: 'runtime:anthropic:namespace',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {
+        capturedChatRequest: {
+          model: 'claude-sonnet-4-5',
+          messages: [{ role: 'user', content: 'check Chrome state' }]
+        }
+      }
+    }));
+
+    const processIncoming = jest.fn(async (payload: Record<string, unknown>) => ({
+      status: 200,
+      data: {
+        id: 'msg_http_namespace_1',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-sonnet-4-5',
+        content: [{ type: 'text', text: `namespace boundary ok: ${JSON.stringify(payload)}` }],
+        stop_reason: 'end_turn'
+      }
+    }));
+
+    const handle = createProviderHandle({
+      runtimeKey: 'runtime:anthropic:namespace',
+      providerKey: 'mock.anthropic.namespace',
+      providerType: 'anthropic',
+      providerProtocol: 'anthropic-messages',
+      processIncoming
+    });
+
+    const executor = createRequestExecutor({
+      runtimeManager: {
+        resolveRuntimeKey: (_providerKey?: string, fallback?: string) => fallback,
+        getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === handle.runtimeKey ? handle : undefined)
+      },
+      getHubPipeline: () => ({
+        execute: pipelineExecute,
+        updateVirtualRouterConfig: jest.fn(),
+        dispose: jest.fn()
+      } as any),
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => ({ success: true }))
+        }
+      } as any),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    });
+
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    app.post('/v1/responses', (req, res) => {
+      void handleResponses(
+        req as any,
+        res as any,
+        {
+          executePipeline: (input: any) => executor.execute(input),
+          errorHandling: null
+        },
+        {
+          entryEndpoint: '/v1/responses'
+        }
+      );
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+
+    try {
+      const tools = buildComputerUseNamespaceTools();
+      const result = await fetchJson(baseUrl, '/v1/responses', {
+        model: 'claude-sonnet-4-5',
+        input: [
+          {
+            role: 'user',
+            content: [{ type: 'input_text', text: 'check Chrome state' }]
+          }
+        ],
+        tools
+      });
+
+      expect(result.status).toBe(200);
+      expect(JSON.stringify(result.payload)).toContain('namespace boundary ok');
+      expect(pipelineExecute).toHaveBeenCalledTimes(1);
+
+      const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
+      expect(pipelineInput.endpoint).toBe('/v1/responses');
+      expect(pipelineInput.payload?.tools).toEqual(tools);
+      expect(pipelineInput.metadata?.__raw_request_body?.tools).toEqual(tools);
     } finally {
       await closeServer(server);
     }

@@ -11,6 +11,7 @@ import {
   __resetSnapshotLocalDiskGateForTests,
   canWriteSnapshotToLocalDisk
 } from '../../../src/utils/snapshot-local-disk-gate.js';
+import { setRuntimeFlag, runtimeFlags } from '../../../src/runtime/runtime-flags.js';
 import {
   REASONING_STOP_FINALIZED_FLAG_KEY
 } from '../../../src/server/runtime/http-server/executor/servertool-response-normalizer.js';
@@ -117,6 +118,9 @@ function createExecutor(pipelineResult: PipelineExecutionResult, handle: Provide
 
 describe('HubRequestExecutor single attempt behaviour', () => {
   const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  const originalSnapshotDir = process.env.ROUTECODEX_SNAPSHOT_DIR;
+  const originalCompatSnapshotDir = process.env.RCC_SNAPSHOT_DIR;
+  const originalSnapshotsEnabled = runtimeFlags.snapshotsEnabled;
 
   beforeAll(() => {
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
@@ -130,6 +134,17 @@ describe('HubRequestExecutor single attempt behaviour', () => {
   });
 
   afterAll(() => {
+    if (originalSnapshotDir === undefined) {
+      delete process.env.ROUTECODEX_SNAPSHOT_DIR;
+    } else {
+      process.env.ROUTECODEX_SNAPSHOT_DIR = originalSnapshotDir;
+    }
+    if (originalCompatSnapshotDir === undefined) {
+      delete process.env.RCC_SNAPSHOT_DIR;
+    } else {
+      process.env.RCC_SNAPSHOT_DIR = originalCompatSnapshotDir;
+    }
+    setRuntimeFlag('snapshotsEnabled', originalSnapshotsEnabled);
     warnSpy.mockRestore();
   });
 
@@ -626,11 +641,20 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const errorsDir = fs.mkdtempSync(
       path.join(process.cwd(), 'tmp', 'jest-request-executor-errorsamples-sanitized-placeholder-')
     );
+    const snapshotDir = fs.mkdtempSync(
+      path.join(process.cwd(), 'tmp', 'jest-request-executor-snapshots-sanitized-placeholder-')
+    );
     process.env.ROUTECODEX_ERRORSAMPLES_DIR = errorsDir;
+    process.env.ROUTECODEX_SNAPSHOT_DIR = snapshotDir;
+    process.env.RCC_SNAPSHOT_DIR = snapshotDir;
+    setRuntimeFlag('snapshotsEnabled', false);
     const { __resetErrorsampleQueueForTests, __flushErrorsampleQueueForTests } = await import(
       '../../../src/utils/errorsamples.js'
     );
     __resetErrorsampleQueueForTests();
+    const { __flushProviderSnapshotQueueForTests } = await import(
+      '../../../src/providers/core/utils/snapshot-writer.js'
+    );
     try {
       const handle = createRuntimeHandle(async () => ({ status: 200, data: { ok: true } }));
       const pipelineResult: PipelineExecutionResult = {
@@ -669,6 +693,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       });
       expect(response.status).toBe(200);
       await __flushErrorsampleQueueForTests();
+      await __flushProviderSnapshotQueueForTests();
 
       const groupDir = path.join(errorsDir, 'payload-contract-error');
       const files = fs.readdirSync(groupDir);
@@ -680,10 +705,30 @@ describe('HubRequestExecutor single attempt behaviour', () => {
           payload.phase === 'provider-response' && payload.marker === 'assistant_sanitized_empty_placeholder'
         )
       ).toBe(true);
+      const snapshotRequestDir = path.join(
+        snapshotDir,
+        'openai-chat',
+        'qwenchat.aliasA',
+        'req_sanitized_placeholder_errorsample'
+      );
+      expect(fs.existsSync(path.join(snapshotRequestDir, 'provider-request.json'))).toBe(true);
+      expect(fs.existsSync(path.join(snapshotRequestDir, 'provider-response.json'))).toBe(true);
+      const providerResponsePayload = JSON.parse(
+        fs.readFileSync(path.join(snapshotRequestDir, 'provider-response.json'), 'utf8')
+      ) as { body?: Record<string, unknown> };
+      expect(providerResponsePayload.body).toMatchObject({
+        payloadContractSignal: {
+          marker: 'assistant_sanitized_empty_placeholder'
+        }
+      });
     } finally {
       __resetErrorsampleQueueForTests();
       delete process.env.ROUTECODEX_ERRORSAMPLES_DIR;
+      delete process.env.ROUTECODEX_SNAPSHOT_DIR;
+      delete process.env.RCC_SNAPSHOT_DIR;
+      setRuntimeFlag('snapshotsEnabled', originalSnapshotsEnabled);
       fs.rmSync(errorsDir, { recursive: true, force: true });
+      fs.rmSync(snapshotDir, { recursive: true, force: true });
     }
   });
 

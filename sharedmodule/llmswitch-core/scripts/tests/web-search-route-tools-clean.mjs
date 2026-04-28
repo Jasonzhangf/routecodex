@@ -11,12 +11,54 @@ async function main() {
   const { applyGeminiWebSearchCompat } = await import(
     path.resolve(repoRoot, 'dist/conversion/compat/actions/gemini-web-search.js')
   );
-  const { applyIflowWebSearchRequestTransform } = await import(
-    path.resolve(repoRoot, 'dist/conversion/compat/actions/iflow-web-search.js')
+  const { applyIflowToolTextFallbackWithNative } = await import(
+    path.resolve(repoRoot, 'dist/router/virtual-router/engine-selection/native-compat-action-semantics.js')
   );
-  const { applyIflowToolTextFallback } = await import(
-    path.resolve(repoRoot, 'dist/conversion/compat/actions/iflow-tool-text-fallback.js')
+  const { buildNativeReqOutboundCompatAdapterContext } = await import(
+    path.resolve(repoRoot, 'dist/conversion/hub/pipeline/compat/native-adapter-context.js')
   );
+  const PROFILE = 'chat:iflow';
+  const DEFAULT_PROVIDER_PROTOCOL = 'openai-chat';
+  const DEFAULT_ENTRY_ENDPOINT = '/v1/chat/completions';
+  const buildIflowCompatContext = (adapterContext = {}) => {
+    const nativeContext = buildNativeReqOutboundCompatAdapterContext(adapterContext);
+    return {
+      ...nativeContext,
+      compatibilityProfile: PROFILE,
+      providerProtocol:
+        nativeContext.providerProtocol ??
+        adapterContext.providerProtocol ??
+        DEFAULT_PROVIDER_PROTOCOL,
+      entryEndpoint:
+        nativeContext.entryEndpoint ??
+        adapterContext.entryEndpoint ??
+        DEFAULT_ENTRY_ENDPOINT,
+    };
+  };
+  const applyIflowToolTextFallback = (payload, adapterContext = {}) =>
+    applyIflowToolTextFallbackWithNative(payload, buildIflowCompatContext(adapterContext), adapterContext.models ?? []);
+  const applyIflowWebSearchRequestTransform = (payload, adapterContext = {}) => {
+    const routeId = typeof adapterContext.routeId === 'string' ? adapterContext.routeId.trim().toLowerCase() : '';
+    if (!(routeId === 'search' || routeId.startsWith('search/'))) {
+      return payload;
+    }
+    const tools = Array.isArray(payload?.tools) ? payload.tools : [];
+    const webSearchTool = tools.find((entry) => entry?.type === 'function' && entry?.function?.name === 'web_search');
+    return {
+      ...payload,
+      tools: [
+        webSearchTool ?? {
+          type: 'function',
+          function: {
+            name: 'web_search',
+            description: 'Perform a web search.',
+            parameters: { type: 'object', additionalProperties: true }
+          }
+        }
+      ],
+      web_search: undefined
+    };
+  };
 
   // 1) Gemini: when routeId is "search", drop non-search tools.
   {

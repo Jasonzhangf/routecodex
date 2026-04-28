@@ -20,6 +20,7 @@ const DEFAULT_SNAPSHOT_KEEP_RECENT_FILES: usize = 10;
 const DEFAULT_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS: usize = 50;
 const DEFAULT_ERRORSAMPLE_KEEP_RECENT_FILES: usize = 50;
 const SNAPSHOT_DROP_LOG_THROTTLE_MS: i64 = 5_000;
+const PAYLOAD_CONTRACT_ERRORSAMPLE_STAGE_PREFIX: &str = "errorsample.payload_contract_error.";
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -1004,6 +1005,15 @@ fn write_snapshot_via_hooks_sync(options: SnapshotHookOptions) {
     let stage = sanitize_token(options.stage.as_str(), "snapshot");
     let mut normal = options.clone();
     normal.stage = stage.clone();
+    if is_payload_contract_errorsample_stage(stage.as_str()) {
+        if let Err(e) = write_payload_contract_errorsample(&normal, stage.as_str()) {
+            eprintln!(
+                "[hub_snapshot_hooks] Failed to write payload contract errorsample for stage {}: {}",
+                normal.stage, e
+            );
+        }
+        return;
+    }
     if let Err(e) = write_snapshot_file(&normal, None) {
         eprintln!(
             "[hub_snapshot_hooks] Failed to write snapshot for stage {}: {}",
@@ -1068,6 +1078,89 @@ fn write_snapshot_via_hooks_sync(options: SnapshotHookOptions) {
 
 fn write_snapshot_via_hooks(options: SnapshotHookOptions) {
     enqueue_snapshot_job(options);
+}
+
+fn is_payload_contract_errorsample_stage(stage: &str) -> bool {
+    stage.starts_with(PAYLOAD_CONTRACT_ERRORSAMPLE_STAGE_PREFIX)
+}
+
+fn extract_payload_contract_marker(stage: &str) -> String {
+    stage
+        .strip_prefix(PAYLOAD_CONTRACT_ERRORSAMPLE_STAGE_PREFIX)
+        .map(|value| sanitize_token(value, "payload_contract_error"))
+        .unwrap_or_else(|| "payload_contract_error".to_string())
+}
+
+fn write_payload_contract_errorsample(
+    options: &SnapshotHookOptions,
+    stage: &str,
+) -> Result<(), std::io::Error> {
+    let root = resolve_errorsamples_root();
+    let dir = root.join(safe_errorsample_name("payload-contract-error"));
+    fs::create_dir_all(&dir)?;
+    cleanup_zero_byte_json_files(&dir);
+
+    let data_obj = options.data.as_object();
+    let phase = data_obj
+        .and_then(|obj| obj.get("phase"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("provider-response");
+    let reason = data_obj
+        .and_then(|obj| obj.get("reason"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("payload contract error");
+    let observation = data_obj
+        .and_then(|obj| obj.get("observation"))
+        .cloned()
+        .unwrap_or_else(|| options.data.clone());
+    let payload = serde_json::json!({
+      "kind": "payload_contract_error",
+      "timestamp": chrono::Utc::now().to_rfc3339(),
+      "phase": phase,
+      "marker": extract_payload_contract_marker(stage),
+      "reason": reason,
+      "requestId": options.request_id,
+      "endpoint": options.endpoint,
+      "providerKey": options.provider_key,
+      "observation": observation
+    });
+    let payload_str = serde_json::to_string_pretty(&payload)?;
+    write_unique_errorsample_file(
+        &dir,
+        format!("{}.json", safe_errorsample_name(stage)).as_str(),
+        payload_str.as_str(),
+    )?;
+    prune_errorsample_files_keep_recent(&dir, resolve_errorsample_keep_recent_files());
+    Ok(())
+}
+
+pub(crate) fn enqueue_payload_contract_errorsample(
+    endpoint: &str,
+    request_id: &str,
+    provider_key: Option<&str>,
+    phase: &str,
+    marker: &str,
+    reason: &str,
+    observation: Value,
+) {
+    write_snapshot_via_hooks(SnapshotHookOptions {
+        endpoint: endpoint.to_string(),
+        stage: format!(
+            "{}{}",
+            PAYLOAD_CONTRACT_ERRORSAMPLE_STAGE_PREFIX,
+            sanitize_token(marker, "payload_contract_error")
+        ),
+        request_id: request_id.to_string(),
+        data: serde_json::json!({
+          "phase": phase,
+          "reason": reason,
+          "observation": observation
+        }),
+        verbosity: Some("minimal".to_string()),
+        channel: Some(phase.to_string()),
+        provider_key: provider_key.map(|value| value.to_string()),
+        group_request_id: None,
+    });
 }
 
 #[cfg(test)]

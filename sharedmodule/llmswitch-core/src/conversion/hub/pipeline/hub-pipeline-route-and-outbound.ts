@@ -248,7 +248,8 @@ export async function executeRouteAndBuildOutbound<TContext = Record<string, unk
       "/v1/chat/completions";
     try {
       return createSnapshotRecorder(outboundAdapterContext, effectiveEndpoint);
-    } catch {
+    } catch (snapshotError) {
+      console.warn(`[hub-pipeline] Outbound snapshot recorder creation failed (non-blocking): ${snapshotError instanceof Error ? snapshotError.message : String(snapshotError)}`);
       return undefined;
     }
   })();

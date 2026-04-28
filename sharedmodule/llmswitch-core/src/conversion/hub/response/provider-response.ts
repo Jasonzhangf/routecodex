@@ -60,6 +60,7 @@ import {
   recordPolicyObservationSafely,
   recordToolSurfaceShadowMismatch
 } from './provider-response-observation.js';
+import { getServerToolHandler } from '../../../servertool/registry.js';
 
 type ProviderResponsePlan = {
   createFormatAdapter: () => ChatFormatAdapter | ResponsesFormatAdapter | AnthropicFormatAdapter | GeminiFormatAdapter;
@@ -201,6 +202,66 @@ function attachHubStageTopToContext(context: AdapterContext, requestId: string):
     ...rt,
     hubStageTop: merged
   };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function extractServerToolCallSignaturesFromMessage(message: unknown, out: Set<string>): void {
+  const row = asRecord(message);
+  const toolCalls = Array.isArray(row?.tool_calls) ? row.tool_calls : [];
+  for (const entry of toolCalls) {
+    const toolCall = asRecord(entry);
+    const fn = asRecord(toolCall?.function)
+      ?? asRecord(toolCall?.functionCall)
+      ?? asRecord(toolCall?.function_call);
+    const name = typeof fn?.name === 'string' ? fn.name.trim() : '';
+    if (!name || !getServerToolHandler(name)) {
+      continue;
+    }
+    const id = typeof toolCall?.id === 'string' ? toolCall.id.trim() : '';
+    const args =
+      typeof fn?.arguments === 'string'
+        ? fn.arguments
+        : typeof fn?.input === 'string'
+          ? fn.input
+          : typeof fn?.args === 'string'
+            ? fn.args
+            : '';
+    out.add(id || `${name}:${args}`);
+  }
+}
+
+function extractServerToolCallSignatures(payload: unknown): Set<string> {
+  const signatures = new Set<string>();
+  const row = asRecord(payload);
+  const choices = Array.isArray(row?.choices) ? row.choices : [];
+  for (const choice of choices) {
+    const choiceRow = asRecord(choice);
+    extractServerToolCallSignaturesFromMessage(choiceRow?.message, signatures);
+  }
+  const messages = Array.isArray(row?.messages) ? row.messages : [];
+  for (const message of messages) {
+    extractServerToolCallSignaturesFromMessage(message, signatures);
+  }
+  return signatures;
+}
+
+function hasNewGovernedServerToolCalls(beforePayload: unknown, afterPayload: unknown): boolean {
+  const before = extractServerToolCallSignatures(beforePayload);
+  const after = extractServerToolCallSignatures(afterPayload);
+  if (after.size === 0) {
+    return false;
+  }
+  for (const signature of after) {
+    if (!before.has(signature)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export interface ProviderResponseConversionOptions {
@@ -424,7 +485,10 @@ export async function convertProviderResponse(
     }
   );
 
-  const followupServertoolResult = isFollowup
+  const shouldRunFollowupPostGovernanceServertool =
+    isFollowup && hasNewGovernedServerToolCalls(effectiveChatResponse, governanceResult.governedPayload);
+
+  const followupServertoolResult = shouldRunFollowupPostGovernanceServertool
     ? await measureHubStage(
       requestId,
       'resp_process.stage3_servertool_orchestration.post_governance',

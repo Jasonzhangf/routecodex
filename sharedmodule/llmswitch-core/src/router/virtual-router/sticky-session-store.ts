@@ -95,7 +95,8 @@ function resolveDefaultSessionDir(scope: 'tmux' | 'routing'): string | null {
     return scope === 'tmux'
       ? resolveRccPath('sessions')
       : resolveRccPath('state', 'routing');
-  } catch {
+  } catch (error) {
+    console.warn(`[sticky-session-store] resolveDefaultSessionDir(${scope}) failed: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
 }
@@ -107,7 +108,8 @@ function resolveSessionDir(scope: 'tmux' | 'routing'): string | null {
       return path.resolve(override.trim());
     }
     return resolveDefaultSessionDir(scope);
-  } catch {
+  } catch (error) {
+    console.warn(`[sticky-session-store] resolveSessionDir(${scope}) failed: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
 }
