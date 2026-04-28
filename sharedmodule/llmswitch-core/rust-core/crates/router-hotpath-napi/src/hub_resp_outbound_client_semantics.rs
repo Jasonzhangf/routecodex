@@ -1422,6 +1422,18 @@ fn repair_tool_args_by_schema_keys(
             }
         }
     }
+    if tool_name == "exec_command" {
+        if wants.contains("cmd") && out.get("cmd").is_none() {
+            if let Some(value) = out.get("command").cloned() {
+                out.insert("cmd".to_string(), value);
+            }
+        }
+        if wants.contains("command") && out.get("command").is_none() {
+            if let Some(value) = out.get("cmd").cloned() {
+                out.insert("command".to_string(), value);
+            }
+        }
+    }
     if tool_name == "apply_patch" {
         if wants.contains("instructions") && out.get("instructions").is_none() {
             if let Some(patch) = out.get("patch").and_then(|v| v.as_str()) {
@@ -1712,19 +1724,14 @@ fn normalize_call_args(tool_name: &str, args_raw: &Value, spec: &ClientToolDefin
     let Some(record) = parsed.as_object() else {
         return args_raw.clone();
     };
-    let repaired = if tool_name == "exec_command" {
-        record.clone()
-    } else {
-        let Some(repaired) = repair_tool_args_by_schema_keys(
-            tool_name,
-            record,
-            required.as_slice(),
-            properties.as_slice(),
-            additional_properties,
-        ) else {
-            return args_raw.clone();
-        };
-        repaired
+    let Some(repaired) = repair_tool_args_by_schema_keys(
+        tool_name,
+        record,
+        required.as_slice(),
+        properties.as_slice(),
+        additional_properties,
+    ) else {
+        return args_raw.clone();
     };
     Value::String(
         serde_json::to_string(&Value::Object(repaired)).unwrap_or_else(|_| "{}".to_string()),
@@ -2641,17 +2648,16 @@ fn merge_source_retention(out: &mut Map<String, Value>, source_row: &Map<String,
     }
 
     if let Some(source_metadata) = source_row.get("metadata").and_then(|v| v.as_object()) {
-        match out.get_mut("metadata").and_then(|v| v.as_object_mut()) {
-            Some(existing_metadata) => {
-                for (key, value) in source_metadata {
-                    existing_metadata.insert(key.to_string(), value.clone());
+        if let Some(deepseek_value) = source_metadata.get("deepseek") {
+            match out.get_mut("metadata").and_then(|v| v.as_object_mut()) {
+                Some(existing_metadata) => {
+                    existing_metadata.insert("deepseek".to_string(), deepseek_value.clone());
                 }
-            }
-            None => {
-                out.insert(
-                    "metadata".to_string(),
-                    Value::Object(source_metadata.clone()),
-                );
+                None => {
+                    let mut metadata = Map::new();
+                    metadata.insert("deepseek".to_string(), deepseek_value.clone());
+                    out.insert("metadata".to_string(), Value::Object(metadata));
+                }
             }
         }
     }
@@ -3659,7 +3665,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_responses_tool_call_arguments_for_client_does_not_guess_exec_command_aliases() {
+    fn normalize_responses_tool_call_arguments_for_client_repairs_exec_command_aliases_by_schema() {
         let responses_payload = serde_json::json!({
             "required_action": {
                 "type": "submit_tool_outputs",
@@ -3698,7 +3704,11 @@ mod tests {
         assert_eq!(
             normalized["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
                 ["arguments"],
-            Value::String("{\"command\":\"pwd\"}".to_string())
+            Value::String("{\"cmd\":\"pwd\"}".to_string())
+        );
+        assert_eq!(
+            normalized["required_action"]["submit_tool_outputs"]["tool_calls"][0]["arguments"],
+            Value::String("{\"cmd\":\"pwd\"}".to_string())
         );
     }
 
@@ -3893,7 +3903,7 @@ mod tests {
 
         assert_eq!(output["request_id"], Value::String("req_merge".to_string()));
         assert_eq!(output["metadata"]["keep"], Value::Bool(true));
-        assert_eq!(output["metadata"]["source"], Value::Bool(true));
+        assert!(output["metadata"].get("source").is_none());
         assert!(output["metadata"].get("toolCallIdStyle").is_none());
         assert_eq!(output["temperature"], Value::from(0.4));
         assert_eq!(output["top_p"], Value::from(0.8));
