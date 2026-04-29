@@ -53,4 +53,58 @@ describe('llmswitch bridge state-integrations', () => {
       'session_identifiers.extract.api_unavailable failed: "extractSessionIdentifiersFromMetadata not available"'
     );
   });
+
+  it('fails fast and does not fallback to legacy clock task-store modules when primary loader fails', async () => {
+    jest.resetModules();
+
+    const importCoreDist = jest.fn(async (subpath: string) => {
+      throw new Error(`missing:${subpath}`);
+    });
+
+    jest.unstable_mockModule(
+      '../../../../src/modules/llmswitch/bridge/module-loader.js',
+      () => ({
+        importCoreDist,
+        requireCoreDist: jest.fn()
+      })
+    );
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const mod = await import('../../../../src/modules/llmswitch/bridge/state-integrations.js');
+
+    await expect(mod.resolveClockConfigSnapshot(undefined)).rejects.toThrow(
+      'clock_task_store.load.unavailable failed: "clock task-store module unavailable"'
+    );
+    expect(importCoreDist).toHaveBeenCalledTimes(1);
+    expect(importCoreDist).toHaveBeenCalledWith('servertool/clock/task-store');
+    expect(importCoreDist).not.toHaveBeenCalledWith('servertool/clock/tasks');
+    expect(importCoreDist).not.toHaveBeenCalledWith('servertool/clock/config');
+
+    warnSpy.mockRestore();
+  });
+
+  it('fails fast when heartbeat task-store runtime api is unavailable', async () => {
+    jest.resetModules();
+
+    const importCoreDist = jest.fn(async (subpath: string) => {
+      if (subpath === 'servertool/heartbeat/task-store') {
+        return {};
+      }
+      throw new Error(`unexpected:${subpath}`);
+    });
+
+    jest.unstable_mockModule(
+      '../../../../src/modules/llmswitch/bridge/module-loader.js',
+      () => ({
+        importCoreDist,
+        requireCoreDist: jest.fn()
+      })
+    );
+
+    const mod = await import('../../../../src/modules/llmswitch/bridge/state-integrations.js');
+
+    await expect(mod.buildHeartbeatInjectTextSnapshot()).rejects.toThrow(
+      'heartbeat_task_store.build_inject_text.api_unavailable failed: "buildHeartbeatInjectText not available"'
+    );
+  });
 });

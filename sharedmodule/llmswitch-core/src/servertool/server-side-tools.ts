@@ -558,8 +558,22 @@ export async function runServerSideToolEngine(
     }
     try {
       return loadRoutingInstructionStateSync(stickyKey) ?? undefined;
-    } catch {
-      return undefined;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+      const wrapped = new ProviderProtocolError(`[servertool] sticky routing state load failed: ${stickyKey}: ${message}`, {
+        code: 'SERVERTOOL_STATE_LOAD_FAILED',
+        category: 'INTERNAL_ERROR',
+        details: {
+          stickyKey,
+          requestId: options.requestId,
+          entryEndpoint: options.entryEndpoint,
+          providerProtocol: options.providerProtocol,
+          error: message
+        }
+      }) as ProviderProtocolError & { status?: number; cause?: unknown };
+      wrapped.status = 500;
+      wrapped.cause = error;
+      throw wrapped;
     }
   })();
 
@@ -623,21 +637,7 @@ export async function runServerSideToolEngine(
         continue;
       }
       if (lastErr) {
-        // Handler failed: report tool error as a tool_output, but do not crash the whole pipeline.
-        const message = lastErr instanceof Error ? lastErr.message : String(lastErr ?? 'unknown');
-        appendToolOutput(
-          baseForExecution,
-          toolCall.id,
-          toolCall.name,
-          JSON.stringify({ ok: false, tool: toolCall.name, message, retryable: true })
-        );
-        // Treat failed servertool calls as executed so we can emit followup with error tool_outputs.
-        executedToolCalls.push(toolCall);
-        executedIds.add(toolCall.id);
-        // continue_execution: use normal flowId since handler becomes no-op instead of throwing
-        // Other tools keep the _error suffix to indicate failure state
-        const fallbackFlowId = toolCall.name === 'continue_execution' ? 'continue_execution_flow' : `${toolCall.name}_error`;
-        executedFlowIds.push(fallbackFlowId);
+        throw lastErr;
       }
     }
   }

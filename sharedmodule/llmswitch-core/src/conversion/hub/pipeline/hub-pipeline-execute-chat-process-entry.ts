@@ -111,8 +111,11 @@ try {
   }
   Object.assign(metaBase, lifted.metadata);
   standardizedRequest = lifted.request as unknown as StandardizedRequest;
-} catch {
-  // best-effort; validation happens below
+} catch (error) {
+  const reason = error instanceof Error ? error.message : String(error ?? "unknown");
+  throw new Error(
+    `[HubPipeline][semantic_gate] Failed to lift protocol semantics into request.semantics before chat_process (requestId=${normalized.id || "unknown"}): ${reason}`,
+  );
 }
 propagateApplyPatchToolModeToRequestMetadata(
   metaBase,

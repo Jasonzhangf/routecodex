@@ -29,12 +29,22 @@ function buildRequest(messages: StandardizedRequest['messages']): StandardizedRe
 }
 
 describe('servertool: mixed tool_calls (servertool + client tools)', () => {
+  const originalSessionDir = process.env.ROUTECODEX_SESSION_DIR;
+
   beforeAll(() => {
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
   });
 
   beforeEach(() => {
     resetSessionDir();
+  });
+
+  afterAll(() => {
+    if (originalSessionDir === undefined) {
+      delete process.env.ROUTECODEX_SESSION_DIR;
+    } else {
+      process.env.ROUTECODEX_SESSION_DIR = originalSessionDir;
+    }
   });
 
   test('executes servertool now, returns client tool_calls, and injects servertool results next request after client tool results', async () => {
@@ -268,6 +278,76 @@ describe('servertool: mixed tool_calls (servertool + client tools)', () => {
     expect(messages[clientToolIdx + 2]?.role).toBe('tool');
     expect(messages[clientToolIdx + 2]?.tool_call_id).toBe(clockCallId);
     expect(fs.existsSync(pendingPath)).toBe(false);
+  });
+
+  test('fails fast when mixed-tool pending injection cannot be persisted', async () => {
+    const brokenBase = path.join(SESSION_DIR, 'blocked-base');
+    fs.writeFileSync(brokenBase, 'not-a-directory', 'utf8');
+    process.env.ROUTECODEX_SESSION_DIR = brokenBase;
+    try {
+      const sessionId = 's-mixed-broken';
+      const dueAt = new Date(Date.now() + 60_000).toISOString();
+      const adapterContext: AdapterContext = {
+        requestId: 'req-mixed-broken-1',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        __rt: { clock: { enabled: true, tickMs: 0 } },
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [{ role: 'user', content: 'hi' }]
+        }
+      } as any;
+
+      const chat = {
+        id: 'chatcmpl-mixed-broken-1',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_clock_broken_1',
+                  type: 'function',
+                  function: {
+                    name: 'clock',
+                    arguments: JSON.stringify({ action: 'schedule', items: [{ dueAt, task: 'broken' }] })
+                  }
+                },
+                {
+                  id: 'call_exec_broken_1',
+                  type: 'function',
+                  function: {
+                    name: 'exec_command',
+                    arguments: JSON.stringify({ cmd: 'echo broken' })
+                  }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls'
+          }
+        ]
+      } as any;
+
+      await expect(
+        runServerToolOrchestration({
+          chat,
+          adapterContext,
+          requestId: 'req-mixed-broken-1',
+          entryEndpoint: '/v1/chat/completions',
+          providerProtocol: 'openai-chat'
+        })
+      ).rejects.toMatchObject({
+        code: 'SERVERTOOL_PENDING_INJECTION_FAILED',
+        status: 502
+      });
+    } finally {
+      process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
+    }
   });
 
 });

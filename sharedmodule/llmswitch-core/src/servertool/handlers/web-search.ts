@@ -707,18 +707,23 @@ async function executeIflowRetrieveWebSearchViaProvider(args: {
   const { options, engine, query, recency, count, requestSuffix } = args;
   if (!options.providerInvoker) return { summary: '', hits: [], ok: false };
   const payload: JsonObject = {
-    model: engine.id,
-    query,
-    ...(recency ? { recency } : {}),
-    count,
-    ...(Array.isArray(engine.searchEngineList) && engine.searchEngineList.length
-      ? { searchEngineList: [...engine.searchEngineList] }
-      : {})
+    data: {
+      query,
+      ...(recency ? { recency } : {}),
+      count,
+      ...(Array.isArray(engine.searchEngineList) && engine.searchEngineList.length
+        ? { searchEngineList: [...engine.searchEngineList] }
+        : {})
+    },
+    metadata: {
+      glmWebSearch: true,
+      routeName: 'web_search'
+    }
   };
   const backend = await options.providerInvoker({
     providerKey: engine.providerKey,
     providerType: undefined,
-    modelId: engine.id,
+    modelId: undefined,
     providerProtocol: options.providerProtocol,
     payload,
     entryEndpoint: '/v1/chat/retrieve',

@@ -151,7 +151,7 @@ async function main() {
     const messages = modules.bridgeMessageUtils.convertBridgeInputToChatMessages({
       input: [
         { type: 'message', role: 'user', content: 'hi' },
-        { type: 'function_call', name: 'exec_command', arguments: { cmd: 'pwd' } },
+        { type: 'function_call', call_id: 'call_1', name: 'exec_command', arguments: { cmd: 'pwd' } },
         { type: 'function_call_output', tool_call_id: 'call_1', output: 'ok' }
       ]
     });
@@ -169,7 +169,7 @@ async function main() {
             { type: 'image_url', image_url: { url: 'https://example.com/img.png', detail: 'low' } }
           ]
         },
-        { type: 'function_call', name: 'exec_command', arguments: { cmd: 'pwd' } },
+        { type: 'function_call', call_id: 'call_1', name: 'exec_command', arguments: { cmd: 'pwd' } },
         { type: 'function_call_output', tool_call_id: 'call_1', output: { ok: true } }
       ]
     });

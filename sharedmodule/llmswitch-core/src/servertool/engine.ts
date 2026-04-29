@@ -1118,10 +1118,20 @@ export async function runServerToolOrchestration(
           });
         }
       } catch (error) {
-        logServerToolNonBlocking('save_pending_servertool_injection', error, {
-          requestId: options.requestId,
-          flowId
-        });
+        const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+        const wrapped = new ProviderProtocolError('[servertool] pending injection persistence failed', {
+          code: 'SERVERTOOL_PENDING_INJECTION_FAILED',
+          category: 'INTERNAL_ERROR',
+          details: {
+            requestId: options.requestId,
+            flowId,
+            sessionIds: uniqueSessionIds,
+            reason: message
+          }
+        }) as ProviderProtocolError & { status?: number; cause?: unknown };
+        wrapped.status = 502;
+        wrapped.cause = error;
+        throw wrapped;
       }
     }
     logProgress(5, totalSteps, 'completed (mixed tools; no reenter)', { flowId });
