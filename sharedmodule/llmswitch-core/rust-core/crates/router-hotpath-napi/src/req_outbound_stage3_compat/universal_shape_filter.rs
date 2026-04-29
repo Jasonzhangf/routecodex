@@ -94,15 +94,11 @@ fn to_string_args(value: Option<&Value>) -> String {
 fn normalize_tool_content(value: Option<&Value>) -> String {
     match value {
         Some(Value::String(text)) if !text.trim().is_empty() => text.clone(),
-        Some(Value::String(_)) | None | Some(Value::Null) => {
-            "[RouteCodex] Tool output was empty; execution status unknown.".to_string()
-        }
+        Some(Value::String(_)) | None | Some(Value::Null) => String::new(),
         Some(other) => serde_json::to_string(other)
             .ok()
             .filter(|text| !text.is_empty())
-            .unwrap_or_else(|| {
-                "[RouteCodex] Tool output was empty; execution status unknown.".to_string()
-            }),
+            .unwrap_or_default(),
     }
 }
 

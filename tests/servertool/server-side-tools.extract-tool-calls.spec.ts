@@ -1,5 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 import { extractToolCalls } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+import { AnthropicResponseMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/response/response-mappers.js';
 
 describe('server-side-tools: extractToolCalls', () => {
   test('skips transcript-like malformed exec_command arguments', () => {
@@ -37,5 +38,82 @@ describe('server-side-tools: extractToolCalls', () => {
     expect(calls[0]?.id).toBe('good_exec_call');
     expect(calls[0]?.name).toBe('exec_command');
   });
-});
 
+  test('fails fast when assistant tool_call id is missing', () => {
+    expect(() => extractToolCalls({
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            tool_calls: [
+              {
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  arguments: JSON.stringify({ cmd: 'pwd' })
+                }
+              }
+            ]
+          }
+        }
+      ]
+    } as any)).toThrow(/tool_call missing required id/i);
+  });
+
+  test('assigns canonical ids for internal servertools at extraction source', () => {
+    const calls = extractToolCalls({
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            tool_calls: [
+              {
+                type: 'function',
+                function: {
+                  name: 'clock',
+                  arguments: JSON.stringify({ action: 'list', items: [], taskId: '' })
+                }
+              }
+            ]
+          }
+        }
+      ]
+    } as any, 'req-clock-source-id');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.name).toBe('clock');
+    expect(calls[0]?.id).toMatch(/^call_[a-f0-9]{24}$/);
+  });
+
+  test('preserves anthropic tool_use ids for downstream servertool execution', () => {
+    const mapper = new AnthropicResponseMapper();
+    const chat = mapper.toChatCompletion(
+      {
+        format: 'anthropic-messages',
+        direction: 'response',
+        payload: {
+          id: 'msg_tool_use_1',
+          role: 'assistant',
+          model: 'mimo-v2.5-pro',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'call_97cb11e6620746fc9a33d1a1',
+              name: 'exec_command',
+              input: { cmd: 'pwd' }
+            }
+          ],
+          stop_reason: 'tool_use'
+        }
+      } as any,
+      { requestId: 'req-anthropic-tool-use-id' } as any,
+      {}
+    ) as any;
+
+    const calls = extractToolCalls(chat, 'req-anthropic-tool-use-id');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.name).toBe('exec_command');
+    expect(calls[0]?.id).toBe('call_97cb11e6620746fc9a33d1a1');
+    expect(chat?.choices?.[0]?.message?.tool_calls?.[0]?.id).toBe('call_97cb11e6620746fc9a33d1a1');
+  });
+});

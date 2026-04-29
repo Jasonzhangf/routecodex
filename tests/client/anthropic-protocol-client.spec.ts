@@ -16,4 +16,33 @@ describe('AnthropicProtocolClient', () => {
 
     expect(body.metadata).toEqual({ user_id: 'test-user' });
   });
+
+  it('normalizes string tool_choice into Anthropic object form', () => {
+    const client = new AnthropicProtocolClient();
+
+    const body = client.buildRequestBody({
+      data: {
+        model: 'glm-4.7',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [{ type: 'function', function: { name: 'echo', parameters: { type: 'object', properties: {} } } }],
+        tool_choice: 'required'
+      }
+    } as any);
+
+    expect(body.tool_choice).toEqual({ type: 'any' });
+  });
+
+  it('fails fast on invalid tool_choice instead of silently dropping it', () => {
+    const client = new AnthropicProtocolClient();
+
+    expect(() =>
+      client.buildRequestBody({
+        data: {
+          model: 'glm-4.7',
+          messages: [{ role: 'user', content: 'hi' }],
+          tool_choice: 123
+        }
+      } as any)
+    ).toThrow(/Invalid Anthropic tool_choice/);
+  });
 });

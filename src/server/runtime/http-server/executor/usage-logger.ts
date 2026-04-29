@@ -152,10 +152,6 @@ export function logUsageSummary(
       recordTokens(info.providerKey ?? 'unknown', info.model ?? '-', pt, ct, tt);
     }
   }
-  const finishReason = typeof info.finishReason === 'string' ? info.finishReason.trim().toLowerCase() : '';
-  if (finishReason !== 'stop') {
-    return;
-  }
   const hubStageTopSuffix = isUsageTimingOutputEnabled() ? formatHubStageTop(info.hubStageTop) : '';
   const extraBreakdown = ` retries=${retryCount} attempts=${providerAttemptCount}`
     + ` wait.traffic=${formatMs(trafficWaitMs)} wait.inject=${formatMs(clientInjectWaitMs)}`

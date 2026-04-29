@@ -8,8 +8,49 @@ interface DataEnvelope {
   data?: Record<string, unknown>;
 }
 
+function buildMalformedAnthropicRequest(message: string, details?: Record<string, unknown>): Error {
+  const error = new Error(message);
+  Object.assign(error, {
+    code: 'MALFORMED_REQUEST',
+    statusCode: 400,
+    details
+  });
+  return error;
+}
+
 function hasDataEnvelope(payload: ProtocolRequestPayload): payload is ProtocolRequestPayload & DataEnvelope {
   return typeof payload === 'object' && payload !== null && 'data' in payload;
+}
+
+function normalizeAnthropicToolChoice(raw: unknown): Record<string, unknown> | undefined {
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      throw buildMalformedAnthropicRequest('Invalid Anthropic tool_choice: empty string', {
+        tool_choice: raw
+      });
+    }
+    const lower = trimmed.toLowerCase();
+    if (lower === 'auto') {
+      return { type: 'auto' };
+    }
+    if (lower === 'none') {
+      return { type: 'none' };
+    }
+    if (lower === 'any' || lower === 'required') {
+      return { type: 'any' };
+    }
+    return { type: trimmed };
+  }
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return { ...(raw as Record<string, unknown>) };
+  }
+  throw buildMalformedAnthropicRequest('Invalid Anthropic tool_choice: expected string or object', {
+    tool_choice_type: Array.isArray(raw) ? 'array' : typeof raw
+  });
 }
 
 export class AnthropicProtocolClient implements HttpProtocolClient<ProtocolRequestPayload> {
@@ -23,51 +64,17 @@ export class AnthropicProtocolClient implements HttpProtocolClient<ProtocolReque
   buildRequestBody(request: ProtocolRequestPayload): Record<string, unknown> {
     const rawPayload = this.extractPayload(request);
     const body = this.chatClient.buildRequestBody(request);
-
-    try {
-      const bodyRecord = body as Record<string, unknown>;
-      const raw = bodyRecord.tool_choice;
-      if (raw !== undefined && raw !== null) {
-        let normalized: Record<string, unknown> | undefined;
-        if (typeof raw === 'string') {
-          const trimmed = raw.trim();
-          if (trimmed) {
-            const lower = trimmed.toLowerCase();
-            if (lower === 'auto') {
-              normalized = { type: 'auto' };
-            } else if (lower === 'none') {
-              normalized = { type: 'none' };
-            } else if (lower === 'any') {
-              normalized = { type: 'any' };
-            } else if (lower === 'required') {
-              normalized = { type: 'any' };
-            } else {
-              normalized = { type: trimmed };
-            }
-          }
-        } else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-          normalized = { ...(raw as Record<string, unknown>) };
-        }
-        if (normalized) {
-          bodyRecord.tool_choice = normalized;
-        } else {
-          // If we couldn't normalize, drop invalid value to avoid upstream 422.
-          delete bodyRecord.tool_choice;
-        }
-      }
-    } catch {
-      // best-effort; fall back to original body on failure
+    const bodyRecord = body as Record<string, unknown>;
+    const normalizedToolChoice = normalizeAnthropicToolChoice(bodyRecord.tool_choice);
+    if (normalizedToolChoice !== undefined) {
+      bodyRecord.tool_choice = normalizedToolChoice;
     }
 
     // Anthropic Messages supports top-level `metadata`. Some Claude-Code-gated proxies require it to exist.
     // The OpenAI chat client deletes `metadata`, so restore it (after stripping internal "__*" keys).
-    try {
-      const raw = (rawPayload as Record<string, unknown>).metadata;
-      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-        (body as Record<string, unknown>).metadata = stripInternalKeysDeep(raw as Record<string, unknown>);
-      }
-    } catch {
-      // best-effort
+    const rawMetadata = (rawPayload as Record<string, unknown>).metadata;
+    if (rawMetadata && typeof rawMetadata === 'object' && !Array.isArray(rawMetadata)) {
+      bodyRecord.metadata = stripInternalKeysDeep(rawMetadata as Record<string, unknown>);
     }
 
     return body;

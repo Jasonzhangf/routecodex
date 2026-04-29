@@ -4,6 +4,7 @@ import type { BridgeInputItem, BridgeToolDefinition } from '../types/bridge-mess
 import type { ChatToolDefinition } from '../hub/types/chat-envelope.js';
 import type { JsonObject, JsonValue } from '../hub/types/json.js';
 import {
+  convertMessagesToBridgeInput,
   convertBridgeInputToChatMessages
 } from '../bridge-message-utils.js';
 import type { BridgeInputBuildResult } from '../bridge-message-utils.js';
@@ -21,7 +22,6 @@ import {
 } from '../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
 import {
   appendLocalImageBlockOnLatestUserInputWithNative,
-  buildBridgeHistoryWithNative,
   filterBridgeInputForUpstreamWithNative,
   normalizeBridgeHistorySeedWithNative,
   prepareResponsesRequestEnvelopeWithNative,
@@ -56,6 +56,53 @@ import {
   stripToolControlFieldsFromParameterObject,
   unwrapData
 } from './responses-openai-bridge/utils.js';
+import {
+  inspectBridgeInputToolHistory,
+  inspectSyntheticRouteCodexAssistantMessages,
+  inspectSyntheticRouteCodexBridgeInput,
+  type ToolHistoryContractViolation
+} from '../shared/openai-message-normalize.js';
+
+function throwBridgeInputViolation(
+  violation: ToolHistoryContractViolation,
+  context: string
+): never {
+  const detailMessage = `Tool history contract violated: ${violation.code} at index ${violation.index}${
+    violation.callId ? ` (call_id=${violation.callId})` : ''
+  } — ${violation.reason}`;
+  throw new ProviderProtocolError(detailMessage, {
+    code: 'MALFORMED_REQUEST',
+    details: {
+      context,
+      sourceShape: 'bridge_input',
+      toolHistoryContractViolation: violation
+    }
+  });
+}
+
+function assertNoSyntheticOrMalformedBridgeInput(
+  input: unknown,
+  context: string
+): void {
+  const syntheticViolation = inspectSyntheticRouteCodexBridgeInput(input);
+  if (syntheticViolation) {
+    throwBridgeInputViolation(syntheticViolation, context);
+  }
+  const historyViolation = inspectBridgeInputToolHistory(input);
+  if (historyViolation) {
+    throwBridgeInputViolation(historyViolation, context);
+  }
+}
+
+function assertNoSyntheticAssistantMessages(
+  messages: unknown,
+  context: string
+): void {
+  const syntheticViolation = inspectSyntheticRouteCodexAssistantMessages(messages);
+  if (syntheticViolation) {
+    throwBridgeInputViolation(syntheticViolation, context);
+  }
+}
 
 
 function readCapturedToolResults(context: ResponsesRequestContext): Array<Record<string, unknown>> | undefined {
@@ -233,6 +280,10 @@ export function captureResponsesContext(
     captured.input = preservedInput;
   }
   captured.input = sanitizeCapturedResponsesInput(captured.input);
+  assertNoSyntheticOrMalformedBridgeInput(
+    captured.input,
+    'responses-openai-bridge.captureRequestContext'
+  );
   if (!captured.systemInstruction && typeof (payload as any).instructions === 'string' && (payload as any).instructions.trim().length) {
     captured.systemInstruction = (payload as any).instructions;
   }
@@ -265,41 +316,41 @@ export function buildChatRequestFromResponses(
     input: context.input,
     tools: toolsNormalized,
     normalizeFunctionName: 'responses',
-    toolResultFallbackText: 'Command succeeded (no output).'
+    toolResultFallbackText: ''
   });
+  assertNoSyntheticAssistantMessages(
+    messages,
+    'responses-openai-bridge.buildChatRequestFromResponses.converted_messages'
+  );
   logHubStageTiming(requestId, 'req_inbound.responses.convert_input_to_messages', 'completed', {
     elapsedMs: Date.now() - convertStart,
     forceLog: true
   });
-  try {
-    const bridgePolicy = resolveBridgePolicy({ protocol: 'openai-responses', moduleType: 'openai-responses' });
-    const policyActions = filterResponsesInboundActionsByPayloadHints(
-      filterRedundantResponsesReasoningAction(
-        resolvePolicyActions(bridgePolicy, 'request_inbound')
-      ),
-      messages
-    );
-    if (policyActions?.length) {
-      logHubStageTiming(requestId, 'req_inbound.responses.inbound_policy', 'start');
-      const policyStart = Date.now();
-      const actionState = runNativeResponsesBridgePipeline({
-        stage: 'request_inbound',
-        actions: policyActions,
-        protocol: (bridgePolicy?.protocol ?? 'openai-responses') as 'openai-responses',
-        moduleType: (bridgePolicy?.moduleType ?? 'openai-responses') as 'openai-responses',
-        requestId: context.requestId,
-        messages,
-        capturedToolResults: readCapturedToolResults(context),
-        rawRequest: payload
-      });
-      messages = actionState.messages;
-      logHubStageTiming(requestId, 'req_inbound.responses.inbound_policy', 'completed', {
-        elapsedMs: Date.now() - policyStart,
-        forceLog: true
-      });
-    }
-  } catch {
-    // Policy application is best-effort; fall back to raw mapping on failure.
+  const bridgePolicy = resolveBridgePolicy({ protocol: 'openai-responses', moduleType: 'openai-responses' });
+  const policyActions = filterResponsesInboundActionsByPayloadHints(
+    filterRedundantResponsesReasoningAction(
+      resolvePolicyActions(bridgePolicy, 'request_inbound')
+    ),
+    messages
+  );
+  if (policyActions?.length) {
+    logHubStageTiming(requestId, 'req_inbound.responses.inbound_policy', 'start');
+    const policyStart = Date.now();
+    const actionState = runNativeResponsesBridgePipeline({
+      stage: 'request_inbound',
+      actions: policyActions,
+      protocol: (bridgePolicy?.protocol ?? 'openai-responses') as 'openai-responses',
+      moduleType: (bridgePolicy?.moduleType ?? 'openai-responses') as 'openai-responses',
+      requestId: context.requestId,
+      messages,
+      capturedToolResults: readCapturedToolResults(context),
+      rawRequest: payload
+    });
+    messages = actionState.messages;
+    logHubStageTiming(requestId, 'req_inbound.responses.inbound_policy', 'completed', {
+      elapsedMs: Date.now() - policyStart,
+      forceLog: true
+    });
   }
   if (Array.isArray(context.originalSystemMessages) && context.originalSystemMessages.length) {
     const preservedSystems = context.originalSystemMessages
@@ -311,6 +362,10 @@ export function buildChatRequestFromResponses(
     }
   }
   messages = appendLocalImageBlockOnLatestUserInputWithNative({ messages }).messages;
+  assertNoSyntheticAssistantMessages(
+    messages,
+    'responses-openai-bridge.buildChatRequestFromResponses.final_messages'
+  );
   if (!messages.length) {
     throw new ProviderProtocolError('Responses payload produced no chat messages', {
       code: 'MALFORMED_REQUEST',
@@ -369,29 +424,33 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   out.model = chat.model;
 
   let messages: any[] = Array.isArray(chat.messages) ? chat.messages as any[] : [];
+  assertNoSyntheticAssistantMessages(
+    messages,
+    'responses-openai-bridge.buildResponsesRequestFromChat.chat_messages'
+  );
   let bridgeMetadata: Record<string, unknown> | undefined;
-  try {
-    const bridgePolicy = resolveBridgePolicy({ protocol: 'openai-responses', moduleType: 'openai-responses' });
-    const policyActions = filterRedundantResponsesReasoningAction(
-      resolvePolicyActions(bridgePolicy, 'request_outbound')
+  const bridgePolicy = resolveBridgePolicy({ protocol: 'openai-responses', moduleType: 'openai-responses' });
+  const policyActions = filterRedundantResponsesReasoningAction(
+    resolvePolicyActions(bridgePolicy, 'request_outbound')
+  );
+  if (policyActions?.length) {
+    const actionState = runNativeResponsesBridgePipeline({
+      stage: 'request_outbound',
+      actions: policyActions,
+      protocol: (bridgePolicy?.protocol ?? 'openai-responses') as 'openai-responses',
+      moduleType: (bridgePolicy?.moduleType ?? 'openai-responses') as 'openai-responses',
+      requestId: ctx?.requestId,
+      messages,
+      rawRequest: chat as Record<string, unknown>
+    });
+    messages = actionState.messages as any[];
+    assertNoSyntheticAssistantMessages(
+      messages,
+      'responses-openai-bridge.buildResponsesRequestFromChat.policy_messages'
     );
-    if (policyActions?.length) {
-      const actionState = runNativeResponsesBridgePipeline({
-        stage: 'request_outbound',
-        actions: policyActions,
-        protocol: (bridgePolicy?.protocol ?? 'openai-responses') as 'openai-responses',
-        moduleType: (bridgePolicy?.moduleType ?? 'openai-responses') as 'openai-responses',
-        requestId: ctx?.requestId,
-        messages,
-        rawRequest: chat as Record<string, unknown>
-      });
-      messages = actionState.messages as any[];
-      if (actionState.metadata && Object.keys(actionState.metadata).length) {
-        bridgeMetadata = actionState.metadata;
-      }
+    if (actionState.metadata && Object.keys(actionState.metadata).length) {
+      bridgeMetadata = actionState.metadata;
     }
-  } catch {
-    // ignore policy errors
   }
   const metadataExtraFields = extractMetadataExtraFields(envelopeMetadata);
   const bridgeDecisions = resolveResponsesRequestBridgeDecisionsWithNative({
@@ -447,7 +506,7 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
 
   const history =
     (previousResponseId ? undefined : historySeed) ??
-    (buildBridgeHistoryWithNative({
+    (convertMessagesToBridgeInput({
       messages,
       tools: Array.isArray(out.tools) ? (out.tools as Array<Record<string, unknown>>) : undefined
     }) as unknown as BridgeInputBuildResult);
@@ -460,12 +519,20 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
     combinedSystemInstruction,
     originalSystemMessages
   } = history;
+  assertNoSyntheticOrMalformedBridgeInput(
+    input,
+    'responses-openai-bridge.buildResponsesRequestFromChat.history'
+  );
 
   // 不追加 metadata，以便 roundtrip 与原始 payload 对齐；系统提示直接写入 instructions。
   const inputForUpstream =
     previousResponseId.length > 0 && Array.isArray(resumedDeltaInput)
       ? resumedDeltaInput
       : input;
+  assertNoSyntheticOrMalformedBridgeInput(
+    inputForUpstream,
+    'responses-openai-bridge.buildResponsesRequestFromChat.upstream_input'
+  );
   if (callIdTransformer) {
     enforceToolCallIdStyle(inputForUpstream, callIdTransformer);
   }

@@ -138,7 +138,7 @@ describe('servertool:clock', () => {
     expect(processed.metadata?.serverToolRequired).toBe(true);
   });
 
-  test('<**clock:clear**> only applies to latest user message and clears session file when present', async () => {
+  test('<**clock:clear**> only applies to latest user message and clears session tasks when present', async () => {
     const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0 });
     if (!clockConfig) {
       throw new Error('clockConfig should not be null');
@@ -181,7 +181,10 @@ describe('servertool:clock', () => {
       m?.role === 'user' && typeof m?.content === 'string' && m.content.includes('please clear')
     );
     expect(typeof lastUserWithDirective?.content === 'string' ? lastUserWithDirective.content : '').not.toContain('clock:clear');
-    expect(fs.existsSync(stateFile)).toBe(false);
+    expect(fs.existsSync(stateFile)).toBe(true);
+    const clearedState = readClockStateFile(sessionScope);
+    expect(Array.isArray(clearedState.tasks)).toBe(true);
+    expect(clearedState.tasks).toHaveLength(0);
   });
 
   test('clock.update clears Clock-Stop-When marker from clock.md on reactivation', async () => {
@@ -356,7 +359,7 @@ describe('servertool:clock', () => {
 
     const processedRequest = processed.processedRequest as any;
     const messages = Array.isArray(processedRequest.messages) ? processedRequest.messages : [];
-    // Due reminder is injected as a user message (time tag is appended after).
+    // Due reminder is injected as a user message. Per-request time tag is opt-in.
     const dueMsg = messages.findLast((m: any) => m?.role === 'user' && typeof m?.content === 'string' && m.content.includes('[Clock Reminder]'));
     expect(dueMsg).toBeDefined();
     expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('[Clock Reminder]');
@@ -370,7 +373,7 @@ describe('servertool:clock', () => {
     expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('## 建议内容示例');
     const last = messages[messages.length - 1];
     expect(last?.role).toBe('user');
-    expect(typeof last?.content === 'string' ? last.content : '').toContain('[Time/Date]:');
+    expect(last).toBe(dueMsg);
 
     const reservation = processedRequest.metadata?.__clockReservation;
     expect(reservation?.reservationId).toBe(`${reqId}:clock`);
@@ -642,18 +645,21 @@ describe('servertool:clock', () => {
       }
     } as any;
 
-    let capturedFollowupMeta: Record<string, unknown> | null = null;
+    let capturedDispatchMeta: Record<string, unknown> | null = null;
     const orchestration = await runServerToolOrchestration({
       chat: chatResponse,
       adapterContext,
       requestId: 'req-clock-hold-pin-1',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
-      reenterPipeline: async (opts: any) => {
-        capturedFollowupMeta =
+      clientInjectDispatch: async (opts: any) => {
+        capturedDispatchMeta =
           opts?.metadata && typeof opts.metadata === 'object'
             ? (opts.metadata as Record<string, unknown>)
             : null;
+        return { ok: true } as any;
+      },
+      reenterPipeline: async () => {
         return {
           body: {
             id: 'chatcmpl-clock-hold-followup-1',
@@ -667,8 +673,9 @@ describe('servertool:clock', () => {
 
     expect(orchestration.executed).toBe(true);
     expect(orchestration.flowId).toBe('clock_hold_flow');
-    expect(capturedFollowupMeta).toBeTruthy();
-    expect((capturedFollowupMeta as any)?.__shadowCompareForcedProviderKey).toBe(providerKey);
+    expect(capturedDispatchMeta).toBeTruthy();
+    expect((capturedDispatchMeta as any)?.clientInjectOnly).toBe(true);
+    expect((capturedDispatchMeta as any)?.__shadowCompareForcedProviderKey).toBe(providerKey);
   });
 
   test('injects time tag as user message when last role is user', async () => {
@@ -676,7 +683,7 @@ describe('servertool:clock', () => {
     const result = await runReqProcessStage1ToolGovernance({
       request,
       rawPayload: {},
-      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { clock: { enabled: true, tickMs: 0 } } },
+      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { clock: { enabled: true, tickMs: 0, includeTimeTag: true } } },
       entryEndpoint: '/v1/chat/completions',
       requestId: 'req-clock-time-tag-user'
     });
@@ -710,7 +717,7 @@ describe('servertool:clock', () => {
     const result = await runReqProcessStage1ToolGovernance({
       request,
       rawPayload: {},
-      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { clock: { enabled: true, tickMs: 0 } } },
+      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { clock: { enabled: true, tickMs: 0, includeTimeTag: true } } },
       entryEndpoint: '/v1/chat/completions',
       requestId: 'req-clock-time-tag-tool'
     });
@@ -1337,7 +1344,7 @@ describe('servertool:clock', () => {
   });
 
 
-  test('keeps malformed <**clock:{time,message}**> marker unchanged and skips scheduling', async () => {
+  test('drops malformed <**clock:{time,message}**> marker text and skips scheduling', async () => {
     const sessionId = 's-clock-marker-invalid';
     const request = buildRequest([
       {
@@ -1365,7 +1372,8 @@ describe('servertool:clock', () => {
       .slice()
       .reverse()
       .find((msg) => msg?.role === 'user');
-    expect(String(latestUser?.content || '')).toContain('<**clock:{"time":"not-a-time","message":"marker-task"}**>');
+    expect(String(latestUser?.content || '')).toContain('please remind me later');
+    expect(String(latestUser?.content || '')).not.toContain('marker-task');
 
     const assistantWithClockTool = (processed.messages as any[]).find(
       (msg) => msg?.role === 'assistant' && Array.isArray(msg?.tool_calls)
@@ -1580,7 +1588,7 @@ describe('servertool:clock', () => {
     expect(fs.existsSync(stateFile)).toBe(false);
   });
 
-  test('clock handler auto-generates tool_call_id when missing', async () => {
+  test('clock handler source-generates canonical tool_call_id when missing', async () => {
     const adapterContext: AdapterContext = {
       requestId: 'req-clock-missing-id',
       entryEndpoint: '/v1/chat/completions',
@@ -1614,11 +1622,11 @@ describe('servertool:clock', () => {
       providerProtocol: 'openai-chat'
     });
 
-    const outputs = (result.finalChatResponse as any).tool_outputs;
-    expect(Array.isArray(outputs)).toBe(true);
-    const last = outputs[outputs.length - 1];
-    expect(typeof last.tool_call_id).toBe('string');
-    expect(String(last.tool_call_id)).toContain('call_servertool_fallback_');
+    expect(result.mode).toBe('tool_flow');
+    expect((result.finalChatResponse as any).choices?.[0]?.message?.tool_calls?.[0]?.id)
+      .toMatch(/^call_[a-f0-9]{24}$/);
+    expect((result.finalChatResponse as any).tool_outputs?.[0]?.tool_call_id)
+      .toMatch(/^call_[a-f0-9]{24}$/);
   });
 
   afterAll(() => {

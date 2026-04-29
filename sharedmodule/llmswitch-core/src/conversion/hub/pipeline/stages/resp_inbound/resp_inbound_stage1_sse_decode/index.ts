@@ -269,11 +269,22 @@ function extractSseStream(payload?: Record<string, unknown>): Readable | undefin
   if (direct && typeof (direct as any).pipe === 'function') {
     return direct as Readable;
   }
+  const rawMode = typeof (payload as any).mode === 'string' ? String((payload as any).mode).trim().toLowerCase() : '';
+  const rawText = typeof (payload as any).raw === 'string' ? String((payload as any).raw) : '';
+  if (rawMode === 'sse' && rawText.length > 0) {
+    return Readable.from([rawText]);
+  }
   const nested = (payload as any).data;
   if (nested && typeof nested === 'object') {
     const inner = (nested as any).__sse_responses || (nested as any).__sse_stream;
     if (inner && typeof (inner as any).pipe === 'function') {
       return inner as Readable;
+    }
+    const nestedRawMode =
+      typeof (nested as any).mode === 'string' ? String((nested as any).mode).trim().toLowerCase() : '';
+    const nestedRawText = typeof (nested as any).raw === 'string' ? String((nested as any).raw) : '';
+    if (nestedRawMode === 'sse' && nestedRawText.length > 0) {
+      return Readable.from([nestedRawText]);
     }
   }
   return undefined;

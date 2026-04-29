@@ -306,6 +306,13 @@ function formatWholeNumber(value: number): string {
   return Math.round(Math.max(0, value)).toLocaleString('en-US');
 }
 
+function formatTokens(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return String(Math.round(value));
+}
+
 function formatRatio(numerator: number, denominator: number): string {
   if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) {
     return '0.0%';
@@ -415,7 +422,8 @@ function emitRealtimeSessionRequestLog(args: {
       sessionColor
     )} ${ANSI_WHITE}finish_reason=${finishReason}${ANSI_RESET}`
   );
-  console.log(colorize(`  session.calls=${calls} session.retries=${retries}`, sessionColor));
+  const ts = getTokenStatsSnapshot();
+  console.log(colorize(`  session.calls=${calls} session.retries=${retries}`, sessionColor) + ` ${ANSI_WHITE}tokens.alltime=${formatTokens(ts.alltime.totalTokens)} tokens.daily=${formatTokens(ts.daily.totalTokens)}${ANSI_RESET}`);
 }
 
 function emitRealtimeVirtualRouterHitLog(args: {

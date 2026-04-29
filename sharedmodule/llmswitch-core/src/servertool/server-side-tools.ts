@@ -16,6 +16,11 @@ import { getServerToolHandler, listAutoServerToolHooks } from './registry.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import { executeWebSearchBackendPlan } from './handlers/web-search.js';
 import { executeVisionBackendPlan } from './handlers/vision.js';
+import {
+  canServerToolOwnToolCallId,
+  createServerToolCallId,
+  isSyntheticRouteCodexToolCallId
+} from '../conversion/shared/openai-message-normalize.js';
 import './handlers/antigravity-thought-signature-bootstrap.js';
 import './handlers/memory/cache-auto.js';
 import './handlers/stop-message-auto.js';
@@ -48,17 +53,43 @@ type AutoHookDescriptor = ReturnType<typeof listAutoServerToolHooks>[number];
 const OPTIONAL_PRIMARY_HOOK_ORDER = ['clock_auto', 'stop_message_auto'] as const;
 const MANDATORY_HOOK_ORDER: readonly string[] = [];
 
-let fallbackToolCallIdSeq = 0;
-
-function ensureToolCallId(record: Record<string, unknown> | JsonObject): string {
+function resolveToolCallId(
+  record: Record<string, unknown> | JsonObject,
+  context: string,
+  toolName: string | undefined,
+  requestId: string
+): string {
   const existing = typeof (record as any).id === 'string' ? String((record as any).id).trim() : '';
   if (existing) {
+    if (isSyntheticRouteCodexToolCallId(existing)) {
+      throw new ProviderProtocolError(`[servertool] synthetic tool_call id is forbidden: ${existing}`, {
+        code: 'MALFORMED_RESPONSE',
+        details: {
+          context,
+          toolName,
+          toolCallId: existing,
+          reason: 'synthetic_routecodex_fallback_id'
+        }
+      });
+    }
     return existing;
   }
-  fallbackToolCallIdSeq += 1;
-  const generated = `call_servertool_fallback_${Date.now()}_${fallbackToolCallIdSeq}`;
-  (record as any).id = generated;
-  return generated;
+  if (canServerToolOwnToolCallId(toolName)) {
+    const generated = createServerToolCallId({
+      toolName: toolName || 'servertool',
+      requestId
+    });
+    (record as any).id = generated;
+    return generated;
+  }
+  throw new ProviderProtocolError('[servertool] tool_call missing required id', {
+    code: 'MALFORMED_RESPONSE',
+    details: {
+      context,
+      toolName,
+      reason: 'missing_tool_call_id'
+    }
+  });
 }
 
 function buildAutoHookQueues(hooks: AutoHookDescriptor[]): {
@@ -119,7 +150,7 @@ function buildAutoHookQueues(hooks: AutoHookDescriptor[]): {
 }
 
 // Extract tool calls from messages array (for Responses API and tool_governance stage)
-function extractToolCallsFromMessagesArray(chatResponse: JsonObject): ToolCall[] {
+function extractToolCallsFromMessagesArray(chatResponse: JsonObject, requestId: string): ToolCall[] {
   const messages = getArray((chatResponse as any).messages);
   const calls: ToolCall[] = [];
   for (const msg of messages) {
@@ -131,12 +162,17 @@ function extractToolCallsFromMessagesArray(chatResponse: JsonObject): ToolCall[]
     for (const raw of toolCalls) {
       const tc = asObject(raw);
       if (!tc) continue;
-      const id = ensureToolCallId(tc as Record<string, unknown>);
       const fn =
         asObject((tc as Record<string, unknown>).function) ??
         asObject((tc as Record<string, unknown>).functionCall) ??
         asObject((tc as Record<string, unknown>).function_call);
       const name = fn && typeof fn.name === 'string' && fn.name.trim() ? fn.name.trim() : '';
+      const id = resolveToolCallId(
+        tc as Record<string, unknown>,
+        'servertool.extractToolCallsFromMessagesArray',
+        name || undefined,
+        requestId
+      );
       const rawArgs =
         (fn ? (fn as Record<string, unknown>).arguments : undefined) ??
         (fn ? (fn as Record<string, unknown>).args : undefined) ??
@@ -297,13 +333,15 @@ function resolveStickyKeyFromAdapterContext(record: Record<string, unknown>): st
   return undefined;
 }
 
-function extractToolCallsFromMessage(message: JsonObject): { raw: JsonObject; parsed: ToolCall }[] {
+function extractToolCallsFromMessage(
+  message: JsonObject,
+  requestId: string
+): { raw: JsonObject; parsed: ToolCall }[] {
   const toolCalls = getArray((message as any).tool_calls);
   const out: { raw: JsonObject; parsed: ToolCall }[] = [];
   for (const raw of toolCalls) {
     const tc = asObject(raw);
     if (!tc) continue;
-    const id = ensureToolCallId(tc as Record<string, unknown>);
     const fn =
       asObject((tc as Record<string, unknown>).function) ??
       asObject((tc as Record<string, unknown>).functionCall) ??
@@ -311,6 +349,12 @@ function extractToolCallsFromMessage(message: JsonObject): { raw: JsonObject; pa
     const name = fn && typeof (fn as any).name === 'string' && String((fn as any).name).trim()
       ? normalizeServerToolCallName(String((fn as any).name))
       : '';
+    const id = resolveToolCallId(
+      tc as Record<string, unknown>,
+      'servertool.extractToolCallsFromMessage',
+      name || undefined,
+      requestId
+    );
     const rawArgs =
       (fn ? (fn as any).arguments : undefined) ??
       (fn ? (fn as any).args : undefined) ??
@@ -460,11 +504,11 @@ export async function runServerSideToolEngine(
     return { mode: 'passthrough', finalChatResponse: options.chatResponse };
   }
 
-  let toolCalls = extractToolCalls(base);
+  let toolCalls = extractToolCalls(base, options.requestId);
 
   // Fallback: Responses API and tool_governance stage use messages array instead of choices
   if (toolCalls.length === 0) {
-    toolCalls = extractToolCallsFromMessagesArray(base);
+    toolCalls = extractToolCallsFromMessagesArray(base, options.requestId);
   }
   if (isClientDisconnected(options.adapterContext) && toolCalls.length > 0) {
     // When client is already disconnected, skip executing explicit tool_call servertools.
@@ -525,7 +569,7 @@ export async function runServerSideToolEngine(
     if (!choiceObj) continue;
     const message = asObject((choiceObj as any).message);
     if (!message) continue;
-    attemptedToolCallsByMessage.push(...extractToolCallsFromMessage(message));
+    attemptedToolCallsByMessage.push(...extractToolCallsFromMessage(message, options.requestId));
   }
 
   if (options.disableToolCallHandlers !== true) {
@@ -844,7 +888,7 @@ async function executeBackendPlan(
   return undefined;
 }
 
-export function extractToolCalls(chatResponse: JsonObject): ToolCall[] {
+export function extractToolCalls(chatResponse: JsonObject, requestId = ''): ToolCall[] {
   const choices = getArray(chatResponse.choices);
   const calls: ToolCall[] = [];
   for (const choice of choices) {
@@ -856,12 +900,17 @@ export function extractToolCalls(chatResponse: JsonObject): ToolCall[] {
     for (const raw of toolCalls) {
       const tc = asObject(raw);
       if (!tc) continue;
-      const id = ensureToolCallId(tc as Record<string, unknown>);
       const fn =
         asObject((tc as Record<string, unknown>).function) ??
         asObject((tc as Record<string, unknown>).functionCall) ??
         asObject((tc as Record<string, unknown>).function_call);
       const name = fn && typeof fn.name === 'string' && fn.name.trim() ? fn.name.trim() : '';
+      const id = resolveToolCallId(
+        tc as Record<string, unknown>,
+        'servertool.extractToolCalls',
+        name || undefined,
+        requestId
+      );
       const rawArgs =
         (fn ? (fn as Record<string, unknown>).arguments : undefined) ??
         (fn ? (fn as Record<string, unknown>).args : undefined) ??

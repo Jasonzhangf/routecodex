@@ -4,9 +4,6 @@ use serde_json::{json, Map, Value};
 use super::super::super::read_trimmed_string;
 use super::tool_guidance::wrap_tool_calls_json;
 
-const EMPTY_TOOL_RESULT_FALLBACK: &str =
-    "[RouteCodex] Tool output was empty; execution status unknown.";
-
 fn stringify_unknown(value: &Value) -> String {
     if let Some(raw) = value.as_str() {
         return raw.to_string();
@@ -36,11 +33,7 @@ fn sanitize_user_visible_text(raw: &str) -> String {
 fn normalize_tool_result_text(value: &Value) -> String {
     let raw = stringify_unknown(value);
     let sanitized = sanitize_user_visible_text(raw.as_str());
-    if sanitized.is_empty() {
-        EMPTY_TOOL_RESULT_FALLBACK.to_string()
-    } else {
-        sanitized
-    }
+    sanitized
 }
 
 fn read_trimmed_string_from_map(map: &Map<String, Value>, key: &str) -> Option<String> {

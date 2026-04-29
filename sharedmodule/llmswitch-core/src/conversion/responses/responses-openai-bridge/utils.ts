@@ -129,9 +129,16 @@ export function sanitizeCapturedResponsesInput(
     if (!sanitizedName) {
       continue;
     }
-    const callId = typeof (entry as any).call_id === 'string' ? String((entry as any).call_id).trim() : '';
+    const callIdCandidates = [
+      (entry as any).call_id,
+      (entry as any).tool_call_id,
+      (entry as any).id
+    ];
+    const callId = callIdCandidates.find(
+      (value) => typeof value === 'string' && String(value).trim().length > 0
+    );
     if (callId) {
-      acceptedCallIds.add(callId);
+      acceptedCallIds.add(String(callId).trim());
     }
   }
   const out: BridgeInputItem[] = [];
@@ -154,7 +161,15 @@ export function sanitizeCapturedResponsesInput(
       continue;
     }
     if (type === 'function_call_output') {
-      const callId = typeof (entry as any).call_id === 'string' ? String((entry as any).call_id).trim() : '';
+      const callIdCandidates = [
+        (entry as any).call_id,
+        (entry as any).tool_call_id,
+        (entry as any).id
+      ];
+      const callIdValue = callIdCandidates.find(
+        (value) => typeof value === 'string' && String(value).trim().length > 0
+      );
+      const callId = callIdValue ? String(callIdValue).trim() : '';
       if (!callId || (sawFunctionCalls && !acceptedCallIds.has(callId))) {
         continue;
       }

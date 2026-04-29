@@ -20,7 +20,7 @@ use std::fs;
 use std::path::PathBuf;
 
 #[test]
-fn normalizes_missing_tool_ids_with_pending_queue() {
+fn normalize_bridge_tool_call_ids_does_not_invent_missing_ids() {
     let input = NormalizeBridgeToolCallIdsInput {
         messages: vec![
             json!({
@@ -47,27 +47,12 @@ fn normalizes_missing_tool_ids_with_pending_queue() {
         .and_then(|v| v.as_object())
         .cloned()
         .unwrap();
-    assert_eq!(
-        call_obj.get("id").and_then(|v| v.as_str()),
-        Some("bridge_tool_1")
-    );
-    assert_eq!(
-        call_obj.get("tool_call_id").and_then(|v| v.as_str()),
-        Some("bridge_tool_1")
-    );
-    assert_eq!(
-        call_obj.get("call_id").and_then(|v| v.as_str()),
-        Some("bridge_tool_1")
-    );
+    assert!(call_obj.get("id").is_none());
+    assert!(call_obj.get("tool_call_id").is_none());
+    assert!(call_obj.get("call_id").is_none());
     let tool_message = output.messages[1].as_object().unwrap();
-    assert_eq!(
-        tool_message.get("tool_call_id").and_then(|v| v.as_str()),
-        Some("bridge_tool_1")
-    );
-    assert_eq!(
-        tool_message.get("call_id").and_then(|v| v.as_str()),
-        Some("bridge_tool_1")
-    );
+    assert!(tool_message.get("tool_call_id").is_none());
+    assert!(tool_message.get("call_id").is_none());
 }
 
 #[test]
@@ -205,7 +190,7 @@ fn builds_bridge_history_for_tool_turn() {
         ],
         tools: None,
     };
-    let output = build_bridge_history(input);
+    let output = build_bridge_history(input).unwrap();
     assert_eq!(output.original_system_messages.len(), 1);
     assert_eq!(output.latest_user_instruction.as_deref(), Some("Run tool"));
     assert!(output.input.iter().any(|entry| {
@@ -233,7 +218,7 @@ fn builds_bridge_history_uses_output_text_for_assistant_string_content() {
         })],
         tools: None,
     };
-    let output = build_bridge_history(input);
+    let output = build_bridge_history(input).unwrap();
     assert_eq!(output.input.len(), 1);
     let entry = output.input[0].as_object().unwrap();
     assert_eq!(entry.get("role").and_then(Value::as_str), Some("assistant"));
@@ -254,7 +239,7 @@ fn builds_bridge_history_with_media_blocks() {
         })],
         tools: None,
     };
-    let output = build_bridge_history(input);
+    let output = build_bridge_history(input).unwrap();
     assert_eq!(output.input.len(), 1);
     let entry = output.input[0].as_object().unwrap();
     let content = entry.get("content").and_then(|v| v.as_array()).unwrap();
@@ -271,44 +256,15 @@ fn builds_bridge_history_with_media_blocks() {
 
 #[test]
 fn applies_bridge_normalize_history() {
-    let output = apply_bridge_normalize_history(ApplyBridgeNormalizeHistoryInput {
+    let error = apply_bridge_normalize_history(ApplyBridgeNormalizeHistoryInput {
         messages: vec![json!({
           "role": "assistant",
           "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "echo"}}]
         })],
         tools: None,
-    });
-    assert_eq!(output.messages.len(), 2);
-    let tool_message = output.messages[1].as_object().cloned().unwrap();
-    assert_eq!(
-        tool_message.get("role").and_then(Value::as_str),
-        Some("tool")
-    );
-    assert_eq!(
-        tool_message.get("tool_call_id").and_then(Value::as_str),
-        Some("call_1")
-    );
-    let bridge_history = output.bridge_history.unwrap();
-    let bridge_input = bridge_history
-        .as_object()
-        .and_then(|row| row.get("input"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap();
-    assert!(bridge_input.iter().any(|entry| {
-        entry
-            .as_object()
-            .and_then(|row| row.get("type"))
-            .and_then(Value::as_str)
-            == Some("function_call")
-    }));
-    assert!(bridge_input.iter().any(|entry| {
-        entry
-            .as_object()
-            .and_then(|row| row.get("type"))
-            .and_then(Value::as_str)
-            == Some("function_call_output")
-    }));
+    })
+    .unwrap_err();
+    assert!(error.contains("dangling_tool_call"));
 }
 
 #[test]
@@ -1000,10 +956,7 @@ fn ensures_bridge_output_fields_for_tool_and_assistant() {
     };
     let output = ensure_bridge_output_fields(input);
     let tool_msg = output.messages[0].as_object().unwrap();
-    assert_eq!(
-        tool_msg.get("content").and_then(|v| v.as_str()),
-        Some("Tool call completed (no output).")
-    );
+    assert_eq!(tool_msg.get("content").and_then(|v| v.as_str()), Some(""));
     let assistant_empty = output.messages[1].as_object().unwrap();
     assert_eq!(
         assistant_empty.get("content").and_then(|v| v.as_str()),
@@ -1017,7 +970,7 @@ fn ensures_bridge_output_fields_for_tool_and_assistant() {
     let assistant_fallback = output.messages[3].as_object().unwrap();
     assert_eq!(
         assistant_fallback.get("content").and_then(|v| v.as_str()),
-        Some("Assistant response unavailable.")
+        Some("")
     );
 }
 
@@ -1045,7 +998,7 @@ fn convert_bridge_input_to_chat_messages_json_basic_user_text() {
         tool_result_fallback_text: None,
         normalize_function_name: None,
     };
-    let output = convert_bridge_input_to_chat_messages(input);
+    let output = convert_bridge_input_to_chat_messages(input).unwrap();
     assert_eq!(output.messages.len(), 1);
     let msg = output.messages[0].as_object().unwrap();
     assert_eq!(msg.get("role").and_then(Value::as_str), Some("user"));
@@ -1122,24 +1075,62 @@ fn convert_bridge_input_preserves_tool_calls_with_content() {
         tool_result_fallback_text: None,
         normalize_function_name: None,
     };
-    let output = convert_bridge_input_to_chat_messages(input);
-    assert_eq!(output.messages.len(), 1);
-    let msg = output.messages[0].as_object().unwrap();
-    assert_eq!(msg.get("role").and_then(Value::as_str), Some("assistant"));
-    assert_eq!(msg.get("content").and_then(Value::as_str), Some("hello"));
-    let tool_calls = msg.get("tool_calls").and_then(Value::as_array).unwrap();
-    assert_eq!(tool_calls.len(), 1);
-    let call = tool_calls[0].as_object().unwrap();
-    assert_eq!(call.get("id").and_then(Value::as_str), Some("call_1"));
-    assert_eq!(call.get("call_id").and_then(Value::as_str), Some("call_1"));
-    let function = call.get("function").and_then(Value::as_object).unwrap();
-    assert_eq!(
-        function.get("name").and_then(Value::as_str),
-        Some("exec_command")
-    );
-    let args = function.get("arguments").and_then(Value::as_str).unwrap();
-    let parsed: Value = serde_json::from_str(args).unwrap();
-    assert_eq!(parsed.get("cmd").and_then(Value::as_str), Some("pwd"));
+    let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
+    assert!(error.contains("dangling_tool_call"));
+}
+
+#[test]
+fn convert_bridge_input_rejects_missing_tool_call_id() {
+    let input = BridgeInputToChatInput {
+        input: vec![json!({
+            "type": "message",
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": { "cmd": "pwd" }
+                    }
+                }
+            ]
+        })],
+        tools: None,
+        tool_result_fallback_text: None,
+        normalize_function_name: None,
+    };
+    let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
+    assert!(error.contains("missing_tool_call_id"));
+}
+
+#[test]
+fn convert_bridge_input_rejects_orphan_tool_result() {
+    let input = BridgeInputToChatInput {
+        input: vec![json!({
+            "type": "function_call_output",
+            "call_id": "call_missing",
+            "output": "done"
+        })],
+        tools: None,
+        tool_result_fallback_text: None,
+        normalize_function_name: Some("responses".to_string()),
+    };
+    let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
+    assert!(error.contains("orphan_tool_result"));
+}
+
+#[test]
+fn build_bridge_history_rejects_dangling_tool_call() {
+    let input = BuildBridgeHistoryInput {
+        messages: vec![json!({
+          "role":"assistant",
+          "tool_calls":[{"id":"call_1","function":{"name":"read","arguments":{"path":"a.txt"}}}]
+        })],
+        tools: None,
+    };
+    let error = build_bridge_history(input).unwrap_err();
+    assert!(error.contains("dangling_tool_call"));
 }
 
 #[test]
@@ -1156,19 +1147,8 @@ fn convert_bridge_input_harvests_malformed_assistant_parameter_markup_into_tool_
         normalize_function_name: Some("responses".to_string()),
     };
 
-    let output = convert_bridge_input_to_chat_messages(input);
-    assert_eq!(output.messages.len(), 1);
-    let msg = output.messages[0].as_object().unwrap();
-    assert_eq!(msg.get("role").and_then(Value::as_str), Some("assistant"));
-    let tool_calls = msg.get("tool_calls").and_then(Value::as_array).unwrap();
-    assert!(!tool_calls.is_empty());
-    let first = tool_calls[0].as_object().unwrap();
-    let function = first.get("function").and_then(Value::as_object).unwrap();
-    assert_eq!(
-        function.get("name").and_then(Value::as_str),
-        Some("exec_command")
-    );
-    assert_eq!(msg.get("content").and_then(Value::as_str), Some(""));
+    let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
+    assert!(error.contains("dangling_tool_call"));
 }
 
 #[test]
@@ -1184,7 +1164,7 @@ fn convert_bridge_input_keeps_plain_assistant_text_without_tool_markup() {
         normalize_function_name: Some("responses".to_string()),
     };
 
-    let output = convert_bridge_input_to_chat_messages(input);
+    let output = convert_bridge_input_to_chat_messages(input).unwrap();
     assert_eq!(output.messages.len(), 1);
     let msg = output.messages[0].as_object().unwrap();
     assert_eq!(msg.get("role").and_then(Value::as_str), Some("assistant"));
@@ -1266,7 +1246,8 @@ fn responses_exec_command_roundtrip_preserves_structured_tool_result() {
         tools: None,
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
-    });
+    })
+    .unwrap();
 
     assert_eq!(chat.messages.len(), 3);
     let assistant = chat.messages[1].as_object().unwrap();
@@ -1299,7 +1280,8 @@ fn responses_exec_command_roundtrip_preserves_structured_tool_result() {
     let rebuilt = build_bridge_history(BuildBridgeHistoryInput {
         messages: chat.messages,
         tools: None,
-    });
+    })
+    .unwrap();
     let function_output = rebuilt
         .input
         .iter()
@@ -1343,7 +1325,7 @@ fn convert_bridge_input_preserves_mixed_media_order() {
         tool_result_fallback_text: None,
         normalize_function_name: None,
     };
-    let output = convert_bridge_input_to_chat_messages(input);
+    let output = convert_bridge_input_to_chat_messages(input).unwrap();
     assert_eq!(output.messages.len(), 1);
     let msg = output.messages[0].as_object().unwrap();
     let content = msg.get("content").and_then(Value::as_array).unwrap();
@@ -1849,6 +1831,6 @@ fn convert_bridge_input_skips_overlong_responses_function_calls() {
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
     };
-    let output = convert_bridge_input_to_chat_messages(input);
+    let output = convert_bridge_input_to_chat_messages(input).unwrap();
     assert!(output.messages.is_empty());
 }

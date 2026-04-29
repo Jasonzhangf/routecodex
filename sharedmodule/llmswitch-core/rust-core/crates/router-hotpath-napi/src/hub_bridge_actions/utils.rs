@@ -20,6 +20,11 @@ pub(crate) fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
     Some(trimmed.to_string())
 }
 
+pub(crate) fn is_synthetic_routecodex_tool_call_id(call_id: &str) -> bool {
+    let lowered = call_id.trim().to_ascii_lowercase();
+    lowered.starts_with("call_servertool_fallback_") || lowered.starts_with("call_clock_fallback_")
+}
+
 pub(crate) fn coerce_bridge_role(role: Option<&str>) -> String {
     let normalized = role.unwrap_or("user").trim().to_ascii_lowercase();
     match normalized.as_str() {
@@ -113,6 +118,10 @@ fn sanitize_core(value: &str) -> String {
     out.trim_matches('_').to_string()
 }
 
+fn sanitize_servertool_name_token(value: &str) -> String {
+    sanitize_core(value.replace('.', "_").as_str())
+}
+
 fn short_hash(value: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(value.as_bytes());
@@ -185,6 +194,40 @@ fn normalize_with_fallback(call_id: Option<&str>, fallback: &str, prefix: &str) 
     }
     let random_core = Uuid::new_v4().simple().to_string()[..8].to_string();
     clamp_prefixed_id(prefix, &random_core, &random_core)
+}
+
+pub(crate) fn can_servertool_own_tool_call_id(tool_name: &str) -> bool {
+    matches!(
+        sanitize_servertool_name_token(tool_name).as_str(),
+        "clock" | "continue_execution" | "reasoning_stop" | "web_search"
+    )
+}
+
+pub(crate) fn create_servertool_tool_call_id(
+    tool_name: &str,
+    request_id: Option<&str>,
+    sequence: usize,
+) -> String {
+    let tool_token = sanitize_servertool_name_token(tool_name);
+    let request_token = extract_core(request_id)
+        .or_else(|| extract_core(Some("req")))
+        .unwrap_or_else(|| "req".to_string());
+    clamp_prefixed_id(
+        "call_servertool_",
+        format!("{tool_token}_{request_token}_{sequence}").as_str(),
+        format!("{tool_name}|{}|{sequence}", request_id.unwrap_or("")).as_str(),
+    )
+}
+
+pub(crate) fn create_harvested_tool_call_id(request_id: Option<&str>, sequence: usize) -> String {
+    let request_token = extract_core(request_id)
+        .or_else(|| extract_core(Some("req")))
+        .unwrap_or_else(|| "req".to_string());
+    clamp_prefixed_id(
+        "call_harvested_",
+        format!("{request_token}_{sequence}").as_str(),
+        format!("{}|{sequence}", request_id.unwrap_or("")).as_str(),
+    )
 }
 
 pub(crate) fn normalize_function_call_id(call_id: Option<&str>, fallback: &str) -> String {

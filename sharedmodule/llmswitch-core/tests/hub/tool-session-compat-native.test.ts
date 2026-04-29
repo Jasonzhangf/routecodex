@@ -3,7 +3,7 @@ import { describe, expect, test } from '@jest/globals';
 import { applyToolSessionCompat } from '../../src/conversion/hub/tool-session-compat.js';
 
 describe('tool-session compat native normalization', () => {
-  test('reorders tool messages, injects unknown placeholders, and filters stray tool outputs', async () => {
+  test('reorders tool messages without synthesizing unknown placeholders, and filters stray tool outputs', async () => {
     const chat: any = {
       messages: [
         {
@@ -31,11 +31,9 @@ describe('tool-session compat native normalization', () => {
       entryEndpoint: '/v1/chat/completions'
     } as any);
 
-    expect(chat.messages).toHaveLength(3);
+    expect(chat.messages).toHaveLength(2);
     expect(chat.messages[1].role).toBe('tool');
-    expect(chat.messages[1].tool_call_id).toBe('call_a');
-    expect(String(chat.messages[1].content || '')).toContain('[RouteCodex] Tool call result unknown');
-    expect(chat.messages[2].tool_call_id).toBe('call_b');
+    expect(chat.messages[1].tool_call_id).toBe('call_b');
 
     expect(Array.isArray(chat.toolOutputs)).toBe(true);
     expect(chat.toolOutputs).toHaveLength(1);

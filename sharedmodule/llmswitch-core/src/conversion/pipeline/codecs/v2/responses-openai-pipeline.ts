@@ -58,7 +58,6 @@ function sanitizeResponsesMessages(payload: JsonObject): void {
   const messages = Array.isArray((payload as any)?.messages) ? ((payload as any).messages as Array<Record<string, unknown>>) : [];
   if (!messages.length) return;
   const sanitized: Array<Record<string, unknown>> = [];
-  let counter = 0;
   const normalizeId = (raw: unknown): string | undefined => {
     if (typeof raw !== 'string') return undefined;
     const trimmed = raw.trim();
@@ -74,12 +73,12 @@ function sanitizeResponsesMessages(payload: JsonObject): void {
     if (role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length) {
       message.tool_calls = message.tool_calls.map((call: any) => {
         if (!call || typeof call !== 'object') return call;
-        const existing = normalizeId(call.id) ?? normalizeId(call.call_id) ?? `fc_function_call_${counter++}`;
+        const existing = normalizeId(call.id) ?? normalizeId(call.call_id);
         if (existing) {
           call.id = existing;
+          if (call.call_id !== undefined) delete call.call_id;
+          if (call.tool_call_id !== undefined) delete call.tool_call_id;
         }
-        if (call.call_id !== undefined) delete call.call_id;
-        if (call.tool_call_id !== undefined) delete call.tool_call_id;
         return call;
       });
       sanitized.push(message);
@@ -90,16 +89,9 @@ function sanitizeResponsesMessages(payload: JsonObject): void {
       const normalizedToolId = normalizeId(clone.tool_call_id ?? clone.call_id);
       if (normalizedToolId) {
         clone.tool_call_id = normalizedToolId;
-      } else if (typeof clone.tool_call_id === 'string') {
-        const trimmed = clone.tool_call_id.trim();
-        if (!trimmed.length) {
-          delete clone.tool_call_id;
-        } else {
-          clone.tool_call_id = trimmed;
-        }
+        if ('call_id' in clone) delete clone.call_id;
+        if ('id' in clone) delete clone.id;
       }
-      if ('call_id' in clone) delete clone.call_id;
-      if ('id' in clone) delete clone.id;
       sanitized.push(clone);
       continue;
     }

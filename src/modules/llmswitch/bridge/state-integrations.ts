@@ -5,6 +5,9 @@
  * clock task store compatibility wrappers.
  */
 
+import * as stickySessionStoreModule from '../../../../node_modules/@jsonstudio/llms/dist/router/virtual-router/sticky-session-store.js';
+import * as reasoningStopStateModule from '../../../../node_modules/@jsonstudio/llms/dist/servertool/handlers/reasoning-stop-state.js';
+import * as sessionIdentifiersModule from '../../../../node_modules/@jsonstudio/llms/dist/conversion/hub/pipeline/session-identifiers.js';
 import { importCoreDist, requireCoreDist } from './module-loader.js';
 import type { AnyRecord } from './module-loader.js';
 
@@ -47,73 +50,64 @@ const NOOP_STATS_CENTER: StatsCenterLike = {
   recordProviderUsage: () => {}
 };
 
-type StickySessionStoreExports = {
-  loadRoutingInstructionStateSync?: (key: string) => unknown | null;
-  saveRoutingInstructionStateAsync?: (key: string, state: unknown | null) => void;
-  saveRoutingInstructionStateSync?: (key: string, state: unknown | null) => void;
-};
-
-let cachedStickySessionStore: StickySessionStoreExports | null | undefined = undefined;
-
-function getStickySessionStoreExports(): StickySessionStoreExports | null {
-  if (cachedStickySessionStore !== undefined) {
-    return cachedStickySessionStore;
-  }
-  try {
-    cachedStickySessionStore = requireCoreDist<StickySessionStoreExports>('router/virtual-router/sticky-session-store');
-  } catch (error) {
-    logStateIntegrationsNonBlocking('sticky_session_store.load', error);
-    cachedStickySessionStore = null;
-  }
-  return cachedStickySessionStore;
+function buildStateIntegrationFailure(stage: string, error: unknown, details?: Record<string, unknown>): Error {
+  const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+  const message = `[llmswitch-bridge.state-integrations] ${stage} failed: ${formatUnknownError(error)}${detailSuffix}`;
+  const wrapped = new Error(message);
+  Object.assign(wrapped, {
+    code: 'STATE_INTEGRATION_FAILED',
+    stage,
+    details,
+    cause: error
+  });
+  return wrapped;
 }
 
 export function loadRoutingInstructionStateSync(key: string): unknown | null {
-  const mod = getStickySessionStoreExports();
-  const fn = mod?.loadRoutingInstructionStateSync;
+  const fn = stickySessionStoreModule.loadRoutingInstructionStateSync;
   if (typeof fn !== 'function') {
-    if (mod) {
-      logStateIntegrationsNonBlocking('sticky_session_store.load_state.api_unavailable', 'loadRoutingInstructionStateSync not available');
-    }
-    return null;
+    throw buildStateIntegrationFailure(
+      'sticky_session_store.load_state.api_unavailable',
+      'loadRoutingInstructionStateSync not available',
+      { key }
+    );
   }
   try {
     return fn(key);
   } catch (error) {
-    logStateIntegrationsNonBlocking('sticky_session_store.load_state.invoke', error, { key });
-    return null;
+    throw buildStateIntegrationFailure('sticky_session_store.load_state.invoke', error, { key });
   }
 }
 
 export function saveRoutingInstructionStateAsync(key: string, state: unknown | null): void {
-  const mod = getStickySessionStoreExports();
-  const fn = mod?.saveRoutingInstructionStateAsync;
+  const fn = stickySessionStoreModule.saveRoutingInstructionStateAsync;
   if (typeof fn !== 'function') {
-    if (mod) {
-      logStateIntegrationsNonBlocking('sticky_session_store.save_async.api_unavailable', 'saveRoutingInstructionStateAsync not available');
-    }
-    return;
+    throw buildStateIntegrationFailure(
+      'sticky_session_store.save_async.api_unavailable',
+      'saveRoutingInstructionStateAsync not available',
+      { key }
+    );
   }
   try {
-    fn(key, state);
+    fn(key, state as Parameters<typeof fn>[1]);
   } catch (error) {
-    logStateIntegrationsNonBlocking('sticky_session_store.save_async.invoke', error, { key });
+    throw buildStateIntegrationFailure('sticky_session_store.save_async.invoke', error, { key });
   }
 }
 
 export function saveRoutingInstructionStateSync(key: string, state: unknown | null): void {
-  const mod = getStickySessionStoreExports();
-  const fn = mod?.saveRoutingInstructionStateSync;
+  const fn = stickySessionStoreModule.saveRoutingInstructionStateSync;
   if (typeof fn !== 'function') {
-    if (mod) {
-      logStateIntegrationsNonBlocking('sticky_session_store.save_sync.api_unavailable', 'saveRoutingInstructionStateSync not available');
-    }
-    return;
+    throw buildStateIntegrationFailure(
+      'sticky_session_store.save_sync.api_unavailable',
+      'saveRoutingInstructionStateSync not available',
+      { key }
+    );
   }
   try {
-    fn(key, state);
+    fn(key, state as Parameters<typeof fn>[1]);
   } catch (error) {
-    logStateIntegrationsNonBlocking('sticky_session_store.save_sync.invoke', error, { key });
+    throw buildStateIntegrationFailure('sticky_session_store.save_sync.invoke', error, { key });
   }
 }
 
@@ -124,44 +118,22 @@ type ReasoningStopStateExports = {
   ) => 'on' | 'off' | 'endless';
 };
 
-let cachedReasoningStopStateModule: ReasoningStopStateExports | null | undefined = undefined;
-
-function getReasoningStopStateExports(): ReasoningStopStateExports | null {
-  if (cachedReasoningStopStateModule !== undefined) {
-    return cachedReasoningStopStateModule;
-  }
-  try {
-    cachedReasoningStopStateModule = requireCoreDist<ReasoningStopStateExports>(
-      'servertool/handlers/reasoning-stop-state'
-    );
-  } catch (error) {
-    logStateIntegrationsNonBlocking('reasoning_stop_state.load', error);
-    cachedReasoningStopStateModule = null;
-  }
-  return cachedReasoningStopStateModule;
-}
-
 export function syncReasoningStopModeFromRequest(
   adapterContext: unknown,
   fallbackMode: 'on' | 'off' | 'endless' = 'off'
 ): 'on' | 'off' | 'endless' {
-  const mod = getReasoningStopStateExports();
-  const fn = mod?.syncReasoningStopModeFromRequest;
+  const fn = (reasoningStopStateModule as ReasoningStopStateExports).syncReasoningStopModeFromRequest;
   if (typeof fn !== 'function') {
-    if (mod) {
-      logStateIntegrationsNonBlocking(
-        'reasoning_stop_state.sync_mode.api_unavailable',
-        'syncReasoningStopModeFromRequest not available',
-        { fallbackMode }
-      );
-    }
-    return fallbackMode;
+    throw buildStateIntegrationFailure(
+      'reasoning_stop_state.sync_mode.api_unavailable',
+      'syncReasoningStopModeFromRequest not available',
+      { fallbackMode }
+    );
   }
   try {
     return fn(adapterContext, fallbackMode);
   } catch (error) {
-    logStateIntegrationsNonBlocking('reasoning_stop_state.sync_mode.invoke', error, { fallbackMode });
-    return fallbackMode;
+    throw buildStateIntegrationFailure('reasoning_stop_state.sync_mode.invoke', error, { fallbackMode });
   }
 }
 
@@ -171,38 +143,18 @@ type SessionIdentifiersModule = {
   extractSessionIdentifiersFromMetadata?: (meta: Record<string, unknown> | undefined) => SessionIdentifiers;
 };
 
-let cachedSessionIdentifiersModule: SessionIdentifiersModule | null | undefined = undefined;
-
-function getSessionIdentifiersModule(): SessionIdentifiersModule | null {
-  if (cachedSessionIdentifiersModule !== undefined) {
-    return cachedSessionIdentifiersModule;
-  }
-  try {
-    cachedSessionIdentifiersModule = requireCoreDist<SessionIdentifiersModule>('conversion/hub/pipeline/session-identifiers');
-  } catch (error) {
-    logStateIntegrationsNonBlocking('session_identifiers.load', error);
-    cachedSessionIdentifiersModule = null;
-  }
-  return cachedSessionIdentifiersModule;
-}
-
 export function extractSessionIdentifiersFromMetadata(meta: Record<string, unknown> | undefined): SessionIdentifiers {
-  const mod = getSessionIdentifiersModule();
-  const fn = mod?.extractSessionIdentifiersFromMetadata;
+  const fn = (sessionIdentifiersModule as SessionIdentifiersModule).extractSessionIdentifiersFromMetadata;
   if (typeof fn !== 'function') {
-    if (mod) {
-      logStateIntegrationsNonBlocking(
-        'session_identifiers.extract.api_unavailable',
-        'extractSessionIdentifiersFromMetadata not available'
-      );
-    }
-    return {};
+    throw buildStateIntegrationFailure(
+      'session_identifiers.extract.api_unavailable',
+      'extractSessionIdentifiersFromMetadata not available'
+    );
   }
   try {
     return fn(meta);
   } catch (error) {
-    logStateIntegrationsNonBlocking('session_identifiers.extract.invoke', error);
-    return {};
+    throw buildStateIntegrationFailure('session_identifiers.extract.invoke', error);
   }
 }
 

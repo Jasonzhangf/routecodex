@@ -178,4 +178,51 @@ describe('resp-inbound-stage1-sse-decode native wrapper', () => {
       maxContextTokens: 4096
     });
   });
+
+  it('decodes snapshot-shaped raw SSE payloads', async () => {
+    const anthropicRaw = [
+      'event: message_start',
+      'data: {"type":"message_start","message":{"id":"msg_test_1","type":"message","role":"assistant","model":"mimo-v2.5-pro","content":[],"usage":{"input_tokens":1,"output_tokens":0}}}',
+      '',
+      'event: content_block_start',
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+      '',
+      'event: content_block_delta',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"OK"}}',
+      '',
+      'event: content_block_stop',
+      'data: {"type":"content_block_stop","index":0}',
+      '',
+      'event: message_delta',
+      'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}',
+      '',
+      'event: message_stop',
+      'data: {"type":"message_stop"}',
+      ''
+    ].join('\n');
+    const result = await runRespInboundStage1SseDecode({
+      providerProtocol: 'anthropic-messages',
+      payload: {
+        mode: 'sse',
+        raw: anthropicRaw
+      } as any,
+      adapterContext: createAdapterContext({
+        requestId: 'req-resp-inbound-stage1-raw-sse',
+        providerProtocol: 'anthropic-messages'
+      }),
+      wantsStream: false
+    });
+
+    expect(result.decodedFromSse).toBe(true);
+    expect(result.payload).toMatchObject({
+      id: 'msg_test_1',
+      stop_reason: 'end_turn',
+      content: [
+        {
+          type: 'text',
+          text: 'OK'
+        }
+      ]
+    });
+  });
 });

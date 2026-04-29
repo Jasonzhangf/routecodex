@@ -1700,7 +1700,7 @@ fn lift_responses_resume_into_semantics(request: &Value, metadata: &Value) -> Va
     Value::Object(output)
 }
 
-fn sync_responses_context_from_canonical_messages(request: &Value) -> Value {
+fn sync_responses_context_from_canonical_messages(request: &Value) -> Result<Value, String> {
     let mut next_request = value_as_object_or_empty(request);
     let messages = next_request
         .get("messages")
@@ -1713,30 +1713,30 @@ fn sync_responses_context_from_canonical_messages(request: &Value) -> Value {
         .cloned();
     let semantics = match next_request.get_mut("semantics") {
         Some(v) if v.is_object() => v,
-        _ => return Value::Object(next_request),
+        _ => return Ok(Value::Object(next_request)),
     };
     let semantics_obj = match semantics.as_object_mut() {
         Some(v) => v,
-        None => return Value::Object(next_request),
+        None => return Ok(Value::Object(next_request)),
     };
     let responses = match semantics_obj.get_mut("responses") {
         Some(v) if v.is_object() => v,
-        _ => return Value::Object(next_request),
+        _ => return Ok(Value::Object(next_request)),
     };
     let responses_obj = match responses.as_object_mut() {
         Some(v) => v,
-        None => return Value::Object(next_request),
+        None => return Ok(Value::Object(next_request)),
     };
     let context = match responses_obj.get_mut("context") {
         Some(v) if v.is_object() => v,
-        _ => return Value::Object(next_request),
+        _ => return Ok(Value::Object(next_request)),
     };
     let context_obj = match context.as_object_mut() {
         Some(v) => v,
-        None => return Value::Object(next_request),
+        None => return Ok(Value::Object(next_request)),
     };
 
-    let bridge = build_bridge_history(BuildBridgeHistoryInput { messages, tools });
+    let bridge = build_bridge_history(BuildBridgeHistoryInput { messages, tools })?;
     let bridge_input = serde_json::to_value(bridge.input).unwrap_or_else(|_| Value::Array(vec![]));
     let original_system_messages = serde_json::to_value(bridge.original_system_messages)
         .unwrap_or_else(|_| Value::Array(vec![]));
@@ -1746,7 +1746,7 @@ fn sync_responses_context_from_canonical_messages(request: &Value) -> Value {
         "originalSystemMessages".to_string(),
         original_system_messages,
     );
-    Value::Object(next_request)
+    Ok(Value::Object(next_request))
 }
 
 fn is_passthrough_canonical_chat_key(key: &str) -> bool {
@@ -2872,7 +2872,8 @@ pub fn sync_responses_context_from_canonical_messages_json(
 ) -> napi::Result<String> {
     let request: Value = serde_json::from_str(&request_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse request JSON: {}", e)))?;
-    let output = sync_responses_context_from_canonical_messages(&request);
+    let output = sync_responses_context_from_canonical_messages(&request)
+        .map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output).map_err(|e| {
         napi::Error::from_reason(format!(
             "Failed to serialize synced responses context request: {}",
@@ -5003,7 +5004,7 @@ mod tests {
                 }
             }
         });
-        let output = sync_responses_context_from_canonical_messages(&request);
+        let output = sync_responses_context_from_canonical_messages(&request).unwrap();
         assert_eq!(
             output
                 .get("semantics")
@@ -5043,7 +5044,7 @@ mod tests {
                 "responses": {}
             }
         });
-        let output = sync_responses_context_from_canonical_messages(&request);
+        let output = sync_responses_context_from_canonical_messages(&request).unwrap();
         assert_eq!(output, request);
     }
 

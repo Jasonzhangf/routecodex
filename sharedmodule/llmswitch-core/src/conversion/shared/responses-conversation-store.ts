@@ -7,6 +7,11 @@ import {
   restoreResponsesContinuationPayloadWithNative,
   resumeResponsesConversationPayloadWithNative
 } from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+import {
+  inspectBridgeInputToolHistory,
+  inspectSyntheticRouteCodexBridgeInput,
+  type ToolHistoryContractViolation
+} from './openai-message-normalize.js';
 
 type AnyRecord = Record<string, unknown>;
 
@@ -100,6 +105,40 @@ function buildScopeKeys(scope: { sessionId?: unknown; conversationId?: unknown }
   return [...new Set(keys)];
 }
 
+function throwBridgeInputViolation(
+  violation: ToolHistoryContractViolation,
+  context: string
+): never {
+  const detailMessage = `Tool history contract violated: ${violation.code} at index ${violation.index}${
+    violation.callId ? ` (call_id=${violation.callId})` : ''
+  } — ${violation.reason}`;
+  throw new ProviderProtocolError(detailMessage, {
+    code: 'MALFORMED_REQUEST',
+    details: {
+      context,
+      sourceShape: 'bridge_input',
+      toolHistoryContractViolation: violation
+    }
+  });
+}
+
+function assertNoSyntheticOrMalformedBridgeInput(
+  input: unknown,
+  context: string,
+  options?: {
+    allowDanglingToolCalls?: boolean;
+  }
+): void {
+  const syntheticViolation = inspectSyntheticRouteCodexBridgeInput(input);
+  if (syntheticViolation) {
+    throwBridgeInputViolation(syntheticViolation, context);
+  }
+  const historyViolation = inspectBridgeInputToolHistory(input, options);
+  if (historyViolation) {
+    throwBridgeInputViolation(historyViolation, context);
+  }
+}
+
 class ResponsesConversationStore {
   private requestMap = new Map<string, ConversationEntry>();
   private responseIndex = new Map<string, ConversationEntry>();
@@ -152,7 +191,21 @@ class ResponsesConversationStore {
     if (entry.lastResponseId) {
       this.responseIndex.delete(entry.lastResponseId);
     }
+    const rawOutput = Array.isArray(response.output) ? response.output : [];
+    assertNoSyntheticOrMalformedBridgeInput(
+      rawOutput,
+      'responses-conversation-store.recordResponse.raw_output',
+      { allowDanglingToolCalls: true }
+    );
     const assistantBlocks = convertOutputToInputItems(response);
+    assertNoSyntheticOrMalformedBridgeInput(
+      [
+        ...entry.input,
+        ...assistantBlocks
+      ],
+      'responses-conversation-store.recordResponse',
+      { allowDanglingToolCalls: true }
+    );
     if (assistantBlocks.length) {
       entry.input.push(...assistantBlocks);
     }
@@ -376,6 +429,9 @@ export function captureResponsesRequestContext(args: CaptureContextArgs): void {
     }
     store.captureRequestContext(args);
   } catch (error) {
+    if (error instanceof ProviderProtocolError) {
+      throw error;
+    }
     logResponsesStoreNonBlockingError('capture', error, {
       requestId: args.requestId,
       sessionId: args.sessionId,
@@ -391,6 +447,9 @@ export function recordResponsesResponse(args: RecordResponseArgs): void {
     }
     store.recordResponse(args);
   } catch (error) {
+    if (error instanceof ProviderProtocolError) {
+      throw error;
+    }
     logResponsesStoreNonBlockingError('record', error, {
       requestId: args.requestId,
       responseId: (args.response as AnyRecord)?.id

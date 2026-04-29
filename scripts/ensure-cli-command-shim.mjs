@@ -12,6 +12,14 @@ function resolveShimDirs() {
   return [path.join(os.homedir(), '.local', 'bin')];
 }
 
+function shouldPreferReleaseSnapshot(binName) {
+  if (binName !== 'rcc') {
+    return false;
+  }
+  const raw = String(process.env.ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
 function normalizeCliPath(value) {
   if (!value) return '';
   return value.split(path.sep).join('/');
@@ -101,7 +109,7 @@ function writeShim(shimDir, binName, packageName) {
     return null;
   }
 
-  const preferReleaseSnapshot = binName === 'rcc';
+  const preferReleaseSnapshot = shouldPreferReleaseSnapshot(binName);
   const shimPath = path.join(shimDir, binName);
   const repoCliPath = path.join(REPO_ROOT, 'dist', 'cli.js');
   const globalCliPath = packageName.startsWith('@')

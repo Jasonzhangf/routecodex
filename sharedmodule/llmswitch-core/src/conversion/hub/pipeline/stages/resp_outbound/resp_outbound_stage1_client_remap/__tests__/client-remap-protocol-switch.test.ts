@@ -532,4 +532,74 @@ describe('client-remap-protocol-switch', () => {
     expect(requiredCalls[0].name).toBe('echo');
     expect(requiredCalls[0].arguments ?? requiredCalls[0].function?.arguments).toBe('{"text":"AUTO-JSON"}');
   });
+
+  it('normalizes responses required_action exec_command arguments by declared client schema', () => {
+    const payload = {
+      id: 'resp_exec_args_1',
+      status: 'requires_action',
+      required_action: {
+        type: 'submit_tool_outputs',
+        submit_tool_outputs: {
+          tool_calls: [
+            {
+              id: 'call_exec_args_1',
+              type: 'function_call',
+              name: 'Bash',
+              arguments: '{"command":"pwd","workdir":"/"}'
+            }
+          ]
+        }
+      },
+      output: [
+        {
+          id: 'fc_exec_args_1',
+          type: 'function_call',
+          call_id: 'call_exec_args_1',
+          name: 'Bash',
+          arguments: '{"command":"pwd","workdir":"/"}'
+        }
+      ]
+    };
+
+    const requestSemantics = {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: {
+                type: 'object',
+                properties: {
+                  cmd: { type: 'string' },
+                  workdir: { type: 'string' }
+                },
+                required: ['cmd'],
+                additionalProperties: false
+              }
+            }
+          }
+        ]
+      }
+    };
+
+    const result = buildClientPayloadForProtocol({
+      payload: payload as any,
+      clientProtocol: 'openai-responses',
+      requestId: 'req-test-responses-exec-args-normalize',
+      requestSemantics: requestSemantics as any
+    });
+
+    const requiredCall = (result as any).required_action.submit_tool_outputs.tool_calls[0];
+    const outputCall = (result as any).output[0];
+    expect(requiredCall.name).toBe('exec_command');
+    expect(requiredCall.arguments).toBe('{"cmd":"pwd","workdir":"/"}');
+    expect(requiredCall.input).toEqual({ cmd: 'pwd', workdir: '/' });
+    expect(requiredCall.function).toMatchObject({
+      name: 'exec_command',
+      arguments: '{"cmd":"pwd","workdir":"/"}'
+    });
+    expect(outputCall.name).toBe('exec_command');
+    expect(outputCall.arguments).toBe('{"cmd":"pwd","workdir":"/"}');
+  });
 });

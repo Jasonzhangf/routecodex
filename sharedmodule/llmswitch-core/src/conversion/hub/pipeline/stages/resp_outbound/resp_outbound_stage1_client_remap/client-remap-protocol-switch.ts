@@ -39,6 +39,11 @@ type ClientToolIndex = {
   byNamespaceName: Map<string, IndexedClientTool>;
 };
 
+function readSchema(entry: IndexedClientTool | undefined): unknown {
+  const functionBag = asRecord(entry?.tool.function);
+  return functionBag?.parameters ?? (entry?.tool as any)?.parameters;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -242,10 +247,6 @@ function remapChatToolCallsToClientNames(
     seenUnknown.add(key);
     unknownNames.push(key);
   };
-  const readSchema = (entry: IndexedClientTool | undefined): unknown => {
-    const functionBag = asRecord(entry?.tool.function);
-    return functionBag?.parameters ?? (entry?.tool as any)?.parameters;
-  };
 
   const choices = Array.isArray((payload as Record<string, unknown>).choices)
     ? ((payload as Record<string, unknown>).choices as unknown[])
@@ -307,6 +308,38 @@ function remapResponsesToolCallsToClientNames(
     seenUnknown.add(key);
     unknownNames.push(key);
   };
+  const normalizeCallArgumentsByDeclaredSchema = (
+    callBag: Record<string, unknown>,
+    matched: IndexedClientTool
+  ) => {
+    const schema = readSchema(matched);
+    const rawArgs = callBag.arguments ?? callBag.input;
+    let parsedArgs: unknown = rawArgs;
+    if (typeof rawArgs === 'string') {
+      try {
+        parsedArgs = JSON.parse(rawArgs);
+      } catch {
+        parsedArgs = rawArgs;
+      }
+    }
+    const normalized = normalizeArgsBySchema(parsedArgs, schema as any);
+    if (!(normalized.ok && normalized.value)) {
+      return;
+    }
+    try {
+      const serialized = JSON.stringify(normalized.value);
+      callBag.arguments = serialized;
+      const functionBag = asRecord(callBag.function);
+      if (functionBag) {
+        functionBag.arguments = serialized;
+      }
+      if ('input' in callBag) {
+        callBag.input = normalized.value as Record<string, unknown>;
+      }
+    } catch {
+      // keep existing args when client-arg serialization fails
+    }
+  };
 
   const requiredActionCalls = Array.isArray((payload as any)?.required_action?.submit_tool_outputs?.tool_calls)
     ? ((payload as any).required_action.submit_tool_outputs.tool_calls as unknown[])
@@ -330,6 +363,11 @@ function remapResponsesToolCallsToClientNames(
     if (matched.namespace) {
       callBag.namespace = matched.namespace;
     }
+    const functionBag = asRecord(callBag.function);
+    if (functionBag) {
+      functionBag.name = matched.declaredName;
+    }
+    normalizeCallArgumentsByDeclaredSchema(callBag, matched);
   }
 
   const outputItems = Array.isArray((payload as any)?.output) ? ((payload as any).output as unknown[]) : [];
@@ -356,6 +394,11 @@ function remapResponsesToolCallsToClientNames(
     if (matched.namespace) {
       itemBag.namespace = matched.namespace;
     }
+    const functionBag = asRecord(itemBag.function);
+    if (functionBag) {
+      functionBag.name = matched.declaredName;
+    }
+    normalizeCallArgumentsByDeclaredSchema(itemBag, matched);
   }
 
   return unknownNames;

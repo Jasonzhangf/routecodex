@@ -36,24 +36,6 @@ const CLOCK_LIST_REQUIRED_MESSAGE =
   'clock.schedule requires clock.list immediately before creating a new reminder. List existing reminders first, and prefer clock.update when you can edit an existing reminder instead of creating another one.';
 const CLOCK_NEARBY_REMINDER_WINDOW_MS = 5 * 60_000;
 
-let fallbackClockToolCallSeq = 0;
-
-function ensureClockToolCall(toolCall: ToolCall | undefined, requestId: string): ToolCall | null {
-  if (!toolCall || toolCall.name !== 'clock') {
-    return null;
-  }
-  const existingId = typeof toolCall.id === 'string' ? toolCall.id.trim() : '';
-  if (existingId) {
-    return toolCall;
-  }
-  fallbackClockToolCallSeq += 1;
-  const reqToken = String(requestId || 'req').replace(/[^a-zA-Z0-9_-]+/g, '_') || 'req';
-  return {
-    ...toolCall,
-    id: `call_clock_fallback_${reqToken}_${fallbackClockToolCallSeq}`
-  };
-}
-
 function extractAssistantMessageFromChatLike(chatResponse: JsonObject): JsonObject | null {
   if (!chatResponse || typeof chatResponse !== 'object') {
     return null;
@@ -376,8 +358,8 @@ function buildNearbyReminderWarnings(scheduled: ClockTask[], allTasks: ClockTask
 }
 
 const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promise<ServerToolHandlerPlan | null> => {
-  const toolCall = ensureClockToolCall(ctx.toolCall, ctx.requestId);
-  if (!toolCall) {
+  const toolCall = ctx.toolCall;
+  if (!toolCall || toolCall.name !== 'clock') {
     return null;
   }
 

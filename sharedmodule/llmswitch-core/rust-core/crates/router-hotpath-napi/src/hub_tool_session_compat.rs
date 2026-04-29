@@ -189,31 +189,20 @@ fn find_tool_message_index(messages: &[Value], start_index: usize, call_id: &str
     None
 }
 
-fn create_unknown_tool_message(
+fn create_tool_message_from_lookup(
     call_id: &str,
     call: &Map<String, Value>,
     tool_output_lookup: &HashMap<String, ToolOutputLookupEntry>,
-) -> Value {
+) -> Option<Value> {
     let call_name = call
         .get("function")
         .and_then(|entry| entry.as_object())
         .and_then(|entry| read_trimmed_string(entry.get("name")));
     let lookup_entry = tool_output_lookup.get(call_id);
+    let content = lookup_entry.and_then(|entry| entry.content.clone())?;
     let name = lookup_entry
         .and_then(|entry| entry.name.clone())
         .or(call_name);
-    let content = lookup_entry
-        .and_then(|entry| entry.content.clone())
-        .unwrap_or_else(|| {
-            let description = name
-                .as_ref()
-                .map(|value| format!("tool \"{}\"", value))
-                .unwrap_or_else(|| "tool call".to_string());
-            format!(
-                "{}: {} ({}) did not produce a result in this session. Treat this tool as failed with unknown status.",
-                TOOL_UNKNOWN_PREFIX, description, call_id
-            )
-        });
     let mut row = Map::new();
     row.insert("role".to_string(), Value::String("tool".to_string()));
     row.insert(
@@ -224,7 +213,7 @@ fn create_unknown_tool_message(
     if let Some(name_value) = name {
         row.insert("name".to_string(), Value::String(name_value));
     }
-    Value::Object(row)
+    Some(Value::Object(row))
 }
 
 fn enrich_existing_tool_message(
@@ -338,9 +327,12 @@ fn normalize_tool_call_ordering(
                 insertion_index += 1;
                 continue;
             }
-            let placeholder = create_unknown_tool_message(&call_id, call_obj, tool_output_lookup);
-            messages.insert(insertion_index, placeholder);
-            insertion_index += 1;
+            if let Some(tool_message) =
+                create_tool_message_from_lookup(&call_id, call_obj, tool_output_lookup)
+            {
+                messages.insert(insertion_index, tool_message);
+                insertion_index += 1;
+            }
         }
         index = std::cmp::max(index + 1, insertion_index);
     }
@@ -591,7 +583,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn normalizes_assistant_tool_message_order_and_inserts_unknown_placeholder() {
+    fn normalizes_assistant_tool_message_order_without_synthesizing_unknown_placeholder() {
         let input = ToolSessionCompatInput {
             messages: vec![
                 json!({
@@ -611,18 +603,8 @@ mod tests {
             tool_outputs: None,
         };
         let output = normalize_tool_session_payload(input);
-        assert_eq!(output.messages.len(), 3);
-        let first_tool = output.messages[1].as_object().unwrap();
-        assert_eq!(
-            first_tool.get("tool_call_id").and_then(|v| v.as_str()),
-            Some("call_a")
-        );
-        assert!(first_tool
-            .get("content")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .starts_with(TOOL_UNKNOWN_PREFIX));
-        let second_tool = output.messages[2].as_object().unwrap();
+        assert_eq!(output.messages.len(), 2);
+        let second_tool = output.messages[1].as_object().unwrap();
         assert_eq!(
             second_tool.get("tool_call_id").and_then(|v| v.as_str()),
             Some("call_b")

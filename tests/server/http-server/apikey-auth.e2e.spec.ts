@@ -4,9 +4,11 @@ import type { AddressInfo } from 'node:net';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import express from 'express';
 import { RouteCodexHttpServer } from '../../../src/server/runtime/http-server/index.js';
 import type { ServerConfigV2 } from '../../../src/server/runtime/http-server/types.js';
 import { writeDaemonLoginRecord } from '../../../src/server/runtime/http-server/daemon-admin/auth-store.js';
+import { registerApiKeyAuthMiddleware } from '../../../src/server/runtime/http-server/middleware.js';
 
 function setEnv(name: string, value: string | undefined): () => void {
   const original = process.env[name];
@@ -85,6 +87,22 @@ async function stopTestServer(server: RouteCodexHttpServer, configDir: string, r
   } catch {
     // ignore cleanup errors
   }
+}
+
+async function startStubMiddlewareServer(apikey: string): Promise<{ raw: http.Server; baseUrl: string }> {
+  const app = express();
+  registerApiKeyAuthMiddleware(app, createTestConfig(0, apikey, '0.0.0.0'));
+  app.post('/shutdown', (_req, res) => {
+    res.status(200).json({ ok: true });
+  });
+  const raw = await new Promise<http.Server>((resolve) => {
+    const server = app.listen(0, '127.0.0.1', () => resolve(server));
+  });
+  const addr = raw.address() as AddressInfo | null;
+  if (!addr || typeof addr.port !== 'number') {
+    throw new Error('Failed to resolve stub server port');
+  }
+  return { raw, baseUrl: `http://127.0.0.1:${addr.port}` };
 }
 
 async function getJson(
@@ -177,6 +195,19 @@ describe('HTTP apikey auth (optional)', () => {
       expect(String(portal.body)).toContain('<html');
     } finally {
       await stopTestServer(server, configDir, restoreEnv);
+    }
+  });
+
+  it('keeps /shutdown reachable from localhost so cli stop can work on apikey-protected servers', async () => {
+    const expected = 'test-apikey';
+    const { raw, baseUrl } = await startStubMiddlewareServer(expected);
+    try {
+      const res = await fetch(`${baseUrl}/shutdown`, { method: 'POST' });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toMatchObject({ ok: true });
+    } finally {
+      await new Promise<void>((resolve) => raw.close(() => resolve()));
     }
   });
 

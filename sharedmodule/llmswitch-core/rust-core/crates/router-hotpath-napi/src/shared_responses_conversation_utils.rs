@@ -55,18 +55,18 @@ fn read_command_from_args_map(args: &Map<String, Value>) -> Option<String> {
         read_trimmed_text(value).or_else(|| read_string_array_command(value))
     };
 
-    let direct = read_value(args.get("cmd"));
+    let direct = read_value(args.get("cmd")).or_else(|| read_value(args.get("command")));
     if direct.is_some() {
         return direct;
     }
 
     args.get("input")
         .and_then(Value::as_object)
-        .and_then(|row| read_value(row.get("cmd")))
+        .and_then(|row| read_value(row.get("cmd")).or_else(|| read_value(row.get("command"))))
         .or_else(|| {
             args.get("args")
                 .and_then(Value::as_object)
-                .and_then(|row| read_value(row.get("cmd")))
+                .and_then(|row| read_value(row.get("cmd")).or_else(|| read_value(row.get("command"))))
         })
 }
 
@@ -314,24 +314,31 @@ fn normalize_submitted_tool_outputs(
         let raw_id = read_trimmed_string(row.get("tool_call_id"))
             .or_else(|| read_trimmed_string(row.get("call_id")))
             .or_else(|| read_trimmed_string(row.get("id")));
-        let call_id = raw_id
-            .clone()
-            .unwrap_or_else(|| format!("call_resume_{}", index));
+        let call_id = raw_id.clone();
 
-        let mapped_item_id = call_id_to_function_item_id
-            .get(&call_id)
+        let mapped_item_id = call_id
+            .as_ref()
+            .and_then(|resolved_call_id| call_id_to_function_item_id.get(resolved_call_id))
             .and_then(Value::as_str)
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
 
         let output_id = if let Some(mapped) = mapped_item_id {
-            normalize_function_call_output_id(Some(mapped.as_str()), mapped.as_str())
-        } else {
+            Some(normalize_function_call_output_id(
+                Some(mapped.as_str()),
+                mapped.as_str(),
+            ))
+        } else if let Some(resolved_call_id) = call_id.as_ref() {
             let fallback = raw_id
                 .clone()
                 .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| format!("fc_resume_{}", index));
-            normalize_function_call_output_id(Some(call_id.as_str()), fallback.as_str())
+                .unwrap_or_else(|| resolved_call_id.clone());
+            Some(normalize_function_call_output_id(
+                Some(resolved_call_id.as_str()),
+                fallback.as_str(),
+            ))
+        } else {
+            None
         };
 
         let output_text = match row.get("output") {
@@ -340,16 +347,23 @@ fn normalize_submitted_tool_outputs(
             None => "null".to_string(),
         };
 
-        items.push(serde_json::json!({
-            "type": "function_call_output",
-            "id": output_id,
-            "call_id": call_id,
-            "output": output_text,
-        }));
+        let mut item = Map::new();
+        item.insert(
+            "type".to_string(),
+            Value::String("function_call_output".to_string()),
+        );
+        if let Some(output_id_value) = output_id {
+            item.insert("id".to_string(), Value::String(output_id_value));
+        }
+        if let Some(resolved_call_id) = call_id.clone() {
+            item.insert("call_id".to_string(), Value::String(resolved_call_id));
+        }
+        item.insert("output".to_string(), Value::String(output_text.clone()));
+        items.push(Value::Object(item));
 
         submitted.push(serde_json::json!({
-            "callId": call_id,
-            "originalId": raw_id.unwrap_or_else(|| call_id.clone()),
+            "callId": call_id.clone(),
+            "originalId": raw_id.clone(),
             "outputText": output_text,
         }));
     }
@@ -902,7 +916,7 @@ mod tests {
     }
 
     #[test]
-    fn drops_command_only_exec_command_when_converting_output_items() {
+    fn normalizes_command_only_exec_command_when_converting_output_items() {
         let response = json!({
             "output": [
                 {
@@ -919,6 +933,11 @@ mod tests {
             .as_array()
             .cloned()
             .unwrap_or_default();
-        assert!(items.is_empty());
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["call_id"], "call_bad");
+        let args_text = items[0]["arguments"].as_str().unwrap_or("{}");
+        let args: Value = serde_json::from_str(args_text).expect("args object");
+        assert_eq!(args["cmd"], "pwd");
+        assert_eq!(args["workdir"], "/tmp");
     }
 }

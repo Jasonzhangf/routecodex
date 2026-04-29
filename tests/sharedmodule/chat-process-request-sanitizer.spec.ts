@@ -76,7 +76,7 @@ describe('sanitizeChatProcessRequest', () => {
     expect(out.metadata?.chatProcessSanitizer?.removedTemplateAssistantTurns).toBe(1);
   });
 
-  it('backfills single pending tool_call_id and drops orphan tool turns', () => {
+  it('does not backfill tool_call_id or drop orphan tool turns', () => {
     const input: any = {
       messages: [
         { role: 'user', content: 'run command' },
@@ -97,13 +97,10 @@ describe('sanitizeChatProcessRequest', () => {
     };
 
     const out: any = sanitizeChatProcessRequest(input);
-    expect(out.messages).toHaveLength(3);
+    expect(out.messages).toHaveLength(4);
     expect(out.messages[2].role).toBe('tool');
-    expect(out.messages[2].tool_call_id).toBe('call_1');
-    expect(out.metadata?.chatProcessSanitizer).toMatchObject({
-      backfilledToolCallIds: 1,
-      removedOrphanToolTurns: 1,
-      removedToolTurns: 1
-    });
+    expect(out.messages[2].tool_call_id).toBeUndefined();
+    expect(out.messages[3].role).toBe('tool');
+    expect(out.metadata?.chatProcessSanitizer).toBeUndefined();
   });
 });

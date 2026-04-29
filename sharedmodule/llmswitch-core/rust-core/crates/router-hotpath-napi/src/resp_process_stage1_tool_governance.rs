@@ -1,4 +1,10 @@
 use crate::shared_tooling::repair_find_meta_impl;
+use crate::{
+    hub_bridge_actions::utils::{
+        can_servertool_own_tool_call_id, create_harvested_tool_call_id,
+        create_servertool_tool_call_id, is_synthetic_routecodex_tool_call_id,
+    },
+};
 use napi_derive::napi;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -3464,6 +3470,99 @@ fn normalize_tool_call_entry(entry: &Value, fallback_id: usize) -> Option<Value>
     }))
 }
 
+fn ensure_tool_call_id_fields(
+    tool_call_obj: &mut Map<String, Value>,
+    request_id: &str,
+    sequence: &mut usize,
+) -> Result<bool, String> {
+    let existing_id = read_trimmed_string(tool_call_obj.get("id"))
+        .or_else(|| read_trimmed_string(tool_call_obj.get("tool_call_id")))
+        .or_else(|| read_trimmed_string(tool_call_obj.get("call_id")));
+    if let Some(existing) = existing_id {
+        if is_synthetic_routecodex_tool_call_id(existing.as_str()) {
+            return Err(format!(
+                "synthetic_tool_call_id: RouteCodex synthetic fallback tool_call id is forbidden: {}",
+                existing
+            ));
+        }
+        tool_call_obj.insert("id".to_string(), Value::String(existing.clone()));
+        tool_call_obj.insert("tool_call_id".to_string(), Value::String(existing.clone()));
+        tool_call_obj.insert("call_id".to_string(), Value::String(existing));
+        return Ok(false);
+    }
+
+    *sequence += 1;
+    let function_name = tool_call_obj
+        .get("function")
+        .and_then(Value::as_object)
+        .and_then(|row| read_trimmed_string(row.get("name")))
+        .or_else(|| read_trimmed_string(tool_call_obj.get("name")));
+    let canonical_name = function_name
+        .as_deref()
+        .and_then(normalize_tool_name)
+        .or(function_name.clone());
+    let generated = match canonical_name {
+        Some(name) if can_servertool_own_tool_call_id(name.as_str()) => {
+            create_servertool_tool_call_id(name.as_str(), Some(request_id), *sequence)
+        }
+        _ => create_harvested_tool_call_id(Some(request_id), *sequence),
+    };
+    tool_call_obj.insert("id".to_string(), Value::String(generated.clone()));
+    tool_call_obj.insert("tool_call_id".to_string(), Value::String(generated.clone()));
+    tool_call_obj.insert("call_id".to_string(), Value::String(generated));
+    Ok(true)
+}
+
+fn ensure_payload_tool_call_ids(payload: &mut Value, request_id: &str) -> Result<i64, String> {
+    let mut assigned = 0i64;
+    let mut sequence = 0usize;
+
+    let mut visit_message = |message: &mut Map<String, Value>| -> Result<(), String> {
+        let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) else {
+            return Ok(());
+        };
+        for tool_call in tool_calls.iter_mut() {
+            let Some(tool_call_obj) = tool_call.as_object_mut() else {
+                continue;
+            };
+            if ensure_tool_call_id_fields(tool_call_obj, request_id, &mut sequence)? {
+                assigned += 1;
+            }
+        }
+        Ok(())
+    };
+
+    if let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) {
+        for choice in choices.iter_mut() {
+            let Some(message) = choice
+                .as_object_mut()
+                .and_then(|row| row.get_mut("message"))
+                .and_then(Value::as_object_mut)
+            else {
+                continue;
+            };
+            visit_message(message)?;
+        }
+    }
+
+    if let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages.iter_mut() {
+            let Some(message_obj) = message.as_object_mut() else {
+                continue;
+            };
+            if !read_trimmed_string(message_obj.get("role"))
+                .unwrap_or_default()
+                .eq_ignore_ascii_case("assistant")
+            {
+                continue;
+            }
+            visit_message(message_obj)?;
+        }
+    }
+
+    Ok(assigned)
+}
+
 fn read_tool_name_hint_from_args(raw_args: Option<&Value>) -> Option<String> {
     fn scan(value: &Value, depth: usize) -> Option<String> {
         if depth == 0 {
@@ -4895,6 +4994,7 @@ pub fn govern_response(input: ToolGovernanceInput) -> Result<ToolGovernanceOutpu
     let thinking_reasoning_normalized = normalize_thinking_only_reasoning_content(&mut payload);
     let sanitized_tool_markup = sanitize_payload_tool_markup_fields(&mut payload);
     strip_orphan_function_calls_tag(&mut payload);
+    let tool_call_ids_assigned = ensure_payload_tool_call_ids(&mut payload, input.request_id.as_str())?;
 
     let apply_patch_repaired = normalize_apply_patch_tool_calls(&mut payload);
     let disallowed_tool_calls_dropped = drop_disallowed_tool_calls_from_payload(&mut payload);
@@ -4905,6 +5005,7 @@ pub fn govern_response(input: ToolGovernanceInput) -> Result<ToolGovernanceOutpu
     let applied = harvested > 0
         || thinking_reasoning_normalized > 0
         || sanitized_tool_markup > 0
+        || tool_call_ids_assigned > 0
         || tool_calls_normalized > 0
         || apply_patch_repaired > 0
         || disallowed_tool_calls_dropped > 0;
@@ -5090,6 +5191,36 @@ mod tests {
         let result = govern_response(input).unwrap();
         assert!(result.summary.applied);
         assert_eq!(result.summary.tool_calls_normalized, 1);
+        let call_id = result.governed_payload["choices"][0]["message"]["tool_calls"][0]["id"]
+            .as_str()
+            .unwrap_or("");
+        assert!(call_id.starts_with("call_harvested_"));
+    }
+
+    #[test]
+    fn test_govern_response_assigns_formal_servertool_call_id() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "tool_calls": [{
+                            "function": {
+                                "name": "reasoning.stop",
+                                "arguments": "{\"stop_reason\":\"task_completed\",\"is_completed\":true}"
+                            }
+                        }]
+                    }
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat".to_string(),
+            request_id: "req_srvtool_123".to_string(),
+        };
+        let result = govern_response(input).unwrap();
+        let call_id = result.governed_payload["choices"][0]["message"]["tool_calls"][0]["id"]
+            .as_str()
+            .unwrap_or("");
+        assert!(call_id.starts_with("call_servertool_reasoning_stop_"));
     }
 
     #[test]

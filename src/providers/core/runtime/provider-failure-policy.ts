@@ -282,6 +282,22 @@ export function resolveProviderFailureClassification(args: {
     return 'recoverable';
   }
 
+  if (
+    errorCode === 'MALFORMED_REQUEST'
+    || upstreamCode === 'MALFORMED_REQUEST'
+    || nestedCode === 'MALFORMED_REQUEST'
+  ) {
+    return 'special_400';
+  }
+
+  if (
+    errorCode === 'MALFORMED_RESPONSE'
+    || upstreamCode === 'MALFORMED_RESPONSE'
+    || nestedCode === 'MALFORMED_RESPONSE'
+  ) {
+    return 'unrecoverable';
+  }
+
   if (errorCode === 'CONTEXT_LENGTH_EXCEEDED' || upstreamCode === 'CONTEXT_LENGTH_EXCEEDED') {
     return 'special_400';
   }

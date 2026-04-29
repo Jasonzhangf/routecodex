@@ -20,6 +20,7 @@ import { recordWarmupSkipEvent } from '../utils/warmup-storm-tracker.js';
 import { trackClientConnectionState } from '../utils/client-connection-state.js';
 import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { payloadContainsVideoInput, VIDEO_REQUEST_TIMEOUT_MS } from '../utils/video-request-detection.js';
+import { writeErrorsampleJson } from '../../utils/errorsamples.js';
 
 interface ResponsesHandlerOptions {
   entryEndpoint?: string;
@@ -50,6 +51,39 @@ function logResponsesHandlerNonBlockingError(stage: string, error: unknown, deta
   } catch {
     // Never throw from non-blocking logging.
   }
+}
+
+function queueInboundToolHistoryErrorsample(args: {
+  requestId: string;
+  entryEndpoint: string;
+  body: unknown;
+  error: unknown;
+}): void {
+  void writeErrorsampleJson({
+    group: 'payload-contract-error',
+    kind: 'responses.inbound_tool_history_contract',
+    payload: {
+      kind: 'responses_inbound_tool_history_contract',
+      timestamp: new Date().toISOString(),
+      requestId: args.requestId,
+      entryEndpoint: args.entryEndpoint,
+      body: args.body,
+      error:
+        args.error && typeof args.error === 'object'
+          ? {
+              name: (args.error as { name?: unknown }).name,
+              message: (args.error as { message?: unknown }).message,
+              code: (args.error as { code?: unknown }).code,
+              details: (args.error as { details?: unknown }).details
+            }
+          : { message: String(args.error ?? 'unknown_error') }
+    }
+  }).catch((error) => {
+    logResponsesHandlerNonBlockingError('tool_history_errorsample.write', error, {
+      requestId: args.requestId,
+      entryEndpoint: args.entryEndpoint
+    });
+  });
 }
 
 export async function handleResponses(
@@ -291,6 +325,26 @@ export async function handleResponses(
     clearTimeoutHandle();
     if (timedOut) {
       return;
+    }
+    const errorRecord = error as Record<string, unknown> | null;
+    const code = typeof errorRecord?.code === 'string' ? String(errorRecord.code) : '';
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    const details = errorRecord && typeof errorRecord.details === 'object'
+      ? (errorRecord.details as Record<string, unknown>)
+      : undefined;
+    if (
+      code === 'MALFORMED_REQUEST'
+      && (
+        message.includes('Tool history contract violated')
+        || Boolean(details?.toolHistoryContractViolation)
+      )
+    ) {
+      queueInboundToolHistoryErrorsample({
+        requestId,
+        entryEndpoint,
+        body: req.body,
+        error
+      });
     }
     logRequestError(entryEndpoint, requestId, error);
     if (res.headersSent) {

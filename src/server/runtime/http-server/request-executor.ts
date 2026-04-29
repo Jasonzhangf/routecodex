@@ -2517,6 +2517,27 @@ function valueHasNonEmptyText(value: unknown): boolean {
   );
 }
 
+function valueHasVisibleAssistantText(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => valueHasVisibleAssistantText(item));
+  }
+  if (!isRecord(value)) {
+    return false;
+  }
+  const entryType = readString(value.type)?.toLowerCase();
+  if (entryType === 'thinking' || entryType === 'reasoning') {
+    return false;
+  }
+  return (
+    valueHasVisibleAssistantText(value.text)
+    || valueHasVisibleAssistantText(value.output_text)
+    || valueHasVisibleAssistantText(value.content)
+  );
+}
+
 function extractTextFromResponsesOutputItem(item: unknown): string {
   if (!isRecord(item)) {
     return '';
@@ -2825,17 +2846,13 @@ function detectRetryableEmptyAssistantResponse(body: unknown): { reason: string;
     const message = isRecord(firstChoice.message) ? firstChoice.message : undefined;
     const hasToolCalls = hasNonEmptyToolCalls(message?.tool_calls);
     const hasText =
-      valueHasNonEmptyText(message?.content)
-      || valueHasNonEmptyText(message?.reasoning_content)
-      || valueHasNonEmptyText(message?.reasoning)
-      || valueHasNonEmptyText(firstChoice.content);
+      valueHasVisibleAssistantText(message?.content)
+      || valueHasVisibleAssistantText(firstChoice.content);
     const combinedText = [
       message?.content,
-      message?.reasoning_content,
-      message?.reasoning,
       firstChoice.content
     ]
-      .filter((item) => valueHasNonEmptyText(item))
+      .filter((item) => valueHasVisibleAssistantText(item))
       .map((item) => String(item))
       .join('\n');
     if ((finishReason === 'stop' || finishReason === 'tool_calls' || !finishReason) && !hasToolCalls && !hasText) {
@@ -2862,9 +2879,8 @@ function detectRetryableEmptyAssistantResponse(body: unknown): { reason: string;
     const hasRequiredActionToolCalls = hasNonEmptyToolCalls(submitToolOutputs?.tool_calls);
     const hasFunctionCalls = hasOutputFunctionCalls(body.output);
     const hasText =
-      valueHasNonEmptyText(body.output_text)
-      || valueHasNonEmptyText(body.output)
-      || valueHasNonEmptyText(body.reasoning);
+      valueHasVisibleAssistantText(body.output_text)
+      || valueHasVisibleAssistantText(body.output);
     if (!hasRequiredActionToolCalls && !hasFunctionCalls && !hasText) {
       return {
         reason: `responses status=${status} but output text/tool_calls are empty`,
@@ -3628,17 +3644,14 @@ export class HubRequestExecutor implements RequestExecutor {
           try {
             await rebindResponsesConversationRequestId(previousRequestId, input.requestId);
           } catch (error) {
-            logRequestExecutorNonBlockingError('responsesConversation.rebindRequestId', error, {
-              previousRequestId,
-              requestId: input.requestId,
-              providerKey: target.providerKey,
-              runtimeKey
-            });
-            logRequestExecutorDegraded('responsesConversation.rebindRequestId', input.requestId, {
+            this.logStage('responsesConversation.rebindRequestId.error', input.requestId, {
               previousRequestId,
               providerKey: target.providerKey,
-              runtimeKey
+              runtimeKey,
+              message: error instanceof Error ? error.message : String(error ?? 'Unknown error'),
+              attempt
             });
+            throw error;
           }
         }
         this.logStage('provider.context_resolve.completed', input.requestId, {
@@ -4135,6 +4148,10 @@ export class HubRequestExecutor implements RequestExecutor {
           }
           const assistantSanitizationPlaceholderSignal = detectAssistantSanitizationPlaceholder(converted.body);
           if (assistantSanitizationPlaceholderSignal) {
+            const bodyForError =
+              converted.body && typeof converted.body === 'object'
+                ? (converted.body as Record<string, unknown>)
+                : undefined;
             queuePayloadContractErrorsample({
               phase: 'provider-response',
               requestId: input.requestId,
@@ -4189,6 +4206,18 @@ export class HubRequestExecutor implements RequestExecutor {
               reason: assistantSanitizationPlaceholderSignal.reason,
               attempt
             });
+            const errorToThrow: any = new Error(
+              `Upstream returned assistant placeholder payload: ${assistantSanitizationPlaceholderSignal.reason}`
+            );
+            errorToThrow.statusCode = 502;
+            errorToThrow.status = 502;
+            errorToThrow.code = 'EMPTY_ASSISTANT_RESPONSE';
+            errorToThrow.retryable = true;
+            errorToThrow.requestExecutorProviderErrorStage = 'host.response_contract';
+            if (bodyForError) {
+              errorToThrow.response = { data: bodyForError };
+            }
+            throw errorToThrow;
           }
           const stoplessTerminationSignal = detectStoplessTerminationWithoutFinalization(
             converted.body,

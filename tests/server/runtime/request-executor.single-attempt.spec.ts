@@ -684,14 +684,17 @@ describe('HubRequestExecutor single attempt behaviour', () => {
           }
         });
 
-      const response = await executor.execute({
+      await expect(executor.execute({
         requestId: 'req_sanitized_placeholder_errorsample',
         entryEndpoint: '/v1/chat/completions',
         headers: {},
         body: { messages: [{ role: 'user', content: 'retry me' }] },
         metadata: { stream: false, inboundStream: false }
+      })).rejects.toMatchObject({
+        code: 'EMPTY_ASSISTANT_RESPONSE',
+        statusCode: 502,
+        requestExecutorProviderErrorStage: 'host.response_contract'
       });
-      expect(response.status).toBe(200);
       await __flushErrorsampleQueueForTests();
       await __flushProviderSnapshotQueueForTests();
 

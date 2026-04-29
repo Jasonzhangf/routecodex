@@ -10,6 +10,7 @@ import {
   shouldRetryProviderError,
   waitBeforeRetry
 } from '../executor-provider.js';
+import { resolveAntigravityMaxProviderAttempts } from './request-retry-helpers.js';
 
 // Re-export for backward compatibility
 export {
@@ -81,17 +82,4 @@ export function resolveMaxProviderAttempts(): number {
   return Math.max(1, Math.min(20, candidate));
 }
 
-/**
- * Resolve maximum provider attempts for Antigravity from environment
- */
-export function resolveAntigravityMaxProviderAttempts(): number {
-  const DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS = 20;
-  const raw = String(
-    process.env.ROUTECODEX_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS || process.env.RCC_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS || ''
-  )
-    .trim()
-    .toLowerCase();
-  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  const candidate = Number.isFinite(parsed) ? parsed : DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS;
-  return Math.max(1, Math.min(60, candidate));
-}
+export { resolveAntigravityMaxProviderAttempts };

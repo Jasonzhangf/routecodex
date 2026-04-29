@@ -46,11 +46,10 @@ function readNonEmptyString(value: unknown): string | undefined {
 
 function normalizeToolCalls(
   calls: unknown[],
-  messageIndex: number
+  _messageIndex: number
 ): { normalized: ToolCall[]; ids: string[] } {
   const normalized: ToolCall[] = [];
   const ids: string[] = [];
-  let autoSeq = 0;
   for (const item of calls) {
     if (!item || typeof item !== 'object') {
       continue;
@@ -59,8 +58,10 @@ function normalizeToolCalls(
     const normalizedId =
       readNonEmptyString(call.id) ??
       readNonEmptyString(call.call_id) ??
-      readNonEmptyString(call.tool_call_id) ??
-      `call_auto_${messageIndex}_${++autoSeq}`;
+      readNonEmptyString(call.tool_call_id);
+    if (!normalizedId) {
+      continue;
+    }
     call.id = normalizedId;
     delete call.call_id;
     delete call.tool_call_id;
@@ -88,9 +89,6 @@ export function sanitizeChatProcessRequest(
 
   let removedEmptyAssistantTurns = 0;
   let removedTemplateAssistantTurns = 0;
-  let removedEmptyToolTurns = 0;
-  let removedOrphanToolTurns = 0;
-  let backfilledToolCallIds = 0;
   const pendingToolCallIds: string[] = [];
 
   const messages: StandardizedMessage[] = [];
@@ -103,7 +101,12 @@ export function sanitizeChatProcessRequest(
     if (role === 'assistant') {
       const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
       if (hasToolCalls) {
-        const { normalized, ids } = normalizeToolCalls(message.tool_calls as unknown[], index);
+        const rawToolCalls = message.tool_calls as unknown[];
+        const { normalized, ids } = normalizeToolCalls(rawToolCalls, index);
+        if (normalized.length !== rawToolCalls.length) {
+          messages.push(message);
+          return;
+        }
         if (ids.length > 0) {
           pendingToolCallIds.push(...ids);
         }
@@ -127,40 +130,31 @@ export function sanitizeChatProcessRequest(
     }
     if (role === 'tool') {
       const messageRecord = message as unknown as Record<string, unknown>;
-      const text = extractMessageText(message.content);
       let toolCallId =
         readNonEmptyString(message.tool_call_id) ??
         readNonEmptyString(messageRecord.call_id) ??
         readNonEmptyString(messageRecord.id);
-      if (!toolCallId && pendingToolCallIds.length === 1) {
-        toolCallId = pendingToolCallIds.shift();
-        backfilledToolCallIds += 1;
-      } else if (toolCallId) {
+      if (toolCallId) {
         const pendingIndex = pendingToolCallIds.indexOf(toolCallId);
         if (pendingIndex >= 0) {
           pendingToolCallIds.splice(pendingIndex, 1);
         }
       }
-      if (!toolCallId && !text) {
-        removedEmptyToolTurns += 1;
-        return;
-      }
-      if (!toolCallId) {
-        removedOrphanToolTurns += 1;
-        return;
-      }
-      messages.push({
-        ...message,
-        tool_call_id: toolCallId
-      });
+      messages.push(
+        toolCallId
+          ? {
+              ...message,
+              tool_call_id: toolCallId
+            }
+          : message
+      );
       return;
     }
     messages.push(message);
   });
 
   const removedAssistantTurns = removedEmptyAssistantTurns + removedTemplateAssistantTurns;
-  const removedToolTurns = removedEmptyToolTurns + removedOrphanToolTurns;
-  if (removedAssistantTurns <= 0 && removedToolTurns <= 0 && backfilledToolCallIds <= 0) {
+  if (removedAssistantTurns <= 0) {
     return sanitized;
   }
 
@@ -170,10 +164,10 @@ export function sanitizeChatProcessRequest(
       removedAssistantTurns,
       removedEmptyAssistantTurns,
       removedTemplateAssistantTurns,
-      removedToolTurns,
-      removedEmptyToolTurns,
-      removedOrphanToolTurns,
-      backfilledToolCallIds
+      removedToolTurns: 0,
+      removedEmptyToolTurns: 0,
+      removedOrphanToolTurns: 0,
+      backfilledToolCallIds: 0
     }
   };
 

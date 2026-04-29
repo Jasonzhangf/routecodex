@@ -47,7 +47,7 @@ npm run fix:cli-permission
 
 echo "📦 安装 release snapshot（不可变运行时）..."
 node scripts/install-release-snapshot.mjs
-node scripts/ensure-cli-command-shim.mjs || true
+ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 node scripts/ensure-cli-command-shim.mjs || true
 node scripts/ensure-cli-executable.mjs || true
 
 echo "🔍 验证 routecodex / rcc 安装..."

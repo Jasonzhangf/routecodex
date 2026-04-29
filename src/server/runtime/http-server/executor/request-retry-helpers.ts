@@ -1,5 +1,24 @@
 import { getSessionClientRegistry } from '../session-client-registry.js';
 import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.js';
+import { extractStatusCodeFromError } from './utils.js';
+import {
+  extractRetryErrorSignature,
+  injectAntigravityRetrySignal,
+  isAntigravityProviderKey,
+  isAntigravityReauthRequired403,
+  isGoogleAccountVerificationRequiredError,
+  shouldRotateAntigravityAliasOnRetry
+} from './antigravity-detector.js';
+
+export {
+  extractRetryErrorSignature,
+  injectAntigravityRetrySignal,
+  isAntigravityProviderKey,
+  isAntigravityReauthRequired403,
+  isGoogleAccountVerificationRequiredError,
+  shouldRotateAntigravityAliasOnRetry,
+  extractStatusCodeFromError
+};
 
 const DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS = 20;
 
@@ -58,10 +77,6 @@ export function resolveAntigravityMaxProviderAttempts(): number {
   return Math.max(1, Math.min(60, candidate));
 }
 
-export function isAntigravityProviderKey(providerKey: string | undefined): boolean {
-  return typeof providerKey === 'string' && providerKey.startsWith('antigravity.');
-}
-
 function coerceErrorCode(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
@@ -75,83 +90,6 @@ export function isRateLimitLikeError(message: string, ...codes: Array<string | u
     return true;
   }
   return RATE_LIMIT_MESSAGE_HINTS.some((hint) => loweredMessage.includes(hint));
-}
-
-export function isGoogleAccountVerificationRequiredError(err: unknown): boolean {
-  if (!err || typeof err !== 'object') {
-    return false;
-  }
-  const messageRaw = (err as { message?: unknown }).message;
-  const message = typeof messageRaw === 'string' ? messageRaw : '';
-  if (!message) {
-    return false;
-  }
-  const lowered = message.toLowerCase();
-  return (
-    lowered.includes('verify your account') ||
-    lowered.includes('validation_required') ||
-    lowered.includes('validation required') ||
-    lowered.includes('validation_url') ||
-    lowered.includes('validation url') ||
-    lowered.includes('accounts.google.com/signin/continue') ||
-    lowered.includes('support.google.com/accounts?p=al_alert')
-  );
-}
-
-export function extractStatusCodeFromError(err: unknown): number | undefined {
-  if (!err || typeof err !== 'object') return undefined;
-  const direct = (err as any).statusCode;
-  if (typeof direct === 'number') return direct;
-  const nested = (err as any).status;
-  if (typeof nested === 'number') return nested;
-  const details = (err as any).details;
-  if (details && typeof details === 'object') {
-    const detailStatusCode = (details as any).statusCode;
-    if (typeof detailStatusCode === 'number') return detailStatusCode;
-    const detailStatus = (details as any).status;
-    if (typeof detailStatus === 'number') return detailStatus;
-  }
-  const response = (err as any).response;
-  if (response && typeof response === 'object') {
-    const responseStatus = (response as any).status;
-    if (typeof responseStatus === 'number') return responseStatus;
-  }
-  return undefined;
-}
-
-export function isAntigravityReauthRequired403(err: unknown): boolean {
-  if (!err || typeof err !== 'object') {
-    return false;
-  }
-  const status = extractStatusCodeFromError(err);
-  if (status !== 403) {
-    return false;
-  }
-  if (isGoogleAccountVerificationRequiredError(err)) {
-    return false;
-  }
-  const messageRaw = (err as { message?: unknown }).message;
-  const message = typeof messageRaw === 'string' ? messageRaw : '';
-  if (!message) {
-    return false;
-  }
-  const lowered = message.toLowerCase();
-  return (
-    lowered.includes('please authenticate with google oauth first') ||
-    lowered.includes('authenticate with google oauth') ||
-    lowered.includes('missing required authentication credential') ||
-    lowered.includes('request is missing required authentication') ||
-    lowered.includes('unauthenticated') ||
-    lowered.includes('invalid token') ||
-    lowered.includes('invalid_grant') ||
-    lowered.includes('unauthorized') ||
-    lowered.includes('token expired') ||
-    lowered.includes('expired token')
-  );
-}
-
-export function shouldRotateAntigravityAliasOnRetry(_error: unknown): boolean {
-  return false;
 }
 
 export function isSseDecodeRateLimitError(error: unknown, status: number | undefined): boolean {
@@ -198,47 +136,6 @@ export function isSseDecodeRetryableNetworkError(error: unknown, status: number 
     message.includes('connection reset') ||
     message.includes('timeout')
   );
-}
-
-export function extractRetryErrorSignature(err: unknown): string {
-  if (!err || typeof err !== 'object') {
-    return 'unknown';
-  }
-  const status = extractStatusCodeFromError(err);
-  if (status === 403 && isGoogleAccountVerificationRequiredError(err)) {
-    return '403:GOOGLE_VERIFY';
-  }
-  if (status === 403 && isAntigravityReauthRequired403(err)) {
-    return '403:OAUTH_REAUTH';
-  }
-  const codeRaw = (err as { code?: unknown }).code;
-  const upstreamCodeRaw = (err as { upstreamCode?: unknown }).upstreamCode;
-  const upstreamCode =
-    typeof upstreamCodeRaw === 'string' && upstreamCodeRaw.trim() ? upstreamCodeRaw.trim() : undefined;
-  const code = typeof codeRaw === 'string' && codeRaw.trim() ? codeRaw.trim() : undefined;
-  const parts = [
-    typeof status === 'number' && Number.isFinite(status) ? String(status) : '',
-    upstreamCode || '',
-    code || ''
-  ].filter((p) => p.length > 0);
-  return parts.length ? parts.join(':') : 'unknown';
-}
-
-export function injectAntigravityRetrySignal(
-  metadata: Record<string, unknown>,
-  signal: AntigravityRetrySignal | null
-): void {
-  if (!signal || !signal.signature || signal.consecutive <= 0) {
-    return;
-  }
-  const carrier = metadata as { __rt?: unknown };
-  const existing = carrier.__rt && typeof carrier.__rt === 'object' && !Array.isArray(carrier.__rt) ? carrier.__rt : {};
-  carrier.__rt = {
-    ...(existing as Record<string, unknown>),
-    antigravityRetryErrorSignature: signal.signature,
-    antigravityRetryErrorConsecutive: signal.consecutive,
-    ...(signal.avoidAllOnRetry === true ? { antigravityAvoidAllOnRetry: true } : {})
-  };
 }
 
 function normalizeSessionToken(value: unknown): string | undefined {

@@ -103,7 +103,7 @@ export function extractRetryErrorSignature(err: unknown): string {
  * Determine if should rotate Antigravity alias on retry
  * Safety: do not rotate between Antigravity aliases within a single request
  */
-export function shouldRotateAntigravityAliasOnRetry(): boolean {
+export function shouldRotateAntigravityAliasOnRetry(_error?: unknown): boolean {
   // Multi-account switching (especially during 4xx/429 states)
   // can cascade into cross-account reauth (403 verify) events.
   return false;

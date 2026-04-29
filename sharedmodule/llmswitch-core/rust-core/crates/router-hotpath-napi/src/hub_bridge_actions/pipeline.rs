@@ -66,7 +66,9 @@ fn apply_metadata_bridge_history(state: &mut BridgeActionState, bridge_history: 
     state.metadata = Some(Value::Object(metadata_obj));
 }
 
-pub(crate) fn run_bridge_action_pipeline(input: BridgeActionPipelineInput) -> BridgeActionState {
+pub(crate) fn run_bridge_action_pipeline(
+    input: BridgeActionPipelineInput,
+) -> Result<BridgeActionState, String> {
     let BridgeActionPipelineInput {
         stage,
         actions,
@@ -78,7 +80,7 @@ pub(crate) fn run_bridge_action_pipeline(input: BridgeActionPipelineInput) -> Br
 
     let action_list = actions.unwrap_or_default();
     if action_list.is_empty() {
-        return state;
+        return Ok(state);
     }
 
     for descriptor in action_list {
@@ -151,10 +153,11 @@ pub(crate) fn run_bridge_action_pipeline(input: BridgeActionPipelineInput) -> Br
                         .and_then(|value| value.get("tools"))
                         .and_then(|value| value.as_array())
                         .map(|items| items.clone());
-                    let output = apply_bridge_normalize_history(ApplyBridgeNormalizeHistoryInput {
-                        messages: mem::take(&mut state.messages),
-                        tools,
-                    });
+                    let output =
+                        apply_bridge_normalize_history(ApplyBridgeNormalizeHistoryInput {
+                            messages: mem::take(&mut state.messages),
+                            tools,
+                        })?;
                     state.messages = output.messages;
                     if let Some(bridge_history) = output.bridge_history {
                         apply_metadata_bridge_history(&mut state, bridge_history);
@@ -163,10 +166,10 @@ pub(crate) fn run_bridge_action_pipeline(input: BridgeActionPipelineInput) -> Br
             }
             "messages.ensure-output-fields" => {
                 if stage == "request_outbound" {
-                    let tool_fallback = pick_option_str(options_ref, "toolFallback")
-                        .unwrap_or_else(|| "Tool call completed (no output).".to_string());
-                    let assistant_fallback = pick_option_str(options_ref, "assistantFallback")
-                        .unwrap_or_else(|| "Assistant response unavailable.".to_string());
+                    let tool_fallback =
+                        pick_option_str(options_ref, "toolFallback").unwrap_or_default();
+                    let assistant_fallback =
+                        pick_option_str(options_ref, "assistantFallback").unwrap_or_default();
                     let output = ensure_bridge_output_fields(EnsureBridgeOutputFieldsInput {
                         messages: mem::take(&mut state.messages),
                         tool_fallback: Some(tool_fallback),
@@ -254,5 +257,5 @@ pub(crate) fn run_bridge_action_pipeline(input: BridgeActionPipelineInput) -> Br
         }
     }
 
-    state
+    Ok(state)
 }

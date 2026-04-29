@@ -64,5 +64,6 @@ export function seedReasoningStopStateFromCapturedRequest(
     syncReasoningStopModeFromRequest(baseContext, 'off');
   } catch (error) {
     onError?.(error);
+    throw error;
   }
 }

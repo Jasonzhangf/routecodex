@@ -14,6 +14,7 @@ import {
   GeminiResponseMapper
 } from './response-mappers.js';
 import type { ResponseMapper, ChatCompletionLike } from './response-mappers.js';
+import { ProviderProtocolError } from '../../provider-protocol-error.js';
 import {
   runRespInboundStage1SseDecode
 } from '../pipeline/stages/resp_inbound/resp_inbound_stage1_sse_decode/index.js';
@@ -584,8 +585,11 @@ export async function convertProviderResponse(
         requestId: options.context.requestId,
         response: clientPayload
       });
-    } catch {
-      // ignore conversation capture errors
+    } catch (error) {
+      if (error instanceof ProviderProtocolError) {
+        throw error;
+      }
+      // ignore non-contract conversation capture errors
     }
   }
 

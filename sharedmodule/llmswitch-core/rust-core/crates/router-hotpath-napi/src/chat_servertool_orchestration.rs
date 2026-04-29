@@ -1,7 +1,7 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::Serialize;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
 
 use crate::chat_web_search_intent::analyze_chat_web_search_intent;
 
@@ -80,37 +80,10 @@ fn build_review_operations(_metadata: &Value) -> Value {
 }
 
 fn build_continue_execution_operations(should_inject: bool) -> Value {
-    if !should_inject {
-        return Value::Array(Vec::new());
-    }
-
-    let parameters = json!({
-      "type": "object",
-      "properties": {},
-      "required": [],
-      "additionalProperties": false
-    });
-    let continue_tool = json!({
-      "type": "function",
-      "function": {
-        "name": "continue_execution",
-        "description": "No-op control tool for progress reporting without interrupting execution. Mandatory rule: if you are giving a progress-only update or are about to end_turn/stop, you MUST call continue_execution first (example arguments: {\"reason\":\"progress_update\"}). Required sequence: (1) call continue_execution, (2) provide a brief progress summary (<=5 lines), (3) immediately continue real actions. Do NOT emit finish_reason=stop/end_turn for progress-only updates. Only stop when the overall goal is actually complete. If waiting longer than 2 minutes is needed, use clock.schedule instead.",
-        "parameters": parameters,
-        "strict": true
-      }
-    });
-
-    json!([
-      {
-        "op": "set_request_metadata_fields",
-        "fields": { "continueExecutionEnabled": true }
-      },
-      {
-        "op": "append_tool_if_missing",
-        "toolName": "continue_execution",
-        "tool": continue_tool
-      }
-    ])
+    let _ = should_inject;
+    // continue_execution remains a server-side compatibility handler for historical/upstream tool calls,
+    // but it must no longer be injected into the model-visible request tool surface.
+    Value::Array(Vec::new())
 }
 
 fn is_stop_message_state_active(raw: &Value) -> bool {
@@ -660,6 +633,7 @@ pub fn resolve_stop_message_session_scope_json(metadata_json: String) -> NapiRes
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_is_canonical_chat_completion_payload_true_when_first_choice_has_message_object() {

@@ -65,6 +65,55 @@ describe('anthropic-openai-pipeline native shell', () => {
     });
   });
 
+  test('request path normalizes Bash.command/workdir into exec_command.cmd/workdir when alias map resolves to exec_command', async () => {
+    const codec = new AnthropicOpenAIPipelineCodec();
+    await codec.initialize();
+
+    const result = await codec.convertRequest(
+      {
+        model: 'claude-3-7-sonnet',
+        tools: [
+          {
+            name: 'Bash',
+            description: 'Run shell commands',
+            input_schema: {
+              type: 'object',
+              properties: { command: { type: 'string' }, workdir: { type: 'string' } },
+              required: ['command']
+            }
+          }
+        ],
+        messages: [
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'toolu_cmd_2', name: 'Bash', input: { command: 'pwd', workdir: '/' } }
+            ]
+          }
+        ]
+      },
+      profile,
+      {
+        requestId: 'req_anthropic_pipeline_request_exec_command',
+        entryEndpoint: '/v1/messages',
+        endpoint: '/v1/messages',
+        metadata: {
+          anthropicToolNameMap: {
+            exec_command: 'Bash'
+          }
+        }
+      } as any
+    );
+
+    expect((result as any).messages[0].tool_calls[0]).toMatchObject({
+      id: 'toolu_cmd_2',
+      function: {
+        name: 'exec_command',
+        arguments: JSON.stringify({ cmd: 'pwd', workdir: '/' })
+      }
+    });
+  });
+
   test('response path uses stored alias map to map chat response back to anthropic', async () => {
     const codec = new AnthropicOpenAIPipelineCodec();
     await codec.initialize();

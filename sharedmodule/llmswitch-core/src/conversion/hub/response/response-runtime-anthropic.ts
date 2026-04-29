@@ -130,7 +130,7 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
       const id = typeof (part as Record<string, unknown>).id === 'string'
         ? String((part as Record<string, unknown>).id)
         : `call_${Math.random().toString(36).slice(2, 10)}`;
-      const input = (part as Record<string, unknown>).input;
+      const input = normalizeShellLikeToolInput(name || rawName, (part as Record<string, unknown>).input);
       let args = '';
       if (typeof input === 'string') {
         args = input;

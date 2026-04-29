@@ -117,6 +117,48 @@ describe('anthropic-openai-codec native wrapper', () => {
     });
   });
 
+  test('buildOpenAIChatFromAnthropic normalizes Bash.command/workdir into exec_command.cmd/workdir', () => {
+    const result = buildOpenAIChatFromAnthropic(
+      {
+        model: 'claude-3-7-sonnet',
+        tools: [
+          {
+            name: 'Bash',
+            description: 'Run shell commands',
+            input_schema: {
+              type: 'object',
+              properties: { command: { type: 'string' }, workdir: { type: 'string' } },
+              required: ['command']
+            }
+          }
+        ],
+        messages: [
+          {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_cmd_1',
+                name: 'Bash',
+                input: { command: 'pwd', workdir: '/' }
+              }
+            ]
+          }
+        ]
+      } as any,
+      { includeToolCallIds: true }
+    );
+
+    expect((result as any).messages[0].tool_calls[0]).toMatchObject({
+      id: 'toolu_cmd_1',
+      type: 'function',
+      function: {
+        name: 'exec_command',
+        arguments: JSON.stringify({ cmd: 'pwd', workdir: '/' })
+      }
+    });
+  });
+
   test('preserves blank lines when converting anthropic request into openai chat', () => {
     const result = buildOpenAIChatFromAnthropic(
       {

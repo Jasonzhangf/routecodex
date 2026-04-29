@@ -4,6 +4,8 @@ import path from 'node:path';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { readJsonFile, writeJsonFileAtomic } from './clock/io.js';
 import { resolveRccPath } from '../runtime/user-data-paths.js';
+import { inspectOpenAiChatToolHistory } from '../conversion/shared/openai-message-normalize.js';
+import { isSyntheticRouteCodexToolCallId } from '../conversion/shared/openai-message-normalize.js';
 
 export interface PendingServerToolInjection {
   version: 1;
@@ -103,6 +105,32 @@ function coercePending(value: unknown): PendingServerToolInjection | null {
   };
 }
 
+async function dropPendingFile(file: string, message: string): Promise<void> {
+  try {
+    await fs.rm(file, { force: true });
+  } catch {
+    // keep original reason visible even if cleanup fails
+  }
+  try {
+    console.warn(message);
+  } catch {
+    // no-op
+  }
+}
+
+function validatePendingInjection(pending: PendingServerToolInjection): string | null {
+  for (const callId of pending.afterToolCallIds) {
+    if (isSyntheticRouteCodexToolCallId(callId)) {
+      return `synthetic afterToolCallIds detected: ${callId}`;
+    }
+  }
+  const violation = inspectOpenAiChatToolHistory(pending.messages);
+  if (violation) {
+    return `message contract violated: ${violation.code}${violation.callId ? ` (${violation.callId})` : ''}`;
+  }
+  return null;
+}
+
 export async function savePendingServerToolInjection(
   sessionId: string,
   pending: Omit<PendingServerToolInjection, 'version' | 'sessionId'>
@@ -132,22 +160,23 @@ export async function loadPendingServerToolInjection(sessionId: string): Promise
     const raw = await readJsonFile(file);
     const pending = coercePending(raw);
     if (!pending) {
+      await dropPendingFile(file, '[servertool-pending] invalid pending injection dropped: malformed payload');
       return null;
     }
     const maxAgeMs = resolvePendingMaxAgeMs();
     if (Date.now() - pending.createdAtMs > maxAgeMs) {
-      try {
-        await fs.rm(file, { force: true });
-      } catch {
-        // ignore stale-file cleanup failure
-      }
-      try {
-        console.warn(
-          `[servertool-pending] stale pending injection dropped session=${pending.sessionId} ageMs=${Date.now() - pending.createdAtMs} maxAgeMs=${maxAgeMs}`
-        );
-      } catch {
-        // no-op
-      }
+      await dropPendingFile(
+        file,
+        `[servertool-pending] stale pending injection dropped session=${pending.sessionId} ageMs=${Date.now() - pending.createdAtMs} maxAgeMs=${maxAgeMs}`
+      );
+      return null;
+    }
+    const validationError = validatePendingInjection(pending);
+    if (validationError) {
+      await dropPendingFile(
+        file,
+        `[servertool-pending] invalid pending injection dropped session=${pending.sessionId} reason=${validationError}`
+      );
       return null;
     }
     return pending;

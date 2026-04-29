@@ -1,4 +1,22 @@
-import { buildResponsesRequestFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
+import { jest } from '@jest/globals';
+
+const nativeBridgeActions = await import(
+  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-bridge-action-semantics.js'
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-bridge-action-semantics.js',
+  () => ({
+    ...nativeBridgeActions,
+    runBridgeActionPipelineWithNative: ({ state }: { state?: { messages?: unknown[] } }) => ({
+      messages: Array.isArray(state?.messages) ? state.messages : []
+    })
+  })
+);
+
+const { buildResponsesRequestFromChat } = await import(
+  '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js'
+);
 
 describe('buildResponsesRequestFromChat (responses bridge)', () => {
   it('preserves apply_patch arguments when converting tool_calls to Responses input', () => {
@@ -28,6 +46,12 @@ describe('buildResponsesRequestFromChat (responses bridge)', () => {
               }
             }
           ]
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_apply_patch',
+          name: 'apply_patch',
+          content: 'patch applied'
         }
       ],
       tools: [
@@ -70,6 +94,12 @@ describe('buildResponsesRequestFromChat (responses bridge)', () => {
               }
             }
           ]
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_apply_patch_empty',
+          name: 'apply_patch',
+          content: 'empty patch result'
         }
       ],
       tools: [
@@ -91,5 +121,52 @@ describe('buildResponsesRequestFromChat (responses bridge)', () => {
     );
     expect(fnCall).toBeTruthy();
     expect(fnCall.arguments).toBe('{}');
+  });
+
+  it('fails fast when incoming history contains synthetic RouteCodex fallback tool ids', () => {
+    const payload = {
+      model: 'gpt-test',
+      messages: [
+        { role: 'user', content: 'hi' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_servertool_fallback_1777378574502_510',
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                arguments: JSON.stringify({ cmd: 'echo hi' })
+              }
+            }
+          ]
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_servertool_fallback_1777378574502_510',
+          name: 'exec_command',
+          content: 'ok'
+        }
+      ]
+    };
+
+    expect(() => buildResponsesRequestFromChat(payload, {})).toThrow(
+      /synthetic RouteCodex fallback id/i
+    );
+  });
+
+  it('fails fast when incoming history contains synthetic RouteCodex local control text', () => {
+    const payload = {
+      model: 'gpt-test',
+      messages: [
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: '[RouteCodex] assistant response became empty after response sanitization.' }
+      ]
+    };
+
+    expect(() => buildResponsesRequestFromChat(payload, {})).toThrow(
+      /synthetic RouteCodex local control text/i
+    );
   });
 });

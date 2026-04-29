@@ -57,21 +57,19 @@ fn build_tool_markup_instruction() -> String {
 }
 
 fn stringify_tool_output(value: Option<&Value>) -> String {
-    const EMPTY_TOOL_FALLBACK: &str =
-        "[RouteCodex] Tool output was empty; execution status unknown.";
     match value {
         Some(Value::String(text)) => {
             if text.trim().is_empty() {
-                EMPTY_TOOL_FALLBACK.to_string()
+                String::new()
             } else {
                 text.clone()
             }
         }
-        Some(Value::Null) | None => EMPTY_TOOL_FALLBACK.to_string(),
+        Some(Value::Null) | None => String::new(),
         Some(other) => serde_json::to_string_pretty(other)
             .ok()
             .filter(|text| !text.trim().is_empty())
-            .unwrap_or_else(|| EMPTY_TOOL_FALLBACK.to_string()),
+            .unwrap_or_default(),
     }
 }
 

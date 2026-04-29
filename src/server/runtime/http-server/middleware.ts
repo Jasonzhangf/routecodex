@@ -274,6 +274,10 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
       next();
       return;
     }
+    if (path === '/shutdown' || path === '/shutdown/') {
+      next();
+      return;
+    }
 
     if (provided && matchesExpectedClientApiKey(provided, expectedKey)) {
       next();

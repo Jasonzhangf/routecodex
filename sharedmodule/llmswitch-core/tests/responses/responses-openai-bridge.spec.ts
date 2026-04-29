@@ -7,6 +7,7 @@ import {
   buildResponsesRequestFromChat,
   captureResponsesContext
 } from '../../src/conversion/responses/responses-openai-bridge.js';
+import { normalizeChatRequest } from '../../src/conversion/shared/openai-message-normalize.js';
 
 function createTempPng(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmswitch-local-image-jest-'));
@@ -20,6 +21,222 @@ function createTempPng(): string {
 }
 
 describe('responses-openai-bridge history seed normalization', () => {
+  test('drops synthetic RouteCodex timeout assistant entries from responses input history', () => {
+    const payload = {
+      model: 'glm-4.7',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'hello' }]
+        },
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: '[RouteCodex] request timed out before a response was received (attempt 1/2). Retrying…' }]
+        },
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'continue' }]
+        }
+      ]
+    } as any;
+
+    const ctx = captureResponsesContext(payload, { route: { requestId: 'bridge-strip-local-timeout' } });
+    const result = buildChatRequestFromResponses(payload, ctx);
+    const serialized = JSON.stringify(result.request.messages);
+
+    expect(serialized).not.toContain('request timed out before a response was received');
+    expect(serialized).toContain('continue');
+  });
+
+  test('drops synthetic RouteCodex timeout assistant entries when rebuilding responses upstream input', () => {
+    const chatPayload = {
+      model: 'glm-4.7',
+      messages: [
+        { role: 'user', content: 'hello' },
+        { role: 'assistant', content: '[RouteCodex] request timed out before a response was received (attempt 1/2). Retrying…' },
+        { role: 'user', content: 'continue' }
+      ]
+    };
+
+    const result = buildResponsesRequestFromChat(chatPayload, {
+      requestId: 'bridge-strip-local-timeout-outbound'
+    } as any);
+    const serialized = JSON.stringify(result.request.input);
+
+    expect(serialized).not.toContain('request timed out before a response was received');
+    expect(serialized).toContain('continue');
+  });
+
+  test('drops synthetic RouteCodex timeout assistant entries from openai chat normalization', () => {
+    const normalized = normalizeChatRequest({
+      model: 'gpt-4.1',
+      messages: [
+        { role: 'user', content: 'hello' },
+        { role: 'assistant', content: '[RouteCodex] request timed out before a response was received (attempt 1/2). Retrying…' },
+        { role: 'user', content: 'continue' }
+      ]
+    });
+
+    expect(normalized.messages).toEqual([
+      { role: 'user', content: 'hello' },
+      { role: 'user', content: 'continue' }
+    ]);
+  });
+
+  test('fails fast when chat history contains a synthetic fallback tool_call id', () => {
+    expect(() => buildResponsesRequestFromChat({
+      model: 'glm-4.7',
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_servertool_fallback_1777375041893_15',
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                arguments: '{}'
+              }
+            }
+          ]
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_servertool_fallback_1777375041893_15',
+          content: ''
+        }
+      ]
+    }, {
+      requestId: 'bridge-invalid-synthetic-tool-call-id'
+    } as any)).toThrow(/Tool history contract violated/);
+  });
+
+  test('fails fast when synthetic fallback ids appear even in servertool history', () => {
+    expect(() => buildResponsesRequestFromChat({
+      model: 'glm-4.7',
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_servertool_fallback_1777375041893_15',
+              type: 'function',
+              function: {
+                name: 'clock',
+                arguments: '{"action":"list"}'
+              }
+            }
+          ]
+        },
+        {
+          role: 'tool',
+          name: 'clock',
+          tool_call_id: 'call_servertool_fallback_1777375041893_15',
+          content: '{"items":[]}'
+        }
+      ]
+    }, {
+      requestId: 'bridge-servertool-legacy-tool-call-id'
+    } as any)).toThrow(/Tool history contract violated/);
+  });
+
+  test('fails fast when responses input contains synthetic fallback ids', () => {
+    expect(() => buildChatRequestFromResponses({
+      model: 'glm-4.7',
+      input: [
+        {
+          type: 'function_call',
+          call_id: 'call_servertool_fallback_1777375041893_15',
+          name: 'clock',
+          arguments: '{"action":"list"}'
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_servertool_fallback_1777375041893_15',
+          name: 'clock',
+          output: '{"items":[]}'
+        }
+      ]
+    } as any, {
+      requestId: 'bridge-servertool-legacy-responses-input',
+      input: [
+        {
+          type: 'function_call',
+          call_id: 'call_servertool_fallback_1777375041893_15',
+          name: 'clock',
+          arguments: '{"action":"list"}'
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_servertool_fallback_1777375041893_15',
+          name: 'clock',
+          output: '{"items":[]}'
+        }
+      ]
+    } as any)).toThrow(/Tool history contract violated/);
+  });
+
+  test('fails fast when responses input contains an orphan tool_result', () => {
+    expect(() => buildChatRequestFromResponses({
+      model: 'glm-4.7',
+      input: [
+        {
+          type: 'tool_result',
+          call_id: 'call_orphan',
+          output: 'done'
+        }
+      ]
+    } as any, {
+      requestId: 'bridge-invalid-orphan-tool-result',
+      input: [
+        {
+          type: 'tool_result',
+          call_id: 'call_orphan',
+          output: 'done'
+        }
+      ]
+    } as any)).toThrow(/Tool history contract violated/);
+  });
+
+  test('accepts responses input when function_call keeps id and function_call_output references call_id', () => {
+    const payload = {
+      model: 'gpt-4.1-mini',
+      instructions: 'You are Codex.',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '列出 FIXME 文件' }]
+        },
+        {
+          type: 'function_call',
+          id: 'fc_find_fixme',
+          name: 'shell',
+          arguments: '{"command":["rg","-n","FIXME","--glob","*.ts"],"workdir":"/repo"}'
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'fc_find_fixme',
+          output: '{"stdout":"src/state.ts:4:// FIXME","stderr":"","exit_code":0}'
+        }
+      ]
+    } as any;
+
+    const ctx = captureResponsesContext(payload, { route: { requestId: 'bridge-id-only-function-call' } });
+    const result = buildChatRequestFromResponses(payload, ctx);
+    const messages = result.request.messages as Array<Record<string, any>>;
+    const assistant = messages.find((entry) => entry.role === 'assistant' && Array.isArray(entry.tool_calls));
+    const tool = messages.find((entry) => entry.role === 'tool');
+
+    expect(assistant?.tool_calls?.[0]?.id).toBe('fc_find_fixme');
+    expect(tool?.tool_call_id).toBe('fc_find_fixme');
+  });
+
   test('filters empty system messages and preserves multimodal content order', () => {
     const chatPayload = {
       model: 'glm-4.7',
@@ -521,12 +738,11 @@ describe('responses-openai-bridge history seed normalization', () => {
     expect(serializedInput).toContain('first question');
     expect(serializedInput).toContain('second question');
 
-    // Shape repair: missing tool output for call_a should be synthesized, call_b should still exist.
+    // No synthetic repair: only real tool outputs may survive; missing call_a must stay missing.
     expect(functionCalls.some((item) => String(item.call_id ?? '').includes('call_a'))).toBe(true);
     expect(functionCalls.some((item) => String(item.call_id ?? '').includes('call_b'))).toBe(true);
-    expect(functionCallOutputs.some((item) => String(item.call_id ?? '').includes('call_a'))).toBe(true);
+    expect(functionCallOutputs.some((item) => String(item.call_id ?? '').includes('call_a'))).toBe(false);
     expect(functionCallOutputs.some((item) => String(item.call_id ?? '').includes('call_b'))).toBe(true);
-    expect(serializedInput).toContain('[RouteCodex] Tool call result unknown');
     expect(serializedInput).toContain('ok-b');
   });
 

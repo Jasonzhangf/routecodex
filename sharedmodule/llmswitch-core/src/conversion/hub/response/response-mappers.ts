@@ -101,7 +101,10 @@ export class AnthropicResponseMapper implements ResponseMapper {
   ): ChatCompletionLike {
     const aliasMap = resolveAliasMapFromRespSemanticsWithNative(options?.requestSemantics);
     return restoreResponseContinuationSemanticsWithNative(
-      buildOpenAIChatFromAnthropicMessage(format.payload ?? {}, { aliasMap }) as Record<string, unknown>,
+      buildOpenAIChatFromAnthropicMessage(format.payload ?? {}, {
+        aliasMap,
+        includeToolCallIds: true
+      }) as Record<string, unknown>,
       options?.requestSemantics as Record<string, unknown> | undefined,
       'anthropic-messages'
     ) as ChatCompletionLike;

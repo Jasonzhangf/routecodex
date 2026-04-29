@@ -1,5 +1,5 @@
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::hub_reasoning_tool_normalizer::{
     normalize_assistant_text_to_tool_calls_json, repair_arguments_to_string,
@@ -16,8 +16,8 @@ use super::types::{
     ValidateToolArgumentsOutput,
 };
 use super::utils::{
-    coerce_bridge_role, normalize_function_call_id, read_trimmed_string, serialize_tool_arguments,
-    MediaBlock,
+    coerce_bridge_role, is_synthetic_routecodex_tool_call_id, read_trimmed_string,
+    serialize_tool_arguments, MediaBlock,
 };
 
 fn default_normalize_function_name(raw: Option<&str>) -> Option<String> {
@@ -104,18 +104,36 @@ fn push_chat_message_without_reparse(
     target.push(Value::Object(message));
 }
 
-fn ensure_assistant_tool_call_identity(
-    call_obj: &mut Map<String, Value>,
-    fallback_id: &str,
-) -> String {
-    let resolved = read_trimmed_string(call_obj.get("call_id"))
-        .or_else(|| read_trimmed_string(call_obj.get("tool_call_id")))
-        .or_else(|| read_trimmed_string(call_obj.get("id")))
-        .unwrap_or_else(|| fallback_id.to_string());
-    call_obj.insert("id".to_string(), Value::String(resolved.clone()));
-    call_obj.insert("tool_call_id".to_string(), Value::String(resolved.clone()));
-    call_obj.insert("call_id".to_string(), Value::String(resolved.clone()));
-    resolved
+fn require_explicit_tool_call_id(call_id: Option<String>, reason: &str) -> Result<String, String> {
+    let resolved = call_id.ok_or_else(|| reason.to_string())?;
+    if is_synthetic_routecodex_tool_call_id(resolved.as_str()) {
+        return Err(format!(
+            "synthetic_tool_call_id: RouteCodex synthetic fallback tool_call id is forbidden: {}",
+            resolved
+        ));
+    }
+    Ok(resolved)
+}
+
+fn register_pending_tool_call(pending_tool_call_ids: &mut VecDeque<String>, call_id: &str) {
+    if !pending_tool_call_ids.iter().any(|entry| entry == call_id) {
+        pending_tool_call_ids.push_back(call_id.to_string());
+    }
+}
+
+fn consume_pending_tool_call(
+    pending_tool_call_ids: &mut VecDeque<String>,
+    call_id: &str,
+    reason: &str,
+) -> Result<(), String> {
+    let Some(position) = pending_tool_call_ids
+        .iter()
+        .position(|entry| entry == call_id)
+    else {
+        return Err(format!("orphan_tool_result: {}: {}", reason, call_id));
+    };
+    pending_tool_call_ids.remove(position);
+    Ok(())
 }
 
 fn should_probe_assistant_tool_markup(content: &str) -> bool {
@@ -179,25 +197,32 @@ fn harvest_assistant_tool_message_from_text(
 fn append_harvested_assistant_tool_message(
     messages: &mut Vec<Value>,
     tool_name_by_id: &mut HashMap<String, String>,
-    last_tool_call_id: &mut Option<String>,
+    pending_tool_call_ids: &mut VecDeque<String>,
     raw_content: &str,
     reasoning_segments: &[String],
-) -> bool {
+) -> Result<bool, String> {
     let Some(mut harvested) =
         harvest_assistant_tool_message_from_text(raw_content, reasoning_segments)
     else {
-        return false;
+        return Ok(false);
     };
     if let Some(tool_calls) = harvested
         .get_mut("tool_calls")
         .and_then(Value::as_array_mut)
     {
-        for (idx, call) in tool_calls.iter_mut().enumerate() {
+        for call in tool_calls.iter_mut() {
             let Value::Object(call_obj) = call else {
                 continue;
             };
-            let fallback_id = format!("fc_call_{}", messages.len() + idx + 1);
-            let call_id = ensure_assistant_tool_call_identity(call_obj, fallback_id.as_str());
+            let call_id = require_explicit_tool_call_id(
+                read_trimmed_string(call_obj.get("call_id"))
+                    .or_else(|| read_trimmed_string(call_obj.get("tool_call_id")))
+                    .or_else(|| read_trimmed_string(call_obj.get("id"))),
+                "missing_tool_call_id: harvested assistant tool_call is missing id/call_id",
+            )?;
+            call_obj.insert("id".to_string(), Value::String(call_id.clone()));
+            call_obj.insert("tool_call_id".to_string(), Value::String(call_id.clone()));
+            call_obj.insert("call_id".to_string(), Value::String(call_id.clone()));
             if let Some(name) = call_obj
                 .get("function")
                 .and_then(Value::as_object)
@@ -208,11 +233,11 @@ fn append_harvested_assistant_tool_message(
             {
                 tool_name_by_id.insert(call_id.clone(), name);
             }
-            *last_tool_call_id = Some(call_id);
+            register_pending_tool_call(pending_tool_call_ids, call_id.as_str());
         }
     }
     messages.push(Value::Object(harvested));
-    true
+    Ok(true)
 }
 
 fn serialize_tool_output(entry: &Map<String, Value>) -> Option<String> {
@@ -230,7 +255,6 @@ struct ProcessBlocksResult {
     ordered_content_blocks: Vec<Value>,
     tool_calls: Vec<Value>,
     tool_messages: Vec<Value>,
-    last_call_id: Option<String>,
     reasoning_segments: Vec<String>,
 }
 
@@ -238,13 +262,12 @@ fn process_message_blocks(
     blocks: &Value,
     normalize_mode: &str,
     tool_name_by_id: &mut HashMap<String, String>,
-    last_tool_call_id: Option<String>,
+    pending_tool_call_ids: &mut VecDeque<String>,
     tool_result_fallback_text: &str,
-) -> ProcessBlocksResult {
+) -> Result<ProcessBlocksResult, String> {
     let mut text_parts: Vec<String> = Vec::new();
     let mut tool_calls: Vec<Value> = Vec::new();
     let mut tool_messages: Vec<Value> = Vec::new();
-    let mut current_last_call = last_tool_call_id;
     let mut reasoning_segments: Vec<String> = Vec::new();
     let mut media_blocks: Vec<MediaBlock> = Vec::new();
     let mut ordered_content_blocks: Vec<Value> = Vec::new();
@@ -287,9 +310,9 @@ fn process_message_blocks(
                         content,
                         normalize_mode,
                         tool_name_by_id,
-                        current_last_call.clone(),
+                        pending_tool_call_ids,
                         tool_result_fallback_text,
-                    );
+                    )?;
                     if let Some(text) = nested.text {
                         if !text.is_empty() {
                             text_parts.push(text);
@@ -297,7 +320,6 @@ fn process_message_blocks(
                     }
                     tool_calls.extend(nested.tool_calls);
                     tool_messages.extend(nested.tool_messages);
-                    current_last_call = nested.last_call_id;
                     reasoning_segments.extend(nested.reasoning_segments);
                     if !nested.media_blocks.is_empty() {
                         media_blocks.extend(nested.media_blocks);
@@ -385,7 +407,6 @@ fn process_message_blocks(
                     .and_then(|row| row.get("name").and_then(Value::as_str))
             });
             let Some(name) = normalize_function_name_by_mode(raw_name, normalize_mode) else {
-                current_last_call = None;
                 continue;
             };
             let args = block_obj
@@ -398,15 +419,15 @@ fn process_message_blocks(
                 })
                 .unwrap_or(&Value::Null);
             let call_id_candidate = read_trimmed_string(block_obj.get("call_id"))
+                .or_else(|| read_trimmed_string(block_obj.get("tool_call_id")))
                 .or_else(|| read_trimmed_string(block_obj.get("id")));
-            let call_id = call_id_candidate.unwrap_or_else(|| {
-                normalize_function_call_id(
-                    None,
-                    format!("fc_call_{}", tool_calls.len() + 1).as_str(),
-                )
-            });
+            let call_id = require_explicit_tool_call_id(
+                call_id_candidate,
+                "missing_tool_call_id: bridge function_call block is missing call_id/id",
+            )?;
             let serialized = serialize_tool_arguments(Some(args)).trim().to_string();
             tool_name_by_id.insert(call_id.clone(), name.clone());
+            register_pending_tool_call(pending_tool_call_ids, call_id.as_str());
             let mut fn_row = Map::new();
             fn_row.insert("name".to_string(), Value::String(name));
             fn_row.insert("arguments".to_string(), Value::String(serialized));
@@ -416,36 +437,39 @@ fn process_message_blocks(
             call_obj.insert("type".to_string(), Value::String("function".to_string()));
             call_obj.insert("function".to_string(), Value::Object(fn_row));
             tool_calls.push(Value::Object(call_obj));
-            current_last_call = Some(call_id);
             continue;
         }
         if matches!(
             block_type.as_str(),
             "function_call_output" | "tool_result" | "tool_message"
         ) {
-            let tool_call_id = read_trimmed_string(block_obj.get("tool_call_id"))
-                .or_else(|| read_trimmed_string(block_obj.get("call_id")))
-                .or_else(|| read_trimmed_string(block_obj.get("tool_use_id")))
-                .or_else(|| read_trimmed_string(block_obj.get("id")))
-                .or_else(|| current_last_call.clone());
-            if let Some(id) = tool_call_id.clone() {
-                let output = serialize_tool_output(block_obj);
-                let mut content = output.unwrap_or_default();
-                if content.trim().is_empty() {
-                    content = tool_result_fallback_text.to_string();
+            let tool_call_id = require_explicit_tool_call_id(
+                read_trimmed_string(block_obj.get("tool_call_id"))
+                    .or_else(|| read_trimmed_string(block_obj.get("call_id")))
+                    .or_else(|| read_trimmed_string(block_obj.get("tool_use_id")))
+                    .or_else(|| read_trimmed_string(block_obj.get("id"))),
+                "missing_tool_call_id: bridge tool_result block is missing call_id/tool_call_id",
+            )?;
+            consume_pending_tool_call(
+                pending_tool_call_ids,
+                tool_call_id.as_str(),
+                "bridge tool_result block references unknown or already-consumed call_id",
+            )?;
+            let output = serialize_tool_output(block_obj);
+            let content = output.unwrap_or_default();
+            let mut tool_msg = Map::new();
+            tool_msg.insert("role".to_string(), Value::String("tool".to_string()));
+            tool_msg.insert(
+                "tool_call_id".to_string(),
+                Value::String(tool_call_id.clone()),
+            );
+            tool_msg.insert("content".to_string(), Value::String(content));
+            if let Some(name) = tool_name_by_id.get(&tool_call_id) {
+                if !name.trim().is_empty() {
+                    tool_msg.insert("name".to_string(), Value::String(name.clone()));
                 }
-                let mut tool_msg = Map::new();
-                tool_msg.insert("role".to_string(), Value::String("tool".to_string()));
-                tool_msg.insert("tool_call_id".to_string(), Value::String(id.clone()));
-                tool_msg.insert("content".to_string(), Value::String(content));
-                if let Some(name) = tool_name_by_id.get(&id) {
-                    if !name.trim().is_empty() {
-                        tool_msg.insert("name".to_string(), Value::String(name.clone()));
-                    }
-                }
-                tool_messages.push(Value::Object(tool_msg));
-                current_last_call = None;
             }
+            tool_messages.push(Value::Object(tool_msg));
             continue;
         }
     }
@@ -455,29 +479,26 @@ fn process_message_blocks(
     } else {
         Some(text_parts.join("\n").trim().to_string())
     };
-    ProcessBlocksResult {
+    Ok(ProcessBlocksResult {
         text,
         media_blocks,
         ordered_content_blocks,
         tool_calls,
         tool_messages,
-        last_call_id: current_last_call,
         reasoning_segments,
-    }
+    })
 }
 
 pub(crate) fn convert_bridge_input_to_chat_messages(
     input: BridgeInputToChatInput,
-) -> BridgeInputToChatOutput {
+) -> Result<BridgeInputToChatOutput, String> {
     let mut messages: Vec<Value> = Vec::new();
     if input.input.is_empty() {
-        return BridgeInputToChatOutput { messages };
+        return Ok(BridgeInputToChatOutput { messages });
     }
     let mut tool_name_by_id: HashMap<String, String> = HashMap::new();
-    let mut last_tool_call_id: Option<String> = None;
-    let fallback_text = input
-        .tool_result_fallback_text
-        .unwrap_or_else(|| "Command succeeded (no output).".to_string());
+    let mut pending_tool_call_ids: VecDeque<String> = VecDeque::new();
+    let fallback_text = input.tool_result_fallback_text.unwrap_or_default();
     let normalize_mode = input
         .normalize_function_name
         .unwrap_or_else(|| "default".to_string());
@@ -511,7 +532,7 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                 .unwrap_or_default();
             if !tool_calls.is_empty() {
                 let mut normalized_calls: Vec<Value> = Vec::new();
-                for (idx, call) in tool_calls.into_iter().enumerate() {
+                for call in tool_calls {
                     let Value::Object(mut call_obj) = call else {
                         continue;
                     };
@@ -529,11 +550,17 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                     let serialized = serialize_tool_arguments(Some(&args_val)).trim().to_string();
                     func_obj.insert("name".to_string(), Value::String(name.clone()));
                     func_obj.insert("arguments".to_string(), Value::String(serialized));
-                    let fallback_id = format!("fc_call_{}", messages.len() + idx + 1);
-                    let call_id =
-                        ensure_assistant_tool_call_identity(&mut call_obj, fallback_id.as_str());
+                    let call_id = require_explicit_tool_call_id(
+                        read_trimmed_string(call_obj.get("call_id"))
+                            .or_else(|| read_trimmed_string(call_obj.get("tool_call_id")))
+                            .or_else(|| read_trimmed_string(call_obj.get("id"))),
+                        "missing_tool_call_id: assistant tool_call is missing id/call_id",
+                    )?;
+                    call_obj.insert("id".to_string(), Value::String(call_id.clone()));
+                    call_obj.insert("tool_call_id".to_string(), Value::String(call_id.clone()));
+                    call_obj.insert("call_id".to_string(), Value::String(call_id.clone()));
                     tool_name_by_id.insert(call_id.clone(), name);
-                    last_tool_call_id = Some(call_id);
+                    register_pending_tool_call(&mut pending_tool_call_ids, call_id.as_str());
                     normalized_calls.push(Value::Object(call_obj));
                 }
                 if !normalized_calls.is_empty() {
@@ -558,10 +585,10 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                 if append_harvested_assistant_tool_message(
                     &mut messages,
                     &mut tool_name_by_id,
-                    &mut last_tool_call_id,
+                    &mut pending_tool_call_ids,
                     content,
                     entry_reasoning_segments.as_slice(),
-                ) {
+                )? {
                     continue;
                 }
             }
@@ -612,11 +639,13 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
             } else {
                 raw_item_id.clone().or(raw_call_id.clone())
             };
-            let call_id = call_id_source.unwrap_or_else(|| {
-                normalize_function_call_id(None, format!("fc_call_{}", messages.len() + 1).as_str())
-            });
+            let call_id = require_explicit_tool_call_id(
+                call_id_source,
+                "missing_tool_call_id: bridge function_call item is missing call_id/id",
+            )?;
             let serialized = serialize_tool_arguments(Some(args)).trim().to_string();
             tool_name_by_id.insert(call_id.clone(), name.clone());
+            register_pending_tool_call(&mut pending_tool_call_ids, call_id.as_str());
             let mut fn_row = Map::new();
             fn_row.insert("name".to_string(), Value::String(name));
             fn_row.insert("arguments".to_string(), Value::String(serialized));
@@ -634,7 +663,6 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                 Value::Array(vec![Value::Object(call_obj)]),
             );
             messages.push(Value::Object(message));
-            last_tool_call_id = Some(call_id);
             continue;
         }
 
@@ -642,30 +670,37 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
             entry_type.as_str(),
             "function_call_output" | "tool_result" | "tool_message"
         ) {
-            let tool_call_id = read_trimmed_string(entry_obj.get("tool_call_id"))
-                .or_else(|| read_trimmed_string(entry_obj.get("call_id")))
-                .or_else(|| read_trimmed_string(entry_obj.get("tool_use_id")))
-                .or_else(|| read_trimmed_string(entry_obj.get("id")))
-                .or_else(|| last_tool_call_id.clone());
-            if let Some(id) = tool_call_id.clone() {
-                let output = serialize_tool_output(entry_obj);
-                let mut content = output.unwrap_or_default();
-                if content.trim().is_empty() {
-                    content = fallback_text.clone();
-                }
-                let mut tool_msg = Map::new();
-                tool_msg.insert("role".to_string(), Value::String("tool".to_string()));
-                tool_msg.insert("tool_call_id".to_string(), Value::String(id.clone()));
-                tool_msg.insert("id".to_string(), Value::String(id.clone()));
-                tool_msg.insert("content".to_string(), Value::String(content));
-                if let Some(name) = tool_name_by_id.get(&id) {
-                    if !name.trim().is_empty() {
-                        tool_msg.insert("name".to_string(), Value::String(name.clone()));
-                    }
-                }
-                messages.push(Value::Object(tool_msg));
-                last_tool_call_id = None;
+            let tool_call_id = require_explicit_tool_call_id(
+                read_trimmed_string(entry_obj.get("tool_call_id"))
+                    .or_else(|| read_trimmed_string(entry_obj.get("call_id")))
+                    .or_else(|| read_trimmed_string(entry_obj.get("tool_use_id")))
+                    .or_else(|| read_trimmed_string(entry_obj.get("id"))),
+                "missing_tool_call_id: bridge tool_result item is missing call_id/tool_call_id",
+            )?;
+            consume_pending_tool_call(
+                &mut pending_tool_call_ids,
+                tool_call_id.as_str(),
+                "bridge tool_result item references unknown or already-consumed call_id",
+            )?;
+            let output = serialize_tool_output(entry_obj);
+            let mut content = output.unwrap_or_default();
+            if content.trim().is_empty() {
+                content = fallback_text.clone();
             }
+            let mut tool_msg = Map::new();
+            tool_msg.insert("role".to_string(), Value::String("tool".to_string()));
+            tool_msg.insert(
+                "tool_call_id".to_string(),
+                Value::String(tool_call_id.clone()),
+            );
+            tool_msg.insert("id".to_string(), Value::String(tool_call_id.clone()));
+            tool_msg.insert("content".to_string(), Value::String(content));
+            if let Some(name) = tool_name_by_id.get(&tool_call_id) {
+                if !name.trim().is_empty() {
+                    tool_msg.insert("name".to_string(), Value::String(name.clone()));
+                }
+            }
+            messages.push(Value::Object(tool_msg));
             continue;
         }
 
@@ -676,21 +711,11 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                     &Value::Array(content.clone()),
                     normalize_mode.as_str(),
                     &mut tool_name_by_id,
-                    last_tool_call_id.clone(),
+                    &mut pending_tool_call_ids,
                     fallback_text.as_str(),
-                );
+                )?;
                 if !nested.tool_calls.is_empty() {
-                    let mut normalized_calls: Vec<Value> = Vec::new();
-                    for (idx, call) in nested.tool_calls.into_iter().enumerate() {
-                        if let Value::Object(mut call_obj) = call {
-                            let fallback_id = format!("fc_call_{}", messages.len() + idx + 1);
-                            ensure_assistant_tool_call_identity(
-                                &mut call_obj,
-                                fallback_id.as_str(),
-                            );
-                            normalized_calls.push(Value::Object(call_obj));
-                        }
-                    }
+                    let normalized_calls: Vec<Value> = nested.tool_calls.into_iter().collect();
                     if !normalized_calls.is_empty() {
                         let mut msg = Map::new();
                         msg.insert("role".to_string(), Value::String("assistant".to_string()));
@@ -766,14 +791,11 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                         && append_harvested_assistant_tool_message(
                             &mut messages,
                             &mut tool_name_by_id,
-                            &mut last_tool_call_id,
+                            &mut pending_tool_call_ids,
                             text.as_str(),
                             combined.as_slice(),
-                        )
+                        )?
                     {
-                        if let Some(next_call_id) = nested.last_call_id.clone() {
-                            last_tool_call_id = Some(next_call_id);
-                        }
                         continue;
                     }
                     push_normalized_chat_message(
@@ -787,7 +809,6 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                         },
                     );
                 }
-                last_tool_call_id = nested.last_call_id;
                 handled_via_explicit_message = true;
             }
         }
@@ -797,18 +818,11 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                 entry_obj.get("content").unwrap_or(&Value::Null),
                 normalize_mode.as_str(),
                 &mut tool_name_by_id,
-                last_tool_call_id.clone(),
+                &mut pending_tool_call_ids,
                 fallback_text.as_str(),
-            );
+            )?;
             if !nested.tool_calls.is_empty() {
-                let mut normalized_calls: Vec<Value> = Vec::new();
-                for (idx, call) in nested.tool_calls.into_iter().enumerate() {
-                    if let Value::Object(mut call_obj) = call {
-                        let fallback_id = format!("fc_call_{}", messages.len() + idx + 1);
-                        ensure_assistant_tool_call_identity(&mut call_obj, fallback_id.as_str());
-                        normalized_calls.push(Value::Object(call_obj));
-                    }
-                }
+                let normalized_calls: Vec<Value> = nested.tool_calls.into_iter().collect();
                 if !normalized_calls.is_empty() {
                     let mut msg = Map::new();
                     msg.insert("role".to_string(), Value::String("assistant".to_string()));
@@ -879,12 +893,11 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                     && append_harvested_assistant_tool_message(
                         &mut messages,
                         &mut tool_name_by_id,
-                        &mut last_tool_call_id,
+                        &mut pending_tool_call_ids,
                         text.as_str(),
                         combined.as_slice(),
-                    )
+                    )?
                 {
-                    last_tool_call_id = nested.last_call_id;
                     continue;
                 }
                 if is_responses_mode {
@@ -911,7 +924,6 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                     );
                 }
             }
-            last_tool_call_id = nested.last_call_id;
         }
 
         let t = entry_obj
@@ -948,7 +960,14 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
         }
     }
 
-    BridgeInputToChatOutput { messages }
+    if let Some(call_id) = pending_tool_call_ids.front() {
+        return Err(format!(
+            "dangling_tool_call: bridge tool_call {} does not have a matching tool result in history",
+            call_id
+        ));
+    }
+
+    Ok(BridgeInputToChatOutput { messages })
 }
 
 pub(crate) fn extract_reasoning_segments_from_text(

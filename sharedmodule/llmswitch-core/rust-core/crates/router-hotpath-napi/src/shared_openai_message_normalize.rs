@@ -308,14 +308,12 @@ fn normalize_openai_tool(tool: &Value) -> Value {
 }
 
 fn sanitize_tool_content_value(content: &Value) -> Value {
-    const EMPTY_TOOL_FALLBACK: &str =
-        "[RouteCodex] Tool output was empty; execution status unknown.";
     if content.is_null() {
-        return Value::String(EMPTY_TOOL_FALLBACK.to_string());
+        return Value::String(String::new());
     }
     if let Some(text) = content.as_str() {
         if text.trim().is_empty() {
-            return Value::String(EMPTY_TOOL_FALLBACK.to_string());
+            return Value::String(String::new());
         }
         return Value::String(text.to_string());
     }
@@ -586,17 +584,14 @@ mod tests {
     }
 
     #[test]
-    fn normalize_tool_message_empty_content_marks_unknown_status() {
+    fn normalize_tool_message_empty_content_preserves_empty_string() {
         let messages = json!([
           { "role": "assistant", "tool_calls": [{ "id": "call_1", "type": "function", "function": { "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" } }]},
           { "role": "tool", "tool_call_id": "call_1", "content": "" }
         ]);
 
         let out = normalize_openai_chat_messages(&messages);
-        assert_eq!(
-            out[1]["content"],
-            "[RouteCodex] Tool output was empty; execution status unknown."
-        );
+        assert_eq!(out[1]["content"], "");
     }
 
     #[test]

@@ -713,7 +713,7 @@ describe('runtime parse/exec errorsamples', () => {
     expect(Array.isArray(json.trace)).toBe(true);
     expect(json.trace.some((entry: any) => entry.stage === 'chat_process.req.stage2.semantic_map')).toBe(true);
     expect(json.requestTailStage).toBe('chat_process.req.stage2.semantic_map');
-    expect(String(json.observation?.requestTailPreview || '')).toContain('cmd<arg_value>');
+    expect(String(json.observation?.requestTailPreview || '')).toContain('function_call/exec_command');
   });
 
   it('does not write empty-response-request sample when required_action/tool_calls exists', async () => {

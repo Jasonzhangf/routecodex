@@ -1,5 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 import { ProviderFactory } from '../../src/providers/core/runtime/provider-factory.js';
+import { resolveProviderModule } from '../../src/providers/core/runtime/provider-factory-helpers.js';
 
 describe('ProviderFactory no fallback', () => {
   test('clearInstanceCache drops active instance records', () => {
@@ -22,6 +23,16 @@ describe('ProviderFactory no fallback', () => {
   test('unknown providerType/moduleType throws', () => {
     const cfg: any = { type: 'unknown-x', config: { providerType: 'unknown-y', auth: { type: 'apikey', apiKey: 'x' } } };
     expect(() => ProviderFactory.createProvider(cfg, { logger: {} as any } as any)).toThrow();
+  });
+
+  test('resolveProviderModule preserves canonical module names', () => {
+    expect(resolveProviderModule('openai-http-provider')).toBe('openai-http-provider');
+    expect(resolveProviderModule('responses-http-provider')).toBe('responses-http-provider');
+    expect(resolveProviderModule('anthropic-http-provider')).toBe('anthropic-http-provider');
+    expect(resolveProviderModule('gemini-http-provider')).toBe('gemini-http-provider');
+    expect(resolveProviderModule('gemini-cli-http-provider')).toBe('gemini-cli-http-provider');
+    expect(resolveProviderModule('deepseek-http-provider')).toBe('deepseek-http-provider');
+    expect(resolveProviderModule('mock-provider')).toBe('mock-provider');
   });
 
   test('runtime timeoutMs/maxRetries map into provider config', () => {
@@ -70,7 +81,7 @@ describe('ProviderFactory no fallback', () => {
     expect(provider?.config?.config?.auth?.tokenFile).toBe('~/.routecodex/auth/deepseek-account-1.json');
     expect(provider?.config?.config?.extensions?.deepseek).toEqual({
       strictToolRequired: true,
-      textToolFallback: false,
+      toolProtocol: 'native',
       powTimeoutMs: 5000,
       powMaxAttempts: 3,
       sessionReuseTtlMs: 120000

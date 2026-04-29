@@ -63,25 +63,17 @@ async function main() {
       requestId: 'req_finalize_empty_1'
     });
 
-    assert.equal(
-      finalized.choices?.[0]?.message?.content,
-      '[RouteCodex] assistant response became empty after response sanitization.'
-    );
+    assert.equal(finalized.choices?.[0]?.finish_reason, 'stop');
+    assert.equal(finalized.choices?.[0]?.message?.content ?? null, null);
 
     const groupDir = path.join(errorsDir, 'payload-contract-error');
-    const file = await waitForFile(
-      groupDir,
-      (name) => name.includes('assistant_sanitized_empty_placeholder')
-    );
-    const json = JSON.parse(await fs.readFile(file, 'utf8'));
-    assert.equal(json.kind, 'payload_contract_error');
-    assert.equal(json.phase, 'provider-response');
-    assert.equal(json.marker, 'assistant_sanitized_empty_placeholder');
-    assert.equal(json.requestId, 'req_finalize_empty_1');
-    assert.equal(
-      json.observation?.finalizedPayload?.choices?.[0]?.message?.content,
-      '[RouteCodex] assistant response became empty after response sanitization.'
-    );
+    let entries = [];
+    try {
+      entries = await fs.readdir(groupDir);
+    } catch {
+      entries = [];
+    }
+    assert.equal(entries.length, 0);
 
     console.log('✅ coverage-finalize-empty-sanitize-errorsample passed');
   } finally {

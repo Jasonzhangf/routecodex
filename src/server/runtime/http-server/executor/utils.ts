@@ -41,6 +41,18 @@ export function extractStatusCodeFromError(err: unknown): number | undefined {
   if (typeof direct === 'number') return direct;
   const nested = (err as any).status;
   if (typeof nested === 'number') return nested;
+  const details = (err as any).details;
+  if (details && typeof details === 'object') {
+    const detailStatusCode = (details as any).statusCode;
+    if (typeof detailStatusCode === 'number') return detailStatusCode;
+    const detailStatus = (details as any).status;
+    if (typeof detailStatus === 'number') return detailStatus;
+  }
+  const response = (err as any).response;
+  if (response && typeof response === 'object') {
+    const responseStatus = (response as any).status;
+    if (typeof responseStatus === 'number') return responseStatus;
+  }
   return undefined;
 }
 

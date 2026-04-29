@@ -18,9 +18,41 @@ use super::types::{
     ResolveResponsesRequestBridgeDecisionsInput, ResolveResponsesRequestBridgeDecisionsOutput,
 };
 use super::utils::{
-    coerce_bridge_role, flatten_content_to_string, normalize_function_call_id,
+    coerce_bridge_role, flatten_content_to_string, is_synthetic_routecodex_tool_call_id,
     normalize_function_call_output_id, read_trimmed_string, serialize_tool_arguments, MediaBlock,
 };
+
+fn require_explicit_tool_call_id(call_id: Option<String>, reason: &str) -> Result<String, String> {
+    let resolved = call_id.ok_or_else(|| reason.to_string())?;
+    if is_synthetic_routecodex_tool_call_id(resolved.as_str()) {
+        return Err(format!(
+            "synthetic_tool_call_id: RouteCodex synthetic fallback tool_call id is forbidden: {}",
+            resolved
+        ));
+    }
+    Ok(resolved)
+}
+
+fn register_pending_tool_call(pending_tool_call_ids: &mut VecDeque<String>, call_id: &str) {
+    if !pending_tool_call_ids.iter().any(|entry| entry == call_id) {
+        pending_tool_call_ids.push_back(call_id.to_string());
+    }
+}
+
+fn consume_pending_tool_call(
+    pending_tool_call_ids: &mut VecDeque<String>,
+    call_id: &str,
+    reason: &str,
+) -> Result<(), String> {
+    let Some(pos) = pending_tool_call_ids
+        .iter()
+        .position(|entry| entry == call_id)
+    else {
+        return Err(format!("orphan_tool_result: {}: {}", reason, call_id));
+    };
+    pending_tool_call_ids.remove(pos);
+    Ok(())
+}
 
 fn content_blocks_to_bridge(value: &Value, blocks: &mut Vec<Value>, default_text_role: &str) {
     match value {
@@ -935,7 +967,9 @@ pub(crate) fn prepare_responses_request_envelope(
     }
 }
 
-pub(crate) fn build_bridge_history(input: BuildBridgeHistoryInput) -> BuildBridgeHistoryOutput {
+pub(crate) fn build_bridge_history(
+    input: BuildBridgeHistoryInput,
+) -> Result<BuildBridgeHistoryOutput, String> {
     let mut items: Vec<Value> = Vec::new();
     let mut system_parts: Vec<String> = Vec::new();
     let mut original_system_messages: Vec<String> = Vec::new();
@@ -975,32 +1009,24 @@ pub(crate) fn build_bridge_history(input: BuildBridgeHistoryInput) -> BuildBridg
         }
 
         if role == "tool" {
-            let raw_tool_id = read_trimmed_string(row.get("tool_call_id"))
-                .or_else(|| read_trimmed_string(row.get("call_id")))
-                .or_else(|| read_trimmed_string(row.get("tool_use_id")))
-                .or_else(|| read_trimmed_string(row.get("id")));
-            let mut call_id = raw_tool_id.clone();
-            if let Some(existing_id) = call_id.clone() {
-                if known_tool_call_ids.contains(existing_id.as_str()) {
-                    if let Some(pos) = pending_tool_call_ids
-                        .iter()
-                        .position(|entry| entry == existing_id.as_str())
-                    {
-                        pending_tool_call_ids.remove(pos);
-                    }
-                }
-            }
-            if call_id.is_none() && !pending_tool_call_ids.is_empty() {
-                call_id = pending_tool_call_ids.pop_front();
-            }
-            if call_id.is_none() {
-                call_id = Some(normalize_function_call_id(
-                    None,
-                    format!("fc_call_{}", items.len() + 1).as_str(),
+            let resolved_call_id = require_explicit_tool_call_id(
+                read_trimmed_string(row.get("tool_call_id"))
+                    .or_else(|| read_trimmed_string(row.get("call_id")))
+                    .or_else(|| read_trimmed_string(row.get("tool_use_id")))
+                    .or_else(|| read_trimmed_string(row.get("id"))),
+                "missing_tool_call_id: tool message is missing tool_call_id/call_id",
+            )?;
+            if !known_tool_call_ids.contains(resolved_call_id.as_str()) {
+                return Err(format!(
+                    "orphan_tool_result: tool message references unknown tool_call_id: {}",
+                    resolved_call_id
                 ));
             }
-            let resolved_call_id =
-                call_id.unwrap_or_else(|| format!("fc_call_{}", items.len() + 1));
+            consume_pending_tool_call(
+                &mut pending_tool_call_ids,
+                resolved_call_id.as_str(),
+                "tool message references unknown or already-consumed tool_call_id",
+            )?;
             known_tool_call_ids.insert(resolved_call_id.clone());
             let normalized_output_id = normalize_function_call_output_id(
                 Some(resolved_call_id.as_str()),
@@ -1030,14 +1056,12 @@ pub(crate) fn build_bridge_history(input: BuildBridgeHistoryInput) -> BuildBridg
                 let Some(tc_row) = tool_call.as_object() else {
                     continue;
                 };
-                let raw_id_candidate = read_trimmed_string(tc_row.get("id"))
-                    .or_else(|| read_trimmed_string(tc_row.get("call_id")));
-                let call_id = raw_id_candidate.clone().unwrap_or_else(|| {
-                    normalize_function_call_id(
-                        raw_id_candidate.as_deref(),
-                        format!("fc_call_{}", items.len() + 1).as_str(),
-                    )
-                });
+                let call_id = require_explicit_tool_call_id(
+                    read_trimmed_string(tc_row.get("id"))
+                        .or_else(|| read_trimmed_string(tc_row.get("call_id")))
+                        .or_else(|| read_trimmed_string(tc_row.get("tool_call_id"))),
+                    "missing_tool_call_id: assistant tool_call is missing id/call_id",
+                )?;
                 let fn_row = tc_row.get("function").and_then(Value::as_object);
                 let name = fn_row
                     .and_then(|v| read_trimmed_string(v.get("name")))
@@ -1052,7 +1076,7 @@ pub(crate) fn build_bridge_history(input: BuildBridgeHistoryInput) -> BuildBridg
                 });
                 items.push(entry);
                 known_tool_call_ids.insert(call_id.clone());
-                pending_tool_call_ids.push_back(call_id);
+                register_pending_tool_call(&mut pending_tool_call_ids, call_id.as_str());
             }
             continue;
         }
@@ -1144,17 +1168,24 @@ pub(crate) fn build_bridge_history(input: BuildBridgeHistoryInput) -> BuildBridg
         }
     };
 
-    BuildBridgeHistoryOutput {
+    if let Some(call_id) = pending_tool_call_ids.front() {
+        return Err(format!(
+            "dangling_tool_call: tool call {} does not have a matching tool result in history",
+            call_id
+        ));
+    }
+
+    Ok(BuildBridgeHistoryOutput {
         input: items,
         combined_system_instruction,
         latest_user_instruction,
         original_system_messages,
-    }
+    })
 }
 
 pub(crate) fn apply_bridge_normalize_history(
     input: ApplyBridgeNormalizeHistoryInput,
-) -> ApplyBridgeNormalizeHistoryOutput {
+) -> Result<ApplyBridgeNormalizeHistoryOutput, String> {
     let normalized = normalize_tool_session_payload(ToolSessionCompatInput {
         messages: input.messages,
         tool_outputs: None,
@@ -1163,12 +1194,12 @@ pub(crate) fn apply_bridge_normalize_history(
     let bridge_history = serde_json::to_value(build_bridge_history(BuildBridgeHistoryInput {
         messages: messages.clone(),
         tools: input.tools,
-    }))
+    })?)
     .ok();
-    ApplyBridgeNormalizeHistoryOutput {
+    Ok(ApplyBridgeNormalizeHistoryOutput {
         messages,
         bridge_history,
-    }
+    })
 }
 
 pub(crate) fn apply_bridge_capture_tool_results(
@@ -1270,13 +1301,11 @@ pub(crate) fn ensure_bridge_output_fields(
     let tool_fallback = input
         .tool_fallback
         .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "Tool call completed (no output).".to_string());
+        .unwrap_or_default();
     let assistant_fallback = input
         .assistant_fallback
         .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "Assistant response unavailable.".to_string());
+        .unwrap_or_default();
 
     let mut messages = input.messages;
     for message in messages.iter_mut() {

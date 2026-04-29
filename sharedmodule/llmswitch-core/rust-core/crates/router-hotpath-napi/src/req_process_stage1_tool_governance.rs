@@ -1098,7 +1098,6 @@ mod tests {
         }
         assert!(names.contains("exec_command"));
         assert!(names.contains("clock"));
-        assert!(names.contains("continue_execution"));
         assert!(names.contains("review"));
     }
 
@@ -1150,7 +1149,7 @@ mod tests {
         }
         assert!(!names.contains("websearch"));
         assert!(names.contains("clock"));
-        assert!(names.contains("continue_execution"));
+        assert!(!names.contains("continue_execution"));
     }
 
     #[test]
@@ -1242,6 +1241,6 @@ mod tests {
             }
         }
 
-        assert!(names.contains("continue_execution"));
+        assert!(!names.contains("continue_execution"));
     }
 }

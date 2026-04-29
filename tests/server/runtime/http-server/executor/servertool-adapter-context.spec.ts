@@ -68,6 +68,30 @@ describe('servertool adapter context builder', () => {
     expect(mockSyncReasoningStopModeFromRequest).toHaveBeenCalledTimes(1);
   });
 
+
+
+  it('fails fast when reasoning stop seed sync fails', async () => {
+    jest.resetModules();
+    mockSyncReasoningStopModeFromRequest.mockClear();
+    mockSyncReasoningStopModeFromRequest.mockImplementationOnce(() => {
+      throw new Error('reasoning-stop seed failed');
+    });
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+
+    expect(() => buildServerToolAdapterContext({
+      metadata: {},
+      originalRequest: {
+        messages: [{ role: 'user', content: '<**stopless:on**> 继续' }]
+      },
+      requestId: 'req-fail',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    })).toThrow('reasoning-stop seed failed');
+  });
+
   it('prefers original request as captured chat request for stopless sync', async () => {
     jest.resetModules();
     mockSyncReasoningStopModeFromRequest.mockClear();

@@ -25,7 +25,6 @@ function buildCodexLikeToolList(): Array<Record<string, unknown>> {
     functionTool('view_image'),
     functionTool('web_search'),
     functionTool('clock'),
-    functionTool('continue_execution'),
     functionTool('shell'),
     functionTool('read'),
     functionTool('grep'),
@@ -72,7 +71,7 @@ function buildCodexLikeToolList(): Array<Record<string, unknown>> {
 }
 
 describe('computer use namespace contract', () => {
-  it('accepts a realistic codex mixed tool list with namespace tool at index 15', () => {
+  it('accepts a realistic codex mixed tool list with namespace tool at index 14', () => {
     const envelope = {
       messages: [{ role: 'user', content: 'inspect Chrome' }],
       parameters: { model: 'gpt-5-codex' },

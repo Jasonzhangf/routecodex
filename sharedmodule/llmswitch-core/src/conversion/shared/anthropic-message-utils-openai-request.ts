@@ -32,7 +32,6 @@ const ANTHROPIC_TOP_LEVEL_FIELDS = new Set<string>([
   'thinking'
 ]);
 
-const EMPTY_TOOL_RESULT_FALLBACK = '[RouteCodex] Tool output was empty; execution status unknown.';
 const UNIFIED_EXEC_CAP_WARNING_RE =
   /^warning:\s*the maximum number of unified exec processes you can keep open is \d+\s+and you currently have \d+\s+processes open\.[\s\S]*automatic pruning of old processes\s*$/i;
 
@@ -56,9 +55,6 @@ function sanitizeUserVisibleText(value: string | undefined): string {
 
 function normalizeToolResultText(value: string | undefined): string {
   const sanitized = sanitizeUserVisibleText(value);
-  if (!hasVisibleText(sanitized)) {
-    return EMPTY_TOOL_RESULT_FALLBACK;
-  }
   return sanitized;
 }
 

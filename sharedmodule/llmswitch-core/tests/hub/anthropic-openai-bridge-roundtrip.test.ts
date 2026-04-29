@@ -162,8 +162,6 @@ describe('anthropic ↔ openai bridge roundtrip', () => {
     const toolResultBlock = firstBlockByType(toolResultMsg.content, 'tool_result');
 
     expect(String(toolResultBlock?.tool_use_id || '')).toBe('call_exec_1');
-    expect(String(toolResultBlock?.content || '')).toBe(
-      '[RouteCodex] Tool output was empty; execution status unknown.'
-    );
+    expect(String(toolResultBlock?.content || '')).toBe('');
   });
 });

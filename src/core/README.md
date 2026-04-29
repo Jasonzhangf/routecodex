@@ -5,25 +5,10 @@ Core module contains fundamental system-level components that are shared across 
 ## Directory Structure
 ```
 src/core/
-└── provider-health-manager.ts  # Provider health monitoring and status management
+└── (reserved for future core runtime primitives)
 ```
 
 ## Key Components
-
-### ProviderHealthManager
-Monitors the health status of all configured providers, tracking:
-- Provider availability and response times
-- Error rates and failure counts
-- Circuit breaker state (healthy/degraded/unhealthy)
-- Automatic recovery detection
-
-## Usage
-```typescript
-import { ProviderHealthManager } from './provider-health-manager.js';
-
-const healthManager = new ProviderHealthManager();
-const status = await healthManager.getProviderStatus('openai');
-```
 
 ## Related Documentation
 - `src/modules/pipeline/validation/` - Configuration validation

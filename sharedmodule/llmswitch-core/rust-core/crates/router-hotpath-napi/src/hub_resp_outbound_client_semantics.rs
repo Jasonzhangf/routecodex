@@ -1501,7 +1501,11 @@ fn read_client_tool_definition(
                 .and_then(|fn_row| fn_row.get("name").and_then(|v| v.as_str()))
                 .map(|v| v.trim().to_string())
         })
-        .or_else(|| row.get("name").and_then(|v| v.as_str()).map(|v| v.trim().to_string()))
+        .or_else(|| {
+            row.get("name")
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().to_string())
+        })
         .filter(|v| !v.is_empty())?;
     let format = row
         .get("format")
@@ -1510,7 +1514,12 @@ fn read_client_tool_definition(
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
     let parameters = fn_row
-        .and_then(|fn_row| fn_row.get("parameters").and_then(|v| v.as_object()).cloned())
+        .and_then(|fn_row| {
+            fn_row
+                .get("parameters")
+                .and_then(|v| v.as_object())
+                .cloned()
+        })
         .or_else(|| row.get("parameters").and_then(|v| v.as_object()).cloned());
 
     Some(ClientToolDefinition {
@@ -1521,7 +1530,11 @@ fn read_client_tool_definition(
     })
 }
 
-fn register_client_tool(index: &mut ClientToolIndex, key: String, definition: &ClientToolDefinition) {
+fn register_client_tool(
+    index: &mut ClientToolIndex,
+    key: String,
+    definition: &ClientToolDefinition,
+) {
     if key.trim().is_empty() {
         return;
     }
@@ -2019,6 +2032,20 @@ fn read_object_string(row: &Map<String, Value>, key: &str) -> Option<String> {
         .and_then(|v| v.as_str())
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+}
+
+fn require_explicit_tool_call_id(call_id: Option<String>, reason: &str) -> Result<String, String> {
+    let resolved = call_id.ok_or_else(|| reason.to_string())?;
+    let lowered = resolved.trim().to_ascii_lowercase();
+    if lowered.starts_with("call_servertool_fallback_")
+        || lowered.starts_with("call_clock_fallback_")
+    {
+        return Err(format!(
+            "synthetic_tool_call_id: RouteCodex synthetic fallback tool_call id is forbidden: {}",
+            resolved
+        ));
+    }
+    Ok(resolved)
 }
 
 fn read_request_id(response: &Map<String, Value>, request_id_hint: Option<&str>) -> Option<String> {
@@ -2894,9 +2921,14 @@ fn build_responses_payload_from_chat_core(
         let Some(name) = normalize_responses_function_name(raw_name) else {
             continue;
         };
-        let call_id = read_object_string(call_row, "id")
-            .or_else(|| read_object_string(call_row, "call_id"))
-            .unwrap_or_else(|| format!("fc_call_{}", index + 1));
+        let call_id = require_explicit_tool_call_id(
+            read_object_string(call_row, "id").or_else(|| read_object_string(call_row, "call_id")),
+            format!(
+                "missing_tool_call_id: assistant tool_call is missing id/call_id at index {}",
+                index
+            )
+            .as_str(),
+        )?;
         let args_raw = fn_row
             .and_then(|v| v.get("arguments"))
             .or_else(|| call_row.get("arguments"))
@@ -3403,6 +3435,36 @@ mod tests {
             function_items[1]["status"],
             Value::String("in_progress".to_string())
         );
+    }
+
+    #[test]
+    fn build_responses_payload_from_chat_rejects_missing_tool_call_id() {
+        let payload = serde_json::json!({
+            "id": "resp_missing_tool_call_id",
+            "model": "glm-4.7",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "done",
+                        "tool_calls": [
+                            {
+                                "type": "function",
+                                "function": { "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" }
+                            }
+                        ]
+                    }
+                }
+            ]
+        });
+
+        let error = build_responses_payload_from_chat_core(
+            &payload,
+            Some("req_missing_tool_call_id"),
+            &serde_json::json!({ "toolsRaw": [] }),
+        )
+        .unwrap_err();
+        assert!(error.contains("missing_tool_call_id"));
     }
 
     #[test]

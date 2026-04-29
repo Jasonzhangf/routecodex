@@ -30,7 +30,7 @@ use super::utils::{coerce_bridge_role, serialize_tool_arguments};
 pub fn convert_bridge_input_to_chat_messages_json(input_json: String) -> NapiResult<String> {
     let input: BridgeInputToChatInput =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = convert_bridge_input_to_chat_messages(input);
+    let output = convert_bridge_input_to_chat_messages(input).map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -278,7 +278,7 @@ pub fn build_bridge_history_json(input_json: String) -> NapiResult<String> {
     }
     let input: BuildBridgeHistoryInput = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = build_bridge_history(input);
+    let output = build_bridge_history(input).map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
@@ -358,7 +358,7 @@ pub fn apply_bridge_normalize_history_json(input_json: String) -> NapiResult<Str
     }
     let input: ApplyBridgeNormalizeHistoryInput = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = apply_bridge_normalize_history(input);
+    let output = apply_bridge_normalize_history(input).map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
@@ -457,7 +457,7 @@ pub fn run_bridge_action_pipeline_json(input_json: String) -> NapiResult<String>
     }
     let input: BridgeActionPipelineInput = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = run_bridge_action_pipeline(input);
+    let output = run_bridge_action_pipeline(input).map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }

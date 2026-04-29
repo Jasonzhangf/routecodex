@@ -6,9 +6,6 @@ use std::collections::HashMap;
 
 use crate::hub_bridge_actions::normalize_reasoning_in_chat_payload;
 
-const EMPTY_STOP_RESPONSE_PLACEHOLDER: &str =
-    "[RouteCodex] assistant response became empty after response sanitization.";
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FinalizeInput {
@@ -33,13 +30,12 @@ fn stringify_args(arg_val: &Value) -> String {
 }
 
 fn to_string_content(val: &Value) -> String {
-    const EMPTY_FALLBACK: &str = "[RouteCodex] Tool output was empty; execution status unknown.";
     match val {
-        Value::Null => EMPTY_FALLBACK.to_string(),
+        Value::Null => String::new(),
         Value::String(text) => {
             let trimmed = text.trim();
             if trimmed.is_empty() {
-                EMPTY_FALLBACK.to_string()
+                String::new()
             } else {
                 text.clone()
             }
@@ -47,7 +43,7 @@ fn to_string_content(val: &Value) -> String {
         Value::Array(_) | Value::Object(_) => {
             let text = serde_json::to_string(val).unwrap_or_default();
             if text.trim().is_empty() {
-                EMPTY_FALLBACK.to_string()
+                String::new()
             } else {
                 text
             }
@@ -55,7 +51,7 @@ fn to_string_content(val: &Value) -> String {
         other => {
             let text = other.to_string();
             if text.trim().is_empty() {
-                EMPTY_FALLBACK.to_string()
+                String::new()
             } else {
                 text
             }
@@ -63,24 +59,12 @@ fn to_string_content(val: &Value) -> String {
     }
 }
 
-fn normalize_tool_call_arguments(tool_call: &mut Value, fallback_id: Option<String>) -> bool {
+fn normalize_tool_call_arguments(tool_call: &mut Value) -> bool {
     let Some(tool_call_obj) = tool_call.as_object_mut() else {
         return false;
     };
     if tool_call_obj.get("type").is_none() && tool_call_obj.get("function").is_some() {
         tool_call_obj.insert("type".to_string(), Value::String("function".to_string()));
-    }
-    let id_missing = tool_call_obj
-        .get("id")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().is_empty())
-        .unwrap_or(true);
-    if id_missing {
-        if let Some(id) = fallback_id {
-            if !id.trim().is_empty() {
-                tool_call_obj.insert("id".to_string(), Value::String(id));
-            }
-        }
     }
     let Some(function_obj) = tool_call_obj
         .get_mut("function")
@@ -127,40 +111,15 @@ fn value_has_non_empty_text(value: Option<&Value>) -> bool {
     }
 }
 
-fn read_payload_error_fallback(payload: &Value) -> Option<String> {
-    let error = payload.get("error")?.as_object()?;
-    let message = error
-        .get("message")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if !message.is_empty() {
-        return Some(message);
-    }
-    let code = error
-        .get("code")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if code.is_empty() {
-        None
-    } else {
-        Some(format!("[RouteCodex] provider error: {}", code))
-    }
-}
-
-fn normalize_choices(payload: &mut Value) -> bool {
-    let error_fallback = read_payload_error_fallback(payload);
+fn normalize_choices(payload: &mut Value) {
     let Some(choices) = payload.get_mut("choices").and_then(|v| v.as_array_mut()) else {
-        return false;
+        return;
     };
     let Some(first_choice) = choices.first_mut() else {
-        return false;
+        return;
     };
     let Some(first_choice_obj) = first_choice.as_object_mut() else {
-        return false;
+        return;
     };
     let original_finish_reason = first_choice_obj
         .get("finish_reason")
@@ -170,10 +129,10 @@ fn normalize_choices(payload: &mut Value) -> bool {
         .to_ascii_lowercase();
     let (has_tool_calls, has_message_text) = {
         let Some(message_value) = first_choice_obj.get_mut("message") else {
-            return false;
+            return;
         };
         let Some(message_obj) = message_value.as_object_mut() else {
-            return false;
+            return;
         };
 
         let mut has_tool_calls = false;
@@ -184,9 +143,8 @@ fn normalize_choices(payload: &mut Value) -> bool {
             let had_raw_tool_calls = !tool_calls.is_empty();
             let mut normalized_tool_calls: Vec<Value> = Vec::new();
             let original = std::mem::take(tool_calls);
-            for (idx, mut tool_call) in original.into_iter().enumerate() {
-                let fallback_id = Some(format!("call_routecodex_repaired_{}", idx + 1));
-                if normalize_tool_call_arguments(&mut tool_call, fallback_id) {
+            for mut tool_call in original.into_iter() {
+                if normalize_tool_call_arguments(&mut tool_call) {
                     normalized_tool_calls.push(tool_call);
                 } else {
                     normalized_tool_calls.push(tool_call);
@@ -208,37 +166,15 @@ fn normalize_choices(payload: &mut Value) -> bool {
                 Value::String("tool_calls".to_string()),
             );
         }
-        return false;
+        return;
     }
 
-    let mut repaired_finish_reason = original_finish_reason.clone();
-    let mut inserted_placeholder = false;
     if original_finish_reason == "tool_calls" && !has_message_text {
         first_choice_obj.insert(
             "finish_reason".to_string(),
             Value::String("stop".to_string()),
         );
-        repaired_finish_reason = "stop".to_string();
     }
-    if repaired_finish_reason == "stop" && !has_message_text {
-        if let Some(message_obj) = first_choice_obj
-            .get_mut("message")
-            .and_then(|value| value.as_object_mut())
-        {
-            message_obj.insert(
-                "content".to_string(),
-                Value::String(
-                    error_fallback
-                        .clone()
-                        .unwrap_or_else(|| {
-                            inserted_placeholder = true;
-                            EMPTY_STOP_RESPONSE_PLACEHOLDER.to_string()
-                        }),
-                ),
-            );
-        }
-    }
-    inserted_placeholder
 }
 
 fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
@@ -278,9 +214,8 @@ fn normalize_messages(payload: &mut Value) {
         }
         let mut normalized_tool_calls: Vec<Value> = Vec::new();
         let original = std::mem::take(tool_calls);
-        for (idx, mut tool_call) in original.into_iter().enumerate() {
-            let fallback_id = Some(format!("call_routecodex_history_{}", idx + 1));
-            if !normalize_tool_call_arguments(&mut tool_call, fallback_id) {
+        for mut tool_call in original.into_iter() {
+            if !normalize_tool_call_arguments(&mut tool_call) {
                 continue;
             }
             let Some(tool_call_obj) = tool_call.as_object() else {
@@ -417,32 +352,11 @@ fn apply_reasoning_policy(payload: &mut Value, mode: Option<&str>) {
 }
 
 pub fn finalize_chat_response(input: FinalizeInput) -> Value {
-    let endpoint = input
-        .endpoint
-        .clone()
-        .unwrap_or_else(|| "/unknown".to_string());
-    let request_id = input
-        .request_id
-        .clone()
-        .unwrap_or_else(|| "unknown".to_string());
     let mut payload = input.payload;
     normalize_reasoning_in_chat_payload(&mut payload);
-    let inserted_placeholder = normalize_choices(&mut payload);
+    normalize_choices(&mut payload);
     normalize_messages(&mut payload);
     apply_reasoning_policy(&mut payload, input.reasoning_mode.as_deref());
-    if inserted_placeholder {
-        crate::hub_snapshot_hooks::enqueue_payload_contract_errorsample(
-            endpoint.as_str(),
-            request_id.as_str(),
-            None,
-            "provider-response",
-            "assistant_sanitized_empty_placeholder",
-            "assistant response was repaired with the empty-after-sanitization placeholder",
-            json!({
-              "finalizedPayload": payload.clone()
-            }),
-        );
-    }
     payload
 }
 
@@ -558,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn test_finalize_repairs_missing_tool_call_id() {
+    fn test_finalize_does_not_repair_missing_tool_call_id() {
         let input = FinalizeInput {
             payload: json!({
               "choices": [{
@@ -580,10 +494,7 @@ mod tests {
         };
         let result = finalize_chat_response(input);
         assert_eq!(result["choices"][0]["finish_reason"], "tool_calls");
-        assert_eq!(
-            result["choices"][0]["message"]["tool_calls"][0]["id"],
-            "call_routecodex_repaired_1"
-        );
+        assert!(result["choices"][0]["message"]["tool_calls"][0]["id"].is_null());
     }
 
     #[test]
@@ -638,10 +549,7 @@ mod tests {
         };
         let result = finalize_chat_response(input);
         assert_eq!(result["choices"][0]["finish_reason"], "stop");
-        assert_eq!(
-            result["choices"][0]["message"]["content"],
-            EMPTY_STOP_RESPONSE_PLACEHOLDER
-        );
+        assert!(result["choices"][0]["message"]["content"].is_null());
     }
 
     #[test]
@@ -661,10 +569,7 @@ mod tests {
             request_id: None,
         };
         let result = finalize_chat_response(input);
-        assert_eq!(
-            result["choices"][0]["message"]["content"],
-            EMPTY_STOP_RESPONSE_PLACEHOLDER
-        );
+        assert_eq!(result["choices"][0]["message"]["content"], "");
     }
 
     #[test]

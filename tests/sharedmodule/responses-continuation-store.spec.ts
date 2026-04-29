@@ -222,4 +222,184 @@ describe('responses conversation store plain continuation restore', () => {
       materializedMode: 'local_full_input'
     });
   });
+
+  it('fails fast when response capture sees synthetic RouteCodex assistant control text', () => {
+    captureResponsesRequestContext({
+      requestId: 'req-resp-store-1',
+      sessionId: 'sess-1',
+      payload: {
+        model: 'gpt-5.3-codex'
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }]
+          }
+        ]
+      }
+    });
+
+    expect(() =>
+      recordResponsesResponse({
+        requestId: 'req-resp-store-1',
+        response: {
+          id: 'resp-store-synthetic-1',
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [
+                {
+                  type: 'output_text',
+                  text: '[RouteCodex] assistant response became empty after response sanitization.'
+                }
+              ]
+            }
+          ]
+        }
+      })
+    ).toThrow(/Tool history contract violated/i);
+  });
+
+  it('fails fast when response capture sees synthetic RouteCodex tool placeholder output', () => {
+    captureResponsesRequestContext({
+      requestId: 'req-resp-store-tool-1',
+      sessionId: 'sess-tool-1',
+      payload: {
+        model: 'gpt-5.3-codex'
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello tool' }]
+          }
+        ]
+      }
+    });
+
+    expect(() =>
+      recordResponsesResponse({
+        requestId: 'req-resp-store-tool-1',
+        response: {
+          id: 'resp-store-tool-synthetic-1',
+          output: [
+            {
+              type: 'function_call',
+              id: 'fc_demo',
+              call_id: 'fc_demo',
+              name: 'demo',
+              arguments: '{}'
+            },
+            {
+              type: 'function_call_output',
+              call_id: 'fc_demo',
+              output: [
+                {
+                  type: 'output_text',
+                  text: '[RouteCodex] Tool call result unknown: tool "demo" (fc_demo) did not produce a result in this session. Treat this tool as failed with unknown status.'
+                }
+              ]
+            }
+          ]
+        }
+      })
+    ).toThrow(/Tool history contract violated/i);
+  });
+
+  it('fails fast when conversation capture sees synthetic RouteCodex local control text', () => {
+    captureResponsesRequestContext({
+      requestId: 'req-resp-store-2',
+      sessionId: 'sess-synthetic-control',
+      payload: {
+        model: 'gpt-5.3-codex'
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }]
+          }
+        ]
+      }
+    });
+
+    expect(() =>
+      recordResponsesResponse({
+        requestId: 'req-resp-store-2',
+        response: {
+          id: 'resp-store-synthetic-control',
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [
+                {
+                  type: 'output_text',
+                  text: '[RouteCodex] assistant response became empty after response sanitization.'
+                }
+              ]
+            }
+          ]
+        }
+      })
+    ).toThrow(/synthetic RouteCodex local control text/i);
+  });
+
+  it('captures a requires_action response with unresolved function_call for later submit_tool_outputs resume', () => {
+    captureResponsesRequestContext({
+      requestId: 'req-resp-store-pending-call',
+      sessionId: 'sess-pending-call',
+      payload: {
+        model: 'gpt-5.3-codex'
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'run pwd' }]
+          }
+        ]
+      }
+    });
+
+    expect(() =>
+      recordResponsesResponse({
+        requestId: 'req-resp-store-pending-call',
+        response: {
+          id: 'resp-store-pending-call',
+          object: 'response',
+          status: 'requires_action',
+          output: [
+            {
+              type: 'function_call',
+              id: 'fc_pending_call_1',
+              call_id: 'call_pending_call_1',
+              name: 'exec_command',
+              arguments: '{"cmd":"pwd"}',
+              status: 'in_progress'
+            }
+          ],
+          required_action: {
+            type: 'submit_tool_outputs',
+            submit_tool_outputs: {
+              tool_calls: [
+                {
+                  id: 'call_pending_call_1',
+                  type: 'function',
+                  name: 'exec_command',
+                  arguments: '{"cmd":"pwd"}'
+                }
+              ]
+            }
+          }
+        }
+      })
+    ).not.toThrow();
+  });
 });

@@ -323,6 +323,32 @@ describe('HubRequestExecutor failover', () => {
       antigravityRetrySignal: null
     });
 
+    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+      status: 'completed',
+      output: [
+        {
+          type: 'reasoning',
+          text: 'internal only'
+        }
+      ],
+      reasoning: 'internal only'
+    })).toMatchObject({
+      marker: 'responses_empty_output'
+    });
+
+    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+      choices: [
+        {
+          finish_reason: 'stop',
+          message: {
+            reasoning: 'internal only'
+          }
+        }
+      ]
+    })).toMatchObject({
+      marker: 'chat_empty_assistant'
+    });
+
     const longReason = 'x'.repeat(400);
     const truncated = __requestExecutorTestables.truncateReason(longReason, 50);
     expect(truncated.length).toBe(50);
@@ -427,6 +453,44 @@ describe('HubRequestExecutor failover', () => {
       },
       stage: 'provider.send'
     })).toBe('recoverable');
+
+    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
+      error: Object.assign(new Error('tool history contract violated'), {
+        code: 'MALFORMED_REQUEST'
+      }),
+      retryError: {
+        errorCode: 'MALFORMED_REQUEST',
+        reason: 'tool history contract violated'
+      },
+      stage: 'provider.send'
+    })).toBe('special_400');
+
+    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
+      error: Object.assign(new Error('tool_call missing required id'), {
+        code: 'MALFORMED_RESPONSE'
+      }),
+      retryError: {
+        errorCode: 'MALFORMED_RESPONSE',
+        reason: 'tool_call missing required id'
+      },
+      stage: 'provider.send'
+    })).toBe('unrecoverable');
+
+    expect(__requestExecutorTestables.resolveProviderRetryEligibilityPlan({
+      error: Object.assign(new Error('tool history contract violated'), {
+        code: 'MALFORMED_REQUEST'
+      }),
+      retryError: {
+        errorCode: 'MALFORMED_REQUEST',
+        reason: 'tool history contract violated'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      providerKey: 'mimo.key1.mimo-v2.5-pro'
+    })).toEqual({
+      shouldRetry: false,
+      blockingRecoverable: false
+    });
 
     const antigravityEligibilityPlan = __requestExecutorTestables.resolveProviderRetryEligibilityPlan({
       error: new Error('Please authenticate with Google OAuth first'),
@@ -872,9 +936,25 @@ describe('HubRequestExecutor failover', () => {
 
     const failingProcess = jest.fn()
       .mockRejectedValueOnce(failingError)
-      .mockResolvedValueOnce({ status: 200, data: { id: 'ok_after_same_provider_wait' } });
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          id: 'ok_after_same_provider_wait',
+          status: 'completed',
+          output_text: 'ok',
+          output: [{ type: 'output_text', text: 'ok' }]
+        }
+      });
     const failureHandle = buildHandle(firstProviderKey, failingProcess);
-    const successPayload = { status: 200, data: { id: 'ok' } };
+    const successPayload = {
+      status: 200,
+      data: {
+        id: 'ok',
+        status: 'completed',
+        output_text: 'ok',
+        output: [{ type: 'output_text', text: 'ok' }]
+      }
+    };
     const successProcess = jest.fn(async () => successPayload);
     const successHandle = buildHandle(secondProviderKey, successProcess);
 
@@ -930,9 +1010,23 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const executor = createRequestExecutor(deps);
+    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
+      status: 200,
+      body: {
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: 'ok'
+            }
+          }
+        ]
+      }
+    });
     const result = await executor.execute({
       requestId: 'req-retry',
-      entryEndpoint: '/v1/responses',
+      entryEndpoint: '/v1/chat/completions',
       body: {},
       headers: {},
       metadata: {}
@@ -1191,9 +1285,23 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const executor = createRequestExecutor(deps);
+    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
+      status: 200,
+      body: {
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: 'ok'
+            }
+          }
+        ]
+      }
+    });
     const result = await executor.execute({
       requestId: 'req-context-overflow',
-      entryEndpoint: '/v1/responses',
+      entryEndpoint: '/v1/chat/completions',
       body: {},
       headers: {},
       metadata: {}

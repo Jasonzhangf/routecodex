@@ -9,6 +9,7 @@ import {
   flattenAnthropicText,
   isObject,
   normalizeAnthropicToolName,
+  normalizeShellLikeToolInput,
   normalizeToolResultContent,
   requireTrimmedString,
   safeJson
@@ -194,9 +195,9 @@ export function buildOpenAIChatFromAnthropic(
       } else if (t === 'tool_use') {
         const name = requireTrimmedString((block as any).name, 'tool_use.name');
         const id = requireTrimmedString((block as any).id, 'tool_use.id');
-        const input = (block as any).input ?? {};
-        const args = safeJson(input);
         const canonicalName = resolveToolName(name) || name;
+        const input = normalizeShellLikeToolInput(canonicalName, (block as any).input ?? {});
+        const args = safeJson(input);
         const includeIds = options?.includeToolCallIds === true;
         toolCalls.push({
           id,

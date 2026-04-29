@@ -9,29 +9,14 @@ use super::utils::read_trimmed_string;
 
 #[derive(Debug)]
 struct ToolIdNormalizer {
-    id_prefix: String,
-    counter: usize,
     alias_map: HashMap<String, String>,
-    pending_queue: Vec<String>,
 }
 
 impl ToolIdNormalizer {
-    fn new(id_prefix: Option<String>) -> Self {
-        let prefix = id_prefix
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| "bridge_tool".to_string());
+    fn new(_id_prefix: Option<String>) -> Self {
         Self {
-            id_prefix: prefix,
-            counter: 0,
             alias_map: HashMap::new(),
-            pending_queue: Vec::new(),
         }
-    }
-
-    fn next_id(&mut self) -> String {
-        self.counter += 1;
-        format!("{}_{}", self.id_prefix, self.counter)
     }
 
     fn register_alias(&mut self, raw: Option<&str>, normalized: &str) {
@@ -46,46 +31,27 @@ impl ToolIdNormalizer {
             .insert(normalized.to_string(), normalized.to_string());
     }
 
-    fn consume_pending(&mut self, id: &str) {
-        if let Some(index) = self.pending_queue.iter().position(|v| v == id) {
-            self.pending_queue.remove(index);
-        }
-    }
-
-    fn normalize_id_value(&mut self, raw: Option<&str>, consume_queue: bool) -> String {
+    fn normalize_id_value(&mut self, raw: Option<&str>) -> Option<String> {
         let existing = raw.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
         if let Some(existing_id) = existing {
             if let Some(mapped) = self.alias_map.get(existing_id.as_str()) {
-                return mapped.clone();
-            }
-            if consume_queue && !self.pending_queue.is_empty() {
-                let queued = self.pending_queue.remove(0);
-                self.register_alias(Some(existing_id.as_str()), queued.as_str());
-                return queued;
+                return Some(mapped.clone());
             }
             self.register_alias(Some(existing_id.as_str()), existing_id.as_str());
-            return existing_id;
+            return Some(existing_id);
         }
-        if consume_queue && !self.pending_queue.is_empty() {
-            let queued = self.pending_queue.remove(0);
-            self.register_alias(Some(queued.as_str()), queued.as_str());
-            return queued;
-        }
-        let generated = self.next_id();
-        self.register_alias(Some(generated.as_str()), generated.as_str());
-        generated
+        None
     }
 }
 
 fn normalize_tool_call_obj(
     call_obj: &mut Map<String, Value>,
     normalizer: &mut ToolIdNormalizer,
-    consume_queue: bool,
 ) -> Option<String> {
     let raw_id = read_trimmed_string(call_obj.get("id"))
         .or_else(|| read_trimmed_string(call_obj.get("tool_call_id")))
         .or_else(|| read_trimmed_string(call_obj.get("call_id")));
-    let normalized = normalizer.normalize_id_value(raw_id.as_deref(), consume_queue);
+    let normalized = normalizer.normalize_id_value(raw_id.as_deref())?;
     let prev_id = read_trimmed_string(call_obj.get("id"));
     let prev_tool_call_id = read_trimmed_string(call_obj.get("tool_call_id"));
     let prev_call_id = read_trimmed_string(call_obj.get("call_id"));
@@ -104,18 +70,17 @@ fn normalize_tool_call_obj(
 fn normalize_tool_message_obj(
     message_obj: &mut Map<String, Value>,
     normalizer: &mut ToolIdNormalizer,
-) -> String {
+) -> Option<String> {
     let raw_id = read_trimmed_string(message_obj.get("tool_call_id"))
         .or_else(|| read_trimmed_string(message_obj.get("call_id")))
         .or_else(|| read_trimmed_string(message_obj.get("id")));
-    let normalized = normalizer.normalize_id_value(raw_id.as_deref(), true);
+    let normalized = normalizer.normalize_id_value(raw_id.as_deref())?;
     let prev_tool_call_id = read_trimmed_string(message_obj.get("tool_call_id"));
     let prev_call_id = read_trimmed_string(message_obj.get("call_id"));
     let prev_id = read_trimmed_string(message_obj.get("id"));
     normalizer.register_alias(prev_tool_call_id.as_deref(), normalized.as_str());
     normalizer.register_alias(prev_call_id.as_deref(), normalized.as_str());
     normalizer.register_alias(prev_id.as_deref(), normalized.as_str());
-    normalizer.consume_pending(normalized.as_str());
     message_obj.insert(
         "tool_call_id".to_string(),
         Value::String(normalized.clone()),
@@ -124,28 +89,27 @@ fn normalize_tool_message_obj(
     if !message_obj.contains_key("id") {
         message_obj.insert("id".to_string(), Value::String(normalized.clone()));
     }
-    normalized
+    Some(normalized)
 }
 
 fn normalize_tool_output_obj(
     row: &mut Map<String, Value>,
     normalizer: &mut ToolIdNormalizer,
-) -> String {
+) -> Option<String> {
     let raw_id = read_trimmed_string(row.get("tool_call_id"))
         .or_else(|| read_trimmed_string(row.get("call_id")))
         .or_else(|| read_trimmed_string(row.get("id")));
-    let normalized = normalizer.normalize_id_value(raw_id.as_deref(), true);
+    let normalized = normalizer.normalize_id_value(raw_id.as_deref())?;
     let prev_tool_call_id = read_trimmed_string(row.get("tool_call_id"));
     let prev_call_id = read_trimmed_string(row.get("call_id"));
     normalizer.register_alias(prev_tool_call_id.as_deref(), normalized.as_str());
     normalizer.register_alias(prev_call_id.as_deref(), normalized.as_str());
-    normalizer.consume_pending(normalized.as_str());
     row.insert(
         "tool_call_id".to_string(),
         Value::String(normalized.clone()),
     );
     row.insert("call_id".to_string(), Value::String(normalized.clone()));
-    normalized
+    Some(normalized)
 }
 
 fn normalize_messages(messages: &mut [Value], normalizer: &mut ToolIdNormalizer) {
@@ -170,14 +134,12 @@ fn normalize_messages(messages: &mut [Value], normalizer: &mut ToolIdNormalizer)
                 let Some(call_obj) = call.as_object_mut() else {
                     continue;
                 };
-                if let Some(normalized) = normalize_tool_call_obj(call_obj, normalizer, false) {
-                    normalizer.pending_queue.push(normalized);
-                }
+                let _ = normalize_tool_call_obj(call_obj, normalizer);
             }
             continue;
         }
         if role == "tool" {
-            normalize_tool_message_obj(message_obj, normalizer);
+            let _ = normalize_tool_message_obj(message_obj, normalizer);
         }
     }
 }
@@ -216,7 +178,7 @@ fn normalize_raw_request(raw_request: &mut Option<Value>, normalizer: &mut ToolI
         let Some(call_obj) = call.as_object_mut() else {
             continue;
         };
-        normalize_tool_call_obj(call_obj, normalizer, false);
+        let _ = normalize_tool_call_obj(call_obj, normalizer);
     }
 }
 
@@ -231,7 +193,7 @@ fn normalize_captured_tool_results(
         let Some(row) = entry.as_object_mut() else {
             continue;
         };
-        normalize_tool_output_obj(row, normalizer);
+        let _ = normalize_tool_output_obj(row, normalizer);
     }
 }
 

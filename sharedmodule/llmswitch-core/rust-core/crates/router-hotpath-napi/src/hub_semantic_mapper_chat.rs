@@ -105,21 +105,19 @@ fn flatten_system_content(content: &Value) -> String {
 }
 
 fn normalize_tool_content(content: &Value) -> String {
-    const EMPTY_TOOL_FALLBACK: &str =
-        "[RouteCodex] Tool output was empty; execution status unknown.";
     match content {
         Value::String(text) => {
             if text.trim().is_empty() {
-                EMPTY_TOOL_FALLBACK.to_string()
+                String::new()
             } else {
                 text.clone()
             }
         }
-        Value::Null => EMPTY_TOOL_FALLBACK.to_string(),
+        Value::Null => String::new(),
         _ => serde_json::to_string(content)
             .ok()
             .filter(|text| !text.trim().is_empty())
-            .unwrap_or_else(|| EMPTY_TOOL_FALLBACK.to_string()),
+            .unwrap_or_default(),
     }
 }
 
@@ -863,19 +861,13 @@ mod tests {
     }
 
     #[test]
-    fn normalize_tool_content_marks_empty_as_unknown() {
-        assert_eq!(
-            normalize_tool_content(&Value::Null),
-            "[RouteCodex] Tool output was empty; execution status unknown."
-        );
-        assert_eq!(
-            normalize_tool_content(&Value::String("   ".to_string())),
-            "[RouteCodex] Tool output was empty; execution status unknown."
-        );
+    fn normalize_tool_content_preserves_empty_as_empty_string() {
+        assert_eq!(normalize_tool_content(&Value::Null), "");
+        assert_eq!(normalize_tool_content(&Value::String("   ".to_string())), "");
     }
 
     #[test]
-    fn map_openai_chat_to_chat_keeps_failed_tool_output_for_next_round() {
+    fn map_openai_chat_to_chat_keeps_empty_tool_output_for_next_round() {
         let payload = json!({
           "messages": [
             {
@@ -904,10 +896,7 @@ mod tests {
             .expect("tool outputs");
         assert_eq!(tool_outputs.len(), 1);
         assert_eq!(tool_outputs[0]["tool_call_id"], "call_exec_1");
-        assert_eq!(
-            tool_outputs[0]["content"],
-            "[RouteCodex] Tool output was empty; execution status unknown."
-        );
+        assert_eq!(tool_outputs[0]["content"], "");
     }
 
     #[test]

@@ -86,9 +86,9 @@ fn build_request_from_responses_payload(
     let converted = convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
         input,
         tools: tools.clone(),
-        tool_result_fallback_text: Some("Command succeeded (no output).".to_string()),
+        tool_result_fallback_text: Some(String::new()),
         normalize_function_name: Some("responses".to_string()),
-    });
+    })?;
     let messages = append_local_images(converted.messages).map_err(|e| e.to_string())?;
     if messages.is_empty() {
         return Err("Responses payload produced no chat messages".to_string());
