@@ -1423,12 +1423,14 @@ fn repair_tool_args_by_schema_keys(
         }
     }
     if tool_name == "exec_command" {
-        if wants.contains("cmd") && out.get("cmd").is_none() {
+        let wants_cmd = wants.contains("cmd");
+        let wants_command = wants.contains("command");
+        if wants_cmd && !wants_command && out.get("cmd").is_none() {
             if let Some(value) = out.get("command").cloned() {
                 out.insert("cmd".to_string(), value);
             }
         }
-        if wants.contains("command") && out.get("command").is_none() {
+        if wants_command && !wants_cmd && out.get("command").is_none() {
             if let Some(value) = out.get("cmd").cloned() {
                 out.insert("command".to_string(), value);
             }

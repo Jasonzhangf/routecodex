@@ -1295,10 +1295,7 @@ fn extract_apply_patch_text_value(value: Option<&Value>) -> Option<String> {
             .get("patch")
             .or_else(|| row.get("input"))
             .or_else(|| row.get("instructions"))
-            .or_else(|| row.get("text"))
-            .or_else(|| row.get("command"))
-            .or_else(|| row.get("cmd"))
-            .or_else(|| row.get("script"))
+            .or_else(|| row.get("arguments"))
             .and_then(|entry| extract_apply_patch_text_value(Some(entry))),
         Some(Value::Array(entries)) => entries
             .iter()
@@ -1331,8 +1328,20 @@ fn normalize_reasoning_harvested_arguments(
         let command = read_command_from_args_value(Some(args_source))
             .or_else(|| read_command_from_args_value(Some(&parsed_args)));
         let command = command?;
+        let has_cmd = args_source
+            .as_object()
+            .map(|row| row.contains_key("cmd"))
+            .unwrap_or(false);
+        let has_command = args_source
+            .as_object()
+            .map(|row| row.contains_key("command"))
+            .unwrap_or(false);
         let mut args_obj = Map::new();
-        args_obj.insert("cmd".to_string(), Value::String(command));
+        if has_command && !has_cmd {
+            args_obj.insert("command".to_string(), Value::String(command));
+        } else {
+            args_obj.insert("cmd".to_string(), Value::String(command));
+        }
         return serde_json::to_string(&Value::Object(args_obj)).ok();
     }
 

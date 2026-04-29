@@ -616,6 +616,7 @@ async function shouldDisableServerToolTimeoutForClockHold(args: {
   chat: JsonObject;
   adapterContext: AdapterContext;
   serverToolTimeoutMs: number;
+  requestId?: string;
 }): Promise<boolean> {
   // Only relevant for stop/length responses: clock_auto may hold indefinitely.
   if (!isStopFinishReasonWithoutToolCalls(args.chat)) {
@@ -649,10 +650,20 @@ async function shouldDisableServerToolTimeoutForClockHold(args: {
     }
     return true;
   } catch (error) {
-    logServerToolNonBlocking('clock_hold_disable_timeout_probe', error, {
-      serverToolTimeoutMs: args.serverToolTimeoutMs
-    });
-    return false;
+    const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+    const wrapped = new ProviderProtocolError('[servertool] clock hold timeout probe failed', {
+      code: 'SERVERTOOL_CLOCK_HOLD_TIMEOUT_PROBE_FAILED',
+      category: 'INTERNAL_ERROR',
+      details: {
+        requestId: args.requestId,
+        sessionId,
+        serverToolTimeoutMs: args.serverToolTimeoutMs,
+        reason: message
+      }
+    }) as ProviderProtocolError & { status?: number; cause?: unknown };
+    wrapped.status = 500;
+    wrapped.cause = error;
+    throw wrapped;
   }
 }
 
@@ -998,7 +1009,8 @@ export async function runServerToolOrchestration(
   const shouldDisableTimeout = await shouldDisableServerToolTimeoutForClockHold({
     chat: options.chat,
     adapterContext: options.adapterContext,
-    serverToolTimeoutMs
+    serverToolTimeoutMs,
+    requestId: options.requestId
   });
   const effectiveServerToolTimeoutMs = shouldDisableTimeout ? 0 : serverToolTimeoutMs;
   const followupTimeoutMs = resolveServerToolFollowupTimeoutMs(serverToolTimeoutMs);

@@ -167,6 +167,18 @@ fn resolve_shell_like_tool_name(raw_name: &str, requested_tool_names: &HashSet<S
     raw_name.to_string()
 }
 
+fn args_contain_direct_or_nested_key(args: &Map<String, Value>, key: &str) -> bool {
+    if args.contains_key(key) {
+        return true;
+    }
+    ["input", "args"].iter().any(|container_key| {
+        args.get(*container_key)
+            .and_then(Value::as_object)
+            .map(|row| row.contains_key(key))
+            .unwrap_or(false)
+    })
+}
+
 fn is_shell_like_tool_name(raw_name: &str) -> bool {
     matches!(
         raw_name.to_ascii_lowercase().as_str(),
@@ -195,15 +207,31 @@ fn normalize_shell_like_function_call_arguments(
     let args = parse_json_record(raw_arguments)?;
     let cmd = read_command_from_args(&args)?;
     let mut next_args = args;
-    next_args.insert("cmd".to_string(), Value::String(cmd.clone()));
-    next_args.insert("command".to_string(), Value::String(cmd));
+    let has_cmd = args_contain_direct_or_nested_key(&next_args, "cmd");
+    let has_command = args_contain_direct_or_nested_key(&next_args, "command");
+    let source_is_shell_alias = matches!(
+        resolved_name.trim().to_ascii_lowercase().as_str(),
+        "shell_command" | "shell" | "bash" | "terminal"
+    );
+    let emit_cmd = has_cmd || (!has_command && !source_is_shell_alias);
+    let emit_command = has_command || (source_is_shell_alias && !has_cmd);
+    if emit_cmd {
+        next_args.insert("cmd".to_string(), Value::String(cmd.clone()));
+    } else {
+        next_args.remove("cmd");
+    }
+    if emit_command {
+        next_args.insert("command".to_string(), Value::String(cmd));
+    } else {
+        next_args.remove("command");
+    }
     if let Some(workdir) = read_workdir_from_args(&next_args) {
         next_args.insert("workdir".to_string(), Value::String(workdir));
     }
     next_args.remove("toon");
 
     let arguments = serde_json::to_string(&Value::Object(next_args))
-        .unwrap_or_else(|_| "{\"cmd\":\"\",\"command\":\"\"}".to_string());
+        .unwrap_or_else(|_| "{\"cmd\":\"\"}".to_string());
     Some((resolved_name, arguments))
 }
 
@@ -426,7 +454,7 @@ mod tests {
             .expect("arguments text");
         let args: Value = serde_json::from_str(args_text).expect("args object");
         assert_eq!(args["cmd"], "pwd");
-        assert_eq!(args["command"], "pwd");
+        assert!(args.get("command").is_none());
     }
 
     #[test]
@@ -455,8 +483,8 @@ mod tests {
             .as_str()
             .expect("arguments text");
         let args: Value = serde_json::from_str(args_text).expect("args object");
-        assert_eq!(args["cmd"], "git status");
         assert_eq!(args["command"], "git status");
+        assert!(args.get("cmd").is_none());
         assert_eq!(args["workdir"], "/repo");
     }
 
@@ -479,8 +507,8 @@ mod tests {
             .as_str()
             .expect("arguments text");
         let args: Value = serde_json::from_str(args_text).expect("args object");
-        assert_eq!(args["cmd"], "npm test");
         assert_eq!(args["command"], "npm test");
+        assert!(args.get("cmd").is_none());
         assert_eq!(args["workdir"], "/workspace");
     }
 
@@ -511,7 +539,7 @@ mod tests {
             .expect("arguments text");
         let args: Value = serde_json::from_str(args_text).expect("args object");
         assert_eq!(args["cmd"], "ls -la");
-        assert_eq!(args["command"], "ls -la");
+        assert!(args.get("command").is_none());
     }
 
     #[test]
@@ -617,8 +645,8 @@ mod tests {
         assert_eq!(items[0]["call_id"], "call_good");
         let args_text = items[0]["arguments"].as_str().expect("normalized args");
         let args: Value = serde_json::from_str(args_text).expect("args object");
-        assert_eq!(args["cmd"], "pwd");
         assert_eq!(args["command"], "pwd");
+        assert!(args.get("cmd").is_none());
     }
 
     #[test]

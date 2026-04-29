@@ -79,6 +79,48 @@ fn read_workdir_from_args_map(args: &Map<String, Value>) -> Option<String> {
         .or_else(|| input.and_then(|row| read_trimmed_text(row.get("cwd"))))
 }
 
+fn args_contain_direct_or_nested_key(args: &Map<String, Value>, key: &str) -> bool {
+    if args.contains_key(key) {
+        return true;
+    }
+    ["input", "args"].iter().any(|container_key| {
+        args.get(*container_key)
+            .and_then(Value::as_object)
+            .map(|row| row.contains_key(key))
+            .unwrap_or(false)
+    })
+}
+
+fn build_shell_like_output_arguments(
+    raw_name: Option<&str>,
+    args: &Map<String, Value>,
+) -> Option<String> {
+    let cmd = read_command_from_args_map(args)?;
+    let has_cmd = args_contain_direct_or_nested_key(args, "cmd");
+    let has_command = args_contain_direct_or_nested_key(args, "command");
+    let source_is_shell_alias = raw_name
+        .map(|name| {
+            let lowered = name.trim().to_ascii_lowercase();
+            matches!(lowered.as_str(), "shell_command" | "shell" | "bash" | "terminal")
+        })
+        .unwrap_or(false);
+
+    let emit_cmd = has_cmd || (!has_command && !source_is_shell_alias);
+    let emit_command = has_command || (source_is_shell_alias && !has_cmd);
+
+    let mut normalized = Map::new();
+    if emit_command {
+        normalized.insert("command".to_string(), Value::String(cmd.clone()));
+    }
+    if emit_cmd {
+        normalized.insert("cmd".to_string(), Value::String(cmd));
+    }
+    if let Some(workdir) = read_workdir_from_args_map(args) {
+        normalized.insert("workdir".to_string(), Value::String(workdir));
+    }
+    serde_json::to_string(&Value::Object(normalized)).ok()
+}
+
 fn pick_responses_persisted_fields(payload: &Value) -> Value {
     let Some(row) = payload.as_object() else {
         return Value::Object(Map::new());
@@ -176,15 +218,7 @@ fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
         let mut normalized_shell_args: Option<Value> = None;
         if is_shell_like {
             let args = parse_arguments_record(raw_arguments)?;
-            let cmd = read_command_from_args_map(&args)?;
-            let mut normalized = Map::new();
-            normalized.insert("cmd".to_string(), Value::String(cmd));
-            if let Some(workdir) = read_workdir_from_args_map(&args) {
-                normalized.insert("workdir".to_string(), Value::String(workdir));
-            }
-            let serialized = serde_json::to_string(&Value::Object(normalized))
-                .ok()
-                .unwrap_or_else(|| "{\"cmd\":\"\"}".to_string());
+            let serialized = build_shell_like_output_arguments(raw_name.as_deref(), &args)?;
             normalized_shell_args = Some(Value::String(serialized));
         }
 
@@ -916,7 +950,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_command_only_exec_command_when_converting_output_items() {
+    fn preserves_command_only_exec_command_when_converting_output_items() {
         let response = json!({
             "output": [
                 {
@@ -937,7 +971,8 @@ mod tests {
         assert_eq!(items[0]["call_id"], "call_bad");
         let args_text = items[0]["arguments"].as_str().unwrap_or("{}");
         let args: Value = serde_json::from_str(args_text).expect("args object");
-        assert_eq!(args["cmd"], "pwd");
+        assert_eq!(args["command"], "pwd");
+        assert!(args.get("cmd").is_none());
         assert_eq!(args["workdir"], "/tmp");
     }
 }
