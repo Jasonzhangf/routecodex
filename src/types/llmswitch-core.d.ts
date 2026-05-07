@@ -1,4 +1,4 @@
-declare module '@jsonstudio/llms/dist/router/virtual-router/provider-runtime-ingress.js' {
+declare module 'rcc-llmswitch-core/dist/router/virtual-router/provider-runtime-ingress.js' {
   export interface ProviderErrorEvent {
     code: string;
     message: string;
@@ -69,7 +69,7 @@ declare module '@jsonstudio/llms/dist/router/virtual-router/provider-runtime-ing
   export function resetProviderRuntimeIngressForTests(): void;
 }
 
-declare module '@jsonstudio/llms/dist/router/virtual-router/types.js' {
+declare module 'rcc-llmswitch-core/dist/router/virtual-router/types.js' {
   export interface ProviderErrorRuntimeMetadata {
     requestId: string;
     providerKey?: string;
@@ -116,7 +116,7 @@ declare module '@jsonstudio/llms/dist/router/virtual-router/types.js' {
   }
 }
 
-declare module '@jsonstudio/llms/dist/quota/index.js' {
+declare module 'rcc-llmswitch-core/dist/quota/index.js' {
   export type QuotaReason =
     | 'ok'
     | 'cooldown'
@@ -169,7 +169,7 @@ declare module '@jsonstudio/llms/dist/quota/index.js' {
   }
 }
 
-declare module '@jsonstudio/llms/dist/conversion/hub/response/provider-response.js' {
+declare module 'rcc-llmswitch-core/dist/conversion/hub/response/provider-response.js' {
   import type { Readable } from 'stream';
   export type ProviderInvoker = (options: {
     providerKey: string;
@@ -210,11 +210,11 @@ declare module '@jsonstudio/llms/dist/conversion/hub/response/provider-response.
   }): Promise<{ body?: Record<string, unknown>; __sse_responses?: Readable; format?: string }>;
 }
 
-declare module '@jsonstudio/llms/dist/conversion/shared/responses-instructions.js' {
+declare module 'rcc-llmswitch-core/dist/conversion/shared/responses-instructions.js' {
   export function ensureResponsesInstructions(payload: Record<string, unknown>): void;
 }
 
-declare module '@jsonstudio/llms/dist/telemetry/stats-center.js' {
+declare module 'rcc-llmswitch-core/dist/telemetry/stats-center.js' {
   export interface ProviderUsageEvent {
     requestId: string;
     timestamp: number;

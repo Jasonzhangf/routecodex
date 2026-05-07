@@ -21,7 +21,7 @@ async function main() {
   const hasLocalSharedDist = await exists(sharedDist);
 
   // 当本地 sharedmodule/llmswitch-core 存在时，dev/release 都以它为唯一真源。
-  // 仅在 release 且本地 sharedmodule 缺失时，才允许退回 npm-installed @jsonstudio/llms。
+  // 仅在 release 且本地 sharedmodule 缺失时，才允许退回 npm-installed rcc-llmswitch-core。
   if (!hasLocalSharedDist && mode === 'dev') {
     console.error('[vendor-core] ERROR: 未找到 sharedmodule/llmswitch-core/dist (BUILD_MODE=dev)');
     console.error('[vendor-core] 请先进入 sharedmodule/llmswitch-core 并运行 `npm run build`。');
@@ -45,7 +45,7 @@ async function main() {
   } else if (mode === 'dev') {
     console.log('[vendor-core] sharedmodule/llmswitch-core/dist 将被直接引用，已停止生成 vendor 副本。');
   } else {
-    console.log('[vendor-core] BUILD_MODE=release without local sharedmodule: using npm-installed @jsonstudio/llms (no vendor copy).');
+    console.log('[vendor-core] BUILD_MODE=release without local sharedmodule: using npm-installed rcc-llmswitch-core (no vendor copy).');
   }
 }
 

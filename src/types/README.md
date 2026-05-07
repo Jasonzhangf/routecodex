@@ -5,7 +5,7 @@ Type definitions for RouteCodex Host and shared module alignment. Focus on DTOs,
 
 ## Core Files
 - `common-types.ts`: Base JSON/logging types
-- `shared-dtos.ts`: Request/response/error data structures shared with `@jsonstudio/llms`
+- `shared-dtos.ts`: Request/response/error data structures shared with `rcc-llmswitch-core`
 - `external-types.ts`: Third-party library type declarations
 - `base-types.ts`: Bridge types between Host and `llmswitch-core`
 

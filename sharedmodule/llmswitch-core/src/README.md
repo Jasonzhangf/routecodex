@@ -1,7 +1,7 @@
 # llmswitch-core Source Directory
 
 ## Overview
-This directory contains the source code for `@jsonstudio/llms` (formerly `rcc-llmswitch-core`), the Hub Pipeline and conversion engine for RouteCodex V2.
+This directory contains the source code for `rcc-llmswitch-core`, the Hub Pipeline and conversion engine for RouteCodex V2.
 
 ## Architecture Principles
 1. **Single Execution Path**: All traffic flows through Hub Pipeline → Provider V2 → Upstream AI

@@ -6,8 +6,8 @@ llmswitch module provides the bridge between RouteCodex Host and the shared llms
 ├── bridge. ts                  # Main Hub Pipeline bridge and entry point
 ├── core- loader. ts            # llmswitch-core loading (symlink or npm version)
 └── pipeline- registry. ts      # Pipeline registry and configuration```## Key Components### BridgeThe main bridge implementation:- Creates Hub Pipeline instances- Handles request routing to pipeline
-- Manages response streaming and SSE conversion### CoreLoaderLoads llmswitch-core from:- Local symlink (`node_modules/@jsonstudio/llms` → `sharedmodule/llmswitch-core`)
-- NPM package (`@jsonstudio/llms`) for release builds### PipelineRegistryMaintains registry of:- Active pipeline instances
+- Manages response streaming and SSE conversion### CoreLoaderLoads llmswitch-core from:- Local symlink (`node_modules/rcc-llmswitch-core` → `sharedmodule/llmswitch-core`)
+- NPM package (`rcc-llmswitch-core`) for release builds### PipelineRegistryMaintains registry of:- Active pipeline instances
 - Pipeline configurations- Runtime metadata mappings## Usage```typescriptimport { createHubPipeline } from './bridge. js';const pipeline = await createHubPipeline({ virtualRouter, targetRuntime });```## Do / Don't
 **Do**
 - Use as the single entry point for Hub Pipeline calls

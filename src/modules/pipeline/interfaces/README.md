@@ -1,6 +1,6 @@
 # Pipeline Interfaces
 
-`src/modules/pipeline` 目录仅保留类型、接口和桥接逻辑，以便 Host 可以与 `llmswitch-core` 的 Hub Pipeline 对齐。实际的节点/执行逻辑全部在 `@jsonstudio/llms` 中实现。
+`src/modules/pipeline` 目录仅保留类型、接口和桥接逻辑，以便 Host 可以与 `llmswitch-core` 的 Hub Pipeline 对齐。实际的节点/执行逻辑全部在 `rcc-llmswitch-core` 中实现。
 
 ## 作用
 - 提供 Host 与共享模块之间的类型声明。

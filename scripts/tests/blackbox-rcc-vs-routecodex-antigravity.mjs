@@ -2,7 +2,7 @@
 /**
  * Black-box parity test:
  * - Always validate RouteCodex behavior against Antigravity-Manager invariants.
- * - Optionally compare against rcc release (off by default) because rcc bundles a published @jsonstudio/llms
+ * - Optionally compare against rcc release (off by default) because rcc bundles the published/local llmswitch core
  *   which may intentionally lag behind dev during incident response.
  * - Both point to a local mock Cloud Code Assist (v1internal) upstream.
  * - Assert:
@@ -828,7 +828,7 @@ async function main() {
       try {
         const candidate = path.join(
           process.cwd(),
-          'node_modules/routecodex/node_modules/@jsonstudio/llms/dist/conversion/compat/antigravity-session-signature.js'
+          'node_modules/routecodex/node_modules/rcc-llmswitch-core/dist/conversion/compat/antigravity-session-signature.js'
         );
         return fs.existsSync(candidate);
       } catch {

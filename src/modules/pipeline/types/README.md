@@ -6,7 +6,7 @@ Pipeline types module contains TypeScript type definitions for the Hub Pipeline,
 └── README. md                  # This file - type definitions overview
 ```## Key Types### Pipeline Base TypesCore types for pipeline operation:- `PipelineRequest` - Incoming request structure
 - `PipelineResponse` - Response structure- `PipelineContext` - Execution context### Provider TypesProvider-related type definitions:- `ProviderRuntimeMetadata` - Runtime information for providers
-- `ProviderHealthStatus` - Health check types### Transformation TypesConversion and compatibility type definitions.## Usage```typescriptimport { PipelineRequest } from '@jsonstudio/llms';const request: PipelineRequest = {  // ...};```## Do / Don't
+- `ProviderHealthStatus` - Health check types### Transformation TypesConversion and compatibility type definitions.## Usage```typescriptimport { PipelineRequest } from 'rcc-llmswitch-core';const request: PipelineRequest = {  // ...};```## Do / Don't
 **Do**
 - Import types from llmswitch-core for consistency
 - Use type guards and validators provided by the module**Don't**

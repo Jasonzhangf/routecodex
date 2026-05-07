@@ -1,6 +1,6 @@
-# @jsonstudio/llms（RouteCodex LLM Switch 核心）
+# rcc-llmswitch-core（RouteCodex LLM Switch 核心）
 
-> 自 0.4.3 起，原 `rcc-llmswitch-core` npm 包已迁移并更名为 `@jsonstudio/llms`。开发 / 发布流程保持不变，仅需更新 package 依赖与文档引用。
+> 当前仓内本地源码包名为 `rcc-llmswitch-core`。开发 / 发布均直接使用本地 sharedmodule 构建产物，不再依赖旧 `@jsonstudio/llms` 命名。
 
 本包是 RouteCodex V2 的“工具治理唯一入口 + 协议转换核心”，实现严格的“前半段/后半段”双向流水线，并通过 `defaultSseCodecRegistry` 统一治理所有 SSE ↔ JSON 转换。核心事实：
 

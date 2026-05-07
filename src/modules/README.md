@@ -32,12 +32,12 @@ src/modules/
 
 重点文件：
 - `llmswitch/bridge.ts`：唯一调用 Hub Pipeline 的入口。
-- `llmswitch/core-loader.ts`：负责加载 `@jsonstudio/llms`（symlink 或 npm 版本）。
+- `llmswitch/core-loader.ts`：负责加载 `rcc-llmswitch-core`（symlink 或 npm 版本）。
 - `config/pipeline-config-path.ts`：解析 `LLMSWITCH_PIPELINE_CONFIG` 等路径配置。
 
 ## Hub Pipeline 接入示例
 ```ts
-import { bootstrapVirtualRouterConfig } from '@jsonstudio/llms';
+import { bootstrapVirtualRouterConfig } from 'rcc-llmswitch-core';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader';
 import { createHubPipeline } from '../modules/llmswitch/bridge';
 

@@ -66,7 +66,7 @@ function resolveCompatProfileConfigCandidates(profileId: string): string[] {
   return [
     path.join(repoRoot, 'sharedmodule', 'llmswitch-core', 'src', 'conversion', 'compat', 'profiles', filename),
     path.join(repoRoot, 'sharedmodule', 'llmswitch-core', 'dist', 'conversion', 'compat', 'profiles', filename),
-    path.join(repoRoot, 'node_modules', '@jsonstudio', 'llms', 'dist', 'conversion', 'compat', 'profiles', filename)
+    path.join(repoRoot, 'node_modules', 'rcc-llmswitch-core', 'dist', 'conversion', 'compat', 'profiles', filename)
   ];
 }
 

@@ -234,7 +234,7 @@ function buildVirtualRouterConfig() {
 }
 
 async function importHubPipelineCtor() {
-  // Use the locally linked @jsonstudio/llms (symlinked to sharedmodule/llmswitch-core).
+  // Use the locally linked rcc-llmswitch-core (symlinked to sharedmodule/llmswitch-core).
   const repoRoot = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), '..');
   const hubPath = path.join(repoRoot, 'sharedmodule', 'llmswitch-core', 'dist', 'conversion', 'hub', 'pipeline', 'hub-pipeline.js');
   const mod = await import(url.pathToFileURL(hubPath).href);
