@@ -78,7 +78,7 @@ describe('servertool:clock', () => {
     await stopClockDaemonForTests();
   });
 
-  test('injects clock tool schema even when sessionId is absent', async () => {
+  test('does not inject clock tool schema by default when sessionId is absent', async () => {
     const request = buildRequest([{ role: 'user', content: 'hi' }]);
     const result = await runReqProcessStage1ToolGovernance({
       request,
@@ -91,13 +91,13 @@ describe('servertool:clock', () => {
     expect(result.processedRequest).toBeDefined();
     const processed = result.processedRequest as StandardizedRequest;
     const toolNames = (Array.isArray(processed.tools) ? processed.tools : []).map((t) => t.function?.name);
-    expect(toolNames).toContain('clock');
-    expect((processed.metadata as any)?.clockEnabled).toBe(true);
+    expect(toolNames).not.toContain('clock');
+    expect((processed.metadata as any)?.clockEnabled).not.toBe(true);
     // Execution still requires session; do not force serverToolRequired when sessionId is missing.
     expect((processed.metadata as any)?.serverToolRequired).toBeUndefined();
   });
 
-  test('injects clock tool schema by default when tmux session exists', async () => {
+  test('does not inject clock tool schema by default when tmux session exists', async () => {
     const request = buildRequest([{ role: 'user', content: 'hi' }]);
     const result = await runReqProcessStage1ToolGovernance({
       request,
@@ -112,9 +112,9 @@ describe('servertool:clock', () => {
 
     const processed = result.processedRequest as any;
     const toolNames = (Array.isArray(processed.tools) ? processed.tools : []).map((t: any) => t?.function?.name);
-    expect(toolNames).toContain('clock');
-    expect(processed.metadata?.clockEnabled).toBe(true);
-    expect(processed.metadata?.serverToolRequired).toBe(true);
+    expect(toolNames).not.toContain('clock');
+    expect(processed.metadata?.clockEnabled).not.toBe(true);
+    expect(processed.metadata?.serverToolRequired).toBeUndefined();
   });
 
   test('injects clock tool schema when enabled', async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import { Command } from 'commander';
+import path from 'node:path';
 
 import { createStartCommand } from '../../src/cli/commands/start.js';
 import { registerStartCommand } from '../../src/cli/register/start-command.js';
@@ -142,6 +143,148 @@ describe('cli start command', () => {
     await expect(program.parseAsync(['node', 'routecodex', 'start'], { from: 'node' })).resolves.toBe(program);
     expect(spawnCount).toBeGreaterThanOrEqual(3);
     expect(infoLogs.some((line) => line.includes('[client-restart] RouteCodex child restarted on port 5520'))).toBe(true);
+  });
+
+  it('managed restart re-resolves current install entry instead of reusing stale absolute release path', async () => {
+    const program = new Command();
+    const spawnedArgs: string[][] = [];
+    let spawnCount = 0;
+    let activeGeneration = 0;
+    let currentCliEntry = '/home/test/.rcc/install/current/dist/cli.js';
+
+    type ExitHandler = (code: number | null, signal: NodeJS.Signals | null) => void;
+
+    class FakeChildProc {
+      pid: number;
+      exitCode: number | null = null;
+      signalCode: NodeJS.Signals | null = null;
+      stdout: null = null;
+      stderr: null = null;
+      private readonly handlers = new Map<string, ExitHandler[]>();
+
+      constructor(pid: number) {
+        this.pid = pid;
+      }
+
+      on(event: string, handler: ExitHandler): this {
+        const list = this.handlers.get(event) ?? [];
+        list.push(handler);
+        this.handlers.set(event, list);
+        return this;
+      }
+
+      once(event: string, handler: ExitHandler): this {
+        const wrapped: ExitHandler = (code, signal) => {
+          this.off(event, wrapped);
+          handler(code, signal);
+        };
+        return this.on(event, wrapped);
+      }
+
+      off(event: string, handler: ExitHandler): this {
+        const list = this.handlers.get(event) ?? [];
+        this.handlers.set(event, list.filter((item) => item !== handler));
+        return this;
+      }
+
+      emitExit(code: number | null, signal: NodeJS.Signals | null): void {
+        this.exitCode = code;
+        this.signalCode = signal;
+        const listeners = [...(this.handlers.get('exit') ?? [])];
+        for (const listener of listeners) {
+          listener(code, signal);
+        }
+      }
+    }
+
+    createStartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5520,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      fsImpl: {
+        existsSync: (target: string) => {
+          if (target === '/tmp/modules.json') {
+            return true;
+          }
+          if (target === '/tmp/index.js') {
+            return true;
+          }
+          if (target === '/home/test/.rcc/install/current/dist/index.js') {
+            return true;
+          }
+          if (target === '/home/test/.rcc/install/current/config/modules.json') {
+            return true;
+          }
+          return true;
+        },
+        statSync: () => ({ isDirectory: () => false } as any),
+        readFileSync: () => JSON.stringify({ httpserver: { port: 5520, host: '127.0.0.1' } }),
+        writeFileSync: () => {},
+        mkdtempSync: () => '/tmp/rc',
+        mkdirSync: () => {},
+        createWriteStream: () => ({ write: () => true, end: () => {} } as any)
+      } as any,
+      pathImpl: path as any,
+      homedir: () => '/home/test',
+      tmpdir: () => '/tmp',
+      sleep: async (ms) => { await new Promise((resolve) => setTimeout(resolve, Math.min(ms, 20))); },
+      ensureLocalTokenPortalEnv: async () => {},
+      ensureTokenDaemonAutoStart: async () => {},
+      ensurePortAvailable: async () => {},
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      spawn: (_bin, childArgs) => {
+        spawnedArgs.push([...childArgs]);
+        spawnCount += 1;
+        activeGeneration = spawnCount;
+        const proc = new FakeChildProc(2000 + spawnCount);
+        if (spawnCount === 1) {
+          setTimeout(() => {
+            currentCliEntry = '/home/test/.rcc/install/current/dist/cli.js';
+            process.argv[1] = currentCliEntry;
+            proc.emitExit(75, null);
+          }, 15);
+        }
+        return proc as any;
+      },
+      fetch: (async () => {
+        if (activeGeneration >= 2) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ server: 'routecodex', status: 'ok' })
+          } as any;
+        }
+        return { ok: false, status: 503, json: async () => ({}) } as any;
+      }) as any,
+      setupKeypress: () => () => {},
+      waitForever: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      },
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    const originalArgv1 = process.argv[1];
+    process.argv[1] = currentCliEntry;
+    try {
+      await expect(program.parseAsync(['node', 'routecodex', 'start'], { from: 'node' })).resolves.toBe(program);
+    } finally {
+      process.argv[1] = originalArgv1;
+    }
+
+    expect(spawnedArgs.length).toBeGreaterThanOrEqual(2);
+    expect(spawnedArgs[0][0]).toBe('/home/test/.rcc/install/current/dist/index.js');
+    expect(spawnedArgs[0][1]).toBe('/home/test/.rcc/install/current/config/modules.json');
+    expect(spawnedArgs[1][0]).toBe('/home/test/.rcc/install/current/dist/index.js');
+    expect(spawnedArgs[1][1]).toBe('/home/test/.rcc/install/current/config/modules.json');
   });
 
   it('registers start command', () => {

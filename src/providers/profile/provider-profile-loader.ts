@@ -88,7 +88,7 @@ const protocolAliases = {
     'mock'
   ]),
   responses: new Set(['responses', 'openai-responses', 'responses-http']),
-  anthropic: new Set(['anthropic', 'anthropic-http', 'claude']),
+  anthropic: new Set(['anthropic', 'anthropic-http', 'claude', 'mimoweb', 'mimoweb-http']),
   gemini: new Set(['gemini', 'gemini2', 'gemini-chat', 'gemini-http']),
   'gemini-cli': new Set(['gemini-cli', 'gemini-cli-chat', 'gemini-cli-http'])
 };

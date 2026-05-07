@@ -1,7 +1,9 @@
 use serde_json::{Map, Value};
 
 use super::super::super::read_trimmed_string;
-use super::content::{normalize_content_to_text, normalize_tool_calls_as_text};
+use super::content::{
+    normalize_content_to_text, normalize_tool_calls_as_text, normalize_tool_message_to_text,
+};
 use super::tool_guidance::{
     build_required_tool_call_tail_reminder_for_tools, build_tool_fallback_instruction,
     is_tool_choice_required, strip_existing_tool_guidance_block,
@@ -34,12 +36,19 @@ pub(super) fn to_prompt_messages(
         if role.is_empty() {
             continue;
         }
-        let mut content_text =
-            normalize_content_to_text(obj.get("content").unwrap_or(&Value::Null));
+        let mut content_text = if role == "tool" {
+            normalize_tool_message_to_text(obj)
+        } else {
+            normalize_content_to_text(obj.get("content").unwrap_or(&Value::Null))
+        };
         if role == "system" {
             content_text = strip_existing_tool_guidance_block(content_text.as_str());
         }
         let tool_calls_text = normalize_tool_calls_as_text(obj.get("tool_calls"));
+        let has_explicit_empty_reasoning_content = role == "assistant"
+            && !tool_calls_text.is_empty()
+            && obj.contains_key("reasoning_content")
+            && read_trimmed_string(obj.get("reasoning_content")).is_none();
         let reasoning = read_trimmed_string(obj.get("reasoning_content"))
             .or_else(|| read_trimmed_string(obj.get("reasoning")))
             .unwrap_or_default();
@@ -52,6 +61,8 @@ pub(super) fn to_prompt_messages(
         }
         if !reasoning.is_empty() {
             parts.push(reasoning);
+        } else if has_explicit_empty_reasoning_content {
+            parts.push("reasoning_content: \"\"".to_string());
         }
         let text = parts.join("\n").trim().to_string();
         if text.is_empty() {

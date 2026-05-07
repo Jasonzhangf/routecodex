@@ -105,8 +105,6 @@ import {
   reloadHttpServerRuntime,
   buildHttpHandlerContext
 } from './http-server-lifecycle.js';
-import { executePipelineViaLegacyOverride } from './http-server-legacy-pipeline.js';
-import { createNoopPipelineLogger } from './http-server-noop-pipeline-logger.js';
 import type { RouteErrorHub } from '../../../error-handling/route-error-hub.js';
 
 export class RouteCodexHttpServer {
@@ -124,7 +122,7 @@ export class RouteCodexHttpServer {
   private providerRuntimeInitErrors: Map<string, Error> = new Map();
   private runtimeKeyCredentialSkipped: Set<string> = new Set();
   private startupExcludedProviderKeys: Set<string> = new Set();
-  private pipelineLogger: PipelineDebugLogger = createNoopPipelineLogger();
+  private pipelineLogger!: PipelineDebugLogger;
   private authResolver = new AuthFileResolver();
   private userConfig: UnknownObject = {};
   private runtimeReadyPromise: Promise<void>;
@@ -181,8 +179,9 @@ export class RouteCodexHttpServer {
     try {
       this.pipelineLogger = new PipelineDebugLoggerImpl({ colored: this.coloredLogger }, { enableConsoleLogging: true });
     } catch (error) {
-      console.warn('[RouteCodexHttpServer] Failed to initialize PipelineDebugLogger; falling back to noop logger.', error);
-      this.pipelineLogger = createNoopPipelineLogger();
+      throw new Error(
+        `[RouteCodexHttpServer] Failed to initialize PipelineDebugLogger: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
 
     this.runtimeReadyPromise = new Promise<void>((resolve, reject) => {
@@ -259,7 +258,7 @@ export class RouteCodexHttpServer {
   }
 
   private createDebugCenterShim(): DebugCenter {
-    return createDebugCenterShim();
+    return createDebugCenterShim(this);
   }
 
   private updateProviderProfiles(collection?: ProviderProfileCollection, rawConfig?: UnknownObject): void {
@@ -452,17 +451,6 @@ export class RouteCodexHttpServer {
   }
 
   private async executePipeline(input: PipelineExecutionInput): Promise<PipelineExecutionResult> {
-    const legacyRunHubPipeline = (this as unknown as { runHubPipeline?: unknown }).runHubPipeline;
-    if (
-      Object.prototype.hasOwnProperty.call(this as object, 'runHubPipeline') &&
-      typeof legacyRunHubPipeline === 'function'
-    ) {
-      return await executePipelineViaLegacyOverride(
-        this,
-        input,
-        legacyRunHubPipeline as (i: PipelineExecutionInput, m: Record<string, unknown>) => Promise<any>
-      );
-    }
     return await this.requestExecutor.execute(input);
   }
 

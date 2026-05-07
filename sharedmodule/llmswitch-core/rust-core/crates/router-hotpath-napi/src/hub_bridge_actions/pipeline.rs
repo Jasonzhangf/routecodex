@@ -157,6 +157,7 @@ pub(crate) fn run_bridge_action_pipeline(
                         apply_bridge_normalize_history(ApplyBridgeNormalizeHistoryInput {
                             messages: mem::take(&mut state.messages),
                             tools,
+                            allow_pending_terminal_tool_call: Some(true),
                         })?;
                     state.messages = output.messages;
                     if let Some(bridge_history) = output.bridge_history {

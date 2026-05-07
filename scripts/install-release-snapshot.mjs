@@ -67,8 +67,8 @@ function copyIntoSnapshot(relativePath, targetRoot) {
 }
 
 function replaceSnapshotLlmsSymlink(snapshotRoot) {
-  const sourceLinkPath = requireExisting(path.join('node_modules', '@jsonstudio', 'llms'));
-  const targetLinkPath = path.join(snapshotRoot, 'node_modules', '@jsonstudio', 'llms');
+  const sourceLinkPath = requireExisting(path.join('node_modules', 'rcc-llmswitch-core'));
+  const targetLinkPath = path.join(snapshotRoot, 'node_modules', 'rcc-llmswitch-core');
   const sourceStat = fs.lstatSync(sourceLinkPath);
   const targetStat = fs.existsSync(targetLinkPath) ? fs.lstatSync(targetLinkPath) : null;
   if (!sourceStat.isSymbolicLink() && (!targetStat || !targetStat.isSymbolicLink())) {
@@ -178,7 +178,7 @@ function pruneOldReleases(releasesDir, currentReleaseId, keepCount = 3) {
 function main() {
   requireExisting(path.join('dist', 'cli.js'));
   requireExisting(path.join('dist', 'index.js'));
-  requireExisting(path.join('node_modules', '@jsonstudio', 'llms'));
+  requireExisting(path.join('node_modules', 'rcc-llmswitch-core'));
 
   const version = readPackageVersion();
   const buildMode = readBuildMode();

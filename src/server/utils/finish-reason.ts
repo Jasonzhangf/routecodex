@@ -1,6 +1,30 @@
 export const STREAM_LOG_FINISH_REASON_KEY = "__routecodex_finish_reason";
 
+const FINISH_REASON_DEBUG_ENABLED =
+  process.env.ROUTECODEX_DEBUG_FINISH_REASON === '1' ||
+  process.env.RCC_DEBUG_FINISH_REASON === '1';
+
+function logFinishReasonDebug(...args: unknown[]): void {
+  if (!FINISH_REASON_DEBUG_ENABLED) {
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.log(...args);
+}
+
 export function deriveFinishReason(body: unknown): string | undefined {
+  logFinishReasonDebug(
+    '[FINISH-REASON:DEBUG] input body keys:',
+    body && typeof body === 'object' ? Object.keys(body as any).join(',') : typeof body
+  );
+  logFinishReasonDebug('[FINISH-REASON:DEBUG] choices:', JSON.stringify((body as any)?.choices)?.slice(0, 200));
+  logFinishReasonDebug('[FINISH-REASON:DEBUG] output:', JSON.stringify((body as any)?.output)?.slice(0, 300));
+  logFinishReasonDebug('[FINISH-REASON:DEBUG] status:', (body as any)?.status);
+  logFinishReasonDebug(
+    '[FINISH-REASON:DEBUG] required_action:',
+    JSON.stringify((body as any)?.required_action)?.slice(0, 200)
+  );
+  logFinishReasonDebug('[FINISH-REASON:DEBUG] stop_reason:', (body as any)?.stop_reason);
   const record = resolveFinishReasonRecord(body);
   if (!record) {
     return undefined;
@@ -24,6 +48,7 @@ export function deriveFinishReason(body: unknown): string | undefined {
 
   const responseStatus = readNonEmptyString(record.status)?.toLowerCase();
   if (hasResponsesToolCall(record)) {
+    logFinishReasonDebug('[FINISH-REASON:DEBUG] hasResponsesToolCall=true -> tool_calls');
     return "tool_calls";
   }
 
@@ -32,7 +57,9 @@ export function deriveFinishReason(body: unknown): string | undefined {
     return mapIncompleteReasonToFinishReason(incompleteReason);
   }
 
+  logFinishReasonDebug('[FINISH-REASON:DEBUG] responseStatus:', responseStatus);
   if (responseStatus === "completed") {
+    logFinishReasonDebug('[FINISH-REASON:DEBUG] status=completed -> stop');
     return "stop";
   }
   if (responseStatus === "requires_action") {

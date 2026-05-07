@@ -1,11 +1,12 @@
 use serde_json::{Map, Value};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::hub_reasoning_tool_normalizer::clamp_responses_input_item_id_json;
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
 use crate::hub_tool_session_compat::{normalize_tool_session_payload, ToolSessionCompatInput};
 use crate::shared_metadata_semantics::read_runtime_metadata_json;
 use crate::shared_responses_tool_utils::resolve_tool_call_id_style_json;
+use crate::shared_tool_result_text_normalizer::{normalize_tool_result_text, normalize_tool_result_value};
 
 use super::types::{
     ApplyBridgeCaptureToolResultsInput, ApplyBridgeCaptureToolResultsOutput,
@@ -52,6 +53,39 @@ fn consume_pending_tool_call(
     };
     pending_tool_call_ids.remove(pos);
     Ok(())
+}
+
+pub(crate) fn can_allow_terminal_pending_tool_calls(
+    pending_tool_call_ids: &VecDeque<String>,
+    pending_tool_call_message_index: &HashMap<String, usize>,
+    non_system_message_indices: &[usize],
+) -> bool {
+    if pending_tool_call_ids.is_empty() {
+        return false;
+    }
+    let Some(first_pending_index) = pending_tool_call_ids
+        .iter()
+        .filter_map(|call_id| pending_tool_call_message_index.get(call_id).copied())
+        .min()
+    else {
+        return false;
+    };
+    let pending_message_indices: HashSet<usize> = pending_tool_call_ids
+        .iter()
+        .filter_map(|call_id| pending_tool_call_message_index.get(call_id).copied())
+        .collect();
+    if pending_message_indices.is_empty() {
+        return false;
+    }
+    let Some(start_pos) = non_system_message_indices
+        .iter()
+        .position(|index| *index == first_pending_index)
+    else {
+        return false;
+    };
+    non_system_message_indices[start_pos..]
+        .iter()
+        .all(|index| pending_message_indices.contains(index))
 }
 
 fn content_blocks_to_bridge(value: &Value, blocks: &mut Vec<Value>, default_text_role: &str) {
@@ -302,14 +336,7 @@ fn extract_user_text_from_entry(entry: &Value) -> String {
 }
 
 fn serialize_tool_result_payload(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        Value::Array(_) | Value::Object(_) => {
-            serde_json::to_string(value).unwrap_or_else(|_| value.to_string())
-        }
-        Value::Null => String::new(),
-        _ => value.to_string(),
-    }
+    normalize_tool_result_value(value)
 }
 
 fn strip_routing_tags_from_text(text: &str) -> String {
@@ -970,15 +997,18 @@ pub(crate) fn prepare_responses_request_envelope(
 pub(crate) fn build_bridge_history(
     input: BuildBridgeHistoryInput,
 ) -> Result<BuildBridgeHistoryOutput, String> {
+    let allow_pending_terminal_tool_call = input.allow_pending_terminal_tool_call.unwrap_or(false);
     let mut items: Vec<Value> = Vec::new();
     let mut system_parts: Vec<String> = Vec::new();
     let mut original_system_messages: Vec<String> = Vec::new();
     let mut latest_user_instruction: Option<String> = None;
     let mut pending_tool_call_ids: VecDeque<String> = VecDeque::new();
+    let mut pending_tool_call_message_index: HashMap<String, usize> = HashMap::new();
     let mut known_tool_call_ids: HashSet<String> = HashSet::new();
+    let mut non_system_message_indices: Vec<usize> = Vec::new();
     let _tools = input.tools;
 
-    for message in input.messages {
+    for (message_index, message) in input.messages.into_iter().enumerate() {
         let Some(row) = message.as_object() else {
             continue;
         };
@@ -1007,6 +1037,7 @@ pub(crate) fn build_bridge_history(
             }
             continue;
         }
+        non_system_message_indices.push(message_index);
 
         if role == "tool" {
             let resolved_call_id = require_explicit_tool_call_id(
@@ -1077,6 +1108,7 @@ pub(crate) fn build_bridge_history(
                 items.push(entry);
                 known_tool_call_ids.insert(call_id.clone());
                 register_pending_tool_call(&mut pending_tool_call_ids, call_id.as_str());
+                pending_tool_call_message_index.insert(call_id.clone(), message_index);
             }
             continue;
         }
@@ -1169,6 +1201,20 @@ pub(crate) fn build_bridge_history(
     };
 
     if let Some(call_id) = pending_tool_call_ids.front() {
+        if allow_pending_terminal_tool_call
+            && can_allow_terminal_pending_tool_calls(
+                &pending_tool_call_ids,
+                &pending_tool_call_message_index,
+                non_system_message_indices.as_slice(),
+            )
+        {
+            return Ok(BuildBridgeHistoryOutput {
+                input: items,
+                combined_system_instruction,
+                latest_user_instruction,
+                original_system_messages,
+            });
+        }
         return Err(format!(
             "dangling_tool_call: tool call {} does not have a matching tool result in history",
             call_id
@@ -1194,6 +1240,7 @@ pub(crate) fn apply_bridge_normalize_history(
     let bridge_history = serde_json::to_value(build_bridge_history(BuildBridgeHistoryInput {
         messages: messages.clone(),
         tools: input.tools,
+        allow_pending_terminal_tool_call: input.allow_pending_terminal_tool_call,
     })?)
     .ok();
     Ok(ApplyBridgeNormalizeHistoryOutput {
@@ -1324,7 +1371,10 @@ pub(crate) fn ensure_bridge_output_fields(
                 .get("content")
                 .and_then(flatten_content_to_string)
                 .unwrap_or_else(|| tool_fallback.clone());
-            row.insert("content".to_string(), Value::String(text));
+            row.insert(
+                "content".to_string(),
+                Value::String(normalize_tool_result_text(text.as_str())),
+            );
             continue;
         }
 

@@ -26,7 +26,7 @@ const pkgPath = path.join(projectRoot, 'package.json');
 const backupPath = pkgPath + '.bak.pack';
 const ensureScriptPath = path.join(projectRoot, 'scripts', 'ensure-llmswitch-mode.mjs');
 const linkScriptPath = path.join(projectRoot, 'scripts', 'link-llmswitch.mjs');
-const llmsPath = path.join(projectRoot, 'node_modules', '@jsonstudio', 'llms');
+const llmsPath = path.join(projectRoot, 'node_modules', 'rcc-llmswitch-core');
 const localLlmsDir = path.join(projectRoot, 'sharedmodule', 'llmswitch-core');
 const localLlmsPkgPath = path.join(projectRoot, 'sharedmodule', 'llmswitch-core', 'package.json');
 
@@ -125,7 +125,7 @@ function readLocalLlmsVersion() {
 }
 
 const isDevPkg = args.name === 'routecodex';
-const isRcc = args.name === 'rcc' || args.name === '@jsonstudio/rcc';
+const isRcc = args.name === 'rcc';
 
 let hadDevLink = false;
 hadDevLink = isSymlink(llmsPath);
@@ -165,9 +165,9 @@ try {
       exists(localLlmsPkgPath) &&
       String(process.env.RCC_LLMS_INLINE_LOCAL ?? process.env.ROUTECODEX_RCC_INLINE_LOCAL ?? '1').trim() !== '0';
     if (inlineLocalLlmsForRcc) {
-      mutated.bundledDependencies = ['@jsonstudio/llms'];
-      mutated.bundleDependencies = ['@jsonstudio/llms'];
-      console.log('[pack-mode] inline local @jsonstudio/llms into rcc tarball');
+      mutated.bundledDependencies = ['rcc-llmswitch-core'];
+      mutated.bundleDependencies = ['rcc-llmswitch-core'];
+      console.log('[pack-mode] inline local rcc-llmswitch-core into rcc tarball');
     } else {
       mutated.bundledDependencies = [];
       mutated.bundleDependencies = [];
@@ -176,9 +176,9 @@ try {
     const localLlmsVersion = readLocalLlmsVersion();
     const llmsVersion = (isRcc && llmsOverride)
       ? llmsOverride
-      : (localLlmsVersion || original.dependencies?.['@jsonstudio/llms'] || '^0.6.230');
+      : (localLlmsVersion || original.dependencies?.['rcc-llmswitch-core'] || 'file:sharedmodule/llmswitch-core');
     if (isRcc && llmsOverride) {
-      console.log(`[pack-mode] using RCC_LLMS_VERSION override: @jsonstudio/llms=${llmsVersion}`);
+      console.log(`[pack-mode] using RCC_LLMS_VERSION override: rcc-llmswitch-core=${llmsVersion}`);
     }
     const deps = {
       ...(original.dependencies || {})
@@ -187,7 +187,7 @@ try {
       ...deps,
       ajv: original.dependencies?.ajv || '^8.17.1',
       zod: original.dependencies?.zod || '^3.23.8',
-      '@jsonstudio/llms': llmsVersion
+      'rcc-llmswitch-core': llmsVersion
     };
     // Ensure rcc ships bundled docs (copied to ~/.routecodex/docs by `rcc init`).
     if (isRcc) {

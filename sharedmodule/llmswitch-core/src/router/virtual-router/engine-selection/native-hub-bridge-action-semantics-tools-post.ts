@@ -3,7 +3,13 @@ import {
   isNativeDisabledByEnv
 } from './native-router-hotpath-policy.js';
 
-import { readNativeFunction, safeStringify } from './native-hub-bridge-action-semantics-shared.js';
+import {
+  parseNativeResultOrFail,
+  readNativeFunction,
+  readNativeJsonResult,
+  safeStringify,
+  shouldRethrowNativeRawError
+} from './native-hub-bridge-action-semantics-shared.js';
 
 import {
   parseApplyBridgeEnsureSystemInstructionOutput,
@@ -52,10 +58,7 @@ export function harvestToolsWithNative(input: NativeHarvestToolsInput): NativeHa
     return fail('json stringify failed');
   }
   try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = readNativeJsonResult(capability, fn(payloadJson));
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return fail('invalid payload');
@@ -66,6 +69,9 @@ export function harvestToolsWithNative(input: NativeHarvestToolsInput): NativeHa
     }
     return row as unknown as NativeHarvestToolsOutput;
   } catch (error) {
+    if (shouldRethrowNativeRawError(error)) {
+      throw error;
+    }
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
@@ -92,13 +98,12 @@ export function ensureBridgeOutputFieldsWithNative(
     return fail('json stringify failed');
   }
   try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseEnsureBridgeOutputFieldsOutput(raw);
-    return parsed ?? fail('invalid payload');
+    const raw = readNativeJsonResult(capability, fn(payloadJson));
+    return parseNativeResultOrFail(capability, raw, parseEnsureBridgeOutputFieldsOutput);
   } catch (error) {
+    if (shouldRethrowNativeRawError(error)) {
+      throw error;
+    }
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
@@ -128,13 +133,12 @@ export function applyBridgeMetadataActionWithNative(
     return fail('json stringify failed');
   }
   try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseApplyBridgeMetadataActionOutput(raw);
-    return parsed ?? fail('invalid payload');
+    const raw = readNativeJsonResult(capability, fn(payloadJson));
+    return parseNativeResultOrFail(capability, raw, parseApplyBridgeMetadataActionOutput);
   } catch (error) {
+    if (shouldRethrowNativeRawError(error)) {
+      throw error;
+    }
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
@@ -161,13 +165,12 @@ export function applyBridgeReasoningExtractWithNative(
     return fail('json stringify failed');
   }
   try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseApplyBridgeReasoningExtractOutput(raw);
-    return parsed ?? fail('invalid payload');
+    const raw = readNativeJsonResult(capability, fn(payloadJson));
+    return parseNativeResultOrFail(capability, raw, parseApplyBridgeReasoningExtractOutput);
   } catch (error) {
+    if (shouldRethrowNativeRawError(error)) {
+      throw error;
+    }
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
@@ -195,13 +198,12 @@ export function applyBridgeResponsesOutputReasoningWithNative(
     return fail('json stringify failed');
   }
   try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseApplyBridgeResponsesOutputReasoningOutput(raw);
-    return parsed ?? fail('invalid payload');
+    const raw = readNativeJsonResult(capability, fn(payloadJson));
+    return parseNativeResultOrFail(capability, raw, parseApplyBridgeResponsesOutputReasoningOutput);
   } catch (error) {
+    if (shouldRethrowNativeRawError(error)) {
+      throw error;
+    }
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
@@ -230,13 +232,12 @@ export function applyBridgeInjectSystemInstructionWithNative(
     return fail('json stringify failed');
   }
   try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseApplyBridgeInjectSystemInstructionOutput(raw);
-    return parsed ?? fail('invalid payload');
+    const raw = readNativeJsonResult(capability, fn(payloadJson));
+    return parseNativeResultOrFail(capability, raw, parseApplyBridgeInjectSystemInstructionOutput);
   } catch (error) {
+    if (shouldRethrowNativeRawError(error)) {
+      throw error;
+    }
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
@@ -264,13 +265,12 @@ export function applyBridgeEnsureSystemInstructionWithNative(
     return fail('json stringify failed');
   }
   try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseApplyBridgeEnsureSystemInstructionOutput(raw);
-    return parsed ?? fail('invalid payload');
+    const raw = readNativeJsonResult(capability, fn(payloadJson));
+    return parseNativeResultOrFail(capability, raw, parseApplyBridgeEnsureSystemInstructionOutput);
   } catch (error) {
+    if (shouldRethrowNativeRawError(error)) {
+      throw error;
+    }
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
@@ -300,16 +300,16 @@ export function runBridgeActionPipelineWithNative(
     return fail('json stringify failed');
   }
   try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = readNativeJsonResult(capability, fn(payloadJson));
     const parsed = parseBridgeActionState(raw);
     if (!parsed) {
       return null;
     }
     return parsed;
   } catch (error) {
+    if (shouldRethrowNativeRawError(error)) {
+      throw error;
+    }
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
@@ -346,13 +346,12 @@ export function normalizeMessageReasoningToolsWithNative(
     return fail('json stringify failed');
   }
   try {
-    const raw = fn(messageJson, typeof idPrefix === 'string' && idPrefix.trim().length ? idPrefix.trim() : undefined);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseNormalizeMessageReasoningToolsOutput(raw);
-    return parsed ?? fail('invalid payload');
+    const raw = readNativeJsonResult(capability, fn(messageJson, typeof idPrefix === 'string' && idPrefix.trim().length ? idPrefix.trim() : undefined));
+    return parseNativeResultOrFail(capability, raw, parseNormalizeMessageReasoningToolsOutput);
   } catch (error) {
+    if (shouldRethrowNativeRawError(error)) {
+      throw error;
+    }
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
@@ -408,9 +407,11 @@ export function normalizeChatResponseReasoningToolsWithNative(
     if (typeof raw !== 'string' || !raw) {
       return fail('empty result');
     }
-    const parsed = parseRecord(raw);
-    return parsed ?? fail('invalid payload');
+    return parseNativeResultOrFail(capability, raw, parseRecord);
   } catch (error) {
+    if (shouldRethrowNativeRawError(error)) {
+      throw error;
+    }
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }

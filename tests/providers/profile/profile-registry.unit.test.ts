@@ -261,6 +261,20 @@ describe('provider family profile registry', () => {
     }
   });
 
+  test('deepseek profile resolveUserAgent ignores client/config passthrough and stays opencode aligned', async () => {
+    const deepseekProfile = getProviderFamilyProfile({ providerId: 'deepseek' });
+    expect(deepseekProfile).toBeTruthy();
+
+    const resolved = await deepseekProfile?.resolveUserAgent?.({
+      uaFromConfig: 'curl/8.7.1',
+      uaFromService: 'DeepSeek/1.0.13 Android/35',
+      inboundUserAgent: 'codex-tui/0.118.0',
+      defaultUserAgent: 'RouteCodex/2.0'
+    } as any);
+
+    expect(resolved).toBe('opencode/1.2.27');
+  });
+
   test('qwen profile remaps oauth request model to coder-model', () => {
     const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
     expect(qwenProfile).toBeTruthy();

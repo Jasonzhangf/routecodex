@@ -4,18 +4,26 @@
  * Single boundary module for llmswitch-core integration.
  */
 
-import type { ProviderErrorEvent, ProviderSuccessEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
-
-// Re-export types from core.
-export type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
-export type { ProviderSuccessEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
-export type { ProviderUsageEvent } from '@jsonstudio/llms';
-export type {
+import type {
+  ProviderErrorEvent,
+  ProviderSuccessEvent,
+  ProviderUsageEvent,
   StaticQuotaConfig,
   QuotaState,
   QuotaStore,
   QuotaStoreSnapshot
-} from '@jsonstudio/llms/dist/quota/index.js';
+} from '../../types/llmswitch-local-types.js';
+
+// Re-export types from core.
+export type {
+  ProviderErrorEvent,
+  ProviderSuccessEvent,
+  ProviderUsageEvent,
+  StaticQuotaConfig,
+  QuotaState,
+  QuotaStore,
+  QuotaStoreSnapshot
+} from '../../types/llmswitch-local-types.js';
 
 // Core module loading utilities.
 export {
@@ -99,10 +107,13 @@ export {
 
 export {
   mapChatToolsToBridgeJson,
+  normalizeAssistantTextToToolCallsJson,
   buildAnthropicResponseFromChatJson,
   injectMcpToolsForChatJson,
   injectMcpToolsForResponsesJson,
-  sanitizeFollowupText
+  sanitizeFollowupText,
+  classifyProviderFailure,
+  getNetworkErrorCodes
 } from './bridge/native-exports.js';
 
 // Keep local aliases so external callers can reference the same symbol names.

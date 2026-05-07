@@ -45,7 +45,7 @@ function logUsageAggregatorNonBlockingError(
  * Extract usage metrics from provider response
  */
 export function extractUsageFromResult(
-  result: { body?: unknown; status?: number; headers?: Record<string, string> },
+  result: { body?: unknown; status?: number; headers?: Record<string, string>; metadata?: Record<string, unknown> },
   metadata?: Record<string, unknown>
 ): UsageMetrics | undefined {
   void metadata;
@@ -55,6 +55,9 @@ export function extractUsageFromResult(
     const body = result.body as Record<string, unknown>;
     if (body.usage) {
       candidates.push(body.usage);
+    }
+    if (body.usageMetadata) {
+      candidates.push(body.usageMetadata);
     }
     if (body.metadata && typeof body.metadata === 'object') {
       const bodyMeta = body.metadata as Record<string, unknown>;
@@ -114,6 +117,16 @@ export function extractUsageFromResult(
     }
   }
 
+  if (result.metadata && typeof result.metadata === 'object') {
+    const resultMeta = result.metadata as Record<string, unknown>;
+    if (resultMeta.usage) {
+      candidates.push(resultMeta.usage);
+    }
+    if (resultMeta.usageMetadata) {
+      candidates.push(resultMeta.usageMetadata);
+    }
+  }
+
   for (const candidate of candidates) {
     const normalized = normalizeUsage(candidate);
     if (normalized) {
@@ -150,13 +163,18 @@ export function normalizeUsage(value: unknown): UsageMetrics | undefined {
     }
     return undefined;
   };
-  const basePrompt =
-    readNumeric(usageRecord.prompt_tokens) ??
+  // Detect source field to decide cache handling:
+  // - prompt_tokens (OpenAI): already includes cache_read_input_tokens
+  // - input_tokens (Anthropic): does NOT include cache_read_input_tokens
+  const basePromptOpenAI = readNumeric(usageRecord.prompt_tokens);
+  const basePromptAnthropic =
     readNumeric(usageRecord.input_tokens) ??
-    readNumeric(usageRecord.promptTokens) ??
     readNumeric(usageRecord.inputTokens) ??
     readNumeric(usageRecord.request_tokens) ??
     readNumeric(usageRecord.requestTokens);
+  const basePromptOther =
+    readNumeric(usageRecord.promptTokenCount) ??
+    readNumeric(usageRecord.promptTokens);
 
   let cacheRead: number | undefined =
     readNumeric(usageRecord.cache_read_input_tokens);
@@ -169,14 +187,21 @@ export function normalizeUsage(value: unknown): UsageMetrics | undefined {
     }
   }
 
-  const prompt =
-    basePrompt !== undefined || cacheRead !== undefined
-      ? (basePrompt ?? 0) + (cacheRead ?? 0)
-      : undefined;
+  const cacheCreation: number | undefined =
+    readNumeric(usageRecord.cache_creation_input_tokens);
+
+  // prompt_tokens (OpenAI) already includes cache — do NOT add cacheRead again.
+  // input_tokens (Anthropic) does NOT include cache — add cacheRead.
+  const prompt = basePromptOpenAI !== undefined
+    ? basePromptOpenAI
+    : basePromptAnthropic !== undefined
+      ? basePromptAnthropic + (cacheRead ?? 0)
+      : basePromptOther;
 
   const completion =
     readNumeric(usageRecord.completion_tokens) ??
     readNumeric(usageRecord.output_tokens) ??
+    readNumeric(usageRecord.candidatesTokenCount) ??
     readNumeric(usageRecord.completionTokens) ??
     readNumeric(usageRecord.outputTokens) ??
     readNumeric(usageRecord.response_tokens) ??
@@ -184,6 +209,7 @@ export function normalizeUsage(value: unknown): UsageMetrics | undefined {
 
   let total =
     readNumeric(usageRecord.total_tokens) ??
+    readNumeric(usageRecord.totalTokenCount) ??
     readNumeric(usageRecord.totalTokens);
 
   if (prompt !== undefined && completion !== undefined) {
@@ -200,7 +226,9 @@ export function normalizeUsage(value: unknown): UsageMetrics | undefined {
   return {
     prompt_tokens: prompt,
     completion_tokens: completion,
-    total_tokens: total
+    total_tokens: total,
+    cache_read_input_tokens: cacheRead,
+    cache_creation_input_tokens: cacheCreation
   };
 }
 
@@ -240,5 +268,9 @@ export function buildUsageLogText(usage?: UsageMetrics): string {
   if (outputTokens === undefined && total !== undefined && inputTokens !== undefined) {
     outputTokens = Math.max(0, total - inputTokens);
   }
-  return `input_tokens=${inputTokens ?? 'n/a'} output_tokens=${outputTokens ?? 'n/a'} total_tokens=${total ?? 'n/a'}`;
+  const cacheRead = usage?.cache_read_input_tokens;
+  const cacheRatio = cacheRead !== undefined && cacheRead > 0 && inputTokens !== undefined && inputTokens > 0
+    ? ` cache=${(cacheRead / inputTokens * 100).toFixed(1)}%`
+    : '';
+  return `input_tokens=${inputTokens ?? 'n/a'} output_tokens=${outputTokens ?? 'n/a'} total_tokens=${total ?? 'n/a'}${cacheRatio}`;
 }

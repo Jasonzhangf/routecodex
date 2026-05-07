@@ -1677,9 +1677,9 @@ function resolveRestartEntryScript(argv: string[]): string | null {
 
 function resolveInstalledSnapshotRoot(): string | null {
   const candidates = [
+    resolveRccPathForRead('install', 'current'),
     String(process.env.ROUTECODEX_INSTALL_ROOT || '').trim(),
     String(process.env.RCC_INSTALL_ROOT || '').trim(),
-    resolveRccPathForRead('install', 'current')
   ].filter(Boolean);
   for (const candidate of candidates) {
     const resolved = path.resolve(candidate);
@@ -1755,6 +1755,22 @@ function isManagedByStartParent(): boolean {
   return raw === '1' || raw === 'true';
 }
 
+function hasLiveManagedStartParent(): boolean {
+  if (!isManagedByStartParent()) {
+    return false;
+  }
+  const parentPid = process.ppid;
+  if (!Number.isFinite(parentPid) || parentPid <= 1) {
+    return false;
+  }
+  try {
+    process.kill(parentPid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<void> {
   if (restartInProgress) {
     return;
@@ -1802,7 +1818,7 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
 
   console.log('🔁 Falling back to process replacement restart mode.');
 
-  if (isManagedByStartParent()) {
+  if (hasLiveManagedStartParent()) {
     logProcessLifecycle({
       event: 'restart_delegate_parent_supervisor',
       source: 'index.restartSelf',
@@ -1822,6 +1838,17 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
     }
     await flushProcessLifecycleLogQueue();
     process.exit(75);
+  }
+  if (isManagedByStartParent()) {
+    logProcessLifecycle({
+      event: 'restart_parent_supervisor_unavailable',
+      source: 'index.restartSelf',
+      details: {
+        signal,
+        parentPid: process.ppid
+      }
+    });
+    console.log('⚠ Start parent supervisor unavailable; using local process replacement restart.');
   }
 
   const restartArgvPlan = resolveRestartArgv(process.argv.slice(1));

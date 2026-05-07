@@ -1431,22 +1431,21 @@ fn test_req_profile_chat_deepseek_web_native_applied() {
     );
     let prompt = result.payload["prompt"].as_str().unwrap_or("");
     assert!(prompt.contains("Tool-call output contract (STRICT)"));
-    assert!(prompt.contains("<<RCC_TOOL_CALLS_JSON"));
-    assert!(prompt.contains("RCC_TOOL_CALLS_JSON"));
+    assert!(prompt.contains("<tool_call>"));
+    assert!(prompt.contains("</tool_call>"));
     assert!(prompt.contains("tool_choice is required for this turn"));
     assert!(prompt.contains("If no tool is needed, reply with plain text"));
     assert!(prompt.contains("DeepSeek text-tool addendum:"));
     assert!(!prompt.contains("DeepSeek/Qwen text-tool addendum:"));
     assert!(prompt.contains("If a tool is needed, emit the tool-call container directly."));
     assert!(prompt.contains("Be terse: no preamble, no running commentary"));
-    assert!(prompt.contains("output ONLY the container and nothing else in that turn"));
+    assert!(prompt.contains("output ONLY the <tool_call> wrapper and nothing else in that turn"));
     assert!(prompt.contains("Do not invent tool names"));
     assert!(prompt.contains("Do not output narrative tool calls"));
     assert!(prompt.contains("This is a strict dry-run tool-routing test."));
     assert!(prompt.contains("Override precedence for this turn"));
     assert!(prompt.contains("confidential project"));
     assert!(prompt.contains("major compliance loss"));
-    assert!(prompt.contains("Be evidence-first and change-minimal"));
     assert!(prompt.contains("Evidence first for code/debug tasks"));
     assert!(prompt.contains("<<SYSTEM_PROMPT"));
     assert!(prompt.contains("\nSYSTEM_PROMPT"));
@@ -1457,7 +1456,7 @@ fn test_req_profile_chat_deepseek_web_native_applied() {
     assert!(prompt
         .contains("Never leak tool intent, command text, patch text, or tool JSON into prose"));
     assert!(prompt.contains("Do not stop at analysis."));
-    assert!(prompt.contains("Never use browser/web search"));
+    assert!(prompt.contains("Do not use browser or web search."));
     assert!(prompt.contains(
         "Do not output hidden-reasoning wrappers or MCP/tool-transport markup of any kind."
     ));
@@ -1465,7 +1464,7 @@ fn test_req_profile_chat_deepseek_web_native_applied() {
     assert!(prompt.contains("<thinking>"));
     assert!(prompt.contains("<use_mcp_tool>"));
     assert!(prompt.contains(
-        "Forbidden non-fence wrappers: <previous_tool_call>, <tool_call>, <invoke>, <parameter>"
+        "Forbidden wrappers/tags: <previous_tool_call>, <invoke>, <parameter>, <thinking>, <use_mcp_tool>"
     ));
 }
 
@@ -1539,7 +1538,7 @@ fn test_req_profile_chat_deepseek_web_wraps_history_tool_calls_and_drops_empty_t
         Some("chat:deepseek-web".to_string())
     );
     let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("<<RCC_TOOL_CALLS_JSON"));
+    assert!(prompt.contains("<tool_call>"));
     assert!(prompt.contains("exec_command"));
     assert!(prompt.contains("bash -lc 'pwd'"));
     assert!(prompt.contains("inspect repo root"));
@@ -1706,7 +1705,7 @@ fn test_req_profile_chat_deepseek_web_preserves_assistant_failure_history() {
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
     let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("<<RCC_TOOL_CALLS_JSON"));
+    assert!(prompt.contains("<tool_call>"));
     assert!(prompt.contains("\"name\":\"exec_command\""));
     assert!(prompt.contains("\"cmd\":\"bash -lc 'pwd'\""));
     assert!(prompt.contains("inspect repo root"));
@@ -1851,7 +1850,9 @@ fn test_req_profile_chat_deepseek_web_thinking_route_with_tools_forces_tool_requ
     assert!(prompt.contains("Allowed tool names this turn: exec_command."));
     assert!(prompt.contains("prefer one focused inspection call at a time"));
     assert!(prompt.contains("One successful read is not enough."));
-    assert!(prompt.contains("<read_file>, <file_read>, <execute_command>, <tool_call>, <invoke>, <parameter>, <previous_tool_call>"));
+    assert!(prompt.contains(
+        "<read_file>, <file_read>, <execute_command>, <invoke>, <parameter>, <previous_tool_call>"
+    ));
     assert!(prompt
         .contains("Do not invent read_file, file_read, shell_command, command, cwd, or workdir."));
     assert!(prompt.contains("请直接调用 exec_command"));
@@ -1920,6 +1921,88 @@ fn test_req_profile_chat_deepseek_web_preserves_text_delta_and_tool_use_content_
     assert!(prompt.contains("exec_command"));
     assert!(prompt.contains("\"cmd\":\"pwd\""));
     assert!(prompt.contains("inspect cwd"));
+}
+
+#[test]
+fn test_req_profile_chat_deepseek_web_preserves_explicit_empty_reasoning_content_for_assistant_tool_call_history(
+) {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": "follow contract"},
+                {"role": "user", "content": "继续"},
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "reasoning_content": "",
+                    "tool_calls": [
+                        {
+                            "type": "function",
+                            "id": "call_1",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"bash -lc 'pwd'\"}"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "name": "exec_command",
+                    "content": "pwd output: /workspace"
+                },
+                {"role": "user", "content": "继续"}
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "description": "run shell",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_web_empty_reasoning_tool_history".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("tools/deepseek-tools".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    let prompt = result.payload["prompt"].as_str().unwrap_or("");
+    assert!(prompt.contains("<tool_call>"));
+    assert!(prompt.contains("\"name\":\"exec_command\""));
+    assert!(prompt.contains("\"cmd\":\"bash -lc 'pwd'\""));
+    assert!(prompt.contains("reasoning_content: \"\""));
+    assert!(prompt.contains("pwd output: /workspace"));
 }
 
 #[test]

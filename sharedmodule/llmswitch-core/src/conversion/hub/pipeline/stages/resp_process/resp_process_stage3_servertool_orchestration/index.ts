@@ -23,6 +23,29 @@ type ClientInjectDispatch = (options: {
   metadata?: JsonObject;
 }) => Promise<{ ok: boolean; reason?: string }>;
 
+function readFollowupClientInjectSource(
+  adapterContext: AdapterContext
+): string {
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    return '';
+  }
+  const record = adapterContext as Record<string, unknown>;
+  const direct =
+    typeof record.clientInjectSource === 'string' && record.clientInjectSource.trim().length
+      ? record.clientInjectSource.trim()
+      : '';
+  if (direct) {
+    return direct;
+  }
+  const runtimeMeta =
+    record.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
+      ? (record.__rt as Record<string, unknown>)
+      : undefined;
+  return typeof runtimeMeta?.clientInjectSource === 'string' && runtimeMeta.clientInjectSource.trim().length
+    ? runtimeMeta.clientInjectSource.trim()
+    : '';
+}
+
 export interface RespProcessStage3ServerToolOrchestrationOptions {
   payload: ChatCompletionLike;
   adapterContext: AdapterContext;
@@ -53,7 +76,15 @@ export async function runRespProcessStage3ServerToolOrchestration(
     !Array.isArray(options.adapterContext)
       ? ((options.adapterContext as Record<string, unknown>).__rt as Record<string, unknown> | undefined)
       : undefined;
-  if (runtimeMeta?.serverToolFollowup === true && options.allowFollowup !== true) {
+  const followupSource = readFollowupClientInjectSource(options.adapterContext);
+  const allowReasoningStopFollowupReentry =
+    followupSource === 'servertool.reasoning_stop_guard'
+    || followupSource === 'servertool.reasoning_stop_continue';
+  if (
+    runtimeMeta?.serverToolFollowup === true
+    && options.allowFollowup !== true
+    && !allowReasoningStopFollowupReentry
+  ) {
     recordStage(options.stageRecorder, 'chat_process.resp.stage5.servertool_orchestration', {
       executed: false,
       skipReason: 'followup_bypass',

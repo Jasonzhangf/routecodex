@@ -31,4 +31,5 @@
 - `docs/design/servertool-stopmessage-lifecycle.md`
 - `docs/design/reasoning-stop-lifecycle.md`
 - `docs/design/servertool-unified-skeleton.md`
+- `docs/design/servertool-rust-only-architecture.md`
 - `docs/routing-instructions.md`

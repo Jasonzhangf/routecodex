@@ -126,6 +126,7 @@ export function buildServerToolNestedRequestMetadata(args: {
   baseMetadata?: Record<string, unknown>;
   extraMetadata?: Record<string, unknown>;
   entryEndpoint: string;
+  requestSemantics?: Record<string, unknown>;
   onMergeRuntimeMetaError?: (error: unknown) => void;
 }): Record<string, unknown> {
   const baseMetadata = asRecord(args.baseMetadata) ?? {};
@@ -137,6 +138,15 @@ export function buildServerToolNestedRequestMetadata(args: {
     direction: 'request',
     stage: 'inbound'
   };
+
+  if (
+    args.requestSemantics &&
+    typeof args.requestSemantics === 'object' &&
+    !Array.isArray(args.requestSemantics) &&
+    !('requestSemantics' in out)
+  ) {
+    out.requestSemantics = args.requestSemantics;
+  }
 
   const mergedClientHeaders = {
     ...(cloneStringHeaders(baseMetadata.clientHeaders) ?? {}),

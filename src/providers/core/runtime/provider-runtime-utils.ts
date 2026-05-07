@@ -14,6 +14,9 @@ export function resolveProviderProfileKey(options: {
   const direct = typeof providerId === 'string' && providerId.trim()
     ? providerId.trim().toLowerCase()
     : '';
+  if (moduleType !== 'deepseek-http-provider' && direct === 'deepseek' && providerType === 'openai') {
+    return 'openai';
+  }
   return direct || providerType;
 }
 

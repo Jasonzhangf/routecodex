@@ -40,6 +40,7 @@ mod gemini_openai_codec;
 mod hub_bridge_actions;
 mod hub_bridge_policies;
 mod hub_chat_envelope_validator;
+mod failure_policy;
 mod hub_pipeline;
 mod hub_pipeline_session_identifiers;
 mod hub_pipeline_target_utils;
@@ -71,6 +72,7 @@ mod req_process_stage2_route_select;
 mod resp_process_stage1_tool_governance;
 mod resp_process_stage2_finalize;
 mod responses_openai_codec;
+mod servertool_skeleton_config;
 mod shared_args_mapping;
 mod shared_bridge_instructions;
 mod shared_chat_output_normalizer;
@@ -86,6 +88,7 @@ mod shared_provider_errors;
 mod shared_response_compat;
 mod shared_responses_conversation_utils;
 mod shared_responses_response_utils;
+mod shared_tool_result_text_normalizer;
 mod shared_responses_tool_utils;
 mod shared_tool_call_id_manager;
 mod shared_tool_mapping;
@@ -1003,7 +1006,13 @@ pub fn normalizeAssistantTextToToolCallsJson(
     message_json: String,
     options_json: Option<String>,
 ) -> NapiResult<String> {
-    hub_reasoning_tool_normalizer::normalize_assistant_text_to_tool_calls_json(
+    let message: Value = serde_json::from_str(&message_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse message JSON: {}", e)))?;
+    if !message.is_object() {
+        return serde_json::to_string(&message)
+            .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)));
+    }
+    crate::hub_reasoning_tool_normalizer::normalize_assistant_text_to_tool_calls_json(
         message_json,
         options_json,
     )
@@ -1280,3 +1289,58 @@ pub fn bootstrap_virtual_router_config_meta_json_bridge(
 }
 
 mod hub_req_inbound_unified_fastpath;
+
+#[napi(js_name = "classifyProviderFailureJson")]
+pub fn classify_provider_failure_json(
+    status_code: Option<u16>,
+    error_code: Option<String>,
+    upstream_code: Option<String>,
+    is_network_error: bool,
+) -> NapiResult<String> {
+    let classification = failure_policy::classify_failure(
+        status_code,
+        error_code.as_deref(),
+        upstream_code.as_deref(),
+        is_network_error,
+    );
+    Ok(serde_json::to_string(&classification).map_err(|e| napi::Error::from_reason(e.to_string()))?)
+}
+
+#[napi(js_name = "networkErrorSetJson")]
+pub fn network_error_set_json() -> NapiResult<String> {
+    serde_json::to_string(&["ECONNRESET","ECONNREFUSED","EHOSTUNREACH","ENOTFOUND","EAI_AGAIN","EPIPE","ETIMEDOUT","ECONNABORTED"])
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi(js_name = "isProviderFailureBlockingRecoverableJson")]
+pub fn is_provider_failure_blocking_recoverable_json(
+    classification_json: String,
+    stage: Option<String>,
+) -> NapiResult<bool> {
+    let classification: failure_policy::FailureClassification = serde_json::from_str(&classification_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(failure_policy::is_blocking_recoverable(classification, stage.as_deref()))
+}
+
+#[napi(js_name = "shouldRetryProviderFailureJson")]
+pub fn should_retry_provider_failure_json(
+    classification_json: String,
+    attempt: u32,
+    max_attempts: u32,
+) -> NapiResult<bool> {
+    let classification: failure_policy::FailureClassification = serde_json::from_str(&classification_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(failure_policy::should_retry(classification, attempt, max_attempts))
+}
+
+#[napi(js_name = "computeProviderBackoffMsJson")]
+pub fn compute_provider_backoff_ms_json(
+    classification_json: String,
+    attempt: u32,
+    base_ms: i64,
+    max_ms: i64,
+) -> NapiResult<i64> {
+    let classification: failure_policy::FailureClassification = serde_json::from_str(&classification_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(failure_policy::compute_backoff(classification, attempt, base_ms as u64, max_ms as u64) as i64)
+}

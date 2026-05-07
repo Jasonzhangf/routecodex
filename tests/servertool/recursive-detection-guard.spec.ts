@@ -9,6 +9,12 @@ function getHandler() {
   if (!entry) {
     throw new Error('recursive_detection_guard not registered');
   }
+  expect(entry.registration).toMatchObject({
+    name: 'recursive_detection_guard',
+    trigger: 'auto',
+    executionMode: 'auto_hook',
+    stripAfterExecute: true
+  });
   return entry.handler;
 }
 

@@ -27,9 +27,18 @@ fn current_unix_seconds() -> i64 {
 }
 
 #[derive(Default)]
+enum DeepSeekAppendTarget {
+    #[default]
+    None,
+    Content,
+    Thinking,
+}
+
+#[derive(Default)]
 struct DeepSeekSseState {
     content: String,
-    append_active: bool,
+    thinking_content: String,
+    append_target: DeepSeekAppendTarget,
     finished: bool,
     accumulated_token_usage: Option<i64>,
     response_message_id: Option<String>,
@@ -74,6 +83,13 @@ fn append_content(state: &mut DeepSeekSseState, text: &str) {
     state.content.push_str(text);
 }
 
+fn append_thinking_content(state: &mut DeepSeekSseState, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    state.thinking_content.push_str(text);
+}
+
 fn process_response_record(
     response: &serde_json::Map<String, Value>,
     state: &mut DeepSeekSseState,
@@ -81,10 +97,13 @@ fn process_response_record(
     if let Some(content) = response.get("content").and_then(Value::as_str) {
         append_content(state, content);
     }
+    if let Some(thinking_content) = response.get("thinking_content").and_then(Value::as_str) {
+        append_thinking_content(state, thinking_content);
+    }
     if let Some(status) = response.get("status").and_then(Value::as_str) {
         if status.trim().eq_ignore_ascii_case("FINISHED") {
             state.finished = true;
-            state.append_active = false;
+            state.append_target = DeepSeekAppendTarget::None;
         }
     }
     if let Some(model) = read_trimmed_string(response.get("model")) {
@@ -118,19 +137,38 @@ fn process_patch_payload(payload: &serde_json::Map<String, Value>, state: &mut D
         .unwrap_or("")
         .trim();
     let value = payload.get("v");
+    let is_textual_patch_op =
+        op.is_empty() || op.eq_ignore_ascii_case("APPEND") || op.eq_ignore_ascii_case("SET");
 
-    if path == "response/content" && op.eq_ignore_ascii_case("APPEND") {
+    if path == "response/content" && is_textual_patch_op {
         if let Some(text) = value.and_then(Value::as_str) {
-            state.append_active = true;
+            state.append_target = DeepSeekAppendTarget::Content;
             append_content(state, text);
             return;
         }
     }
 
-    if path.is_empty() && state.append_active {
+    if path == "response/thinking_content" && is_textual_patch_op {
         if let Some(text) = value.and_then(Value::as_str) {
-            append_content(state, text);
+            state.append_target = DeepSeekAppendTarget::Thinking;
+            append_thinking_content(state, text);
             return;
+        }
+    }
+
+    if path.is_empty() {
+        if let Some(text) = value.and_then(Value::as_str) {
+            match state.append_target {
+                DeepSeekAppendTarget::Content => {
+                    append_content(state, text);
+                    return;
+                }
+                DeepSeekAppendTarget::Thinking => {
+                    append_thinking_content(state, text);
+                    return;
+                }
+                DeepSeekAppendTarget::None => {}
+            }
         }
     }
 
@@ -138,7 +176,7 @@ fn process_patch_payload(payload: &serde_json::Map<String, Value>, state: &mut D
         if let Some(status) = value.and_then(Value::as_str) {
             if status.trim().eq_ignore_ascii_case("FINISHED") {
                 state.finished = true;
-                state.append_active = false;
+                state.append_target = DeepSeekAppendTarget::None;
                 return;
             }
         }
@@ -215,7 +253,11 @@ fn parse_deepseek_sse_raw(raw: &str) -> Option<DeepSeekSseState> {
         flush_sse_block(current.as_str(), &mut state);
     }
 
-    if state.content.is_empty() && state.response_message_id.is_none() && !state.finished {
+    if state.content.is_empty()
+        && state.thinking_content.is_empty()
+        && state.response_message_id.is_none()
+        && !state.finished
+    {
         return None;
     }
     Some(state)
@@ -240,6 +282,7 @@ fn build_deepseek_sse_chat_completion(value: &Value) -> Option<Value> {
             "message": {
                 "role": "assistant",
                 "content": state.content,
+                "reasoning_content": state.thinking_content,
             },
             "finish_reason": if state.finished { "stop" } else { "stop" }
         }]
@@ -401,6 +444,51 @@ mod tests {
 
         let normalized = normalize_deepseek_business_envelope(payload).unwrap();
         assert_eq!(normalized["choices"][0]["message"]["content"], "hi");
+        assert_eq!(normalized["choices"][0]["finish_reason"], "stop");
+    }
+
+    #[test]
+    fn test_normalize_deepseek_business_envelope_maps_thinking_content_to_reasoning_content() {
+        let payload = json!({
+            "body": {
+                "mode": "sse",
+                "raw": concat!(
+                    "event: ready\n",
+                    "data: {\"request_message_id\":1,\"response_message_id\":2}\n\n",
+                    "data: {\"p\":\"response/thinking_content\",\"o\":\"APPEND\",\"v\":\"先检查\"}\n\n",
+                    "data: {\"v\":\"工具返回\"}\n\n",
+                    "data: {\"p\":\"response/status\",\"v\":\"FINISHED\"}\n\n"
+                )
+            }
+        });
+
+        let normalized = normalize_deepseek_business_envelope(payload).unwrap();
+        assert_eq!(normalized["choices"][0]["message"]["content"], "");
+        assert_eq!(
+            normalized["choices"][0]["message"]["reasoning_content"],
+            "先检查工具返回"
+        );
+        assert_eq!(normalized["choices"][0]["finish_reason"], "stop");
+    }
+
+    #[test]
+    fn test_normalize_deepseek_business_envelope_maps_nested_response_thinking_content() {
+        let payload = json!({
+            "body": {
+                "mode": "sse",
+                "raw": concat!(
+                    "data: {\"v\":{\"response\":{\"message_id\":2,\"status\":\"WIP\",\"thinking_content\":\"先看日志\"}}}\n\n",
+                    "data: {\"p\":\"response/status\",\"v\":\"FINISHED\"}\n\n"
+                )
+            }
+        });
+
+        let normalized = normalize_deepseek_business_envelope(payload).unwrap();
+        assert_eq!(normalized["choices"][0]["message"]["content"], "");
+        assert_eq!(
+            normalized["choices"][0]["message"]["reasoning_content"],
+            "先看日志"
+        );
         assert_eq!(normalized["choices"][0]["finish_reason"], "stop");
     }
 }

@@ -61,7 +61,7 @@ import {
   recordPolicyObservationSafely,
   recordToolSurfaceShadowMismatch
 } from './provider-response-observation.js';
-import { getServerToolHandler } from '../../../servertool/registry.js';
+import { isRegisteredServerToolName } from '../../../servertool/registry.js';
 
 type ProviderResponsePlan = {
   createFormatAdapter: () => ChatFormatAdapter | ResponsesFormatAdapter | AnthropicFormatAdapter | GeminiFormatAdapter;
@@ -220,7 +220,7 @@ function extractServerToolCallSignaturesFromMessage(message: unknown, out: Set<s
       ?? asRecord(toolCall?.functionCall)
       ?? asRecord(toolCall?.function_call);
     const name = typeof fn?.name === 'string' ? fn.name.trim() : '';
-    if (!name || !getServerToolHandler(name)) {
+    if (!name || !isRegisteredServerToolName(name)) {
       continue;
     }
     const id = typeof toolCall?.id === 'string' ? toolCall.id.trim() : '';

@@ -1,6 +1,6 @@
 import type { PipelineExecutionInput } from '../../handlers/types.js';
 import { asRecord } from './provider-utils.js';
-import { extractSessionIdentifiersFromMetadata } from '../../../../node_modules/@jsonstudio/llms/dist/conversion/hub/pipeline/session-identifiers.js';
+import { extractSessionIdentifiersFromMetadata } from '../../../modules/llmswitch/bridge.js';
 import { extractSessionClientDaemonIdFromApiKey } from '../../../utils/session-client-token.js';
 import {
   shouldTraceSessionScopeByContext

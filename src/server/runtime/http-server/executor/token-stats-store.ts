@@ -16,6 +16,7 @@ export interface TokenCounters {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  cacheReadTokens: number;
 }
 
 export interface TokenProviderEntry extends TokenCounters {
@@ -39,7 +40,7 @@ interface PersistedTokenStats {
 
 // ── State ──────────────────────────────────────────────────────────
 
-let tokenAlltime: TokenCounters = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+let tokenAlltime: TokenCounters = { promptTokens: 0, completionTokens: 0, totalTokens: 0, cacheReadTokens: 0 };
 let tokenDaily = new Map<string, TokenCounters>();
 let tokenByProvider = new Map<string, TokenProviderEntry>();
 let initialized = false;
@@ -72,7 +73,7 @@ function providerMapKey(providerKey: string, model: string): string {
 }
 
 function emptyCounters(): TokenCounters {
-  return { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  return { promptTokens: 0, completionTokens: 0, totalTokens: 0, cacheReadTokens: 0 };
 }
 
 function buildPersistedSnapshot(): PersistedTokenStats {
@@ -123,6 +124,7 @@ function ensureLoaded(): void {
       promptTokens: Number(data.alltime?.promptTokens) || 0,
       completionTokens: Number(data.alltime?.completionTokens) || 0,
       totalTokens: Number(data.alltime?.totalTokens) || 0,
+      cacheReadTokens: Number(data.alltime?.cacheReadTokens) || 0,
     };
 
     if (data.daily && typeof data.daily === 'object') {
@@ -132,6 +134,7 @@ function ensureLoaded(): void {
             promptTokens: Number((v as TokenCounters).promptTokens) || 0,
             completionTokens: Number((v as TokenCounters).completionTokens) || 0,
             totalTokens: Number((v as TokenCounters).totalTokens) || 0,
+            cacheReadTokens: Number((v as TokenCounters).cacheReadTokens) || 0,
           });
         }
       }
@@ -146,6 +149,7 @@ function ensureLoaded(): void {
             promptTokens: Number((v as TokenProviderEntry).promptTokens) || 0,
             completionTokens: Number((v as TokenProviderEntry).completionTokens) || 0,
             totalTokens: Number((v as TokenProviderEntry).totalTokens) || 0,
+            cacheReadTokens: Number((v as TokenProviderEntry).cacheReadTokens) || 0,
           });
         }
       }
@@ -294,7 +298,8 @@ export function recordTokens(
   model: string,
   promptTokens: number,
   completionTokens: number,
-  totalTokens: number
+  totalTokens: number,
+  cacheReadTokens?: number
 ): void {
   ensureLoaded();
   ensureExitHooksBound();
@@ -304,12 +309,14 @@ export function recordTokens(
   const p = Math.max(0, Math.floor(promptTokens));
   const c = Math.max(0, Math.floor(completionTokens));
   const t = Math.max(0, Math.floor(totalTokens > 0 ? totalTokens : (promptTokens + completionTokens)));
+  const cr = Math.max(0, Math.floor(cacheReadTokens ?? 0));
   if (p === 0 && c === 0 && t === 0) return;
 
   // Alltime
   tokenAlltime.promptTokens += p;
   tokenAlltime.completionTokens += c;
   tokenAlltime.totalTokens += t;
+  tokenAlltime.cacheReadTokens += cr;
 
   // Daily
   const today = getTodayKey();
@@ -317,6 +324,7 @@ export function recordTokens(
   day.promptTokens += p;
   day.completionTokens += c;
   day.totalTokens += t;
+  day.cacheReadTokens += cr;
   tokenDaily.set(today, day);
 
   // Per-provider
@@ -327,10 +335,12 @@ export function recordTokens(
     promptTokens: 0,
     completionTokens: 0,
     totalTokens: 0,
+    cacheReadTokens: 0,
   };
   entry.promptTokens += p;
   entry.completionTokens += c;
   entry.totalTokens += t;
+  entry.cacheReadTokens += cr;
   tokenByProvider.set(key, entry);
 
   dirty = true;

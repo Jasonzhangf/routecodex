@@ -119,7 +119,6 @@ export interface RequestExecutor {
 const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
-const requestDegradedLogState = new Set<string>();
 const RECOVERABLE_BACKOFF_TTL_MS = 5 * 60_000;
 const recoverableErrorBackoffState = new Map<string, { consecutive: number; updatedAtMs: number }>();
 const recoverableRetryGateState = new Map<string, Promise<void>>();
@@ -230,19 +229,6 @@ function logRequestExecutorNonBlockingError(stage: string, error: unknown, detai
   }
 }
 
-function logRequestExecutorDegraded(stage: string, requestId: string, details?: Record<string, unknown>): void {
-  const key = `${requestId}:${stage}`;
-  if (requestDegradedLogState.has(key)) {
-    return;
-  }
-  requestDegradedLogState.add(key);
-  try {
-    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
-    console.warn(`[request-executor][degraded] req=${requestId} stage=${stage}${detailSuffix}`);
-  } catch {
-    // Never throw from degraded logging.
-  }
-}
 
 function readString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -2280,7 +2266,6 @@ function consumeLogicalChainRecoverableRetry(key: string): {
 
 function resetRequestExecutorInternalStateForTests(): void {
   nonBlockingLogState.clear();
-  requestDegradedLogState.clear();
   recoverableErrorBackoffState.clear();
   recoverableRetryGateState.clear();
   recoverableRetryWaiterState.clear();
@@ -2543,6 +2528,10 @@ function extractTextFromResponsesOutputItem(item: unknown): string {
     return '';
   }
   const itemType = readString(item.type)?.toLowerCase();
+  const directOutputText = readString(item.output_text);
+  if (directOutputText) {
+    return directOutputText;
+  }
   if (itemType === 'output_text' || itemType === 'text' || itemType === 'input_text') {
     const direct = readString(item.text);
     if (direct) {
@@ -2560,7 +2549,7 @@ function extractTextFromResponsesOutputItem(item: unknown): string {
       if (partType && partType !== 'output_text' && partType !== 'text' && partType !== 'input_text') {
         continue;
       }
-      const partText = readString(part.text);
+      const partText = readString(part.text) ?? readString(part.output_text);
       if (partText) {
         chunks.push(partText);
       }
@@ -2828,7 +2817,102 @@ async function waitSessionStormBackoffWithGate(key: string, ms: number, signal?:
   }
 }
 
-function detectRetryableEmptyAssistantResponse(body: unknown): { reason: string; marker: string } | null {
+function hasRequestedToolsInSemantics(requestSemantics?: Record<string, unknown>): boolean {
+  if (!requestSemantics || typeof requestSemantics !== 'object') {
+    return false;
+  }
+  const toolsNode =
+    requestSemantics.tools && typeof requestSemantics.tools === 'object' && !Array.isArray(requestSemantics.tools)
+      ? (requestSemantics.tools as Record<string, unknown>)
+      : undefined;
+  const candidates = [
+    requestSemantics.tools,
+    toolsNode?.clientToolsRaw,
+    toolsNode?.baselineTools
+  ];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate) && candidate.length > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function readServerToolFollowupSource(requestSemantics?: Record<string, unknown>): string {
+  const routecodex =
+    requestSemantics?.__routecodex && typeof requestSemantics.__routecodex === 'object' && !Array.isArray(requestSemantics.__routecodex)
+      ? (requestSemantics.__routecodex as Record<string, unknown>)
+      : undefined;
+  const raw = routecodex?.serverToolFollowupSource;
+  return typeof raw === 'string' && raw.trim().length ? raw.trim() : '';
+}
+
+function isReasoningStopFollowupTurn(requestSemantics?: Record<string, unknown>): boolean {
+  const source = readServerToolFollowupSource(requestSemantics);
+  return source === 'servertool.reasoning_stop_guard' || source === 'servertool.reasoning_stop_continue';
+}
+
+function isToolResultFollowupTurn(requestSemantics?: Record<string, unknown>): boolean {
+  if (isReasoningStopFollowupTurn(requestSemantics)) {
+    return false;
+  }
+  const messages = Array.isArray(requestSemantics?.messages) ? requestSemantics.messages : [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!isRecord(message)) {
+      continue;
+    }
+    const role = readString(message.role)?.toLowerCase() ?? '';
+    if (role === 'tool' || role === 'function') {
+      return true;
+    }
+    if (typeof message.tool_call_id === 'string' && message.tool_call_id.trim().length > 0) {
+      return true;
+    }
+    const type = readString(message.type)?.toLowerCase() ?? '';
+    if (type === 'function_call_output' || type === 'tool_result' || type === 'tool_message') {
+      return true;
+    }
+    if (role === 'assistant' || role === 'user' || type.length > 0) {
+      return false;
+    }
+  }
+  return false;
+}
+
+function containsReasoningStopFinalizedMarker(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.includes(REASONING_STOP_FINALIZED_MARKER);
+  }
+  if (Array.isArray(value)) {
+    return value.some((entry) => containsReasoningStopFinalizedMarker(entry));
+  }
+  if (!isRecord(value)) {
+    return false;
+  }
+  const entryType = readString(value.type)?.toLowerCase();
+  if (entryType && entryType !== 'output_text' && entryType !== 'text' && entryType !== 'input_text' && entryType !== 'message') {
+    return false;
+  }
+  if (containsReasoningStopFinalizedMarker(value.output_text)) {
+    return true;
+  }
+  if (containsReasoningStopFinalizedMarker(value.text)) {
+    return true;
+  }
+  if (entryType === 'message') {
+    return containsReasoningStopFinalizedMarker(value.content);
+  }
+  if (Array.isArray(value.content)) {
+    return containsReasoningStopFinalizedMarker(value.content);
+  }
+  return false;
+}
+
+function detectRetryableEmptyAssistantResponse(
+  body: unknown,
+  requestSemantics?: Record<string, unknown>
+): { reason: string; marker: string } | null {
   if (!isRecord(body)) {
     return null;
   }
@@ -2861,6 +2945,17 @@ function detectRetryableEmptyAssistantResponse(body: unknown): { reason: string;
         marker: 'chat_empty_assistant'
       };
     }
+    if (
+      (finishReason === 'stop' || !finishReason)
+      && !hasToolCalls
+      && hasRequestedToolsInSemantics(requestSemantics)
+      && !isToolResultFollowupTurn(requestSemantics)
+    ) {
+      return {
+        reason: `finish_reason=${finishReason || 'unknown'} with declared request tools but no structured tool_calls`,
+        marker: 'chat_missing_required_tool_call'
+      };
+    }
     if ((finishReason === 'stop' || finishReason === 'tool_calls' || !finishReason) && !hasToolCalls && containsToolRegistryMissingText(combinedText)) {
       return {
         reason: 'assistant emitted textual tool-not-found complaint without structured tool_calls',
@@ -2885,6 +2980,19 @@ function detectRetryableEmptyAssistantResponse(body: unknown): { reason: string;
       return {
         reason: `responses status=${status} but output text/tool_calls are empty`,
         marker: 'responses_empty_output'
+      };
+    }
+    if (
+      !hasRequiredActionToolCalls &&
+      !hasFunctionCalls &&
+      hasRequestedToolsInSemantics(requestSemantics) &&
+      !isToolResultFollowupTurn(requestSemantics) &&
+      !containsReasoningStopFinalizedMarker(body.output) &&
+      !containsReasoningStopFinalizedMarker(body.output_text)
+    ) {
+      return {
+        reason: `responses status=${status} with declared request tools but no function_call output`,
+        marker: 'responses_missing_required_tool_call'
       };
     }
     if (
@@ -3092,15 +3200,46 @@ function queuePayloadContractErrorsample(args: {
 }
 
 function bodyContainsReasoningStopFinalizedMarker(body: unknown): boolean {
-  if (!body || typeof body !== 'object') {
+  if (!isRecord(body)) {
     return false;
   }
-  try {
-    return JSON.stringify(body).includes(REASONING_STOP_FINALIZED_MARKER);
-  } catch (error: unknown) {
-    logRequestExecutorNonBlockingError('bodyContainsReasoningStopFinalizedMarker.stringify', error);
-    return false;
+  const choices = Array.isArray(body.choices) ? body.choices : [];
+  for (const choice of choices) {
+    if (!isRecord(choice)) {
+      continue;
+    }
+    const message = isRecord(choice.message) ? choice.message : undefined;
+    if (message && containsReasoningStopFinalizedMarker(message.content)) {
+      return true;
+    }
   }
+  if (containsReasoningStopFinalizedMarker(body.output_text)) {
+    return true;
+  }
+  const output = Array.isArray(body.output) ? body.output : [];
+  for (const item of output) {
+    if (!isRecord(item)) {
+      continue;
+    }
+    if (containsReasoningStopFinalizedMarker(item.output_text)) {
+      return true;
+    }
+    if (containsReasoningStopFinalizedMarker(item.text)) {
+      return true;
+    }
+    if (containsReasoningStopFinalizedMarker(item.content)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasAnthropicToolUseSuccess(body: Record<string, unknown>): boolean {
+  const data = isRecord(body.data) ? body.data : body;
+  const stopReason = readString(data.stop_reason)?.toLowerCase() ?? '';
+  const content = Array.isArray(data.content) ? data.content : [];
+  const hasToolUseBlock = content.some((item) => isRecord(item) && readString(item.type) === 'tool_use');
+  return stopReason === 'tool_use' || hasToolUseBlock;
 }
 
 function detectStoplessTerminationWithoutFinalization(
@@ -3122,6 +3261,9 @@ function detectStoplessTerminationWithoutFinalization(
     return null;
   }
   if (bodyContainsReasoningStopFinalizedMarker(body)) {
+    return null;
+  }
+  if (hasAnthropicToolUseSuccess(body)) {
     return null;
   }
 
@@ -3906,7 +4048,8 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           const requestSemantics = resolveRequestSemantics(
             pipelineResult.processedRequest as Record<string, unknown> | undefined,
-            pipelineResult.standardizedRequest as Record<string, unknown> | undefined
+            pipelineResult.standardizedRequest as Record<string, unknown> | undefined,
+            mergedMetadata
           );
           this.logStage('provider.request_semantics.completed', input.requestId, {
             providerKey: target.providerKey,
@@ -4078,7 +4221,7 @@ export class HubRequestExecutor implements RequestExecutor {
               });
             }
           }
-          const emptyAssistantSignal = detectRetryableEmptyAssistantResponse(converted.body);
+          const emptyAssistantSignal = detectRetryableEmptyAssistantResponse(converted.body, requestSemantics);
           if (emptyAssistantSignal) {
             const bodyForError = converted.body as Record<string, unknown>;
             queuePayloadContractErrorsample({
@@ -4568,6 +4711,10 @@ export const __requestExecutorTestables = {
   consumeProviderTransportBackoffMs,
   peekProviderTransportBackoffWaitMs,
   clearProviderTransportBackoff,
+  hasRequestedToolsInSemantics,
+  isToolResultFollowupTurn,
+  bodyContainsReasoningStopFinalizedMarker,
+  detectStoplessTerminationWithoutFinalization,
   detectRetryableEmptyAssistantResponse,
   deriveLogicalRequestChainKey,
   resolveSessionStormBackoffScope,

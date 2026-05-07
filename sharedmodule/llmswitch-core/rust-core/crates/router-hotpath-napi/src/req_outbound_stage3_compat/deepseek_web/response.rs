@@ -1,14 +1,12 @@
 use regex::Regex;
 use serde_json::Value;
 
-use crate::resp_process_stage1_tool_governance::{
-    govern_response, harvest_text_tool_calls_from_payload, ToolGovernanceInput,
-};
+use crate::resp_process_stage1_tool_governance::{govern_response, ToolGovernanceInput};
 
 use self::envelope::normalize_deepseek_business_envelope;
 use self::tool_state::{
     count_tool_calls_from_choices, resolve_declared_tools_present, resolve_deepseek_options,
-    resolve_tool_choice_required,
+    resolve_effective_declared_tools_present, resolve_tool_choice_required,
 };
 use super::markup::{
     ensure_finish_reason_tool_calls, harvest_function_results_markup,
@@ -19,29 +17,6 @@ use super::AdapterContext;
 
 mod envelope;
 mod tool_state;
-
-fn set_skip_global_text_harvest(payload: &mut Value) {
-    let Some(root) = payload.as_object_mut() else {
-        return;
-    };
-    let governance = root
-        .entry("__rcc_tool_governance".to_string())
-        .or_insert_with(|| serde_json::json!({}));
-    if let Some(row) = governance.as_object_mut() {
-        row.insert("skipTextHarvest".to_string(), Value::Bool(true));
-    } else {
-        *governance = serde_json::json!({
-            "skipTextHarvest": true
-        });
-    }
-}
-
-fn strip_skip_global_text_harvest(payload: &mut Value) {
-    let Some(root) = payload.as_object_mut() else {
-        return;
-    };
-    root.remove("__rcc_tool_governance");
-}
 
 fn is_exec_command_family(name: &str) -> bool {
     matches!(
@@ -130,6 +105,69 @@ fn remap_exec_tool_name_to_requested_alias(payload: &mut Value, requested_alias:
     }
 }
 
+fn ensure_exec_command_args_have_cmd(payload: &mut Value) {
+    let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for choice in choices {
+        let Some(tool_calls) = choice
+            .as_object_mut()
+            .and_then(|row| row.get_mut("message"))
+            .and_then(Value::as_object_mut)
+            .and_then(|message| message.get_mut("tool_calls"))
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        for tool_call in tool_calls {
+            let Some(function) = tool_call
+                .as_object_mut()
+                .and_then(|row| row.get_mut("function"))
+                .and_then(Value::as_object_mut)
+            else {
+                continue;
+            };
+            let is_exec = function
+                .get("name")
+                .and_then(Value::as_str)
+                .map(is_exec_command_family)
+                .unwrap_or(false);
+            if !is_exec {
+                continue;
+            }
+            let Some(arguments_raw) = function.get("arguments").and_then(Value::as_str) else {
+                continue;
+            };
+            let Ok(mut arguments) = serde_json::from_str::<Value>(arguments_raw) else {
+                continue;
+            };
+            let Some(arguments_obj) = arguments.as_object_mut() else {
+                continue;
+            };
+            let has_cmd = arguments_obj
+                .get("cmd")
+                .and_then(Value::as_str)
+                .map(|value| !value.trim().is_empty())
+                .unwrap_or(false);
+            if has_cmd {
+                continue;
+            }
+            let Some(command) = arguments_obj
+                .get("command")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            arguments_obj.insert("cmd".to_string(), Value::String(command.to_string()));
+            if let Ok(serialized) = serde_json::to_string(&arguments) {
+                function.insert("arguments".to_string(), Value::String(serialized));
+            }
+        }
+    }
+}
+
 fn normalize_tool_call_only_content_to_null(payload: &mut Value) {
     let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {
         return;
@@ -175,14 +213,76 @@ fn collapse_blank_lines(value: &str) -> String {
         .to_string()
 }
 
+fn detect_forbidden_hidden_tool_transport_text(value: &str) -> bool {
+    let patterns = [
+        r"(?is)<\s*use_mcp_tool\s*>[\s\S]*?<\s*/\s*use_mcp_tool\s*>",
+        r"(?is)<\s*previous_tool_call\s*>[\s\S]*?<\s*/\s*previous_tool_call\s*>",
+        r#"(?is)<\s*invoke(?:\s+[^>]*)?>[\s\S]*?<\s*/\s*invoke\s*>"#,
+        r#"(?is)<\s*parameter(?:\s+[^>]*)?>[\s\S]*?<\s*/\s*parameter\s*>"#,
+        r"(?is)<\s*server_name\s*>[\s\S]*?<\s*/\s*server_name\s*>",
+        r"(?is)<\s*tool_name\s*>[\s\S]*?<\s*/\s*tool_name\s*>",
+        r"(?is)<\s*arguments\s*>[\s\S]*?<\s*/\s*arguments\s*>",
+        r"(?is)<\s*ds_safety\s*>[\s\S]*?<\s*/\s*ds_safety\s*>",
+        r"(?is)<\s*safety\s*>[\s\S]*?<\s*/\s*safety\s*>",
+    ];
+    patterns.iter().any(|pattern| {
+        Regex::new(pattern)
+            .map(|re| re.is_match(value))
+            .unwrap_or(false)
+    })
+}
+
+fn detect_forbidden_hidden_tool_transport_payload(payload: &Value) -> bool {
+    let Some(choices) = payload.get("choices").and_then(Value::as_array) else {
+        return false;
+    };
+    for choice in choices {
+        let Some(message) = choice.get("message").and_then(Value::as_object) else {
+            continue;
+        };
+        for key in ["content", "reasoning", "reasoning_content", "thinking"] {
+            let Some(value) = message.get(key) else {
+                continue;
+            };
+            match value {
+                Value::String(raw) => {
+                    if detect_forbidden_hidden_tool_transport_text(raw) {
+                        return true;
+                    }
+                }
+                Value::Array(parts) => {
+                    for part in parts {
+                        let Some(part_obj) = part.as_object() else {
+                            continue;
+                        };
+                        for text_key in ["text", "content"] {
+                            let Some(raw) = part_obj.get(text_key).and_then(Value::as_str) else {
+                                continue;
+                            };
+                            if detect_forbidden_hidden_tool_transport_text(raw) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    false
+}
+
 fn sanitize_deepseek_meta_leakage_text(value: &str) -> (String, bool) {
     let mut text = value.to_string();
     let mut detected = false;
     let paired_patterns = [
         r"(?is)<\s*use_mcp_tool\s*>[\s\S]*?<\s*/\s*use_mcp_tool\s*>",
         r"(?is)<\s*previous_tool_call\s*>[\s\S]*?<\s*/\s*previous_tool_call\s*>",
-        r"(?is)<\s*tool_call\s*>[\s\S]*?<\s*/\s*tool_call\s*>",
         r#"(?is)<\s*invoke(?:\s+[^>]*)?>[\s\S]*?<\s*/\s*invoke\s*>"#,
+        r#"(?is)<\s*parameter(?:\s+[^>]*)?>[\s\S]*?<\s*/\s*parameter\s*>"#,
+        r"(?is)<\s*server_name\s*>[\s\S]*?<\s*/\s*server_name\s*>",
+        r"(?is)<\s*tool_name\s*>[\s\S]*?<\s*/\s*tool_name\s*>",
+        r"(?is)<\s*arguments\s*>[\s\S]*?<\s*/\s*arguments\s*>",
         r"(?is)<\s*ds_safety\s*>[\s\S]*?<\s*/\s*ds_safety\s*>",
         r"(?is)<\s*safety\s*>[\s\S]*?<\s*/\s*safety\s*>",
     ];
@@ -197,7 +297,7 @@ fn sanitize_deepseek_meta_leakage_text(value: &str) -> (String, bool) {
     }
 
     let meta_line_patterns = [
-        r"(?im)^[ \t]*<?[^>\r\n]*(?:tool-call block|RCC_TOOL_CALLS_JSON|system prompt|exact format)[^>\r\n]*>?\s*\r?\n?",
+        r"(?im)^[ \t]*<?[^>\r\n]*(?:tool-call block|system prompt|exact format)[^>\r\n]*>?\s*\r?\n?",
         r"(?im)^[ \t]*<\s*(?:server_name|tool_name|arguments)\s*>[\s\S]*?<\s*/\s*(?:server_name|tool_name|arguments)\s*>\s*\r?\n?",
         r"(?im)^[ \t]*<\s*/?\s*(?:server_name|tool_name|arguments)\s*>\s*\r?\n?",
     ];
@@ -371,8 +471,13 @@ pub(crate) fn apply_deepseek_web_response_compat(
     let harvested_function_results = harvest_function_results_markup(&mut normalized);
     let before_count = count_tool_calls_from_choices(&normalized);
     attach_requested_tool_names(&mut normalized, adapter_context);
-    harvest_text_tool_calls_from_payload(&mut normalized);
-    set_skip_global_text_harvest(&mut normalized);
+    let (strict_tool_required, text_tool_fallback) = resolve_deepseek_options(adapter_context);
+    let declared_tools_present = resolve_declared_tools_present(adapter_context);
+    let tool_choice_required = resolve_tool_choice_required(adapter_context);
+    let effective_declared_tools_present =
+        resolve_effective_declared_tools_present(adapter_context, strict_tool_required);
+    let hidden_transport_detected_before_governance =
+        detect_forbidden_hidden_tool_transport_payload(&normalized);
 
     let request_id = adapter_context
         .request_id
@@ -388,13 +493,28 @@ pub(crate) fn apply_deepseek_web_response_compat(
         request_id,
     }) {
         Ok(output) => output.governed_payload,
-        Err(_) => {
-            strip_skip_global_text_harvest(&mut normalized);
-            normalized
+        Err(err) => {
+            let mut error_probe = normalized.clone();
+            let forbidden_transport_detected =
+                hidden_transport_detected_before_governance || sanitize_deepseek_meta_leakage(&mut error_probe);
+            if forbidden_transport_detected
+                && (declared_tools_present || tool_choice_required)
+                && count_tool_calls_from_choices(&error_probe) <= 0
+            {
+                return Err(
+                    "DeepSeek emitted forbidden hidden tool transport markup without a valid declared tool call"
+                        .to_string(),
+                );
+            }
+            if effective_declared_tools_present {
+                return Err(format!(
+                    "DeepSeek declared tools present but no valid tool call was produced (toolChoiceRequired={}, fallbackEnabled={}, strictToolRequired={})",
+                    tool_choice_required, text_tool_fallback, strict_tool_required
+                ));
+            }
+            return Err(err);
         }
     };
-    let (strict_tool_required, text_tool_fallback) = resolve_deepseek_options(adapter_context);
-    let declared_tools_present = resolve_declared_tools_present(adapter_context);
     ensure_finish_reason_tool_calls(&mut governed);
     if harvested_function_results {
         mark_function_results_harvested(&mut governed);
@@ -403,7 +523,9 @@ pub(crate) fn apply_deepseek_web_response_compat(
         &mut governed,
         resolve_requested_exec_tool_alias(adapter_context).as_deref(),
     );
-    let forbidden_transport_detected = sanitize_deepseek_meta_leakage(&mut governed);
+    ensure_exec_command_args_have_cmd(&mut governed);
+    let forbidden_transport_detected =
+        hidden_transport_detected_before_governance || sanitize_deepseek_meta_leakage(&mut governed);
     normalize_tool_call_only_content_to_null(&mut governed);
 
     let after_count = count_tool_calls_from_choices(&governed);
@@ -417,21 +539,26 @@ pub(crate) fn apply_deepseek_web_response_compat(
     write_deepseek_tool_state(&mut governed, state, source);
     apply_usage_estimate(&mut governed, adapter_context);
 
-    let tool_choice_required = resolve_tool_choice_required(adapter_context);
-    if forbidden_transport_detected && declared_tools_present && after_count <= 0 {
+    if forbidden_transport_detected
+        && (declared_tools_present || tool_choice_required)
+        && after_count <= 0
+    {
         return Err(
             "DeepSeek emitted forbidden hidden tool transport markup without a valid declared tool call"
                 .to_string(),
         );
     }
-    if declared_tools_present && after_count <= 0 && detect_narrative_tool_intent(&governed) {
+    if effective_declared_tools_present
+        && after_count <= 0
+        && detect_narrative_tool_intent(&governed)
+    {
         return Err(
             "DeepSeek declared tools present but emitted narrative tool intent instead of a valid tool call"
                 .to_string(),
         );
     }
     let strict_tools_missing =
-        strict_tool_required && declared_tools_present && tool_choice_required && after_count <= 0;
+        strict_tool_required && effective_declared_tools_present && after_count <= 0;
     if strict_tools_missing {
         return Err(format!(
             "DeepSeek declared tools present but no valid tool call was produced (toolChoiceRequired={}, fallbackEnabled={}, strictToolRequired={})",

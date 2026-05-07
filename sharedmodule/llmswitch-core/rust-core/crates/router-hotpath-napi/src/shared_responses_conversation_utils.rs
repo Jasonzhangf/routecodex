@@ -64,9 +64,9 @@ fn read_command_from_args_map(args: &Map<String, Value>) -> Option<String> {
         .and_then(Value::as_object)
         .and_then(|row| read_value(row.get("cmd")).or_else(|| read_value(row.get("command"))))
         .or_else(|| {
-            args.get("args")
-                .and_then(Value::as_object)
-                .and_then(|row| read_value(row.get("cmd")).or_else(|| read_value(row.get("command"))))
+            args.get("args").and_then(Value::as_object).and_then(|row| {
+                read_value(row.get("cmd")).or_else(|| read_value(row.get("command")))
+            })
         })
 }
 
@@ -101,7 +101,10 @@ fn build_shell_like_output_arguments(
     let source_is_shell_alias = raw_name
         .map(|name| {
             let lowered = name.trim().to_ascii_lowercase();
-            matches!(lowered.as_str(), "shell_command" | "shell" | "bash" | "terminal")
+            matches!(
+                lowered.as_str(),
+                "shell_command" | "shell" | "bash" | "terminal"
+            )
         })
         .unwrap_or(false);
 

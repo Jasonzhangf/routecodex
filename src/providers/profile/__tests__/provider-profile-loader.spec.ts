@@ -124,6 +124,28 @@ describe('provider-profile-loader', () => {
     expect(result.byId.tabglm.transport.backend).toBe('vercel-ai-sdk');
   });
 
+  it('maps mimoweb provider type to anthropic protocol and preserves module type', () => {
+    const config: Record<string, unknown> = {
+      providers: {
+        mimoweb: {
+          type: 'mimoweb',
+          baseUrl: 'https://aistudio.xiaomimimo.com',
+          auth: {
+            type: 'apikey',
+            apiKey: '',
+            serviceToken: '${MIMO_SERVICE_TOKEN}',
+            userId: '${MIMO_USER_ID}',
+            phToken: '${MIMO_PH_TOKEN}'
+          }
+        }
+      }
+    };
+
+    const result = buildProviderProfiles(config);
+    expect(result.byId.mimoweb.protocol).toBe('anthropic');
+    expect(result.byId.mimoweb.moduleType).toBe('mimoweb');
+  });
+
   it('extracts concurrency and rpm metadata from provider config', () => {
     const config: Record<string, unknown> = {
       providers: {

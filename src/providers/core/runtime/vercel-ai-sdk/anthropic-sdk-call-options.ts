@@ -24,6 +24,17 @@ import {
 
 type ToolNameIndex = Map<string, string>;
 
+function parseDataUrl(value: string): { mediaType: string; data: string } | null {
+  const match = /^data:([^;,]+);base64,(.*)$/i.exec(value);
+  if (!match) {
+    return null;
+  }
+  return {
+    mediaType: match[1] || 'application/octet-stream',
+    data: match[2] || ''
+  };
+}
+
 function normalizeToolChoice(value: unknown): LanguageModelV3ToolChoice | undefined {
   if (typeof value === 'string') {
     const normalized = value.trim().toLowerCase();
@@ -118,6 +129,27 @@ function toFilePart(block: UnknownRecord): LanguageModelV3FilePart | null {
     data: normalized.data,
     mediaType: normalized.mediaType,
     ...(normalized.filename ? { filename: normalized.filename } : {})
+  };
+}
+
+function toFilePartFromImageUrlStyle(block: UnknownRecord): LanguageModelV3FilePart | null {
+  const imageUrlNode = asRecord(block.image_url ?? block.imageUrl);
+  const url = pickString(imageUrlNode.url ?? block.url ?? block.image_url ?? block.imageUrl);
+  if (!url) {
+    return null;
+  }
+  const dataUrl = parseDataUrl(url);
+  if (dataUrl) {
+    return {
+      type: 'file',
+      data: dataUrl.data,
+      mediaType: dataUrl.mediaType
+    };
+  }
+  return {
+    type: 'file',
+    data: new URL(url),
+    mediaType: 'image/*'
   };
 }
 
@@ -216,7 +248,7 @@ function convertMessageContent(
     if (!type) {
       continue;
     }
-    if (type === 'text') {
+    if (type === 'text' || type === 'input_text') {
       const text = pickString(item.text);
       if (!text) {
         continue;
@@ -230,6 +262,18 @@ function convertMessageContent(
     }
     if (type === 'image' || type === 'document') {
       const filePart = toFilePart(item);
+      if (!filePart) {
+        continue;
+      }
+      if (role === 'assistant') {
+        assistantParts.push(filePart);
+      } else {
+        userParts.push(filePart);
+      }
+      continue;
+    }
+    if (type === 'input_image' || type === 'image_url') {
+      const filePart = toFilePartFromImageUrlStyle(item);
       if (!filePart) {
         continue;
       }

@@ -1,4 +1,5 @@
 use napi::bindgen_prelude::Result as NapiResult;
+use regex::Regex;
 use serde_json::{json, Map, Value};
 
 fn parse_json_value(raw: &str) -> NapiResult<Value> {
@@ -91,12 +92,70 @@ fn to_string_args(value: Option<&Value>) -> String {
     }
 }
 
+fn strip_terminal_right_gutter_noise(line: &str) -> String {
+    Regex::new(r"\s+[│┃]\s*[·.]{6,}\s*$")
+        .map(|re| re.replace(line, "").to_string())
+        .unwrap_or_else(|_| line.to_string())
+}
+
+fn is_chunked_exec_transcript_header_line(line: &str) -> bool {
+    Regex::new(
+        r"(?i)^(?:\[工具结果\]|Command:\s+.*|Chunk ID:\s+.*|Wall time:\s+.*|Process exited with code\s+.*|Process running with session ID\s+.*|Original token count:\s+.*)$",
+    )
+    .map(|re| re.is_match(line.trim()))
+    .unwrap_or(false)
+}
+
+fn unwrap_chunked_exec_transcript_shape(raw: &str) -> Option<String> {
+    let lines: Vec<&str> = raw.lines().collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let output_idx = lines
+        .iter()
+        .position(|line| line.trim().eq_ignore_ascii_case("Output:"))?;
+    let header = &lines[..output_idx];
+    if header.is_empty()
+        || !header
+            .iter()
+            .all(|line| is_chunked_exec_transcript_header_line(line))
+    {
+        return None;
+    }
+    let output = lines
+        .iter()
+        .skip(output_idx + 1)
+        .copied()
+        .collect::<Vec<&str>>()
+        .join("\n")
+        .trim()
+        .to_string();
+    Some(output)
+}
+
+fn normalize_tool_content_text(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let without_gutter = trimmed
+        .lines()
+        .map(strip_terminal_right_gutter_noise)
+        .collect::<Vec<String>>()
+        .join("\n");
+    if let Some(unwrapped) = unwrap_chunked_exec_transcript_shape(without_gutter.as_str()) {
+        return unwrapped;
+    }
+    without_gutter.trim().to_string()
+}
+
 fn normalize_tool_content(value: Option<&Value>) -> String {
     match value {
-        Some(Value::String(text)) if !text.trim().is_empty() => text.clone(),
+        Some(Value::String(text)) if !text.trim().is_empty() => normalize_tool_content_text(text),
         Some(Value::String(_)) | None | Some(Value::Null) => String::new(),
         Some(other) => serde_json::to_string(other)
             .ok()
+            .map(|text| normalize_tool_content_text(text.as_str()))
             .filter(|text| !text.is_empty())
             .unwrap_or_default(),
     }
@@ -866,5 +925,71 @@ mod tests {
             Value::String("{\"cmd\":\"pwd\"}".to_string())
         );
         assert_eq!(parsed["usage"].get("ignored"), None);
+    }
+
+    #[test]
+    fn universal_shape_filter_request_unwraps_tool_transcript_shape() {
+        let payload = json!({
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": { "cmd": "pwd" }
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "name": "exec_command",
+                    "tool_call_id": "call_1",
+                    "content": "Chunk ID: abc\nWall time: 0.1s\nProcess exited with code 0\nOriginal token count: 12\nOutput:\n/Users/demo/project\n"
+                }
+            ]
+        });
+        let config = json!({
+            "request": {
+                "allowTopLevel": ["messages"],
+                "messages": {
+                    "allowedRoles": ["assistant", "tool"]
+                }
+            },
+            "response": { "allowTopLevel": [], "choices": { "message": {} } }
+        });
+
+        let parsed = apply_request_filter(payload, config);
+        assert_eq!(parsed["messages"][1]["content"], "/Users/demo/project");
+    }
+
+    #[test]
+    fn universal_shape_filter_request_strips_tool_right_gutter_noise() {
+        let payload = json!({
+            "messages": [
+                {
+                    "role": "tool",
+                    "content": "Chunk ID: abc\nWall time: 0.1s\nProcess exited with code 1\nOriginal token count: 12\nOutput:\n  File \"<stdin>\", line 21                                                    │··········································\n    SyntaxError: invalid syntax                                               │··········································\n"
+                }
+            ]
+        });
+        let config = json!({
+            "request": {
+                "allowTopLevel": ["messages"],
+                "messages": {
+                    "allowedRoles": ["tool"]
+                }
+            },
+            "response": { "allowTopLevel": [], "choices": { "message": {} } }
+        });
+
+        let parsed = apply_request_filter(payload, config);
+        let content = parsed["messages"][0]["content"].as_str().expect("tool content");
+        assert!(content.contains("File \"<stdin>\", line 21"));
+        assert!(content.contains("SyntaxError: invalid syntax"));
+        assert!(!content.contains("│····"));
+        assert!(!content.contains("Original token count"));
     }
 }

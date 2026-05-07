@@ -1,3 +1,7 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
 export type ProviderFailureClassification =
   | 'unrecoverable'
   | 'recoverable'
@@ -89,6 +93,30 @@ const UNRECOVERABLE_CODE_SET = new Set([
   'FORBIDDEN'
 ]);
 
+// --- Sync native failure policy bridge (works in jest CJS and production ESM) ---
+const _nativeRequire = createRequire(import.meta.url);
+const _moduleDir = path.dirname(fileURLToPath(import.meta.url));
+let _nativeFailurePolicy: {
+  classifyProviderFailure?: (statusCode: number | undefined, errorCode: string | undefined, upstreamCode: string | undefined, isNetworkError: boolean) => string;
+} | null | undefined;
+function _loadNativeFailurePolicy(): typeof _nativeFailurePolicy {
+  if (_nativeFailurePolicy !== undefined) return _nativeFailurePolicy;
+  try {
+    const mod = _nativeRequire('rcc-llmswitch-core');
+    if (mod && typeof mod.classifyProviderFailureJson === 'function') {
+      _nativeFailurePolicy = { classifyProviderFailure: mod.classifyProviderFailureJson };
+    } else {
+      const nativePath = path.resolve(
+        _moduleDir,
+        '../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/engine-selection/native-failure-policy.js'
+      );
+      _nativeFailurePolicy = _nativeRequire(nativePath);
+    }
+  } catch {
+    _nativeFailurePolicy = null;
+  }
+  return _nativeFailurePolicy;
+}
 const NETWORK_ERROR_CODE_SET = new Set([
   'ECONNRESET',
   'ECONNREFUSED',
@@ -291,6 +319,23 @@ export function resolveProviderFailureClassification(args: {
   }
 
   if (
+    errorCode === 'CLIENT_TOOL_ARGS_INVALID'
+    || upstreamCode === 'CLIENT_TOOL_ARGS_INVALID'
+    || nestedCode === 'CLIENT_TOOL_ARGS_INVALID'
+  ) {
+    return 'special_400';
+  }
+
+  if (
+    reason.includes('[mimoweb] upstream assistant response was empty')
+    || reason.includes('[mimoweb] upstream emitted tool markers but no tool calls could be harvested')
+    || reason.includes('[mimoweb] upstream repeated prior tool call after tool_result')
+    || reason.includes('[mimoweb] serialized query exceeds empty-safe limit')
+  ) {
+    return 'special_400';
+  }
+
+  if (
     errorCode === 'MALFORMED_RESPONSE'
     || upstreamCode === 'MALFORMED_RESPONSE'
     || nestedCode === 'MALFORMED_RESPONSE'
@@ -361,6 +406,20 @@ export function resolveProviderFailureClassification(args: {
     || reason.includes('blocked due to unauthorized requests')
   ) {
     return 'unrecoverable';
+  }
+
+  // Final fallback: consume native Rust failure_policy for generic classification
+  try {
+    const isNetworkError = isProviderFailureNetworkTransportLike(args.error);
+    const nativeMod = _loadNativeFailurePolicy();
+    if (nativeMod?.classifyProviderFailure) {
+      const nativeResult = nativeMod.classifyProviderFailure(statusCode, errorCode, upstreamCode, isNetworkError);
+      if (nativeResult === 'unrecoverable' || nativeResult === 'recoverable' || nativeResult === 'special_400') {
+        return nativeResult;
+      }
+    }
+  } catch (_nativeBridgeError) {
+    // Native bridge not available; fall through to TS-side default
   }
   return 'recoverable';
 }

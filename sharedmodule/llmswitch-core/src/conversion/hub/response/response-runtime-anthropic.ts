@@ -35,6 +35,16 @@ export interface AnthropicResponseOptions {
   includeToolCallIds?: boolean;
 }
 
+function shouldLogAnthropicMapperDebug(payload: JsonObject): boolean {
+  const governance =
+    payload?.__rcc_tool_governance &&
+    typeof payload.__rcc_tool_governance === 'object' &&
+    !Array.isArray(payload.__rcc_tool_governance)
+      ? (payload.__rcc_tool_governance as Record<string, unknown>)
+      : undefined;
+  return governance?.textHarvestApplied === true;
+}
+
 function cloneJsonRecord(value: Record<string, unknown>): Record<string, unknown> | undefined {
   try {
     const structuredCloneImpl = (globalThis as { structuredClone?: <T>(input: T) => T }).structuredClone;
@@ -91,8 +101,26 @@ function restoreResponsesSemanticsFromSnapshot(
   (chatResponse as any).semantics = semantics;
 }
 
+function unwrapAnthropicMessagePayload(payload: JsonObject): JsonObject {
+  const nested = payload?.data;
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    const record = nested as JsonObject;
+    if (
+      Array.isArray(record.content)
+      || typeof record.stop_reason === 'string'
+      || typeof record.role === 'string'
+      || typeof record.model === 'string'
+      || typeof record.id === 'string'
+    ) {
+      return record;
+    }
+  }
+  return payload;
+}
+
 export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options?: AnthropicResponseOptions): JsonObject {
-  const content = Array.isArray(payload?.content) ? payload.content : [];
+  const messagePayload = unwrapAnthropicMessagePayload(payload);
+  const content = Array.isArray(messagePayload?.content) ? messagePayload.content : [];
   const textParts: string[] = [];
   const toolCalls: Array<{ id: string; name: string; args: string }> = [];
   const inferredToolCalls: Array<Record<string, unknown>> = [];
@@ -218,7 +246,7 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
   }
 
   const message: Record<string, unknown> = {
-    role: typeof payload.role === 'string' ? payload.role : 'assistant',
+    role: typeof messagePayload.role === 'string' ? messagePayload.role : 'assistant',
     content: textParts.join('\n')
   };
   const localReasoning = normalizeMessageReasoningPayload({
@@ -231,9 +259,18 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
     (message as any).tool_calls = canonicalToolCalls;
   }
   applyReasoningPayload(message, localReasoning);
-  applyAnthropicResponseInboundBridgePolicy(message, payload as Record<string, unknown>);
+  applyAnthropicResponseInboundBridgePolicy(message, messagePayload as Record<string, unknown>);
 
-  const stopReason = typeof payload['stop_reason'] === 'string' ? payload['stop_reason'] : undefined;
+  const shouldLogDebug = shouldLogAnthropicMapperDebug(messagePayload);
+  if (shouldLogDebug) {
+    console.log('[ANTHROPIC-MAPPER:DEBUG] stop_reason from payload:', JSON.stringify(messagePayload['stop_reason']));
+    console.log('[ANTHROPIC-MAPPER:DEBUG] toolCalls count:', toolCalls.length);
+    console.log('[ANTHROPIC-MAPPER:DEBUG] inferredToolCalls count:', inferredToolCalls.length);
+    console.log('[ANTHROPIC-MAPPER:DEBUG] canonicalToolCalls count:', canonicalToolCalls.length);
+    console.log('[ANTHROPIC-MAPPER:DEBUG] textParts count:', textParts.length, 'preview:', textParts.join('').slice(0, 100));
+  }
+
+  const stopReason = typeof messagePayload['stop_reason'] === 'string' ? messagePayload['stop_reason'] : undefined;
   const hasVisibleAssistantOutput = textParts.some((text) => text.trim().length > 0)
     || reasoningParts.some((text) => text.trim().length > 0)
     || canonicalToolCalls.length > 0;
@@ -252,18 +289,22 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
         category: 'EXTERNAL_ERROR',
         details: {
           stop_reason: stopReason,
-          response_id: typeof payload.id === 'string' ? payload.id : undefined
+          response_id: typeof messagePayload.id === 'string' ? messagePayload.id : undefined
         }
       }
     );
   }
   const finishReason = outcome.finishReason;
+  if (shouldLogDebug) {
+    console.log('[ANTHROPIC-MAPPER:DEBUG] outcome:', JSON.stringify(outcome));
+    console.log('[ANTHROPIC-MAPPER:DEBUG] resolved finishReason:', finishReason);
+  }
 
   const chatResponse = {
-    id: typeof payload.id === 'string' ? payload.id : `chatcmpl_${Date.now()}`,
+    id: typeof messagePayload.id === 'string' ? messagePayload.id : `chatcmpl_${Date.now()}`,
     object: 'chat.completion',
-    created: typeof payload?.['created'] === 'number' ? payload['created'] : Math.floor(Date.now() / 1000),
-    model: typeof payload.model === 'string' ? payload.model : 'unknown',
+    created: typeof messagePayload?.['created'] === 'number' ? messagePayload['created'] : Math.floor(Date.now() / 1000),
+    model: typeof messagePayload.model === 'string' ? messagePayload.model : 'unknown',
     choices: [
       {
         index: 0,
@@ -271,8 +312,8 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
         message
       }
     ],
-    usage: payload['usage'] && typeof payload['usage'] === 'object'
-      ? payload['usage']
+    usage: messagePayload['usage'] && typeof messagePayload['usage'] === 'object'
+      ? messagePayload['usage']
       : undefined
   } as JsonObject;
   const preserved = normalizeMessageReasoningPayload(consumeResponsesReasoning(chatResponse.id));
@@ -287,6 +328,8 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
   }
   const retentionAliases = [
     chatResponse.id,
+    typeof (messagePayload as any)?.request_id === 'string' ? (messagePayload as any).request_id : undefined,
+    typeof (messagePayload as any)?.id === 'string' ? (messagePayload as any).id : undefined,
     typeof (payload as any)?.request_id === 'string' ? (payload as any).request_id : undefined,
     typeof (payload as any)?.id === 'string' ? (payload as any).id : undefined
   ];

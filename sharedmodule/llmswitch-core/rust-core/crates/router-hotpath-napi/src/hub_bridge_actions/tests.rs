@@ -189,6 +189,7 @@ fn builds_bridge_history_for_tool_turn() {
             json!({"role":"tool","tool_call_id":"call_1","content":"ok"}),
         ],
         tools: None,
+        allow_pending_terminal_tool_call: None,
     };
     let output = build_bridge_history(input).unwrap();
     assert_eq!(output.original_system_messages.len(), 1);
@@ -217,6 +218,7 @@ fn builds_bridge_history_uses_output_text_for_assistant_string_content() {
           "content":"Task complete"
         })],
         tools: None,
+        allow_pending_terminal_tool_call: None,
     };
     let output = build_bridge_history(input).unwrap();
     assert_eq!(output.input.len(), 1);
@@ -238,6 +240,7 @@ fn builds_bridge_history_with_media_blocks() {
           ]
         })],
         tools: None,
+        allow_pending_terminal_tool_call: None,
     };
     let output = build_bridge_history(input).unwrap();
     assert_eq!(output.input.len(), 1);
@@ -262,6 +265,7 @@ fn applies_bridge_normalize_history() {
           "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "echo"}}]
         })],
         tools: None,
+        allow_pending_terminal_tool_call: None,
     })
     .unwrap_err();
     assert!(error.contains("dangling_tool_call"));
@@ -893,6 +897,37 @@ fn applies_bridge_capture_tool_results() {
 }
 
 #[test]
+fn applies_bridge_capture_tool_results_strips_exec_transcript_wrapper() {
+    let output = apply_bridge_capture_tool_results(ApplyBridgeCaptureToolResultsInput {
+        stage: "request_outbound".to_string(),
+        captured_tool_results: None,
+        raw_request: Some(json!({
+          "tool_outputs": [{
+            "tool_call_id":"call_1",
+            "output":"Chunk ID: 93f309\nWall time: 0.0000 seconds\nProcess exited with code 0\nOriginal token count: 2221\nOutput:\nalpha\nbeta\n",
+            "name":"echo"
+          }]
+        })),
+        raw_response: None,
+        metadata: Some(json!({})),
+    });
+    let captured = output.captured_tool_results.unwrap();
+    let first = captured[0].as_object().cloned().unwrap();
+    assert_eq!(first.get("output").and_then(Value::as_str), Some("alpha\nbeta"));
+    let mirrored = output
+        .metadata
+        .unwrap()
+        .get("capturedToolResults")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        mirrored[0].get("output").and_then(Value::as_str),
+        Some("alpha\nbeta")
+    );
+}
+
+#[test]
 fn applies_bridge_ensure_tool_placeholders() {
     let output = apply_bridge_ensure_tool_placeholders(ApplyBridgeEnsureToolPlaceholdersInput {
         stage: "request_outbound".to_string(),
@@ -997,6 +1032,7 @@ fn convert_bridge_input_to_chat_messages_json_basic_user_text() {
         tools: None,
         tool_result_fallback_text: None,
         normalize_function_name: None,
+        allow_pending_terminal_tool_call: None,
     };
     let output = convert_bridge_input_to_chat_messages(input).unwrap();
     assert_eq!(output.messages.len(), 1);
@@ -1074,6 +1110,7 @@ fn convert_bridge_input_preserves_tool_calls_with_content() {
         tools: None,
         tool_result_fallback_text: None,
         normalize_function_name: None,
+        allow_pending_terminal_tool_call: None,
     };
     let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
     assert!(error.contains("dangling_tool_call"));
@@ -1099,6 +1136,7 @@ fn convert_bridge_input_rejects_missing_tool_call_id() {
         tools: None,
         tool_result_fallback_text: None,
         normalize_function_name: None,
+        allow_pending_terminal_tool_call: None,
     };
     let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
     assert!(error.contains("missing_tool_call_id"));
@@ -1115,6 +1153,7 @@ fn convert_bridge_input_rejects_orphan_tool_result() {
         tools: None,
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: None,
     };
     let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
     assert!(error.contains("orphan_tool_result"));
@@ -1128,9 +1167,228 @@ fn build_bridge_history_rejects_dangling_tool_call() {
           "tool_calls":[{"id":"call_1","function":{"name":"read","arguments":{"path":"a.txt"}}}]
         })],
         tools: None,
+        allow_pending_terminal_tool_call: None,
     };
     let error = build_bridge_history(input).unwrap_err();
     assert!(error.contains("dangling_tool_call"));
+}
+
+#[test]
+fn build_bridge_history_allows_terminal_pending_tool_call_when_enabled() {
+    let input = BuildBridgeHistoryInput {
+        messages: vec![json!({
+          "role":"assistant",
+          "tool_calls":[{"id":"call_keep_me","function":{"name":"exec_command","arguments":"{\"cmd\":\"echo hi\"}"}}]
+        })],
+        tools: None,
+        allow_pending_terminal_tool_call: Some(true),
+    };
+    let output = build_bridge_history(input).unwrap();
+    assert_eq!(output.input.len(), 1);
+    let call = output.input[0].as_object().unwrap();
+    assert_eq!(
+        call.get("type").and_then(Value::as_str),
+        Some("function_call")
+    );
+    assert_eq!(call.get("id").and_then(Value::as_str), Some("call_keep_me"));
+    assert_eq!(
+        call.get("call_id").and_then(Value::as_str),
+        Some("call_keep_me")
+    );
+}
+
+#[test]
+fn build_bridge_history_allows_terminal_pending_tool_call_suffix_when_enabled() {
+    let input = BuildBridgeHistoryInput {
+        messages: vec![
+            json!({
+              "role":"assistant",
+              "tool_calls":[{"id":"call_keep_me_1","function":{"name":"exec_command","arguments":"{\"cmd\":\"echo hi\"}"}}]
+            }),
+            json!({
+              "role":"assistant",
+              "tool_calls":[{"id":"call_keep_me_2","function":{"name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"}}]
+            }),
+        ],
+        tools: None,
+        allow_pending_terminal_tool_call: Some(true),
+    };
+    let output = build_bridge_history(input).unwrap();
+    assert_eq!(output.input.len(), 2);
+    assert_eq!(
+        output.input[0].get("call_id").and_then(Value::as_str),
+        Some("call_keep_me_1")
+    );
+    assert_eq!(
+        output.input[1].get("call_id").and_then(Value::as_str),
+        Some("call_keep_me_2")
+    );
+}
+
+#[test]
+fn build_bridge_history_still_rejects_non_terminal_pending_tool_call_when_enabled() {
+    let input = BuildBridgeHistoryInput {
+        messages: vec![
+            json!({
+              "role":"assistant",
+              "tool_calls":[{"id":"call_1","function":{"name":"read","arguments":{"path":"a.txt"}}}]
+            }),
+            json!({
+              "role":"user",
+              "content":"continue"
+            }),
+        ],
+        tools: None,
+        allow_pending_terminal_tool_call: Some(true),
+    };
+    let error = build_bridge_history(input).unwrap_err();
+    assert!(error.contains("dangling_tool_call"));
+}
+
+#[test]
+fn convert_bridge_input_allows_terminal_pending_tool_call_when_enabled() {
+    let input = BridgeInputToChatInput {
+        input: vec![json!({
+            "type": "message",
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_keep_me",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": { "cmd": "pwd" }
+                    }
+                }
+            ]
+        })],
+        tools: None,
+        tool_result_fallback_text: None,
+        normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: Some(true),
+    };
+    let output = convert_bridge_input_to_chat_messages(input).unwrap();
+    assert_eq!(output.messages.len(), 1);
+    let msg = output.messages[0].as_object().unwrap();
+    assert_eq!(msg.get("role").and_then(Value::as_str), Some("assistant"));
+    assert!(msg
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .map(|v| !v.is_empty())
+        .unwrap_or(false));
+}
+
+#[test]
+fn convert_bridge_input_still_rejects_non_terminal_pending_tool_call_when_enabled() {
+    let input = BridgeInputToChatInput {
+        input: vec![
+            json!({
+                "type": "message",
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_not_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": { "cmd": "pwd" }
+                        }
+                    }
+                ]
+            }),
+            json!({
+                "type": "message",
+                "role": "user",
+                "content": "继续"
+            }),
+        ],
+        tools: None,
+        tool_result_fallback_text: None,
+        normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: Some(true),
+    };
+    let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
+    assert!(error.contains("dangling_tool_call"));
+}
+
+#[test]
+fn convert_bridge_input_allows_function_call_output_before_matching_function_call_in_same_batch() {
+    let input = BridgeInputToChatInput {
+        input: vec![
+            json!({
+                "type": "function_call_output",
+                "call_id": "call_late",
+                "output": "stderr: permission denied"
+            }),
+            json!({
+                "type": "function_call",
+                "id": "call_late",
+                "call_id": "call_late",
+                "name": "exec_command",
+                "arguments": { "cmd": "pwd" }
+            }),
+        ],
+        tools: None,
+        tool_result_fallback_text: None,
+        normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: Some(true),
+    };
+    let output = convert_bridge_input_to_chat_messages(input).unwrap();
+    assert_eq!(output.messages.len(), 2);
+    assert_eq!(
+        output.messages[0]
+            .as_object()
+            .and_then(|row| row.get("role"))
+            .and_then(Value::as_str),
+        Some("assistant")
+    );
+    assert_eq!(
+        output.messages[1]
+            .as_object()
+            .and_then(|row| row.get("role"))
+            .and_then(Value::as_str),
+        Some("tool")
+    );
+    assert_eq!(
+        output.messages[1]
+            .as_object()
+            .and_then(|row| row.get("tool_call_id"))
+            .and_then(Value::as_str),
+        Some("call_late")
+    );
+}
+
+#[test]
+fn convert_bridge_input_rejects_duplicate_function_call_output_after_call_already_consumed() {
+    let input = BridgeInputToChatInput {
+        input: vec![
+            json!({
+                "type": "function_call",
+                "id": "call_dup",
+                "call_id": "call_dup",
+                "name": "exec_command",
+                "arguments": { "cmd": "pwd" }
+            }),
+            json!({
+                "type": "function_call_output",
+                "call_id": "call_dup",
+                "output": "ok"
+            }),
+            json!({
+                "type": "function_call_output",
+                "call_id": "call_dup",
+                "output": "ok-again"
+            }),
+        ],
+        tools: None,
+        tool_result_fallback_text: None,
+        normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: Some(true),
+    };
+    let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
+    assert!(error.contains("orphan_tool_result"));
 }
 
 #[test]
@@ -1145,6 +1403,7 @@ fn convert_bridge_input_harvests_malformed_assistant_parameter_markup_into_tool_
         tools: None,
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: None,
     };
 
     let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
@@ -1162,6 +1421,7 @@ fn convert_bridge_input_keeps_plain_assistant_text_without_tool_markup() {
         tools: None,
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: None,
     };
 
     let output = convert_bridge_input_to_chat_messages(input).unwrap();
@@ -1246,6 +1506,7 @@ fn responses_exec_command_roundtrip_preserves_structured_tool_result() {
         tools: None,
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: None,
     })
     .unwrap();
 
@@ -1280,6 +1541,7 @@ fn responses_exec_command_roundtrip_preserves_structured_tool_result() {
     let rebuilt = build_bridge_history(BuildBridgeHistoryInput {
         messages: chat.messages,
         tools: None,
+        allow_pending_terminal_tool_call: None,
     })
     .unwrap();
     let function_output = rebuilt
@@ -1311,6 +1573,58 @@ fn responses_exec_command_roundtrip_preserves_structured_tool_result() {
 }
 
 #[test]
+fn build_bridge_history_strips_tool_message_exec_transcript_wrapper() {
+    let rebuilt = build_bridge_history(BuildBridgeHistoryInput {
+        messages: vec![
+            json!({
+              "role": "assistant",
+              "tool_calls": [{
+                "id": "call_demo_exec",
+                "type": "function",
+                "function": {"name": "exec_command", "arguments": "{\"cmd\":\"ls\"}"}
+              }]
+            }),
+            json!({
+              "role": "tool",
+              "tool_call_id": "call_demo_exec",
+              "name": "exec_command",
+              "content": "Chunk ID: 93f309\nWall time: 0.0000 seconds\nProcess exited with code 0\nOriginal token count: 2221\nOutput:\nalpha\nbeta\n"
+            }),
+        ],
+        tools: None,
+        allow_pending_terminal_tool_call: None,
+    })
+    .unwrap();
+
+    let function_output = rebuilt
+        .input
+        .iter()
+        .find(|entry| entry.get("type").and_then(Value::as_str) == Some("function_call_output"))
+        .and_then(Value::as_object)
+        .unwrap();
+    assert_eq!(
+        function_output.get("output").and_then(Value::as_str),
+        Some("alpha\nbeta")
+    );
+}
+
+#[test]
+fn ensure_bridge_output_fields_strips_tool_transcript_wrapper() {
+    let output = ensure_bridge_output_fields(EnsureBridgeOutputFieldsInput {
+        messages: vec![json!({
+          "role": "tool",
+          "content": "• Ran bash -lc 'python3 demo.py'                                  │··········\n  │ File \"<stdin>\", line 3                                        │··········\n  │ SyntaxError: invalid syntax                                     │··········\n"
+        })],
+        tool_fallback: None,
+        assistant_fallback: None,
+    });
+    assert_eq!(
+        output.messages[0].get("content").and_then(Value::as_str),
+        Some("File \"<stdin>\", line 3\nSyntaxError: invalid syntax")
+    );
+}
+
+#[test]
 fn convert_bridge_input_preserves_mixed_media_order() {
     let input = BridgeInputToChatInput {
         input: vec![json!({
@@ -1324,6 +1638,7 @@ fn convert_bridge_input_preserves_mixed_media_order() {
         tools: None,
         tool_result_fallback_text: None,
         normalize_function_name: None,
+        allow_pending_terminal_tool_call: None,
     };
     let output = convert_bridge_input_to_chat_messages(input).unwrap();
     assert_eq!(output.messages.len(), 1);
@@ -1830,6 +2145,7 @@ fn convert_bridge_input_skips_overlong_responses_function_calls() {
         tools: None,
         tool_result_fallback_text: None,
         normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: None,
     };
     let output = convert_bridge_input_to_chat_messages(input).unwrap();
     assert!(output.messages.is_empty());

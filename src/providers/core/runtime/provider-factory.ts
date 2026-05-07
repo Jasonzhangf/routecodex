@@ -290,6 +290,7 @@ export class ProviderFactory {
     const configNode: ProviderConfigInternal = {
       providerType,
       providerId: providerFamily,
+      compatibilityProfile: runtime.compatibilityProfile,
       baseUrl,
       ...(timeoutMs !== undefined ? { timeout: timeoutMs } : {}),
       ...(maxRetries !== undefined ? { maxRetries } : {}),
@@ -321,6 +322,7 @@ export class ProviderFactory {
     }
 
     if (
+      this.shouldUseImplicitDeepSeekHttpProvider(runtime) &&
       isDeepSeekRuntimeIdentity({
         providerFamily: runtime.providerFamily,
         providerId: runtime.providerId,
@@ -332,6 +334,35 @@ export class ProviderFactory {
     }
 
     return undefined;
+  }
+
+  private static shouldUseImplicitDeepSeekHttpProvider(runtime: ProviderRuntimeProfile): boolean {
+    const read = (value?: string): string => (typeof value === 'string' ? value.trim().toLowerCase() : '');
+    const providerId = read(runtime.providerId);
+    const providerKey = read(runtime.providerKey);
+    const runtimeKey = read(runtime.runtimeKey);
+    const compatibilityProfile = read(runtime.compatibilityProfile);
+
+    if (compatibilityProfile === 'chat:deepseek-web') {
+      return true;
+    }
+
+    if (
+      providerId === 'deepseek-web' ||
+      providerId.startsWith('deepseek-web.') ||
+      providerKey === 'deepseek-web' ||
+      providerKey.startsWith('deepseek-web.') ||
+      runtimeKey === 'deepseek-web' ||
+      runtimeKey.startsWith('deepseek-web.')
+    ) {
+      return true;
+    }
+
+    const endpointCandidates = [runtime.baseUrl, runtime.endpoint]
+      .map((value) => read(value))
+      .filter((value) => value.length > 0);
+
+    return endpointCandidates.some((value) => value.includes('chat.deepseek.com'));
   }
 
   private static applyRuntimeProfile(provider: IProviderV2, runtime: ProviderRuntimeProfile): void {

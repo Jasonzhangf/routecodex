@@ -38,10 +38,11 @@ function parseReasoningItems(raw) {
     return out;
 }
 function parseToolCallResult(raw) {
-    if (!raw || raw === 'null') {
-        return null;
+    if (!raw || raw === 'null' || raw === 'undefined') {
+        return [];
     }
-    return parseToolCallLiteArray(raw);
+    const parsed = parseToolCallLiteArray(raw);
+    return parsed ?? [];
 }
 function callTextMarkupExtractor(capability, payload) {
     const fail = (reason) => failNativeRequired(capability, reason);

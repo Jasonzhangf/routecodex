@@ -148,8 +148,9 @@ export function logUsageSummary(
     const pt = info.usage?.prompt_tokens ?? 0;
     const ct = info.usage?.completion_tokens ?? 0;
     const tt = info.usage?.total_tokens ?? (pt + ct);
+    const cacheRead = info.usage?.cache_read_input_tokens ?? 0;
     if (pt > 0 || ct > 0 || tt > 0) {
-      recordTokens(info.providerKey ?? 'unknown', info.model ?? '-', pt, ct, tt);
+      recordTokens(info.providerKey ?? 'unknown', info.model ?? '-', pt, ct, tt, cacheRead);
     }
   }
   const hubStageTopSuffix = isUsageTimingOutputEnabled() ? formatHubStageTop(info.hubStageTop) : '';

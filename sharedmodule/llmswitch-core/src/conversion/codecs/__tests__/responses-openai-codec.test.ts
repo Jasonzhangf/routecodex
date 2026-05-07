@@ -127,11 +127,66 @@ describe('responses-openai-codec native wrapper', () => {
       name: 'exec_command',
       arguments: '{"cmd":"pwd"}'
     });
-    expect((result as any).output[0]).toMatchObject({
+  expect((result as any).output[0]).toMatchObject({
       type: 'function_call',
       call_id: 'call_demo_exec',
       name: 'exec_command',
       arguments: '{"cmd":"pwd"}'
     });
+  });
+
+  test('responses codec keeps exec_command tool calls cmd-only for declared cmd schema', () => {
+    const profile = {
+      clientProtocol: 'openai-responses',
+      entryEndpoint: '/v1/responses'
+    };
+
+    const result = buildResponsesPayloadFromChat(
+      {
+        id: 'resp_cmd_only_1',
+        model: 'deepseek-reasoner',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              tool_calls: [
+                {
+                  id: 'call_cmd_only_1',
+                  function: {
+                    name: 'exec_command',
+                    arguments: { cmd: "bash -lc 'pwd'" }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      profile,
+      {
+        requestId: 'req_responses_codec_cmd_only',
+        entryEndpoint: '/v1/responses'
+      } as any
+    );
+
+    expect((result as any).required_action.submit_tool_outputs.tool_calls[0]).toMatchObject({
+      id: 'call_cmd_only_1',
+      tool_call_id: 'call_cmd_only_1',
+      type: 'function',
+      name: 'exec_command',
+      arguments: '{"cmd":"bash -lc \'pwd\'"}'
+    });
+    expect((result as any).required_action.submit_tool_outputs.tool_calls[0].arguments).not.toContain(
+      '"command"'
+    );
+    expect((result as any).output[0]).toMatchObject({
+      type: 'function_call',
+      call_id: 'call_cmd_only_1',
+      name: 'exec_command',
+      arguments: '{"cmd":"bash -lc \'pwd\'"}'
+    });
+    expect((result as any).output[0].arguments).not.toContain('"command"');
   });
 });

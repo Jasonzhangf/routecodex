@@ -197,14 +197,18 @@ fn normalize_tools(tools: Option<&Value>) -> Vec<Value> {
                                 .map(|v| v.trim().to_string())
                                 .filter(|v| !v.is_empty())?;
                             let mut out_child = Map::new();
-                            out_child.insert("type".to_string(), Value::String("function".to_string()));
+                            out_child
+                                .insert("type".to_string(), Value::String("function".to_string()));
                             out_child.insert("name".to_string(), Value::String(child_name));
                             if let Some(description) = child_fn_row
                                 .and_then(|row| row.get("description"))
                                 .or_else(|| child_row.get("description"))
                                 .and_then(|v| v.as_str())
                             {
-                                out_child.insert("description".to_string(), Value::String(description.to_string()));
+                                out_child.insert(
+                                    "description".to_string(),
+                                    Value::String(description.to_string()),
+                                );
                             }
                             out_child.insert(
                                 "parameters".to_string(),
@@ -214,8 +218,14 @@ fn normalize_tools(tools: Option<&Value>) -> Vec<Value> {
                                     .cloned()
                                     .unwrap_or_else(|| {
                                         let mut fallback = Map::new();
-                                        fallback.insert("type".to_string(), Value::String("object".to_string()));
-                                        fallback.insert("properties".to_string(), Value::Object(Map::new()));
+                                        fallback.insert(
+                                            "type".to_string(),
+                                            Value::String("object".to_string()),
+                                        );
+                                        fallback.insert(
+                                            "properties".to_string(),
+                                            Value::Object(Map::new()),
+                                        );
                                         Value::Object(fallback)
                                     }),
                             );
@@ -248,7 +258,10 @@ fn normalize_tools(tools: Option<&Value>) -> Vec<Value> {
             namespace_out.insert("type".to_string(), Value::String("namespace".to_string()));
             namespace_out.insert("name".to_string(), Value::String(namespace_name));
             if let Some(description) = tool_row.get("description").and_then(|v| v.as_str()) {
-                namespace_out.insert("description".to_string(), Value::String(description.to_string()));
+                namespace_out.insert(
+                    "description".to_string(),
+                    Value::String(description.to_string()),
+                );
             }
             namespace_out.insert("tools".to_string(), Value::Array(child_tools));
             normalized.push(Value::Object(namespace_out));
@@ -568,14 +581,20 @@ fn map_standardized_tools(tools: Option<&Value>) -> Option<Value> {
                                     .map(|v| v.trim().to_string())
                                     .filter(|v| !v.is_empty())?;
                                 let mut out_child = Map::new();
-                                out_child.insert("type".to_string(), Value::String("function".to_string()));
+                                out_child.insert(
+                                    "type".to_string(),
+                                    Value::String("function".to_string()),
+                                );
                                 out_child.insert("name".to_string(), Value::String(name));
                                 if let Some(description) = child_fn_row
                                     .and_then(|row| row.get("description"))
                                     .or_else(|| child_row.get("description"))
                                     .and_then(|v| v.as_str())
                                 {
-                                    out_child.insert("description".to_string(), Value::String(description.to_string()));
+                                    out_child.insert(
+                                        "description".to_string(),
+                                        Value::String(description.to_string()),
+                                    );
                                 }
                                 out_child.insert(
                                     "parameters".to_string(),
@@ -594,13 +613,16 @@ fn map_standardized_tools(tools: Option<&Value>) -> Option<Value> {
                                 }
                                 if child_fn_row
                                     .and_then(|row| row.get("defer_loading"))
-                                    .or_else(|| child_fn_row.and_then(|row| row.get("deferLoading")))
+                                    .or_else(|| {
+                                        child_fn_row.and_then(|row| row.get("deferLoading"))
+                                    })
                                     .or_else(|| child_row.get("defer_loading"))
                                     .or_else(|| child_row.get("deferLoading"))
                                     .and_then(|v| v.as_bool())
                                     .unwrap_or(false)
                                 {
-                                    out_child.insert("defer_loading".to_string(), Value::Bool(true));
+                                    out_child
+                                        .insert("defer_loading".to_string(), Value::Bool(true));
                                 }
                                 Some(Value::Object(out_child))
                             })
@@ -614,7 +636,10 @@ fn map_standardized_tools(tools: Option<&Value>) -> Option<Value> {
                 out_namespace.insert("type".to_string(), Value::String("namespace".to_string()));
                 out_namespace.insert("name".to_string(), Value::String(namespace_name));
                 if let Some(description) = tool_row.get("description").and_then(|v| v.as_str()) {
-                    out_namespace.insert("description".to_string(), Value::String(description.to_string()));
+                    out_namespace.insert(
+                        "description".to_string(),
+                        Value::String(description.to_string()),
+                    );
                 }
                 out_namespace.insert("tools".to_string(), Value::Array(child_tools));
                 return Some(Value::Object(out_namespace));
@@ -946,7 +971,13 @@ mod tests {
 
         assert_eq!(standardized["tools"][0]["type"], "namespace");
         assert_eq!(standardized["tools"][0]["name"], "mcp__computer_use");
-        assert_eq!(standardized["tools"][0]["tools"][0]["name"], "get_app_state");
-        assert_eq!(standardized["tools"][0]["tools"][0]["defer_loading"], Value::Bool(true));
+        assert_eq!(
+            standardized["tools"][0]["tools"][0]["name"],
+            "get_app_state"
+        );
+        assert_eq!(
+            standardized["tools"][0]["tools"][0]["defer_loading"],
+            Value::Bool(true)
+        );
     }
 }

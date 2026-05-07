@@ -352,6 +352,64 @@ export async function respondWithPipelineError(
   res.status(mapped.status).json(mapped.body);
 }
 
+export async function writeStartedSsePipelineError(
+  res: Response,
+  ctx: HandlerContext,
+  error: unknown,
+  entryEndpoint: string,
+  requestId: string
+): Promise<void> {
+  const effectiveRequestId = formatRequestId(requestId);
+  const normalizedError = normalizeError(error, effectiveRequestId, entryEndpoint);
+  const routePayload: RouteErrorPayload = {
+    code: typeof (normalizedError as Record<string, unknown>).code === 'string'
+      ? String((normalizedError as Record<string, unknown>).code)
+      : 'HTTP_HANDLER_ERROR',
+    message: normalizedError.message,
+    source: `http-handler.${entryEndpoint}`,
+    scope: 'http',
+    severity: 'medium',
+    requestId: effectiveRequestId,
+    endpoint: entryEndpoint,
+    providerKey: (normalizedError as Record<string, unknown>).providerKey as string | undefined,
+    providerType: (normalizedError as Record<string, unknown>).providerType as string | undefined,
+    routeName: (normalizedError as Record<string, unknown>).routeName as string | undefined,
+    details: {
+      ...(normalizedError as Record<string, unknown>),
+      endpoint: entryEndpoint
+    },
+    originalError: normalizedError
+  };
+  const mapped = await resolveReportedRouteErrorHttpResponse({
+    routePayload,
+    normalizedError,
+    onReportError: (reportError) => logHandlerNonBlockingError(`reportRouteErrorStartedSse:${effectiveRequestId}`, reportError)
+  });
+  const payload = mapped.body?.error
+    ? { type: 'error', status: mapped.status, error: mapped.body.error }
+    : { type: 'error', status: mapped.status, error: mapped.body };
+  try {
+    res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
+  } catch (writeError) {
+    logHandlerNonBlockingError(`startedSseErrorWrite:${effectiveRequestId}`, writeError);
+  }
+  try {
+    res.end();
+  } catch (endError) {
+    logHandlerNonBlockingError(`startedSseErrorEnd:${effectiveRequestId}`, endError);
+  }
+  if (isSnapshotsEnabled()) {
+    void writeServerSnapshot({
+      phase: 'client-response.error',
+      requestId: effectiveRequestId,
+      entryEndpoint,
+      data: { mode: 'sse-started', status: mapped.status, payload }
+    }).catch((snapshotError) => {
+      logHandlerNonBlockingError(`writeServerSnapshot:started_sse_error:${effectiveRequestId}`, snapshotError);
+    });
+  }
+}
+
 export async function resolveReportedRouteErrorHttpResponse(args: {
   routePayload: RouteErrorPayload;
   normalizedError: Error & Record<string, unknown>;

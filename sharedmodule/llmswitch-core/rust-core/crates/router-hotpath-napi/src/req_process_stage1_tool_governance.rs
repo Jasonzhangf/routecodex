@@ -252,7 +252,7 @@ fn read_runtime_metadata(metadata: &Map<String, Value>) -> Map<String, Value> {
 fn read_clock_enabled(runtime_metadata: &Map<String, Value>) -> bool {
     let raw_clock = runtime_metadata.get("clock");
     match raw_clock {
-        None => true,
+        None => false,
         Some(Value::Object(row)) => pick_bool(row.get("enabled")).unwrap_or(false),
         _ => false,
     }

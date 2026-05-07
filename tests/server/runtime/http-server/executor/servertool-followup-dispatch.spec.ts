@@ -152,4 +152,114 @@ describe('servertool followup dispatch helper', () => {
     });
     expect((result.body as Record<string, any>)?.headers?.authorization).toBe('Bearer test-token');
   });
+
+  it('reenter path injects original request semantics into nested body when followup body lost them', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: {
+        semantics: input.body?.semantics,
+        tools: input.body?.semantics?.tools?.clientToolsRaw
+      }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    const requestSemantics = {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: { type: 'object', properties: { cmd: { type: 'string' } } }
+            }
+          }
+        ]
+      },
+      __routecodex: {
+        serverToolFollowup: true,
+        serverToolFollowupSource: 'servertool.reasoning_stop_continue'
+      }
+    };
+
+    const result = await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_followup_dispatch_4b',
+      body: {
+        model: 'mimo-v2.5-pro',
+        input: 'continue',
+        tools: [{ type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }]
+      },
+      requestSemantics,
+      executeNested
+    });
+
+    const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
+    expect(nestedInput?.body?.tools?.map((tool: any) => tool?.function?.name)).toEqual(['reasoning.stop']);
+    expect(nestedInput?.body?.semantics).toEqual(requestSemantics);
+    expect((nestedInput?.body?.semantics as any)?.tools?.clientToolsRaw?.[0]?.function?.name).toBe('exec_command');
+    expect(((result.body as Record<string, any>)?.tools ?? [])[0]?.function?.name).toBe('exec_command');
+  });
+
+  it('reenter path throws when nested pipeline returns HTTP error body instead of success payload', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async () => ({
+      status: 502,
+      body: {
+        error: {
+          message: 'Converted provider tool call has invalid client arguments',
+          code: 'CLIENT_TOOL_ARGS_INVALID',
+          request_id: 'nested_req_1'
+        }
+      }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    await expect(executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_followup_dispatch_5',
+      body: { input: 'continue' },
+      executeNested
+    })).rejects.toMatchObject({
+      message: 'Converted provider tool call has invalid client arguments',
+      code: 'CLIENT_TOOL_ARGS_INVALID',
+      upstreamCode: 'CLIENT_TOOL_ARGS_INVALID',
+      status: 502,
+      requestExecutorProviderErrorStage: 'provider.followup'
+    });
+  });
+
+  it('reenter path throws when nested pipeline returns HTTP status without explicit error object', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async () => ({
+      status: 504,
+      body: { detail: 'gateway timeout' }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    await expect(executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_followup_dispatch_6',
+      body: { input: 'continue' },
+      executeNested
+    })).rejects.toMatchObject({
+      message: 'ServerTool nested followup request failed with HTTP 504',
+      code: 'HTTP_504',
+      upstreamCode: 'HTTP_504',
+      status: 504,
+      requestExecutorProviderErrorStage: 'provider.followup'
+    });
+  });
 });

@@ -29,6 +29,24 @@ const ON_MODE_MAX_FAIL_COUNT = 5;
 const GUARD_MAX_TRIGGER_COUNT = 3; // Storm protection: max guard triggers before auto-pass
 const GUARD_TRIGGER_WINDOW_MS = 10000; // 10 seconds window for storm detection
 const REASONING_STOP_FINALIZED_MARKER = '[app.finished:reasoning.stop]';
+const REASONING_STOP_BLOCK_MARKER = '[reasoning.stop]';
+const REASONING_STOP_ALLOWED_PREFIXES = [
+  '用户任务目标:',
+  '是否完成:',
+  '完成证据:',
+  '停止原因:',
+  '下一步:',
+  '需用户参与:',
+  '用户问题:',
+  '已穷尽可行尝试:',
+  '穷尽所有尝试:',
+  '无法完成原因:',
+  '阻塞证据:',
+  '经验沉淀:',
+  '是否简单问题:',
+  '简单问题:',
+  '结束标记:'
+] as const;
 
 const ON_CONTINUE_TEXT =
   '禁止直接停止。你当前处于 reasoning.stop 模式。每次停止前必须调用 reasoning.stop 工具并提供以下信息：\n' +
@@ -201,6 +219,33 @@ function isIrrecoverablyBlockedStop(parsed: {
   return true;
 }
 
+function isValidCompletedStop(parsed: {
+  completed?: boolean;
+  completionEvidence: string;
+  userInputRequired?: boolean;
+  userQuestion: string;
+  nextStep: string;
+  cannotCompleteReason: string;
+  blockingEvidence: string;
+}): boolean {
+  if (parsed.completed !== true) {
+    return false;
+  }
+  if (!parsed.completionEvidence) {
+    return false;
+  }
+  if (parsed.userInputRequired === true) {
+    return false;
+  }
+  if (parsed.userQuestion) {
+    return false;
+  }
+  if (parsed.nextStep || parsed.cannotCompleteReason || parsed.blockingEvidence) {
+    return false;
+  }
+  return true;
+}
+
 function buildExecuteNextStepText(nextStep: string): string {
   return [
     '你在上一轮 reasoning.stop 自查中给出了下一步计划。',
@@ -274,6 +319,26 @@ function isReasoningStopGuardEnabled(): boolean {
   return true;
 }
 
+function readFollowupClientInjectSource(adapterContext: unknown): string {
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    return '';
+  }
+  const record = adapterContext as Record<string, unknown>;
+  const direct =
+    typeof record.clientInjectSource === 'string' && record.clientInjectSource.trim().length
+      ? record.clientInjectSource.trim()
+      : '';
+  if (direct) {
+    return direct;
+  }
+  const rt = readRuntimeMetadata(record);
+  const runtimeValue =
+    rt && typeof (rt as Record<string, unknown>).clientInjectSource === 'string'
+      ? String((rt as Record<string, unknown>).clientInjectSource).trim()
+      : '';
+  return runtimeValue;
+}
+
 function shouldSkipGuardForReasoningOnlyResponse(base: JsonObject, adapterContext: unknown): boolean {
   const choices = Array.isArray((base as any).choices) ? ((base as any).choices as unknown[]) : [];
   if (choices.length === 0) {
@@ -302,7 +367,90 @@ function shouldDeferToStopMessageAuto(adapterContext: unknown): boolean {
   return stopCompare.armed === true;
 }
 
-function appendReasoningStopSummaryToChatResponse(base: JsonObject, summary: string): JsonObject {
+function collectAssistantTextCandidates(base: JsonObject): string[] {
+  const out: string[] = [];
+  const push = (value: unknown): void => {
+    if (typeof value !== 'string') {
+      return;
+    }
+    const trimmed = value.trim();
+    if (trimmed) {
+      out.push(trimmed);
+    }
+  };
+
+  const choices = Array.isArray((base as any).choices) ? ((base as any).choices as unknown[]) : [];
+  for (const choice of choices) {
+    if (!choice || typeof choice !== 'object' || Array.isArray(choice)) {
+      continue;
+    }
+    const message = (choice as Record<string, unknown>).message;
+    if (!message || typeof message !== 'object' || Array.isArray(message)) {
+      continue;
+    }
+    push((message as Record<string, unknown>).content);
+  }
+
+  const output = Array.isArray((base as any).output) ? ((base as any).output as unknown[]) : [];
+  for (const item of output) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      continue;
+    }
+    const row = item as Record<string, unknown>;
+    const itemType = typeof row.type === 'string' ? row.type.trim().toLowerCase() : '';
+    const role = typeof row.role === 'string' ? row.role.trim().toLowerCase() : '';
+    if (itemType !== 'message' || role !== 'assistant') {
+      continue;
+    }
+    const content = Array.isArray(row.content) ? row.content : [];
+    for (const part of content) {
+      if (!part || typeof part !== 'object' || Array.isArray(part)) {
+        continue;
+      }
+      const record = part as Record<string, unknown>;
+      push(record.text);
+      push(record.output_text);
+    }
+  }
+
+  push((base as any).output_text);
+  return out;
+}
+
+function extractEmbeddedReasoningStopSummary(base: JsonObject): string {
+  const candidates = collectAssistantTextCandidates(base);
+  for (let i = candidates.length - 1; i >= 0; i -= 1) {
+    const text = candidates[i];
+    const markerIndex = text.lastIndexOf(REASONING_STOP_BLOCK_MARKER);
+    if (markerIndex < 0) {
+      continue;
+    }
+    const block = text.slice(markerIndex + REASONING_STOP_BLOCK_MARKER.length);
+    const lines = block
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (!lines.length) {
+      continue;
+    }
+    const collected: string[] = [];
+    for (const line of lines) {
+      if (REASONING_STOP_ALLOWED_PREFIXES.some((prefix) => line.startsWith(prefix))) {
+        collected.push(line);
+        continue;
+      }
+      if (collected.length > 0) {
+        break;
+      }
+    }
+    if (collected.length > 0) {
+      return collected.join('\n');
+    }
+  }
+  return '';
+}
+
+export function appendReasoningStopSummaryToChatResponse(base: JsonObject, summary: string): JsonObject {
   const rawSummary = typeof summary === 'string' ? summary.trim() : '';
   const markerLine = rawSummary ? `结束标记: ${buildReasoningStopFinalizedMarker(rawSummary)}` : '';
   const normalizedSummary = rawSummary
@@ -327,9 +475,47 @@ function appendReasoningStopSummaryToChatResponse(base: JsonObject, summary: str
           : null;
       if (message) {
         const rawContent = typeof message.content === 'string' ? message.content.trim() : '';
+        if (rawContent.includes(REASONING_STOP_FINALIZED_MARKER)) {
+          return cloned;
+        }
         message.content = rawContent ? `${rawContent}\n\n${block}` : block;
         return cloned;
       }
+    }
+  }
+  const output = Array.isArray((cloned as any).output) ? ((cloned as any).output as unknown[]) : [];
+  if (output.length > 0) {
+    for (const item of output) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        continue;
+      }
+      const row = item as Record<string, unknown>;
+      const itemType = typeof row.type === 'string' ? row.type.trim().toLowerCase() : '';
+      const role = typeof row.role === 'string' ? row.role.trim().toLowerCase() : '';
+      if (itemType !== 'message' || role !== 'assistant') {
+        continue;
+      }
+      const content = Array.isArray(row.content) ? [...row.content] : [];
+      const hasMarker = content.some((part) => {
+        if (!part || typeof part !== 'object' || Array.isArray(part)) {
+          return false;
+        }
+        const text = typeof (part as Record<string, unknown>).text === 'string'
+          ? String((part as Record<string, unknown>).text)
+          : typeof (part as Record<string, unknown>).output_text === 'string'
+            ? String((part as Record<string, unknown>).output_text)
+            : '';
+        return text.includes(REASONING_STOP_FINALIZED_MARKER);
+      });
+      if (!hasMarker) {
+        content.push({ type: 'output_text', text: block });
+      }
+      row.content = content;
+      const outputText = typeof (cloned as any).output_text === 'string'
+        ? String((cloned as any).output_text).trim()
+        : '';
+      (cloned as any).output_text = outputText ? `${outputText}\n\n${block}` : block;
+      return cloned;
     }
   }
   const outputText = typeof (cloned as any).output_text === 'string' ? String((cloned as any).output_text).trim() : '';
@@ -354,13 +540,20 @@ function logReasoningStopFinalizedMarker(args: {
   );
 }
 
-const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | null> => {
+  const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | null> => {
   if (!isReasoningStopGuardEnabled()) {
     return null;
   }
-  // Skip if this is already a servertool followup (prevent infinite loop)
+  // Most servertool followups should bypass this guard to avoid recursion.
+  // But reasoning_stop_guard / reasoning_stop_continue followups must re-enter
+  // the guard/finalize logic; otherwise a second plain stop on the followup hop
+  // is silently accepted as success.
   const rt = readRuntimeMetadata(ctx.adapterContext as unknown as Record<string, unknown>);
-  if ((rt as Record<string, unknown>)?.serverToolFollowup === true) {
+  const followupSource = readFollowupClientInjectSource(ctx.adapterContext);
+  const allowReasoningStopFollowupReentry =
+    followupSource === 'servertool.reasoning_stop_guard'
+    || followupSource === 'servertool.reasoning_stop_continue';
+  if ((rt as Record<string, unknown>)?.serverToolFollowup === true && !allowReasoningStopFollowupReentry) {
     return null;
   }
 
@@ -372,12 +565,8 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
   const { count: guardTriggerCount, lastTriggerAt: lastGuardTriggerAt } = readReasoningStopGuardTriggerCount(ctx.adapterContext);
   const now = Date.now();
   if (guardTriggerCount >= GUARD_MAX_TRIGGER_COUNT) {
-    if (lastGuardTriggerAt && (now - lastGuardTriggerAt) < GUARD_TRIGGER_WINDOW_MS) {
-      // Storm detected: reset counter and pass through to prevent infinite loop
-      resetReasoningStopGuardTriggerCount(ctx.adapterContext);
-      return null;
-    }
-    // Outside window: reset counter
+    // Keep stopless contract authoritative: even during storms we may reset counters,
+    // but we must not auto-pass a stop response that has not satisfied reasoning.stop.
     resetReasoningStopGuardTriggerCount(ctx.adapterContext);
   }
   // Increment guard trigger count
@@ -417,42 +606,21 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
   return {
     flowId: FLOW_ID_FINALIZE,
     finalize: async () => {
-      const parsed = parseReasoningStopSummary(stopState.summary);
+      const freshSummary = extractEmbeddedReasoningStopSummary(ctx.base);
+      const summary = freshSummary || stopState.summary;
+      const parsed = parseReasoningStopSummary(summary);
+      const canFinalizeCurrentTurn =
+        !allowReasoningStopFollowupReentry || freshSummary.length > 0;
       
       if (stoplessMode === 'on') {
-        const failCount = readReasoningStopFailCount(ctx.adapterContext);
-        if (failCount >= ON_MODE_MAX_FAIL_COUNT) {
-          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
-          logReasoningStopFinalizedMarker({
-            requestId: ctx.requestId,
-            mode: stoplessMode,
-            summary: stopState.summary,
-            reason: 'fail_count_exceeded'
-          });
-          clearReasoningStopState(ctx.adapterContext);
-          resetReasoningStopFailCount(ctx.adapterContext);
-          return {
-            chatResponse: patched,
-            execution: {
-              flowId: FLOW_ID_FINALIZE,
-              context: {
-                reasoning_stop: {
-                  finalized: true,
-                  fail_count_exceeded: true
-                }
-              }
-            }
-          };
-        }
-        
-       if (parsed.completed === true) {
+       if (canFinalizeCurrentTurn && isValidCompletedStop(parsed)) {
           // Allow stop for simple questions
           if (parsed.isSimpleQuestion === true) {
-            const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
+            const patched = appendReasoningStopSummaryToChatResponse(ctx.base, summary);
             logReasoningStopFinalizedMarker({
               requestId: ctx.requestId,
               mode: stoplessMode,
-              summary: stopState.summary,
+              summary,
               reason: 'simple_question'
             });
             clearReasoningStopState(ctx.adapterContext);
@@ -470,11 +638,11 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
               }
             };
           }
-          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
+          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, summary);
           logReasoningStopFinalizedMarker({
             requestId: ctx.requestId,
             mode: stoplessMode,
-            summary: stopState.summary,
+            summary,
             reason: 'completed'
           });
           clearReasoningStopState(ctx.adapterContext);
@@ -501,12 +669,12 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
           };
         }
         
-        if (parsed.completed === false && isIrrecoverablyBlockedStop(parsed)) {
-          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
+        if (canFinalizeCurrentTurn && parsed.completed === false && isIrrecoverablyBlockedStop(parsed)) {
+          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, summary);
           logReasoningStopFinalizedMarker({
             requestId: ctx.requestId,
             mode: stoplessMode,
-            summary: stopState.summary,
+            summary,
             reason: 'blocked'
           });
           clearReasoningStopState(ctx.adapterContext);
@@ -548,31 +716,6 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
         }
         
         incrementReasoningStopFailCount(ctx.adapterContext);
-        const newFailCount = readReasoningStopFailCount(ctx.adapterContext);
-        if (newFailCount >= ON_MODE_MAX_FAIL_COUNT) {
-          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
-          logReasoningStopFinalizedMarker({
-            requestId: ctx.requestId,
-            mode: stoplessMode,
-            summary: stopState.summary,
-            reason: 'fail_count_exceeded'
-          });
-          clearReasoningStopState(ctx.adapterContext);
-          resetReasoningStopFailCount(ctx.adapterContext);
-          return {
-            chatResponse: patched,
-            execution: {
-              flowId: FLOW_ID_FINALIZE,
-              context: {
-                reasoning_stop: {
-                  finalized: true,
-                  fail_count_exceeded: true
-                }
-              }
-            }
-          };
-        }
-        
         return {
           chatResponse: ctx.base,
           execution: {
@@ -592,12 +735,12 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
       }
       
       if (stoplessMode === 'endless') {
-        if (parsed.completed === true) {
-          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
+        if (canFinalizeCurrentTurn && isValidCompletedStop(parsed)) {
+          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, summary);
           logReasoningStopFinalizedMarker({
             requestId: ctx.requestId,
             mode: stoplessMode,
-            summary: stopState.summary,
+            summary,
             reason: 'completed'
           });
           clearReasoningStopState(ctx.adapterContext);
@@ -615,12 +758,12 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
           };
         }
         
-        if (isIrrecoverablyBlockedStop(parsed)) {
-          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
+        if (canFinalizeCurrentTurn && isIrrecoverablyBlockedStop(parsed)) {
+          const patched = appendReasoningStopSummaryToChatResponse(ctx.base, summary);
           logReasoningStopFinalizedMarker({
             requestId: ctx.requestId,
             mode: stoplessMode,
-            summary: stopState.summary,
+            summary,
             reason: 'blocked'
           });
           clearReasoningStopState(ctx.adapterContext);
@@ -677,11 +820,11 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
         };
       }
       
-      const patched = appendReasoningStopSummaryToChatResponse(ctx.base, stopState.summary);
+      const patched = appendReasoningStopSummaryToChatResponse(ctx.base, summary);
       logReasoningStopFinalizedMarker({
         requestId: ctx.requestId,
         mode: stoplessMode,
-        summary: stopState.summary,
+        summary,
         reason: 'finalized_fallback'
       });
       clearReasoningStopState(ctx.adapterContext);

@@ -203,6 +203,74 @@ describe('responses-openai-bridge history seed normalization', () => {
     } as any)).toThrow(/Tool history contract violated/);
   });
 
+  test('fails fast when responses input contains a duplicate function_call_output for the same completed call', () => {
+    expect(() => buildChatRequestFromResponses({
+      model: 'glm-4.7',
+      input: [
+        {
+          type: 'function_call',
+          call_id: 'call_1',
+          name: 'exec_command',
+          arguments: '{"cmd":"echo first"}'
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_1',
+          output: 'first'
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_1',
+          output: 'first-again'
+        }
+      ]
+    } as any, {
+      requestId: 'bridge-duplicate-function-call-output',
+      input: [
+        {
+          type: 'function_call',
+          call_id: 'call_1',
+          name: 'exec_command',
+          arguments: '{"cmd":"echo first"}'
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_1',
+          output: 'first'
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_1',
+          output: 'first-again'
+        }
+      ]
+    } as any)).toThrow(/Tool history contract violated: orphan_tool_result/);
+  });
+
+  test('allows responses input when function_call_output appears before its matching function_call in the same batch', () => {
+    const payload = {
+      model: 'glm-4.7',
+      input: [
+        {
+          type: 'function_call_output',
+          call_id: 'call_late',
+          output: 'done'
+        },
+        {
+          type: 'function_call',
+          call_id: 'call_late',
+          name: 'exec_command',
+          arguments: '{"cmd":"pwd"}'
+        }
+      ]
+    } as any;
+
+    expect(() => buildChatRequestFromResponses(payload, {
+      requestId: 'bridge-output-before-call-same-batch',
+      input: payload.input
+    } as any)).not.toThrow();
+  });
+
   test('accepts responses input when function_call keeps id and function_call_output references call_id', () => {
     const payload = {
       model: 'gpt-4.1-mini',
@@ -235,6 +303,205 @@ describe('responses-openai-bridge history seed normalization', () => {
 
     expect(assistant?.tool_calls?.[0]?.id).toBe('fc_find_fixme');
     expect(tool?.tool_call_id).toBe('fc_find_fixme');
+  });
+
+  test('fails fast when responses input assistant message tool_calls dangle without tool result', () => {
+    expect(() => buildChatRequestFromResponses({
+      model: 'gpt-4.1-mini',
+      input: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'fc_find_fixme',
+              type: 'function',
+              function: {
+                name: 'shell',
+                arguments: '{"command":["rg","-n","FIXME","--glob","*.ts"],"workdir":"/repo"}'
+              }
+            }
+          ]
+        }
+      ]
+    } as any, {
+      requestId: 'bridge-assistant-tool-call-dangling',
+      input: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'fc_find_fixme',
+              type: 'function',
+              function: {
+                name: 'shell',
+                arguments: '{"command":["rg","-n","FIXME","--glob","*.ts"],"workdir":"/repo"}'
+              }
+            }
+          ]
+        }
+      ]
+    } as any)).toThrow(/Tool history contract violated: dangling_tool_call/);
+  });
+
+  test('fails fast when responses input assistant message tool_call misses id', () => {
+    expect(() => buildChatRequestFromResponses({
+      model: 'gpt-4.1-mini',
+      input: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              type: 'function',
+              function: {
+                name: 'shell',
+                arguments: '{"command":["pwd"]}'
+              }
+            }
+          ]
+        }
+      ]
+    } as any, {
+      requestId: 'bridge-assistant-tool-call-missing-id',
+      input: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              type: 'function',
+              function: {
+                name: 'shell',
+                arguments: '{"command":["pwd"]}'
+              }
+            }
+          ]
+        }
+      ]
+    } as any)).toThrow(/Tool history contract violated: missing_tool_call_id/);
+  });
+
+  test('allows terminal pending assistant tool_call when rebuilding outbound responses input', () => {
+    const result = buildResponsesRequestFromChat({
+      model: 'gpt-4.1-mini',
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_keep_me',
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                arguments: '{"cmd":"echo hi"}'
+              }
+            }
+          ]
+        }
+      ]
+    }, {
+      requestId: 'bridge-terminal-pending-tool-call'
+    } as any);
+
+    expect(result.request.input).toEqual([
+      {
+        type: 'function_call',
+        id: 'call_keep_me',
+        call_id: 'call_keep_me',
+        name: 'exec_command',
+        arguments: '{"cmd":"echo hi"}'
+      }
+    ]);
+  });
+
+  test('allows terminal pending assistant tool_call suffix when rebuilding outbound responses input', () => {
+    const result = buildResponsesRequestFromChat({
+      model: 'gpt-4.1-mini',
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_keep_me_1',
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                arguments: '{"cmd":"echo hi"}'
+              }
+            }
+          ]
+        },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_keep_me_2',
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                arguments: '{"cmd":"pwd"}'
+              }
+            }
+          ]
+        }
+      ]
+    }, {
+      requestId: 'bridge-terminal-pending-tool-call-suffix'
+    } as any);
+
+    expect(result.request.input).toEqual([
+      {
+        type: 'function_call',
+        id: 'call_keep_me_1',
+        call_id: 'call_keep_me_1',
+        name: 'exec_command',
+        arguments: '{"cmd":"echo hi"}'
+      },
+      {
+        type: 'function_call',
+        id: 'call_keep_me_2',
+        call_id: 'call_keep_me_2',
+        name: 'exec_command',
+        arguments: '{"cmd":"pwd"}'
+      }
+    ]);
+  });
+
+  test('still fails fast when dangling tool_call is no longer terminal in chat history', () => {
+    expect(() => buildResponsesRequestFromChat({
+      model: 'gpt-4.1-mini',
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_not_terminal',
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                arguments: '{"cmd":"echo hi"}'
+              }
+            }
+          ]
+        },
+        {
+          role: 'user',
+          content: '继续'
+        }
+      ]
+    }, {
+      requestId: 'bridge-non-terminal-dangling-tool-call'
+    } as any)).toThrow(/Tool history contract violated: dangling_tool_call/);
   });
 
   test('filters empty system messages and preserves multimodal content order', () => {

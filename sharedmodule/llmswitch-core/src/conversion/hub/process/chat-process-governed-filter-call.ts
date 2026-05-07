@@ -1,4 +1,3 @@
-import { runChatRequestToolFilters } from '../../shared/tool-filter-pipeline.js';
 import type { StandardizedRequest } from '../types/standardized.js';
 import {
   buildGovernedFilterPayloadWithNative
@@ -19,17 +18,5 @@ export async function runGovernedChatRequestFilters(
 ): Promise<Record<string, unknown>> {
   const { request } = options;
   const shaped = buildGovernedFilterPayloadWithNative(request) as Record<string, unknown>;
-
-  const governedPayload = await runChatRequestToolFilters(shaped, {
-    entryEndpoint: options.entryEndpoint,
-    requestId: options.requestId,
-    model: request.model,
-    profile: options.providerProtocol,
-    stream: options.inboundStreamIntent,
-    toolFilterHints: options.metadataToolHints,
-    rawPayload: options.rawRequestBody && typeof options.rawRequestBody === 'object'
-      ? options.rawRequestBody
-      : undefined
-  });
-  return governedPayload as Record<string, unknown>;
+  return shaped;
 }

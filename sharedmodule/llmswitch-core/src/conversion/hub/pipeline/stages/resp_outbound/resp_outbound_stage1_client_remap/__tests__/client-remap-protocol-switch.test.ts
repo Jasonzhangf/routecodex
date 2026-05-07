@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { buildClientPayloadForProtocol } from '../client-remap-protocol-switch.js';
+import { buildOpenAIChatFromAnthropicMessage } from '../../../../../response/response-runtime-anthropic.js';
 
 describe('client-remap-protocol-switch', () => {
   it('remaps openai-chat tool call names back to client-declared names', () => {
@@ -533,6 +534,104 @@ describe('client-remap-protocol-switch', () => {
     expect(requiredCalls[0].arguments ?? requiredCalls[0].function?.arguments).toBe('{"text":"AUTO-JSON"}');
   });
 
+  it('maps wrapped anthropic data.tool_use payloads into responses requires_action', () => {
+    const anthropicPayload = {
+      data: {
+        id: 'msg_wrapped_1',
+        role: 'assistant',
+        model: 'mimo-v2.5-pro',
+        stop_reason: 'tool_use',
+        content: [
+          { type: 'thinking', thinking: '继续执行工具' },
+          {
+            type: 'tool_use',
+            id: 'call_dd97d989154849fea9380e44',
+            name: 'exec_command',
+            input: { cmd: 'pwd' }
+          }
+        ]
+      }
+    };
+
+    const chatPayload = buildOpenAIChatFromAnthropicMessage(
+      anthropicPayload as any,
+      { includeToolCallIds: true }
+    );
+    const result = buildClientPayloadForProtocol({
+      payload: chatPayload as any,
+      clientProtocol: 'openai-responses',
+      requestId: 'req-test-wrapped-anthropic-tool-use'
+    });
+
+    expect((result as any).status).toBe('requires_action');
+    expect((result as any).required_action?.submit_tool_outputs?.tool_calls).toHaveLength(1);
+    expect((result as any).required_action.submit_tool_outputs.tool_calls[0]).toMatchObject({
+      id: 'call_dd97d989154849fea9380e44',
+      name: 'exec_command'
+    });
+    expect((result as any).output.filter((item: any) => item?.type === 'function_call')).toHaveLength(1);
+  });
+
+  it('maps anthropic tool_use payloads into responses requires_action for mimoweb-style calls', () => {
+    const anthropicPayload = {
+      id: 'msg_mimoweb_1',
+      role: 'assistant',
+      model: 'mimo-v2.5-pro',
+      stop_reason: 'tool_use',
+      content: [
+        {
+          type: 'text',
+          text: [
+            '<think>The user wants me to:',
+            '1. First implement auto-upgrade integrated with WebDAV',
+            '2. Then implement retry mechanism for mobile WebDAV sync',
+            '</think>Jason，明白。让我先读取项目 skill，然后深入看相关代码。'
+          ].join('\n')
+        },
+        {
+          type: 'tool_use',
+          id: 'toolu_mimo_read_1',
+          name: 'read',
+          input: {
+            filePath: '/Users/fanzhang/Documents/github/novelmobile/.agents/skills/novelmobile-dev/SKILL.md'
+          }
+        },
+        {
+          type: 'tool_use',
+          id: 'toolu_mimo_read_2',
+          name: 'read',
+          input: {
+            filePath: '/Users/fanzhang/Documents/github/novelmobile/apps/mobile-app/src/services/appUpdateService.ts'
+          }
+        },
+        {
+          type: 'tool_use',
+          id: 'toolu_mimo_read_3',
+          name: 'read',
+          input: {
+            filePath: '/Users/fanzhang/Documents/github/novelmobile/apps/mobile-app/src/services/mobileWebdavSync.ts'
+          }
+        }
+      ]
+    };
+
+    const chatPayload = buildOpenAIChatFromAnthropicMessage(
+      anthropicPayload as any,
+      { includeToolCallIds: true }
+    );
+    const result = buildClientPayloadForProtocol({
+      payload: chatPayload as any,
+      clientProtocol: 'openai-responses',
+      requestId: 'req-test-mimoweb-tool-use'
+    });
+
+    expect((result as any).status).toBe('requires_action');
+    expect((result as any).required_action?.submit_tool_outputs?.tool_calls).toHaveLength(3);
+    expect((result as any).output.filter((item: any) => item?.type === 'function_call')).toHaveLength(3);
+    expect((result as any).output[0]?.type).toBe('message');
+    expect((result as any).output[0]?.content?.[0]?.text).toContain('Jason，明白');
+  });
+
   it('normalizes responses required_action exec_command arguments by declared client schema', () => {
     const payload = {
       id: 'resp_exec_args_1',
@@ -601,5 +700,72 @@ describe('client-remap-protocol-switch', () => {
     });
     expect(outputCall.name).toBe('exec_command');
     expect(outputCall.arguments).toBe('{"cmd":"pwd","workdir":"/"}');
+  });
+
+  it('drops duplicate exec_command command alias when declared client schema is cmd-only', () => {
+    const payload = {
+      id: 'resp_exec_args_dedupe_1',
+      status: 'requires_action',
+      required_action: {
+        type: 'submit_tool_outputs',
+        submit_tool_outputs: {
+          tool_calls: [
+            {
+              id: 'call_exec_args_dedupe_1',
+              type: 'function_call',
+              name: 'exec_command',
+              arguments: '{"cmd":"bash -lc \\"pwd\\"","command":"bash -lc \\"pwd\\""}'
+            }
+          ]
+        }
+      },
+      output: [
+        {
+          id: 'fc_exec_args_dedupe_1',
+          type: 'function_call',
+          call_id: 'call_exec_args_dedupe_1',
+          name: 'exec_command',
+          arguments: '{"cmd":"bash -lc \\"pwd\\"","command":"bash -lc \\"pwd\\""}'
+        }
+      ]
+    };
+
+    const requestSemantics = {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: {
+                type: 'object',
+                properties: {
+                  cmd: { type: 'string' }
+                },
+                required: ['cmd'],
+                additionalProperties: false
+              }
+            }
+          }
+        ]
+      }
+    };
+
+    const result = buildClientPayloadForProtocol({
+      payload: payload as any,
+      clientProtocol: 'openai-responses',
+      requestId: 'req-test-responses-exec-args-dedupe',
+      requestSemantics: requestSemantics as any
+    });
+
+    const requiredCall = (result as any).required_action.submit_tool_outputs.tool_calls[0];
+    const outputCall = (result as any).output[0];
+    expect(requiredCall.arguments).toBe('{"cmd":"bash -lc \\"pwd\\""}');
+    expect(requiredCall.input).toEqual({ cmd: 'bash -lc "pwd"' });
+    expect(requiredCall.function).toMatchObject({
+      name: 'exec_command',
+      arguments: '{"cmd":"bash -lc \\"pwd\\""}'
+    });
+    expect(outputCall.arguments).toBe('{"cmd":"bash -lc \\"pwd\\""}');
   });
 });

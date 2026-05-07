@@ -6,6 +6,7 @@ import { ChatHttpProvider } from './chat-http-provider.js';
 import { GeminiHttpProvider } from './gemini-http-provider.js';
 import { MockProvider } from '../../mock/index.js';
 import { GeminiCLIHttpProvider } from './gemini-cli-http-provider.js';
+import { MimowebProvider } from './mimoweb/mimoweb-provider.js';
 import type { OpenAIStandardConfig, ApiKeyAuth, OAuthAuth, OAuthAuthType } from '../api/provider-config.js';
 import type { IProviderV2, ProviderRuntimeAuth, ProviderRuntimeProfile, ProviderType } from '../api/provider-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
@@ -167,6 +168,7 @@ export function resolveProviderModule(value?: string): OpenAIStandardConfig['typ
     case 'gemini-http-provider':
     case 'gemini-cli-http-provider':
     case 'deepseek-http-provider':
+    case 'mimoweb-provider':
     case 'mock-provider':
       return trimmed as OpenAIStandardConfig['type'];
     case 'deepseek':
@@ -179,6 +181,8 @@ export function resolveProviderModule(value?: string): OpenAIStandardConfig['typ
       return 'responses-http-provider';
     case 'gemini':
       return 'gemini-http-provider';
+    case 'mimoweb':
+      return 'mimoweb-provider';
     default:
       return undefined;
   }
@@ -197,6 +201,9 @@ export function mapProviderModule(providerType: ProviderType): OpenAIStandardCon
   if (providerType === 'mock') {
     return 'mock-provider';
   }
+  if (providerType === 'mimoweb') {
+    return 'mimoweb-provider';
+  }
   return 'openai-http-provider';
 }
 
@@ -206,6 +213,9 @@ export function instantiateProvider(
   config: OpenAIStandardConfig,
   dependencies: ModuleDependencies
 ): IProviderV2 {
+  if (moduleType === 'mimoweb-provider') {
+    return new MimowebProvider(config, dependencies);
+  }
   if (moduleType === 'mock-provider') {
     return new MockProvider(config, dependencies);
   }
@@ -245,6 +255,9 @@ export function instantiateProvider(
   }
   if (moduleType === 'anthropic-http-provider') {
     return new AnthropicHttpProvider(config, dependencies);
+  }
+  if (providerType === 'mimoweb') {
+    return new MimowebProvider(config, dependencies);
   }
   const error = new Error(`[ProviderFactory] Unsupported providerType='${providerType}' and moduleType='${moduleType}'`);
   (error as Error & { code?: string }).code = 'ERR_UNSUPPORTED_PROVIDER_TYPE';

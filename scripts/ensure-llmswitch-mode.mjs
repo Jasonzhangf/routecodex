@@ -11,8 +11,8 @@ const rawMode = String(process.env.BUILD_MODE || process.env.RCC_BUILD_MODE || '
 const mode = rawMode === 'dev' ? 'dev' : 'release';
 
 const sharedCoreDir = path.join(PROJECT_ROOT, 'sharedmodule', 'llmswitch-core');
-const nodeModulesScope = path.join(PROJECT_ROOT, 'node_modules', '@jsonstudio');
-const llmsPath = path.join(nodeModulesScope, 'llms');
+const nodeModulesScope = path.join(PROJECT_ROOT, 'node_modules');
+const llmsPath = path.join(nodeModulesScope, 'rcc-llmswitch-core');
 
 function runNodeScript(relativePath, args = []) {
   const scriptPath = path.join(PROJECT_ROOT, relativePath);
@@ -59,33 +59,33 @@ function ensureDevLink() {
       const resolved = path.resolve(nodeModulesScope, target);
       const expected = path.resolve(sharedCoreDir);
       if (resolved === expected) {
-        console.log('[llmswitch:ensure] dev link ok: node_modules/@jsonstudio/llms -> sharedmodule/llmswitch-core');
+        console.log('[llmswitch:ensure] dev link ok: node_modules/rcc-llmswitch-core -> sharedmodule/llmswitch-core');
         return;
       }
     }
   }
-  console.log('[llmswitch:ensure] linking dev core: node_modules/@jsonstudio/llms -> sharedmodule/llmswitch-core');
+  console.log('[llmswitch:ensure] linking dev core: node_modules/rcc-llmswitch-core -> sharedmodule/llmswitch-core');
   runNodeScript('scripts/link-llmswitch.mjs');
 }
 
 function ensureReleasePackage() {
   if (isSymlink(llmsPath)) {
-    console.log('[llmswitch:ensure] release mode: unlinking node_modules/@jsonstudio/llms symlink');
+    console.log('[llmswitch:ensure] release mode: unlinking node_modules/rcc-llmswitch-core symlink');
     runNodeScript('scripts/link-llmswitch.mjs', ['unlink']);
   }
   const pkgPath = path.join(llmsPath, 'package.json');
   if (!exists(pkgPath)) {
-    console.log('[llmswitch:ensure] BUILD_MODE=release: installing @jsonstudio/llms via npm (missing in node_modules)');
+    console.log('[llmswitch:ensure] BUILD_MODE=release: local package missing; expecting sharedmodule/llmswitch-core or node_modules/rcc-llmswitch-core');
     const res = spawnSync('npm', ['install', '--no-audit', '--no-fund'], { cwd: PROJECT_ROOT, stdio: 'inherit' });
     if ((res.status ?? 0) !== 0) {
       process.exit(res.status ?? 2);
     }
     if (!exists(pkgPath)) {
-      console.error('[llmswitch:ensure] npm install completed but @jsonstudio/llms is still missing');
+      console.error('[llmswitch:ensure] npm install completed but rcc-llmswitch-core is still missing');
       process.exit(2);
     }
   }
-  console.log('[llmswitch:ensure] release package ok: using npm-installed @jsonstudio/llms');
+  console.log('[llmswitch:ensure] release package ok: using local rcc-llmswitch-core package');
 }
 
 if (exists(sharedCoreDir)) {

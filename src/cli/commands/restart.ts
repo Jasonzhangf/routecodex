@@ -56,6 +56,11 @@ export type RestartCommandContext = {
   exit: (code: number) => never;
 };
 
+type RestartApiKeyResolution = {
+  value: string;
+  source: 'config' | 'env' | 'none';
+};
+
 function formatUnknownError(error: unknown): string {
   if (error instanceof Error) {
     return error.stack || `${error.name}: ${error.message}`;
@@ -184,30 +189,48 @@ function resolveConfigPortHostMaybe(
   return { port, host: String(host || LOCAL_HOSTS.LOCALHOST) };
 }
 
-function resolveRestartApiKeyMaybe(
+function readConfigApiKeyRaw(config: any): { present: boolean; raw: unknown } {
+  if (config && typeof config === 'object') {
+    if (config.httpserver && typeof config.httpserver === 'object' && 'apikey' in config.httpserver) {
+      return { present: true, raw: config.httpserver.apikey };
+    }
+    if (config.modules?.httpserver?.config && typeof config.modules.httpserver.config === 'object' && 'apikey' in config.modules.httpserver.config) {
+      return { present: true, raw: config.modules.httpserver.config.apikey };
+    }
+    if (config.server && typeof config.server === 'object' && 'apikey' in config.server) {
+      return { present: true, raw: config.server.apikey };
+    }
+  }
+  return { present: false, raw: undefined };
+}
+
+function resolveRestartApiKey(
   ctx: RestartCommandContext,
   options: RestartCommandOptions
-): string {
-  const fromEnv = normalizeString(ctx.env?.ROUTECODEX_HTTP_APIKEY) || normalizeString(ctx.env?.RCC_HTTP_APIKEY);
-  if (fromEnv) {
-    return fromEnv;
-  }
+): RestartApiKeyResolution {
   const fsImpl = ctx.fsImpl ?? fs;
   const home = ctx.getHomeDir ?? (() => homedir());
   const configPath = options.config || resolveRccConfigFile(home());
-  if (!fsImpl.existsSync(configPath)) {
-    return '';
+  if (fsImpl.existsSync(configPath)) {
+    try {
+      const configContent = fsImpl.readFileSync(configPath, 'utf8');
+      const config = JSON.parse(configContent);
+      const apiKeyField = readConfigApiKeyRaw(config);
+      if (apiKeyField.present) {
+        return {
+          value: resolveConfigApiKeyValue(apiKeyField.raw, ctx.env),
+          source: 'config'
+        };
+      }
+    } catch {
+      return { value: '', source: 'none' };
+    }
   }
-  try {
-    const configContent = fsImpl.readFileSync(configPath, 'utf8');
-    const config = JSON.parse(configContent);
-    return resolveConfigApiKeyValue(
-      config?.httpserver?.apikey ?? config?.modules?.httpserver?.config?.apikey ?? config?.server?.apikey,
-      ctx.env
-    );
-  } catch {
-    return '';
+  const fromEnv = normalizeString(ctx.env?.ROUTECODEX_HTTP_APIKEY) || normalizeString(ctx.env?.RCC_HTTP_APIKEY);
+  if (fromEnv) {
+    return { value: fromEnv, source: 'env' };
   }
+  return { value: '', source: 'none' };
 }
 
 function getSessionCandidatePorts(ctx: RestartCommandContext): number[] {
@@ -324,6 +347,21 @@ async function requestProcessRestartViaHttp(
   }
   requestInPlaceRestart(ctx, target);
   return 'signal';
+}
+
+function shouldUseHttpRestartTransport(
+  ctx: RestartCommandContext,
+  target: RestartTarget,
+  restartApiKey: RestartApiKeyResolution
+): boolean {
+  if (isHttpOnlyRestartMode(ctx)) {
+    return true;
+  }
+  const oldPids = Array.isArray(target.oldPids) ? target.oldPids : [];
+  if (oldPids.length > 0) {
+    return restartApiKey.source === 'config' && Boolean(normalizeString(restartApiKey.value));
+  }
+  return Boolean(normalizeString(restartApiKey.value));
 }
 
 type RestartTarget = { host: string; port: number; oldPids: number[] };
@@ -510,7 +548,7 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
     .action(async (options: RestartCommandOptions) => {
       const spinner = await ctx.createSpinner('Restarting RouteCodex server(s)...');
       try {
-        const restartApiKey = resolveRestartApiKeyMaybe(ctx, options);
+        const restartApiKey = resolveRestartApiKey(ctx, options);
         // Prompt flags cannot be applied via restart endpoint (server reloads from its own config/env).
         if (options.codex || options.claude) {
           spinner.fail('Flags --codex/--claude are not supported for restart; edit config/env and restart again.');
@@ -528,7 +566,7 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
           }
         });
 
-        spinner.text = 'Requesting server-managed restart...';
+        spinner.text = 'Requesting RouteCodex restart...';
         for (const t of targets) {
           const approved = await ctx.reportGuardianLifecycle?.({
             action: 'restart_request',
@@ -542,9 +580,14 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
           if (ctx.reportGuardianLifecycle && approved !== true) {
             throw new Error(`guardian lifecycle apply rejected for ${t.host}:${t.port}`);
           }
-          const transport = await requestProcessRestartViaHttp(ctx, t, restartApiKey);
+          const transport = shouldUseHttpRestartTransport(ctx, t, restartApiKey)
+            ? await requestProcessRestartViaHttp(ctx, t, restartApiKey.value)
+            : (() => {
+                requestInPlaceRestart(ctx, t);
+                return 'signal' as const;
+              })();
           if (transport === 'signal') {
-            spinner.warn(`Restart endpoint unavailable on ${t.host}:${t.port}; used legacy signal transport.`);
+            spinner.warn(`Used in-place signal restart for ${t.host}:${t.port}.`);
           }
         }
 

@@ -110,6 +110,8 @@ export function flattenAnthropicContent(content: unknown): string {
   if (content && typeof content === 'object') {
     const block = content as Record<string, unknown>;
     if (typeof block.text === 'string') return block.text;
+    if (typeof block.thinking === 'string') return block.thinking;
+    if (typeof block.reasoning === 'string') return block.reasoning;
     if (typeof block.content === 'string') return block.content;
     if (Array.isArray(block.content)) return block.content.map(flattenAnthropicContent).filter(Boolean).join('');
   }

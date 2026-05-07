@@ -52,10 +52,11 @@ function parseReasoningItems(raw: string): Array<{ type: 'reasoning'; content: s
 }
 
 function parseToolCallResult(raw: string): Array<{ id?: string; name: string; args: string }> | null {
-  if (!raw || raw === 'null') {
-    return null;
+  if (!raw || raw === 'null' || raw === 'undefined') {
+    return [];
   }
-  return parseToolCallLiteArray(raw);
+  const parsed = parseToolCallLiteArray(raw);
+  return parsed ?? [];
 }
 
 function callTextMarkupExtractor(

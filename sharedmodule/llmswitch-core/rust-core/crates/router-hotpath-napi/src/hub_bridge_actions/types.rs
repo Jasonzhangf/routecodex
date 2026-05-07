@@ -50,6 +50,8 @@ pub struct BuildBridgeHistoryInput {
     pub messages: Vec<Value>,
     #[serde(default)]
     pub tools: Option<Vec<Value>>,
+    #[serde(default)]
+    pub allow_pending_terminal_tool_call: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -223,6 +225,8 @@ pub struct ApplyBridgeNormalizeHistoryInput {
     pub messages: Vec<Value>,
     #[serde(default)]
     pub tools: Option<Vec<Value>>,
+    #[serde(default)]
+    pub allow_pending_terminal_tool_call: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -291,6 +295,8 @@ pub struct BridgeInputToChatInput {
     pub tool_result_fallback_text: Option<String>,
     #[serde(default)]
     pub normalize_function_name: Option<String>,
+    #[serde(default)]
+    pub allow_pending_terminal_tool_call: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]

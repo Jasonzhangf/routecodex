@@ -11,7 +11,9 @@ import type { ApiKeyAuth, OpenAIStandardConfig } from '../api/provider-config.js
 import type { ProviderContext } from '../api/provider-types.js';
 import { resolveRccCamoufoxFingerprintDir } from '../../../config/user-data-paths.js';
 import {
+  DEEPSEEK_COMPATIBILITY_PROFILE,
   DEEPSEEK_ERROR_CODES,
+  DEEPSEEK_UPSTREAM_USER_AGENT,
   normalizeDeepSeekProviderRuntimeOptions
 } from '../contracts/deepseek-provider-contract.js';
 import { HttpTransportProvider } from './http-transport-provider.js';
@@ -35,8 +37,6 @@ import { DeepSeekSessionPowManager } from './deepseek-session-pow.js';
 const DEFAULT_BASE_URL = 'https://chat.deepseek.com';
 const DEFAULT_COMPLETION_ENDPOINT = '/api/v0/chat/completion';
 const DEFAULT_CAMOUFOX_PROVIDER = 'deepseek';
-const DEFAULT_DEEPSEEK_USER_AGENT = 'DeepSeek/1.0.13 Android/35';
-
 type DeepSeekApiKeyAuth = ApiKeyAuth & {
   rawType?: string;
   accountAlias?: string;
@@ -99,7 +99,12 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
   }
 
   protected override wantsUpstreamSse(request: UnknownObject, context: ProviderContext): boolean {
-    if (readStreamIntent(request) || shouldForceUpstreamSseForSearch(request) || shouldForceUpstreamSseForTools(request)) {
+    if (
+      this.isDeepSeekWebCompatibilityRuntime()
+      || readStreamIntent(request)
+      || shouldForceUpstreamSseForSearch(request)
+      || shouldForceUpstreamSseForTools(request)
+    ) {
       return true;
     }
     return super.wantsUpstreamSse(request, context);
@@ -125,8 +130,17 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
       };
     }
 
+    if (this.isDeepSeekWebCompatibilityRuntime()) {
+      delete finalized.session_id;
+      delete finalized.conversation_id;
+    }
+
     if (!this.deepseekSessionPow) {
       return finalized;
+    }
+
+    if (this.isDeepSeekWebCompatibilityRuntime()) {
+      await this.deepseekSessionPow.cleanup();
     }
 
     const sessionHeaders = {
@@ -148,8 +162,9 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
     if (!isRecord(body)) {
       return body;
     }
+    const isDeepSeekWebRuntime = this.isDeepSeekWebCompatibilityRuntime();
 
-    if (this.isCompletionPayload(body)) {
+    if (!isDeepSeekWebRuntime && this.isCompletionPayload(body)) {
       return body;
     }
 
@@ -165,10 +180,13 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
       );
     }
 
-    const sessionId =
-      normalizeString(body.chat_session_id) ||
-      this.pendingSessionId ||
-      extractSessionIdFromMetadata(request);
+    const sessionId = isDeepSeekWebRuntime
+      ? this.pendingSessionId
+      : (
+          normalizeString(body.chat_session_id) ||
+          this.pendingSessionId ||
+          extractSessionIdFromMetadata(request)
+        );
 
     if (!sessionId) {
       throw createProviderError(
@@ -180,7 +198,9 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
 
     const normalized: DeepSeekCompletionBody = {
       chat_session_id: sessionId,
-      parent_message_id: normalizeString(body.parent_message_id) || null,
+      parent_message_id: isDeepSeekWebRuntime
+        ? null
+        : (normalizeString(body.parent_message_id) || null),
       prompt,
       ref_file_ids: Array.isArray(body.ref_file_ids) ? body.ref_file_ids : [],
       thinking_enabled: Boolean(body.thinking_enabled),
@@ -197,6 +217,27 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
       return request.data;
     }
     return request;
+  }
+
+  private isDeepSeekWebCompatibilityRuntime(): boolean {
+    const readLower = (value: unknown): string => normalizeString(value)?.toLowerCase() || '';
+    const runtime = this.getRuntimeProfile();
+    const providerId = readLower(runtime?.providerId || this.config.config.providerId);
+    const providerKey = readLower(runtime?.providerKey);
+    const runtimeKey = readLower(runtime?.runtimeKey);
+    const compatibilityProfile = readLower(
+      runtime?.compatibilityProfile || (this.config.config as { compatibilityProfile?: unknown }).compatibilityProfile
+    );
+
+    return (
+      compatibilityProfile === DEEPSEEK_COMPATIBILITY_PROFILE
+      || providerId === 'deepseek-web'
+      || providerId.startsWith('deepseek-web.')
+      || providerKey === 'deepseek-web'
+      || providerKey.startsWith('deepseek-web.')
+      || runtimeKey === 'deepseek-web'
+      || runtimeKey.startsWith('deepseek-web.')
+    );
   }
 
   protected buildDeepSeekSessionPowManager(): DeepSeekSessionPowManager {
@@ -317,11 +358,10 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
   }
 
   private buildDeepSeekBrowserHeaders(fingerprint: CamoufoxFingerprintSnapshot | null): Record<string, string> {
-    const userAgent = normalizeString(fingerprint?.userAgent) || DEFAULT_DEEPSEEK_USER_AGENT;
     const clientPlatform = mapPlatformToClientPlatform(fingerprint?.platform) || 'android';
 
     return {
-      'User-Agent': userAgent,
+      'User-Agent': DEEPSEEK_UPSTREAM_USER_AGENT,
       'x-client-platform': clientPlatform,
       'x-client-version': '1.3.0-auto-resume',
       'x-client-locale': 'zh_CN',

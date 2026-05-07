@@ -21,7 +21,6 @@ import {
   applyRespProcessToolGovernanceWithNative,
   prepareRespProcessToolGovernancePayloadWithNative
 } from '../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
-import { normalizeChatResponseReasoningToolsWithNative as normalizeChatResponseReasoningToolsLegacy } from '../../router/virtual-router/engine-selection/native-hub-bridge-action-semantics.js';
 import {
   parseLenientJsonishWithNative as parseLenient,
   repairArgumentsToStringWithNative as repairArgumentsToString
@@ -81,18 +80,6 @@ function hasRecoveredResponseToolCalls(payload: Unknown): boolean {
     const toolCalls = Array.isArray(choice?.message?.tool_calls) ? choice.message.tool_calls : [];
     return toolCalls.length > 0;
   });
-}
-
-function shouldAttemptLegacyNamedToolSalvage(payload: Unknown): boolean {
-  try {
-    const raw = JSON.stringify(payload ?? {});
-    if (!raw) return false;
-    const hasToolCallsMarker = /"tool_calls"|'tool_calls'|\btool_calls\b/i.test(raw);
-    const hasExplicitNameMarker = /\\"name\\"\s*:|"name"\s*:|'name'\s*:|\bname\s*:/i.test(raw);
-    return hasToolCallsMarker && hasExplicitNameMarker;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -486,13 +473,7 @@ export function processChatResponseTools(resp: Unknown): Unknown {
       entryEndpoint: '/v1/chat/completions',
       requestId
     });
-    let canonical = governed.governedPayload as Unknown;
-    if (!hasRecoveredResponseToolCalls(canonical) && shouldAttemptLegacyNamedToolSalvage(resp)) {
-      const salvaged = normalizeChatResponseReasoningToolsLegacy(resp as any);
-      if (hasRecoveredResponseToolCalls(salvaged as Unknown)) {
-        canonical = salvaged as Unknown;
-      }
-    }
+    const canonical = governed.governedPayload as Unknown;
     const withPatch = normalizeApplyPatchToolCallsOnResponse(canonical as Unknown);
     return enhanceResponseToolArguments(withPatch as Unknown);
   } catch (error) {

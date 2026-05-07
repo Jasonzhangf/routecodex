@@ -4,7 +4,7 @@
  * Lazy-loads core quota manager and keeps host-side x7e gate checks local.
  */
 
-import type { ProviderErrorEvent, ProviderSuccessEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
+import type { ProviderErrorEvent, ProviderSuccessEvent } from '../../../types/llmswitch-local-types.js';
 import { x7eGate } from '../../../server/runtime/http-server/daemon-admin/routecodex-x7e-gate.js';
 import { importCoreDist } from './module-loader.js';
 
@@ -51,7 +51,7 @@ export async function createCoreQuotaManager(options?: { store?: unknown }): Pro
   const Ctor = mod?.QuotaManager;
   if (typeof Ctor !== 'function') {
     throw new Error(
-      `[llmswitch-bridge] core QuotaManager not available; please update @jsonstudio/llms${cachedQuotaModuleError ? ` (${cachedQuotaModuleError})` : ''}`
+      `[llmswitch-bridge] core QuotaManager not available; please rebuild local llmswitch-core${cachedQuotaModuleError ? ` (${cachedQuotaModuleError})` : ''}`
     );
   }
   return new Ctor({ ...(options ?? {}) });

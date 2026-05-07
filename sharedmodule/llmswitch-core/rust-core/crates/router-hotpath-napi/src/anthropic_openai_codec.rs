@@ -8,6 +8,7 @@ use crate::hub_reasoning_tool_normalizer::{
 use crate::hub_resp_outbound_client_semantics::build_anthropic_response_from_chat_value;
 use crate::resp_process_stage1_tool_governance::{govern_response, ToolGovernanceInput};
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
+use crate::shared_tool_result_text_normalizer::normalize_tool_result_text;
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -73,6 +74,12 @@ fn flatten_text(value: &Value) -> String {
             if let Some(text) = row.get("text").and_then(|v| v.as_str()) {
                 return text.to_string();
             }
+            if let Some(text) = row.get("thinking").and_then(|v| v.as_str()) {
+                return text.to_string();
+            }
+            if let Some(text) = row.get("reasoning").and_then(|v| v.as_str()) {
+                return text.to_string();
+            }
             if let Some(content) = row.get("content") {
                 return flatten_text(content);
             }
@@ -83,8 +90,8 @@ fn flatten_text(value: &Value) -> String {
 }
 
 fn normalize_tool_result_content(block: &Map<String, Value>) -> String {
-    match block.get("content") {
-        Some(Value::String(text)) => text.clone(),
+    let normalized = match block.get("content") {
+        Some(Value::String(text)) => normalize_tool_result_text(text),
         Some(Value::Array(items)) => items
             .iter()
             .map(|entry| match entry {
@@ -97,9 +104,12 @@ fn normalize_tool_result_content(block: &Map<String, Value>) -> String {
             .filter(|entry| !entry.is_empty())
             .collect::<Vec<String>>()
             .join("\n"),
-        Some(other) => serde_json::to_string(other).unwrap_or_default(),
+        Some(other) => normalize_tool_result_text(
+            serde_json::to_string(other).unwrap_or_default().as_str(),
+        ),
         None => String::new(),
-    }
+    };
+    normalize_tool_result_text(normalized.as_str())
 }
 
 fn build_openai_image_part(block: &Map<String, Value>) -> Option<Value> {
@@ -487,6 +497,70 @@ mod tests {
             messages[2]["content"].as_str(),
             Some("first\n\nsecond\n\nthird")
         );
+    }
+
+    #[test]
+    fn build_openai_chat_from_anthropic_preserves_thinking_field_reasoning() {
+        let payload = json!({
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        { "type": "thinking", "thinking": "先检查代码路径", "signature": "sig_payload" }
+                    ]
+                }
+            ]
+        });
+
+        let output: Value = serde_json::from_str(
+            &build_openai_chat_from_anthropic_json(payload.to_string(), None)
+                .expect("build success"),
+        )
+        .expect("json output");
+
+        let messages = output["request"]["messages"]
+            .as_array()
+            .expect("messages array");
+        assert_eq!(messages[0]["content"].as_str(), Some(""));
+        assert_eq!(
+            messages[0]["reasoning_content"].as_str(),
+            Some("先检查代码路径")
+        );
+        assert_eq!(
+            messages[0]["reasoning"]["content"][0]["text"].as_str(),
+            Some("先检查代码路径")
+        );
+    }
+
+    #[test]
+    fn build_openai_chat_from_anthropic_strips_tool_result_transcript_wrappers() {
+        let payload = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "call_1",
+                            "content": "Chunk ID: 93f309\nWall time: 0.0000 seconds\nProcess exited with code 0\nOriginal token count: 2221\nOutput:\nalpha\nbeta\n"
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let output: Value = serde_json::from_str(
+            &build_openai_chat_from_anthropic_json(payload.to_string(), None)
+                .expect("build success"),
+        )
+        .expect("json output");
+
+        let messages = output["request"]["messages"]
+            .as_array()
+            .expect("messages array");
+        assert_eq!(messages[0]["role"].as_str(), Some("tool"));
+        assert_eq!(messages[0]["tool_call_id"].as_str(), Some("call_1"));
+        assert_eq!(messages[0]["content"].as_str(), Some("alpha\nbeta"));
     }
 }
 

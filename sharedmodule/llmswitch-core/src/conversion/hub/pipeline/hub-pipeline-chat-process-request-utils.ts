@@ -48,6 +48,28 @@ function hasReasoningStopTool(tools: StandardizedTool[] | undefined): boolean {
   );
 }
 
+function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function isServerToolFollowupReentry(adapterContext: AdapterContext): boolean {
+  const rt = asFlatRecord((adapterContext as Record<string, unknown>).__rt);
+  return rt?.serverToolFollowup === true;
+}
+
+function hasReusableCapturedChatRequest(adapterContext: AdapterContext): boolean {
+  const captured = asFlatRecord(
+    (adapterContext as Record<string, unknown>).capturedChatRequest,
+  );
+  if (!captured) {
+    return false;
+  }
+  return Array.isArray(captured.messages) || Array.isArray(captured.input);
+}
+
 function buildCapturedChatRequestFromStandardized(request: StandardizedRequest): JsonObject {
   const out: JsonObject = {
     model: request.model,
@@ -238,10 +260,20 @@ export function prepareReasoningStopRequestTooling(args: {
     args.request,
     args.adapterContext,
   );
-  const captured = buildCapturedChatRequestFromStandardized(args.request);
-  (args.adapterContext as Record<string, unknown>).capturedChatRequest = captured;
-  const mode = syncReasoningStopModeFromRequest(args.adapterContext, 'off');
-  const capturedMessages = (captured as Record<string, unknown>).messages;
+  const requestSnapshot = buildCapturedChatRequestFromStandardized(args.request);
+  const preserveCapturedForFollowup =
+    isServerToolFollowupReentry(args.adapterContext) &&
+    hasReusableCapturedChatRequest(args.adapterContext);
+  const captured = preserveCapturedForFollowup
+    ? ((args.adapterContext as Record<string, unknown>)
+        .capturedChatRequest as JsonObject)
+    : requestSnapshot;
+  if (!preserveCapturedForFollowup) {
+    (args.adapterContext as Record<string, unknown>).capturedChatRequest =
+      captured;
+  }
+  const mode = syncReasoningStopModeFromRequest(args.adapterContext, 'on');
+  const capturedMessages = (requestSnapshot as Record<string, unknown>).messages;
   const strippedMessages = Array.isArray(capturedMessages)
     ? (jsonClone(capturedMessages as unknown as JsonObject[]) as unknown as StandardizedMessage[])
     : undefined;
@@ -256,14 +288,16 @@ export function prepareReasoningStopRequestTooling(args: {
     nextTools.push(jsonClone(REASONING_STOP_TOOL_DEF) as unknown as StandardizedTool);
     args.request.tools = nextTools;
   }
-  (captured as { messages?: StandardizedMessage[] }).messages = jsonClone(
-    args.request.messages as unknown as JsonObject[]
-  ) as unknown as StandardizedMessage[];
-  (captured as { tools?: StandardizedTool[] }).tools = jsonClone(
-    (args.request.tools ?? []) as unknown as JsonObject[]
-  ) as unknown as StandardizedTool[];
-  (captured as { parameters?: StandardizedParameters }).parameters = jsonClone(
-    args.request.parameters as unknown as JsonObject
-  ) as unknown as StandardizedParameters;
+  if (!preserveCapturedForFollowup) {
+    (captured as { messages?: StandardizedMessage[] }).messages = jsonClone(
+      args.request.messages as unknown as JsonObject[]
+    ) as unknown as StandardizedMessage[];
+    (captured as { tools?: StandardizedTool[] }).tools = jsonClone(
+      (args.request.tools ?? []) as unknown as JsonObject[]
+    ) as unknown as StandardizedTool[];
+    (captured as { parameters?: StandardizedParameters }).parameters = jsonClone(
+      args.request.parameters as unknown as JsonObject
+    ) as unknown as StandardizedParameters;
+  }
   return mode;
 }

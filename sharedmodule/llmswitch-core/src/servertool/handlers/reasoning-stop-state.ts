@@ -5,15 +5,15 @@ import {
   saveRoutingInstructionStateSync
 } from '../../router/virtual-router/sticky-session-store.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
-import { resolveStopMessageSessionScope } from './stop-message-auto/runtime-utils.js';
 import { extractCapturedChatSeed } from './followup-request-builder.js';
+import { resolveServertoolPersistentScopeKey } from '../state-scope.js';
 
 const REASONING_STOP_SUMMARY_MAX_CHARS = 4000;
 const STOPLESS_DIRECTIVE_PATTERN = /<\*\*stopless:([a-z0-9_-]+)\*\*>/gi;
 const STOPLESS_DIRECTIVE_STRIP_PATTERN = /<\*\*stopless:[^*]+\*\*>/gi;
 
 export type ReasoningStopMode = 'on' | 'off' | 'endless';
-export const DEFAULT_REASONING_STOP_MODE: ReasoningStopMode = 'off';
+export const DEFAULT_REASONING_STOP_MODE: ReasoningStopMode = 'on';
 export type ReasoningStopReason =
   | 'completed'
   | 'blocked'
@@ -89,13 +89,7 @@ function createEmptyRoutingInstructionState(): RoutingInstructionState {
 }
 
 function resolveStickyKey(adapterContext: unknown): string {
-  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
-    return '';
-  }
-  const record = adapterContext as Record<string, unknown>;
-  const runtime = readRuntimeMetadata(record);
-  const scope = resolveStopMessageSessionScope(record, runtime);
-  return typeof scope === 'string' ? scope.trim() : '';
+  return resolveServertoolPersistentScopeKey(adapterContext) ?? '';
 }
 
 function normalizeSummary(value: unknown): string {
@@ -152,7 +146,6 @@ function isStateEmpty(state: RoutingInstructionState): boolean {
     state.reasoningStopArmed !== true &&
     (typeof state.reasoningStopUpdatedAt !== 'number' || !Number.isFinite(state.reasoningStopUpdatedAt)) &&
     (typeof state.reasoningStopFailCount !== 'number' || !Number.isFinite(state.reasoningStopFailCount));
-    (typeof state.reasoningStopUpdatedAt !== 'number' || !Number.isFinite(state.reasoningStopUpdatedAt));
   const noPreCommand =
     (!state.preCommandScriptPath || !state.preCommandScriptPath.trim()) &&
     (typeof state.preCommandUpdatedAt !== 'number' || !Number.isFinite(state.preCommandUpdatedAt));
@@ -443,6 +436,11 @@ export function syncReasoningStopModeFromRequest(
 
   const persistedMode = normalizeReasoningStopMode(state?.reasoningStopMode) ?? fallbackMode;
   if (!directiveMode) {
+    if (!normalizeReasoningStopMode(state?.reasoningStopMode)) {
+      const next = state ?? createEmptyRoutingInstructionState();
+      next.reasoningStopMode = persistedMode;
+      saveRoutingInstructionStateSync(stickyKey, next);
+    }
     return persistedMode;
   }
 

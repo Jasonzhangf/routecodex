@@ -71,7 +71,7 @@ describe('http-server session daemon bootstrap', () => {
     expect(server.sessionDaemonInjectTickInFlight).toBe(false);
   });
 
-  it('boots the shared clock daemon from default llmswitch config even when host config omits clock', async () => {
+  it('does not boot the shared clock daemon by default when host config omits clock', async () => {
     jest.resetModules();
     mockResolveClockConfigSnapshot.mockReset();
     mockStartClockDaemonIfNeededSnapshot.mockReset();
@@ -103,13 +103,8 @@ describe('http-server session daemon bootstrap', () => {
 
     await tickSessionDaemonInjectLoop(server);
 
-    expect(mockResolveClockConfigSnapshot).toHaveBeenCalledWith(undefined);
-    expect(mockStartClockDaemonIfNeededSnapshot).toHaveBeenCalledWith({
-      enabled: true,
-      retentionMs: 120000,
-      dueWindowMs: 0,
-      tickMs: 1500
-    });
+    expect(mockResolveClockConfigSnapshot).not.toHaveBeenCalled();
+    expect(mockStartClockDaemonIfNeededSnapshot).not.toHaveBeenCalled();
     expect(server.sessionDaemonInjectTickInFlight).toBe(false);
   });
 });

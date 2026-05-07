@@ -10,6 +10,48 @@ function isRecord(value: unknown): value is UnknownRecord {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+function resolveReferencedProviderIdsFromRouting(routing: VirtualRouterRoutingConfig): Set<string> {
+  const providerIds = new Set<string>();
+  for (const entries of Object.values(routing)) {
+    if (!Array.isArray(entries)) {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!isRecord(entry)) {
+        continue;
+      }
+
+      if (Array.isArray(entry.targets)) {
+        for (const target of entry.targets) {
+          if (typeof target !== 'string' || !target.trim()) {
+            continue;
+          }
+          const providerId = target.trim().split('.', 1)[0];
+          if (providerId) {
+            providerIds.add(providerId);
+          }
+        }
+      }
+
+      const loadBalancing = isRecord(entry.loadBalancing) ? (entry.loadBalancing as UnknownRecord) : undefined;
+      const weights = isRecord(loadBalancing?.weights) ? (loadBalancing.weights as UnknownRecord) : undefined;
+      if (!weights) {
+        continue;
+      }
+      for (const target of Object.keys(weights)) {
+        if (typeof target !== 'string' || !target.trim()) {
+          continue;
+        }
+        const providerId = target.trim().split('.', 1)[0];
+        if (providerId) {
+          providerIds.add(providerId);
+        }
+      }
+    }
+  }
+  return providerIds;
+}
+
 function extractRoutingFromUserConfig(userConfig: UnknownRecord): VirtualRouterRoutingConfig {
   const vrNode = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : {};
   const groupsNode = isRecord(vrNode.routingPolicyGroups) ? (vrNode.routingPolicyGroups as UnknownRecord) : undefined;
@@ -47,11 +89,15 @@ export async function buildVirtualRouterInputV2(
   providerRootDir?: string
 ): Promise<VirtualRouterInput> {
   const routing = extractRoutingFromUserConfig(userConfig);
+  const referencedProviderIds = resolveReferencedProviderIdsFromRouting(routing);
 
   const providerConfigs = await loadProviderConfigsV2(providerRootDir);
   const providers: VirtualRouterProvidersConfig = {};
 
   for (const [providerId, cfg] of Object.entries(providerConfigs)) {
+    if (referencedProviderIds.size > 0 && !referencedProviderIds.has(providerId)) {
+      continue;
+    }
     providers[providerId] = cfg.provider;
   }
 

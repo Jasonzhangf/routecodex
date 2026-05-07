@@ -5,9 +5,6 @@
  * clock task store compatibility wrappers.
  */
 
-import * as stickySessionStoreModule from '../../../../node_modules/@jsonstudio/llms/dist/router/virtual-router/sticky-session-store.js';
-import * as reasoningStopStateModule from '../../../../node_modules/@jsonstudio/llms/dist/servertool/handlers/reasoning-stop-state.js';
-import * as sessionIdentifiersModule from '../../../../node_modules/@jsonstudio/llms/dist/conversion/hub/pipeline/session-identifiers.js';
 import { importCoreDist, requireCoreDist } from './module-loader.js';
 import type { AnyRecord } from './module-loader.js';
 
@@ -46,10 +43,6 @@ function logStateIntegrationsNonBlocking(
   }
 }
 
-const NOOP_STATS_CENTER: StatsCenterLike = {
-  recordProviderUsage: () => {}
-};
-
 function buildStateIntegrationFailure(stage: string, error: unknown, details?: Record<string, unknown>): Error {
   const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
   const message = `[llmswitch-bridge.state-integrations] ${stage} failed: ${formatUnknownError(error)}${detailSuffix}`;
@@ -64,6 +57,9 @@ function buildStateIntegrationFailure(stage: string, error: unknown, details?: R
 }
 
 export function loadRoutingInstructionStateSync(key: string): unknown | null {
+  const stickySessionStoreModule = requireCoreDist<{
+    loadRoutingInstructionStateSync?: (key: string) => unknown | null;
+  }>('router/virtual-router/sticky-session-store');
   const fn = stickySessionStoreModule.loadRoutingInstructionStateSync;
   if (typeof fn !== 'function') {
     throw buildStateIntegrationFailure(
@@ -80,6 +76,9 @@ export function loadRoutingInstructionStateSync(key: string): unknown | null {
 }
 
 export function saveRoutingInstructionStateAsync(key: string, state: unknown | null): void {
+  const stickySessionStoreModule = requireCoreDist<{
+    saveRoutingInstructionStateAsync?: (key: string, state: unknown | null) => void;
+  }>('router/virtual-router/sticky-session-store');
   const fn = stickySessionStoreModule.saveRoutingInstructionStateAsync;
   if (typeof fn !== 'function') {
     throw buildStateIntegrationFailure(
@@ -96,6 +95,9 @@ export function saveRoutingInstructionStateAsync(key: string, state: unknown | n
 }
 
 export function saveRoutingInstructionStateSync(key: string, state: unknown | null): void {
+  const stickySessionStoreModule = requireCoreDist<{
+    saveRoutingInstructionStateSync?: (key: string, state: unknown | null) => void;
+  }>('router/virtual-router/sticky-session-store');
   const fn = stickySessionStoreModule.saveRoutingInstructionStateSync;
   if (typeof fn !== 'function') {
     throw buildStateIntegrationFailure(
@@ -122,6 +124,9 @@ export function syncReasoningStopModeFromRequest(
   adapterContext: unknown,
   fallbackMode: 'on' | 'off' | 'endless' = 'off'
 ): 'on' | 'off' | 'endless' {
+  const reasoningStopStateModule = requireCoreDist<ReasoningStopStateExports>(
+    'servertool/handlers/reasoning-stop-state'
+  );
   const fn = (reasoningStopStateModule as ReasoningStopStateExports).syncReasoningStopModeFromRequest;
   if (typeof fn !== 'function') {
     throw buildStateIntegrationFailure(
@@ -144,6 +149,9 @@ type SessionIdentifiersModule = {
 };
 
 export function extractSessionIdentifiersFromMetadata(meta: Record<string, unknown> | undefined): SessionIdentifiers {
+  const sessionIdentifiersModule = requireCoreDist<SessionIdentifiersModule>(
+    'conversion/hub/pipeline/session-identifiers'
+  );
   const fn = (sessionIdentifiersModule as SessionIdentifiersModule).extractSessionIdentifiersFromMetadata;
   if (typeof fn !== 'function') {
     throw buildStateIntegrationFailure(
@@ -173,7 +181,7 @@ export function getStatsCenterSafe(): StatsCenterLike {
     return cachedStatsCenter;
   }
   if (cachedStatsCenter === null) {
-    return NOOP_STATS_CENTER;
+    throw buildStateIntegrationFailure('stats_center.load.cached_unavailable', 'stats center unavailable');
   }
   try {
     const mod = requireCoreDist<StatsCenterModule>('telemetry/stats-center');
@@ -183,12 +191,11 @@ export function getStatsCenterSafe(): StatsCenterLike {
       cachedStatsCenter = center;
       return center;
     }
-    logStateIntegrationsNonBlocking('stats_center.api_unavailable', 'getStatsCenter not available');
+    throw buildStateIntegrationFailure('stats_center.api_unavailable', 'getStatsCenter not available');
   } catch (error) {
-    logStateIntegrationsNonBlocking('stats_center.load', error);
+    cachedStatsCenter = null;
+    throw buildStateIntegrationFailure('stats_center.load', error);
   }
-  cachedStatsCenter = null;
-  return NOOP_STATS_CENTER;
 }
 
 export function getLlmsStatsSnapshot(): unknown | null {
@@ -197,10 +204,12 @@ export function getLlmsStatsSnapshot(): unknown | null {
     const get = mod?.getStatsCenter;
     const center = typeof get === 'function' ? get() : null;
     const snap = center && typeof center === 'object' ? (center as any).getSnapshot : null;
-    return typeof snap === 'function' ? snap.call(center) : null;
+    if (typeof snap !== 'function') {
+      throw buildStateIntegrationFailure('stats_center.snapshot.api_unavailable', 'getSnapshot not available');
+    }
+    return snap.call(center);
   } catch (error) {
-    logStateIntegrationsNonBlocking('stats_center.snapshot', error);
-    return null;
+    throw buildStateIntegrationFailure('stats_center.snapshot.invoke', error);
   }
 }
 

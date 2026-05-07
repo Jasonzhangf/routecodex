@@ -510,6 +510,131 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     }
   });
 
+  it('auto-detects submit_tool_outputs payload posted to /v1/responses and resumes the conversation', async () => {
+    mockResumeResponsesConversation.mockResolvedValue({
+      payload: {
+        model: 'claude-sonnet-4-5',
+        previous_response_id: 'resp_submit_prev_auto_1',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行 auto submit_tool_outputs 整链验证' }] }],
+        tool_outputs: [{ tool_call_id: 'call_submit_auto_1', output: 'ok' }]
+      },
+      meta: {
+        previousRequestId: 'req_chain_submit_auto_1',
+        restoredFromResponseId: 'resp_submit_prev_auto_1'
+      }
+    });
+
+    const pipelineExecute = jest.fn(async (_input: any) => ({
+      providerPayload: {
+        model: 'claude-sonnet-4-5',
+        messages: [{ role: 'user', content: '继续执行 auto submit_tool_outputs 整链验证' }]
+      },
+      standardizedRequest: {
+        model: 'claude-sonnet-4-5',
+        messages: [{ role: 'user', content: '继续执行 auto submit_tool_outputs 整链验证' }]
+      },
+      processedRequest: {
+        model: 'claude-sonnet-4-5',
+        messages: [{ role: 'user', content: '继续执行 auto submit_tool_outputs 整链验证' }]
+      },
+      target: {
+        providerKey: 'mock.anthropic.submit.auto',
+        providerType: 'anthropic',
+        outboundProfile: 'anthropic-messages',
+        runtimeKey: 'runtime:anthropic:submit:auto',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {
+        capturedChatRequest: {
+          model: 'claude-sonnet-4-5',
+          messages: [{ role: 'user', content: '继续执行 auto submit_tool_outputs 整链验证' }]
+        }
+      }
+    }));
+
+    const processIncoming = jest.fn(async (payload: Record<string, unknown>) => ({
+      status: 200,
+      data: {
+        id: 'msg_http_submit_auto_1',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-sonnet-4-5',
+        content: [{ type: 'text', text: `auto submit_tool_outputs 整链响应: ${JSON.stringify(payload)}` }],
+        stop_reason: 'end_turn'
+      }
+    }));
+
+    const handle = createProviderHandle({
+      runtimeKey: 'runtime:anthropic:submit:auto',
+      providerKey: 'mock.anthropic.submit.auto',
+      providerType: 'anthropic',
+      providerProtocol: 'anthropic-messages',
+      processIncoming
+    });
+
+    const executor = createRequestExecutor({
+      runtimeManager: {
+        resolveRuntimeKey: (_providerKey?: string, fallback?: string) => fallback,
+        getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === handle.runtimeKey ? handle : undefined)
+      },
+      getHubPipeline: () => ({
+        execute: pipelineExecute,
+        updateVirtualRouterConfig: jest.fn(),
+        dispose: jest.fn()
+      } as any),
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => ({ success: true }))
+        }
+      } as any),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    });
+
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    app.post('/v1/responses', (req, res) => {
+      void handleResponses(req as any, res as any, {
+        executePipeline: (input: any) => executor.execute(input),
+        errorHandling: null
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+
+    try {
+      const result = await fetchJson(baseUrl, '/v1/responses', {
+        response_id: 'resp_submit_prev_auto_1',
+        tool_outputs: [{ tool_call_id: 'call_submit_auto_1', output: 'ok' }]
+      });
+
+      expect(result.status).toBe(200);
+      expect(JSON.stringify(result.payload)).toContain('auto submit_tool_outputs 整链响应');
+
+      expect(mockResumeResponsesConversation).toHaveBeenCalledTimes(1);
+      expect(mockResumeResponsesConversation).toHaveBeenCalledWith(
+        'resp_submit_prev_auto_1',
+        {
+          response_id: 'resp_submit_prev_auto_1',
+          tool_outputs: [{ tool_call_id: 'call_submit_auto_1', output: 'ok' }]
+        },
+        expect.objectContaining({ requestId: expect.any(String) })
+      );
+
+      expect(pipelineExecute).toHaveBeenCalledTimes(1);
+      const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
+      expect(pipelineInput.endpoint).toBe('/v1/responses');
+      expect(pipelineInput.payload?.previous_response_id).toBe('resp_submit_prev_auto_1');
+      expect(pipelineInput.metadata?.responsesResume).toEqual({
+        previousRequestId: 'req_chain_submit_auto_1',
+        restoredFromResponseId: 'resp_submit_prev_auto_1'
+      });
+    } finally {
+      await closeServer(server);
+    }
+  });
+
 
   it('keeps namespace tools intact at /v1/responses handler boundary before pipeline routing', async () => {
     const pipelineExecute = jest.fn(async (_input: any) => ({

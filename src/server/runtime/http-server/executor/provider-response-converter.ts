@@ -138,6 +138,35 @@ function readReasoningStopBoolean(value: unknown): boolean | undefined {
   return undefined;
 }
 
+function containsBroadKillCommand(cmd: string): boolean {
+  const text = String(cmd || '').trim().toLowerCase();
+  if (!text) {
+    return false;
+  }
+  return (
+    /\bpkill\b/.test(text) ||
+    /\bkillall\b/.test(text) ||
+    /\bkill\s*\$\s*\(/.test(text) ||
+    /\bxargs\s+kill\b/.test(text)
+  );
+}
+
+function hasInvalidShellWrapperShape(cmd: string): boolean {
+  const trimmed = String(cmd || '').trim();
+  if (!trimmed) {
+    return false;
+  }
+  const shellWrapperPrefixes = [
+    "bash -lc '",
+    "bash -c '",
+    "sh -lc '",
+    "sh -c '",
+    "zsh -lc '",
+    "zsh -c '"
+  ] as const;
+  return shellWrapperPrefixes.some((prefix) => trimmed.startsWith(prefix) && !trimmed.endsWith("'"));
+}
+
 function validateCanonicalClientToolCall(
   name: string,
   argsString: string,
@@ -159,6 +188,19 @@ function validateCanonicalClientToolCall(
           reason: 'missing_cmd',
           message: 'exec_command requires input.cmd as a non-empty string.',
           missingFields: ['cmd']
+        });
+      }
+      if (containsBroadKillCommand(cmd)) {
+        return buildToolValidationFailure({
+          reason: 'forbidden_broad_kill',
+          message: 'exec_command contains a forbidden broad process-kill command. Use explicit PID- or service-scoped shutdown/restart only.'
+        });
+      }
+      if (hasInvalidShellWrapperShape(cmd)) {
+        return buildToolValidationFailure({
+          reason: 'invalid_shell_wrapper_shape',
+          message:
+            "exec_command contains a malformed shell wrapper: `bash/sh/zsh -c/-lc '...'` must keep the closing single quote. Tail-truncated wrappers are rejected."
         });
       }
       return { ok: true, normalizedArgs: JSON.stringify({ ...parsed, cmd }) };
@@ -1041,10 +1083,15 @@ export async function convertProviderResponseIfNeeded(
         status: normalized.status,
         elapsedMs: Date.now() - normalizeStartMs
       });
-      const bodyPayload =
+      const normalizedBodyRecord =
         normalized.body && typeof normalized.body === 'object'
           ? (normalized.body as Record<string, unknown>)
-          : (normalized as unknown as Record<string, unknown>);
+          : undefined;
+      const bodyPayload =
+        extractBridgeProviderResponsePayload(normalizedBodyRecord)
+        ?? (normalizedBodyRecord
+          ? normalizedBodyRecord
+          : (normalized as unknown as Record<string, unknown>));
       logPipelineStage('convert.provider_invoke.completed', invokeOptions.requestId, {
         providerKey: invokeOptions.providerKey,
         runtimeKey,
@@ -1071,6 +1118,7 @@ export async function convertProviderResponseIfNeeded(
         body: reenterOpts.body,
         metadata: reenterOpts.metadata,
         baseMetadata: metadataBag,
+        requestSemantics: options.requestSemantics,
         executeNested: deps.executeNested,
         runClientInjectBeforeNested: false,
         onMergeRuntimeMetaError: (error, details) => {
@@ -1106,6 +1154,7 @@ export async function convertProviderResponseIfNeeded(
         body: injectOpts.body,
         metadata: injectOpts.metadata,
         baseMetadata: metadataBag,
+        requestSemantics: options.requestSemantics,
         onMergeRuntimeMetaError: (error, details) => {
           logProviderResponseConverterNonBlockingError('clientInjectDispatch.mergeRuntimeMeta', error, {
             requestId: details.requestId,
@@ -1137,9 +1186,12 @@ export async function convertProviderResponseIfNeeded(
       wantsStream: options.wantsStream
     });
     const bridgeStartMs = Date.now();
+    const bridgeProviderResponse =
+      extractBridgeProviderResponsePayload(body as Record<string, unknown>)
+      ?? (body as Record<string, unknown>);
     const converted = await bridgeConvertProviderResponse({
       providerProtocol: options.providerProtocol,
-      providerResponse: body as Record<string, unknown>,
+      providerResponse: bridgeProviderResponse,
       context: adapterContext,
       entryEndpoint: options.entryEndpoint || entry,
       wantsStream: options.wantsStream,
@@ -1283,4 +1335,31 @@ export async function convertProviderResponseIfNeeded(
     }
     throw error;
   }
+}
+
+function extractBridgeProviderResponsePayload(
+  body: Record<string, unknown> | null | undefined
+): Record<string, unknown> | undefined {
+  if (!body || typeof body !== 'object') {
+    return undefined;
+  }
+  const nestedBody =
+    body.body && typeof body.body === 'object' && !Array.isArray(body.body)
+      ? (body.body as Record<string, unknown>)
+      : undefined;
+  const nestedData =
+    nestedBody?.data && typeof nestedBody.data === 'object' && !Array.isArray(nestedBody.data)
+      ? (nestedBody.data as Record<string, unknown>)
+      : undefined;
+  if (nestedData) {
+    return nestedData;
+  }
+  if (nestedBody) {
+    return nestedBody;
+  }
+  const rootData =
+    body.data && typeof body.data === 'object' && !Array.isArray(body.data)
+      ? (body.data as Record<string, unknown>)
+      : undefined;
+  return rootData;
 }

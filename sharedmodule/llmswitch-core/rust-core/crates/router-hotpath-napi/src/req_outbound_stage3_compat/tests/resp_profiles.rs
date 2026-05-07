@@ -151,6 +151,76 @@ fn test_resp_profile_chat_lmstudio_harvests_responses_output_tool_tokens() {
 }
 
 #[test]
+fn test_resp_profile_chat_deepseek_web_harvests_real_sample_with_extra_trailing_closer() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "body": {
+                "mode": "sse",
+                "raw": concat!(
+                    "data: {\"v\":{\"response\":{\"message_id\":2,\"status\":\"WIP\",\"content\":\"\"}}}\n\n",
+                    "data: {\"p\":\"response/content\",\"v\":\"<tool_call>\\n\"}\n\n",
+                    "data: {\"o\":\"APPEND\",\"v\":\"{\\\"name\\\":\\\"exec_command\\\",\\\"arguments\\\":{\\\"cmd\\\":\\\"bash -lc 'curl -s -o /dev/null -w \\\\\\\"%{http_code}\\\\\\\" http://127.0.0.1:4040/'\\\"},\\\"id\\\":\\\"check_webdebug\\\",\\\"justification\\\":\\\"验证 fin web-debug 是否运行\\\"}}\"}\n\n",
+                    "data: {\"v\":\"\\n</tool_call>\"}\n\n",
+                    "data: {\"p\":\"response/status\",\"v\":\"FINISHED\"}\n\n"
+                )
+            }
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_resp_deepseek_web_realshape_1".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: Some("coding/coding-long-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "cmd": { "type": "string" }
+                                },
+                                "required": ["cmd"]
+                            }
+                        }
+                    }
+                ]
+            })),
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_resp_inbound_stage3_compat(input).expect("deepseek-web compat");
+    assert!(result.native_applied);
+    assert_eq!(result.applied_profile, Some("chat:deepseek-web".to_string()));
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    assert_eq!(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["id"],
+        "check_webdebug"
+    );
+}
+
+#[test]
 fn test_resp_inbound_iflow_protocol_mismatch_native_noop() {
     let input = ReqOutboundCompatInput {
         payload: json!({"id": "resp_2", "output": []}),
@@ -735,6 +805,60 @@ fn test_resp_profile_chat_deepseek_web_harvests_function_results_markup() {
 }
 
 #[test]
+fn test_resp_profile_chat_deepseek_web_preserves_empty_reasoning_content_from_thinking_only_sse() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "body": {
+                "mode": "sse",
+                "raw": concat!(
+                    "event: ready\n",
+                    "data: {\"request_message_id\":1,\"response_message_id\":2}\n\n",
+                    "data: {\"v\":{\"response\":{\"message_id\":2,\"status\":\"WIP\",\"thinking_content\":\"\"}}}\n\n",
+                    "data: {\"p\":\"response/status\",\"v\":\"FINISHED\"}\n\n"
+                )
+            }
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_empty_reasoning_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(
+        result.applied_profile,
+        Some("chat:deepseek-web".to_string())
+    );
+    assert_eq!(result.payload["choices"][0]["message"]["content"], "");
+    assert_eq!(
+        result.payload["choices"][0]["message"]["reasoning_content"],
+        ""
+    );
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "stop");
+}
+
+#[test]
 fn test_resp_profile_chat_deepseek_web_harvests_tool_calls_from_rcc_container_only() {
     let input = ReqOutboundCompatInput {
         payload: json!({
@@ -798,7 +922,7 @@ fn test_resp_profile_chat_deepseek_web_harvests_tool_calls_from_rcc_container_on
 }
 
 #[test]
-fn test_resp_profile_chat_deepseek_web_harvests_quote_wrapped_tool_calls_via_global_text_harvest() {
+fn test_resp_profile_chat_deepseek_web_does_not_harvest_quote_wrapped_tool_calls_outside_wrapper() {
     let input = ReqOutboundCompatInput {
         payload: json!({
             "choices": [{
@@ -855,15 +979,15 @@ fn test_resp_profile_chat_deepseek_web_harvests_quote_wrapped_tool_calls_via_glo
 
     let result = run_resp_inbound_stage3_compat(input).unwrap();
     assert!(result.native_applied);
-    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
-    assert_eq!(
-        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
-        "exec_command"
-    );
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "stop");
+    assert!(result.payload["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .map(|rows| rows.is_empty())
+        .unwrap_or(true));
 }
 
 #[test]
-fn test_resp_profile_chat_deepseek_web_harvests_truncated_rcc_container_by_boundary_repair_only() {
+fn test_resp_profile_chat_deepseek_web_rejects_truncated_rcc_container_without_closing_boundary() {
     let input = ReqOutboundCompatInput {
         payload: json!({
             "choices": [{
@@ -894,7 +1018,8 @@ fn test_resp_profile_chat_deepseek_web_harvests_truncated_rcc_container_by_bound
                             "required": ["cmd"]
                         }
                     }
-                }]
+                }],
+                "tool_choice": "required"
             })),
             deepseek: Some(json!({
                 "strictToolRequired": true,
@@ -917,13 +1042,8 @@ fn test_resp_profile_chat_deepseek_web_harvests_truncated_rcc_container_by_bound
         explicit_profile: None,
     };
 
-    let result = run_resp_inbound_stage3_compat(input).unwrap();
-    assert!(result.native_applied);
-    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
-    assert_eq!(
-        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
-        "exec_command"
-    );
+    let error = run_resp_inbound_stage3_compat(input).unwrap_err();
+    assert!(error.contains("declared tools present"));
 }
 
 #[test]
@@ -1099,6 +1219,117 @@ fn test_resp_profile_chat_deepseek_web_strips_meta_leakage_when_tool_call_exists
     assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
     assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
     assert_eq!(message["content"], Value::Null);
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_harvests_sse_fenced_tool_call_wrappers() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "body": {
+                "mode": "sse",
+                "raw": concat!(
+                    "event: ready\n",
+                    "data: {\"request_message_id\":7,\"response_message_id\":8,\"model_type\":\"default\"}\n\n",
+                    "data: {\"v\":{\"response\":{\"message_id\":8,\"status\":\"WIP\",\"content\":\"\"}}}\n\n",
+                    "data: {\"p\":\"response/content\",\"o\":\"APPEND\",\"v\":\"```\"}\n\n",
+                    "data: {\"v\":\"json\"}\n\n",
+                    "data: {\"v\":\"\\n\"}\n\n",
+                    "data: {\"v\":\"<\"}\n\n",
+                    "data: {\"v\":\"tool\"}\n\n",
+                    "data: {\"v\":\"_call\"}\n\n",
+                    "data: {\"v\":\">\\n\"}\n\n",
+                    "data: {\"v\":\"{\\\"name\\\":\\\"update_plan\\\",\\\"arguments\\\":{\\\"plan\\\":[{\\\"step\\\":\\\"修改 scheduler.rs\\\",\\\"status\\\":\\\"completed\\\"}]}}\\n\"}\n\n",
+                    "data: {\"v\":\"</\"}\n\n",
+                    "data: {\"v\":\"tool\"}\n\n",
+                    "data: {\"v\":\"_call\"}\n\n",
+                    "data: {\"v\":\">\\n\"}\n\n",
+                    "data: {\"v\":\"```\\n\"}\n\n",
+                    "data: {\"v\":\"```\"}\n\n",
+                    "data: {\"v\":\"json\"}\n\n",
+                    "data: {\"v\":\"\\n\"}\n\n",
+                    "data: {\"v\":\"<\"}\n\n",
+                    "data: {\"v\":\"tool\"}\n\n",
+                    "data: {\"v\":\"_call\"}\n\n",
+                    "data: {\"v\":\">\\n\"}\n\n",
+                    "data: {\"v\":\"{\\\"name\\\":\\\"exec_command\\\",\\\"arguments\\\":{\\\"cmd\\\":\\\"bash -lc 'echo ok'\\\"}}\\n\"}\n\n",
+                    "data: {\"v\":\"</\"}\n\n",
+                    "data: {\"v\":\"tool\"}\n\n",
+                    "data: {\"v\":\"_call\"}\n\n",
+                    "data: {\"v\":\">\\n\"}\n\n",
+                    "data: {\"v\":\"```\"}\n\n",
+                    "data: {\"p\":\"response/status\",\"v\":\"FINISHED\"}\n\n"
+                )
+            }
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_sse_fenced_wrappers".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("thinking-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "update_plan",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"plan": {"type": "array"}},
+                            "required": ["plan"]
+                        }
+                    }
+                },{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "auto"
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": false,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    let tool_calls = result.payload["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(tool_calls.len(), 2);
+    assert_eq!(tool_calls[0]["function"]["name"], "update_plan");
+    assert_eq!(tool_calls[1]["function"]["name"], "exec_command");
+    let exec_args: Value = serde_json::from_str(
+        tool_calls[1]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    assert_eq!(exec_args["cmd"], "bash -lc 'echo ok'");
 }
 
 #[test]
@@ -1429,6 +1660,71 @@ fn test_resp_profile_chat_deepseek_web_declared_tools_missing_returns_error_with
 }
 
 #[test]
+fn test_resp_profile_chat_deepseek_web_coding_route_plain_text_final_requires_tool_call() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "我已经完成检查，根因在 response 侧 declared tools 判定过严，需要对齐 request 侧路由语义。",
+                    "tool_calls": []
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_coding_plain_text_final".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("coding-long-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "auto",
+                "messages": [{
+                    "role": "user",
+                    "content": "继续"
+                }]
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": true,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let error = run_resp_inbound_stage3_compat(input).unwrap_err();
+    assert!(error.contains("declared tools present"));
+    assert!(error.contains("toolChoiceRequired=false"));
+}
+
+#[test]
 fn test_resp_profile_chat_deepseek_web_narrative_tool_intent_is_rejected_without_wrapper() {
     let input = ReqOutboundCompatInput {
         payload: json!({
@@ -1488,7 +1784,168 @@ fn test_resp_profile_chat_deepseek_web_narrative_tool_intent_is_rejected_without
 }
 
 #[test]
-fn test_resp_profile_chat_deepseek_web_harvests_real_failed_command_wrappers() {
+fn test_resp_profile_chat_deepseek_web_harvests_tool_call_from_reasoning_content_tail() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "我们上次修改了 scheduler.rs，使 running 状态不再阻塞 dispatch_ready_task。\n\n让我先查看 fin-cli 的帮助，看看有哪些命令可以创建持久会话。\n<tool_call>\n{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"bash -lc '~/.cargo/bin/fin-cli --help'\"}}\n</tool_call>",
+                    "tool_calls": []
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_reasoning_tail_tool_call".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("thinking-long-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "model": "deepseek-reasoner",
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "messages": [{
+                    "role": "user",
+                    "content": "继续"
+                }]
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": true,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    let args: Value = serde_json::from_str(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    assert_eq!(args["cmd"], "bash -lc '~/.cargo/bin/fin-cli --help'");
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_sse_patch_without_append_harvests_reasoning_tool_call() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "body": {
+                "mode": "sse",
+                "raw": concat!(
+                    "event: ready\n",
+                    "data: {\"request_message_id\":1,\"response_message_id\":2,\"model_type\":\"default\"}\n\n",
+                    "data: {\"v\":{\"response\":{\"message_id\":2,\"status\":\"WIP\",\"content\":\"\",\"thinking_content\":null}}}\n\n",
+                    "data: {\"p\":\"response/thinking_content\",\"v\":\"让我先查看 fin-cli 的帮助。\\n\"}\n\n",
+                    "data: {\"v\":\"<tool_call>\\n\"}\n\n",
+                    "data: {\"v\":\"{\\\"name\\\":\\\"exec_command\\\",\\\"arguments\\\":{\\\"cmd\\\":\\\"bash -lc '~/.cargo/bin/fin-cli --help'\\\"}}\\n\"}\n\n",
+                    "data: {\"v\":\"</tool_call>\"}\n\n",
+                    "data: {\"p\":\"response/accumulated_token_usage\",\"o\":\"SET\",\"v\":123}\n\n",
+                    "data: {\"p\":\"response/status\",\"v\":\"FINISHED\"}\n\n",
+                    "event: finish\n",
+                    "data: {}\n\n"
+                )
+            }
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_sse_patch_without_append".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("thinking-long-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "model": "deepseek-reasoner",
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "messages": [{
+                    "role": "user",
+                    "content": "继续"
+                }]
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": true,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    let args: Value = serde_json::from_str(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    assert_eq!(args["cmd"], "bash -lc '~/.cargo/bin/fin-cli --help'");
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_does_not_harvest_generic_command_wrappers_without_whitelist_container(
+) {
     let input = ReqOutboundCompatInput {
         payload: json!({
             "choices": [{
@@ -1561,69 +2018,76 @@ fn test_resp_profile_chat_deepseek_web_harvests_real_failed_command_wrappers() {
 
     let result = run_resp_inbound_stage3_compat(input).unwrap();
     assert!(result.native_applied);
-    assert_eq!(
-        result.applied_profile,
-        Some("chat:deepseek-web".to_string())
-    );
-    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
-    assert_eq!(
-        result.payload["metadata"]["deepseek"]["toolCallState"],
-        "text_tool_calls"
-    );
-    assert_eq!(
-        result.payload["metadata"]["deepseek"]["toolCallSource"],
-        "fallback"
-    );
-
-    let tool_calls = result.payload["choices"][0]["message"]["tool_calls"]
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "stop");
+    assert!(result.payload["choices"][0]["message"]["tool_calls"]
         .as_array()
-        .cloned()
-        .unwrap_or_default();
-    assert_eq!(tool_calls.len(), 3);
-    for entry in &tool_calls {
-        assert_eq!(entry["function"]["name"], "exec_command");
-    }
-    let args0: Value = serde_json::from_str(
-        tool_calls[0]["function"]["arguments"]
-            .as_str()
-            .unwrap_or("{}"),
-    )
-    .unwrap_or(Value::Null);
-    let args1: Value = serde_json::from_str(
-        tool_calls[1]["function"]["arguments"]
-            .as_str()
-            .unwrap_or("{}"),
-    )
-    .unwrap_or(Value::Null);
-    let args2: Value = serde_json::from_str(
-        tool_calls[2]["function"]["arguments"]
-            .as_str()
-            .unwrap_or("{}"),
-    )
-    .unwrap_or(Value::Null);
-    assert_eq!(
-        args0["cmd"],
-        r#"cd /Volumes/extension/code/finger && grep -n "agentRegistry\|registerAgent\|getAgent" src/orchestration/message-hub.ts | head -30"#
-    );
-    assert_eq!(
-        args1["cmd"],
-        r#"cd /Volumes/extension/code/finger && grep -n "resolveTargetModule\|moduleLookup" src/blocks/agent-runtime-block/index.ts | head -30"#
-    );
-    assert_eq!(
-        args2["cmd"],
-        "cd /Volumes/extension/code/finger && ls -la src/agents/finger-system-agent/registry.ts"
-    );
-    let content = result.payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
-    assert!(content.contains("system agent 重启后无法向 project agent 派发任务"));
-    assert!(content.contains("让我定位具体代码"));
-    assert!(!content.contains("<command>"));
-    assert!(!content.contains("<grep_command>"));
+        .map(|rows| rows.is_empty())
+        .unwrap_or(true));
 }
 
 #[test]
-fn test_resp_profile_chat_deepseek_web_harvests_live_single_command_wrapper() {
+fn test_resp_profile_chat_deepseek_web_rejects_top_level_exec_command_object_without_wrapper() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "• {\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"bash -lc \\\"pwd\\\"\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\"}}\n\"tool_call\"}",
+                    "tool_calls": []
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_top_level_tail_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("thinking-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tool_choice": "required",
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }]
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": true,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let error = run_resp_inbound_stage3_compat(input).unwrap_err();
+    assert!(error.contains("declared tools present"));
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_does_not_harvest_live_single_command_wrapper_without_whitelist_container(
+) {
     let input = ReqOutboundCompatInput {
         payload: json!({
             "choices": [{
@@ -1698,57 +2162,11 @@ cd /Volumes/extension/code/finger && grep -n "moduleRegistry\|agentRegistry" src
 
     let result = run_resp_inbound_stage3_compat(input).unwrap();
     assert!(result.native_applied);
-    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
-    assert_eq!(
-        result.payload["metadata"]["deepseek"]["toolCallState"],
-        "text_tool_calls"
-    );
-    assert_eq!(
-        result.payload["metadata"]["deepseek"]["toolCallSource"],
-        "fallback"
-    );
-
-    let tool_calls = result.payload["choices"][0]["message"]["tool_calls"]
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "stop");
+    assert!(result.payload["choices"][0]["message"]["tool_calls"]
         .as_array()
-        .cloned()
-        .unwrap_or_default();
-    assert_eq!(tool_calls.len(), 3);
-    let args0: Value = serde_json::from_str(
-        tool_calls[0]["function"]["arguments"]
-            .as_str()
-            .unwrap_or("{}"),
-    )
-    .unwrap_or(Value::Null);
-    let args1: Value = serde_json::from_str(
-        tool_calls[1]["function"]["arguments"]
-            .as_str()
-            .unwrap_or("{}"),
-    )
-    .unwrap_or(Value::Null);
-    let args2: Value = serde_json::from_str(
-        tool_calls[2]["function"]["arguments"]
-            .as_str()
-            .unwrap_or("{}"),
-    )
-    .unwrap_or(Value::Null);
-    assert_eq!(
-        args0["cmd"],
-        r#"cd /Volumes/extension/code/finger && grep -n "hasModule\|getModule" src/orchestration/message-hub.ts | head -30"#
-    );
-    assert_eq!(
-        args1["cmd"],
-        r#"cd /Volumes/extension/code/finger && grep -n "resolveAgentToModule" src/orchestration/message-hub.ts"#
-    );
-    assert_eq!(
-        args2["cmd"],
-        r#"cd /Volumes/extension/code/finger && grep -n "moduleRegistry\|agentRegistry" src/orchestration/message-hub.ts | head -30"#
-    );
-    let content = result.payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
-    assert!(content.contains("让我查看 message-hub 如何查找 target agent"));
-    assert!(!content.contains("<command>"));
-    assert!(!content.contains("<grep_command>"));
+        .map(|rows| rows.is_empty())
+        .unwrap_or(true));
 }
 
 #[test]
@@ -1962,7 +2380,8 @@ fn test_resp_profile_chat_deepseek_web_does_not_guess_exec_command_from_command_
 }
 
 #[test]
-fn test_resp_profile_chat_deepseek_web_preserves_compact_exec_command_arguments() {
+fn test_resp_profile_chat_deepseek_web_does_not_harvest_compact_exec_command_json_outside_wrapper()
+{
     let input = ReqOutboundCompatInput {
         payload: json!({
             "choices": [{
@@ -2024,44 +2443,11 @@ fn test_resp_profile_chat_deepseek_web_preserves_compact_exec_command_arguments(
 
     let result = run_resp_inbound_stage3_compat(input).unwrap();
     assert!(result.native_applied);
-    assert_eq!(
-        result.applied_profile,
-        Some("chat:deepseek-web".to_string())
-    );
-    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
-
-    let tool_calls = result.payload["choices"][0]["message"]["tool_calls"]
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "stop");
+    assert!(result.payload["choices"][0]["message"]["tool_calls"]
         .as_array()
-        .cloned()
-        .unwrap_or_default();
-    assert_eq!(tool_calls.len(), 2);
-
-    let args0: Value = serde_json::from_str(
-        tool_calls[0]["function"]["arguments"]
-            .as_str()
-            .unwrap_or("{}"),
-    )
-    .unwrap_or(Value::Null);
-    assert_eq!(
-        args0["cmd"],
-        "catdocs/design/project-dispatch-operation-architecture.md"
-    );
-    assert!(args0.get("workdir").is_none());
-
-    let args1: Value = serde_json::from_str(
-        tool_calls[1]["function"]["arguments"]
-            .as_str()
-            .unwrap_or("{}"),
-    )
-    .unwrap_or(Value::Null);
-    assert_eq!(
-        args1["cmd"],
-        "ls -la /Volumes/extension/code/finger/docs/design/project-dispatch-operation-architecture.md2>&1 &&head -200 /Volumes/extension/code/finger/docs/design/project-dispatch-operation-architecture.md"
-    );
-    assert_eq!(
-        result.payload["metadata"]["deepseek"]["toolCallState"],
-        "text_tool_calls"
-    );
+        .map(|rows| rows.is_empty())
+        .unwrap_or(true));
 }
 
 #[test]

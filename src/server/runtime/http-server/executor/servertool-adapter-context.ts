@@ -21,6 +21,60 @@ function readNonEmptyString(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
+function readToolName(tool: unknown): string {
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+    return '';
+  }
+  const directName = readNonEmptyString((tool as { name?: unknown }).name);
+  if (directName) {
+    return directName.toLowerCase();
+  }
+  const fn = (tool as { function?: unknown }).function;
+  if (!fn || typeof fn !== 'object' || Array.isArray(fn)) {
+    return '';
+  }
+  return readNonEmptyString((fn as { name?: unknown }).name)?.toLowerCase() ?? '';
+}
+
+function shouldReplaceCapturedChatRequestTools(args: {
+  baseContext: Record<string, unknown>;
+  existingTools?: unknown[];
+  clientToolsRaw?: unknown[];
+}): boolean {
+  const existingTools = Array.isArray(args.existingTools) ? args.existingTools : undefined;
+  const clientToolsRaw = Array.isArray(args.clientToolsRaw) ? args.clientToolsRaw : undefined;
+  if (!clientToolsRaw?.length) {
+    return false;
+  }
+  if (!existingTools?.length) {
+    return true;
+  }
+
+  const rt = asFlatRecord(args.baseContext.__rt);
+  const isServerToolFollowup =
+    args.baseContext.serverToolFollowup === true
+    || args.baseContext.isServerToolFollowup === true
+    || rt?.serverToolFollowup === true;
+  if (!isServerToolFollowup) {
+    return false;
+  }
+
+  const existingNames = existingTools.map(readToolName).filter(Boolean);
+  const clientNames = new Set(clientToolsRaw.map(readToolName).filter(Boolean));
+  if (!existingNames.length || !clientNames.size) {
+    return false;
+  }
+
+  const existingOnlyReasoningStop = existingNames.every(
+    (name) => name === 'reasoning.stop' || name === 'reasoning_stop' || name === 'reasoning-stop'
+  );
+  if (existingOnlyReasoningStop) {
+    return true;
+  }
+
+  return existingNames.length < clientNames.size && existingNames.every((name) => clientNames.has(name));
+}
+
 function hasStoplessDirectiveInRequestPayload(payload: unknown): boolean {
   if (!payload || typeof payload !== 'object') {
     return false;
@@ -44,7 +98,7 @@ function backfillCapturedChatRequestToolsFromRequestSemantics(
     return;
   }
   const existingTools = Array.isArray(capturedChatRequest.tools) ? capturedChatRequest.tools : undefined;
-  if (existingTools?.length) {
+  if (!shouldReplaceCapturedChatRequestTools({ baseContext, existingTools, clientToolsRaw })) {
     return;
   }
   capturedChatRequest.tools = clientToolsRaw;
@@ -122,8 +176,17 @@ export function buildServerToolAdapterContext(args: {
 
   const stopMessageInjectReadiness = resolveStopMessageClientInjectReadiness(baseContext);
   const rt = asFlatRecord(baseContext.__rt) ?? {};
+  const followupFlag =
+    metadataBag.isServerToolFollowup === true
+    || metadataBag.serverToolFollowup === true
+    || rt.serverToolFollowup === true;
+  const clientProtocol = readNonEmptyString(metadataBag.clientProtocol)
+    ?? readNonEmptyString(rt.clientProtocol)
+    ?? (args.entryEndpoint.includes('/v1/responses') ? 'openai-responses' : undefined);
   baseContext.__rt = {
     ...rt,
+    ...(followupFlag ? { serverToolFollowup: true } : {}),
+    ...(clientProtocol ? { clientProtocol } : {}),
     stopMessageClientInjectReady: stopMessageInjectReadiness.ready,
     stopMessageClientInjectReason: stopMessageInjectReadiness.reason,
     ...(stopMessageInjectReadiness.sessionScope

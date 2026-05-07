@@ -66,6 +66,7 @@ export type ProviderConfigInternal = OpenAIStandardConfig['config'] & {
   defaultModel?: string;
   headers?: Record<string, string>;
   responses?: Record<string, unknown>;
+  compatibilityProfile?: string;
   authCapabilities?: {
     required?: string[];
     optional?: string[];

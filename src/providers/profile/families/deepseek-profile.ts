@@ -4,6 +4,7 @@ import type {
   ProviderFamilyProfile,
   ResolveUserAgentInput
 } from '../profile-contracts.js';
+import { DEEPSEEK_UPSTREAM_USER_AGENT } from '../../core/contracts/deepseek-provider-contract.js';
 
 function assignHeader(headers: Record<string, string>, target: string, value: string): void {
   const normalizedValue = typeof value === 'string' ? value.trim() : '';
@@ -116,8 +117,7 @@ export const deepseekFamilyProfile: ProviderFamilyProfile = {
   id: 'deepseek/default',
   providerFamily: 'deepseek',
   async resolveUserAgent(_input: ResolveUserAgentInput): Promise<string | undefined> {
-    // 暂时返回 undefined 让上层决定 UA，后续可定制
-    return undefined;
+    return DEEPSEEK_UPSTREAM_USER_AGENT;
   },
   applyRequestHeaders(input: ApplyRequestHeadersInput): Record<string, string> | undefined {
     return applyDeepSeekHeaderContract(input.headers, input.request);

@@ -191,6 +191,7 @@ describe('runtime parse/exec errorsamples', () => {
     expect(Array.isArray(json.observation.toolMessages)).toBe(true);
   });
 
+
   it('ignores transcript-like successful exec_command output even if output text contains parse-failure keywords', async () => {
     const recorder = await createSnapshotRecorder(
       {

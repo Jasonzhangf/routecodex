@@ -5,7 +5,7 @@
  * provider runtime ingress hooks.
  */
 
-import type { ProviderErrorEvent, ProviderSuccessEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
+import type { ProviderErrorEvent, ProviderSuccessEvent } from '../../../types/llmswitch-local-types.js';
 import { importCoreDist } from './module-loader.js';
 import type { AnyRecord } from './module-loader.js';
 

@@ -24,6 +24,16 @@ export interface ClientRemapProtocolSwitchOptions {
   responseSemantics?: JsonObject;
 }
 
+function shouldLogClientRemapDebug(payload: JsonObject): boolean {
+  const governance =
+    payload?.__rcc_tool_governance &&
+    typeof payload.__rcc_tool_governance === 'object' &&
+    !Array.isArray(payload.__rcc_tool_governance)
+      ? (payload.__rcc_tool_governance as Record<string, unknown>)
+      : undefined;
+  return governance?.textHarvestApplied === true;
+}
+
 type IndexedClientTool = {
   declaredName: string;
   namespace?: string;
@@ -471,6 +481,7 @@ function enforceClientToolNameContract(
 export function buildClientPayloadForProtocol(options: ClientRemapProtocolSwitchOptions): JsonObject {
   let clientPayload: JsonObject;
   const toolsRaw = resolveClientToolsRawFromSemantics(options.requestSemantics) as BridgeToolDefinition[] | undefined;
+  const shouldLogDebug = shouldLogClientRemapDebug(options.payload);
   if (options.clientProtocol === 'openai-chat') {
     clientPayload = normalizeOpenaiChatReasoningOutboundWithNative(options.payload) as JsonObject;
   } else if (options.clientProtocol === 'anthropic-messages') {
@@ -478,6 +489,10 @@ export function buildClientPayloadForProtocol(options: ClientRemapProtocolSwitch
       aliasMap: resolveAliasMapFromSemantics(options.requestSemantics)
     });
   } else {
+    if (shouldLogDebug) {
+      console.log('[CLIENT-REMAP:DEBUG] input payload choices[0].finish_reason:', (options.payload as any)?.choices?.[0]?.finish_reason);
+      console.log('[CLIENT-REMAP:DEBUG] input payload choices[0].message.tool_calls count:', (options.payload as any)?.choices?.[0]?.message?.tool_calls?.length);
+    }
     clientPayload = buildResponsesPayloadFromChatWithNative(options.payload, {
       requestId: options.requestId,
       responseSemantics: options.responseSemantics,
@@ -485,6 +500,12 @@ export function buildClientPayloadForProtocol(options: ClientRemapProtocolSwitch
     }) as JsonObject;
   }
 
+  if (shouldLogDebug) {
+    console.log('[CLIENT-REMAP:DEBUG] responsesPayload status:', (clientPayload as any)?.status);
+    console.log('[CLIENT-REMAP:DEBUG] responsesPayload output count:', (clientPayload as any)?.output?.length);
+    console.log('[CLIENT-REMAP:DEBUG] responsesPayload output types:', (clientPayload as any)?.output?.map((o: any) => o.type));
+    console.log('[CLIENT-REMAP:DEBUG] responsesPayload required_action:', JSON.stringify((clientPayload as any)?.required_action)?.slice(0, 200));
+  }
   const patchedPayload = applyClientPassthroughPatchWithNative(
     clientPayload,
     options.payload

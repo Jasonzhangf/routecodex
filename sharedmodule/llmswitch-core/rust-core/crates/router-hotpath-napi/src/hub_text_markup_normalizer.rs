@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct ToolCallLite {
+pub(crate) struct ToolCallLite {
     id: Option<String>,
     name: String,
     args: String,
@@ -24,7 +24,7 @@ struct JsonToolRepairConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct TextMarkupNormalizeOptions {
+pub(crate) struct TextMarkupNormalizeOptions {
     json_tool_repair: Option<JsonToolRepairConfig>,
 }
 
@@ -50,6 +50,14 @@ fn known_tools() -> HashSet<&'static str> {
     ]
     .into_iter()
     .collect()
+}
+
+fn is_structured_tool_name(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    !trimmed.is_empty()
+        && trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == '-')
 }
 
 fn allowed_keys_for_tool(name: &str) -> Option<&'static [&'static str]> {
@@ -137,6 +145,15 @@ fn filter_args_for_tool(name: &str, args: &Map<String, Value>) -> Map<String, Va
         }
         return out;
     }
+    if is_structured_tool_name(lname.as_str()) {
+        for (k, v) in args.iter() {
+            let key = normalize_key(k).to_string();
+            if !key.is_empty() {
+                out.insert(key, v.clone());
+            }
+        }
+        return out;
+    }
     let safe: HashSet<&str> = [
         "cmd",
         "command",
@@ -176,6 +193,26 @@ fn try_parse_json_value(text: &str) -> Option<Value> {
     serde_json::from_str(trimmed).ok()
 }
 
+fn is_pure_top_level_json_payload(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    (trimmed.starts_with('{') && trimmed.ends_with('}'))
+        || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+}
+
+fn extract_whitelisted_prefixed_json_payload(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    let prefix_re = Regex::new(r"^[\s]*(?:[•*+-]\s+)([\s\S]+)$").ok()?;
+    let caps = prefix_re.captures(trimmed)?;
+    let body = caps.get(1)?.as_str().trim();
+    if is_pure_top_level_json_payload(body) {
+        return Some(body.to_string());
+    }
+    None
+}
+
 fn try_parse_primitive_value(text: &str) -> Value {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -199,9 +236,20 @@ fn try_parse_primitive_value(text: &str) -> Value {
 }
 
 fn coerce_command_value_to_string(value: &Value) -> String {
+    fn normalize_shell_escaped_quotes(raw: &str) -> String {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+        if trimmed.contains("\\\"") {
+            return trimmed.replace("\\\"", "\"");
+        }
+        trimmed.to_string()
+    }
+
     match value {
         Value::Null => String::new(),
-        Value::String(s) => s.trim().to_string(),
+        Value::String(s) => normalize_shell_escaped_quotes(s),
         Value::Array(arr) => arr
             .iter()
             .map(|v| value_to_string(v))
@@ -212,17 +260,17 @@ fn coerce_command_value_to_string(value: &Value) -> String {
         Value::Object(map) => {
             if let Some(Value::String(cmd)) = map.get("cmd") {
                 if !cmd.trim().is_empty() {
-                    return cmd.trim().to_string();
+                    return normalize_shell_escaped_quotes(cmd);
                 }
             }
             if let Some(Value::String(cmd)) = map.get("command") {
                 if !cmd.trim().is_empty() {
-                    return cmd.trim().to_string();
+                    return normalize_shell_escaped_quotes(cmd);
                 }
             }
             serde_json::to_string(value).unwrap_or_else(|_| value_to_string(value))
         }
-        _ => value_to_string(value),
+        _ => normalize_shell_escaped_quotes(value_to_string(value).as_str()),
     }
 }
 
@@ -314,6 +362,250 @@ fn try_parse_json_with_model_repairs(raw: &str) -> Option<Value> {
     None
 }
 
+fn resolve_explicit_whitelisted_string_fields_for_tool(tool_name: &str) -> &'static [&'static str] {
+    match tool_name {
+        "exec_command" => &["cmd", "command"],
+        "write_stdin" => &["chars", "text", "input", "data"],
+        "apply_patch" => &["patch", "text", "input", "instructions"],
+        _ => &[],
+    }
+}
+
+fn infer_tool_name_from_args_shape(
+    raw_args: Option<&Value>,
+    options: &Option<TextMarkupNormalizeOptions>,
+) -> Option<String> {
+    fn infer_from_object(
+        obj: &Map<String, Value>,
+        options: &Option<TextMarkupNormalizeOptions>,
+    ) -> Option<String> {
+        let mut candidates: Vec<String> = Vec::new();
+        let object_value = Value::Object(obj.clone());
+
+        if obj.contains_key("cmd")
+            && normalize_json_tool_args("exec_command", &object_value, options).is_some()
+        {
+            candidates.push("exec_command".to_string());
+        }
+
+        let has_write_payload = ["chars", "text", "input", "data"]
+            .iter()
+            .any(|key| obj.contains_key(*key));
+        let has_session_id = obj.contains_key("session_id") || obj.contains_key("sessionId");
+        if has_session_id
+            && has_write_payload
+            && normalize_json_tool_args("write_stdin", &object_value, options).is_some()
+        {
+            candidates.push("write_stdin".to_string());
+        }
+
+        if obj.contains_key("patch")
+            && normalize_json_tool_args("apply_patch", &object_value, options).is_some()
+        {
+            candidates.push("apply_patch".to_string());
+        }
+
+        if candidates.len() == 1 {
+            candidates.into_iter().next()
+        } else {
+            None
+        }
+    }
+
+    fn scan(
+        value: &Value,
+        depth: usize,
+        options: &Option<TextMarkupNormalizeOptions>,
+    ) -> Option<String> {
+        if depth == 0 {
+            return None;
+        }
+        let obj = value.as_object()?;
+        if let Some(raw_name) = obj
+            .get("name")
+            .and_then(Value::as_str)
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+        {
+            let normalized =
+                canonicalize_json_tool_name(&Value::String(raw_name.to_string()), options)?;
+            return Some(normalized);
+        }
+        if let Some(inferred) = infer_from_object(obj, options) {
+            return Some(inferred);
+        }
+        for key in [
+            "function",
+            "arguments",
+            "input",
+            "args",
+            "payload",
+            "parameters",
+            "params",
+        ] {
+            if let Some(child) = obj.get(key) {
+                if let Some(found) = scan(child, depth - 1, options) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    match raw_args {
+        Some(Value::Object(_)) => scan(raw_args?, 4, options),
+        Some(Value::Array(items)) => items.iter().find_map(|item| scan(item, 3, options)),
+        _ => None,
+    }
+}
+
+fn infer_explicit_tool_name_from_broken_json_text(
+    candidate: &str,
+    options: &Option<TextMarkupNormalizeOptions>,
+) -> Option<String> {
+    let lowered = candidate.to_ascii_lowercase();
+    let has_explicit_wrapper = lowered.contains("\"tool_calls\"")
+        || lowered.contains("'tool_calls'")
+        || lowered.contains("\"arguments\"")
+        || lowered.contains("'arguments'")
+        || lowered.contains("\"input\"")
+        || lowered.contains("'input'")
+        || lowered.contains("\"function\"")
+        || lowered.contains("'function'");
+    if !has_explicit_wrapper {
+        return None;
+    }
+
+    let mut candidates: Vec<String> = Vec::new();
+    let has_cmd = Regex::new(r#"["']cmd["']\s*:\s*["']"#)
+        .unwrap()
+        .is_match(candidate);
+    if has_cmd {
+        candidates.push("exec_command".to_string());
+    }
+
+    let has_session_id = Regex::new(r#"["'](?:session_id|sessionId)["']\s*:\s*\d+"#)
+        .unwrap()
+        .is_match(candidate);
+    let has_write_payload = Regex::new(r#"["'](?:chars|text|input|data)["']\s*:\s*["']"#)
+        .unwrap()
+        .is_match(candidate);
+    if has_session_id && has_write_payload {
+        candidates.push("write_stdin".to_string());
+    }
+
+    let has_patch = Regex::new(r#"["']patch["']\s*:\s*["']"#)
+        .unwrap()
+        .is_match(candidate);
+    if has_patch {
+        candidates.push("apply_patch".to_string());
+    }
+
+    if candidates.len() != 1 {
+        return None;
+    }
+    canonicalize_json_tool_name(&Value::String(candidates.remove(0)), options)
+}
+
+fn extract_explicit_tool_name_from_broken_json_text(
+    candidate: &str,
+    options: &Option<TextMarkupNormalizeOptions>,
+) -> Option<String> {
+    let name_re = Regex::new(r#"\"name\"\s*:\s*\"([^\"]+)\""#).unwrap();
+    let raw_name = name_re
+        .captures(candidate)
+        .and_then(|caps| caps.get(1))
+        .map(|m| m.as_str().to_string())?;
+    canonicalize_json_tool_name(&Value::String(raw_name), options)
+}
+
+fn escape_inner_quotes_in_whitelisted_string_fields(raw: &str, keys: &[&str]) -> Option<String> {
+    if raw.trim().is_empty() || keys.is_empty() {
+        return None;
+    }
+    let key_pattern = keys
+        .iter()
+        .map(|key| regex::escape(key))
+        .collect::<Vec<String>>()
+        .join("|");
+    let re = Regex::new(format!(r#""(?:{})"\s*:\s*""#, key_pattern).as_str()).unwrap();
+    let bytes = raw.as_bytes();
+    let mut cursor = 0usize;
+    let mut out = String::with_capacity(raw.len() + 16);
+    let mut changed = false;
+
+    while let Some(mat) = re.find(&raw[cursor..]) {
+        let abs_start = cursor + mat.start();
+        let value_start = cursor + mat.end();
+        out.push_str(&raw[cursor..value_start]);
+
+        let mut segment_start = value_start;
+        let mut j = value_start;
+        let mut escaped = false;
+        let mut terminated = false;
+        while j < bytes.len() {
+            let b = bytes[j];
+            if escaped {
+                escaped = false;
+                j += 1;
+                continue;
+            }
+            if b == b'\\' {
+                escaped = true;
+                j += 1;
+                continue;
+            }
+            if b == b'"' {
+                let mut k = j + 1;
+                while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                    k += 1;
+                }
+                if k >= bytes.len() || bytes[k] == b',' || bytes[k] == b'}' || bytes[k] == b']' {
+                    out.push_str(&raw[segment_start..j]);
+                    out.push('"');
+                    cursor = j + 1;
+                    terminated = true;
+                    break;
+                }
+                out.push_str(&raw[segment_start..j]);
+                out.push_str("\\\"");
+                changed = true;
+                segment_start = j + 1;
+            }
+            j += 1;
+        }
+
+        if !terminated {
+            out.push_str(&raw[abs_start..]);
+            return if changed { Some(out) } else { None };
+        }
+    }
+
+    if cursor == 0 {
+        return None;
+    }
+    out.push_str(&raw[cursor..]);
+    if changed {
+        Some(out)
+    } else {
+        None
+    }
+}
+
+fn try_parse_json_with_explicit_whitelisted_field_masks(
+    raw: &str,
+    options: &Option<TextMarkupNormalizeOptions>,
+) -> Option<Value> {
+    let tool_name = extract_explicit_tool_name_from_broken_json_text(raw, options)
+        .or_else(|| infer_explicit_tool_name_from_broken_json_text(raw, options))?;
+    let fields = resolve_explicit_whitelisted_string_fields_for_tool(tool_name.as_str());
+    if fields.is_empty() {
+        return None;
+    }
+    let repaired = escape_inner_quotes_in_whitelisted_string_fields(raw, fields)?;
+    try_parse_json_with_model_repairs(repaired.as_str())
+}
+
 fn salvage_tool_args_from_raw_text(tool_name: &str, raw_args: &str) -> Option<Map<String, Value>> {
     let lname = tool_name.to_lowercase();
     let text = raw_args.to_string();
@@ -372,7 +664,15 @@ fn salvage_tool_args_from_raw_text(tool_name: &str, raw_args: &str) -> Option<Ma
 fn resolve_json_tool_name_aliases(
     options: &Option<TextMarkupNormalizeOptions>,
 ) -> HashMap<String, String> {
-    let mut merged: HashMap<String, String> = HashMap::new();
+    let mut merged: HashMap<String, String> = HashMap::from([
+        ("shell_command".to_string(), "exec_command".to_string()),
+        ("execute".to_string(), "exec_command".to_string()),
+        ("execute_command".to_string(), "exec_command".to_string()),
+        ("execute-command".to_string(), "exec_command".to_string()),
+        ("shell".to_string(), "exec_command".to_string()),
+        ("bash".to_string(), "exec_command".to_string()),
+        ("terminal".to_string(), "exec_command".to_string()),
+    ]);
     if let Some(opts) = options {
         if let Some(repair) = &opts.json_tool_repair {
             if let Some(alias_map) = &repair.tool_name_aliases {
@@ -548,6 +848,8 @@ fn canonicalize_json_tool_name(
     let known = known_tools();
     if known.contains(canonical.as_str()) {
         Some(canonical)
+    } else if is_structured_tool_name(canonical.as_str()) {
+        Some(canonical)
     } else {
         None
     }
@@ -652,9 +954,10 @@ fn normalize_json_tool_args(
     Some(filtered)
 }
 
-fn normalize_json_tool_call_entry(
+fn normalize_json_tool_call_entry_with_mode(
     entry: &Value,
     options: &Option<TextMarkupNormalizeOptions>,
+    allow_shape_inference: bool,
 ) -> Option<ToolCallLite> {
     if let Value::Object(rec) = entry {
         let fn_obj = rec.get("function").and_then(|v| v.as_object());
@@ -669,7 +972,13 @@ fn normalize_json_tool_call_entry(
         } else {
             &Value::Null
         };
-        let hinted_name = read_tool_name_hint_from_args(Some(args_source), options);
+        let hinted_name = read_tool_name_hint_from_args(Some(args_source), options).or_else(|| {
+            if allow_shape_inference {
+                infer_tool_name_from_args_shape(Some(entry), options)
+            } else {
+                None
+            }
+        });
         let name_val = rec
             .get("name")
             .or_else(|| fn_obj.and_then(|f| f.get("name")));
@@ -697,6 +1006,13 @@ fn normalize_json_tool_call_entry(
         });
     }
     None
+}
+
+fn normalize_json_tool_call_entry(
+    entry: &Value,
+    options: &Option<TextMarkupNormalizeOptions>,
+) -> Option<ToolCallLite> {
+    normalize_json_tool_call_entry_with_mode(entry, options, false)
 }
 
 fn extract_balanced_json_object_at(text: &str, start_index: usize) -> Option<String> {
@@ -785,6 +1101,77 @@ fn collect_embedded_tool_call_objects(text: &str) -> Vec<String> {
     out
 }
 
+fn is_explicit_top_level_tool_call_object_value(
+    value: &Value,
+    options: &Option<TextMarkupNormalizeOptions>,
+) -> bool {
+    let Some(obj) = value.as_object() else {
+        return false;
+    };
+    let has_top_level_name = obj
+        .get("name")
+        .and_then(Value::as_str)
+        .map(|raw| !raw.trim().is_empty())
+        .unwrap_or(false);
+    let has_top_level_function_name = obj
+        .get("function")
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("name"))
+        .and_then(Value::as_str)
+        .map(|raw| !raw.trim().is_empty())
+        .unwrap_or(false);
+    let has_top_level_args = ["arguments", "input", "params", "parameters", "payload"]
+        .iter()
+        .any(|key| obj.contains_key(*key))
+        || obj
+            .get("function")
+            .and_then(Value::as_object)
+            .map(|row| {
+                ["arguments", "input", "params", "parameters", "payload"]
+                    .iter()
+                    .any(|key| row.contains_key(*key))
+            })
+            .unwrap_or(false);
+    if !has_top_level_args {
+        return false;
+    }
+    let has_unambiguous_shape = infer_tool_name_from_args_shape(Some(value), options).is_some();
+    if !(has_top_level_name || has_top_level_function_name || has_unambiguous_shape) {
+        return false;
+    }
+    normalize_json_tool_call_entry_with_mode(value, options, true).is_some()
+}
+
+fn collect_embedded_explicit_top_level_tool_call_objects(
+    text: &str,
+    options: &Option<TextMarkupNormalizeOptions>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    let chars: Vec<char> = text.chars().collect();
+    for i in 0..chars.len() {
+        if chars[i] != '{' {
+            continue;
+        }
+        let Some(obj) = extract_balanced_json_object_at(text, i) else {
+            continue;
+        };
+        let trimmed = obj.trim().to_string();
+        if trimmed.is_empty() || seen.contains(trimmed.as_str()) {
+            continue;
+        }
+        let Some(parsed) = try_parse_json_with_model_repairs(trimmed.as_str()) else {
+            continue;
+        };
+        if !is_explicit_top_level_tool_call_object_value(&parsed, options) {
+            continue;
+        }
+        seen.insert(trimmed.clone());
+        out.push(trimmed);
+    }
+    out
+}
+
 fn decode_json_escapes(raw: &str) -> String {
     raw.replace("\\r\\n", "\n")
         .replace("\\n", "\n")
@@ -822,38 +1209,6 @@ fn extract_possibly_broken_quoted_value(text: &str, keys: &[&str]) -> Option<Str
     None
 }
 
-fn salvage_tool_call_from_broken_json_text(
-    candidate: &str,
-    options: &Option<TextMarkupNormalizeOptions>,
-) -> Option<ToolCallLite> {
-    let name_re = Regex::new(r#"\"name\"\s*:\s*\"([^\"]+)\""#).unwrap();
-    let raw_name = name_re
-        .captures(candidate)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().to_string());
-    let name_val = raw_name.map(Value::String).unwrap_or(Value::Null);
-    let canonical = canonicalize_json_tool_name(&name_val, options)?;
-    let mut args: Option<Map<String, Value>> = None;
-    if canonical == "exec_command" {
-        if let Some(cmd) = extract_possibly_broken_quoted_value(candidate, &["cmd"]) {
-            if !cmd.trim().is_empty() {
-                let mut map = Map::new();
-                map.insert("cmd".to_string(), Value::String(cmd));
-                args = Some(map);
-            }
-        }
-    }
-    if args.is_none() {
-        args = salvage_tool_args_from_raw_text(canonical.as_str(), candidate);
-    }
-    let normalized = normalize_json_tool_args(canonical.as_str(), &Value::Object(args?), options)?;
-    Some(ToolCallLite {
-        id: Some(gen_tool_call_id()),
-        name: canonical,
-        args: serde_json::to_string(&normalized).unwrap_or_else(|_| "{}".to_string()),
-    })
-}
-
 fn extract_tool_call_entries_from_unknown(value: &Value) -> Vec<Value> {
     if let Value::Array(arr) = value {
         return arr.clone();
@@ -872,50 +1227,23 @@ fn extract_tool_call_entries_from_unknown(value: &Value) -> Vec<Value> {
 }
 
 fn extract_rcc_tool_call_fence_segments(raw: &str) -> Vec<String> {
-    fn find_open_marker(raw: &str, cursor: usize, open_marker: &str) -> Option<usize> {
-        let mut search_from = cursor;
-        while search_from < raw.len() {
-            let rel_start = raw[search_from..].find(open_marker)?;
-            let start = search_from + rel_start;
-            if open_marker == "<<RCC_TOOL_CALLS"
-                && raw[start + open_marker.len()..].starts_with("_JSON")
-            {
-                search_from = start + open_marker.len();
-                continue;
-            }
-            return Some(start);
-        }
-        None
-    }
-
     let mut out: Vec<String> = Vec::new();
     let mut seen = HashSet::<String>::new();
-    let markers = [
-        ("<<RCC_TOOL_CALLS_JSON", "RCC_TOOL_CALLS_JSON"),
-        ("<<RCC_TOOL_CALLS", "RCC_TOOL_CALLS"),
+    let patterns = [
+        Regex::new(r"(?ims)^[^\S\r\n]*(?:[•*-]\s+)?<<\s*RCC_TOOL_CALLS_JSON\s*$([\s\S]*?)^[^\S\r\n]*RCC_TOOL_CALLS_JSON\s*$")
+            .expect("valid strict rcc tool calls json heredoc pattern"),
+        Regex::new(r"(?ims)^[^\S\r\n]*(?:[•*-]\s+)?<<\s*RCC_TOOL_CALLS\s*$([\s\S]*?)^[^\S\r\n]*RCC_TOOL_CALLS\s*$")
+            .expect("valid strict rcc tool calls heredoc pattern"),
     ];
 
-    for (open_marker, close_marker) in markers {
-        let mut cursor = 0usize;
-        while cursor < raw.len() {
-            let Some(open_start) = find_open_marker(raw, cursor, open_marker) else {
-                break;
+    for pattern in patterns {
+        for caps in pattern.captures_iter(raw) {
+            let Some(inner) = caps.get(1) else {
+                continue;
             };
-            let start = open_start + open_marker.len();
-            let remainder = &raw[start..];
-            let inner = if let Some(rel_end) = remainder.find(close_marker) {
-                &remainder[..rel_end]
-            } else {
-                remainder
-            };
-            let candidate = inner.trim();
+            let candidate = inner.as_str().trim();
             if !candidate.is_empty() && seen.insert(candidate.to_string()) {
                 out.push(candidate.to_string());
-            }
-            if let Some(rel_end) = remainder.find(close_marker) {
-                cursor = start + rel_end + close_marker.len();
-            } else {
-                break;
             }
         }
     }
@@ -946,7 +1274,14 @@ fn read_tool_name_hint_from_args(
                 canonicalize_json_tool_name(&Value::String(raw_name.to_string()), options)?;
             return Some(normalized);
         }
-        for key in ["function", "input", "args", "payload"] {
+        for key in [
+            "function",
+            "input",
+            "args",
+            "payload",
+            "parameters",
+            "params",
+        ] {
             if let Some(child) = obj.get(key) {
                 if let Some(found) = scan(child, depth - 1, options) {
                     return Some(found);
@@ -957,8 +1292,8 @@ fn read_tool_name_hint_from_args(
     }
 
     match raw_args {
-        Some(Value::Object(_)) => scan(raw_args?, 3, options),
-        Some(Value::Array(items)) => items.iter().find_map(|item| scan(item, 2, options)),
+        Some(Value::Object(_)) => scan(raw_args?, 4, options),
+        Some(Value::Array(items)) => items.iter().find_map(|item| scan(item, 3, options)),
         _ => None,
     }
 }
@@ -970,44 +1305,29 @@ fn extract_json_tool_calls_from_text_impl(
     if text.trim().is_empty() {
         return None;
     }
-    let mut candidates: Vec<String> = Vec::new();
+    let mut candidates: Vec<(String, bool)> = Vec::new();
     let mut seen_candidates: HashSet<String> = HashSet::new();
-    let mut add_candidate = |raw: &str| {
+    let mut add_candidate = |raw: &str, trusted_explicit: bool| {
         let trimmed = raw.trim().to_string();
         if trimmed.is_empty() || seen_candidates.contains(&trimmed) {
             return;
         }
         seen_candidates.insert(trimmed.clone());
-        candidates.push(trimmed.clone());
+        candidates.push((trimmed.clone(), trusted_explicit));
         let decoded = decode_json_escapes(trimmed.as_str()).trim().to_string();
         if !decoded.is_empty() && decoded != trimmed && !seen_candidates.contains(&decoded) {
             seen_candidates.insert(decoded.clone());
-            candidates.push(decoded);
+            candidates.push((decoded, trusted_explicit));
         }
     };
 
-    add_candidate(text);
+    if is_pure_top_level_json_payload(text) {
+        add_candidate(text, true);
+    } else if let Some(prefixed) = extract_whitelisted_prefixed_json_payload(text) {
+        add_candidate(prefixed.as_str(), true);
+    }
     for inner in extract_rcc_tool_call_fence_segments(text) {
-        add_candidate(inner.as_str());
-    }
-    let fence_re =
-        Regex::new(r"```(?:json|tool_call|tool_calls|function_call)?\s*([\s\S]*?)\s*```").unwrap();
-    for caps in fence_re.captures_iter(text) {
-        if let Some(m) = caps.get(1) {
-            let body = m.as_str().trim();
-            if !body.is_empty() {
-                add_candidate(body);
-            }
-        }
-    }
-    for embedded in collect_embedded_tool_call_objects(text) {
-        add_candidate(embedded.as_str());
-    }
-    let decoded_text = decode_json_escapes(text);
-    if decoded_text != text {
-        for embedded in collect_embedded_tool_call_objects(decoded_text.as_str()) {
-            add_candidate(embedded.as_str());
-        }
+        add_candidate(inner.as_str(), true);
     }
 
     let mut out: Vec<ToolCallLite> = Vec::new();
@@ -1022,10 +1342,31 @@ fn extract_json_tool_calls_from_text_impl(
             }
         };
 
-    for candidate in candidates.iter() {
+    for (candidate, trusted_explicit) in candidates.iter() {
         if let Some(parsed) = try_parse_json_with_model_repairs(candidate) {
             for entry in extract_tool_call_entries_from_unknown(&parsed) {
+                if *trusted_explicit {
+                    if let Some(normalized) =
+                        normalize_json_tool_call_entry_with_mode(&entry, options, true)
+                    {
+                        let key = format!("{}:{}", normalized.name, normalized.args);
+                        if seen.insert(key) {
+                            out.push(normalized);
+                        }
+                        continue;
+                    }
+                }
                 push_entry(&mut out, &mut seen, &entry);
+            }
+            if out.is_empty() {
+                if let Some(normalized) =
+                    normalize_json_tool_call_entry_with_mode(&parsed, options, *trusted_explicit)
+                {
+                    let key = format!("{}:{}", normalized.name, normalized.args);
+                    if seen.insert(key) {
+                        out.push(normalized);
+                    }
+                }
             }
         }
         if !out.is_empty() {
@@ -1043,29 +1384,34 @@ fn extract_json_tool_calls_from_text_impl(
                 }
             }
         }
-    }
-
-    if out.is_empty() {
-        for candidate in candidates.iter() {
-            let lower = candidate.to_lowercase();
-            if lower.contains("<quote>") && lower.contains("</quote>") {
-                continue;
-            }
-            if let Some(salvaged) = salvage_tool_call_from_broken_json_text(candidate, options) {
-                let mut entry = Map::new();
-                entry.insert(
-                    "id".to_string(),
-                    Value::String(salvaged.id.clone().unwrap_or_default()),
-                );
-                entry.insert("name".to_string(), Value::String(salvaged.name.clone()));
-                let mut fn_obj = Map::new();
-                fn_obj.insert("name".to_string(), Value::String(salvaged.name.clone()));
-                fn_obj.insert(
-                    "arguments".to_string(),
-                    Value::String(salvaged.args.clone()),
-                );
-                entry.insert("function".to_string(), Value::Object(fn_obj));
-                push_entry(&mut out, &mut seen, &Value::Object(entry));
+        if out.is_empty() {
+            if let Some(parsed) =
+                try_parse_json_with_explicit_whitelisted_field_masks(candidate, options)
+            {
+                for entry in extract_tool_call_entries_from_unknown(&parsed) {
+                    if *trusted_explicit {
+                        if let Some(normalized) =
+                            normalize_json_tool_call_entry_with_mode(&entry, options, true)
+                        {
+                            let key = format!("{}:{}", normalized.name, normalized.args);
+                            if seen.insert(key) {
+                                out.push(normalized);
+                            }
+                            continue;
+                        }
+                    }
+                    push_entry(&mut out, &mut seen, &entry);
+                }
+                if out.is_empty() {
+                    if let Some(normalized) =
+                        normalize_json_tool_call_entry_with_mode(&parsed, options, *trusted_explicit)
+                    {
+                        let key = format!("{}:{}", normalized.name, normalized.args);
+                        if seen.insert(key) {
+                            out.push(normalized);
+                        }
+                    }
+                }
             }
         }
     }
@@ -1197,6 +1543,47 @@ fn extract_apply_patch_calls_from_text_impl(text: &str) -> Option<Vec<ToolCallLi
         });
     }
     Some(out)
+}
+
+fn tool_call_lite_to_response_value(call: &ToolCallLite) -> Value {
+    let mut row = Map::new();
+    row.insert(
+        "id".to_string(),
+        Value::String(call.id.clone().unwrap_or_else(gen_tool_call_id)),
+    );
+    row.insert("type".to_string(), Value::String("function".to_string()));
+    let mut function = Map::new();
+    function.insert("name".to_string(), Value::String(call.name.clone()));
+    function.insert("arguments".to_string(), Value::String(call.args.clone()));
+    row.insert("function".to_string(), Value::Object(function));
+    Value::Object(row)
+}
+
+pub(crate) fn extract_explicit_top_level_tool_calls_as_values(
+    text: &str,
+    options: &Option<TextMarkupNormalizeOptions>,
+) -> Vec<Value> {
+    if text.trim().is_empty() {
+        return Vec::new();
+    }
+
+    let mut out: Vec<Value> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut push_calls = |calls: Option<Vec<ToolCallLite>>| {
+        let Some(calls) = calls else {
+            return;
+        };
+        for call in calls {
+            let key = format!("{}:{}", call.name, call.args);
+            if seen.insert(key) {
+                out.push(tool_call_lite_to_response_value(&call));
+            }
+        }
+    };
+
+    push_calls(extract_json_tool_calls_from_text_impl(text, options));
+    push_calls(extract_apply_patch_calls_from_text_impl(text));
+    out
 }
 
 fn apply_tool_inner_field(
@@ -1771,95 +2158,8 @@ fn looks_like_shell_command(line: &str) -> bool {
     re.is_match(t)
 }
 
-fn looks_like_broken_tool_markup(text: &str) -> bool {
-    let t = text.to_string();
-    if t.is_empty() {
-        return false;
-    }
-    let ran_re = Regex::new(r"(?m)^\s*(?:[•*+-]\s*)?Ran\s+(.+)$").unwrap();
-    let has_ran_shell = ran_re.captures_iter(t.as_str()).any(|caps| {
-        let payload = caps
-            .get(1)
-            .map(|m| m.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if payload.is_empty() {
-            return false;
-        }
-        if let Some(arr) = try_parse_json_array_on_line(payload.as_str()) {
-            return looks_like_shell_command(arr.join(" ").as_str());
-        }
-        looks_like_shell_command(payload.as_str())
-    });
-    t.contains("<exec_command")
-        || t.contains("<invoke")
-        || t.contains("<function_calls")
-        || t.contains("<parameter")
-        || t.contains("<tool_call")
-        || t.contains("</tool_call")
-        || t.contains("<arg_value")
-        || t.contains("</arg_value")
-        || t.contains("</func_call")
-        || Regex::new(r"\bRan\b\s+\[").unwrap().is_match(t.as_str())
-        || has_ran_shell
-}
-
-fn extract_bare_exec_command_from_text_impl(text: &str) -> Option<Vec<ToolCallLite>> {
-    if text.is_empty() {
-        return None;
-    }
-    if !looks_like_broken_tool_markup(text) {
-        return None;
-    }
-    let mut candidates: Vec<(String, Option<String>)> = Vec::new();
-    for raw in text.lines() {
-        let line = normalize_possible_command_line(raw);
-        if line.is_empty() {
-            continue;
-        }
-        if let Some(caps) = Regex::new(r"^Ran\s+(.+)$").unwrap().captures(line.as_str()) {
-            let payload = caps
-                .get(1)
-                .map(|m| m.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if payload.is_empty() {
-                continue;
-            }
-            if let Some(arr) = try_parse_json_array_on_line(payload.as_str()) {
-                let cmd = arr.join(" ").trim().to_string();
-                if looks_like_shell_command(cmd.as_str()) {
-                    candidates.push((cmd, None));
-                    continue;
-                }
-            }
-            if looks_like_shell_command(payload.as_str()) {
-                candidates.push((payload, None));
-                continue;
-            }
-        }
-        if looks_like_shell_command(line.as_str()) {
-            candidates.push((line.trim().to_string(), None));
-        }
-    }
-    if candidates.is_empty() {
-        return None;
-    }
-    let picked = candidates.last().unwrap().0.clone();
-    let mut args_obj = Map::new();
-    args_obj.insert("cmd".to_string(), Value::String(picked));
-    if let Some(wd) = read_default_workdir_from_env() {
-        args_obj.insert("workdir".to_string(), Value::String(wd));
-    }
-    let filtered = filter_args_for_tool("exec_command", &args_obj);
-    let args = serde_json::to_string(&filtered).unwrap_or_else(|_| "{}".to_string());
-    Some(vec![ToolCallLite {
-        id: Some(gen_tool_call_id()),
-        name: "exec_command".to_string(),
-        args,
-    }])
+fn extract_bare_exec_command_from_text_impl(_text: &str) -> Option<Vec<ToolCallLite>> {
+    None
 }
 
 fn extract_execute_blocks_from_text_impl(text: &str) -> Option<Vec<ToolCallLite>> {
@@ -1926,57 +2226,8 @@ fn normalize_explored_list_path(raw: &str) -> String {
     first
 }
 
-fn extract_explored_list_directory_calls_from_text_impl(text: &str) -> Option<Vec<ToolCallLite>> {
-    if text.is_empty() {
-        return None;
-    }
-    let has_explored = Regex::new(r"(?:^|\n)\s*(?:[•*+-]\s*)?Explored\b")
-        .unwrap()
-        .is_match(text);
-    let has_tree = Regex::new(r"(?:^|\n)\s*[│\s]*[└├]\s*List\s+")
-        .unwrap()
-        .is_match(text);
-    if !has_explored && !has_tree {
-        return None;
-    }
-    let mut out = Vec::new();
-    let mut seen = HashSet::new();
-    for raw_line in text.lines() {
-        let mut line = raw_line.trim().to_string();
-        if line.is_empty() {
-            continue;
-        }
-        line = Regex::new(r"^[•*+-]\s*")
-            .unwrap()
-            .replace(line.as_str(), "")
-            .to_string();
-        line = Regex::new(r"^[\s│]+|^[└├─]+\s*")
-            .unwrap()
-            .replace(line.as_str(), "")
-            .to_string();
-        let list_re = Regex::new(r"^List\s+([\s\S]+)$").unwrap();
-        if let Some(caps) = list_re.captures(line.as_str()) {
-            let raw_path = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-            let path = normalize_explored_list_path(raw_path);
-            if path.is_empty() || seen.contains(&path) {
-                continue;
-            }
-            seen.insert(path.clone());
-            let args =
-                serde_json::to_string(&serde_json::json!({"path": path, "recursive": false}))
-                    .unwrap_or_else(|_| "{}".to_string());
-            out.push(ToolCallLite {
-                id: Some(gen_tool_call_id()),
-                name: "list_directory".to_string(),
-                args,
-            });
-        }
-    }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
+fn extract_explored_list_directory_calls_from_text_impl(_text: &str) -> Option<Vec<ToolCallLite>> {
+    None
 }
 
 fn extract_qwen_tool_call_tokens_from_text_impl(text: &str) -> Option<Vec<ToolCallLite>> {
@@ -2179,12 +2430,114 @@ mod tests {
 
     #[test]
     fn extract_json_tool_calls_from_text_impl_harvests_rcc_fence_with_nested_input_name() {
-        let text = "前言\n• <<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"cmd\":\"pwd\",\"name\":\"exec_command\"}}]}RCC_TOOL_CALLS_JSON\n尾言";
+        let text = "前言\n• <<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"input\":{\"cmd\":\"pwd\",\"name\":\"exec_command\"}}]}\nRCC_TOOL_CALLS_JSON\n尾言";
         let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].name, "exec_command");
         let args: Value = serde_json::from_str(calls[0].args.as_str()).unwrap_or(Value::Null);
         assert_eq!(args.get("cmd").and_then(Value::as_str), Some("pwd"));
+    }
+
+    #[test]
+    fn extract_json_tool_calls_from_text_impl_rejects_bullet_prefixed_top_level_exec_command_object_with_trailing_garbage(
+    ) {
+        let text = "• {\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"bash -lc \\\"pwd\\\"\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\"}}\n\"tool_call\"}";
+        let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn extract_json_tool_calls_from_text_impl_salvages_explicit_exec_command_shape_with_inner_quotes(
+    ) {
+        let text = r#"• {"name":"exec_command","arguments":{"cmd":"bash -lc 'curl -u "cisy:welcome4zcam#" -X PROPFIND "http://100.77.11.8:5005/nvme11-18675515367a/" --connect-timeout 5 2>&1 | head -20'"}}"#;
+        let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "exec_command");
+        let args: Value = serde_json::from_str(calls[0].args.as_str()).unwrap_or(Value::Null);
+        assert_eq!(
+            args.get("cmd").and_then(Value::as_str),
+            Some("bash -lc 'curl -u \"cisy:welcome4zcam#\" -X PROPFIND \"http://100.77.11.8:5005/nvme11-18675515367a/\" --connect-timeout 5 2>&1 | head -20'")
+        );
+    }
+
+    #[test]
+    fn extract_json_tool_calls_from_text_impl_salvages_tool_calls_wrapper_with_inner_quotes_in_whitelisted_cmd_field(
+    ) {
+        let text = r#"{"tool_calls":[{"name":"exec_command","input":{"cmd":"bd --no-db create "Mailbox 统一消息与心跳优先级改造" --type epic --description "统一 mailbox 消息三段式格式""}}]}"#;
+        let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "exec_command");
+        let args: Value = serde_json::from_str(calls[0].args.as_str()).unwrap_or(Value::Null);
+        assert_eq!(
+            args.get("cmd").and_then(Value::as_str),
+            Some("bd --no-db create \"Mailbox 统一消息与心跳优先级改造\" --type epic --description \"统一 mailbox 消息三段式格式\"")
+        );
+    }
+
+    #[test]
+    fn extract_json_tool_calls_from_text_impl_salvages_missing_name_in_explicit_wrapper_by_unique_cmd_shape(
+    ) {
+        let text = r#"{"tool_calls":[{"arguments":{"cmd":"bash -lc 'curl -u "cisy:welcome4zcam#" -X PROPFIND "http://100.77.11.8:5005/nvme11-18675515367a/" --connect-timeout 5 2>&1 | head -20'"}}]}"#;
+        let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "exec_command");
+        let args: Value = serde_json::from_str(calls[0].args.as_str()).unwrap_or(Value::Null);
+        assert_eq!(
+            args.get("cmd").and_then(Value::as_str),
+            Some("bash -lc 'curl -u \"cisy:welcome4zcam#\" -X PROPFIND \"http://100.77.11.8:5005/nvme11-18675515367a/\" --connect-timeout 5 2>&1 | head -20'")
+        );
+    }
+
+    #[test]
+    fn extract_json_tool_calls_from_text_impl_salvages_missing_name_with_top_level_arguments_wrapper(
+    ) {
+        let text = r#"{"arguments":{"cmd":"bash -lc 'pwd'"}}"#;
+        let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "exec_command");
+        let args: Value = serde_json::from_str(calls[0].args.as_str()).unwrap_or(Value::Null);
+        assert_eq!(
+            args.get("cmd").and_then(Value::as_str),
+            Some("bash -lc 'pwd'")
+        );
+    }
+
+    #[test]
+    fn extract_json_tool_calls_from_text_impl_rejects_embedded_top_level_arguments_wrapper_without_name_by_unique_shape(
+    ) {
+        let text = r#"• {"arguments":{"cmd":"bash -lc 'curl -u \"cisy:welcome4zcam#\" -X PROPFIND \"http://100.77.11.8:5005/nvme11-18675515367a/\" --connect-timeout 5 2>&1 | head -20'"}}"#;
+        let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn extract_json_tool_calls_from_text_impl_rejects_embedded_top_level_function_arguments_wrapper_without_name_by_unique_shape(
+    ) {
+        let text = r#"analysis first
+{"function":{"arguments":{"cmd":"bash -lc 'pwd'"}}}
+continue"#;
+        let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn extract_json_tool_calls_from_text_impl_does_not_infer_missing_name_from_bare_cmd_object() {
+        let text = r#"{"cmd":"bash -lc 'pwd'"}"#;
+        let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn extract_json_tool_calls_from_text_impl_preserves_args_for_structured_unknown_tool_name() {
+        let text = r#"{"name":"read","arguments":{"filePath":"/tmp/a.txt"}}"#;
+        let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "read");
+        let args: Value = serde_json::from_str(calls[0].args.as_str()).unwrap_or(Value::Null);
+        assert_eq!(
+            args.get("filePath").and_then(Value::as_str),
+            Some("/tmp/a.txt")
+        );
     }
 
     #[test]
@@ -2225,18 +2578,12 @@ mod tests {
     }
 
     #[test]
-    fn extract_bare_exec_command_from_text_impl_harvests_ran_prefix_line() {
+    fn extract_bare_exec_command_from_text_impl_ignores_ran_prefix_line() {
         let text = r#"• Ran git push origin main
   └ Everything up-to-date
 
 • {"type":"blocked","summary":"服务状态异常导致 state API 测试失败"}"#;
         let calls = extract_bare_exec_command_from_text_impl(text).unwrap_or_default();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].name, "exec_command");
-        let args: Value = serde_json::from_str(calls[0].args.as_str()).unwrap_or(Value::Null);
-        assert_eq!(
-            args.get("cmd").and_then(Value::as_str),
-            Some("git push origin main")
-        );
+        assert!(calls.is_empty());
     }
 }

@@ -682,7 +682,8 @@ pub fn flatten_chat_tools_for_function_calling_with_options_json(
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let sanitize_mode = resolve_sanitize_mode(input.options.as_ref());
     let rows = input.tools.as_array().cloned().unwrap_or_default();
-    let flattened = flatten_chat_tools_for_function_calling(rows.as_slice(), sanitize_mode.as_str());
+    let flattened =
+        flatten_chat_tools_for_function_calling(rows.as_slice(), sanitize_mode.as_str());
     serde_json::to_string(&Value::Array(flattened))
         .map_err(|e| napi::Error::from_reason(e.to_string()))
 }

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Regression: servertool reenter followups must accept Responses tool-call payloads
+ * Regression: valid servertool reenter followups must accept Responses tool-call payloads
  * (status:"requires_action") without treating them as empty.
  *
- * We trigger `reasoning_only_continue_flow` (assistant text empty + reasoning present)
- * in non-tmux mode so followup goes through reenterPipeline.
+ * We trigger an explicit `clock` servertool tool_call, which performs one internal
+ * reenter hop. The reenter response is `status:"requires_action"` and must be preserved.
  */
 
 import assert from 'node:assert/strict';
@@ -29,11 +29,11 @@ async function main() {
     requestId,
     entryEndpoint: '/v1/responses',
     providerProtocol: 'openai-chat',
-    providerKey: 'antigravity.test.requires_action',
+    providerKey: 'antigravity.test.clock_requires_action',
     sessionId,
     capturedChatRequest: {
       model: 'gpt-5.2-codex',
-      messages: [{ role: 'user', content: 'hi' }],
+      messages: [{ role: 'user', content: '请帮我设置一个提醒，然后继续执行' }],
       tools: []
     }
   };
@@ -44,8 +44,23 @@ async function main() {
     choices: [
       {
         index: 0,
-        finish_reason: 'stop',
-        message: { role: 'assistant', content: '', reasoning: '我将继续完成当前任务。' }
+        finish_reason: 'tool_calls',
+        message: {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'call_clock_test',
+              type: 'function',
+              function: {
+                name: 'clock',
+                arguments: JSON.stringify({
+                  action: 'get'
+                })
+              }
+            }
+          ]
+        }
       }
     ]
   };
@@ -105,26 +120,22 @@ async function main() {
   });
 
   assert.equal(res.executed, true, 'expected servertool executed');
-  assert.equal(res.flowId, 'reasoning_only_continue_flow', 'expected reasoning_only_continue_flow');
+  assert.equal(res.flowId, 'clock_flow', 'expected clock_flow');
   assert.ok(res.chat && typeof res.chat === 'object', 'expected chat payload');
   assert.equal(
     (res.chat).status,
     'requires_action',
     'reenter followup should preserve requires_action payload'
   );
-  assert.equal(reenterCalled, true, 'reasoning_only_continue_flow should reenter when tmux inject is unavailable');
+  assert.equal(reenterCalled, true, 'clock_flow should reenter when captured request exists');
   assert.equal(followupArgs, null, 'reenter followup should not use clientInject dispatch');
   assert.ok(reenterArgs && typeof reenterArgs === 'object', 'expected reenter args');
   const metadata = reenterArgs.metadata && typeof reenterArgs.metadata === 'object' ? reenterArgs.metadata : {};
   assert.equal(metadata.clientInjectOnly, undefined, 'reenter flow should not require clientInjectOnly');
   const followupBody = reenterArgs.body && typeof reenterArgs.body === 'object' ? reenterArgs.body : {};
   const followupMessages = Array.isArray(followupBody.messages) ? followupBody.messages : [];
-  const lastMessage = [...followupMessages].reverse().find((item) => item && typeof item.content === 'string');
-  const followupText = lastMessage && typeof lastMessage.content === 'string' ? lastMessage.content : '';
-  assert.ok(
-    followupText.includes('继续执行'),
-    'reasoning_only_continue should provide reenter followup text'
-  );
+  const toolMessages = followupMessages.filter((item) => item && item.role === 'tool');
+  assert.ok(toolMessages.length >= 1, 'clock_flow followup should append tool outputs before reenter');
 
   console.log('✅ servertool followup requires_action regression passed');
 }

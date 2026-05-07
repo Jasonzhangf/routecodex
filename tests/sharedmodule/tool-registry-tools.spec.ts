@@ -219,4 +219,14 @@ describe('tool-registry validateToolCall (all tools)', () => {
     expect(result.reason).toBe('forbidden_exec_command_policy');
     expect(result.message).toContain('mass kill command is not allowed');
   });
+
+  it('rejects malformed shell wrapper with missing closing quote in exec_command', () => {
+    const args = JSON.stringify({
+      cmd: `bash -lc 'tail -50 ~/.fin/runtime/peers/qqbot/bridge.stderr.log 2>/dev/null || echo "No bridge log"`
+    });
+    const result = validateToolCall('exec_command', args);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('invalid_shell_wrapper_shape');
+    expect(result.message).toContain('balanced closing single quote');
+  });
 });

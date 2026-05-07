@@ -1,6 +1,6 @@
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
-import type { DebugCenter } from '../../../modules/pipeline/types/external-types.js';
+import type { DebugCenter, DebugEvent } from '../../../modules/pipeline/types/external-types.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import type { ProviderProfile, ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
 import { buildProviderProfiles } from '../../../providers/profile/provider-profile-loader.js';
@@ -164,13 +164,46 @@ export function getErrorHandlingShim(server: any): ModuleDependencies['errorHand
   return server.errorHandlingShim;
 }
 
-export function createDebugCenterShim(): DebugCenter {
+export function createDebugCenterShim(server: any): DebugCenter {
+  const logger = server?.pipelineLogger;
+  const toDebugEvent = (entry: Record<string, unknown>): DebugEvent => ({
+    moduleId: typeof entry.pipelineId === 'string' && entry.pipelineId.trim() ? entry.pipelineId : 'pipeline',
+    operationId: typeof entry.category === 'string' && entry.category.trim() ? entry.category : 'log',
+    timestamp: typeof entry.timestamp === 'number' ? entry.timestamp : Date.now(),
+    type:
+      entry.level === 'error'
+        ? 'error'
+        : (entry.category === 'end' ? 'end' : 'start'),
+    position:
+      entry.category === 'end'
+        ? 'end'
+        : (entry.category === 'start' ? 'start' : 'middle'),
+    data: entry
+  });
+
   return {
-    logDebug: () => {},
-    logError: () => {},
-    logModule: () => {},
-    processDebugEvent: () => {},
-    getLogs: () => []
+    logDebug: (module: string, message: string, data?: Record<string, unknown>) => {
+      logger?.logDebug?.(`[${module}] ${message}`, data);
+    },
+    logError: (module: string, error: unknown, context?: Record<string, unknown>) => {
+      logger?.logError?.(error, { module, ...(context ?? {}) });
+    },
+    logModule: (module: string, action: string, data?: Record<string, unknown>) => {
+      logger?.logModule?.(module, action, data);
+    },
+    processDebugEvent: (event: DebugEvent) => {
+      logger?.logDebug?.(
+        `[${event.moduleId}] ${event.operationId}:${event.type}`,
+        (event.data ?? {}) as Record<string, unknown>
+      );
+    },
+    getLogs: (module?: string) => {
+      const recent = logger?.getRecentLogs?.() ?? [];
+      const filtered = module
+        ? recent.filter((entry: Record<string, unknown>) => entry.pipelineId === module)
+        : recent;
+      return filtered.map((entry: Record<string, unknown>) => toDebugEvent(entry));
+    }
   };
 }
 
@@ -180,7 +213,7 @@ export function updateProviderProfiles(
   rawConfig?: UnknownObject
 ): void {
   server.providerProfileIndex.clear();
-  const source = collection ?? tryBuildProfiles(rawConfig);
+  const source = collection ?? (rawConfig ? buildProviderProfiles(rawConfig) : null);
   if (!source) {
     return;
   }
@@ -195,11 +228,11 @@ export function ensureProviderProfilesFromUserConfig(server: any): void {
   if (server.providerProfileIndex.size > 0) {
     return;
   }
-  const fallback = tryBuildProfiles(server.userConfig);
-  if (!fallback) {
+  if (!server.userConfig) {
     return;
   }
-  for (const profile of fallback.profiles) {
+  const profiles = buildProviderProfiles(server.userConfig);
+  for (const profile of profiles.profiles) {
     if (profile && typeof profile.id === 'string' && profile.id.trim()) {
       server.providerProfileIndex.set(profile.id.trim(), profile);
     }
@@ -210,12 +243,7 @@ export function tryBuildProfiles(config: UnknownObject | undefined): ProviderPro
   if (!config) {
     return null;
   }
-  try {
-    return buildProviderProfiles(config);
-  } catch (error) {
-    logBootstrapNonBlockingError('tryBuildProfiles', error);
-    return null;
-  }
+  return buildProviderProfiles(config);
 }
 
 export function findProviderProfile(server: any, runtime: ProviderRuntimeProfile): ProviderProfile | undefined {
@@ -250,8 +278,9 @@ export function applyProviderProfileOverrides(server: any, runtime: ProviderRunt
   const originalFamily = patched.providerFamily || patched.providerType;
   patched.providerFamily = originalFamily;
   patched.providerType = profile.protocol as ProviderRuntimeProfile['providerType'];
-  if (profile.moduleType && profile.moduleType.trim()) {
-    patched.providerModule = profile.moduleType.trim();
+  const moduleOverride = resolveProfileModuleOverride(profile, runtime);
+  if (moduleOverride) {
+    patched.providerModule = moduleOverride;
   }
   if (!patched.baseUrl && profile.transport.baseUrl) {
     patched.baseUrl = profile.transport.baseUrl;
@@ -288,6 +317,45 @@ export function applyProviderProfileOverrides(server: any, runtime: ProviderRunt
   }
 
   return canonicalizeRuntimeProvider(patched);
+}
+
+function resolveProfileModuleOverride(
+  profile: ProviderProfile,
+  runtime: ProviderRuntimeProfile,
+): string | undefined {
+  const raw = typeof profile.moduleType === 'string' ? profile.moduleType.trim() : '';
+  if (!raw) {
+    return undefined;
+  }
+  const normalized = raw.toLowerCase();
+  if (shouldPreserveImplicitDeepSeekWebModule(runtime) && isGenericOpenAiModuleHint(normalized)) {
+    return 'deepseek-http-provider';
+  }
+  return raw;
+}
+
+function isGenericOpenAiModuleHint(value: string): boolean {
+  return ['openai', 'openai-standard', 'openai-http-provider'].includes(value);
+}
+
+function shouldPreserveImplicitDeepSeekWebModule(runtime: ProviderRuntimeProfile): boolean {
+  const read = (value?: string): string => (typeof value === 'string' ? value.trim().toLowerCase() : '');
+  const providerId = read(runtime.providerId);
+  const providerKey = read(runtime.providerKey);
+  const runtimeKey = read(runtime.runtimeKey);
+  const compatibilityProfile = read(runtime.compatibilityProfile);
+  const authRawType = read((runtime.auth as { rawType?: string } | undefined)?.rawType);
+
+  return (
+    compatibilityProfile === 'chat:deepseek-web' ||
+    providerId === 'deepseek-web' ||
+    providerId.startsWith('deepseek-web.') ||
+    providerKey === 'deepseek-web' ||
+    providerKey.startsWith('deepseek-web.') ||
+    runtimeKey === 'deepseek-web' ||
+    runtimeKey.startsWith('deepseek-web.') ||
+    authRawType === 'deepseek-account'
+  );
 }
 
 export function canonicalizeRuntimeProvider(runtime: ProviderRuntimeProfile): ProviderRuntimeProfile {

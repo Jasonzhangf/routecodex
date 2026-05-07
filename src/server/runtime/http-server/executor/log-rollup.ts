@@ -449,7 +449,7 @@ function emitRealtimeVirtualRouterHitLog(args: {
   const active = Math.max(0, Math.floor(args.activeInFlight));
   const max = Math.max(0, Math.floor(args.maxInFlight));
   const stoplessSuffix = args.stoplessMode
-    ? ` stopless=${args.stoplessMode} armed=${args.stoplessArmed === true ? 'yes' : 'no'}`
+    ? ` stopless=${args.stoplessMode} state=${args.stoplessArmed === true ? 'armed' : 'ready'}`
     : '';
   console.log(
     colorize(

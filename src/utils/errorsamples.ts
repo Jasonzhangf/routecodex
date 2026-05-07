@@ -8,6 +8,7 @@ const KB = 1024;
 const MB = 1024 * KB;
 
 const DEFAULT_MAX_SAMPLE_BYTES = 256 * KB;
+const DEFAULT_RESPONSES_TOOL_HISTORY_MAX_SAMPLE_BYTES = 4 * MB;
 const DEFAULT_MAX_FILES_PER_GROUP = 50;
 const DEFAULT_MAX_BYTES_PER_GROUP = 128 * MB;
 const DEFAULT_CLIENT_TOOL_MAX_SAMPLE_BYTES = 24 * KB;
@@ -103,8 +104,9 @@ function resolveErrorsampleQueueMemoryBudgetBytes(): number {
   );
 }
 
-function resolveGroupBudget(group: string): ErrorsampleGroupBudget {
+function resolveGroupBudget(group: string, kind?: string): ErrorsampleGroupBudget {
   const normalizedGroup = safeName(group || 'sample').toLowerCase();
+  const normalizedKind = safeName(kind || 'sample').toLowerCase();
   const maxSampleBytes = parseEnvPositiveInt(
     ['ROUTECODEX_ERRORSAMPLE_MAX_BYTES', 'RCC_ERRORSAMPLE_MAX_BYTES'],
     DEFAULT_MAX_SAMPLE_BYTES
@@ -137,6 +139,24 @@ function resolveGroupBudget(group: string): ErrorsampleGroupBudget {
         ['ROUTECODEX_ERRORSAMPLE_CLIENT_TOOL_MAX_BYTES', 'RCC_ERRORSAMPLE_CLIENT_TOOL_MAX_BYTES'],
         DEFAULT_CLIENT_TOOL_MAX_BYTES
       ),
+      pruneIntervalMs
+    };
+  }
+
+  if (
+    normalizedGroup === 'payload-contract-error'
+    && normalizedKind === 'responses.inbound_tool_history_contract'
+  ) {
+    return {
+      maxSampleBytes: parseEnvPositiveInt(
+        [
+          'ROUTECODEX_ERRORSAMPLE_RESPONSES_TOOL_HISTORY_MAX_SAMPLE_BYTES',
+          'RCC_ERRORSAMPLE_RESPONSES_TOOL_HISTORY_MAX_SAMPLE_BYTES'
+        ],
+        DEFAULT_RESPONSES_TOOL_HISTORY_MAX_SAMPLE_BYTES
+      ),
+      maxFiles: defaultMaxFiles,
+      maxBytes: defaultMaxBytes,
       pruneIntervalMs
     };
   }
@@ -463,7 +483,7 @@ export async function writeErrorsampleJson(options: {
   }
   const root = resolveErrorsamplesRoot();
   const dir = path.join(root, safeName(options.group));
-  const budget = resolveGroupBudget(options.group);
+  const budget = resolveGroupBudget(options.group, options.kind);
   const file = path.join(
     dir,
     `${safeName(options.kind)}-${safeStamp()}-${Math.random().toString(16).slice(2)}.json`

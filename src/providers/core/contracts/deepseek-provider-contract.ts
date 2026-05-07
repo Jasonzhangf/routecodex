@@ -1,5 +1,6 @@
 export const DEEPSEEK_PROVIDER_FAMILY = 'deepseek';
 export const DEEPSEEK_COMPATIBILITY_PROFILE = 'chat:deepseek-web';
+export const DEEPSEEK_UPSTREAM_USER_AGENT = 'opencode/1.2.27';
 
 export type DeepSeekToolCallState = 'native_tool_calls' | 'text_tool_calls' | 'no_tool_calls';
 export type DeepSeekToolCallSource = 'native' | 'text' | 'none';

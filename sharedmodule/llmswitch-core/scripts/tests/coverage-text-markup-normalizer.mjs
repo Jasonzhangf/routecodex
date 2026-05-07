@@ -27,12 +27,12 @@ async function main() {
     assert.ok(Array.isArray(tools) && tools[0]?.name === 'shell');
   }
 
-  // Broken markup fallback: bare exec_command extraction requires "broken tool markup" hint.
+  // Transcript-like Ran text must not be harvested as a fresh tool call.
   {
     process.env.ROUTECODEX_WORKDIR = '/tmp';
     const text = '<tool_call>\nRan [\"rg\",\"-n\",\"TODO\",\".\"]\n</tool_call>';
     const tools = extractBareExecCommandFromText(text);
-    assert.ok(Array.isArray(tools) && tools[0]?.name === 'exec_command');
+    assert.ok(Array.isArray(tools) && tools.length === 0);
   }
 
   // Structured apply_patch payloads inside fenced JSON.

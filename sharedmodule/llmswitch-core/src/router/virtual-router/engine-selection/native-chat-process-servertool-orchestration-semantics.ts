@@ -3,6 +3,15 @@ import {
   isNativeDisabledByEnv
 } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
+import {
+  parseServertoolDispatchPlanPayload,
+  parseServertoolFollowupFlowProfilePayload,
+  parseServertoolFollowupRuntimePlanPayload,
+  parseServertoolAutoHookQueuesPayload,
+  parseServertoolOutcomePlanPayload,
+  parseServertoolResponseStagePayload,
+  parseServertoolGenericFollowupPayload
+} from './native-router-hotpath-analysis.js';
 
 export type NativeChatWebSearchPlan = {
   shouldInject: boolean;
@@ -22,11 +31,46 @@ export type NativeContinueDirectiveInjection = {
   messages: unknown[];
 };
 
+export type NativePayloadContractSignal = {
+  reason: string;
+  marker: string;
+};
+
 export type NativeChatServerToolBundlePlan = {
   webSearch: NativeChatWebSearchPlan;
   clock: NativeChatClockPlan;
   continueExecution: NativeContinueExecutionPlan;
 };
+
+export type NativeServertoolResponseStage = ReturnType<typeof parseServertoolResponseStagePayload> extends infer T
+  ? Exclude<T, null>
+  : never;
+
+export type NativeServertoolDispatchPlan = ReturnType<typeof parseServertoolDispatchPlanPayload> extends infer T
+  ? Exclude<T, null>
+  : never;
+
+export type NativeServertoolOutcomePlan = ReturnType<typeof parseServertoolOutcomePlanPayload> extends infer T
+  ? Exclude<T, null>
+  : never;
+
+export type NativeServertoolAutoHookQueues = ReturnType<typeof parseServertoolAutoHookQueuesPayload> extends infer T
+  ? Exclude<T, null>
+  : never;
+
+export type NativeServertoolGenericFollowupPayload = ReturnType<typeof parseServertoolGenericFollowupPayload> extends infer T
+  ? Exclude<T, null>
+  : never;
+
+export type NativeServertoolFollowupFlowProfile = ReturnType<typeof parseServertoolFollowupFlowProfilePayload> extends infer T
+  ? Exclude<T, null>
+  : never;
+
+export type NativeServertoolFollowupRuntimePlan = ReturnType<typeof parseServertoolFollowupRuntimePlanPayload> extends infer T
+  ? Exclude<T, null>
+  : never;
+
+export type NativeServertoolSkeletonDocument = Record<string, unknown>;
 
 const NON_BLOCKING_SERVERTOOL_ORCHESTRATION_LOG_THROTTLE_MS = 60_000;
 const nonBlockingServertoolOrchestrationLogState = new Map<string, number>();
@@ -99,6 +143,12 @@ function invokeNativeStringCapability(capability: string, args: unknown[]): stri
   }
   try {
     const raw = fn(...args);
+    if (raw instanceof Error) {
+      return fail(raw.message || 'native error');
+    }
+    if (raw && typeof raw === 'object' && !Array.isArray(raw) && typeof (raw as { message?: unknown }).message === 'string') {
+      return fail(String((raw as { message: unknown }).message));
+    }
     if (typeof raw !== 'string' || !raw) {
       return fail('empty result');
     }
@@ -184,6 +234,32 @@ function parseServerToolBundlePlan(raw: string): NativeChatServerToolBundlePlan 
   return { webSearch, clock, continueExecution };
 }
 
+function parsePayloadContractSignal(raw: string): NativePayloadContractSignal | null {
+  const parsed = parseJson('parsePayloadContractSignal', raw);
+  if (parsed === JSON_PARSE_FAILED) {
+    return null;
+  }
+  if (parsed === null) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const row = parsed as Record<string, unknown>;
+  if (typeof row.reason !== 'string' || typeof row.marker !== 'string') {
+    return null;
+  }
+  return { reason: row.reason, marker: row.marker };
+}
+
+function parseServertoolSkeletonDocument(raw: string): NativeServertoolSkeletonDocument | null {
+  const parsed = parseJson('parseServertoolSkeletonDocument', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed as NativeServertoolSkeletonDocument;
+}
+
 function parseProviderResponseShape(raw: string):
   | 'openai-chat'
   | 'openai-responses'
@@ -237,6 +313,26 @@ function parseStringOrUndefined(raw: string): string | undefined | null {
   return typeof parsed === 'string' ? parsed : null;
 }
 
+export function detectEmptyAssistantPayloadContractSignalWithNative(
+  payload: unknown
+): NativePayloadContractSignal | null {
+  const capability = 'detectEmptyAssistantPayloadContractSignalJson';
+  if (isNativeDisabledByEnv()) {
+    return null;
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return null;
+  }
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [payload ?? null]);
+    return parsePayloadContractSignal(raw);
+  } catch (error) {
+    logNativeServertoolOrchestrationNonBlocking(capability, error);
+    return null;
+  }
+}
+
 export function detectProviderResponseShapeWithNative(
   payload: unknown
 ): 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat' | 'unknown' {
@@ -286,6 +382,21 @@ export function resolveStopMessageSessionScopeWithNative(
   metadata: Record<string, unknown>
 ): string | undefined {
   const capability = 'resolveStopMessageSessionScopeJson';
+  const fail = (reason?: string) => failNativeRequired<string | undefined>(capability, reason);
+  try {
+    const response = invokeNativeStringCapabilityWithJsonArgs(capability, [metadata]);
+    const parsed = parseStringOrUndefined(response);
+    return parsed === null ? fail('invalid payload') : parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function resolveServertoolStickyKeyWithNative(
+  metadata: Record<string, unknown>
+): string | undefined {
+  const capability = 'resolveServertoolStickyKeyJson';
   const fail = (reason?: string) => failNativeRequired<string | undefined>(capability, reason);
   try {
     const response = invokeNativeStringCapabilityWithJsonArgs(capability, [metadata]);
@@ -428,6 +539,164 @@ export function injectContinueExecutionDirectiveWithNative(
     const messagesJson = encodeJsonArg(capability, messages);
     const raw = invokeNativeStringCapability(capability, [messagesJson, marker, targetText]);
     const parsed = parseContinueDirectiveInjection(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function runServertoolResponseStageWithNative(
+  payload: unknown,
+  requestId: string
+): NativeServertoolResponseStage {
+  const capability = 'runServertoolResponseStageJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolResponseStage>(capability, reason);
+  try {
+    const payloadJson = encodeJsonArg(capability, payload ?? null);
+    const raw = invokeNativeStringCapability(capability, [payloadJson, String(requestId || '')]);
+    const parsed = parseServertoolResponseStagePayload(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function getDefaultServertoolSkeletonDocumentWithNative(): NativeServertoolSkeletonDocument {
+  const capability = 'getDefaultServertoolSkeletonDocumentJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolSkeletonDocument>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapability(capability, []);
+    const parsed = parseServertoolSkeletonDocument(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planServertoolToolCallDispatchWithNative(input: {
+  toolCalls: Array<{ id: string; name: string; arguments: string }>;
+  disableToolCallHandlers: boolean;
+  includeToolCallHandlerNames?: string[];
+  excludeToolCallHandlerNames?: string[];
+  registeredToolCallHandlers: Array<{
+    name: string;
+    trigger: string;
+    executionMode: string;
+    stripAfterExecute: boolean;
+  }>;
+}): NativeServertoolDispatchPlan {
+  const capability = 'planServertoolToolCallDispatchJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolDispatchPlan>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseServertoolDispatchPlanPayload(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planServertoolOutcomeWithNative(input: {
+  toolCalls: Array<{ id: string; name: string; arguments: string }>;
+  executedToolCalls: Array<{
+    id: string;
+    name: string;
+    arguments: string;
+    executionMode: string;
+    stripAfterExecute: boolean;
+  }>;
+  executedFlowIds: string[];
+  lastExecutionFlowId?: string;
+  hasLastExecutionFollowup: boolean;
+  sessionId?: string;
+  conversationId?: string;
+  toolOutputs?: unknown[];
+  pendingInjectionMessageKinds?: string[];
+  followupInjectionOps?: string[];
+}): NativeServertoolOutcomePlan {
+  const capability = 'planServertoolOutcomeJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolOutcomePlan>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseServertoolOutcomePlanPayload(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planServertoolAutoHookQueuesWithNative(input: {
+  hooks: Array<{ id: string; phase: string; priority: number; order: number }>;
+  includeAutoHookIds?: string[];
+  excludeAutoHookIds?: string[];
+  optionalPrimaryHookOrder: string[];
+  mandatoryHookOrder: string[];
+}): NativeServertoolAutoHookQueues {
+  const capability = 'planServertoolAutoHookQueuesJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolAutoHookQueues>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseServertoolAutoHookQueuesPayload(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function buildServertoolGenericFollowupPayloadWithNative(input: {
+  model: string;
+  messages: unknown[];
+  tools?: unknown[];
+  parameters?: Record<string, unknown>;
+  assistantMessage?: unknown;
+  toolOutputs?: unknown[];
+  followupInjectionOps: unknown[];
+}): NativeServertoolGenericFollowupPayload {
+  const capability = 'buildServertoolGenericFollowupPayloadJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolGenericFollowupPayload>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseServertoolGenericFollowupPayload(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function resolveServertoolFollowupFlowProfileWithNative(
+  flowId: string
+): NativeServertoolFollowupFlowProfile {
+  const capability = 'resolveServertoolFollowupFlowProfileJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolFollowupFlowProfile>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapability(capability, [String(flowId || '')]);
+    const parsed = parseServertoolFollowupFlowProfilePayload(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planServertoolFollowupRuntimeWithNative(
+  flowId: string
+): NativeServertoolFollowupRuntimePlan {
+  const capability = 'planServertoolFollowupRuntimeJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolFollowupRuntimePlan>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapability(capability, [String(flowId || '')]);
+    const parsed = parseServertoolFollowupRuntimePlanPayload(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

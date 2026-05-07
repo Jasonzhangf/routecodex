@@ -216,6 +216,140 @@ fn filter_orphan_responses_tool_outputs(items: Vec<Value>) -> Vec<Value> {
         .collect()
 }
 
+fn build_duplicate_responses_call_id_rewrites(
+    items: &[Value],
+    allowed_tool_names: &std::collections::HashSet<String>,
+) -> std::collections::HashMap<usize, String> {
+    #[derive(Default)]
+    struct CallIdOccurrences {
+        call_indexes: Vec<usize>,
+        output_indexes: Vec<usize>,
+    }
+
+    let mut occurrences =
+        std::collections::HashMap::<String, CallIdOccurrences>::new();
+
+    for (index, entry) in items.iter().enumerate() {
+        let Some(row) = entry.as_object() else {
+            continue;
+        };
+        let ty = read_trimmed_string(row.get("type"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        if matches!(ty.as_str(), "function_call" | "tool_call") {
+            let name = read_trimmed_string(row.get("name"))
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            let Some(name) = name else {
+                continue;
+            };
+            let lowered_name = name.to_ascii_lowercase();
+            let name_allowed = allowed_tool_names.is_empty()
+                || allowed_tool_names.contains(lowered_name.as_str());
+            if name.len() > 128 || !name_allowed {
+                continue;
+            }
+            let call_id = read_trimmed_string(row.get("call_id"))
+                .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+                .or_else(|| read_trimmed_string(row.get("id")));
+            let Some(call_id) = call_id else {
+                continue;
+            };
+            occurrences
+                .entry(call_id)
+                .or_default()
+                .call_indexes
+                .push(index);
+            continue;
+        }
+
+        if matches!(ty.as_str(), "function_call_output" | "tool_result" | "tool_message") {
+            let call_id = read_trimmed_string(row.get("call_id"))
+                .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+                .or_else(|| read_trimmed_string(row.get("tool_use_id")))
+                .or_else(|| read_trimmed_string(row.get("id")));
+            let Some(call_id) = call_id else {
+                continue;
+            };
+            occurrences
+                .entry(call_id)
+                .or_default()
+                .output_indexes
+                .push(index);
+        }
+    }
+
+    let mut rewrites = std::collections::HashMap::<usize, String>::new();
+
+    for (raw_call_id, occurrence) in occurrences {
+        if occurrence.call_indexes.len() <= 1 {
+            continue;
+        }
+
+        let mut rewritten_ids = Vec::with_capacity(occurrence.call_indexes.len());
+        for (ordinal, call_index) in occurrence.call_indexes.iter().enumerate() {
+            let rewritten = if ordinal == 0 {
+                raw_call_id.clone()
+            } else {
+                format!("{raw_call_id}__rcc_occurrence_{}", ordinal + 1)
+            };
+            rewritten_ids.push(rewritten.clone());
+            rewrites.insert(*call_index, rewritten);
+        }
+
+        for (ordinal, output_index) in occurrence.output_indexes.iter().enumerate() {
+            if let Some(rewritten) = rewritten_ids.get(ordinal) {
+                rewrites.insert(*output_index, rewritten.clone());
+            }
+        }
+    }
+
+    rewrites
+}
+
+fn rewrite_responses_tool_history_entry_call_id(
+    index: usize,
+    row: &Map<String, Value>,
+    rewrites: &std::collections::HashMap<usize, String>,
+) -> Map<String, Value> {
+    let Some(rewritten_call_id) = rewrites.get(&index) else {
+        return row.clone();
+    };
+    let mut next = row.clone();
+    let ty = read_trimmed_string(row.get("type"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    if matches!(ty.as_str(), "function_call" | "tool_call") {
+        next.insert(
+            "call_id".to_string(),
+            Value::String(rewritten_call_id.clone()),
+        );
+        next.insert("id".to_string(), Value::String(rewritten_call_id.clone()));
+        if row.contains_key("tool_call_id") {
+            next.insert(
+                "tool_call_id".to_string(),
+                Value::String(rewritten_call_id.clone()),
+            );
+        }
+        return next;
+    }
+
+    if matches!(ty.as_str(), "function_call_output" | "tool_result" | "tool_message") {
+        next.insert(
+            "call_id".to_string(),
+            Value::String(rewritten_call_id.clone()),
+        );
+        next.insert(
+            "tool_call_id".to_string(),
+            Value::String(rewritten_call_id.clone()),
+        );
+    }
+
+    next
+}
+
 pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
     let mut mapped: Vec<Value> = Vec::new();
 
@@ -235,21 +369,24 @@ pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
                     rows.iter()
                         .filter_map(|child| {
                             let child_row = child.as_object()?;
-                            let child_function = child_row.get("function").and_then(|v| v.as_object());
+                            let child_function =
+                                child_row.get("function").and_then(|v| v.as_object());
                             let child_name = read_trimmed_string(
                                 child_function
                                     .and_then(|v| v.get("name"))
                                     .or_else(|| child_row.get("name")),
                             )?;
                             let mut child_out = Map::new();
-                            child_out.insert("type".to_string(), Value::String("function".to_string()));
+                            child_out
+                                .insert("type".to_string(), Value::String("function".to_string()));
                             child_out.insert("name".to_string(), Value::String(child_name));
                             if let Some(description) = read_trimmed_string(
                                 child_function
                                     .and_then(|v| v.get("description"))
                                     .or_else(|| child_row.get("description")),
                             ) {
-                                child_out.insert("description".to_string(), Value::String(description));
+                                child_out
+                                    .insert("description".to_string(), Value::String(description));
                             }
                             if let Some(parameters) = normalize_tool_parameters(
                                 child_function
@@ -284,7 +421,8 @@ pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
             if let Some(namespace_name) = namespace_name {
                 if !child_tools.is_empty() {
                     let mut namespace_out = Map::new();
-                    namespace_out.insert("type".to_string(), Value::String("namespace".to_string()));
+                    namespace_out
+                        .insert("type".to_string(), Value::String("namespace".to_string()));
                     namespace_out.insert("name".to_string(), Value::String(namespace_name));
                     if let Some(description) = read_trimmed_string(tool_row.get("description")) {
                         namespace_out.insert("description".to_string(), Value::String(description));
@@ -372,12 +510,16 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                         .collect::<std::collections::HashSet<String>>()
                 })
                 .unwrap_or_default();
+            let call_id_rewrites =
+                build_duplicate_responses_call_id_rewrites(items, &allowed_tool_names);
 
             let mut normalized: Vec<Value> = Vec::with_capacity(items.len());
             let mut valid_call_ids = std::collections::HashSet::new();
             let mut saw_function_calls = false;
+            let mut completed_tool_output_signatures =
+                std::collections::HashMap::<String, std::collections::HashSet<String>>::new();
 
-            for entry in items {
+            for (index, entry) in items.iter().enumerate() {
                 let Some(row) = entry.as_object() else {
                     continue;
                 };
@@ -406,12 +548,16 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                 let call_id = read_trimmed_string(row.get("call_id"))
                     .or_else(|| read_trimmed_string(row.get("tool_call_id")))
                     .or_else(|| read_trimmed_string(row.get("id")));
-                if let Some(value) = call_id {
+                let effective_call_id = call_id_rewrites
+                    .get(&index)
+                    .cloned()
+                    .or(call_id);
+                if let Some(value) = effective_call_id {
                     valid_call_ids.insert(value);
                 }
             }
 
-            for entry in items {
+            for (index, entry) in items.iter().enumerate() {
                 let Some(row) = entry.as_object() else {
                     normalized.push(entry.clone());
                     continue;
@@ -437,10 +583,18 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                     let call_id = read_trimmed_string(row.get("call_id"))
                         .or_else(|| read_trimmed_string(row.get("tool_call_id")))
                         .or_else(|| read_trimmed_string(row.get("id")));
-                    if let Some(value) = call_id {
+                    let effective_call_id = call_id_rewrites
+                        .get(&index)
+                        .cloned()
+                        .or(call_id);
+                    if let Some(value) = effective_call_id {
                         valid_call_ids.insert(value);
                     }
-                    normalized.push(entry.clone());
+                    normalized.push(Value::Object(rewrite_responses_tool_history_entry_call_id(
+                        index,
+                        row,
+                        &call_id_rewrites,
+                    )));
                     continue;
                 }
 
@@ -452,13 +606,28 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                         .or_else(|| read_trimmed_string(row.get("tool_call_id")))
                         .or_else(|| read_trimmed_string(row.get("tool_use_id")))
                         .or_else(|| read_trimmed_string(row.get("id")));
-                    let Some(call_id) = call_id else {
+                    let effective_call_id = call_id_rewrites
+                        .get(&index)
+                        .cloned()
+                        .or(call_id);
+                    let Some(call_id) = effective_call_id else {
                         continue;
                     };
                     if saw_function_calls && !valid_call_ids.contains(call_id.as_str()) {
                         continue;
                     }
-                    normalized.push(entry.clone());
+                    let rewritten_row =
+                        rewrite_responses_tool_history_entry_call_id(index, row, &call_id_rewrites);
+                    let payload_signature = serde_json::to_string(&Value::Object(rewritten_row.clone()))
+                        .unwrap_or_else(|_| format!("{:?}", row));
+                    let seen_signatures = completed_tool_output_signatures
+                        .entry(call_id.clone())
+                        .or_default();
+                    if seen_signatures.contains(payload_signature.as_str()) {
+                        continue;
+                    }
+                    seen_signatures.insert(payload_signature);
+                    normalized.push(Value::Object(rewritten_row));
                     continue;
                 }
 
@@ -974,6 +1143,143 @@ mod tests {
         assert_eq!(normalized[0]["type"], "function_call_output");
         assert_eq!(normalized[0]["call_id"], "fc_late");
         assert_eq!(normalized[1]["type"], "function_call");
+    }
+
+    #[test]
+    fn normalize_responses_input_items_dedupes_identical_duplicate_function_call_outputs() {
+        let raw_request = json!({
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "exec_command",
+                "parameters": { "type": "object", "properties": {} }
+              }
+            }
+          ],
+          "input": [
+            {
+              "type": "function_call",
+              "id": "fc_dup",
+              "call_id": "fc_dup",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"pwd\"}"
+            },
+            {
+              "type": "function_call_output",
+              "id": "out_dup_1",
+              "call_id": "fc_dup",
+              "output": "{\"stdout\":\"/tmp\"}"
+            },
+            {
+              "type": "function_call_output",
+              "id": "out_dup_1",
+              "call_id": "fc_dup",
+              "output": "{\"stdout\":\"/tmp\"}"
+            }
+          ]
+        });
+
+        let normalized = normalize_responses_input_items(raw_request.as_object().unwrap())
+            .expect("normalized input");
+        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized[0]["type"], "function_call");
+        assert_eq!(normalized[1]["type"], "function_call_output");
+        assert_eq!(normalized[1]["call_id"], "fc_dup");
+    }
+
+    #[test]
+    fn normalize_responses_input_items_keeps_distinct_duplicate_function_call_outputs() {
+        let raw_request = json!({
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "exec_command",
+                "parameters": { "type": "object", "properties": {} }
+              }
+            }
+          ],
+          "input": [
+            {
+              "type": "function_call",
+              "id": "fc_dup",
+              "call_id": "fc_dup",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"pwd\"}"
+            },
+            {
+              "type": "function_call_output",
+              "id": "out_dup_1",
+              "call_id": "fc_dup",
+              "output": "{\"stdout\":\"/tmp\"}"
+            },
+            {
+              "type": "function_call_output",
+              "id": "out_dup_2",
+              "call_id": "fc_dup",
+              "output": "{\"stdout\":\"/var\"}"
+            }
+          ]
+        });
+
+        let normalized = normalize_responses_input_items(raw_request.as_object().unwrap())
+            .expect("normalized input");
+        assert_eq!(normalized.len(), 3);
+        assert_eq!(normalized[1]["type"], "function_call_output");
+        assert_eq!(normalized[2]["type"], "function_call_output");
+        assert_eq!(normalized[2]["output"], "{\"stdout\":\"/var\"}");
+    }
+
+    #[test]
+    fn normalize_responses_input_items_rewrites_reused_call_ids_by_occurrence_order() {
+        let raw_request = json!({
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "exec_command",
+                "parameters": { "type": "object", "properties": {} }
+              }
+            }
+          ],
+          "input": [
+            {
+              "type": "function_call",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"echo first\"}",
+              "call_id": "call_1"
+            },
+            {
+              "type": "function_call",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"echo second\"}",
+              "call_id": "call_1"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_1",
+              "output": "first output"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_1",
+              "output": "second output"
+            }
+          ]
+        });
+
+        let normalized = normalize_responses_input_items(raw_request.as_object().unwrap())
+            .expect("normalized input");
+        assert_eq!(normalized.len(), 4);
+        assert_eq!(normalized[0]["call_id"], "call_1");
+        assert_eq!(normalized[0]["id"], "call_1");
+        assert_eq!(normalized[1]["call_id"], "call_1__rcc_occurrence_2");
+        assert_eq!(normalized[1]["id"], "call_1__rcc_occurrence_2");
+        assert_eq!(normalized[2]["call_id"], "call_1");
+        assert_eq!(normalized[2]["tool_call_id"], "call_1");
+        assert_eq!(normalized[3]["call_id"], "call_1__rcc_occurrence_2");
+        assert_eq!(normalized[3]["tool_call_id"], "call_1__rcc_occurrence_2");
     }
 
     #[test]

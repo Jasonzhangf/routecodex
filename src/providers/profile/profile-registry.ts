@@ -2,6 +2,7 @@ import type { ProviderFamilyLookupInput, ProviderFamilyProfile } from './profile
 import { resolveProviderFamilyFromDirectory } from './provider-directory.js';
 import { antigravityFamilyProfile } from './families/antigravity-profile.js';
 import { anthropicFamilyProfile } from './families/anthropic-profile.js';
+import { deepseekFamilyProfile } from './families/deepseek-profile.js';
 import { glmFamilyProfile } from './families/glm-profile.js';
 import { qwenFamilyProfile } from './families/qwen-profile.js';
 import { responsesFamilyProfile } from './families/responses-profile.js';
@@ -9,6 +10,7 @@ import { responsesFamilyProfile } from './families/responses-profile.js';
 const FAMILY_PROFILES = new Map<string, ProviderFamilyProfile>([
   ['responses', responsesFamilyProfile],
   ['anthropic', anthropicFamilyProfile],
+  ['deepseek', deepseekFamilyProfile],
   ['glm', glmFamilyProfile],
   ['qwen', qwenFamilyProfile],
   ['antigravity', antigravityFamilyProfile]

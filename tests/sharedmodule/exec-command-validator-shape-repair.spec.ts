@@ -43,4 +43,29 @@ describe('exec_command validator shape repair', () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('missing_cmd');
   });
+
+  it('rejects tail-truncated shell wrapper because closure is ambiguous', () => {
+    const result = validateToolCall(
+      'exec_command',
+      JSON.stringify({
+        cmd: "bash -lc 'tail -50 ~/.fin/runtime/peers/qqbot/bridge.stderr.log 2>/dev/null || echo \"No bridge log\""
+      })
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('invalid_shell_wrapper_shape');
+  });
+
+  it('allows zero-ambiguity shell wrapper spacing normalization elsewhere but keeps balanced wrappers valid', () => {
+    const result = validateToolCall(
+      'exec_command',
+      JSON.stringify({
+        cmd: "bash -lc 'pwd'"
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const normalized = JSON.parse(String(result.normalizedArgs || '{}'));
+      expect(normalized.cmd).toBe("bash -lc 'pwd'");
+    }
+  });
 });

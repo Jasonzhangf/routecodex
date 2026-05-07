@@ -273,10 +273,8 @@ fn validate_tools(
                     stage,
                     direction,
                     "tools_namespace_child_type",
-                    format!(
-                        "tools[{index}].tools[{child_index}].type must equal \"function\""
-                    )
-                    .as_str(),
+                    format!("tools[{index}].tools[{child_index}].type must equal \"function\"")
+                        .as_str(),
                     source,
                 ));
             }
@@ -298,10 +296,7 @@ fn validate_tools(
                     stage,
                     direction,
                     "tools_namespace_child_name",
-                    format!(
-                        "tools[{index}].tools[{child_index}].name must be a string"
-                    )
-                    .as_str(),
+                    format!("tools[{index}].tools[{child_index}].name must be a string").as_str(),
                     source,
                 ));
             }

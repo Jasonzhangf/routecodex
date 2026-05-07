@@ -68,6 +68,106 @@ describe('servertool adapter context builder', () => {
     expect(mockSyncReasoningStopModeFromRequest).toHaveBeenCalledTimes(1);
   });
 
+  it('replaces followup-collapsed reasoning.stop-only captured tools with original clientToolsRaw', async () => {
+    jest.resetModules();
+    mockSyncReasoningStopModeFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata: {
+        capturedChatRequest: {
+          model: 'mimo-v2.5-pro',
+          messages: [{ role: 'user', content: '继续执行' }],
+          tools: [
+            {
+              type: 'function',
+              function: { name: 'reasoning.stop', parameters: { type: 'object' } }
+            }
+          ]
+        },
+        __rt: {
+          serverToolFollowup: true
+        }
+      },
+      requestSemantics: {
+        tools: {
+          clientToolsRaw: [
+            {
+              type: 'function',
+              function: { name: 'exec_command', parameters: { type: 'object' } }
+            },
+            {
+              type: 'function',
+              function: { name: 'apply_patch', parameters: { type: 'object' } }
+            },
+            {
+              type: 'function',
+              function: { name: 'reasoning.stop', parameters: { type: 'object' } }
+            }
+          ]
+        }
+      },
+      requestId: 'req-followup-tools-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    const toolNames = (((context.capturedChatRequest as Record<string, unknown>).tools as Array<any>) ?? [])
+      .map((tool) => tool?.function?.name);
+    expect(toolNames).toEqual(['exec_command', 'apply_patch', 'reasoning.stop']);
+  });
+
+  it('recognizes anthropic-style top-level tool names when deciding whether to restore original client tools', async () => {
+    jest.resetModules();
+    mockSyncReasoningStopModeFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata: {
+        capturedChatRequest: {
+          model: 'mimo-v2.5-pro',
+          messages: [{ role: 'user', content: '继续执行' }],
+          tools: [
+            {
+              name: 'reasoning.stop',
+              input_schema: { type: 'object' }
+            }
+          ]
+        },
+        __rt: {
+          serverToolFollowup: true
+        }
+      },
+      requestSemantics: {
+        tools: {
+          clientToolsRaw: [
+            {
+              type: 'function',
+              function: { name: 'exec_command', parameters: { type: 'object' } }
+            },
+            {
+              type: 'function',
+              function: { name: 'reasoning.stop', parameters: { type: 'object' } }
+            }
+          ]
+        }
+      },
+      requestId: 'req-followup-tools-anthropic-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    const tools = (((context.capturedChatRequest as Record<string, unknown>).tools as Array<any>) ?? []);
+    const toolNames = tools.map((tool) => tool?.function?.name ?? tool?.name);
+    expect(toolNames).toEqual(['exec_command', 'reasoning.stop']);
+  });
+
 
 
   it('fails fast when reasoning stop seed sync fails', async () => {

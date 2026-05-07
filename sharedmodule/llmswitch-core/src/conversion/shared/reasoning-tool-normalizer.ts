@@ -20,6 +20,21 @@ function assertReasoningToolNormalizerNativeAvailable(): void {
   }
 }
 
+function applyNormalizedMessage(
+  target: UnknownRecord | null | undefined,
+  normalized: UnknownRecord | null | undefined
+): void {
+  if (!target || !normalized) {
+    return;
+  }
+  for (const key of Object.keys(target)) {
+    if (!Object.prototype.hasOwnProperty.call(normalized, key)) {
+      delete target[key];
+    }
+  }
+  Object.assign(target, normalized);
+}
+
 export function normalizeMessageReasoningTools(
   message: UnknownRecord | null | undefined,
   options?: { idPrefix?: string }
@@ -29,6 +44,7 @@ export function normalizeMessageReasoningTools(
     message as UnknownRecord,
     typeof options?.idPrefix === 'string' ? options.idPrefix : undefined
   );
+  applyNormalizedMessage(message, normalized.message);
   return {
     toolCallsAdded: normalized.toolCallsAdded,
     ...(typeof normalized.cleanedReasoning === 'string'

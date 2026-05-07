@@ -569,6 +569,16 @@ const handler: ServerToolHandler = async (
           chatResponse: ctx.base,
           execution: {
             flowId: FLOW_ID,
+            ...(stickyKey
+              ? {
+                  stopMessageReservation: {
+                    stickyKey,
+                    previousState: stickyState
+                      ? (JSON.parse(JSON.stringify(stickyState)) as Record<string, unknown>)
+                      : null
+                  }
+                }
+              : {}),
             followup: {
               requestIdSuffix: ':stop_followup',
               metadata: {
@@ -647,6 +657,16 @@ const handler: ServerToolHandler = async (
         chatResponse: ctx.base,
         execution: {
           flowId: FLOW_ID,
+          ...(stickyKey
+            ? {
+                stopMessageReservation: {
+                  stickyKey,
+                  previousState: stickyState
+                    ? (JSON.parse(JSON.stringify(stickyState)) as Record<string, unknown>)
+                    : null
+                }
+              }
+            : {}),
           followup: {
             requestIdSuffix: ':stop_followup',
             metadata: {

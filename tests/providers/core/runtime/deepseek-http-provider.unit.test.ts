@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
+import { DEEPSEEK_UPSTREAM_USER_AGENT } from '../../../../src/providers/core/contracts/deepseek-provider-contract.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 import { DeepSeekHttpProvider } from '../../../../src/providers/core/runtime/deepseek-http-provider.js';
 
@@ -166,6 +167,14 @@ describe('DeepSeekHttpProvider', () => {
       fakeSessionPow
     );
 
+    (provider as any).setRuntimeProfile({
+      runtimeKey: 'deepseek-web.1',
+      keyAlias: '1',
+      providerId: 'deepseek-web',
+      providerKey: 'deepseek-web.1.deepseek-reasoner',
+      providerType: 'openai'
+    });
+
     await provider.initialize();
 
     const finalizedHeaders = await (provider as any).finalizeRequestHeaders(
@@ -190,6 +199,7 @@ describe('DeepSeekHttpProvider', () => {
     });
 
     expect(finalizedHeaders['x-ds-pow-response']).toBe('pow-encoded');
+    expect(finalizedHeaders['User-Agent']).toBe(DEEPSEEK_UPSTREAM_USER_AGENT);
     expect(fakeSessionPow.ensureChatSession).toHaveBeenCalledTimes(1);
     expect(fakeSessionPow.createPowResponse).toHaveBeenCalledTimes(1);
 
@@ -516,6 +526,93 @@ describe('DeepSeekHttpProvider', () => {
     expect(wantsSse).toBe(false);
   });
 
+  it('forces upstream SSE for plain deepseek-web text requests even when stream=false', async () => {
+    const tokenFile = await createDeepSeekTokenFile('sse-regular-web-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-sse-web-1'),
+      createPowResponse: jest.fn(async () => 'pow-sse-web-1'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek-web',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+    const wantsSse = (provider as any).wantsUpstreamSse(
+      {
+        data: {
+          model: 'deepseek-chat',
+          search_enabled: false,
+          stream: false,
+          prompt: 'plain text request'
+        }
+      },
+      { requestId: 'req-deepseek-sse-regular-web' } as any
+    );
+
+    expect(wantsSse).toBe(true);
+  });
+
+  it('forces upstream SSE when deepseek-web compatibility is carried by compatibilityProfile on config', async () => {
+    const tokenFile = await createDeepSeekTokenFile('sse-compat-profile-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-sse-compat-1'),
+      createPowResponse: jest.fn(async () => 'pow-sse-compat-1'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'openai',
+          compatibilityProfile: 'chat:deepseek-web',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+    const wantsSse = (provider as any).wantsUpstreamSse(
+      {
+        data: {
+          model: 'deepseek-chat',
+          search_enabled: false,
+          stream: false,
+          prompt: 'compatibility profile request'
+        }
+      },
+      { requestId: 'req-deepseek-sse-compat-profile' } as any
+    );
+
+    expect(wantsSse).toBe(true);
+  });
+
   it('forces upstream SSE for tool requests even when stream=false', async () => {
     const tokenFile = await createDeepSeekTokenFile('sse-tool-token');
     const fakeSessionPow: FakeSessionPow = {
@@ -685,12 +782,113 @@ describe('DeepSeekHttpProvider', () => {
       }
     );
 
-    expect(finalizedHeaders['User-Agent']).toBe('Mozilla/5.0 Camoufox DeepSeek Test');
+    expect(finalizedHeaders['User-Agent']).toBe(DEEPSEEK_UPSTREAM_USER_AGENT);
     expect(finalizedHeaders['x-client-platform']).toBe('windows');
     expect(finalizedHeaders['Origin']).toBe('https://chat.deepseek.com');
     expect(finalizedHeaders['Referer']).toBe('https://chat.deepseek.com/');
     expect(fakeSessionPow.ensureChatSession).toHaveBeenCalledTimes(1);
-    expect(fakeSessionPow.ensureChatSession.mock.calls[0]?.[0]?.['User-Agent']).toBe('Mozilla/5.0 Camoufox DeepSeek Test');
+    expect(fakeSessionPow.ensureChatSession.mock.calls[0]?.[0]?.['User-Agent']).toBe(DEEPSEEK_UPSTREAM_USER_AGENT);
+  });
+
+  it('drops session headers and refreshes chat session cache for deepseek-web requests', async () => {
+    const tokenFile = await createDeepSeekTokenFile('session-isolation-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-isolated-1'),
+      createPowResponse: jest.fn(async () => 'pow-isolated-1'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek-web',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+
+    const finalizedHeaders = await (provider as any).finalizeRequestHeaders(
+      {
+        session_id: 'sticky-session-id',
+        conversation_id: 'sticky-conversation-id'
+      },
+      {
+        data: {
+          prompt: 'fresh session please'
+        }
+      }
+    );
+
+    expect(finalizedHeaders.session_id).toBeUndefined();
+    expect(finalizedHeaders.conversation_id).toBeUndefined();
+    expect(fakeSessionPow.cleanup).toHaveBeenCalledTimes(1);
+    expect(fakeSessionPow.ensureChatSession).toHaveBeenCalledTimes(1);
+    expect(fakeSessionPow.ensureChatSession.mock.calls[0]?.[0]?.session_id).toBeUndefined();
+    expect(fakeSessionPow.ensureChatSession.mock.calls[0]?.[0]?.conversation_id).toBeUndefined();
+  });
+
+  it('ignores inbound chat_session_id and parent_message_id for deepseek-web compat body', async () => {
+    const tokenFile = await createDeepSeekTokenFile('fresh-session-body-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-fresh-body-1'),
+      createPowResponse: jest.fn(async () => 'pow-fresh-body-1'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek-web',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+
+    await (provider as any).finalizeRequestHeaders(
+      {},
+      {
+        data: {
+          prompt: 'fresh session body request'
+        }
+      }
+    );
+
+    const body = (provider as any).buildHttpRequestBody({
+      data: {
+        prompt: 'fresh session body request',
+        chat_session_id: 'stale-session-id',
+        parent_message_id: 'stale-parent-id',
+        thinking_enabled: true,
+        search_enabled: false
+      }
+    });
+
+    expect(body.chat_session_id).toBe('session-fresh-body-1');
+    expect(body.parent_message_id).toBeNull();
   });
 
   it('keeps text-emitted function_calls untouched in provider runtime postprocess', async () => {
@@ -747,5 +945,52 @@ describe('DeepSeekHttpProvider', () => {
     expect(firstChoice?.finish_reason).toBe('stop');
     expect(firstChoice?.message?.tool_calls).toBeUndefined();
     expect(String(firstChoice?.message?.content || '')).toContain('<function_calls>');
+  });
+
+  it('forces upstream SSE for text-tool wrapper prompts even after tools are folded into prompt', async () => {
+    const tokenFile = await createDeepSeekTokenFile('sse-tool-wrapper-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-sse-3'),
+      createPowResponse: jest.fn(async () => 'pow-sse-3'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+    const wantsSse = (provider as any).wantsUpstreamSse(
+      {
+        data: {
+          model: 'deepseek-chat',
+          prompt: `<tool_call>\n{"name":"exec_command","arguments":{"cmd":"bash -lc 'pwd'"}}\n</tool_call>`,
+          metadata: {
+            deepseek: {
+              toolProtocol: 'text'
+            }
+          },
+          stream: false
+        }
+      },
+      { requestId: 'req-deepseek-sse-tool-wrapper' } as any
+    );
+
+    expect(wantsSse).toBe(true);
   });
 });

@@ -83,7 +83,7 @@ describe('antigravity_thought_signature_bootstrap servertool', () => {
     expect(preflight?.metadata?.stream).toBe(false);
     expect(preflight?.metadata?.__shadowCompareForcedProviderKey).toBe('antigravity.test');
     expect(preflight?.metadata?.__hubEntry).toBe('chat_process');
-    expect(preflight?.metadata?.routeHint).toBe('');
+    expect(preflight?.metadata?.routeHint).toBeUndefined();
     expect(preflight?.metadata?.__rt?.serverToolFollowup).toBe(true);
     expect(preflight?.metadata?.__rt?.antigravityThoughtSignatureBootstrap).toBe(true);
 
@@ -104,7 +104,7 @@ describe('antigravity_thought_signature_bootstrap servertool', () => {
     expect(String(replay?.requestId || '')).toContain(':antigravity_ts_replay');
     expect(replay?.metadata?.stream).toBe(false);
     expect(replay?.metadata?.__hubEntry).toBe('chat_process');
-    expect(replay?.metadata?.routeHint).toBe('');
+    expect(replay?.metadata?.routeHint).toBeUndefined();
     expect(replay?.metadata?.__rt?.serverToolFollowup).toBe(true);
     expect(replay?.metadata?.__shadowCompareForcedProviderKey).toBe('antigravity.test');
 
@@ -116,7 +116,7 @@ describe('antigravity_thought_signature_bootstrap servertool', () => {
     expect(replayBody.tools.map((t: any) => t?.function?.name)).toContain('shell');
   });
 
-  test('does not replay when preflight still returns 429', async () => {
+  test('fails fast when preflight still returns 429', async () => {
     const capturedChatRequest: JsonObject = {
       model: 'gemini-test',
       messages: [{ role: 'user', content: 'FIRST USER MESSAGE' }]
@@ -140,7 +140,7 @@ describe('antigravity_thought_signature_bootstrap servertool', () => {
     } as any;
 
     const calls: any[] = [];
-    const orchestration = await runServerToolOrchestration({
+    await expect(runServerToolOrchestration({
       chat: errorChat,
       adapterContext,
       requestId: 'req-bootstrap-2',
@@ -158,10 +158,13 @@ describe('antigravity_thought_signature_bootstrap servertool', () => {
           } as JsonObject
         };
       }
+    })).rejects.toMatchObject({
+      code: 'SERVERTOOL_FOLLOWUP_FAILED',
+      status: 429,
+      statusCode: 429,
+      upstreamCode: 'HTTP_429'
     });
 
-    expect(orchestration.executed).toBe(true);
-    expect(orchestration.flowId).toBe('antigravity_thought_signature_bootstrap');
     expect(calls.length).toBe(1);
   });
 });

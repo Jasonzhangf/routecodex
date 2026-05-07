@@ -9,7 +9,7 @@ const PROJECT_ROOT = path.resolve(__dirname, '..');
 
 const pkgPath = path.join(PROJECT_ROOT, 'package.json');
 const packScriptPath = path.join(PROJECT_ROOT, 'scripts', 'pack-mode.mjs');
-const llmsPath = path.join(PROJECT_ROOT, 'node_modules', '@jsonstudio', 'llms');
+const llmsPath = path.join(PROJECT_ROOT, 'node_modules', 'rcc-llmswitch-core');
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { stdio: 'inherit', ...options });
@@ -38,13 +38,13 @@ try {
     }
   });
 
-  run(process.execPath, [packScriptPath, '--name', '@jsonstudio/rcc', '--bin', 'rcc'], {
+  run(process.execPath, [packScriptPath, '--name', 'rcc', '--bin', 'rcc'], {
     cwd: PROJECT_ROOT
   });
 
   const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
   const version = String(pkg.version || '').trim();
-  const tarballName = `jsonstudio-rcc-${version}.tgz`;
+  const tarballName = `rcc-${version}.tgz`;
   const tarballPath = path.join(PROJECT_ROOT, tarballName);
 
   if (!fs.existsSync(tarballPath)) {

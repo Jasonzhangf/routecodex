@@ -6,6 +6,7 @@
 import os from 'node:os';
 import { API_ENDPOINTS, API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS, DEFAULT_CONFIG } from "../../../constants/index.js";
 import type { ServiceProfile } from '../api/provider-types.js';
+import { DEEPSEEK_UPSTREAM_USER_AGENT } from '../contracts/deepseek-provider-contract.js';
 import { resolveQwenCodeUserAgent } from '../utils/qwen-client-fingerprint.js';
 
 /**
@@ -176,7 +177,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'x-client-version': '1.3.0-auto-resume',
       'x-client-locale': 'zh_CN',
       'accept-charset': 'UTF-8',
-      'User-Agent': 'DeepSeek/1.0.13 Android/35'
+      'User-Agent': DEEPSEEK_UPSTREAM_USER_AGENT
     },
     timeout: 240000,
     maxRetries: 3

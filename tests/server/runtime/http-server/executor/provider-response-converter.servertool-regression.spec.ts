@@ -897,6 +897,136 @@ describe('provider-response-converter servertool regressions', () => {
     });
   });
 
+  it('rejects converted exec_command calls with malformed shell wrapper shape', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementation(async () => ({
+      body: {
+        id: 'chatcmpl-invalid-exec-shell-wrapper',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_invalid_exec_shell_wrapper',
+                  type: 'function',
+                  function: {
+                    name: 'exec_command',
+                    arguments: JSON.stringify({
+                      cmd: `bash -lc 'tail -50 ~/.fin/runtime/peers/qqbot/bridge.stderr.log 2>/dev/null || echo "No bridge log"`
+                    })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-chat',
+          requestId: 'req_invalid_exec_shell_wrapper_1',
+          wantsStream: false,
+          response: { body: { id: 'upstream_body' } } as any,
+          pipelineMetadata: {}
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'CLIENT_TOOL_ARGS_INVALID',
+      status: 502,
+      statusCode: 502,
+      toolName: 'exec_command',
+      validationReason: 'invalid_shell_wrapper_shape'
+    });
+  });
+
+  it('rejects converted broad-kill exec_command calls before servertool guard can swallow them', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementation(async () => ({
+      body: {
+        id: 'chatcmpl-invalid-broad-kill-exec-command',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_invalid_broad_kill_exec',
+                  type: 'function',
+                  function: {
+                    name: 'exec_command',
+                    arguments: JSON.stringify({
+                      cmd: 'bash -lc \'pkill -9 -f \"fin-cli\"; sleep 1; echo ok\''
+                    })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-chat',
+          requestId: 'req_invalid_broad_kill_exec_command_1',
+          wantsStream: false,
+          response: { body: { id: 'upstream_body' } } as any,
+          pipelineMetadata: {}
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'CLIENT_TOOL_ARGS_INVALID',
+      status: 502,
+      statusCode: 502,
+      toolName: 'exec_command',
+      validationReason: 'forbidden_broad_kill',
+      validationMessage:
+        'exec_command contains a forbidden broad process-kill command. Use explicit PID- or service-scoped shutdown/restart only.'
+    });
+  });
+
   it('fails followup when client inject cannot resolve tmux binding and unbinds stale session', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();

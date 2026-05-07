@@ -192,8 +192,7 @@ fn resolve_clock_config(raw: &Value, raw_is_undefined: bool) -> Option<ClockConf
         return Some(normalized);
     }
     if raw_is_undefined {
-        let default_raw = serde_json::json!({ "enabled": true });
-        return normalize_clock_config(&default_raw);
+        return None;
     }
     None
 }
@@ -268,5 +267,11 @@ mod tests {
         );
         assert!(out.is_some());
         assert!(out.expect("clock config").include_time_tag);
+    }
+
+    #[test]
+    fn normalized_clock_config_defaults_to_disabled_when_undefined() {
+        let out = resolve_clock_config(&Value::Null, true);
+        assert!(out.is_none());
     }
 }

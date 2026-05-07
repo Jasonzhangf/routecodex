@@ -187,4 +187,5 @@ describe('executor-response stopless direct-model regression', () => {
     expect(String(nestedCalls[0]?.requestId || '')).toContain(':reasoning_stop_guard');
     expect((result.body as any)?.output_text).toBe('继续执行中');
   });
+
 });

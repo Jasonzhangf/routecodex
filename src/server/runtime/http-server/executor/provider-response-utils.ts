@@ -1,40 +1,5 @@
 import type { PipelineExecutionResult } from '../../../handlers/types.js';
 
-const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
-const nonBlockingLogState = new Map<string, number>();
-
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
-
-function logProviderResponseUtilsNonBlockingError(
-  stage: string,
-  error: unknown,
-  details?: Record<string, unknown>
-): void {
-  const now = Date.now();
-  const last = nonBlockingLogState.get(stage) ?? 0;
-  if (now - last < NON_BLOCKING_LOG_THROTTLE_MS) {
-    return;
-  }
-  nonBlockingLogState.set(stage, now);
-  try {
-    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
-    console.warn(
-      `[provider-response-utils] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`
-    );
-  } catch {
-    // Never throw from non-blocking logging.
-  }
-}
-
 export function extractResponseStatus(response: unknown): number | undefined {
   if (!response || typeof response !== 'object') {
     return undefined;
@@ -45,6 +10,13 @@ export function extractResponseStatus(response: unknown): number | undefined {
 
 export function normalizeProviderResponse(response: unknown): PipelineExecutionResult {
   const status = extractResponseStatus(response);
+  const metadata =
+    response && typeof response === 'object' && 'metadata' in (response as Record<string, unknown>)
+      && (response as Record<string, unknown>).metadata
+      && typeof (response as Record<string, unknown>).metadata === 'object'
+      && !Array.isArray((response as Record<string, unknown>).metadata)
+      ? ((response as Record<string, unknown>).metadata as Record<string, unknown>)
+      : undefined;
   const headers = normalizeProviderResponseHeaders(
     response && typeof response === 'object' ? (response as Record<string, unknown>).headers : undefined
   );
@@ -52,7 +24,7 @@ export function normalizeProviderResponse(response: unknown): PipelineExecutionR
     response && typeof response === 'object' && 'data' in (response as Record<string, unknown>)
       ? (response as Record<string, unknown>).data
       : response;
-  return { status, headers, body };
+  return { status, headers, body, metadata };
 }
 
 function normalizeProviderResponseHeaders(headers: unknown): Record<string, string> | undefined {
@@ -93,18 +65,6 @@ export function extractClientModelId(
   return undefined;
 }
 
-export function cloneRequestPayload(payload: unknown): Record<string, unknown> | undefined {
-  if (!payload || typeof payload !== 'object') {
-    return undefined;
-  }
-  try {
-    return JSON.parse(JSON.stringify(payload));
-  } catch (error) {
-    logProviderResponseUtilsNonBlockingError('cloneRequestPayload', error);
-    return undefined;
-  }
-}
-
 export function extractProviderModel(payload?: Record<string, unknown>): string | undefined {
   if (!payload) {
     return undefined;
@@ -139,57 +99,158 @@ export function buildProviderLabel(providerKey?: string, model?: string): string
 
 export function resolveRequestSemantics(
   processed?: Record<string, unknown>,
-  standardized?: Record<string, unknown>
+  standardized?: Record<string, unknown>,
+  requestMetadata?: Record<string, unknown>
 ): Record<string, unknown> | undefined {
-  const cloneRecord = (value: Record<string, unknown>): Record<string, unknown> => {
-    try {
-      return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
-    } catch (error) {
-      logProviderResponseUtilsNonBlockingError('resolveRequestSemantics.cloneRecord', error);
-      return { ...value };
+  const mergeUniqueTools = (primary?: unknown[], secondary?: unknown[]): unknown[] | undefined => {
+    const out: unknown[] = [];
+    const seen = new Set<string>();
+    const append = (tool: unknown) => {
+      if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+        return;
+      }
+      const record = tool as Record<string, unknown>;
+      const fn =
+        record.function && typeof record.function === 'object' && !Array.isArray(record.function)
+          ? (record.function as Record<string, unknown>)
+          : undefined;
+      const rawName =
+        (typeof fn?.name === 'string' ? fn.name : undefined)
+        ?? (typeof record.name === 'string' ? record.name : undefined)
+        ?? '';
+      const normalizedName = rawName.trim().toLowerCase();
+      if (!normalizedName || seen.has(normalizedName)) {
+        return;
+      }
+      seen.add(normalizedName);
+      out.push(tool);
+    };
+    for (const tool of primary ?? []) {
+      append(tool);
     }
+    for (const tool of secondary ?? []) {
+      append(tool);
+    }
+    return out.length ? out : undefined;
   };
-  const cloneToolsArray = (value: unknown): unknown[] | undefined => {
-    if (!Array.isArray(value) || value.length <= 0) {
-      return undefined;
-    }
-    try {
-      const cloned = JSON.parse(JSON.stringify(value));
-      return Array.isArray(cloned) ? cloned : undefined;
-    } catch (error) {
-      logProviderResponseUtilsNonBlockingError('resolveRequestSemantics.cloneToolsArray', error);
-      return value.slice();
-    }
-  };
-  const resolveFallbackClientTools = (): unknown[] | undefined => (
-    cloneToolsArray(processed?.tools) ?? cloneToolsArray(standardized?.tools)
-  );
-  const withFallbackClientTools = (
-    semantics: Record<string, unknown> | undefined
-  ): Record<string, unknown> | undefined => {
-    const fallbackTools = resolveFallbackClientTools();
-    if (!fallbackTools || fallbackTools.length <= 0) {
-      return semantics;
-    }
-    const nextSemantics = semantics ? cloneRecord(semantics) : {};
-    const toolsBagRaw = nextSemantics.tools;
-    const toolsBag =
-      toolsBagRaw && typeof toolsBagRaw === 'object' && !Array.isArray(toolsBagRaw)
-        ? cloneRecord(toolsBagRaw as Record<string, unknown>)
-        : {};
-    const existingTools = Array.isArray(toolsBag.clientToolsRaw) ? toolsBag.clientToolsRaw : [];
-    if (existingTools.length <= 0) {
-      toolsBag.clientToolsRaw = fallbackTools;
-    }
-    nextSemantics.tools = toolsBag;
-    return nextSemantics;
-  };
+  const readRootTools = (value?: Record<string, unknown>): unknown[] | undefined =>
+    Array.isArray(value?.tools) ? value.tools : undefined;
+  const readMetadata = (value?: Record<string, unknown>): Record<string, unknown> | undefined =>
+    value?.metadata && typeof value.metadata === 'object' && value.metadata
+      ? (value.metadata as Record<string, unknown>)
+      : undefined;
+  const readRt = (metadata?: Record<string, unknown>): Record<string, unknown> | undefined =>
+    metadata?.__rt && typeof metadata.__rt === 'object' && metadata.__rt
+      ? (metadata.__rt as Record<string, unknown>)
+      : undefined;
+  const processedMetadata = readMetadata(processed);
+  const standardizedMetadata = readMetadata(standardized);
+  const requestMetadataRecord = requestMetadata && typeof requestMetadata === 'object' ? requestMetadata : undefined;
+  const metadataRequestSemantics =
+    processedMetadata?.requestSemantics && typeof processedMetadata.requestSemantics === 'object' && processedMetadata.requestSemantics
+      ? (processedMetadata.requestSemantics as Record<string, unknown>)
+      : standardizedMetadata?.requestSemantics && typeof standardizedMetadata.requestSemantics === 'object' && standardizedMetadata.requestSemantics
+        ? (standardizedMetadata.requestSemantics as Record<string, unknown>)
+        : requestMetadataRecord?.requestSemantics && typeof requestMetadataRecord.requestSemantics === 'object' && requestMetadataRecord.requestSemantics
+          ? (requestMetadataRecord.requestSemantics as Record<string, unknown>)
+          : undefined;
+  const fallbackTools = readRootTools(processed) ?? readRootTools(standardized);
+  const base =
+    metadataRequestSemantics
+      ?? (processed && typeof processed.semantics === 'object' && processed.semantics
+        ? (processed.semantics as Record<string, unknown>)
+        : standardized && typeof standardized.semantics === 'object' && standardized.semantics
+          ? (standardized.semantics as Record<string, unknown>)
+          : undefined);
+  if (!base && !fallbackTools?.length) {
+    return undefined;
+  }
+  const baseTools =
+    base?.tools && typeof base.tools === 'object' && !Array.isArray(base.tools)
+      ? (base.tools as Record<string, unknown>)
+      : undefined;
+  const existingClientToolsRaw = Array.isArray(baseTools?.clientToolsRaw)
+    ? baseTools.clientToolsRaw
+    : Array.isArray(base?.tools)
+      ? base.tools
+      : undefined;
+  const normalizedBase =
+    !base
+      ? { tools: { clientToolsRaw: fallbackTools } }
+      : existingClientToolsRaw?.length || !fallbackTools?.length
+        ? base
+        : {
+            ...base,
+            tools: {
+              ...baseTools,
+              clientToolsRaw: fallbackTools
+            }
+          };
 
-  if (processed && typeof processed.semantics === 'object' && processed.semantics) {
-    return withFallbackClientTools(processed.semantics as Record<string, unknown>);
+  const processedRt = readRt(processedMetadata);
+  const standardizedRt = readRt(standardizedMetadata);
+  const requestMetadataRt = readRt(requestMetadataRecord);
+
+  const followupRaw =
+    processedRt?.serverToolFollowup
+    ?? standardizedRt?.serverToolFollowup
+    ?? requestMetadataRt?.serverToolFollowup
+    ?? processedMetadata?.serverToolFollowup
+    ?? standardizedMetadata?.serverToolFollowup
+    ?? requestMetadataRecord?.serverToolFollowup;
+  const serverToolFollowup =
+    followupRaw === true
+    || (typeof followupRaw === 'string' && followupRaw.trim().toLowerCase() === 'true');
+  const followupSourceCandidate =
+    processedRt?.clientInjectSource
+    ?? standardizedRt?.clientInjectSource
+    ?? requestMetadataRt?.clientInjectSource
+    ?? processedMetadata?.clientInjectSource
+    ?? standardizedMetadata?.clientInjectSource
+    ?? requestMetadataRecord?.clientInjectSource;
+  const followupSource =
+    typeof followupSourceCandidate === 'string' && followupSourceCandidate.trim()
+      ? followupSourceCandidate.trim()
+      : undefined;
+
+  if (!serverToolFollowup && !followupSource) {
+    return normalizedBase;
   }
-  if (standardized && typeof standardized.semantics === 'object' && standardized.semantics) {
-    return withFallbackClientTools(standardized.semantics as Record<string, unknown>);
-  }
-  return withFallbackClientTools(undefined);
+
+  const mergedFollowupClientToolsRaw = mergeUniqueTools(
+    Array.isArray(
+      normalizedBase.tools && typeof normalizedBase.tools === 'object' && !Array.isArray(normalizedBase.tools)
+        ? (normalizedBase.tools as Record<string, unknown>).clientToolsRaw
+        : undefined
+    )
+      ? (
+          (normalizedBase.tools as Record<string, unknown>).clientToolsRaw as unknown[]
+        )
+      : undefined,
+    fallbackTools
+  );
+
+  const existingRouteCodex =
+    normalizedBase.__routecodex && typeof normalizedBase.__routecodex === 'object' && !Array.isArray(normalizedBase.__routecodex)
+      ? (normalizedBase.__routecodex as Record<string, unknown>)
+      : undefined;
+
+  return {
+    ...normalizedBase,
+    ...(mergedFollowupClientToolsRaw
+      ? {
+          tools: {
+            ...(normalizedBase.tools && typeof normalizedBase.tools === 'object' && !Array.isArray(normalizedBase.tools)
+              ? (normalizedBase.tools as Record<string, unknown>)
+              : {}),
+            clientToolsRaw: mergedFollowupClientToolsRaw
+          }
+        }
+      : {}),
+    __routecodex: {
+      ...existingRouteCodex,
+      ...(serverToolFollowup ? { serverToolFollowup: true } : {}),
+      ...(followupSource ? { serverToolFollowupSource: followupSource } : {})
+    }
+  };
 }

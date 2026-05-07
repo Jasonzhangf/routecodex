@@ -42,7 +42,7 @@ export function normalizeClockConfig(raw: unknown): ClockConfigSnapshot | null {
  * Resolve the effective clock config for a request/session.
  *
  * - If a config object exists and enabled=true -> return normalized config.
- * - If the config is absent (undefined) -> default-enable using CLOCK_CONFIG_DEFAULTS.
+ * - If the config is absent (undefined) -> stay disabled.
  * - If the config is explicitly present but disabled/invalid -> return null.
  */
 export function resolveClockConfig(raw: unknown): ClockConfigSnapshot | null {

@@ -166,7 +166,7 @@ function buildDefaultSnapshot(sourcePath: string, clockSourcePath: string, heart
     clockSourceExists: false,
     heartbeatSourcePath,
     heartbeatSourceExists: false,
-    clock: { enabled: true },
+    clock: { enabled: false },
     heartbeat: { enabled: true },
     tmuxInjection: {
       enabled: true,
@@ -292,7 +292,12 @@ export function resolveClockDaemonConfigInput(raw: unknown): {
   configInput: unknown;
 } {
   const runtime = resolveTmuxInjectionRuntimeConfig();
-  const enabled = runtime.tmuxInjection.enabled && runtime.clock.enabled;
+  const rawClock = toRecordOrUndefined(raw);
+  const explicitEnabled = readBoolean(rawClock?.enabled);
+  const enabled = runtime.tmuxInjection.enabled && (
+    explicitEnabled === true ||
+    (explicitEnabled === undefined && runtime.clock.enabled)
+  );
   const merged = runtime.clock.override ? mergeRecord(raw, runtime.clock.override) : raw;
   return {
     enabled,

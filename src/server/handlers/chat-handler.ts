@@ -3,6 +3,7 @@ import type { HandlerContext } from './types.js';
 import {
   nextRequestIdentifiers,
   respondWithPipelineError,
+  writeStartedSsePipelineError,
   sendPipelineResponse,
   hasSsePayload,
   logRequestStart,
@@ -99,13 +100,16 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
     });
   } catch (error: unknown) {
     logRequestError(entryEndpoint, requestId, error);
-    if (res.headersSent) {
-      return;
-    }
     const acceptsSse = typeof req.headers['accept'] === 'string'
       && (req.headers['accept'] as string).includes('text/event-stream');
     const originalStream = Boolean(req.body && typeof req.body === 'object' && (req.body as ChatCompletionPayload).stream === true);
     const wantsSSE = acceptsSse || originalStream;
+    if (res.headersSent) {
+      if (wantsSSE && !res.writableEnded) {
+        await writeStartedSsePipelineError(res, ctx, error, entryEndpoint, requestId);
+      }
+      return;
+    }
     await respondWithPipelineError(res, ctx, error, entryEndpoint, requestId, { forceSse: wantsSSE });
   }
 }

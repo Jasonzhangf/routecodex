@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import {
   DEEPSEEK_ERROR_CODES,
+  DEEPSEEK_UPSTREAM_USER_AGENT,
   type DeepSeekErrorCode
 } from '../core/contracts/deepseek-provider-contract.js';
 import { resolveRccAuthDir, resolveRccCamoufoxFingerprintDir } from '../../config/user-data-paths.js';
@@ -80,7 +81,6 @@ export type EnsureDeepSeekAccountTokenResult = {
 
 const DEFAULT_AUTH_DIR = resolveRccAuthDir();
 const DEFAULT_DEEPSEEK_LOGIN_URL = 'https://chat.deepseek.com/api/v0/users/login';
-const DEFAULT_DEEPSEEK_USER_AGENT = 'DeepSeek/1.0.13 Android/35';
 const DEFAULT_CAMOUFOX_PROVIDER = 'deepseek';
 const HELPER_TIMEOUT_MS = 45_000;
 const TOKEN_HELPER_ENV_KEYS = ['ROUTECODEX_DEEPSEEK_TOKEN_HELPER', 'RCC_DEEPSEEK_TOKEN_HELPER'];
@@ -342,10 +342,9 @@ async function loadCamoufoxFingerprint(providerFamily: string, alias: string): P
 }
 
 function buildDeepSeekBrowserHeaders(fingerprint: CamoufoxFingerprintSnapshot | null): Record<string, string> {
-  const userAgent = normalizeString(fingerprint?.userAgent) || DEFAULT_DEEPSEEK_USER_AGENT;
   const clientPlatform = mapPlatformToClientPlatform(fingerprint?.platform) || 'android';
   return {
-    'User-Agent': userAgent,
+    'User-Agent': DEEPSEEK_UPSTREAM_USER_AGENT,
     'x-client-platform': clientPlatform,
     'x-client-version': '1.3.0-auto-resume',
     'x-client-locale': 'zh_CN',

@@ -313,6 +313,30 @@ export function collectToolMessages(payload: AnyRecord): Array<Record<string, un
     if (!Array.isArray(candidate) || candidate.length <= 0) {
       continue;
     }
+    const responsesFunctionCallNameById = new Map<string, string>();
+    for (const row of candidate) {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+        continue;
+      }
+      const record = row as Record<string, unknown>;
+      const type = typeof record.type === 'string' ? record.type.trim().toLowerCase() : '';
+      if (type !== 'function_call' && type !== 'function') {
+        continue;
+      }
+      const callId =
+        typeof record.call_id === 'string' ? record.call_id
+          : typeof record.tool_call_id === 'string' ? record.tool_call_id
+            : typeof record.id === 'string' ? record.id
+              : '';
+      const name = typeof record.name === 'string'
+        ? record.name
+        : (record.function && typeof (record.function as Record<string, unknown>).name === 'string'
+          ? String((record.function as Record<string, unknown>).name)
+          : '');
+      if (callId && name) {
+        responsesFunctionCallNameById.set(callId, name);
+      }
+    }
     let seenTrailingTool = 0;
     for (let index = candidate.length - 1; index >= 0; index -= 1) {
       const row = candidate[index];
@@ -326,6 +350,7 @@ export function collectToolMessages(payload: AnyRecord): Array<Record<string, un
       const role = typeof record.role === 'string' ? record.role.trim().toLowerCase() : '';
       const name = typeof record.name === 'string' ? record.name.trim().toLowerCase() : '';
       const content = typeof record.content === 'string' ? record.content : '';
+      const type = typeof record.type === 'string' ? record.type.trim().toLowerCase() : '';
       if (role && role !== 'tool') {
         break;
       }
@@ -339,6 +364,48 @@ export function collectToolMessages(payload: AnyRecord): Array<Record<string, un
           break;
         }
         continue;
+      }
+      if (
+        type === 'function_call_output'
+        || type === 'tool_result'
+        || type === 'tool_message'
+      ) {
+        const callId =
+          typeof record.call_id === 'string' ? record.call_id
+            : typeof record.tool_call_id === 'string' ? record.tool_call_id
+              : '';
+        const output =
+          typeof record.output === 'string' ? record.output
+            : typeof record.content === 'string' ? record.content
+              : '';
+        const resolvedName =
+          (callId ? responsesFunctionCallNameById.get(callId) : undefined)
+          || (typeof record.name === 'string' ? record.name : '')
+          || (typeof record.tool_name === 'string' ? record.tool_name : '');
+        if (resolvedName && output) {
+          seenTrailingTool += 1;
+          const synthetic = {
+            role: 'tool',
+            name: resolvedName,
+            content: output,
+            tool_call_id: callId || undefined,
+            call_id: callId || undefined
+          } as Record<string, unknown>;
+          collected.unshift(synthetic);
+          if (seenTrailingTool >= MAX_TRAILING_TOOL_MESSAGES) {
+            break;
+          }
+          continue;
+        }
+      }
+      if (type === 'function_call' || type === 'function') {
+        if (seenTrailingTool > 0) {
+          continue;
+        }
+        break;
+      }
+      if (type.length > 0) {
+        break;
       }
       if (seenTrailingTool > 0) {
         break;

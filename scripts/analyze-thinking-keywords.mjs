@@ -10,7 +10,7 @@
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { DEFAULT_THINKING_KEYWORDS } from '@jsonstudio/llms';
+import { DEFAULT_THINKING_KEYWORDS } from '../sharedmodule/llmswitch-core/dist/router/virtual-router/default-thinking-keywords.js';
 
 const HOME = os.homedir();
 const CHAT_DIR = path.join(HOME, '.routecodex', 'codex-samples', 'openai-chat');

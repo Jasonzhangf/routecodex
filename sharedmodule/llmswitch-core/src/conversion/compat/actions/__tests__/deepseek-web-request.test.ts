@@ -31,7 +31,9 @@ describe('deepseek-web-request action wrapper', () => {
     );
 
     expect((result as any).prompt).toContain('Tool-call output contract (STRICT)');
-    expect((result as any).prompt).toContain('"tool_calls"');
+    expect((result as any).prompt).toContain('<tool_call>');
+    expect((result as any).prompt).toContain('"name"');
+    expect((result as any).prompt).toContain('"arguments"');
   });
 
   test('enables search for routeId/web_search triggers', () => {
@@ -171,7 +173,66 @@ describe('deepseek-web-request action wrapper', () => {
     );
 
     expect((result as any).prompt).toContain('[Previous tool output — result of a prior tool call');
+    expect((result as any).prompt).toContain('tool_call_id: call_1');
+    expect((result as any).prompt).toContain('tool_name: exec_command');
+    expect((result as any).prompt).toContain('output:\n{"stdout":"/tmp","exit_code":0}');
+    expect(
+      ((result as any).prompt.match(/\[Previous tool output — result of a prior tool call/g) ?? [])
+        .length
+    ).toBe(1);
     expect((result as any).prompt).not.toContain('tool_choice is required for this turn');
     expect((result as any).prompt).not.toContain('This turn is tool-required');
+  });
+
+  test('serializes prior assistant tool calls using mimoweb-style tool_call wrappers', () => {
+    const result = applyDeepSeekWebRequestTransform(
+      {
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'user', content: '请继续' },
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  arguments: JSON.stringify({ cmd: "bash -lc 'pwd'" })
+                }
+              }
+            ]
+          }
+        ],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              description: 'run shell',
+              parameters: {
+                type: 'object',
+                properties: { cmd: { type: 'string' } },
+                required: ['cmd']
+              }
+            }
+          }
+        ]
+      } as any,
+      {
+        providerProtocol: 'openai-chat',
+        compatibilityProfile: 'chat:deepseek-web',
+        deepseek: {
+          toolProtocol: 'text'
+        }
+      } as any
+    );
+
+    expect((result as any).prompt).toContain('<tool_call>');
+    expect((result as any).prompt).toContain('"id":"call_1"');
+    expect((result as any).prompt).toContain('"name":"exec_command"');
+    expect((result as any).prompt).toContain('"arguments":{"cmd":"bash -lc');
+    expect((result as any).prompt).not.toContain('<<RCC_TOOL_CALLS_JSON');
   });
 });

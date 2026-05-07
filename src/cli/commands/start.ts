@@ -335,7 +335,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
 
         const nodeBin = ctx.nodeBin || process.execPath;
         const serverEntry = ctx.resolveServerEntryPath();
-        const resolveServerRuntimeCwd = (): string => {
+        const resolveServerRuntimeCwd = (entryPath: string): string => {
           const dirname =
             typeof (pathImpl as typeof path).dirname === 'function'
               ? (pathImpl as typeof path).dirname.bind(pathImpl)
@@ -344,19 +344,22 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             typeof (pathImpl as typeof path).basename === 'function'
               ? (pathImpl as typeof path).basename.bind(pathImpl)
               : path.basename;
-          const entryDir = dirname(serverEntry);
+          const entryDir = dirname(entryPath);
           if (basename(entryDir) === 'dist') {
             return dirname(entryDir);
           }
           return entryDir;
         };
-        const serverRuntimeCwd = resolveServerRuntimeCwd();
+        const serverRuntimeCwd = resolveServerRuntimeCwd(serverEntry);
 
         const env = { ...ctx.env } as NodeJS.ProcessEnv;
         env.ROUTECODEX_CONFIG = configPath;
         env.ROUTECODEX_CONFIG_PATH = configPath;
         env.ROUTECODEX_BASEDIR = env.ROUTECODEX_BASEDIR || serverRuntimeCwd;
         env.RCC_BASEDIR = env.RCC_BASEDIR || serverRuntimeCwd;
+        const baseDirWasDefaulted =
+          !String(ctx.env.ROUTECODEX_BASEDIR || '').trim()
+          && !String(ctx.env.RCC_BASEDIR || '').trim();
         if (ctx.isDevPackage) {
           env.ROUTECODEX_PORT = String(resolvedPort);
         }
@@ -376,6 +379,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         } as NodeJS.ProcessEnv;
 
         const args: string[] = [serverEntry, modulesConfigPath];
+
         const routeCodexHome = resolveRccUserDir(home());
         const defaultPrecommand = ensureDefaultPrecommandScriptBestEffort({
           fsImpl,
@@ -398,6 +402,71 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               pid: pid ?? null
             });
           }
+        };
+
+        type ServerSpawnPlan = {
+          entry: string;
+          modulesConfigPath: string;
+          args: string[];
+          cwd: string;
+          env: NodeJS.ProcessEnv;
+        };
+
+        const resolveLiveServerSpawnPlan = (): ServerSpawnPlan => {
+          let nextEntry = serverEntry;
+          let nextModulesConfigPath = modulesConfigPath;
+          try {
+            const cliEntry = String(process.argv[1] || '').trim();
+            if (cliEntry) {
+              const dirname =
+                typeof (pathImpl as typeof path).dirname === 'function'
+                  ? (pathImpl as typeof path).dirname.bind(pathImpl)
+                  : path.dirname;
+              const basename =
+                typeof (pathImpl as typeof path).basename === 'function'
+                  ? (pathImpl as typeof path).basename.bind(pathImpl)
+                  : path.basename;
+              const join =
+                typeof (pathImpl as typeof path).join === 'function'
+                  ? (pathImpl as typeof path).join.bind(pathImpl)
+                  : path.join;
+              const cliBase = basename(cliEntry).toLowerCase();
+              if (cliBase === 'cli.js' || cliBase === 'index.js') {
+                const distDir = dirname(cliEntry);
+                const installRoot = dirname(distDir);
+                const candidateEntry = join(distDir, 'index.js');
+                const candidateModulesConfigPath = join(installRoot, 'config', 'modules.json');
+                if (fsImpl.existsSync(candidateEntry) && fsImpl.existsSync(candidateModulesConfigPath)) {
+                  nextEntry = candidateEntry;
+                  nextModulesConfigPath = candidateModulesConfigPath;
+                }
+              }
+            }
+          } catch (error) {
+            logStartNonBlocking(ctx, 'resolve_live_server_spawn_plan', error, {
+              port: resolvedPort,
+              fallbackEntry: serverEntry,
+              fallbackModulesConfigPath: modulesConfigPath
+            });
+          }
+
+          const nextCwd = resolveServerRuntimeCwd(nextEntry);
+          const nextEnv = {
+            ...childProcessEnv,
+            ...(baseDirWasDefaulted
+              ? {
+                ROUTECODEX_BASEDIR: nextCwd,
+                RCC_BASEDIR: nextCwd
+              }
+              : {})
+          } as NodeJS.ProcessEnv;
+          return {
+            entry: nextEntry,
+            modulesConfigPath: nextModulesConfigPath,
+            args: [nextEntry, nextModulesConfigPath],
+            cwd: nextCwd,
+            env: nextEnv
+          };
         };
 
         const daemonEnabled = !ctx.isDevPackage && resolveReleaseDaemonEnabled(ctx.env);
@@ -475,10 +544,11 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               ctx.exit(0);
             }
 
-            const childProc = ctx.spawn(nodeBin, args, {
+            const spawnPlan = resolveLiveServerSpawnPlan();
+            const childProc = ctx.spawn(nodeBin, spawnPlan.args, {
               stdio: 'inherit',
-              env: childProcessEnv,
-              cwd: serverRuntimeCwd
+              env: spawnPlan.env,
+              cwd: spawnPlan.cwd
             });
             writePidFile(childProc.pid);
 
@@ -622,11 +692,11 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           return probe.ok;
         };
 
-        const waitForServerEntryReady = async (deadlineMs: number): Promise<boolean> => {
+        const waitForServerEntryReady = async (entryPath: string, deadlineMs: number): Promise<boolean> => {
           while (Date.now() < deadlineMs) {
             try {
-              if (fsImpl.existsSync(serverEntry)) {
-                const stat = fsImpl.statSync(serverEntry);
+              if (fsImpl.existsSync(entryPath)) {
+                const stat = fsImpl.statSync(entryPath);
                 if (!stat.isDirectory()) {
                   return true;
                 }
@@ -698,12 +768,17 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
                   let lastFailure = 'unknown';
                   while (Date.now() < restartDeadline) {
                     attempt += 1;
-                    const entryReady = await waitForServerEntryReady(restartDeadline);
+                    const spawnPlan = resolveLiveServerSpawnPlan();
+                    const entryReady = await waitForServerEntryReady(spawnPlan.entry, restartDeadline);
                     if (!entryReady) {
-                      lastFailure = `server entry not ready: ${serverEntry}`;
+                      lastFailure = `server entry not ready: ${spawnPlan.entry}`;
                       break;
                     }
-                    const nextChild = ctx.spawn(nodeBin, args, spawnOptions);
+                    const nextChild = ctx.spawn(nodeBin, spawnPlan.args, {
+                      ...spawnOptions,
+                      env: spawnPlan.env,
+                      cwd: spawnPlan.cwd
+                    });
                     activeChildProc = nextChild;
                     writePidFile(nextChild.pid);
                     forwardToConsoleAndLog((nextChild as unknown as { stdout?: NodeJS.ReadableStream | null }).stdout, process.stdout);
@@ -760,7 +835,12 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         };
 
         const spawnChild = (): ReturnType<typeof ctx.spawn> => {
-          const proc = ctx.spawn(nodeBin, args, spawnOptions);
+          const spawnPlan = resolveLiveServerSpawnPlan();
+          const proc = ctx.spawn(nodeBin, spawnPlan.args, {
+            ...spawnOptions,
+            env: spawnPlan.env,
+            cwd: spawnPlan.cwd
+          });
           activeChildProc = proc;
           writePidFile(proc.pid);
           forwardToConsoleAndLog((proc as unknown as { stdout?: NodeJS.ReadableStream | null }).stdout, process.stdout);

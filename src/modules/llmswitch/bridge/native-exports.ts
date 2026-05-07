@@ -10,6 +10,10 @@ type NativeSharedConversionSemantics = {
   mapChatToolsToBridgeWithNative?: (rawTools: unknown) => Array<Record<string, unknown>>;
   injectMcpToolsForChatWithNative?: (tools: unknown[] | undefined, discoveredServers: string[]) => unknown[];
   injectMcpToolsForResponsesWithNative?: (tools: unknown[] | undefined, discoveredServers: string[]) => unknown[];
+  normalizeAssistantTextToToolCallsWithNative?: (
+    message: Record<string, unknown>,
+    options?: Record<string, unknown>
+  ) => Record<string, unknown>;
 };
 
 type NativeHubPipelineRespSemantics = {
@@ -26,16 +30,14 @@ type FollowupSanitizeModule = {
 let cachedSharedSemantics: NativeSharedConversionSemantics | null | undefined;
 let cachedRespSemantics: NativeHubPipelineRespSemantics | null | undefined;
 let cachedFollowupSanitize: FollowupSanitizeModule | null | undefined;
-let nativeBindingsChecked: boolean | undefined;
+let sharedBindingsChecked: boolean | undefined;
+let respBindingsChecked: boolean | undefined;
 
-async function assertNativeBindings(): Promise<void> {
-  if (nativeBindingsChecked) {
+async function assertSharedBindings(): Promise<void> {
+  if (sharedBindingsChecked) {
     return;
   }
-  const [shared, resp] = await Promise.all([
-    getSharedConversionSemantics(),
-    getRespSemantics()
-  ]);
+  const shared = await getSharedConversionSemantics();
   const missing: string[] = [];
   if (typeof shared.mapChatToolsToBridgeWithNative !== 'function') {
     missing.push('mapChatToolsToBridgeJson');
@@ -46,13 +48,28 @@ async function assertNativeBindings(): Promise<void> {
   if (typeof shared.injectMcpToolsForResponsesWithNative !== 'function') {
     missing.push('injectMcpToolsForResponsesJson');
   }
+  if (typeof shared.normalizeAssistantTextToToolCallsWithNative !== 'function') {
+    missing.push('normalizeAssistantTextToToolCallsJson');
+  }
+  if (missing.length > 0) {
+    throw new Error(`[llmswitch-bridge] native shared bindings missing: ${missing.join(', ')}`);
+  }
+  sharedBindingsChecked = true;
+}
+
+async function assertRespBindings(): Promise<void> {
+  if (respBindingsChecked) {
+    return;
+  }
+  const resp = await getRespSemantics();
+  const missing: string[] = [];
   if (typeof resp.buildAnthropicResponseFromChatWithNative !== 'function') {
     missing.push('buildAnthropicResponseFromChatJson');
   }
   if (missing.length > 0) {
-    throw new Error(`[llmswitch-bridge] native bindings missing: ${missing.join(', ')}`);
+    throw new Error(`[llmswitch-bridge] native resp bindings missing: ${missing.join(', ')}`);
   }
-  nativeBindingsChecked = true;
+  respBindingsChecked = true;
 }
 
 async function getSharedConversionSemantics(): Promise<NativeSharedConversionSemantics> {
@@ -114,7 +131,7 @@ async function getFollowupSanitizeModule(): Promise<FollowupSanitizeModule> {
 }
 
 export async function mapChatToolsToBridgeJson(rawTools: unknown): Promise<AnyRecord[]> {
-  await assertNativeBindings();
+  await assertSharedBindings();
   const mod = await getSharedConversionSemantics();
   const fn = mod.mapChatToolsToBridgeWithNative;
   if (typeof fn !== 'function') {
@@ -127,7 +144,7 @@ export async function injectMcpToolsForChatJson(
   tools: unknown[] | undefined,
   discoveredServers: string[]
 ): Promise<AnyRecord[]> {
-  await assertNativeBindings();
+  await assertSharedBindings();
   const mod = await getSharedConversionSemantics();
   const fn = mod.injectMcpToolsForChatWithNative;
   if (typeof fn !== 'function') {
@@ -140,7 +157,7 @@ export async function injectMcpToolsForResponsesJson(
   tools: unknown[] | undefined,
   discoveredServers: string[]
 ): Promise<AnyRecord[]> {
-  await assertNativeBindings();
+  await assertSharedBindings();
   const mod = await getSharedConversionSemantics();
   const fn = mod.injectMcpToolsForResponsesWithNative;
   if (typeof fn !== 'function') {
@@ -149,11 +166,24 @@ export async function injectMcpToolsForResponsesJson(
   return fn(Array.isArray(tools) ? tools : [], Array.isArray(discoveredServers) ? discoveredServers : []) as AnyRecord[];
 }
 
+export async function normalizeAssistantTextToToolCallsJson(
+  message: Record<string, unknown>,
+  options?: Record<string, unknown>
+): Promise<AnyRecord> {
+  await assertSharedBindings();
+  const mod = await getSharedConversionSemantics();
+  const fn = mod.normalizeAssistantTextToToolCallsWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] normalizeAssistantTextToToolCallsJson not available');
+  }
+  return fn(message, options) as AnyRecord;
+}
+
 export async function buildAnthropicResponseFromChatJson(
   chatResponse: unknown,
   aliasMap?: Record<string, string>
 ): Promise<AnyRecord> {
-  await assertNativeBindings();
+  await assertRespBindings();
   const mod = await getRespSemantics();
   const fn = mod.buildAnthropicResponseFromChatWithNative;
   if (typeof fn !== 'function') {
@@ -169,4 +199,60 @@ export async function sanitizeFollowupText(raw: unknown): Promise<string> {
     throw new Error('[llmswitch-bridge] sanitizeFollowupText not available');
   }
   return fn(raw);
+}
+
+// --- Native Failure Policy exports (sync, via requireCoreDist) ---
+type NativeFailurePolicyModule = {
+  classifyProviderFailure?: (statusCode: number | undefined, errorCode: string | undefined, upstreamCode: string | undefined, isNetworkError: boolean) => string;
+  isBlockingRecoverableNative?: (classification: string, stage: string | undefined) => boolean;
+  shouldRetryNative?: (classification: string, attempt: number, maxAttempts: number) => boolean;
+  computeBackoffMsNative?: (classification: string, attempt: number, baseMs: number, maxMs: number) => number;
+  getNetworkErrorCodes?: () => string[];
+};
+
+import { requireCoreDist } from './module-loader.js';
+
+let cachedFailurePolicy: NativeFailurePolicyModule | null | undefined;
+
+function getFailurePolicyModule(): NativeFailurePolicyModule {
+  if (cachedFailurePolicy !== undefined) {
+    if (!cachedFailurePolicy) {
+      throw new Error('[llmswitch-bridge] native-failure-policy module not available');
+    }
+    return cachedFailurePolicy;
+  }
+  try {
+    cachedFailurePolicy = requireCoreDist<NativeFailurePolicyModule>(
+      'router/virtual-router/engine-selection/native-failure-policy'
+    );
+  } catch {
+    cachedFailurePolicy = null;
+  }
+  if (!cachedFailurePolicy) {
+    throw new Error('[llmswitch-bridge] native-failure-policy module not available');
+  }
+  return cachedFailurePolicy;
+}
+
+export function classifyProviderFailure(
+  statusCode: number | undefined,
+  errorCode: string | undefined,
+  upstreamCode: string | undefined,
+  isNetworkError: boolean,
+): string {
+  const mod = getFailurePolicyModule();
+  const fn = mod.classifyProviderFailure;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] classifyProviderFailure not available');
+  }
+  return fn(statusCode, errorCode, upstreamCode, isNetworkError);
+}
+
+export function getNetworkErrorCodes(): string[] {
+  const mod = getFailurePolicyModule();
+  const fn = mod.getNetworkErrorCodes;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] getNetworkErrorCodes not available');
+  }
+  return fn();
 }

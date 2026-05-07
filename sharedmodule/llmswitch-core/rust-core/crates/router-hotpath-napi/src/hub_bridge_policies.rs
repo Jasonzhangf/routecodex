@@ -197,11 +197,11 @@ fn responses_policy() -> Value {
           }))
         ],
         "outbound": [
-          action("messages.normalize-history"),
           action("tools.capture-results"),
           normalize_tool_call_action("responses_tool_call"),
           action("compat.fix-apply-patch"),
           action("tools.ensure-placeholders"),
+          action("messages.normalize-history"),
           action("messages.ensure-output-fields"),
           action("messages.ensure-system-instruction"),
           reasoning_action("responses_reasoning"),

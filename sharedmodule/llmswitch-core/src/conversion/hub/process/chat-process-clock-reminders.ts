@@ -70,7 +70,13 @@ export async function maybeInjectClockRemindersAndApplyDirectives(
   if (flowPlan.skipForServerToolFollowup) {
     return requestAfterHeartbeat;
   }
-  const rawConfig = (rt as any)?.clock as VirtualRouterClockConfig | undefined;
+  const topLevelClock =
+    metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? ((metadata as Record<string, unknown>).clock as VirtualRouterClockConfig | undefined)
+      : undefined;
+  const rawConfig =
+    ((rt as any)?.clock as VirtualRouterClockConfig | undefined)
+    ?? topLevelClock;
   const clockConfig = resolveClockConfig(rawConfig);
   if (!clockConfig) {
     return requestAfterHeartbeat;

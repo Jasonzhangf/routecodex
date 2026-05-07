@@ -1,4 +1,3 @@
-use crate::hub_reasoning_tool_normalizer::extract_tool_calls_from_reasoning_text_json;
 use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
 use napi::bindgen_prelude::Result as NapiResult;
 use regex::Regex;
@@ -9,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use uuid::Uuid;
 
-use crate::hub_reasoning_tool_normalizer::repair_arguments_to_string;
+use crate::hub_reasoning_tool_normalizer::{normalize_assistant_text_to_tool_calls_json, repair_arguments_to_string};
 
 #[cfg(test)]
 mod tests;
@@ -416,18 +415,21 @@ fn extract_reasoning_json_tool_calls(
         .map(|v| v.trim())
         .filter(|v| !v.is_empty())
         .unwrap_or("call");
-    let extracted_raw = match extract_tool_calls_from_reasoning_text_json(
+    let options = json!({
+        "idPrefix": id_prefix,
+    });
+    let normalized_raw = match normalize_assistant_text_to_tool_calls_json(
         text.to_string(),
-        Some(id_prefix.to_string()),
+        Some(options.to_string()),
     ) {
         Ok(raw) => raw,
         Err(_) => return Vec::new(),
     };
-    let extracted = match serde_json::from_str::<Value>(&extracted_raw) {
+    let normalized = match serde_json::from_str::<Value>(&normalized_raw) {
         Ok(value) => value,
         Err(_) => return Vec::new(),
     };
-    let tool_calls = extract_tool_call_entries_from_json_value(&extracted);
+    let tool_calls = extract_tool_call_entries_from_json_value(&normalized);
     if tool_calls.is_empty() {
         return Vec::new();
     }

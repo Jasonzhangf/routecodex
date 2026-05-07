@@ -172,6 +172,10 @@ export interface ServerToolHandlerPlan {
 export interface ServerToolExecution {
   flowId: string;
   followup?: ServerToolFollowupPlan;
+  stopMessageReservation?: {
+    stickyKey: string;
+    previousState: Record<string, unknown> | null;
+  };
   /**
    * Optional tool-specific context for the execution result.
    * For example, web_search handler may attach { web_search: { engineId, providerKey, summary } }

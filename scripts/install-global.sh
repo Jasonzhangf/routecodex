@@ -156,7 +156,7 @@ global_install() {
 }
 
 link_global_llms_dev() {
-    echo "🔗 链接全局 @jsonstudio/llms 到本地 sharedmodule (dev 模式)..."
+    echo "🔗 链接全局 rcc-llmswitch-core 到本地 sharedmodule (dev 模式)..."
     node scripts/link-global-llms-local.mjs --package routecodex --require-target
 }
 
@@ -167,7 +167,7 @@ verify_install() {
         echo "✅ routecodex 已全局安装"
         node scripts/ensure-cli-command-shim.mjs || true
         routecodex --version
-        node -e "const path=require('path');const cp=require('child_process');const root=cp.execSync('npm root -g').toString().trim();const pkg=path.join(root,'routecodex','node_modules','@jsonstudio','llms','package.json');const fs=require('fs');if(fs.existsSync(pkg)){const v=require(pkg).version;console.log('🔎 全局 @jsonstudio/llms 版本:',v);}else{console.log('⚠️  未找到全局 @jsonstudio/llms package.json');}"
+        node -e "const path=require('path');const cp=require('child_process');const root=cp.execSync('npm root -g').toString().trim();const pkg=path.join(root,'routecodex','node_modules','rcc-llmswitch-core','package.json');const fs=require('fs');if(fs.existsSync(pkg)){const v=require(pkg).version;console.log('🔎 全局 rcc-llmswitch-core 版本:',v);}else{console.log('⚠️  未找到全局 rcc-llmswitch-core package.json');}"
     else
         echo "❌ 全局安装失败（未找到 routecodex 命令）"
         exit 1

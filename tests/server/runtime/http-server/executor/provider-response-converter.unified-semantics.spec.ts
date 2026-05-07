@@ -142,4 +142,115 @@ describe('provider-response-converter unified semantics handoff', () => {
       observed_captured_has_messages: true
     });
   });
+
+  it('unwraps snapshot-style anthropic provider-response body.data before bridge conversion', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+    mockSyncReasoningStopModeFromRequest.mockClear();
+
+    mockConvertProviderResponse.mockImplementationOnce(async ({ providerResponse }) => ({
+      body: {
+        object: 'response',
+        id: 'resp_unwrapped_1',
+        output: [
+          {
+            type: 'function_call',
+            name: 'apply_patch',
+            arguments: JSON.stringify({ patch: '*** Begin Patch\\n*** End Patch' }),
+            call_id: 'toolu_1'
+          }
+        ]
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const result = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'anthropic-messages',
+        requestId: 'req_converter_unwrap_1',
+        wantsStream: false,
+        requestSemantics: {
+          tools: {
+            clientToolsRaw: [
+              {
+                type: 'function',
+                function: {
+                  name: 'apply_patch',
+                  parameters: { type: 'object' }
+                }
+              }
+            ]
+          }
+        } as any,
+        originalRequest: {
+          model: 'deepseek-v4-flash',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }]
+        },
+        response: {
+          body: {
+            body: {
+              data: {
+                id: 'msg_provider_wrapped_1',
+                type: 'message',
+                role: 'assistant',
+                stop_reason: 'tool_use',
+                content: [
+                  {
+                    id: 'toolu_1',
+                    type: 'tool_use',
+                    name: 'apply_patch',
+                    input: {
+                      patch: '*** Begin Patch\n*** End Patch'
+                    }
+                  }
+                ]
+              }
+            },
+            headers: {
+              'content-type': 'application/json'
+            },
+            meta: {
+              stage: 'provider-response'
+            }
+          }
+        } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
+    const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, any>;
+    expect(bridgeArgs?.providerResponse).toMatchObject({
+      id: 'msg_provider_wrapped_1',
+      stop_reason: 'tool_use',
+      content: [
+        expect.objectContaining({
+          type: 'tool_use',
+          name: 'apply_patch'
+        })
+      ]
+    });
+    expect((result as any).body).toMatchObject({
+      object: 'response',
+      id: 'resp_unwrapped_1',
+      output: [
+        expect.objectContaining({
+          type: 'function_call',
+          name: 'apply_patch'
+        })
+      ]
+    });
+  });
 });

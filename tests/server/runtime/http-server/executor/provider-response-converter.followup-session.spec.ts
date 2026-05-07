@@ -200,6 +200,98 @@ describe('provider-response-converter serverTool followup metadata', () => {
     });
   });
 
+  it('passes original requestSemantics into nested followup body when followup payload lost client tools', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    const executeNested = jest.fn(async (input) => ({
+      body: {
+        observedSemantics: (input.body as any)?.semantics,
+        observedTools: (input.body as any)?.tools
+      }
+    }));
+
+    mockConvertProviderResponse.mockImplementation(async ({ reenterPipeline }) => {
+      const result = await reenterPipeline({
+        entryEndpoint: '/v1/responses',
+        requestId: 'followup_req_semantics_1',
+        body: {
+          model: 'mimo-v2.5-pro',
+          input: 'continue',
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'reasoning.stop',
+                parameters: { type: 'object' }
+              }
+            }
+          ]
+        },
+        metadata: {
+          __rt: { serverToolFollowup: true, clientInjectSource: 'servertool.reasoning_stop_continue' }
+        }
+      });
+      return { body: result.body ?? { ok: false } };
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const clientToolsRaw = [
+      {
+        type: 'function',
+        function: {
+          name: 'exec_command',
+          parameters: {
+            type: 'object',
+            properties: { cmd: { type: 'string' } },
+            required: ['cmd']
+          }
+        }
+      }
+    ];
+
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        requestId: 'req_followup_semantics_1',
+        wantsStream: false,
+        requestSemantics: {
+          tools: { clientToolsRaw },
+          __routecodex: {
+            serverToolFollowup: true,
+            serverToolFollowupSource: 'servertool.reasoning_stop_continue'
+          }
+        } as any,
+        response: { body: { id: 'resp_ok', output: [] } } as any,
+        pipelineMetadata: {
+          capturedChatRequest: {
+            model: 'mimo-v2.5-pro',
+            input: 'continue'
+          }
+        }
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested
+      }
+    );
+
+    expect(executeNested).toHaveBeenCalledTimes(1);
+    const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
+    expect(nestedInput?.body?.tools?.map((tool: any) => tool?.function?.name)).toEqual(['reasoning.stop']);
+    expect((nestedInput?.body?.semantics as any)?.tools?.clientToolsRaw).toEqual(clientToolsRaw);
+    expect(((nestedInput?.body?.semantics as any)?.tools?.clientToolsRaw ?? [])[0]?.function?.name).toBe('exec_command');
+    expect((converted.body as any)?.observedSemantics?.tools?.clientToolsRaw?.[0]?.function?.name).toBe('exec_command');
+  });
+
   it('backfills session identifiers from originalRequest metadata before syncing stopless state', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();

@@ -1736,7 +1736,11 @@ fn sync_responses_context_from_canonical_messages(request: &Value) -> Result<Val
         None => return Ok(Value::Object(next_request)),
     };
 
-    let bridge = build_bridge_history(BuildBridgeHistoryInput { messages, tools })?;
+    let bridge = build_bridge_history(BuildBridgeHistoryInput {
+        messages,
+        tools,
+        allow_pending_terminal_tool_call: None,
+    })?;
     let bridge_input = serde_json::to_value(bridge.input).unwrap_or_else(|_| Value::Array(vec![]));
     let original_system_messages = serde_json::to_value(bridge.original_system_messages)
         .unwrap_or_else(|_| Value::Array(vec![]));

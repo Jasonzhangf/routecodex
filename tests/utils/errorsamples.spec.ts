@@ -30,7 +30,9 @@ const ENV_KEYS = [
   'ROUTECODEX_ERRORSAMPLE_QUEUE_MAX_ITEMS',
   'RCC_ERRORSAMPLE_QUEUE_MAX_ITEMS',
   'ROUTECODEX_ERRORSAMPLE_QUEUE_MEMORY_BUDGET_BYTES',
-  'RCC_ERRORSAMPLE_QUEUE_MEMORY_BUDGET_BYTES'
+  'RCC_ERRORSAMPLE_QUEUE_MEMORY_BUDGET_BYTES',
+  'ROUTECODEX_ERRORSAMPLE_RESPONSES_TOOL_HISTORY_MAX_SAMPLE_BYTES',
+  'RCC_ERRORSAMPLE_RESPONSES_TOOL_HISTORY_MAX_SAMPLE_BYTES'
 ] as const;
 
 async function listFiles(dir: string): Promise<string[]> {
@@ -281,6 +283,57 @@ describe('errorsample writer safeguards', () => {
       expect(typeof r4).toBe('string');
       const files = await listFiles(path.join(tmp, 'provider-error'));
       expect(files).toHaveLength(2);
+    } finally {
+      for (const key of ENV_KEYS) {
+        const value = envBackup.get(key);
+        if (value == null) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+      await fs.rm(tmp, { recursive: true, force: true });
+      __resetErrorsampleQueueForTests();
+    }
+  });
+
+  it('keeps larger full payloads for responses inbound tool history contract samples', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-errorsamples-tool-history-'));
+    const envBackup = new Map<string, string | undefined>();
+    for (const key of ENV_KEYS) {
+      envBackup.set(key, process.env[key]);
+    }
+    try {
+      process.env.RCC_ERRORSAMPLES_DIR = tmp;
+      process.env.ROUTECODEX_ERRORSAMPLE_MAX_BYTES = '1024';
+      process.env.ROUTECODEX_ERRORSAMPLE_RESPONSES_TOOL_HISTORY_MAX_SAMPLE_BYTES = '1048576';
+      process.env.ROUTECODEX_ERRORSAMPLE_PRUNE_INTERVAL_MS = '0';
+
+      const payload = {
+        requestId: 'req-tool-history-contract',
+        body: {
+          input: Array.from({ length: 300 }, (_, i) => ({
+            type: i % 2 === 0 ? 'function_call' : 'function_call_output',
+            call_id: `call_${Math.floor(i / 2)}`,
+            name: 'exec_command',
+            output: 'x'.repeat(200),
+            arguments: JSON.stringify({ cmd: `echo ${i}` })
+          }))
+        }
+      };
+      const file = await writeErrorsampleJson({
+        group: 'payload-contract-error',
+        kind: 'responses.inbound_tool_history_contract',
+        payload
+      });
+      await __flushErrorsampleQueueForTests();
+      const text = await fs.readFile(file!, 'utf8');
+      const json = JSON.parse(text) as Record<string, unknown>;
+
+      expect(Buffer.byteLength(text, 'utf8')).toBeGreaterThan(1024);
+      expect(json.truncated).toBeUndefined();
+      expect(text).toContain('req-tool-history-contract');
+      expect(text).toContain('function_call_output');
     } finally {
       for (const key of ENV_KEYS) {
         const value = envBackup.get(key);

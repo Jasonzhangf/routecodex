@@ -290,6 +290,24 @@ async function fetchRemoteImageAsBase64(
         { sourceUrl, timeoutMs }
       );
     }
+    const existingRemoteImageCode = pickString((error as { code?: unknown })?.code);
+    if (existingRemoteImageCode && existingRemoteImageCode.startsWith('REMOTE_IMAGE_')) {
+      throw error;
+    }
+    if (error instanceof Error) {
+      const detailMessage = pickString(error.message) ?? String(error);
+      throw buildRemoteImageInlineError(
+        'REMOTE_IMAGE_FETCH_NETWORK_ERROR',
+        `remote image fetch failed before upstream request: ${parsed.toString()} :: ${detailMessage}`,
+        502,
+        {
+          sourceUrl: parsed.toString(),
+          timeoutMs,
+          causeName: error.name || null,
+          causeMessage: detailMessage
+        }
+      );
+    }
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -403,6 +421,9 @@ export function resolveAnthropicRemoteImagePolicy(context: ProviderContext, rawB
     return envDefault;
   }
 
+  if (modelHint.startsWith('qwen3.6-plus') && providerHint.includes('ali-coding-plan')) {
+    return 'direct_then_inline';
+  }
   if (providerHint.includes('ali-coding-plan') || modelHint.startsWith('kimi-k2.5')) {
     return 'inline';
   }

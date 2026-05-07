@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 
 export type LlmsImpl = 'ts' | 'engine';
@@ -11,11 +11,10 @@ const BUILTIN_SHARED_MODULE_REL = path.join('sharedmodule', 'llmswitch-core');
 const PACKAGE_CANDIDATES_BY_IMPL: Record<LlmsImpl, string[]> = {
   ts: [
     BUILTIN_SHARED_MODULE_REL,
-    path.join('node_modules', '@jsonstudio', 'llms'),
     path.join('node_modules', 'rcc-llmswitch-core')
   ],
   engine: [
-    path.join('node_modules', '@jsonstudio', 'llms-engine')
+    path.join('node_modules', 'rcc-llmswitch-engine')
   ]
 };
 
@@ -23,6 +22,36 @@ const corePackageDirByImpl: Record<LlmsImpl, string | null> = {
   ts: null,
   engine: null
 };
+
+function resolveCoreLoaderModulePath(): string {
+  try {
+    return new URL(import.meta.url).pathname;
+  } catch {
+    // continue to stack / cwd fallback
+  }
+  if (typeof __filename === 'string' && __filename.length > 0) {
+    return __filename;
+  }
+
+  const stack = String(new Error().stack || '');
+  for (const line of stack.split('\n')) {
+    const match = line.match(/(file:\/\/[^\s)]+core-loader\.(?:ts|js)|\/[^\s)]+core-loader\.(?:ts|js))/);
+    if (!match) {
+      continue;
+    }
+    const rawPath = match[1];
+    if (rawPath.startsWith('file://')) {
+      try {
+        return decodeURIComponent(new URL(rawPath).pathname);
+      } catch {
+        continue;
+      }
+    }
+    return rawPath;
+  }
+
+  return path.join(process.cwd(), 'src/modules/llmswitch/core-loader.ts');
+}
 
 function findPackageRootFromEntry(entryPath: string): string | null {
   let current = path.dirname(entryPath);
@@ -57,7 +86,7 @@ function resolveCorePackageDir(impl: LlmsImpl): string {
 
   // 0) Prefer the built-in sharedmodule when it has a dist/ directory.
   //    Resolve relative to the project root (directory containing package.json).
-  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const moduleDir = path.dirname(resolveCoreLoaderModulePath());
   const builtinCandidates = [
     // From compiled dist/modules/llmswitch/ → ../../sharedmodule/llmswitch-core
     path.resolve(moduleDir, '..', '..', '..', BUILTIN_SHARED_MODULE_REL),
@@ -75,11 +104,10 @@ function resolveCorePackageDir(impl: LlmsImpl): string {
   // 1) Prefer Node's resolver when possible (more robust under global installs and Jest ESM).
   // Try resolution relative to this module, then relative to project CWD.
   const packageNamesByImpl: Record<LlmsImpl, string[]> = {
-    ts: ['@jsonstudio/llms', 'rcc-llmswitch-core'],
-    engine: ['@jsonstudio/llms-engine']
+    ts: ['rcc-llmswitch-core'],
+    engine: ['rcc-llmswitch-engine']
   };
   const baseUrls = [
-    import.meta.url,
     pathToFileURL(path.join(process.cwd(), 'package.json')).href
   ];
   for (const name of packageNamesByImpl[impl]) {
@@ -95,7 +123,7 @@ function resolveCorePackageDir(impl: LlmsImpl): string {
   // 2) Fallback: walk up and find node_modules relative to runtime/module paths.
   const startDirs = [
     // Normal runtime: resolve from this module's location.
-    path.dirname(fileURLToPath(import.meta.url)),
+    path.dirname(resolveCoreLoaderModulePath()),
     // Jest/ts-jest ESM can execute from virtualized cache paths; fall back to project CWD.
     process.cwd()
   ];

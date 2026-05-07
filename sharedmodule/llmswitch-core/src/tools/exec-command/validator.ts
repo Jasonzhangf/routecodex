@@ -31,6 +31,7 @@ export type ExecCommandValidationOptions = {
 
 type PolicyViolation = {
   reason:
+    | 'invalid_shell_wrapper_shape'
     | 'forbidden_git_reset_hard'
     | 'forbidden_git_checkout_scope'
     | 'forbidden_exec_command_policy';
@@ -53,6 +54,38 @@ const POLICY_CACHE = new Map<string, ExecCommandGuardPolicyCacheEntry>();
 const GIT_RESET_HARD_PATTERN = /\bgit\s+reset\s+--hard(?:\s|$)/i;
 const GIT_CHECKOUT_PATTERN = /\bgit\s+checkout\b/i;
 const SHELL_SEPARATORS = new Set([';', '&&', '||', '|', '&']);
+
+function detectInvalidShellWrapperShape(command: string): PolicyViolation | null {
+  const trimmed = String(command || '').trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const shellWrapperPrefixes = [
+    "bash -lc '",
+    "bash -c '",
+    "sh -lc '",
+    "sh -c '",
+    "zsh -lc '",
+    "zsh -c '"
+  ] as const;
+
+  for (const prefix of shellWrapperPrefixes) {
+    if (!trimmed.startsWith(prefix)) {
+      continue;
+    }
+    if (!trimmed.endsWith("'")) {
+      return {
+        reason: 'invalid_shell_wrapper_shape',
+        message:
+          `Malformed shell wrapper: ${prefix.trim()}... requires a balanced closing single quote. ` +
+          'Closing-quote or tail-truncated wrappers are not auto-repaired.'
+      };
+    }
+  }
+
+  return null;
+}
 
 function splitShellTokens(command: string): string[] {
   const tokens: string[] = [];
@@ -261,6 +294,10 @@ function detectPolicyRuleViolation(command: string, options?: ExecCommandValidat
 function detectPolicyViolation(command: string, options?: ExecCommandValidationOptions): PolicyViolation | null {
   if (!command || !command.trim()) {
     return null;
+  }
+  const invalidShellWrapper = detectInvalidShellWrapperShape(command);
+  if (invalidShellWrapper) {
+    return invalidShellWrapper;
   }
   const policyViolation = detectPolicyRuleViolation(command, options);
   if (policyViolation) {

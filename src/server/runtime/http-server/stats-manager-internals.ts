@@ -278,6 +278,33 @@ export function mergeToolAggregate(
   }
 }
 
+function canonicalizeToolNameForStats(rawName: unknown): string {
+  if (typeof rawName !== 'string') {
+    return '';
+  }
+  const trimmed = rawName.trim();
+  if (!trimmed) {
+    return '';
+  }
+  const withoutFunctionsPrefix = trimmed.toLowerCase().startsWith('functions.')
+    ? trimmed.slice('functions.'.length).trim()
+    : trimmed;
+  if (!withoutFunctionsPrefix) {
+    return '';
+  }
+  switch (withoutFunctionsPrefix.toLowerCase()) {
+    case 'execute_command':
+    case 'execute-command':
+    case 'shell_command':
+    case 'shell':
+    case 'bash':
+    case 'terminal':
+      return 'exec_command';
+    default:
+      return withoutFunctionsPrefix;
+  }
+}
+
 export function extractToolCalls(payload: unknown): Array<{ name: string; id?: string }> {
   if (!payload || typeof payload !== 'object') {
     return [];
@@ -287,7 +314,7 @@ export function extractToolCalls(payload: unknown): Array<{ name: string; id?: s
   const seenIds = new Set<string>();
 
   const addCall = (nameRaw: unknown, idRaw?: unknown): void => {
-    const name = typeof nameRaw === 'string' && nameRaw.trim() ? nameRaw.trim() : '';
+    const name = canonicalizeToolNameForStats(nameRaw);
     if (!name) {
       return;
     }

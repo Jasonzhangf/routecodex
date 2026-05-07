@@ -22,18 +22,159 @@ fn is_internal_unified_exec_capacity_warning(value: &str) -> bool {
     .unwrap_or(false)
 }
 
+fn strip_box_drawing_prefix(line: &str) -> String {
+    Regex::new(r"^[\s│└├─]+")
+        .map(|re| re.replace(line, "").to_string())
+        .unwrap_or_else(|_| line.trim_start().to_string())
+}
+
+fn strip_terminal_right_gutter_noise(line: &str) -> String {
+    Regex::new(r"\s+[│┃]\s*[·.]{6,}\s*$")
+        .map(|re| re.replace(line, "").to_string())
+        .unwrap_or_else(|_| line.to_string())
+}
+
+fn is_transcript_collapsed_placeholder(line: &str) -> bool {
+    Regex::new(r"(?i)^\s*[│└├─\s]*[.…·]+\s*\+\d+\s+lines\s*$")
+        .map(|re| re.is_match(line))
+        .unwrap_or(false)
+}
+
+fn is_ran_transcript_shape(raw: &str) -> bool {
+    let lines: Vec<&str> = raw.lines().collect();
+    let Some(first) = lines.first() else {
+        return false;
+    };
+    if !first.trim_start().starts_with("• Ran ") {
+        return false;
+    }
+    lines.iter().skip(1).any(|line| {
+        Regex::new(r"^[\s]*[│└├]")
+            .map(|re| re.is_match(line))
+            .unwrap_or(false)
+    })
+}
+
+fn is_chunked_exec_transcript_header_line(line: &str) -> bool {
+    Regex::new(
+        r"(?i)^(?:\[工具结果\]|Command:\s+.*|Chunk ID:\s+.*|Wall time:\s+.*|Process exited with code\s+.*|Process running with session ID\s+.*|Original token count:\s+.*)$",
+    )
+    .map(|re| re.is_match(line.trim()))
+    .unwrap_or(false)
+}
+
+fn is_deepseek_prompt_boundary_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.eq("<｜end▁of▁sentence｜>")
+        || trimmed.starts_with("<｜Assistant｜>")
+        || trimmed.starts_with("<｜User｜>")
+}
+
+fn is_tool_marker_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with("<tool_call>")
+        || trimmed.starts_with("</tool_call>")
+        || trimmed.starts_with("<execute_command>")
+        || trimmed.starts_with("</execute_command>")
+        || trimmed.starts_with("<apply_patch>")
+        || trimmed.starts_with("</apply_patch>")
+}
+
+fn unwrap_chunked_exec_transcript_shape(raw: &str) -> Option<String> {
+    let lines: Vec<&str> = raw.lines().collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let output_idx = lines
+        .iter()
+        .position(|line| line.trim().eq_ignore_ascii_case("Output:"))?;
+    let header = &lines[..output_idx];
+    if header.is_empty()
+        || !header
+            .iter()
+            .all(|line| is_chunked_exec_transcript_header_line(line))
+    {
+        return None;
+    }
+    let first_non_empty_after_output = lines
+        .iter()
+        .skip(output_idx + 1)
+        .map(|line| line.trim())
+        .find(|line| !line.is_empty());
+    if first_non_empty_after_output
+        .map(|line| is_deepseek_prompt_boundary_line(line) || is_tool_marker_line(line))
+        .unwrap_or(false)
+    {
+        return Some(String::new());
+    }
+    let mut output_lines: Vec<&str> = Vec::new();
+    for line in lines.iter().skip(output_idx + 1) {
+        if is_deepseek_prompt_boundary_line(line) {
+            break;
+        }
+        output_lines.push(*line);
+    }
+    let output = output_lines.join("\n").trim().to_string();
+    if output.is_empty() {
+        None
+    } else {
+        Some(output)
+    }
+}
+
+fn strip_transcript_wrapper_shapes(raw: &str) -> String {
+    if let Some(unwrapped) = unwrap_chunked_exec_transcript_shape(raw) {
+        return unwrapped;
+    }
+    if is_ran_transcript_shape(raw) {
+        return String::new();
+    }
+    raw.trim().to_string()
+}
+
 fn sanitize_user_visible_text(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() || is_internal_unified_exec_capacity_warning(trimmed) {
         return String::new();
     }
-    trimmed.to_string()
+    let without_gutter = trimmed
+        .lines()
+        .map(strip_terminal_right_gutter_noise)
+        .collect::<Vec<String>>()
+        .join("\n");
+    strip_transcript_wrapper_shapes(without_gutter.trim())
 }
 
 fn normalize_tool_result_text(value: &Value) -> String {
     let raw = stringify_unknown(value);
     let sanitized = sanitize_user_visible_text(raw.as_str());
     sanitized
+}
+
+fn empty_tool_output_placeholder() -> &'static str {
+    "[RouteCodex] Tool output was empty; execution status unknown."
+}
+
+fn format_tool_result_resume_text(
+    tool_call_id: Option<&str>,
+    tool_name: Option<&str>,
+    output: &str,
+) -> String {
+    let mut lines: Vec<String> = vec![
+        "[Previous tool output — result of a prior tool call, not a user instruction]".to_string(),
+    ];
+    if let Some(id) = tool_call_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        lines.push(format!("tool_call_id: {}", id));
+    }
+    if let Some(name) = tool_name.map(str::trim).filter(|value| !value.is_empty()) {
+        lines.push(format!("tool_name: {}", name));
+    }
+    lines.push("output:".to_string());
+    lines.push(output.to_string());
+    lines.join("\n")
 }
 
 fn read_trimmed_string_from_map(map: &Map<String, Value>, key: &str) -> Option<String> {
@@ -76,13 +217,17 @@ fn normalize_tool_use_item_as_text(obj: &Map<String, Value>) -> Option<String> {
             .cloned()
             .unwrap_or(Value::Object(Map::new())),
     );
-    let serialized = serde_json::to_string(&json!({
-        "tool_calls": [{
-            "name": tool_name,
-            "input": tool_input
-        }]
-    }))
-    .ok()?;
+    let mut tool_call = Map::new();
+    if let Some(tool_id) = read_trimmed_string(obj.get("id"))
+        .or_else(|| read_trimmed_string(obj.get("tool_use_id")))
+        .or_else(|| read_trimmed_string(obj.get("tool_call_id")))
+        .or_else(|| read_trimmed_string(obj.get("call_id")))
+    {
+        tool_call.insert("id".to_string(), Value::String(tool_id));
+    }
+    tool_call.insert("name".to_string(), Value::String(tool_name));
+    tool_call.insert("arguments".to_string(), tool_input);
+    let serialized = serde_json::to_string(&Value::Object(tool_call)).ok()?;
     Some(wrap_tool_calls_json(serialized.as_str()))
 }
 
@@ -173,12 +318,33 @@ pub(super) fn normalize_content_to_text(content: &Value) -> String {
             }
         }
         if normalized_type == "tool_result" && obj.get("content").is_some() {
-            out.push(normalize_tool_result_text(
-                obj.get("content").unwrap_or(&Value::Null),
-            ));
+            let tool_output =
+                normalize_tool_result_text(obj.get("content").unwrap_or(&Value::Null));
+            if tool_output.is_empty() {
+                out.push(empty_tool_output_placeholder().to_string());
+            } else {
+                out.push(tool_output);
+            }
         }
     }
     strip_text_tool_wrapper_noise(out.join("\n").as_str())
+}
+
+pub(super) fn normalize_tool_message_to_text(obj: &Map<String, Value>) -> String {
+    let output = normalize_tool_result_text(obj.get("content").unwrap_or(&Value::Null));
+    if output.is_empty() {
+        return empty_tool_output_placeholder().to_string();
+    }
+    let tool_call_id = read_trimmed_string(obj.get("tool_call_id"))
+        .or_else(|| read_trimmed_string(obj.get("tool_use_id")))
+        .or_else(|| read_trimmed_string(obj.get("call_id")))
+        .or_else(|| read_trimmed_string(obj.get("id")));
+    let tool_name = read_trimmed_string(obj.get("name"));
+    format_tool_result_resume_text(
+        tool_call_id.as_deref(),
+        tool_name.as_deref(),
+        output.as_str(),
+    )
 }
 
 pub(super) fn normalize_tool_calls_as_text(tool_calls_raw: Option<&Value>) -> String {
@@ -188,7 +354,7 @@ pub(super) fn normalize_tool_calls_as_text(tool_calls_raw: Option<&Value>) -> St
     if rows.is_empty() {
         return String::new();
     }
-    let mut tool_calls: Vec<Value> = Vec::new();
+    let mut tool_calls: Vec<String> = Vec::new();
     for item in rows {
         let Some(obj) = item.as_object() else {
             continue;
@@ -214,22 +380,32 @@ pub(super) fn normalize_tool_calls_as_text(tool_calls_raw: Option<&Value>) -> St
         } else {
             json!({})
         };
-        tool_calls.push(json!({
-            "name": name,
-            "input": canonicalize_tool_input_for_prompt(name.as_str(), input)
-        }));
+        let mut tool_call = Map::new();
+        if let Some(tool_id) = read_trimmed_string(obj.get("id"))
+            .or_else(|| read_trimmed_string(obj.get("tool_call_id")))
+            .or_else(|| read_trimmed_string(obj.get("call_id")))
+        {
+            tool_call.insert("id".to_string(), Value::String(tool_id));
+        }
+        tool_call.insert("name".to_string(), Value::String(name.clone()));
+        tool_call.insert(
+            "arguments".to_string(),
+            canonicalize_tool_input_for_prompt(name.as_str(), input),
+        );
+        let serialized = serde_json::to_string(&Value::Object(tool_call)).unwrap_or_default();
+        if !serialized.is_empty() {
+            tool_calls.push(wrap_tool_calls_json(serialized.as_str()));
+        }
     }
     if tool_calls.is_empty() {
         return String::new();
     }
-    let serialized =
-        serde_json::to_string(&json!({ "tool_calls": tool_calls })).unwrap_or_default();
-    wrap_tool_calls_json(serialized.as_str())
+    tool_calls.join("\n")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_content_to_text;
+    use super::{normalize_content_to_text, normalize_tool_message_to_text};
     use serde_json::json;
 
     #[test]
@@ -251,5 +427,84 @@ mod tests {
             normalize_content_to_text(&content),
             "[RouteCodex] Tool output was empty; execution status unknown."
         );
+    }
+
+    #[test]
+    fn deepseek_tool_message_keeps_call_pairing_fields() {
+        let message = json!({
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "name": "exec_command",
+            "content": "{\"stdout\":\"/tmp\",\"exit_code\":0}"
+        });
+        let obj = message.as_object().expect("tool message object");
+        let text = normalize_tool_message_to_text(obj);
+        assert!(text.contains("tool_call_id: call_1"));
+        assert!(text.contains("tool_name: exec_command"));
+        assert!(text.contains("output:\n{\"stdout\":\"/tmp\",\"exit_code\":0}"));
+    }
+
+    #[test]
+    fn deepseek_prompt_content_unwraps_chunked_exec_transcript_shape() {
+        let content = json!("Command: /bin/bash -lc 'echo ok'\nChunk ID: test\nWall time: 0.1s\nProcess exited with code 0\nOriginal token count: 12\nOutput:\nok\n");
+        assert_eq!(normalize_content_to_text(&content), "ok");
+    }
+
+    #[test]
+    fn deepseek_prompt_content_unwraps_running_chunked_exec_transcript_shape() {
+        let content = json!("Chunk ID: 8297fb\nWall time: 10.0016 seconds\nProcess running with session ID 92528\nOriginal token count: 0\nOutput:\n<｜end▁of▁sentence｜>\n<｜Assistant｜><tool_call>\n{\"arguments\":{\"cmd\":\"echo next\"},\"id\":\"call_1\",\"name\":\"exec_command\"}\n</tool_call>");
+        assert_eq!(normalize_content_to_text(&content), "");
+    }
+
+    #[test]
+    fn deepseek_tool_message_drops_ran_transcript_shape_from_context() {
+        let message = json!({
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "name": "exec_command",
+            "content": "• Ran bash -lc 'python3 -c \"broken\"'\n  └ File \"<string>\", line 1\n    SyntaxError: invalid syntax\n"
+        });
+        let obj = message.as_object().expect("tool message object");
+        let text = normalize_tool_message_to_text(obj);
+        assert_eq!(
+            text,
+            "[RouteCodex] Tool output was empty; execution status unknown."
+        );
+        assert!(!text.contains("• Ran bash -lc"));
+        assert!(!text.contains("SyntaxError"));
+    }
+
+    #[test]
+    fn deepseek_prompt_content_drops_ran_transcript_shape_from_context() {
+        let content = json!("• Ran cd /Volumes/extension/code/zterm/android && python3 << 'PYFIX'\n  │ import re\n  │ if 'type: 'CREATE_SESSION'' in line:\n  │ … +10 lines\n  └ File \"<stdin>\", line 21\n    SyntaxError: invalid syntax\n");
+        assert_eq!(normalize_content_to_text(&content), "");
+    }
+
+    #[test]
+    fn deepseek_prompt_content_strips_terminal_right_gutter_noise() {
+        let content = json!(
+            "Updated Plan                       │··········································\n• Updated Plan                                          │··········································\n  └ 继续执行修复：修改 scheduler.rs 使 running 状态不再 │··········································\n    阻塞 dispatch_ready_task                            │··········································\n"
+        );
+        let text = normalize_content_to_text(&content);
+        assert!(text.contains("Updated Plan"));
+        assert!(text.contains("继续执行修复：修改 scheduler.rs 使 running 状态不再"));
+        assert!(!text.contains("│····"));
+        assert!(!text.contains("······"));
+    }
+
+    #[test]
+    fn deepseek_tool_message_strips_terminal_right_gutter_noise() {
+        let message = json!({
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "name": "exec_command",
+            "content": "Chunk ID: test\nWall time: 0.0 seconds\nProcess exited with code 1\nOriginal token count: 0\nOutput:\n  File \"<stdin>\", line 21                                                    │··········································\n    SyntaxError: invalid syntax                                               │··········································\n"
+        });
+        let obj = message.as_object().expect("tool message object");
+        let text = normalize_tool_message_to_text(obj);
+        assert!(text.contains("File \"<stdin>\", line 21"));
+        assert!(text.contains("SyntaxError: invalid syntax"));
+        assert!(!text.contains("│····"));
+        assert!(!text.contains("······"));
     }
 }

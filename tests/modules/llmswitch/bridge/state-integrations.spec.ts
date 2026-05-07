@@ -4,17 +4,23 @@ describe('llmswitch bridge state-integrations', () => {
   it('fails fast when sticky session load throws', async () => {
     jest.resetModules();
 
-    const stickySessionStoreMock = {
-      loadRoutingInstructionStateSync: () => {
-        throw new Error('sticky boom');
-      },
-      saveRoutingInstructionStateAsync: () => undefined,
-      saveRoutingInstructionStateSync: () => undefined
-    };
-
     jest.unstable_mockModule(
-      '../../../../node_modules/@jsonstudio/llms/dist/router/virtual-router/sticky-session-store.js',
-      () => stickySessionStoreMock
+      '../../../../src/modules/llmswitch/bridge/module-loader.js',
+      () => ({
+        importCoreDist: jest.fn(),
+        requireCoreDist: jest.fn((subpath: string) => {
+          if (subpath === 'router/virtual-router/sticky-session-store') {
+            return {
+              loadRoutingInstructionStateSync: () => {
+                throw new Error('sticky boom');
+              },
+              saveRoutingInstructionStateAsync: () => undefined,
+              saveRoutingInstructionStateSync: () => undefined
+            };
+          }
+          throw new Error(`unexpected:${subpath}`);
+        })
+      })
     );
 
     const mod = await import('../../../../src/modules/llmswitch/bridge/state-integrations.js');
@@ -28,8 +34,16 @@ describe('llmswitch bridge state-integrations', () => {
     jest.resetModules();
 
     jest.unstable_mockModule(
-      '../../../../node_modules/@jsonstudio/llms/dist/servertool/handlers/reasoning-stop-state.js',
-      () => ({})
+      '../../../../src/modules/llmswitch/bridge/module-loader.js',
+      () => ({
+        importCoreDist: jest.fn(),
+        requireCoreDist: jest.fn((subpath: string) => {
+          if (subpath === 'servertool/handlers/reasoning-stop-state') {
+            return {};
+          }
+          throw new Error(`unexpected:${subpath}`);
+        })
+      })
     );
 
     const mod = await import('../../../../src/modules/llmswitch/bridge/state-integrations.js');
@@ -43,8 +57,16 @@ describe('llmswitch bridge state-integrations', () => {
     jest.resetModules();
 
     jest.unstable_mockModule(
-      '../../../../node_modules/@jsonstudio/llms/dist/conversion/hub/pipeline/session-identifiers.js',
-      () => ({})
+      '../../../../src/modules/llmswitch/bridge/module-loader.js',
+      () => ({
+        importCoreDist: jest.fn(),
+        requireCoreDist: jest.fn((subpath: string) => {
+          if (subpath === 'conversion/hub/pipeline/session-identifiers') {
+            return {};
+          }
+          throw new Error(`unexpected:${subpath}`);
+        })
+      })
     );
 
     const mod = await import('../../../../src/modules/llmswitch/bridge/state-integrations.js');
@@ -105,6 +127,29 @@ describe('llmswitch bridge state-integrations', () => {
 
     await expect(mod.buildHeartbeatInjectTextSnapshot()).rejects.toThrow(
       'heartbeat_task_store.build_inject_text.api_unavailable failed: "buildHeartbeatInjectText not available"'
+    );
+  });
+
+  it('fails fast instead of returning noop stats center when telemetry module is unavailable', async () => {
+    jest.resetModules();
+
+    jest.unstable_mockModule(
+      '../../../../src/modules/llmswitch/bridge/module-loader.js',
+      () => ({
+        importCoreDist: jest.fn(),
+        requireCoreDist: jest.fn((subpath: string) => {
+          if (subpath === 'telemetry/stats-center') {
+            throw new Error('stats load boom');
+          }
+          throw new Error(`unexpected:${subpath}`);
+        })
+      })
+    );
+
+    const mod = await import('../../../../src/modules/llmswitch/bridge/state-integrations.js');
+
+    expect(() => mod.getStatsCenterSafe()).toThrow(
+      'stats_center.load failed: Error: stats load boom'
     );
   });
 });

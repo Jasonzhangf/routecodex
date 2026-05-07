@@ -63,8 +63,8 @@ function linkForPackage(globalRoot, packageName) {
   if (!fs.existsSync(pkgRoot)) {
     return { packageName, changed: false, skipped: true, reason: 'package-not-installed' };
   }
-  const scopeDir = path.join(pkgRoot, 'node_modules', '@jsonstudio');
-  const linkPath = path.join(scopeDir, 'llms');
+  const scopeDir = path.join(pkgRoot, 'node_modules');
+  const linkPath = path.join(scopeDir, 'rcc-llmswitch-core');
   fs.mkdirSync(scopeDir, { recursive: true });
   fs.rmSync(linkPath, { recursive: true, force: true });
   fs.symlinkSync(localLlms, linkPath, 'junction');
@@ -84,7 +84,7 @@ function main() {
     const detail = results
       .map((it) => `${it.packageName}:${it.skipped ? it.reason : 'unknown'}`)
       .join(', ');
-    throw new Error(`no eligible global package found to link @jsonstudio/llms (${detail})`);
+    throw new Error(`no eligible global package found to link rcc-llmswitch-core (${detail})`);
   }
 
   for (const row of results) {

@@ -24,6 +24,7 @@ export interface NativeApplyBridgeNormalizeToolIdentifiersInput {
 export interface NativeBridgeHistoryInput {
   messages: unknown[];
   tools?: Array<Record<string, unknown>>;
+  allowPendingTerminalToolCall?: boolean;
 }
 
 export interface NativeBridgeHistoryOutput {
@@ -126,6 +127,7 @@ export interface NativeAppendLocalImageBlockOnLatestUserInputOutput {
 export interface NativeApplyBridgeNormalizeHistoryInput {
   messages: unknown[];
   tools?: Array<Record<string, unknown>>;
+  allowPendingTerminalToolCall?: boolean;
 }
 
 export interface NativeApplyBridgeNormalizeHistoryOutput {
@@ -164,6 +166,7 @@ export interface NativeBridgeInputToChatInput {
   tools?: Array<Record<string, unknown>>;
   toolResultFallbackText?: string;
   normalizeFunctionName?: string;
+  allowPendingTerminalToolCall?: boolean;
 }
 
 export interface NativeBridgeInputToChatOutput {

@@ -357,6 +357,9 @@ export function shouldForceUpstreamSseForTools(request: UnknownObject): boolean 
     return false;
   }
 
+  if (/<tool_?call(?:\s|>)/i.test(prompt)) {
+    return true;
+  }
   if (/<<\s*RCC_TOOL_CALLS(?:_JSON)?/i.test(prompt)) {
     return true;
   }

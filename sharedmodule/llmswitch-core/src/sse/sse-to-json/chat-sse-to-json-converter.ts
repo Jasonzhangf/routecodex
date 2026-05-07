@@ -26,6 +26,147 @@ import { normalizeMessageReasoningTools } from '../../conversion/shared/reasonin
 import { normalizeChatMessageContent } from '../../conversion/shared/chat-output-normalizer.js';
 import { dispatchReasoning } from '../shared/reasoning-dispatcher.js';
 
+type DeepSeekWebErrorInfo = {
+  message: string;
+  code: string;
+  finishReason: string;
+  raw: Record<string, unknown>;
+};
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function readTrimmed(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function includesContextLengthHint(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized.includes('context_length_exceeded')
+    || normalized.includes('context too long')
+    || normalized.includes('context window')
+    || normalized.includes('达到对话长度上限')
+    || normalized.includes('请开启新对话')
+  );
+}
+
+function normalizeDeepSeekWebFinishReason(input: {
+  code?: string;
+  message?: string;
+  finishReason?: string;
+  status?: string;
+}): string {
+  const finishReason = readTrimmed(input.finishReason);
+  const code = readTrimmed(input.code);
+  const message = readTrimmed(input.message);
+  const status = readTrimmed(input.status);
+  if (
+    includesContextLengthHint(finishReason)
+    || includesContextLengthHint(code)
+    || includesContextLengthHint(message)
+    || status.toLowerCase().includes('context')
+  ) {
+    return 'context_length_exceeded';
+  }
+  if (
+    code.toLowerCase().includes('rate_limit')
+    || finishReason.toLowerCase().includes('rate_limit')
+    || message.toLowerCase().includes('rate limit')
+  ) {
+    return 'rate_limit_exceeded';
+  }
+  return finishReason || code || status || 'SSE_ERROR';
+}
+
+function extractDeepSeekWebErrorInfo(payload: unknown): DeepSeekWebErrorInfo | null {
+  const row = asRecord(payload);
+  if (!row) {
+    return null;
+  }
+
+  const directError = asRecord(row.error);
+  const valueNode = asRecord(row.v);
+  const responseNode = asRecord(valueNode?.response) || asRecord(row.response);
+  const responseError = asRecord(responseNode?.error);
+  const responseStatus = readTrimmed(responseNode?.status);
+  const path = readTrimmed(row.p);
+  const op = readTrimmed(row.o);
+  const value = row.v;
+  const valueRecord = asRecord(value);
+
+  const topLevelMessage =
+    readTrimmed(row.message)
+    || readTrimmed(row.error)
+    || readTrimmed(row.content)
+    || readTrimmed(row.msg);
+  const topLevelCode =
+    readTrimmed(row.code)
+    || readTrimmed(row.finish_reason);
+
+  const nestedMessage =
+    readTrimmed(directError?.message)
+    || readTrimmed(responseError?.message)
+    || readTrimmed(responseNode?.message)
+    || readTrimmed(valueRecord?.message)
+    || readTrimmed(valueRecord?.error)
+    || readTrimmed(valueRecord?.msg);
+  const nestedCode =
+    readTrimmed(directError?.code)
+    || readTrimmed(responseError?.code)
+    || readTrimmed(responseNode?.code)
+    || readTrimmed(valueRecord?.code)
+    || readTrimmed(valueRecord?.finish_reason);
+
+  const rawStatus =
+    responseStatus
+    || readTrimmed(row.status)
+    || (path === 'response/status' ? readTrimmed(value) : '');
+  const rawMessage = topLevelMessage || nestedMessage;
+  const rawCode = topLevelCode || nestedCode;
+  const finishReason = normalizeDeepSeekWebFinishReason({
+    code: rawCode,
+    message: rawMessage,
+    finishReason:
+      readTrimmed(row.finish_reason)
+      || readTrimmed(responseNode?.finish_reason)
+      || readTrimmed(valueRecord?.finish_reason),
+    status: rawStatus
+  });
+
+  const explicitErrorLike =
+    readTrimmed(row.type).toLowerCase() === 'error'
+    || path === 'response/error'
+    || op.toUpperCase() === 'ERROR';
+  const failedStatusLike = ['FAILED', 'ERROR', 'REJECTED', 'ABORTED', 'CANCELLED'].includes(rawStatus.toUpperCase());
+  const contextLengthLike = includesContextLengthHint(rawMessage) || includesContextLengthHint(rawCode) || finishReason === 'context_length_exceeded';
+
+  if (!explicitErrorLike && !failedStatusLike && !contextLengthLike) {
+    return null;
+  }
+
+  const message =
+    rawMessage
+    || (finishReason === 'context_length_exceeded'
+      ? '达到对话长度上限，请开启新对话'
+      : failedStatusLike
+        ? `DeepSeek upstream status=${rawStatus}`
+        : 'Unknown SSE error');
+
+  return {
+    message,
+    code: rawCode || finishReason || 'SSE_ERROR',
+    finishReason,
+    raw: row
+  };
+}
+
 function readNonNegativeInteger(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
     return Math.round(value);
@@ -101,6 +242,16 @@ export class ChatSseToJsonConverter {
 
     } catch (error) {
       context.eventStats.errorCount++;
+      if (this.isTerminatedError(error)) {
+        const salvaged = this.trySalvageResponse(context);
+        if (salvaged) {
+          context.isCompleted = true;
+          context.eventStats.endTime = TimeUtils.now();
+          context.eventStats.duration = (context.eventStats.endTime - context.eventStats.startTime) / 1000;
+          options.onCompletion?.(salvaged);
+          return salvaged;
+        }
+      }
       options.onError?.(error as Error);
       throw ErrorUtils.wrapError(error, 'SSE to JSON conversion failed');
     } finally {
@@ -137,6 +288,17 @@ export class ChatSseToJsonConverter {
 
     } catch (error) {
       context.eventStats.errorCount++;
+      if (this.isTerminatedError(error)) {
+        const salvaged = this.trySalvageResponse(context);
+        if (salvaged) {
+          context.isCompleted = true;
+          context.eventStats.endTime = TimeUtils.now();
+          context.eventStats.duration = (context.eventStats.endTime - context.eventStats.startTime) / 1000;
+          options.onCompletion?.(salvaged);
+          yield salvaged;
+          return;
+        }
+      }
       options.onError?.(error as Error);
       throw ErrorUtils.wrapError(error, 'SSE stream aggregation failed');
     } finally {
@@ -215,11 +377,15 @@ export class ChatSseToJsonConverter {
       }
       return undefined;
     })();
+    const deepseekErrorInfo = extractDeepSeekWebErrorInfo(parsedData);
 
     const normalizeEventType = (
       candidate: string | undefined,
       payload?: Record<string, unknown>
     ): ChatSseEventType | undefined => {
+      if (payload && extractDeepSeekWebErrorInfo(payload)) {
+        return 'error';
+      }
       if (!candidate) return undefined;
       const v = candidate.trim().toLowerCase();
       if (!v) return undefined;
@@ -234,9 +400,11 @@ export class ChatSseToJsonConverter {
       if (v === 'finish' || v === 'close') return 'chat.done';
       if (v === 'toast') {
         const toastType = typeof payload?.type === 'string' ? payload.type.trim().toLowerCase() : '';
-        const finishReason = typeof payload?.finish_reason === 'string'
-          ? payload.finish_reason.trim().toLowerCase()
-          : '';
+        const finishReason = deepseekErrorInfo?.finishReason || (
+          typeof payload?.finish_reason === 'string'
+            ? payload.finish_reason.trim().toLowerCase()
+            : ''
+        );
         if (toastType === 'error' || finishReason === 'context_length_exceeded' || finishReason === 'rate_limit_exceeded') {
           return 'error';
         }
@@ -370,6 +538,24 @@ export class ChatSseToJsonConverter {
       const parsedEntries = this.parseChatChunkPayload(payload);
 
       for (const parsed of parsedEntries) {
+        const deepseekErrorInfo = extractDeepSeekWebErrorInfo(parsed);
+        if (deepseekErrorInfo) {
+          const typedError = new Error(deepseekErrorInfo.message) as Error & { code?: string };
+          typedError.code = deepseekErrorInfo.code;
+          throw ErrorUtils.createError(
+            typedError.message,
+            CHAT_CONVERSION_ERROR_CODES.STREAM_ERROR,
+            {
+              errorData: {
+                ...deepseekErrorInfo.raw,
+                code: deepseekErrorInfo.code,
+                finish_reason: deepseekErrorInfo.finishReason,
+                message: deepseekErrorInfo.message
+              },
+              parsed
+            }
+          );
+        }
         if (this.tryProcessDeepSeekWebPatchEvent(parsed, context)) {
           continue;
         }
@@ -474,7 +660,7 @@ export class ChatSseToJsonConverter {
     const op = typeof payload.o === 'string' ? payload.o : '';
     const value = payload.v;
     const deepseekState = this.getDeepSeekPatchState(context);
-    const isBareContinuation = deepseekState.patchAppendActive && !path && typeof value === 'string';
+    const isBareContinuation = Boolean(deepseekState.patchAppendTarget) && !path && typeof value === 'string';
     const looksLikeDeepSeekPatch =
       path.startsWith('response/')
       || typeof payload.request_message_id === 'number'
@@ -503,13 +689,34 @@ export class ChatSseToJsonConverter {
     const choiceBuilder = this.ensureChoiceBuilder(context, 0);
     choiceBuilder.messageBuilder.role = choiceBuilder.messageBuilder.role || 'assistant';
 
-    if (path === 'response/content' && op === 'APPEND' && typeof value === 'string') {
-      deepseekState.patchAppendActive = true;
+    if (path === 'response/content' && typeof value === 'string') {
+      deepseekState.patchAppendTarget = 'content';
+      choiceBuilder.messageBuilder.content = (choiceBuilder.messageBuilder.content || '') + value;
+      choiceBuilder.accumulatedContent += value;
+    } else if (path === 'response/thinking_content' && typeof value === 'string') {
+      deepseekState.patchAppendTarget = 'reasoning';
+      choiceBuilder.messageBuilder.reasoningContent =
+        (choiceBuilder.messageBuilder.reasoningContent || '') + value;
+      choiceBuilder.accumulatedContent += value;
+    } else if (path === 'response/content') {
+      deepseekState.patchAppendTarget = 'content';
+    } else if (path === 'response/thinking_content') {
+      deepseekState.patchAppendTarget = 'reasoning';
+    } else if (op === 'APPEND' && typeof value === 'string' && deepseekState.patchAppendTarget === 'reasoning') {
+      choiceBuilder.messageBuilder.reasoningContent =
+        (choiceBuilder.messageBuilder.reasoningContent || '') + value;
+      choiceBuilder.accumulatedContent += value;
+    } else if (op === 'APPEND' && typeof value === 'string' && deepseekState.patchAppendTarget === 'content') {
       choiceBuilder.messageBuilder.content = (choiceBuilder.messageBuilder.content || '') + value;
       choiceBuilder.accumulatedContent += value;
     } else if (!path && typeof value === 'string' && value.length > 0) {
-      // DeepSeek sometimes continues APPEND content via bare {"v":"..."} frames.
-      choiceBuilder.messageBuilder.content = (choiceBuilder.messageBuilder.content || '') + value;
+      // DeepSeek sometimes continues APPEND content/reasoning via bare {"v":"..."} frames.
+      if (deepseekState.patchAppendTarget === 'reasoning') {
+        choiceBuilder.messageBuilder.reasoningContent =
+          (choiceBuilder.messageBuilder.reasoningContent || '') + value;
+      } else {
+        choiceBuilder.messageBuilder.content = (choiceBuilder.messageBuilder.content || '') + value;
+      }
       choiceBuilder.accumulatedContent += value;
     } else if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
       const inner = value as Record<string, unknown>;
@@ -520,6 +727,11 @@ export class ChatSseToJsonConverter {
           choiceBuilder.messageBuilder.content =
             (choiceBuilder.messageBuilder.content || '') + responseRecord.content;
           choiceBuilder.accumulatedContent += responseRecord.content;
+        }
+        if (typeof responseRecord.thinking_content === 'string' && responseRecord.thinking_content.length > 0) {
+          choiceBuilder.messageBuilder.reasoningContent =
+            (choiceBuilder.messageBuilder.reasoningContent || '') + responseRecord.thinking_content;
+          choiceBuilder.accumulatedContent += responseRecord.thinking_content;
         }
         if (typeof responseRecord.status === 'string' && responseRecord.status.toUpperCase() === 'FINISHED') {
           choiceBuilder.finishReason = 'stop';
@@ -532,7 +744,7 @@ export class ChatSseToJsonConverter {
       context.eventStats.totalTokens = value;
     }
     if (path === 'response/status' && typeof value === 'string' && value.toUpperCase() === 'FINISHED') {
-      deepseekState.patchAppendActive = false;
+      deepseekState.patchAppendTarget = undefined;
       choiceBuilder.finishReason = 'stop';
       choiceBuilder.isCompleted = true;
       context.isCompleted = true;
@@ -544,22 +756,22 @@ export class ChatSseToJsonConverter {
 
   private getDeepSeekPatchState(
     context: SseToChatJsonContext
-  ): { patchAppendActive: boolean } {
+  ): { patchAppendTarget?: 'content' | 'reasoning' } {
     const carrier = context as SseToChatJsonContext & {
-      deepseekPatchState?: { patchAppendActive?: boolean };
+      deepseekPatchState?: { patchAppendTarget?: 'content' | 'reasoning' };
     };
     if (!carrier.deepseekPatchState) {
-      carrier.deepseekPatchState = { patchAppendActive: false };
+      carrier.deepseekPatchState = {};
     }
     return {
-      get patchAppendActive() {
-        return Boolean(carrier.deepseekPatchState?.patchAppendActive);
+      get patchAppendTarget() {
+        return carrier.deepseekPatchState?.patchAppendTarget;
       },
-      set patchAppendActive(value: boolean) {
+      set patchAppendTarget(value: 'content' | 'reasoning' | undefined) {
         if (!carrier.deepseekPatchState) {
           carrier.deepseekPatchState = {};
         }
-        carrier.deepseekPatchState.patchAppendActive = value;
+        carrier.deepseekPatchState.patchAppendTarget = value;
       }
     };
   }
@@ -809,7 +1021,10 @@ export class ChatSseToJsonConverter {
     this.normalizeReasoning(choiceBuilder, message, context);
 
     responseChoice.message = message;
-    responseChoice.finish_reason = choiceBuilder.finishReason ?? responseChoice.finish_reason;
+    responseChoice.finish_reason =
+      Array.isArray(message.tool_calls) && message.tool_calls.length > 0
+        ? 'tool_calls'
+        : (choiceBuilder.finishReason ?? responseChoice.finish_reason);
 
     context.eventStats.totalToolCalls += toolCalls.length;
   }
@@ -909,6 +1124,16 @@ export class ChatSseToJsonConverter {
       // keep raw payload only
     }
 
+    const deepseekErrorInfo = extractDeepSeekWebErrorInfo(errorData);
+    if (deepseekErrorInfo) {
+      errorData = {
+        ...deepseekErrorInfo.raw,
+        code: deepseekErrorInfo.code,
+        finish_reason: deepseekErrorInfo.finishReason,
+        message: deepseekErrorInfo.message
+      };
+    }
+
     const errorMessage = errorData
       ? (typeof errorData.error === 'string'
           ? errorData.error
@@ -986,6 +1211,50 @@ export class ChatSseToJsonConverter {
       choices,
       usage: usage || undefined
     };
+  }
+
+  private isTerminatedError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+    const message = (error as { message?: unknown }).message;
+    const code = (error as { code?: unknown }).code;
+    const normalizedMessage = typeof message === 'string' ? message.toLowerCase() : '';
+    const normalizedCode = typeof code === 'string' ? code.toLowerCase() : '';
+    return (
+      normalizedCode.includes('terminated') ||
+      normalizedMessage.includes('terminated') ||
+      normalizedCode.includes('upstream_stream_idle_timeout') ||
+      normalizedMessage.includes('upstream_stream_idle_timeout') ||
+      normalizedCode.includes('upstream_stream_timeout') ||
+      normalizedMessage.includes('upstream_stream_timeout')
+    );
+  }
+
+  private trySalvageResponse(context: SseToChatJsonContext): ChatCompletionResponse | null {
+    const choices = context.currentResponse.choices || [];
+    const hasMaterializedChoice = choices.some((choice) => {
+      const message = choice?.message as unknown as Record<string, unknown> | undefined;
+      const content = typeof message?.content === 'string' ? message.content.trim() : '';
+      const reasoning = typeof (message as any)?.reasoning_content === 'string'
+        ? String((message as any).reasoning_content).trim()
+        : '';
+      const functionCall = message?.function_call;
+      const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+      return Boolean(content || reasoning || functionCall || toolCalls.length > 0);
+    });
+
+    if (!hasMaterializedChoice) {
+      return null;
+    }
+
+    for (const choice of choices) {
+      if (!choice.finish_reason) {
+        choice.finish_reason = 'stop';
+      }
+    }
+
+    return this.finalizeResponse(context);
   }
 
   /**

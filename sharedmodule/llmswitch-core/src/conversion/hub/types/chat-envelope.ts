@@ -66,6 +66,8 @@ export interface AdapterContext {
   entryEndpoint: string;
   providerProtocol: string;
   providerId?: string;
+  providerKey?: string;
+  targetProviderKey?: string;
   routeId?: string;
   profileId?: string;
   streamingHint?: 'auto' | 'force' | 'disable';

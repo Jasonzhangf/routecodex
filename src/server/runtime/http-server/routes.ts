@@ -266,7 +266,7 @@ function collectArtifactModelAliases(artifacts: unknown): ModelListItem[] {
   return items;
 }
 
-async function collectCodexModelItems(): Promise<ModelListItem[]> {
+async function collectConfiguredModelItems(): Promise<ModelListItem[]> {
   const providerConfigs = await loadProviderConfigsV2();
   const items: ModelListItem[] = [];
   for (const [providerId, cfg] of Object.entries(providerConfigs)) {
@@ -277,20 +277,20 @@ async function collectCodexModelItems(): Promise<ModelListItem[]> {
     if (readBoolean(providerNode.enabled) === false) {
       continue;
     }
-    if (readString(providerNode.type) !== 'responses') {
-      continue;
-    }
     const modelsNode = isPlainRecord(providerNode.models) ? providerNode.models : null;
     if (!modelsNode) {
       continue;
     }
+    const providerType = readString(providerNode.type);
     for (const [modelId, modelRaw] of Object.entries(modelsNode)) {
       const trimmedModelId = modelId.trim();
       if (!trimmedModelId) {
         continue;
       }
       const modelNode = isPlainRecord(modelRaw) ? modelRaw : {};
-      items.push(buildCodexModelMetadata(providerId, trimmedModelId, trimmedModelId, providerNode, modelNode));
+      if (providerType === 'responses') {
+        items.push(buildCodexModelMetadata(providerId, trimmedModelId, trimmedModelId, providerNode, modelNode));
+      }
       items.push(buildCodexModelMetadata(providerId, trimmedModelId, `${providerId}.${trimmedModelId}`, providerNode, modelNode));
     }
   }
@@ -330,7 +330,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
     try {
       const items: ModelListItem[] = [];
       const seen = new Set<string>();
-      for (const item of await collectCodexModelItems()) {
+      for (const item of await collectConfiguredModelItems()) {
         if (seen.has(item.id)) {
           continue;
         }

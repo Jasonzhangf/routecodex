@@ -26,7 +26,7 @@ else
   exit 1
 fi
 
-echo "🧹 清理历史 @jsonstudio/rcc 残留（若存在）..."
+echo "🧹 清理历史 scoped rcc 残留（若存在）..."
 npm uninstall -g @jsonstudio/rcc >/dev/null 2>&1 || true
 GLOBAL_NODE_MODULES=$(npm root -g 2>/dev/null || true)
 if [ -n "${GLOBAL_NODE_MODULES:-}" ] && [ -d "${GLOBAL_NODE_MODULES}/@jsonstudio/rcc" ]; then

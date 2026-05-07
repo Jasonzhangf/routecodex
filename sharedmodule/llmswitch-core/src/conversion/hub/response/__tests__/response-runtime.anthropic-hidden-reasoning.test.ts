@@ -35,6 +35,30 @@ describe('response-runtime anthropic hidden reasoning', () => {
     expect((chat as any).choices?.[0]?.message?.reasoning?.encrypted_content).toBe('sig_payload');
   });
 
+  it('accepts anthropic thinking blocks that use the thinking field', () => {
+    const chat = buildOpenAIChatFromAnthropicMessage({
+      id: 'msg_thinking_field_only',
+      type: 'message',
+      role: 'assistant',
+      model: 'mimo-v2.5-pro',
+      stop_reason: 'max_tokens',
+      content: [{ type: 'thinking', thinking: 'The user says \"只回复 ok', signature: 'sig_payload' }]
+    } as any);
+
+    expect((chat as any).choices?.[0]?.finish_reason).toBe('length');
+    expect((chat as any).choices?.[0]?.message?.content).toBe('');
+    expect((chat as any).choices?.[0]?.message?.reasoning_content).toBe('The user says \"只回复 ok');
+    expect((chat as any).choices?.[0]?.message?.reasoning?.content?.[0]?.text).toBe('The user says \"只回复 ok');
+    expect((chat as any).choices?.[0]?.message?.reasoning?.encrypted_content).toBe('sig_payload');
+
+    const responses = buildResponsesPayloadFromChatWithNative(chat as any, { requestId: 'req_hidden_thinking_field' }) as any;
+    const reasoningItem = Array.isArray(responses?.output)
+      ? responses.output.find((item: any) => item?.type === 'reasoning')
+      : undefined;
+    expect(reasoningItem?.content?.[0]?.text).toBe('The user says \"只回复 ok');
+    expect(reasoningItem?.encrypted_content).toBe('sig_payload');
+  });
+
   it('prioritizes redacted_thinking encrypted content over thinking signature', () => {
     const chat = buildOpenAIChatFromAnthropicMessage({
       id: 'msg_signature_and_redacted',

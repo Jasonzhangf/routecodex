@@ -1,9 +1,6 @@
 use crate::hub_bridge_actions::utils::normalize_function_call_id;
-use crate::hub_reasoning_tool_normalizer::{
-    extract_tool_calls_from_reasoning_text_json, normalize_assistant_text_to_tool_calls_json,
-};
+use crate::hub_reasoning_tool_normalizer::normalize_assistant_text_to_tool_calls_json;
 use napi::bindgen_prelude::Result as NapiResult;
-use regex::Regex;
 use serde_json::{Map, Value};
 
 fn read_trimmed_non_empty_string(value: Option<&Value>) -> Option<String> {
@@ -39,161 +36,7 @@ fn normalize_assistant_message(message: &Value, options_json: Option<&String>) -
     let message_json = serde_json::to_string(message).ok()?;
     let normalized_json =
         normalize_assistant_text_to_tool_calls_json(message_json, options_json.cloned()).ok()?;
-    let mut normalized = serde_json::from_str::<Value>(&normalized_json).ok()?;
-    consume_harvested_reasoning_text(&mut normalized, message);
-    Some(normalized)
-}
-
-fn strip_reasoning_transport_noise(raw: &str) -> String {
-    let line_re = Regex::new(r"(?im)^\[(?:Time/Date)\]:.*$").unwrap();
-    let open_re = Regex::new(r"(?i)^\s*\[(?:思考|thinking)\]\s*").unwrap();
-    let close_re = Regex::new(r"(?i)\s*\[/(?:思考|thinking)\]\s*$").unwrap();
-    let multi_newline_re = Regex::new(r"\n{3,}").unwrap();
-
-    let stripped = line_re.replace_all(raw, "").to_string();
-    let stripped = open_re.replace(&stripped, "").to_string();
-    let stripped = close_re.replace(&stripped, "").to_string();
-    multi_newline_re
-        .replace_all(&stripped, "\n\n")
-        .trim()
-        .to_string()
-}
-
-fn prepare_reasoning_text_for_harvest(raw: &str) -> String {
-    let stripped = strip_reasoning_transport_noise(raw);
-    if stripped.is_empty() {
-        return String::new();
-    }
-    let lower = stripped.to_ascii_lowercase();
-    let has_tool_call_open = lower.contains("<tool_call");
-    let has_tool_call_close = lower.contains("</tool_call>");
-    if !has_tool_call_open && has_tool_call_close && has_bare_tool_call_prefix(stripped.as_str()) {
-        return format!("<tool_call>{}", stripped);
-    }
-    stripped
-}
-
-fn has_bare_tool_call_prefix(raw: &str) -> bool {
-    let trimmed = raw.trim_start();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let mut end = 0usize;
-    for (index, ch) in trimmed.char_indices() {
-        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == '-' {
-            end = index + ch.len_utf8();
-        } else {
-            break;
-        }
-    }
-    if end == 0 {
-        return false;
-    }
-    let rest = trimmed[end..].trim_start();
-    rest.starts_with("<arg_key>")
-        || rest.starts_with("<arg_value>")
-        || rest.starts_with("<argument")
-        || rest.starts_with("<parameter")
-}
-
-fn consume_harvested_reasoning_text(normalized: &mut Value, original: &Value) {
-    const REASONING_KEYS: [&str; 3] = ["reasoning_content", "reasoning", "reasoningContent"];
-    let Some(target) = normalized.as_object_mut() else {
-        return;
-    };
-    let source_obj = original.as_object();
-
-    for key in REASONING_KEYS {
-        let source_text = read_trimmed_non_empty_string(target.get(key))
-            .or_else(|| source_obj.and_then(|obj| read_trimmed_non_empty_string(obj.get(key))));
-        let Some(source_text) = source_text else {
-            continue;
-        };
-
-        let prepared = prepare_reasoning_text_for_harvest(source_text.as_str());
-        if prepared.is_empty() {
-            target.remove(key);
-            continue;
-        }
-
-        let (cleaned_text, tool_calls) = harvest_reasoning_tool_calls(prepared.as_str());
-        if tool_calls.is_empty() {
-            continue;
-        }
-        if let Some(cleaned_text) = cleaned_text {
-            target.insert(key.to_string(), Value::String(cleaned_text));
-        } else {
-            target.remove(key);
-        }
-
-        let has_tool_calls = target
-            .get("tool_calls")
-            .and_then(Value::as_array)
-            .map(|arr| !arr.is_empty())
-            .unwrap_or(false);
-        if !has_tool_calls {
-            target.insert("tool_calls".to_string(), Value::Array(tool_calls));
-        }
-    }
-}
-
-fn harvest_reasoning_tool_calls(prepared: &str) -> (Option<String>, Vec<Value>) {
-    if let Ok(extracted_json) = extract_tool_calls_from_reasoning_text_json(
-        prepared.to_string(),
-        Some("reasoning".to_string()),
-    ) {
-        if let Ok(extracted) = serde_json::from_str::<Value>(&extracted_json) {
-            let tool_calls = extracted
-                .as_object()
-                .and_then(|obj| obj.get("tool_calls"))
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            if !tool_calls.is_empty() {
-                let cleaned_text = extracted
-                    .as_object()
-                    .and_then(|obj| obj.get("cleaned_text"))
-                    .and_then(Value::as_str)
-                    .map(|raw| raw.trim().to_string())
-                    .filter(|raw| !raw.is_empty());
-                return (cleaned_text, tool_calls);
-            }
-        }
-    }
-
-    let probe_message = serde_json::json!({
-        "role": "assistant",
-        "content": prepared
-    });
-    let probe_json = match serde_json::to_string(&probe_message) {
-        Ok(raw) => raw,
-        Err(_) => return (None, Vec::new()),
-    };
-    let normalized_probe_json = match normalize_assistant_text_to_tool_calls_json(probe_json, None)
-    {
-        Ok(raw) => raw,
-        Err(_) => return (None, Vec::new()),
-    };
-    let normalized_probe: Value = match serde_json::from_str(&normalized_probe_json) {
-        Ok(value) => value,
-        Err(_) => return (None, Vec::new()),
-    };
-    let tool_calls = normalized_probe
-        .as_object()
-        .and_then(|obj| obj.get("tool_calls"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    if tool_calls.is_empty() {
-        return (None, Vec::new());
-    }
-    let cleaned_text = normalized_probe
-        .as_object()
-        .and_then(|obj| obj.get("content"))
-        .and_then(Value::as_str)
-        .map(|raw| raw.trim().to_string())
-        .filter(|raw| !raw.is_empty());
-    (cleaned_text, tool_calls)
+    serde_json::from_str::<Value>(&normalized_json).ok()
 }
 
 fn has_tool_calls(message: &Value) -> bool {
@@ -388,10 +231,6 @@ mod tests {
     #[test]
     fn normalize_assistant_message_harvests_reasoning_prefix_payload() {
         let raw_reasoning = "[Time/Date]: utc=`2026-03-10T12:18:35.686Z`\nexec_command<arg_key>cmd</arg_key><arg_value>pwd</arg_value></tool_call>";
-        let prepared = prepare_reasoning_text_for_harvest(raw_reasoning);
-        assert!(prepared.starts_with("<tool_call>exec_command"));
-        let (_, harvested) = harvest_reasoning_tool_calls(prepared.as_str());
-        assert_eq!(harvested.len(), 1);
 
         let message = serde_json::json!({
             "role": "assistant",
@@ -418,11 +257,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_assistant_message_harvests_malformed_parameter_reasoning_payload() {
+    fn normalize_assistant_message_rejects_malformed_parameter_reasoning_payload_without_explicit_tool_name() {
         let raw_reasoning = "<parameter name=\"input\">pwd</</parameter>\n<parameter name=\"type\">string</parameter>\n</command></arg_value>";
-        let prepared = prepare_reasoning_text_for_harvest(raw_reasoning);
-        let (_, harvested) = harvest_reasoning_tool_calls(prepared.as_str());
-        assert_eq!(harvested.len(), 1);
 
         let message = serde_json::json!({
             "role": "assistant",
@@ -435,15 +271,6 @@ mod tests {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        assert_eq!(tool_calls.len(), 1);
-        let args = tool_calls[0]
-            .as_object()
-            .and_then(|obj| obj.get("function"))
-            .and_then(Value::as_object)
-            .and_then(|obj| obj.get("arguments"))
-            .and_then(Value::as_str)
-            .unwrap_or("{}");
-        let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
-        assert_eq!(args_json["cmd"], "pwd");
+        assert!(tool_calls.is_empty());
     }
 }

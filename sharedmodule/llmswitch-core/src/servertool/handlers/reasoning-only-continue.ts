@@ -3,12 +3,16 @@ import { registerServerToolHandler } from '../registry.js';
 import { isStopEligibleForServerTool } from '../stop-gateway-context.js';
 import { extractStopMessageAutoResponseSnapshot } from './stop-message-auto/ai-followup.js';
 import { stripReasoningTransportNoise } from '../../conversion/shared/reasoning-normalizer.js';
+import { detectEmptyAssistantPayloadContractSignalWithNative } from '../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 
 const FLOW_ID = 'reasoning_only_continue_flow';
 const HOOK_ID = 'reasoning_only_continue';
 
 const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | null> => {
   if (!isStopEligibleForServerTool(ctx.base, ctx.adapterContext)) {
+    return null;
+  }
+  if (detectEmptyAssistantPayloadContractSignalWithNative(ctx.base)) {
     return null;
   }
   const snapshot = extractStopMessageAutoResponseSnapshot(ctx.base, ctx.adapterContext);

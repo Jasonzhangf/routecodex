@@ -98,9 +98,9 @@ const CATALOG: InitProviderTemplate[] = [
     capabilities: { supportsReasoning: true, supportsTools: true },
     webSearch: {
       engineId: 'deepseek:web_search',
-      providerKey: 'deepseek-web.deepseek-chat',
-      routeTarget: 'deepseek-web.deepseek-chat',
-      modelId: 'deepseek-chat',
+      providerKey: 'deepseek-web.deepseek-chat-search',
+      routeTarget: 'deepseek-web.deepseek-chat-search',
+      modelId: 'deepseek-chat-search',
       description: 'DeepSeek native web_search route backend',
       executionMode: 'direct',
       directActivation: 'route',
@@ -132,11 +132,11 @@ const CATALOG: InitProviderTemplate[] = [
       models: {
         'deepseek-chat': {
           supportsStreaming: true,
-          aliases: ['deepseek-chat-search', 'deepseek-v3-search']
+          aliases: ['deepseek-v3', 'deepseek-chat-search', 'deepseek-v3-search']
         },
         'deepseek-reasoner': {
           supportsStreaming: true,
-          aliases: ['deepseek-reasoner-search', 'deepseek-r1-search']
+          aliases: ['deepseek-r1', 'deepseek-reasoner-search', 'deepseek-r1-search']
         }
       }
     },

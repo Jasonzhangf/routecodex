@@ -32,7 +32,26 @@ describe('ProviderFactory no fallback', () => {
     expect(resolveProviderModule('gemini-http-provider')).toBe('gemini-http-provider');
     expect(resolveProviderModule('gemini-cli-http-provider')).toBe('gemini-cli-http-provider');
     expect(resolveProviderModule('deepseek-http-provider')).toBe('deepseek-http-provider');
+    expect(resolveProviderModule('mimoweb')).toBe('mimoweb-provider');
+    expect(resolveProviderModule('mimoweb-provider')).toBe('mimoweb-provider');
     expect(resolveProviderModule('mock-provider')).toBe('mock-provider');
+  });
+
+  test('moduleType mimoweb-provider wins over generic anthropic providerType', () => {
+    const runtime: any = {
+      runtimeKey: 'mimoweb.key1',
+      providerId: 'mimoweb',
+      providerType: 'anthropic',
+      providerModule: 'mimoweb-provider',
+      endpoint: 'https://aistudio.xiaomimimo.com/api/chat',
+      auth: {
+        type: 'apikey',
+        value: 'mimo-test-key'
+      }
+    };
+
+    const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
+    expect(provider?.type).toBe('mimoweb');
   });
 
   test('runtime timeoutMs/maxRetries map into provider config', () => {
@@ -168,5 +187,27 @@ describe('ProviderFactory no fallback', () => {
     const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
     expect(provider?.config?.config?.auth?.apiKey).toBe('public');
     expect(provider?.config?.config?.auth?.rawType).toBe('opencode-zen-public');
+  });
+
+  test('generic deepseek openai gateway runtime should stay on openai provider', () => {
+    ProviderFactory.clearInstanceCache();
+    const runtime: any = {
+      runtimeKey: 'deepseek.generic.key1',
+      providerId: 'deepseek',
+      providerFamily: 'deepseek',
+      providerType: 'openai',
+      providerKey: 'deepseek.key1.deepseek-v4-flash',
+      endpoint: 'https://gateway.kevinllm.v6.army/v1/chat/completions',
+      auth: {
+        type: 'apikey',
+        value: 'sk-test-generic-deepseek'
+      }
+    };
+
+    const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
+    expect(provider?.type).toBe('openai-standard');
+    expect(provider?.config?.config?.providerType).toBe('openai');
+    expect(provider?.config?.config?.baseUrl).toBe('https://gateway.kevinllm.v6.army/v1/chat/completions');
+    expect(provider?.getEffectiveEndpoint?.()).toBe('/chat/completions');
   });
 });

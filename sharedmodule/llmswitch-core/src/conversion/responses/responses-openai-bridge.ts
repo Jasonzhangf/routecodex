@@ -82,13 +82,20 @@ function throwBridgeInputViolation(
 
 function assertNoSyntheticOrMalformedBridgeInput(
   input: unknown,
-  context: string
+  context: string,
+  options?: {
+    allowDanglingToolCalls?: boolean;
+    allowOutputOnlyResumeBatches?: boolean;
+  }
 ): void {
   const syntheticViolation = inspectSyntheticRouteCodexBridgeInput(input);
   if (syntheticViolation) {
     throwBridgeInputViolation(syntheticViolation, context);
   }
-  const historyViolation = inspectBridgeInputToolHistory(input);
+  const historyViolation = inspectBridgeInputToolHistory(input, {
+    allowDanglingToolCalls: options?.allowDanglingToolCalls === true,
+    allowOutputOnlyResumeBatches: options?.allowOutputOnlyResumeBatches === true
+  });
   if (historyViolation) {
     throwBridgeInputViolation(historyViolation, context);
   }
@@ -282,7 +289,8 @@ export function captureResponsesContext(
   captured.input = sanitizeCapturedResponsesInput(captured.input);
   assertNoSyntheticOrMalformedBridgeInput(
     captured.input,
-    'responses-openai-bridge.captureRequestContext'
+    'responses-openai-bridge.captureRequestContext',
+    { allowOutputOnlyResumeBatches: true }
   );
   if (!captured.systemInstruction && typeof (payload as any).instructions === 'string' && (payload as any).instructions.trim().length) {
     captured.systemInstruction = (payload as any).instructions;
@@ -316,7 +324,8 @@ export function buildChatRequestFromResponses(
     input: context.input,
     tools: toolsNormalized,
     normalizeFunctionName: 'responses',
-    toolResultFallbackText: ''
+    toolResultFallbackText: '',
+    allowDanglingToolCalls: true
   });
   assertNoSyntheticAssistantMessages(
     messages,
@@ -508,7 +517,8 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
     (previousResponseId ? undefined : historySeed) ??
     (convertMessagesToBridgeInput({
       messages,
-      tools: Array.isArray(out.tools) ? (out.tools as Array<Record<string, unknown>>) : undefined
+      tools: Array.isArray(out.tools) ? (out.tools as Array<Record<string, unknown>>) : undefined,
+      allowDanglingToolCalls: true
     }) as unknown as BridgeInputBuildResult);
   const callIdTransformer = createToolCallIdTransformer(toolCallIdStyle);
   if (callIdTransformer) {
@@ -521,7 +531,8 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   } = history;
   assertNoSyntheticOrMalformedBridgeInput(
     input,
-    'responses-openai-bridge.buildResponsesRequestFromChat.history'
+    'responses-openai-bridge.buildResponsesRequestFromChat.history',
+    { allowDanglingToolCalls: true }
   );
 
   // 不追加 metadata，以便 roundtrip 与原始 payload 对齐；系统提示直接写入 instructions。
@@ -531,7 +542,8 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
       : input;
   assertNoSyntheticOrMalformedBridgeInput(
     inputForUpstream,
-    'responses-openai-bridge.buildResponsesRequestFromChat.upstream_input'
+    'responses-openai-bridge.buildResponsesRequestFromChat.upstream_input',
+    { allowDanglingToolCalls: true }
   );
   if (callIdTransformer) {
     enforceToolCallIdStyle(inputForUpstream, callIdTransformer);

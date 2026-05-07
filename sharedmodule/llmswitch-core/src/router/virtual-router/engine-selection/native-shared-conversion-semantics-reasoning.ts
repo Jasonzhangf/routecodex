@@ -75,14 +75,19 @@ function normalizeToolCallEntries(raw: unknown[]): NormalizedToolCall[] {
             ? row.name
             : ''
       ).trim();
+      const rawArgsCandidate =
+        functionRow?.arguments ??
+        row.args ??
+        row.arguments ??
+        functionRow?.input ??
+        row.input ??
+        null;
       const argsCandidate =
-        typeof functionRow?.arguments === 'string'
-          ? functionRow.arguments
-          : typeof row.args === 'string'
-            ? row.args
-            : typeof row.arguments === 'string'
-              ? row.arguments
-              : '';
+        typeof rawArgsCandidate === 'string'
+          ? rawArgsCandidate
+          : rawArgsCandidate && typeof rawArgsCandidate === 'object'
+            ? JSON.stringify(rawArgsCandidate)
+            : '';
       if (!name) {
         return null;
       }

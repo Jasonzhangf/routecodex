@@ -40,7 +40,14 @@ describe('resp_inbound stage1 SSE stream rewind', () => {
     });
 
     expect(result.decodedFromSse).toBe(false);
-    expect(records).toEqual([]);
+    expect(records).toEqual([
+      {
+        stage: 'chat_process.resp.stage1.sse_decode',
+        payload: {
+          streamDetected: false
+        }
+      }
+    ]);
   });
 
   it('keeps SSE payload intact when JSON pre-detection fails to parse', async () => {
@@ -95,5 +102,28 @@ describe('resp_inbound stage1 SSE stream rewind', () => {
         maxContextTokens: 512000
       }
     });
+  });
+
+  it('salvages partial deepseek-web patch content when SSE terminates before finish', async () => {
+    async function* terminatedDeepseekPatch() {
+      yield 'event: ready\ndata: {"request_message_id":31,"response_message_id":32}\n\n';
+      yield 'data: {"v":{"response":{"message_id":32,"status":"WIP","content":""}}}\n\n';
+      yield 'data: {"p":"response/content","o":"APPEND","v":"hello "}\n\n';
+      yield 'data: {"v":"world"}\n\n';
+      throw Object.assign(new Error('terminated'), { code: 'TERMINATED' });
+    }
+
+    const result = await runRespInboundStage1SseDecode({
+      providerProtocol: 'openai-chat',
+      payload: {
+        __sse_stream: Readable.from(terminatedDeepseekPatch(), { objectMode: false })
+      } as any,
+      adapterContext: { requestId: 'rewind-stage1-deepseek-terminated' } as any,
+      wantsStream: false
+    });
+
+    expect(result.decodedFromSse).toBe(true);
+    expect(String((result.payload as any)?.choices?.[0]?.message?.content || '')).toContain('hello world');
+    expect((result.payload as any)?.choices?.[0]?.finish_reason).toBe('stop');
   });
 });

@@ -349,6 +349,260 @@ describe('HubRequestExecutor failover', () => {
       marker: 'chat_empty_assistant'
     });
 
+    expect(__requestExecutorTestables.hasRequestedToolsInSemantics({
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      }
+    })).toBe(true);
+
+    expect(__requestExecutorTestables.isToolResultFollowupTurn({
+      messages: [
+        {
+          role: 'tool',
+          tool_call_id: 'call_1',
+          content: 'ok'
+        }
+      ]
+    })).toBe(true);
+
+    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+      choices: [
+        {
+          finish_reason: 'stop',
+          message: {
+            content: '我可以先给你一个验证脚本。'
+          }
+        }
+      ]
+    }, {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      }
+    })).toMatchObject({
+      marker: 'chat_missing_required_tool_call'
+    });
+
+    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+      choices: [
+        {
+          finish_reason: 'stop',
+          message: {
+            content: '工具执行完成，我继续给出结果。'
+          }
+        }
+      ]
+    }, {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      },
+      messages: [
+        {
+          role: 'tool',
+          tool_call_id: 'call_1',
+          content: 'ok'
+        }
+      ]
+    })).toBeNull();
+
+    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+      choices: [
+        {
+          finish_reason: 'stop',
+          message: {
+            content: '我已经完成了，下面给你结果。'
+          }
+        }
+      ]
+    }, {
+      __routecodex: {
+        serverToolFollowup: true,
+        serverToolFollowupSource: 'servertool.reasoning_stop_continue'
+      },
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      },
+      messages: [
+        {
+          role: 'tool',
+          tool_call_id: 'call_1',
+          content: 'ok'
+        }
+      ]
+    })).toMatchObject({
+      marker: 'chat_missing_required_tool_call'
+    });
+
+    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+      status: 'completed',
+      output_text: '请你手动更新 secret 后再告诉我结果。',
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            { type: 'output_text', text: '请你手动更新 secret 后再告诉我结果。' }
+          ]
+        }
+      ]
+    }, {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      },
+      messages: [
+        {
+          role: 'user',
+          content: '继续执行'
+        }
+      ]
+    })).toMatchObject({
+      marker: 'responses_missing_required_tool_call'
+    });
+
+
+    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+      status: 'completed',
+      output_text: '[reasoning.stop]\n用户任务目标: A\n是否完成: 是\n完成证据: B\n结束标记: [app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}',
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            {
+              type: 'output_text',
+              text: '[reasoning.stop]\n用户任务目标: A\n是否完成: 是\n完成证据: B\n结束标记: [app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}'
+            }
+          ]
+        }
+      ]
+    }, {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      },
+      messages: [
+        {
+          role: 'user',
+          content: '继续执行'
+        }
+      ]
+    })).toBeNull();
+
+    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+      status: 'completed',
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            {
+              type: 'output_text',
+              output_text: '[reasoning.stop]\n用户任务目标: A\n是否完成: 是\n完成证据: B\n结束标记: [app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}'
+            }
+          ]
+        }
+      ]
+    }, {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      },
+      messages: [
+        {
+          role: 'user',
+          content: '继续执行'
+        }
+      ]
+    })).toBeNull();
+
+    expect(__requestExecutorTestables.bodyContainsReasoningStopFinalizedMarker({
+      status: 'completed',
+      metadata: {
+        hidden: '[app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}'
+      },
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            {
+              type: 'output_text',
+              text: '普通文本，没有结束标记'
+            }
+          ]
+        }
+      ]
+    })).toBe(false);
+
+    expect(__requestExecutorTestables.detectStoplessTerminationWithoutFinalization({
+      status: 'completed',
+      metadata: {
+        hidden: '[app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}'
+      },
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            {
+              type: 'output_text',
+              text: '普通文本，没有结束标记'
+            }
+          ]
+        }
+      ]
+    }, 'on')).toMatchObject({
+      marker: 'responses_stopless_missing_reasoning_stop_finalization'
+    });
+
+    expect(__requestExecutorTestables.detectStoplessTerminationWithoutFinalization({
+      status: 'completed',
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            {
+              type: 'output_text',
+              output_text: '[reasoning.stop]\\n结束标记: [app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}'
+            }
+          ]
+        }
+      ]
+    }, 'on')).toBeNull();
+
     const longReason = 'x'.repeat(400);
     const truncated = __requestExecutorTestables.truncateReason(longReason, 50);
     expect(truncated.length).toBe(50);

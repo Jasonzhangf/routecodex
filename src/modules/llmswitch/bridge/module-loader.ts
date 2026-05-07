@@ -5,6 +5,7 @@
  */
 
 import { createRequire } from 'module';
+import path from 'path';
 import {
   importCoreModule,
   resolveCoreModulePath
@@ -13,7 +14,45 @@ import type { LlmsImpl } from '../core-loader.js';
 
 type AnyRecord = Record<string, unknown>;
 
-const require = createRequire(import.meta.url);
+function resolveModuleLoaderPath(): string {
+  try {
+    return new URL(import.meta.url).pathname;
+  } catch {
+    // continue to stack / cwd fallback
+  }
+  if (typeof __filename === 'string' && __filename.length > 0) {
+    return __filename;
+  }
+
+  const stack = String(new Error().stack || '');
+  for (const line of stack.split('\n')) {
+    const match = line.match(/(file:\/\/[^\s)]+module-loader\.(?:ts|js)|\/[^\s)]+module-loader\.(?:ts|js))/);
+    if (!match) {
+      continue;
+    }
+    const rawPath = match[1];
+    if (rawPath.startsWith('file://')) {
+      try {
+        return decodeURIComponent(new URL(rawPath).pathname);
+      } catch {
+        continue;
+      }
+    }
+    return rawPath;
+  }
+
+  return path.join(process.cwd(), 'src/modules/llmswitch/bridge/module-loader.ts');
+}
+
+function createNodeRequire() {
+  try {
+    return createRequire(import.meta.url);
+  } catch {
+    return createRequire(resolveModuleLoaderPath());
+  }
+}
+
+const nodeRequire = createNodeRequire();
 
 function parsePrefixList(raw: string | undefined): string[] {
   return String(raw || '')
@@ -59,7 +98,7 @@ async function importCoreDist<TModule extends object = AnyRecord>(
     return await importCoreModule<TModule>(subpath, impl);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    const pkg = impl === 'engine' ? '@jsonstudio/llms-engine' : '@jsonstudio/llms';
+    const pkg = impl === 'engine' ? 'rcc-llmswitch-engine' : 'sharedmodule/llmswitch-core';
     throw new Error(
       `[llmswitch-bridge] Unable to load core module "${subpath}" (${impl}). 请确认 ${pkg} 依赖已安装（npm install）。${detail ? ` (${detail})` : ''}`
     );
@@ -75,7 +114,7 @@ function requireCoreDist<TModule extends object = AnyRecord>(
   }
   const modulePath = resolveCoreModulePath(subpath, impl);
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  return require(modulePath) as TModule;
+  return nodeRequire(modulePath) as TModule;
 }
 
 export {

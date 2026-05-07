@@ -18,6 +18,7 @@ import {
 export interface BridgeInputBuildOptions {
   messages: Array<Record<string, unknown>>;
   tools?: Array<Record<string, unknown>> | undefined;
+  allowDanglingToolCalls?: boolean | undefined;
 }
 
 export interface BridgeInputBuildResult {
@@ -75,7 +76,7 @@ export function serializeToolOutput(entry: BridgeInputItem): string | null {
 
 export function convertMessagesToBridgeInput(options: BridgeInputBuildOptions): BridgeInputBuildResult {
   assertBridgeMessageUtilsNativeAvailable();
-  const { messages, tools } = options;
+  const { messages, tools, allowDanglingToolCalls } = options;
   const syntheticViolation = inspectSyntheticRouteCodexAssistantMessages(messages);
   if (syntheticViolation) {
     throwToolHistoryContractViolation(
@@ -84,7 +85,9 @@ export function convertMessagesToBridgeInput(options: BridgeInputBuildOptions): 
       'chat_messages'
     );
   }
-  const violation = inspectOpenAiChatToolHistory(messages);
+  const violation = inspectOpenAiChatToolHistory(messages, {
+    allowDanglingToolCalls
+  } as any);
   if (violation) {
     throwToolHistoryContractViolation(
       violation,
@@ -92,7 +95,11 @@ export function convertMessagesToBridgeInput(options: BridgeInputBuildOptions): 
       'chat_messages'
     );
   }
-  const native = buildBridgeHistoryWithNative({ messages, tools });
+  const native = buildBridgeHistoryWithNative({
+    messages,
+    tools,
+    allowPendingTerminalToolCall: allowDanglingToolCalls === true
+  });
   return native as BridgeInputBuildResult;
 }
 
@@ -101,12 +108,15 @@ export interface BridgeInputToChatOptions {
   tools?: Array<Record<string, unknown>>;
   normalizeFunctionName?: ((raw: unknown) => string | undefined) | 'default' | 'responses';
   toolResultFallbackText?: string;
+  allowDanglingToolCalls?: boolean;
 }
 
 export function convertBridgeInputToChatMessages(options: BridgeInputToChatOptions): Array<Record<string, unknown>> {
   assertBridgeMessageUtilsNativeAvailable();
-  const { input, tools, normalizeFunctionName, toolResultFallbackText } = options;
-  const violation = inspectBridgeInputToolHistory(Array.isArray(input) ? input : []);
+  const { input, tools, normalizeFunctionName, toolResultFallbackText, allowDanglingToolCalls } = options;
+  const violation = inspectBridgeInputToolHistory(Array.isArray(input) ? input : [], {
+    allowDanglingToolCalls
+  });
   if (violation) {
     throwToolHistoryContractViolation(
       violation,
@@ -118,7 +128,8 @@ export function convertBridgeInputToChatMessages(options: BridgeInputToChatOptio
     input: Array.isArray(input) ? input : [],
     tools,
     toolResultFallbackText,
-    normalizeFunctionName: typeof normalizeFunctionName === 'string' ? normalizeFunctionName : undefined
+    normalizeFunctionName: typeof normalizeFunctionName === 'string' ? normalizeFunctionName : undefined,
+    allowPendingTerminalToolCall: allowDanglingToolCalls === true
   });
   return output.messages;
 }

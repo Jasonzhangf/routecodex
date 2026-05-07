@@ -2,9 +2,16 @@ import type { JsonObject, JsonValue } from '../../conversion/hub/types/json.js';
 import type { ServerToolHandler, ServerToolHandlerPlan, ToolCall } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
 import { cloneJson } from '../server-side-tools.js';
-import { armReasoningStopState } from './reasoning-stop-state.js';
+import {
+  armReasoningStopState,
+  clearReasoningStopState,
+  resetReasoningStopFailCount
+} from './reasoning-stop-state.js';
+import { appendReasoningStopSummaryToChatResponse } from './reasoning-stop-guard.js';
 
 const FLOW_ID = 'reasoning_stop_flow';
+const FLOW_ID_FINALIZE = 'reasoning_stop_finalize_flow';
+const FLOW_ID_CONTINUE = 'reasoning_stop_continue_flow';
 const TOOL_NAME = 'reasoning.stop';
 const VALID_STOP_REASONS = new Set(['completed', 'blocked', 'user_input', 'simple_question', 'plan_mode']);
 
@@ -22,6 +29,58 @@ type ReasoningStopPayload = {
   learning?: string;  // 可选。如果本轮任务有值得沉淀的经验（成功或反复失败的教训），用 2-3 句话总结。无则留空。
   isSimpleQuestion?: boolean;  // 可选。如果是简单事实性问题，可以直接回答，不需要进一步执行。
 };
+
+const CONTINUE_TEXT_PREFIX =
+  '你在上一轮 reasoning.stop 自查中给出了下一步计划。';
+
+function buildExecuteNextStepText(nextStep: string): string {
+  return [
+    CONTINUE_TEXT_PREFIX,
+    `next_step: ${nextStep}`,
+    '现在立即执行该 next_step，不要停止。',
+    '如果你想停止，必须再次调用 reasoning.stop，并且只有在“任务已完成并给出 completion_evidence”或“已穷尽可行尝试且给出 cannot_complete_reason + blocking_evidence + attempts_exhausted=true”时才允许停止。'
+  ].join('\n');
+}
+
+function buildInvalidReasoningStopPrompt(message: string): string {
+  const reason = typeof message === 'string' && message.trim().length
+    ? message.trim()
+    : 'reasoning.stop 参数不合法。';
+  return [
+    '你刚刚调用的 reasoning.stop 未通过校验，不能据此停止。',
+    `错误原因: ${reason}`,
+    '请立即继续执行；如果后续仍要停止，必须重新调用 reasoning.stop，并补齐缺失字段。'
+  ].join('\n');
+}
+
+function buildReasoningStopFollowupOps(promptText: string): Array<Record<string, unknown>> {
+  return [
+    { op: 'preserve_tools' },
+    { op: 'ensure_standard_tools' },
+    { op: 'append_assistant_message', required: true },
+    { op: 'append_tool_messages_from_tool_outputs', required: true },
+    { op: 'append_user_text', text: promptText }
+  ];
+}
+
+function isIrrecoverablyBlockedStop(payload: ReasoningStopPayload): boolean {
+  if (payload.completed) {
+    return false;
+  }
+  if (payload.nextStep) {
+    return false;
+  }
+  if (payload.attemptsExhausted !== true) {
+    return false;
+  }
+  if (!payload.cannotCompleteReason || !payload.blockingEvidence) {
+    return false;
+  }
+  if (payload.userInputRequired === true && !payload.userQuestion) {
+    return false;
+  }
+  return true;
+}
 
 function parseToolArguments(toolCall: ToolCall): Record<string, unknown> {
   if (!toolCall.arguments || typeof toolCall.arguments !== 'string') {
@@ -152,6 +211,12 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>): {
     'lesson',
     'lesson_learned'
   ]);
+  const isSimpleQuestion = readBool(args, [
+    'is_simple_question',
+    'isSimpleQuestion',
+    'simple_question',
+    'simpleQuestion'
+  ]);
 
   if (completed && !completionEvidence) {
     return {
@@ -218,7 +283,8 @@ function normalizeReasoningStopPayload(args: Record<string, unknown>): {
       nextStep,
       ...(typeof userInputRequired === 'boolean' ? { userInputRequired } : {}),
       userQuestion,
-      ...(learning ? { learning } : {})
+      ...(learning ? { learning } : {}),
+      ...(typeof isSimpleQuestion === 'boolean' ? { isSimpleQuestion } : {})
     }
   };
 }
@@ -299,7 +365,7 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
 
   if (normalized.ok === false) {
     return {
-      flowId: FLOW_ID,
+      flowId: FLOW_ID_CONTINUE,
       finalize: async () => ({
         chatResponse: appendToolOutput(ctx.base, toolCall, {
           ok: false,
@@ -307,16 +373,59 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
           message: normalized.message
         }),
         execution: {
-          flowId: FLOW_ID
+          flowId: FLOW_ID_CONTINUE,
+          followup: {
+            requestIdSuffix: ':reasoning_stop_continue',
+            entryEndpoint: ctx.entryEndpoint,
+            injection: {
+              ops: buildReasoningStopFollowupOps(buildInvalidReasoningStopPrompt(normalized.message))
+            },
+            metadata: {
+              clientInjectSource: 'servertool.reasoning_stop_continue'
+            }
+          }
         }
       })
     };
   }
 
-  const summary = buildSummary(normalized.payload);
+  const payload = normalized.payload;
+  const summary = buildSummary(payload);
+  const blockedStop = isIrrecoverablyBlockedStop(payload);
+
+  if (payload.completed === true || blockedStop || payload.isSimpleQuestion === true) {
+    return {
+      flowId: FLOW_ID_FINALIZE,
+      finalize: async () => {
+        clearReasoningStopState(ctx.adapterContext);
+        resetReasoningStopFailCount(ctx.adapterContext);
+        return {
+          chatResponse: appendReasoningStopSummaryToChatResponse(ctx.base, summary),
+          execution: {
+            flowId: FLOW_ID_FINALIZE,
+            context: {
+              reasoning_stop: {
+                finalized: true,
+                completed: payload.completed === true,
+                ...(blockedStop ? { blocked: true, attempts_exhausted: true } : {}),
+                ...(payload.userInputRequired === true ? { user_input_required: true } : {}),
+                ...(payload.isSimpleQuestion === true ? { simple_question: true } : {})
+              }
+            }
+          }
+        };
+      }
+    };
+  }
+
   const armed = armReasoningStopState(ctx.adapterContext, summary);
+  const continuePrompt = payload.nextStep
+    ? buildExecuteNextStepText(payload.nextStep)
+    : buildInvalidReasoningStopPrompt(
+        'reasoning.stop 尚未满足允许停止的条件；请继续执行，或在满足条件后再调用 reasoning.stop。'
+      );
   return {
-    flowId: FLOW_ID,
+    flowId: FLOW_ID_CONTINUE,
     finalize: async () => ({
       chatResponse: appendToolOutput(ctx.base, toolCall, {
         ok: true,
@@ -324,7 +433,17 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
         summary
       }),
       execution: {
-        flowId: FLOW_ID
+        flowId: FLOW_ID_CONTINUE,
+        followup: {
+          requestIdSuffix: ':reasoning_stop_continue',
+          entryEndpoint: ctx.entryEndpoint,
+          injection: {
+            ops: buildReasoningStopFollowupOps(continuePrompt)
+          },
+          metadata: {
+            clientInjectSource: 'servertool.reasoning_stop_continue'
+          }
+        }
       }
     })
   };

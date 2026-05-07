@@ -85,3 +85,8 @@ export {
   injectMcpToolsForChatJson,
   injectMcpToolsForResponsesJson
 } from './native-exports.js';
+
+export {
+  classifyProviderFailure,
+  getNetworkErrorCodes
+} from './native-exports.js';

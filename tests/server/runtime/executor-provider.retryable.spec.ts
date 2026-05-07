@@ -54,6 +54,14 @@ describe('shouldRetryProviderError', () => {
     expect(shouldRetryProviderError(err)).toBe(false);
   });
 
+  it('does not retry deterministic CLIENT_TOOL_ARGS_INVALID errors even when surfaced as 502', () => {
+    const err: any = new Error('Converted provider tool call has invalid client arguments');
+    err.statusCode = 502;
+    err.code = 'CLIENT_TOOL_ARGS_INVALID';
+    err.upstreamCode = 'CLIENT_TOOL_ARGS_INVALID';
+    expect(shouldRetryProviderError(err)).toBe(false);
+  });
+
   it('does not retry client disconnect abort errors', () => {
     const err: any = Object.assign(new Error('CLIENT_REQUEST_ABORTED'), {
       name: 'AbortError',

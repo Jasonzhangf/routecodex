@@ -1,6 +1,7 @@
 import { describe, expect, test } from '@jest/globals';
 
 import { buildServerToolFollowupChatPayloadFromInjection } from '../../src/servertool/handlers/followup-request-builder.js';
+import { buildServertoolGenericFollowupPayloadWithNative } from '../../src/router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 
 describe('servertool followup request builder', () => {
   test('preserves tools but strips tool-selection hints from the captured seed', () => {
@@ -200,5 +201,260 @@ describe('servertool followup request builder', () => {
     expect(followup.model).toBe('kimi-k2.5');
     expect(Array.isArray(followup.messages)).toBe(true);
     expect(followup.messages.length).toBe(2);
+  });
+
+  test('native generic followup payload builder matches generic assistant/tool output append semantics', () => {
+    const payload = buildServertoolGenericFollowupPayloadWithNative({
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: { type: 'object', properties: { cmd: { type: 'string' } } }
+          }
+        }
+      ],
+      parameters: {
+        temperature: 0.7,
+        parallel_tool_calls: true
+      },
+      assistantMessage: {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call_1',
+            type: 'function',
+            function: {
+              name: 'clock',
+              arguments: '{}'
+            }
+          }
+        ]
+      },
+      toolOutputs: [
+        {
+          tool_call_id: 'call_1',
+          name: 'clock',
+          content: '{"ok":true}'
+        }
+      ],
+      followupInjectionOps: [
+        { op: 'append_assistant_message', required: true },
+        { op: 'append_tool_messages_from_tool_outputs', required: true }
+      ]
+    });
+
+    expect(payload.model).toBe('gpt-test');
+    expect(Array.isArray(payload.messages)).toBe(true);
+    expect(payload.messages).toHaveLength(3);
+    expect((payload.messages as any[])[1]?.role).toBe('assistant');
+    expect((payload.messages as any[])[2]).toEqual({
+      role: 'tool',
+      tool_call_id: 'call_1',
+      name: 'clock',
+      content: '{"ok":true}'
+    });
+    expect(Array.isArray(payload.tools)).toBe(true);
+    expect(payload.tools).toHaveLength(1);
+    expect(payload.parameters?.parallel_tool_calls).toBe(true);
+  });
+
+  test('native generic followup payload builder supports append_user_text, inject_system_text, and drop_tool_by_name', () => {
+    const payload = buildServertoolGenericFollowupPayloadWithNative({
+      model: 'gpt-test',
+      messages: [
+        { role: 'system', content: 'base system' },
+        { role: 'user', content: 'hi' }
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: { type: 'object', properties: { cmd: { type: 'string' } } }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'web_search',
+            parameters: { type: 'object', properties: { query: { type: 'string' } } }
+          }
+        }
+      ],
+      followupInjectionOps: [
+        { op: 'inject_system_text', text: 'extra system' },
+        { op: 'append_user_text', text: '继续执行' },
+        { op: 'drop_tool_by_name', name: 'web_search' }
+      ]
+    });
+
+    expect(payload.model).toBe('gpt-test');
+    expect(Array.isArray(payload.messages)).toBe(true);
+    expect((payload.messages as any[])[0]).toEqual({ role: 'system', content: 'base system' });
+    expect((payload.messages as any[])[1]).toEqual({ role: 'system', content: 'extra system' });
+    expect((payload.messages as any[])[3]).toEqual({ role: 'user', content: '继续执行' });
+    expect((payload.tools as any[]).map((tool) => tool?.function?.name)).toEqual(['exec_command']);
+  });
+
+  test('native generic followup payload builder supports inject_vision_summary and compact_tool_content', () => {
+    const payload = buildServertoolGenericFollowupPayloadWithNative({
+      model: 'gpt-test',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'look' },
+            { type: 'input_image', image_url: 'data:image/png;base64,AAA' }
+          ]
+        },
+        { role: 'assistant', content: 'ok' },
+        {
+          role: 'tool',
+          content: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+        }
+      ],
+      followupInjectionOps: [
+        { op: 'compact_tool_content', maxChars: 80 },
+        { op: 'inject_vision_summary', summary: 'a cat' }
+      ]
+    });
+
+    expect(payload.model).toBe('gpt-test');
+    expect(Array.isArray(payload.messages)).toBe(true);
+    expect(payload.messages).toHaveLength(3);
+    const first = (payload.messages as any[])[0];
+    expect(first?.role).toBe('user');
+    expect(Array.isArray(first?.content)).toBe(true);
+    const texts = (first.content as any[])
+      .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+      .filter(Boolean);
+    expect(texts).toEqual(expect.arrayContaining(['[Image omitted]', '[Vision] a cat']));
+    const toolContent = (payload.messages as any[]).find((entry) => entry?.role === 'tool')?.content;
+    expect(typeof toolContent).toBe('string');
+    expect(String(toolContent)).toContain('[tool_output_compacted omitted=');
+  });
+
+  test('native generic followup payload builder supports trim_openai_messages', () => {
+    const payload = buildServertoolGenericFollowupPayloadWithNative({
+      model: 'gpt-test',
+      messages: [
+        { role: 'system', content: 'policy' },
+        { role: 'user', content: 'turn-1' },
+        { role: 'assistant', content: 'turn-2' },
+        { role: 'user', content: 'turn-3' },
+        { role: 'assistant', content: 'turn-4' }
+      ],
+      followupInjectionOps: [
+        { op: 'trim_openai_messages', maxNonSystemMessages: 2 }
+      ]
+    });
+
+    expect(payload.model).toBe('gpt-test');
+    expect(Array.isArray(payload.messages)).toBe(true);
+    expect(payload.messages).toHaveLength(3);
+    expect((payload.messages as any[])[0]).toEqual({ role: 'system', content: 'policy' });
+    expect((payload.messages as any[])[1]).toEqual({ role: 'user', content: 'turn-3' });
+    expect((payload.messages as any[])[2]).toEqual({ role: 'assistant', content: 'turn-4' });
+  });
+
+  test('native generic followup payload builder supports ensure_standard_tools, append_tool_if_missing, and force_tool_choice', () => {
+    const payload = buildServertoolGenericFollowupPayloadWithNative({
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'continue' }],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: { type: 'object', properties: { cmd: { type: 'string' } } }
+          }
+        }
+      ],
+      parameters: {
+        parallel_tool_calls: true
+      },
+      followupInjectionOps: [
+        {
+          op: 'ensure_standard_tools',
+          includeReasoningStopTool: true,
+          reasoningStopToolDefinition: {
+            type: 'function',
+            function: {
+              name: 'reasoning.stop',
+              parameters: { type: 'object' }
+            }
+          }
+        },
+        {
+          op: 'append_tool_if_missing',
+          toolName: 'web_search',
+          toolDefinition: {
+            type: 'function',
+            function: {
+              name: 'web_search',
+              parameters: { type: 'object' }
+            }
+          }
+        },
+        {
+          op: 'force_tool_choice',
+          value: {
+            type: 'function',
+            function: {
+              name: 'reasoning.stop'
+            }
+          }
+        }
+      ]
+    });
+
+    expect((payload.tools as any[]).map((tool) => tool?.function?.name)).toEqual([
+      'exec_command',
+      'reasoning.stop',
+      'web_search'
+    ]);
+    expect(payload.parameters?.tool_choice).toEqual({
+      type: 'function',
+      function: {
+        name: 'reasoning.stop'
+      }
+    });
+    expect(payload.parameters?.parallel_tool_calls).toBe(false);
+  });
+
+  test('native generic followup payload builder supports replace_tools', () => {
+    const payload = buildServertoolGenericFollowupPayloadWithNative({
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'continue' }],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: { type: 'object', properties: { cmd: { type: 'string' } } }
+          }
+        }
+      ],
+      followupInjectionOps: [
+        {
+          op: 'replace_tools',
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'web_search',
+                parameters: { type: 'object' }
+              }
+            }
+          ]
+        }
+      ]
+    });
+
+    expect((payload.tools as any[]).map((tool) => tool?.function?.name)).toEqual(['web_search']);
   });
 });

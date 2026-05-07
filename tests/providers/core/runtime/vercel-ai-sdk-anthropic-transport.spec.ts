@@ -120,6 +120,39 @@ describe('buildAnthropicSdkCallOptions', () => {
       }
     ]);
   });
+
+  it('maps standard input_image and image_url parts into anthropic file parts', () => {
+    const options = buildAnthropicSdkCallOptions(
+      {
+        model: 'qwen3.6-plus',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'input_text', text: 'look' },
+              { type: 'input_image', image_url: 'https://example.com/a.png' },
+              { type: 'image_url', image_url: { url: 'data:image/png;base64,QUJD' } }
+            ]
+          }
+        ]
+      },
+      {}
+    );
+
+    expect(options.prompt).toHaveLength(1);
+    expect(options.prompt[0]).toMatchObject({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'look' },
+        { type: 'file', mediaType: 'image/*' },
+        { type: 'file', mediaType: 'image/png' }
+      ]
+    });
+    const promptContent = (options.prompt[0] as any).content;
+    expect(promptContent[1].data).toBeInstanceOf(URL);
+    expect(String(promptContent[1].data)).toBe('https://example.com/a.png');
+    expect(promptContent[2].data).toBe('QUJD');
+  });
 });
 
 describe('inlineRemoteAnthropicImageUrls', () => {
@@ -192,6 +225,38 @@ describe('inlineRemoteAnthropicImageUrls', () => {
       statusCode: 415
     });
   });
+
+  it('wraps bare network fetch failures with structured remote image error details', async () => {
+    await expect(
+      inlineRemoteAnthropicImageUrls(
+        {
+          model: 'qwen3.6-plus',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'image',
+                  source: {
+                    type: 'url',
+                    url: 'https://example.com/unreachable.png'
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          fetchImpl: (async () => {
+            throw new TypeError('fetch failed');
+          }) as typeof fetch
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'REMOTE_IMAGE_FETCH_NETWORK_ERROR',
+      statusCode: 502
+    });
+  });
 });
 
 describe('remote image policy resolution', () => {
@@ -205,6 +270,13 @@ describe('remote image policy resolution', () => {
       { providerId: 'ali-coding-plan' } as any,
       { model: 'kimi-k2.5' }
     )).toBe('inline');
+  });
+
+  it('defaults ali-coding-plan qwen3.6-plus to direct_then_inline policy', () => {
+    expect(resolveAnthropicRemoteImagePolicy(
+      { providerId: 'ali-coding-plan' } as any,
+      { model: 'qwen3.6-plus' }
+    )).toBe('direct_then_inline');
   });
 
   it('supports env override map for provider id', () => {

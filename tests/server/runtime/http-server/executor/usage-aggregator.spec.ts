@@ -77,7 +77,9 @@ describe('usage log text', () => {
     expect(usage).toEqual({
       prompt_tokens: 107951,
       completion_tokens: 969,
-      total_tokens: 108920
+      total_tokens: 108920,
+      cache_read_input_tokens: 107392,
+      cache_creation_input_tokens: undefined
     });
   });
 
@@ -96,7 +98,9 @@ describe('usage log text', () => {
     expect(usage).toEqual({
       prompt_tokens: 107021,
       completion_tokens: 38,
-      total_tokens: 107059
+      total_tokens: 107059,
+      cache_read_input_tokens: 106944,
+      cache_creation_input_tokens: undefined
     });
   });
 
@@ -119,6 +123,47 @@ describe('usage log text', () => {
       prompt_tokens: 10,
       completion_tokens: 5,
       total_tokens: 15
+    });
+  });
+
+  it('extracts gemini usageMetadata token counts', () => {
+    const usage = extractUsageFromResult({
+      body: {
+        usageMetadata: {
+          promptTokenCount: 42,
+          candidatesTokenCount: 10,
+          totalTokenCount: 52
+        }
+      }
+    });
+
+    expect(usage).toEqual({
+      prompt_tokens: 42,
+      completion_tokens: 10,
+      total_tokens: 52
+    });
+  });
+
+  it('extracts usage from provider response metadata bag', () => {
+    const usage = extractUsageFromResult({
+      body: {
+        candidates: []
+      },
+      metadata: {
+        usage: {
+          usageMetadata: {
+            promptTokenCount: 12,
+            candidatesTokenCount: 7,
+            totalTokenCount: 19
+          }
+        }
+      }
+    });
+
+    expect(usage).toEqual({
+      prompt_tokens: 12,
+      completion_tokens: 7,
+      total_tokens: 19
     });
   });
 

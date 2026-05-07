@@ -156,6 +156,49 @@ describe('cli restart command', () => {
     expect(signals).toEqual([{ pid: 333, signal: 'SIGUSR2' }]);
   });
 
+  it('uses direct signal restart when local pid is known and no restart apikey is configured', async () => {
+    const program = new Command();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const fetchCalls: string[] = [];
+    let call = 0;
+    createRestartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5555,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: (port) => {
+        call += 1;
+        if (port !== 5520) {
+          return [];
+        }
+        return call <= 1 ? [345] : [456];
+      },
+      sleep: async () => {},
+      sendSignal: (pid, signal) => {
+        signals.push({ pid, signal });
+      },
+      fetch: (async (url: string) => {
+        fetchCalls.push(String(url));
+        if (String(url).includes('/health')) {
+          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) } as any;
+        }
+        if (String(url).includes('/daemon/restart-process')) {
+          throw new Error('should not call daemon restart endpoint without apikey when local pid is known');
+        }
+        return { ok: false, status: 404, text: async () => '' } as any;
+      }) as any,
+      env: {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'restart', '--port', '5520'], { from: 'node' });
+    expect(signals).toEqual([{ pid: 345, signal: 'SIGUSR2' }]);
+    expect(fetchCalls.some((url) => url.includes('/daemon/restart-process'))).toBe(false);
+  });
+
   it('still signals restart for --port when health probe is temporarily unavailable', async () => {
     const program = new Command();
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
@@ -239,7 +282,7 @@ describe('cli restart command', () => {
     expect(signals).toEqual([{ pid: 777, signal: 'SIGUSR2' }]);
   });
 
-  it('sends the shared http apikey to daemon restart endpoint', async () => {
+  it('sends the config-managed http apikey to daemon restart endpoint', async () => {
     const program = new Command();
     const fetchCalls: Array<{ url: string; options?: Record<string, unknown> }> = [];
     let findCall = 0;
@@ -282,6 +325,13 @@ describe('cli restart command', () => {
       env: {
         ROUTECODEX_HTTP_APIKEY: 'shared-http-key'
       },
+      fsImpl: {
+        existsSync: () => true,
+        readFileSync: () =>
+          JSON.stringify({
+            httpserver: { port: 5520, host: '127.0.0.1', apikey: '${ROUTECODEX_HTTP_APIKEY}' }
+          })
+      } as any,
       exit: (code) => {
         throw new Error(`exit:${code}`);
       }
@@ -291,5 +341,57 @@ describe('cli restart command', () => {
     const restartCall = fetchCalls.find((entry) => String(entry.url).includes('/daemon/restart-process'));
     expect(restartCall).toBeDefined();
     expect(restartCall?.options?.headers).toEqual({ 'x-api-key': 'shared-http-key' });
+  });
+
+  it('does not let ambient http apikey force restart endpoint when config explicitly disables apikey', async () => {
+    const program = new Command();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const fetchCalls: string[] = [];
+    let findCall = 0;
+    createRestartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5555,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: (port) => {
+        findCall += 1;
+        if (port !== 5520) {
+          return [];
+        }
+        return findCall <= 1 ? [1001] : [1002];
+      },
+      sleep: async () => {},
+      sendSignal: (pid, signal) => {
+        signals.push({ pid, signal });
+      },
+      fetch: (async (url: string) => {
+        fetchCalls.push(String(url));
+        if (String(url).includes('/health')) {
+          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) } as any;
+        }
+        if (String(url).includes('/daemon/restart-process')) {
+          throw new Error('should not call daemon restart endpoint when config apikey is explicitly empty');
+        }
+        return { ok: false, status: 404, text: async () => '' } as any;
+      }) as any,
+      env: {
+        ROUTECODEX_HTTP_APIKEY: 'ambient-http-key'
+      },
+      fsImpl: {
+        existsSync: () => true,
+        readFileSync: () =>
+          JSON.stringify({
+            httpserver: { port: 5520, host: '127.0.0.1', apikey: '' }
+          })
+      } as any,
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'restart', '--port', '5520'], { from: 'node' });
+    expect(signals).toEqual([{ pid: 1001, signal: 'SIGUSR2' }]);
+    expect(fetchCalls.some((url) => url.includes('/daemon/restart-process'))).toBe(false);
   });
 });

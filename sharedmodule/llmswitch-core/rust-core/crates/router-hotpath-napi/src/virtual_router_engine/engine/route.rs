@@ -226,6 +226,7 @@ impl VirtualRouterEngineCore {
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
         {
+            selection_routing_state.forced_target = None;
             selection_routing_state.sticky_target = None;
             selection_routing_state.prefer_target = None;
         }
@@ -645,5 +646,42 @@ impl VirtualRouterEngineCore {
         let scope = resolve_stop_message_scope(metadata)?;
         let state = self.load_routing_state_for_scope(&scope);
         pre_command_state_snapshot(&state.pre_command)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::virtual_router_engine::instructions::{InstructionTarget, RoutingInstructionState};
+
+    #[test]
+    fn disable_sticky_routes_clears_forced_and_sticky_targets_for_selection() {
+        let mut state = RoutingInstructionState::default();
+        let target = InstructionTarget {
+            provider: Some("deepseek-web".to_string()),
+            key_alias: Some("3".to_string()),
+            key_index: None,
+            model: Some("deepseek-r1-search".to_string()),
+            path_length: Some(3),
+            process_mode: None,
+        };
+        state.forced_target = Some(target.clone());
+        state.sticky_target = Some(target.clone());
+        state.prefer_target = Some(target);
+
+        let metadata = json!({ "disableStickyRoutes": true });
+        if metadata
+            .get("disableStickyRoutes")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            state.forced_target = None;
+            state.sticky_target = None;
+            state.prefer_target = None;
+        }
+
+        assert!(state.forced_target.is_none());
+        assert!(state.sticky_target.is_none());
+        assert!(state.prefer_target.is_none());
     }
 }

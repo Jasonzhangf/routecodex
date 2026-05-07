@@ -3,6 +3,7 @@ import type { HandlerContext } from './types.js';
 import {
   nextRequestIdentifiers,
   respondWithPipelineError,
+  writeStartedSsePipelineError,
   sendPipelineResponse,
   hasSsePayload,
   logRequestStart,
@@ -35,6 +36,16 @@ type ResponsesPayload = {
   [key: string]: unknown;
 };
 
+function isResponsesSubmitToolOutputsPayload(payload: ResponsesPayload | undefined): boolean {
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+  if (typeof payload.response_id !== 'string' || !payload.response_id.trim()) {
+    return false;
+  }
+  return Array.isArray(payload.tool_outputs);
+}
+
 function formatUnknownError(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -63,7 +74,7 @@ function queueInboundToolHistoryErrorsample(args: {
     group: 'payload-contract-error',
     kind: 'responses.inbound_tool_history_contract',
     payload: {
-      kind: 'responses_inbound_tool_history_contract',
+      kind: 'responses.inbound_tool_history_contract',
       timestamp: new Date().toISOString(),
       requestId: args.requestId,
       entryEndpoint: args.entryEndpoint,
@@ -93,7 +104,6 @@ export async function handleResponses(
   options: ResponsesHandlerOptions = {}
 ): Promise<void> {
   const entryEndpoint = options.entryEndpoint || '/v1/responses';
-  const isSubmitToolOutputs = entryEndpoint === '/v1/responses.submit_tool_outputs';
   // Some client endpoints are "synthetic" entrypoints used only for Hub/Pipeline semantics
   // (e.g. submit_tool_outputs). We may rewrite the pipeline entryEndpoint after preprocessing.
   let pipelineEntryEndpoint = entryEndpoint;
@@ -113,6 +123,7 @@ export async function handleResponses(
   let requestTimeoutMs = configuredRequestTimeoutMs;
   let isVideoRequest = false;
   let timedOut = false;
+  let isSubmitToolOutputs = entryEndpoint === '/v1/responses.submit_tool_outputs';
   let timeoutHandle: NodeJS.Timeout | undefined;
   const clearTimeoutHandle = () => {
     if (timeoutHandle) {
@@ -128,6 +139,12 @@ export async function handleResponses(
     let payload = (req.body && typeof req.body === 'object'
       ? req.body
       : {}) as ResponsesPayload;
+    isSubmitToolOutputs =
+      entryEndpoint === '/v1/responses.submit_tool_outputs'
+      || (
+        entryEndpoint === '/v1/responses'
+        && isResponsesSubmitToolOutputsPayload(payload)
+      );
     const originalPayload = captureRawRequestBodyForMetadata(payload) as ResponsesPayload;
     const requestBodyMetadata = readRequestBodyMetadata(originalPayload);
     if (options.responseIdFromPath && !payload.response_id) {
@@ -143,7 +160,7 @@ export async function handleResponses(
     const inboundStream = isSubmitToolOutputs ? originalStream : (acceptsSse || originalStream);
     const outboundStream = originalStream;
     let resumeMeta: Record<string, unknown> | undefined;
-    if (entryEndpoint === '/v1/responses.submit_tool_outputs') {
+    if (isSubmitToolOutputs) {
       const responseId = typeof payload?.response_id === 'string'
         ? payload.response_id
         : options.responseIdFromPath;
@@ -195,7 +212,7 @@ export async function handleResponses(
     }
     const wantsStream = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
 
-    if (entryEndpoint === '/v1/responses') {
+    if (!isSubmitToolOutputs && entryEndpoint === '/v1/responses') {
       applySystemPromptOverride(entryEndpoint, payload);
     }
     const warmupCheck = detectWarmupRequest(req.headers, payload as Record<string, unknown>);
@@ -347,15 +364,18 @@ export async function handleResponses(
       });
     }
     logRequestError(entryEndpoint, requestId, error);
-    if (res.headersSent) {
-      return;
-    }
     const acceptsSse = typeof req.headers['accept'] === 'string'
       && (req.headers['accept'] as string).includes('text/event-stream');
     const originalStream = Boolean(req.body && typeof req.body === 'object' && (req.body as ResponsesPayload).stream === true);
     const wantsStream = isSubmitToolOutputs
       ? (options.forceStream === true || originalStream)
       : (acceptsSse || originalStream || options.forceStream === true);
+    if (res.headersSent) {
+      if (wantsStream && !res.writableEnded) {
+        await writeStartedSsePipelineError(res, ctx, error, entryEndpoint, requestId);
+      }
+      return;
+    }
     await respondWithPipelineError(res, ctx, error, entryEndpoint, requestId, { forceSse: wantsStream });
   }
 }

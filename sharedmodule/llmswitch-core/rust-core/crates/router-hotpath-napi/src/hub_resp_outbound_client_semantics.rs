@@ -10,6 +10,7 @@ use crate::hub_reasoning_tool_normalizer::{
     project_message_reasoning_text,
 };
 use crate::shared_responses_tool_utils::strip_internal_tooling_metadata_impl;
+use crate::shared_tool_result_text_normalizer::normalize_tool_result_text;
 use crate::shared_tool_mapping::build_flattened_namespace_child_alias;
 
 fn normalize_alias_map(candidate: &Value) -> Option<Map<String, Value>> {
@@ -703,9 +704,10 @@ fn normalize_tool_result_entry(entry: &Value) -> Option<Map<String, Value>> {
     };
     let content = match raw_content {
         None | Some(Value::Null) => None,
-        Some(Value::String(raw)) => Some(raw.to_string()),
+        Some(Value::String(raw)) => Some(normalize_tool_result_text(raw)),
         Some(other) => serde_json::to_string(other)
             .ok()
+            .map(|text| normalize_tool_result_text(text.as_str()))
             .or_else(|| Some(other.to_string())),
     };
     let is_error = row.get("is_error").and_then(|v| v.as_bool());
@@ -3773,6 +3775,70 @@ mod tests {
         assert_eq!(
             normalized["required_action"]["submit_tool_outputs"]["tool_calls"][0]["arguments"],
             Value::String("{\"cmd\":\"pwd\"}".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_responses_tool_call_arguments_for_client_drops_exec_command_command_alias_when_schema_is_cmd_only(
+    ) {
+        let responses_payload = serde_json::json!({
+            "output": [
+                {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"bash -lc 'pwd'\",\"command\":\"bash -lc 'pwd'\"}",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"bash -lc 'pwd'\",\"command\":\"bash -lc 'pwd'\"}"
+                    }
+                }
+            ],
+            "required_action": {
+                "type": "submit_tool_outputs",
+                "submit_tool_outputs": {
+                    "tool_calls": [
+                        {
+                            "name": "exec_command",
+                            "arguments": "{\"cmd\":\"bash -lc 'pwd'\",\"command\":\"bash -lc 'pwd'\"}",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"bash -lc 'pwd'\",\"command\":\"bash -lc 'pwd'\"}"
+                            }
+                        }
+                    ]
+                }
+            }
+        });
+        let tools_raw = serde_json::json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "exec_command",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "cmd": { "type": "string" }
+                        },
+                        "required": ["cmd"],
+                        "additionalProperties": false
+                    }
+                }
+            }
+        ]);
+        let normalized =
+            normalize_responses_tool_call_arguments_for_client(&responses_payload, &tools_raw);
+        assert_eq!(
+            normalized["output"][0]["arguments"],
+            Value::String("{\"cmd\":\"bash -lc 'pwd'\"}".to_string())
+        );
+        assert_eq!(
+            normalized["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
+                ["arguments"],
+            Value::String("{\"cmd\":\"bash -lc 'pwd'\"}".to_string())
+        );
+        assert_eq!(
+            normalized["required_action"]["submit_tool_outputs"]["tool_calls"][0]["arguments"],
+            Value::String("{\"cmd\":\"bash -lc 'pwd'\"}".to_string())
         );
     }
 

@@ -122,7 +122,7 @@ tool:exec_command (tool:exec_command)
 `);
   });
 
-  it('harvests noisy marker + trailing text wrapper around JSON tool_calls', () => {
+  it('does not harvest noisy marker + trailing text wrapper around JSON tool_calls without explicit container', () => {
     const message = {
       role: 'assistant',
       content: [
@@ -136,14 +136,10 @@ tool:exec_command (tool:exec_command)
 
     const normalized = normalizeAssistantTextToToolCalls(message);
     const toolCalls = Array.isArray((normalized as any).tool_calls) ? (normalized as any).tool_calls : [];
-    expect(toolCalls.length).toBe(1);
-    expect(toolCalls[0]?.function?.name).toBe('exec_command');
-    const args = JSON.parse(String(toolCalls[0]?.function?.arguments || '{}'));
-    expect(args.cmd).toBe('bd --no-db ready');
-    expect((normalized as any).content).toBe('');
+    expect(toolCalls.length).toBe(0);
   });
 
-  it('harvests JSON tool_calls embedded inside quote envelope when payload is explicit', () => {
+  it('does not harvest JSON tool_calls embedded inside quote envelope without explicit container', () => {
     const message = {
       role: 'assistant',
       content: [
@@ -157,11 +153,7 @@ tool:exec_command (tool:exec_command)
 
     const normalized = normalizeAssistantTextToToolCalls(message);
     const toolCalls = Array.isArray((normalized as any).tool_calls) ? (normalized as any).tool_calls : [];
-    expect(toolCalls.length).toBe(1);
-    expect(toolCalls[0]?.function?.name).toBe('exec_command');
-    const args = JSON.parse(String(toolCalls[0]?.function?.arguments || '{}'));
-    expect(args.cmd).toBe('bd --no-db list --status in_progress');
-    expect((normalized as any).content).toBe('');
+    expect(toolCalls.length).toBe(0);
   });
 
   it('extracts plain Begin/End Patch transcript via dedicated apply_patch extractor', () => {
@@ -187,8 +179,8 @@ I need to add a backend endpoint and then execute the patch.
     expect(patchText).toContain('app.get(\'/tabs/:tabId/view\'');
   });
 
-  it('extracts codex explored list transcript via dedicated list_directory extractor', () => {
-    const calls = extractExploredListDirectoryCallsFromText([
+  it('ignores transcript-only explored/list and ran-command text', () => {
+    const listCalls = extractExploredListDirectoryCallsFromText([
         '服务已启动，API 测试通过。',
         '',
         '• Explored',
@@ -202,32 +194,16 @@ I need to add a backend endpoint and then execute the patch.
         '',
         '› Summarize recent commits'
       ].join('\n'));
+    expect(Array.isArray(listCalls)).toBe(true);
+    expect(listCalls?.length ?? 0).toBe(0);
 
-    expect(Array.isArray(calls)).toBe(true);
-    expect(calls?.length).toBe(2);
-
-    const firstArgs = JSON.parse(String(calls?.[0]?.args || '{}'));
-    const secondArgs = JSON.parse(String(calls?.[1]?.args || '{}'));
-    expect(calls?.[0]?.name).toBe('list_directory');
-    expect(firstArgs.path).toBe('xiaohongshu');
-    expect(firstArgs.recursive).toBe(false);
-    expect(calls?.[1]?.name).toBe('list_directory');
-    expect(secondArgs.path).toBe('app');
-    expect(secondArgs.recursive).toBe(false);
-  });
-
-  it('extracts bare ran-command transcript via dedicated exec extractor', () => {
-    const calls = extractBareExecCommandFromText([
+    const execCalls = extractBareExecCommandFromText([
         '• Ran git push origin main',
         '  └ Everything up-to-date',
         '',
         '• {"type":"blocked","summary":"服务状态异常导致 state API 测试失败","blocker":"unified-api 服务 health check 失败，core-daemon 显示 unified-api 状态为 unhealthy","impact":"无法验证新分解的 Xiaohongshu 模块与 state API 的集成","next_action":"检查 unified-api 日志 (/Users/fanzhang/.webauto/logs/unified-api.log) 定位启动失败原因","evidence":["node scripts/xiaohongshu/tests/test-state-api.mjs 返回 ECONNREFUSED","node scripts/core-daemon.mjs status 显示 unified-api 为 unhealthy"]}'
       ].join('\n'));
-
-    expect(Array.isArray(calls)).toBe(true);
-    expect(calls?.length).toBe(1);
-    expect(calls?.[0]?.name).toBe('exec_command');
-    const args = JSON.parse(String(calls?.[0]?.args || '{}'));
-    expect(args.cmd).toBe('git push origin main');
+    expect(Array.isArray(execCalls)).toBe(true);
+    expect(execCalls?.length ?? 0).toBe(0);
   });
 });

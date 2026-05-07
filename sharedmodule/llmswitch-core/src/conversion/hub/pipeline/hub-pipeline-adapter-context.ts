@@ -26,7 +26,10 @@ export function buildAdapterContextFromNormalized(
   const providerProtocol =
     (target?.outboundProfile as string | undefined) ||
     normalized.providerProtocol;
-  const providerId = (target?.providerKey || metadata.providerKey) as
+  const providerKey = (target?.providerKey || metadata.providerKey) as
+    | string
+    | undefined;
+  const providerId = providerKey as
     | string
     | undefined;
   const routeId = metadata.routeName as string | undefined;
@@ -58,6 +61,7 @@ export function buildAdapterContextFromNormalized(
     entryEndpoint: normalized.entryEndpoint || "/v1/chat/completions",
     providerProtocol,
     providerId,
+    ...(providerKey ? { providerKey, targetProviderKey: providerKey } : {}),
     routeId,
     profileId,
     streamingHint,

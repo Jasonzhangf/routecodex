@@ -23,6 +23,7 @@ export interface ConvertProviderResponseOptions {
   providerType?: string;
   requestId: string;
   wantsStream: boolean;
+  requestSemantics?: Record<string, unknown> | undefined;
   originalRequest?: Record<string, unknown> | undefined;
   processMode?: string;
   serverToolsEnabled?: boolean;
@@ -61,6 +62,7 @@ export async function convertProviderResponseIfNeeded(
     const adapterContext = buildServerToolAdapterContext({
       metadata: metadataBag,
       originalRequest: options.originalRequest,
+      requestSemantics: options.requestSemantics,
       requestId: options.requestId,
       entryEndpoint: options.entryEndpoint || entry,
       providerProtocol
@@ -127,6 +129,7 @@ export async function convertProviderResponseIfNeeded(
         body: reenterOpts.body,
         metadata: reenterOpts.metadata,
         baseMetadata: metadataBag,
+        requestSemantics: options.requestSemantics,
         executeNested: deps.executeNested
       });
     };

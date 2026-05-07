@@ -15,6 +15,7 @@ export interface PipelineExecutionResult {
   status?: number;
   headers?: Record<string, string>;
   body?: unknown;
+  metadata?: Record<string, unknown>;
   timingBreakdown?: {
     hubResponseExcludedMs?: number;
     clientInjectWaitMs?: number;

@@ -88,6 +88,8 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 **关键点**：heredoc 只是 wrapper，剥离后内部 JSON 格式和正常 function call 一样，收割方式也一样。
 - DeepSeek-Web 收敛规则（2026-04-11）：响应侧工具收割优先用 **RCC heredoc 容器唯一来源**；容器外 prose/patch/quote/bullet 一律不得参与 tool 解析，避免把正文噪声误收成调用。
 - DeepSeek-Web 边界修复只允许 **容器边界补闭合**（如缺尾标记时按容器尾部收束）；JSON 无法直接解析、tool 不在 allowlist、或缺必需字段时，按无效调用处理，不转正文启发式。
+- DeepSeek-Web wrapper 白名单升级（2026-05-02）：deepseek-web 响应 compat 现走 **explicit-wrapper-only** 收割，白名单仅 `<tool_call>...</tool_call>`、`<function_calls>...</function_calls>`、`RCC_TOOL_CALLS(_JSON)`；quote/bullet/top-level JSON/generic `<command>` 外层一律不 harvest。shape 修复只允许容器内 JSON 补闭合 + allowlist 归一，不猜正文语义。
+- DeepSeek-Web request/response 工具必出判定对齐（2026-05-02）：response 侧 `strict tools missing` 必须复用与 request 侧 `should_force_tool_required` **同一语义**；`coding` 路由即使声明了 tools，也允许 plain-text final + `finish_reason=stop`。但若出现 hidden tool-transport markup（如 `<use_mcp_tool>`）且无合法 wrapper/tool_call，仍必须 fail-fast。
 - 收割命中后的内容清理规则（2026-04-11）：**只剥离 tool marker / heredoc wrapper，本轮剩余 prose 要保留**；禁止成功 harvest 后无条件 `content=""`，否则会吞掉容器外解释文本并让 provider 兼容行为漂移。
 - XML 兼容收割补充（2026-04-11）：若上游仍吐出 `<execute_command>...<command>...` / `<apply_patch>...` 这类**反面教材**，只能在 `resp_process_stage1_tool_governance` 统一入口做兼容收割；禁止新增旁路入口。只要标签残缺但仍能恢复出足够参数，就按 allowlist + 参数 mask 归一为结构化 `tool_calls`。
 - `execute_command` 兼容别名（2026-04-11）：响应侧必须归一到 `exec_command`，且 `cmd/command/workdir` 等已恢复字段尽量保全，不得靠“删字段/删工具调用”规避兼容问题。
@@ -108,6 +110,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - DeepSeek-Web 主链结论（2026-04-14）：5520 实测表明 DeepSeek upstream 即使被要求“直接输出标准 function call”，仍常回 **RCC fence** 或 `<tool_call>...</tool_call>` 这类文本工具壳；因此 **文本 fence 才是当前 provider 真正稳定主路径**，客户端看到的标准 `function_call` 只是 harvest/bridge 结果，不要反过来把“原生标准 function call”当 SSOT。
 - DeepSeek-Web wrapper 泄露真因（2026-04-19）：若客户端同时看到 **已结构化的 tool_calls** 和残留 `<<RCC_TOOL_CALLS_JSON ...` 文本，不要先怪“请求 JSON 坏了”；高概率是真实链路里 **responses→chat 已先产出 structured tool_calls，但 `output_text/message.content` 里的 raw wrapper 没被二次清理**。修复铁律：**只要 tool_calls 已存在，也必须继续 sanitize `content/output_text/__responses_output_text_meta`**，否则就会出现“工具已执行 + raw wrapper 仍回显”的双写假象。
 - DeepSeek-Web SSE 判定边界（2026-04-19）：**不要只用 `payload.tools[]` 判断 tool 请求。** `chat:deepseek-web` 的 text-tool compat 会把 `tools` 收进 `prompt`，runtime 只剩 `prompt + metadata.deepseek.textToolFallback/toolProtocol=text`；若 5520 出现 `UPSTREAM_SSE_NOT_ALLOWED`，先按这个 transformed payload 形状强制 upstream SSE。
+- DeepSeek-Web runtime 装配边界（2026-04-30）：provider profile 的 `type: openai` 只是**协议提示**，不能在 `applyProviderProfileOverrides(...)` 里把 runtime `providerModule` 覆写成 `openai/openai-http-provider`；对 `chat:deepseek-web` 这类特殊 compat，必须保留 implicit module 推断，让 `ProviderFactory` 继续落到 `DeepSeekHttpProvider`，否则 `/v1/responses` 会先本地炸成 `missing model from virtual router`，还没到上游 429。
 - DeepSeek-Web 路由护栏（2026-04-19）：若目标是**文本工具收割**，`thinking` 池也必须指向 `deepseek-chat`，不要把 `thinking` 绑到 `deepseek-reasoner`；否则当前轮 `thinking:user-input|tools:tool-request-detected` 会稳定落到 reasoner，表现为长时间 `finish_reason=stop` 且不出工具。`deepseek-reasoner` 只留给 `longcontext`。
 - DeepSeek-Web 文本工具硬护栏（2026-04-19）：**收割只认白名单 wrapper/mask**（优先 `RCC_TOOL_CALLS_JSON` / `<function_calls>`）；如果声明了 tools 却只输出“步骤/我先检查/命令列表”这类口嗨正文，没有命中白名单容器，就必须按“未产生有效 tool_call”直接报错重试，不能把 narrative tool intent 当成功响应放回客户端。
 - DeepSeek / 文本工具 mask 白名单（2026-04-19）：高层收割入口只放行**显式壳**：`RCC_TOOL_CALLS(_JSON)`、`<function_calls>/<tool_call>`、Qwen marker、顶层 `{"tool_calls":...}`、以及声明工具后的 `Tool: <name> + Arguments:` 对；**`Calling:` / `exec_command(...)` 这类 function-style 口嗨一律不算合法 tool 容器**。
@@ -157,6 +160,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - 响应工具 allowlist 闭环（2026-04-11）：`resp_process_stage1_tool_governance` 必须以 **requestSemantics / capturedChatRequest 派生的请求工具集合** 为唯一允许集；文本 harvest 要先按 allowlist 过滤再落 `tool_calls`，否则会误吞正文并把未声明工具透传到客户端。
 - helper 对齐规则（2026-04-12）：若 TS/client helper（如 `processChatResponseTools`）与 chat pipeline 行为漂移，优先检查它是否绕开 `resp_process_stage1_tool_governance`。helper 必须先复用 unified resp-process native entry；旧 `hub_reasoning_tool_normalizer` 只能做**显式 name 的 malformed 文本 salvage**，不得恢复缺 name 的 shell/apply_patch 调用。
 - Provider snapshot 背压精华（2026-04-13）：**provider snapshot 不要在请求路径直接 await 写盘**；必须走**有界异步队列**，并在队列满或内存预算超限时**丢弃最旧 pending item**。仅靠“本地最近 N 条保留”不能阻止慢磁盘/失败写盘把待写 payload 长时间堆在内存里。
+- Anthropic multimodal 排查铁律（2026-05-05）：若请求已命中 `multimodal` 路由但 provider 仍在 `provider.send` 早期 `fetch failed`，**先验证 `input_image / image_url` 是否已在 anthropic transport 里规范化成 `type=image + source.{url|base64}`**；在确认标准图片 shape 已被消费前，禁止先改 remote-image/inline 策略。
 - Errorsamples 背压精华（2026-04-13）：**errorsamples 也不能同步直写**；必须和 snapshot 一样走**有界异步队列 + drop oldest pending**。`429/502` 这类瞬时上游错误默认**直接跳过写盘**，否则最容易在重试风暴里把磁盘和内存一起打爆。
 - 空 payload/空响应取证精华（2026-04-27 / 2026-04-28）：即使未开启 `--snap`，凡是命中**provider request 空消息/空 input**、**empty assistant**、或 **assistant sanitize 后变空**，都要**默认写 `errorsamples/payload-contract-error` + 强制保留 `provider-request/provider-response` 本地原始样本**；只留 errorsample 不足以做根因回放。
 - tool history 配对铁律（2026-04-28）：`assistant tool_call/function_call` 与 `tool/tool_result/function_call_output` 必须**显式 id 一一配对**；禁止补 `fallback id`、禁止拿“最近一个 tool_call”隐式配对、禁止 orphan/dangling 继续上游，命中即 `MALFORMED_REQUEST/RESPONSE` fail-fast。
@@ -170,6 +174,11 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - Snapshot 双实现扫描动作（2026-04-18）：排查样本坏文件时，先 grep 同名文件是否同时存在 **native hook 写盘** 与 **host mirror 写盘** 两套实现；如果两边都写同一路径，只允许一边 `create_new`，另一边只能幂等跳过。
 - DeepSeek 静默失败排查（2026-04-12）：若日志出现 `finish_reason=stop` + `no assistant content`，先查 `resp_process_stage1_tool_governance::sanitize_reasoning_fields_after_tool_harvest`。**ChunkingError / 沙箱失败正文只有在 message 已成功带上非空 `tool_calls` 后才允许去噪；无 tool_calls 时必须保留原始失败正文。**
 - finish_reason 对齐铁律（2026-04-12）：**只要最终 payload 里有非空 `tool_calls`，`finish_reason` 必须是 `tool_calls`**；不允许让 `metadata.finish_reason=stop` 或其它旧字段覆盖它。排查点先看 `shared_responses_response_utils::resolve_finish_reason_impl` 与 `resp_process_stage2_finalize::normalize_choices`。
+- provider-local text harvest fail-fast（2026-04-30）：像 `mimoweb` 这类 provider 兼容若做本地文本工具收割，命中**tool marker 存在但 harvest=0** 或 **assistant 原始输出为空** 时必须**直接抛错**；禁止回传空 assistant、禁止把原始 JSON/tool wrapper 当正常文本继续放行。
+- mimoweb 工具续轮排查（2026-04-30）：若 `tool_result` 后上游重复同一 `tool_call` 或声称“没有这个工具”，先查两点：**(1)** provider 是否错误地每轮新建 `conversationId`，导致上游失去同会话上下文；**(2)** request serializer / loop detector 是否同时支持 **Anthropic blocks** 和 **OpenAI chat 原始 `assistant.tool_calls + role=tool` 历史形状**。这两点任一缺失，都会表现成“历史看似在，mimoweb 实际没吃到”。
+- mimoweb 空响应取证（2026-04-30）：若 `fullText=''` 且 `harvested=0`，除了 fail-fast，还要把 **`routeName / sessionId / queryLength / messageCount / toolDefinitionCount / assistantToolCalls`** 直接打进日志与错误文案；本轮实测 `queryLength≈200k+` 已可稳定触发空响应，先把真相返回给上游闭环，禁止继续黑箱重试。
+- 上下文能力测试铁律（2026-05-01）：**只允许用完整显式历史重放**来测试 provider 的可用上下文与历史保真；**禁止**用 `conversationId/sessionId` 原生续聊模式来宣称上下文能力，因为那无法证明上游实际记录了哪段历史，也不等价于主链可控记忆。
+- Web provider 隐藏会话污染（2026-05-01）：对 `mimoweb` / `deepseek-web` / `qwenchat-web` 这类 web 形态 provider，若复用 `conversationId/sessionId`，上游可能已缓存未知轮次、摘要或截断历史，导致**实际已占用上下文预算不可见**，现场表现就是同 payload 上下文测试忽大忽小、成功/超限/裁切随机漂移；因此上下文测试必须**每次新建会话 + 完整显式历史重放**，否则测到的是产品态隐藏记忆，不是主链可控上下文。
 
 ## PipeDebug 诊断流程
 
@@ -452,6 +461,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 ### Jason 重启固定动作（2026-04-14）
 - 触发信号：Jason 直接要求“编译 / 全局安装 / 重启 5555 和 5520”，或用户明确要让**运行中的端口吃到本地新代码**。
 - 固定顺序：**先 build，再 install，再 restart，再验活**；不要现场猜是 `SIGUSR2`、`start` 还是别的路径。
+- Jason 原地重启纠正规则（2026-04-30）：**优先直接用 `restart`，禁止把 `stop + start` 当成等价替代**；某些端口/child 链路只有 `restart` 才能正确原地重启并吃到本地新代码，`stop` 后再 `start` 会破坏原地续接语义。
 - Release snapshot 精华（2026-04-27）：**release 运行时绝不能直接吃 repo `dist/` 或 npm 全局 symlink**；必须先 `npm run install:release` 生成 `~/.rcc/install/current` 不可变快照，再让端口进程切到该 snapshot。若现网进程仍是 repo 路径，优先 `rcc start --config <cfg> --port <port>` 让 CLI 接管端口并重启到 snapshot，不要继续信任旧进程自重启。
 - Launcher auto-start 生命周期精华（2026-04-27）：`rcc codex/claude` 自动拉起 server 时，必须使用**config-scoped lock + lease**，并在 **ready 超时/启动失败** 时对**本次 spawn 的明确 PID**做主动回收；不能只靠 parent guard 被动善后，否则会留下短时孤儿与启动竞争风暴。
 - 当前项目已验证可复用命令：

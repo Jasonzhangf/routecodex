@@ -31,6 +31,87 @@ function asObjectBody(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function cloneNestedBodyWithSemantics(
+  body: Record<string, unknown> | undefined,
+  requestSemantics: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  const out = body ? { ...body } : {};
+  if (
+    requestSemantics
+    && typeof requestSemantics === 'object'
+    && !Array.isArray(requestSemantics)
+    && (!out.semantics || typeof out.semantics !== 'object' || Array.isArray(out.semantics))
+  ) {
+    out.semantics = requestSemantics;
+  }
+  return out;
+}
+
+function extractNestedPipelineErrorMessage(body: Record<string, unknown> | undefined, status?: number): string {
+  const errorRecord = body && typeof body.error === 'object' && body.error && !Array.isArray(body.error)
+    ? (body.error as Record<string, unknown>)
+    : undefined;
+  const message =
+    typeof errorRecord?.message === 'string' && errorRecord.message.trim()
+      ? errorRecord.message.trim()
+      : undefined;
+  if (message) {
+    return message;
+  }
+  if (typeof status === 'number' && Number.isFinite(status)) {
+    return `ServerTool nested followup request failed with HTTP ${status}`;
+  }
+  return 'ServerTool nested followup request failed';
+}
+
+function throwIfNestedPipelineReturnedError(result: PipelineExecutionResult): void {
+  const status = typeof result.status === 'number' && Number.isFinite(result.status)
+    ? Math.floor(result.status)
+    : undefined;
+  const body =
+    result.body && typeof result.body === 'object' && !Array.isArray(result.body)
+      ? (result.body as Record<string, unknown>)
+      : undefined;
+  const errorRecord = body && typeof body.error === 'object' && body.error && !Array.isArray(body.error)
+    ? (body.error as Record<string, unknown>)
+    : undefined;
+  const hasHttpErrorStatus = typeof status === 'number' && status >= 400;
+  if (!hasHttpErrorStatus && !errorRecord) {
+    return;
+  }
+
+  const message = extractNestedPipelineErrorMessage(body, status);
+  const code =
+    typeof errorRecord?.code === 'string' && errorRecord.code.trim()
+      ? errorRecord.code.trim()
+      : (typeof status === 'number' ? `HTTP_${status}` : 'SERVERTOOL_FOLLOWUP_FAILED');
+  const upstreamCode =
+    typeof errorRecord?.upstreamCode === 'string' && errorRecord.upstreamCode.trim()
+      ? errorRecord.upstreamCode.trim()
+      : code;
+  const requestId =
+    typeof errorRecord?.request_id === 'string' && errorRecord.request_id.trim()
+      ? errorRecord.request_id.trim()
+      : undefined;
+
+  const error = Object.assign(new Error(message), {
+    code,
+    upstreamCode,
+    status,
+    statusCode: status,
+    requestExecutorProviderErrorStage: 'provider.followup',
+    details: {
+      ...(typeof status === 'number' ? { status } : {}),
+      ...(requestId ? { requestId } : {}),
+      reason: message,
+      upstreamCode,
+      requestExecutorProviderErrorStage: 'provider.followup'
+    },
+    response: body ? { data: body } : undefined
+  });
+  throw error;
+}
+
 function buildServerToolNestedInput(args: {
   entryEndpoint: string;
   fallbackEntryEndpoint: string;
@@ -38,6 +119,7 @@ function buildServerToolNestedInput(args: {
   body?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   baseMetadata?: Record<string, unknown>;
+  requestSemantics?: Record<string, unknown>;
   mode: 'reenter' | 'client_inject';
   onMergeRuntimeMetaError?: BuildNestedMetadataLogger;
 }): {
@@ -51,6 +133,7 @@ function buildServerToolNestedInput(args: {
     baseMetadata: args.baseMetadata,
     extraMetadata: nestedExtra,
     entryEndpoint: nestedEntry,
+    requestSemantics: args.requestSemantics,
     onMergeRuntimeMetaError: args.onMergeRuntimeMetaError
       ? (error) => {
           args.onMergeRuntimeMetaError?.(error, {
@@ -71,7 +154,7 @@ function buildServerToolNestedInput(args: {
       requestId: args.requestId,
       headers: cloneStringHeaders(nestedMetadata.clientHeaders) ?? {},
       query: {},
-      body: args.body ?? {},
+      body: cloneNestedBodyWithSemantics(args.body, args.requestSemantics),
       metadata: nestedMetadata
     }
   };
@@ -84,6 +167,7 @@ export async function executeServerToolReenterPipeline(args: {
   body?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   baseMetadata?: Record<string, unknown>;
+  requestSemantics?: Record<string, unknown>;
   executeNested: ServerToolNestedExecute;
   onMergeRuntimeMetaError?: BuildNestedMetadataLogger;
   runClientInjectBeforeNested?: boolean;
@@ -102,6 +186,7 @@ export async function executeServerToolReenterPipeline(args: {
     body: args.body,
     metadata: args.metadata,
     baseMetadata: args.baseMetadata,
+    requestSemantics: args.requestSemantics,
     mode: 'reenter',
     onMergeRuntimeMetaError: args.onMergeRuntimeMetaError
   });
@@ -118,6 +203,7 @@ export async function executeServerToolReenterPipeline(args: {
   }
 
   const nestedResult = await args.executeNested(nestedInput);
+  throwIfNestedPipelineReturnedError(nestedResult);
   const nestedBody =
     nestedResult.body && typeof nestedResult.body === 'object'
       ? (nestedResult.body as Record<string, unknown>)
@@ -132,6 +218,7 @@ export async function executeServerToolClientInjectDispatch(args: {
   body?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   baseMetadata?: Record<string, unknown>;
+  requestSemantics?: Record<string, unknown>;
   onMergeRuntimeMetaError?: BuildNestedMetadataLogger;
 }): Promise<{ ok: boolean; reason?: string }> {
   const { nestedMetadata } = buildServerToolNestedInput({
@@ -141,6 +228,7 @@ export async function executeServerToolClientInjectDispatch(args: {
     body: args.body,
     metadata: args.metadata,
     baseMetadata: args.baseMetadata,
+    requestSemantics: args.requestSemantics,
     mode: 'client_inject',
     onMergeRuntimeMetaError: args.onMergeRuntimeMetaError
   });

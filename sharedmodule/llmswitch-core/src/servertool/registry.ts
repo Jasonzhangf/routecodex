@@ -1,7 +1,15 @@
 import type { ServerToolHandler } from './types.js';
+import {
+  type ServertoolAutoHookPhase,
+  type ServerToolHandlerRegistrationSpec,
+  type ServerToolRegisteredHandlerRecord,
+  getServertoolToolSpec,
+  isServertoolEnabledByConfig,
+  normalizeServerToolRegistrationSpec
+} from './skeleton-config.js';
 
 type TriggerMode = 'tool_call' | 'auto';
-type AutoHookPhase = 'pre' | 'default' | 'post';
+type AutoHookPhase = ServertoolAutoHookPhase;
 
 interface ServerToolAutoHookSpec {
   id: string;
@@ -14,6 +22,7 @@ export interface ServerToolHandlerEntry {
   name: string;
   trigger: TriggerMode;
   handler: ServerToolHandler;
+  registration: ServerToolHandlerRegistrationSpec;
   autoHook?: ServerToolAutoHookSpec;
 }
 
@@ -22,51 +31,13 @@ export interface ServerToolAutoHookDescriptor {
   phase: AutoHookPhase;
   priority: number;
   order: number;
+  registration: ServerToolHandlerRegistrationSpec;
   handler: ServerToolHandler;
 }
 
 const SERVER_TOOL_HANDLERS: Record<string, ServerToolHandlerEntry> = Object.create(null);
 const AUTO_SERVER_TOOL_HANDLERS: ServerToolHandlerEntry[] = [];
-const DEFAULT_AUTO_HOOK_PRIORITY = 100;
 let autoHookRegistrationOrder = 0;
-
-function normalizeServerToolName(value: unknown): string {
-  const key = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  if (!key) {
-    return '';
-  }
-  if (key === 'websearch' || key === 'web-search') {
-    return 'web_search';
-  }
-  if (key === 'reasoning_stop' || key === 'reasoning-stop') {
-    return 'reasoning.stop';
-  }
-  return key;
-}
-
-function normalizeAutoHookPhase(value: unknown): AutoHookPhase {
-  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  if (normalized === 'pre' || normalized === 'before') {
-    return 'pre';
-  }
-  if (normalized === 'post' || normalized === 'after') {
-    return 'post';
-  }
-  return 'default';
-}
-
-function normalizeAutoHookPriority(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return Math.floor(value);
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number.parseInt(value.trim(), 10);
-    if (Number.isFinite(parsed)) {
-      return Math.floor(parsed);
-    }
-  }
-  return DEFAULT_AUTO_HOOK_PRIORITY;
-}
 
 function resolveAutoHookPhaseRank(phase: AutoHookPhase): number {
   if (phase === 'pre') return 0;
@@ -88,30 +59,38 @@ export function registerServerToolHandler(
   }
 ): void {
   if (!name || typeof name !== 'string' || typeof handler !== 'function') return;
-  const key = normalizeServerToolName(name);
-  if (!key) return;
-  const trigger: TriggerMode = options?.trigger ?? 'tool_call';
-  const entry: ServerToolHandlerEntry = { name: key, trigger, handler };
-  if (trigger === 'auto') {
-    const priority = normalizeAutoHookPriority(options?.hook?.priority ?? options?.priority);
-    const phase = normalizeAutoHookPhase(options?.hook?.phase ?? options?.phase);
+  const registration = normalizeServerToolRegistrationSpec(name, options);
+  if (!registration || !registration.enabled || !isServertoolEnabledByConfig(registration.name)) {
+    return;
+  }
+  const entry: ServerToolHandlerEntry = {
+    name: registration.name,
+    trigger: registration.trigger,
+    handler,
+    registration
+  };
+  if (registration.trigger === 'auto' && registration.autoHook) {
     entry.autoHook = {
-      id: key,
-      phase,
-      priority,
+      id: registration.autoHook.id,
+      phase: registration.autoHook.phase,
+      priority: registration.autoHook.priority,
       order: autoHookRegistrationOrder++
     };
     AUTO_SERVER_TOOL_HANDLERS.push(entry);
     return;
   }
-  SERVER_TOOL_HANDLERS[key] = entry;
+  SERVER_TOOL_HANDLERS[registration.name] = entry;
 }
 
 export function getServerToolHandler(name: string): ServerToolHandlerEntry | undefined {
   if (!name || typeof name !== 'string') return undefined;
-  const key = normalizeServerToolName(name);
-  if (!key) return undefined;
-  return SERVER_TOOL_HANDLERS[key];
+  const registration = normalizeServerToolRegistrationSpec(name);
+  if (!registration) return undefined;
+  return SERVER_TOOL_HANDLERS[registration.name];
+}
+
+export function listRegisteredServerToolHandlerNames(): string[] {
+  return Object.keys(SERVER_TOOL_HANDLERS).sort();
 }
 
 export function listAutoServerToolHandlers(): ServerToolHandlerEntry[] {
@@ -125,7 +104,7 @@ export function listAutoServerToolHandlers(): ServerToolHandlerEntry[] {
       return phaseRankDiff;
     }
 
-    const priorityDiff = (leftHook?.priority ?? DEFAULT_AUTO_HOOK_PRIORITY) - (rightHook?.priority ?? DEFAULT_AUTO_HOOK_PRIORITY);
+    const priorityDiff = (leftHook?.priority ?? 100) - (rightHook?.priority ?? 100);
     if (priorityDiff !== 0) {
       return priorityDiff;
     }
@@ -143,8 +122,25 @@ export function listAutoServerToolHooks(): ServerToolAutoHookDescriptor[] {
   return listAutoServerToolHandlers().map((entry) => ({
     id: entry.name,
     phase: entry.autoHook?.phase ?? 'default',
-    priority: entry.autoHook?.priority ?? DEFAULT_AUTO_HOOK_PRIORITY,
+    priority: entry.autoHook?.priority ?? 100,
     order: entry.autoHook?.order ?? 0,
+    registration: entry.registration,
     handler: entry.handler
   }));
+}
+
+export function isRegisteredServerToolName(name: string): boolean {
+  return getServertoolToolSpec(name)?.enabled === true;
+}
+
+export function listRegisteredServerToolHandlerRecords(): ServerToolRegisteredHandlerRecord[] {
+  const toolCallHandlers = Object.values(SERVER_TOOL_HANDLERS).map((entry) => ({
+    registration: entry.registration,
+    handler: entry.handler
+  }));
+  const autoHandlers = AUTO_SERVER_TOOL_HANDLERS.map((entry) => ({
+    registration: entry.registration,
+    handler: entry.handler
+  }));
+  return [...toolCallHandlers, ...autoHandlers];
 }

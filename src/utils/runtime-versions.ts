@@ -14,8 +14,10 @@ export function resolveLlmswitchCoreVersion(): string | undefined {
     const moduleDir = path.dirname(fileURLToPath(import.meta.url));
     const packageRoot = path.resolve(moduleDir, '..', '..');
     const candidates = [
-      path.resolve(process.cwd(), 'node_modules', '@jsonstudio', 'llms', 'package.json'),
-      path.resolve(packageRoot, 'node_modules', '@jsonstudio', 'llms', 'package.json')
+      path.resolve(process.cwd(), 'sharedmodule', 'llmswitch-core', 'package.json'),
+      path.resolve(packageRoot, 'sharedmodule', 'llmswitch-core', 'package.json'),
+      path.resolve(process.cwd(), 'node_modules', 'rcc-llmswitch-core', 'package.json'),
+      path.resolve(packageRoot, 'node_modules', 'rcc-llmswitch-core', 'package.json')
     ];
 
     for (const pkgPath of candidates) {

@@ -23,8 +23,8 @@ function buildReasoningOnlyResponse(): JsonObject {
   };
 }
 
-describe('servertool reasoning-only auto continue', () => {
-  test('uses reenter followup when tmux session is unavailable', async () => {
+describe('servertool reasoning-only empty assistant contract', () => {
+  test('does not trigger auto continue when assistant payload is empty', async () => {
     const chatResponse = buildReasoningOnlyResponse();
     const adapterContext = {} as AdapterContext;
     const result = await runServerSideToolEngine({
@@ -35,22 +35,11 @@ describe('servertool reasoning-only auto continue', () => {
       requestId: 'req_reasoning_only_1'
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('reasoning_only_continue_flow');
-    const followup = result.execution?.followup as
-      | {
-          metadata?: Record<string, unknown>;
-          injection?: { ops?: Array<Record<string, unknown>> };
-        }
-      | undefined;
-    expect(followup?.metadata?.clientInjectOnly).toBeUndefined();
-    expect(followup?.injection?.ops).toEqual([
-      { op: 'append_assistant_message', required: false },
-      { op: 'append_user_text', text: '继续执行' }
-    ]);
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
   });
 
-  test('still uses reenter followup when tmux session is available', async () => {
+  test('still does not trigger when tmux session is available', async () => {
     const chatResponse = buildReasoningOnlyResponse();
     const adapterContext = {
       clientTmuxSessionId: 'session-123',
@@ -64,22 +53,11 @@ describe('servertool reasoning-only auto continue', () => {
       requestId: 'req_reasoning_only_2'
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('reasoning_only_continue_flow');
-    const followup = result.execution?.followup as
-      | {
-          metadata?: Record<string, unknown>;
-          injection?: { ops?: Array<Record<string, unknown>> };
-        }
-      | undefined;
-    expect(followup?.metadata?.clientInjectOnly).toBeUndefined();
-    expect(followup?.injection?.ops).toEqual([
-      { op: 'append_assistant_message', required: false },
-      { op: 'append_user_text', text: '继续执行' }
-    ]);
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
   });
 
-  test('reenters pipeline instead of client injection when reasoning-only continue fires', async () => {
+  test('orchestration also skips empty reasoning-only payloads', async () => {
     const chatResponse = buildReasoningOnlyResponse();
     const adapterContext = {
       requestId: 'req_reasoning_only_3',
@@ -135,10 +113,10 @@ describe('servertool reasoning-only auto continue', () => {
       reenterPipeline
     });
 
-    expect(result.executed).toBe(true);
-    expect(result.flowId).toBe('reasoning_only_continue_flow');
-    expect(reenterPipeline).toHaveBeenCalledTimes(1);
+    expect(result.executed).toBe(false);
+    expect(result.flowId).toBeUndefined();
+    expect(reenterPipeline).toHaveBeenCalledTimes(0);
     expect(clientInjectDispatch).not.toHaveBeenCalled();
-    expect((result.chat as any)?.choices?.[0]?.finish_reason).toBe('tool_calls');
+    expect((result.chat as any)?.choices?.[0]?.finish_reason).toBe('stop');
   });
 });
