@@ -9,8 +9,11 @@ import {
   buildFormattedOutboundPayload,
   prepareOutboundPayloadBuildContext,
 } from "./hub-pipeline-provider-payload-orchestration-blocks.js";
-import { buildPassthroughProviderPayload } from "./hub-pipeline-provider-payload-passthrough-blocks.js";
 import { buildFinalProviderPayloadBundle } from "./hub-pipeline-provider-payload-finalize-blocks.js";
+import {
+  buildProviderPayloadStageResult,
+  resolvePassthroughProviderPayload,
+} from "./hub-pipeline-provider-payload-result-blocks.js";
 
 export async function buildRequestStageProviderPayload<TContext = Record<string, unknown>>(args: {
   normalized: NormalizedRequest;
@@ -52,20 +55,13 @@ export async function buildRequestStageProviderPayload<TContext = Record<string,
     shadowCompareBaselineMode,
   } = args;
 
-  let providerPayload: Record<string, unknown>;
-  let shadowBaselineProviderPayload: Record<string, unknown> | undefined;
-
   if (activeProcessMode === "passthrough") {
-    providerPayload = buildPassthroughProviderPayload({
+    return resolvePassthroughProviderPayload({
       rawRequest,
       outboundStream,
       passthroughAudit,
       outboundProtocol,
     });
-    return {
-      providerPayload,
-      shadowBaselineProviderPayload,
-    };
   }
 
   const {
@@ -93,7 +89,7 @@ export async function buildRequestStageProviderPayload<TContext = Record<string,
     outboundContextSnapshot,
   });
 
-  ({
+  const {
     providerPayload,
     shadowBaselineProviderPayload,
   } = buildFinalProviderPayloadBundle({
@@ -108,10 +104,10 @@ export async function buildRequestStageProviderPayload<TContext = Record<string,
     passthroughAudit,
     outboundRecorder,
     shadowCompareBaselineMode,
-  }));
+  });
 
-  return {
+  return buildProviderPayloadStageResult({
     providerPayload,
     shadowBaselineProviderPayload,
-  };
+  });
 }

@@ -1,6 +1,5 @@
 import {
   normalizeHubEndpointWithNative,
-  runHubPipelineOrchestrationWithNative,
 } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
 import {
   resolveReadablePayload,
@@ -13,8 +12,10 @@ import type {
 import { extractRequestMetadataOptions } from "./hub-pipeline-normalize-request-metadata-blocks.js";
 import {
   buildPreOrchestrationRequestShape,
+  buildNativeOrchestrationMetadataInput,
   finalizeNormalizedRequest,
 } from "./hub-pipeline-normalize-request-finalize-blocks.js";
+import { runNormalizedRequestOrchestration } from "./hub-pipeline-normalize-request-orchestration-blocks.js";
 
 export async function normalizeHubPipelineRequest(
   request: HubPipelineRequest,
@@ -49,55 +50,34 @@ export async function normalizeHubPipelineRequest(
     resolvedReadable,
   );
 
-  const orchestrationResult = runHubPipelineOrchestrationWithNative({
+  const orchestration = runNormalizedRequestOrchestration({
     requestId: id,
     endpoint,
     entryEndpoint: base.entryEndpoint,
     providerProtocol: base.providerProtocol,
     payload,
-    metadata: {
-      ...metadataRecord,
+    metadata: buildNativeOrchestrationMetadataInput({
+      metadataRecord,
       entryEndpoint: base.entryEndpoint,
       providerProtocol: base.providerProtocol,
       processMode: base.processMode,
       direction: base.direction,
       stage: base.stage,
       stream,
-      ...(base.routeHint ? { routeHint: base.routeHint } : {}),
-    },
+      routeHint: base.routeHint,
+    }),
     stream,
     processMode: base.processMode,
     direction: base.direction,
     stage: base.stage,
   });
-  if (!orchestrationResult.success) {
-    const code =
-      orchestrationResult.error && typeof orchestrationResult.error.code === "string"
-        ? orchestrationResult.error.code.trim()
-        : "hub_pipeline_native_failed";
-    const message =
-      orchestrationResult.error &&
-      typeof orchestrationResult.error.message === "string"
-        ? orchestrationResult.error.message.trim()
-        : "Native hub pipeline orchestration failed";
-    throw new Error(`[${code}] ${message}`);
-  }
-  if (orchestrationResult.payload) {
-    payload = orchestrationResult.payload;
-  }
-
-  const orchestrationMetadata =
-    orchestrationResult.metadata &&
-    typeof orchestrationResult.metadata === "object" &&
-    !Array.isArray(orchestrationResult.metadata)
-      ? (orchestrationResult.metadata as Record<string, unknown>)
-      : {};
+  payload = orchestration.payload;
   return finalizeNormalizedRequest({
     id,
     endpoint,
     payload,
     metadataRecord,
-    orchestrationMetadata,
+    orchestrationMetadata: orchestration.orchestrationMetadata,
     base: {
       ...base,
       stream,

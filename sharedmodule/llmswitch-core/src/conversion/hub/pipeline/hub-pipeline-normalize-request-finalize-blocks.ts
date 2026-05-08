@@ -15,6 +15,10 @@ import {
   resolveNormalizedRouteShape,
   type HubNormalizedRouteShape,
 } from "./hub-pipeline-normalize-request-shape-blocks.js";
+import {
+  buildNativeOrchestrationMetadataInput,
+  buildNormalizedRequestResult,
+} from "./hub-pipeline-normalize-request-result-blocks.js";
 
 export function buildPreOrchestrationRequestShape(args: {
   request: HubPipelineRequest;
@@ -88,26 +92,18 @@ export function finalizeNormalizedRequest(args: {
     routeShape,
   });
 
-  return {
+  return buildNormalizedRequestResult({
     id: args.id,
     endpoint: args.endpoint,
-    entryEndpoint: routeShape.entryEndpoint,
-    providerProtocol: routeShape.providerProtocol,
+    routeShape,
     payload: args.payload,
     metadata: normalizedMetadata,
     policyOverride: args.extracted.policyOverride,
     shadowCompare: args.extracted.shadowCompare,
     disableSnapshots: args.extracted.disableSnapshots,
-    ...(args.extracted.externalStageRecorder
-      ? { externalStageRecorder: args.extracted.externalStageRecorder }
-      : {}),
-    processMode: routeShape.processMode,
-    direction: routeShape.direction,
-    stage: routeShape.stage,
-    stream: routeShape.stream,
-    routeHint: routeShape.routeHint,
-    ...(args.extracted.hubEntryMode
-      ? { hubEntryMode: args.extracted.hubEntryMode }
-      : {}),
-  };
+    hubEntryMode: args.extracted.hubEntryMode,
+    externalStageRecorder: args.extracted.externalStageRecorder,
+  });
 }
+
+export { buildNativeOrchestrationMetadataInput };

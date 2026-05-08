@@ -11,13 +11,15 @@ import type {
 import type { RequestStageHooks } from "./hub-pipeline-stage-hooks.js";
 import type { HubPolicyConfig } from "../policy/policy-engine.js";
 import {
-  buildValidatedCapturedChatRequest,
-  finalizeRouteAndOutboundMetadata,
 } from "./hub-pipeline-route-and-outbound-metadata-blocks.js";
 import {
   buildOutboundProviderPayloadBundle,
   resolveRouteSelectionAndOutboundContext,
 } from "./hub-pipeline-route-and-outbound-orchestration-blocks.js";
+import {
+  buildRouteAndOutboundExecutionResult,
+  buildRouteAndOutboundResultMetadata,
+} from "./hub-pipeline-route-and-outbound-result-blocks.js";
 
 type ShadowCompareBaselineMode =
   NormalizedRequest["shadowCompare"] extends { baselineMode: infer T }
@@ -101,18 +103,13 @@ export async function executeRouteAndBuildOutbound<TContext = Record<string, unk
       shadowCompareBaselineMode,
       nodeResults,
     });
-
-  const capturedChatRequest = buildValidatedCapturedChatRequest({
+  const metadata = buildRouteAndOutboundResultMetadata({
     normalized,
     workingRequest,
     activeProcessMode,
-  });
-  const metadata = finalizeRouteAndOutboundMetadata({
-    normalized,
     outboundProtocol: routeContext.outboundProtocol,
     target: routeContext.routing.target,
     outboundStream: routeContext.outboundStream,
-    capturedChatRequest,
     passthroughAudit,
     shadowCompareBaselineMode,
     effectivePolicyMode: effectivePolicy?.mode ?? "off",
@@ -120,12 +117,12 @@ export async function executeRouteAndBuildOutbound<TContext = Record<string, unk
     hasImageAttachment,
   });
 
-  return {
+  return buildRouteAndOutboundExecutionResult({
     providerPayload,
     metadata,
     routingDecision: routeContext.routing.decision,
     routingDiagnostics: routeContext.routing.diagnostics,
     target: routeContext.routing.target,
     workingRequest,
-  };
+  });
 }

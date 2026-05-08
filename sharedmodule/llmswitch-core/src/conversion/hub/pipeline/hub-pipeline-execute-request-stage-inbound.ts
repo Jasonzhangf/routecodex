@@ -6,7 +6,6 @@ import type { RequestStageHooks } from "./hub-pipeline-stage-hooks.js";
 import { type HubPolicyConfig } from "../policy/policy-engine.js";
 import {
   applyInboundRuntimeHints,
-  finalizeInboundWorkingRequest,
   prepareInboundExecutionContext,
 } from "./hub-pipeline-execute-request-stage-inbound-setup.js";
 import { requireJsonObjectPayload } from "./hub-pipeline-shared-guards.js";
@@ -14,6 +13,10 @@ import {
   executeInboundGovernanceStage,
   executeInboundSemanticStages,
 } from "./hub-pipeline-execute-request-stage-inbound-orchestration-blocks.js";
+import {
+  buildRequestStageInboundResult,
+  finalizeInboundWorkingRequestResult,
+} from "./hub-pipeline-execute-request-stage-inbound-result-blocks.js";
 
 export interface RequestStageInboundResult<TContext = Record<string, unknown>> {
   rawRequest: JsonObject;
@@ -40,7 +43,6 @@ export async function executeRequestStageInbound<TContext = Record<string, unkno
   config: HubPipelineConfig;
 }): Promise<RequestStageInboundResult<TContext>> {
   const { normalized, hooks, config } = args;
-  const semanticMapper = hooks.createSemanticMapper();
   const rawRequest = requireJsonObjectPayload(normalized);
 
   applyInboundRuntimeHints(normalized, rawRequest);
@@ -63,7 +65,7 @@ export async function executeRequestStageInbound<TContext = Record<string, unkno
   } = await executeInboundSemanticStages({
     normalized,
     hooks,
-    semanticMapper,
+    semanticMapper: hooks.createSemanticMapper(),
     rawRequest,
     effectivePolicy,
     inboundAdapterContext,
@@ -84,7 +86,7 @@ export async function executeRequestStageInbound<TContext = Record<string, unkno
     workingRequest,
     hasImageAttachment,
     serverToolRequired,
-  } = finalizeInboundWorkingRequest(
+  } = finalizeInboundWorkingRequestResult(
     (processedRequest ?? standardizedRequest) as unknown as Record<
       string,
       unknown
@@ -92,9 +94,9 @@ export async function executeRequestStageInbound<TContext = Record<string, unkno
     normalized,
   );
 
-  return {
+  return buildRequestStageInboundResult({
     rawRequest,
-    semanticMapper,
+    hooks,
     effectivePolicy,
     shadowCompareBaselineMode,
     inboundRecorder,
@@ -107,5 +109,5 @@ export async function executeRequestStageInbound<TContext = Record<string, unkno
     nodeResults,
     hasImageAttachment,
     serverToolRequired,
-  };
+  });
 }

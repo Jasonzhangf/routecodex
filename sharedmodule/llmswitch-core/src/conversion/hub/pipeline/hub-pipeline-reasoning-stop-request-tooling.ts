@@ -20,7 +20,7 @@ export function prepareReasoningStopRequestTooling(args: {
   );
   const { requestSnapshot, captured, preserveCapturedForFollowup } =
     resolveCapturedChatRequestForReasoningStop(args);
-  const mode = syncReasoningStopModeFromRequest(args.adapterContext, "on");
+  const mode = syncReasoningStopModeFromRequest(args.adapterContext);
   if (mode === "off") {
     return mode;
   }
