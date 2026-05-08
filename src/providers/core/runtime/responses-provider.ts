@@ -206,8 +206,11 @@ export class ResponsesProvider extends HttpTransportProvider {
     }
   }
 
-  private async sendSseRequest(options: {
-    endpoint: string;
+  /**
+   * Shared SSE stream execution block.
+   * Opens upstream SSE stream, converts to JSON, captures snapshots, reports failures.
+   */
+  private async executeSseStream(options: {
     body: Record<string, unknown>;
     headers: Record<string, string>;
     context: ProviderContext;
@@ -216,8 +219,8 @@ export class ResponsesProvider extends HttpTransportProvider {
     providerStream: boolean | undefined;
     httpClient: ResponsesHttpClient;
   }): Promise<unknown> {
-    const { endpoint, body, headers, context, targetUrl, entryEndpoint, providerStream, httpClient } = options;
-    const stream = await httpClient.postStream(endpoint, body, {
+    const { body, headers, context, targetUrl, entryEndpoint, providerStream, httpClient } = options;
+    const stream = await httpClient.postStream(targetUrl, body, {
       ...headers,
       Accept: 'text/event-stream'
     });
@@ -267,6 +270,19 @@ export class ResponsesProvider extends HttpTransportProvider {
     };
   }
 
+  private async sendSseRequest(options: {
+    endpoint: string;
+    body: Record<string, unknown>;
+    headers: Record<string, string>;
+    context: ProviderContext;
+    targetUrl: string;
+    entryEndpoint?: string;
+    providerStream: boolean | undefined;
+    httpClient: ResponsesHttpClient;
+  }): Promise<unknown> {
+    return this.executeSseStream(options);
+  }
+
   private async sendSubmitToolOutputsRequest(options: {
     endpoint: string;
     body: Record<string, unknown>;
@@ -277,55 +293,10 @@ export class ResponsesProvider extends HttpTransportProvider {
     providerStream: boolean | undefined;
     httpClient: ResponsesHttpClient;
   }): Promise<unknown> {
-    const { endpoint, body, headers, context, targetUrl, entryEndpoint, providerStream, httpClient } = options;
+    const { context, headers, targetUrl, entryEndpoint, body } = options;
     await this.snapshotPhase('provider-request', context, body, headers, targetUrl, entryEndpoint);
     try {
-      const stream = await httpClient.postStream(endpoint, body, {
-        ...headers,
-        Accept: 'text/event-stream'
-      });
-      const captureSse = providerStream === true && shouldCaptureProviderStreamSnapshots();
-      const streamForHost = captureSse
-        ? attachProviderSseSnapshotStream(stream, {
-          requestId: context.requestId,
-          headers,
-          url: targetUrl,
-          entryEndpoint,
-          clientRequestId: extractClientRequestId(context),
-          providerKey: context.providerKey,
-          providerId: context.providerId
-        })
-        : stream;
-      const converter = await this.loadResponsesSseConverter();
-      const json = await converter.convertSseToJson(streamForHost, {
-        requestId: context.requestId,
-        model: typeof context.model === 'string' ? context.model : 'unknown'
-      });
-      if (!captureSse) {
-        await this.snapshotPhase(
-          'provider-response',
-          context,
-          {
-            mode: 'sse',
-            clientStream: providerStream === true,
-            payload: json ?? null
-          },
-          headers,
-          targetUrl,
-          entryEndpoint
-        );
-      }
-      this.reportResponsesFailureIfNeeded(json, context);
-      return {
-        data: json,
-        status: 200,
-        statusText: 'OK',
-        headers: {
-          'x-upstream-mode': 'sse',
-          'x-provider-stream-requested': providerStream === true ? '1' : '0'
-        },
-        url: targetUrl
-      };
+      return await this.executeSseStream(options);
     } catch (error) {
       const normalizedError = normalizeUpstreamError(error);
       await this.snapshotPhase(

@@ -4,6 +4,7 @@ import axios from 'axios';
 
 import type { UnknownObject } from '../../../types/common-types.js';
 import { buildAntigravityHeaders } from '../../auth/antigravity-userinfo-helper.js';
+import { expandHome } from '../../../utils/common-utils.js';
 
 export interface AntigravityModelQuotaInfo {
   remainingFraction: number;
@@ -15,15 +16,6 @@ export interface AntigravityQuotaSnapshot {
   fetchedAt: number;
 }
 
-function expandHome(p: string): string {
-  if (!p || typeof p !== 'string') {
-    return p;
-  }
-  if (p.startsWith('~/')) {
-    return p.replace(/^~\//, `${os.homedir()}/`);
-  }
-  return p;
-}
 
 async function readJsonFile(filePath: string): Promise<UnknownObject | null> {
   try {

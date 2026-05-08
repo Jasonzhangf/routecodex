@@ -19,9 +19,8 @@ export function isGeminiCliFamily(providerType: string): boolean {
   return GEMINI_CLI_PROVIDER_IDS.has(providerType.toLowerCase());
 }
 
-export function expandHome(p: string): string {
-  return p.startsWith('~/') ? p.replace(/^~\//, `${process.env.HOME || ''}/`) : p;
-}
+import { expandHome } from '../../../utils/common-utils.js';
+export { expandHome };
 
 export function defaultTokenFile(providerType: string): string {
   if (providerType === 'qwen') {

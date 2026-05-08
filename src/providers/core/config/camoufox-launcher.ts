@@ -1,3 +1,4 @@
+import { expandHome, isTruthyFlag } from '../../../utils/common-utils.js';
 import { spawn, spawnSync, type ChildProcess, type SpawnSyncOptions, type SpawnSyncReturns } from 'node:child_process';
 import fs from 'node:fs';
 import fsAsync from 'node:fs/promises';
@@ -115,18 +116,6 @@ export async function shutdownCamoufoxLaunchers(): Promise<void> {
   await Promise.allSettled(launchers.map((handle) => terminateLauncher(handle)));
   activeLaunchers.clear();
 }
-
-function expandHome(p: string): string {
-  if (!p) {
-    return p;
-  }
-  if (p.startsWith('~/')) {
-    const home = process.env.HOME || '';
-    return path.join(home, p.slice(2));
-  }
-  return p;
-}
-
 function resolveGoogleUiLanguage(): string | null {
   const raw = String(
     process.env.ROUTECODEX_OAUTH_GOOGLE_HL ||
@@ -764,12 +753,6 @@ export function ensureCamoufoxFingerprintForToken(
     });
   }
 }
-
-function isTruthyFlag(value: string | undefined): boolean {
-  const raw = String(value || '').trim().toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
-}
-
 function parsePositiveInt(value: string | undefined, fallbackValue: number): number {
   const parsed = Number.parseInt(String(value || '').trim(), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackValue;
