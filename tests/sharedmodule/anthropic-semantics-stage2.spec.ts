@@ -22,7 +22,7 @@ jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/conversion/codec
 }));
 
 const { AnthropicSemanticMapper } = await import(
-  '../../sharedmodule/llmswitch-core/src/conversion/hub/semantic-mappers/anthropic-mapper.js'
+  '../../sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/anthropic-mapper.js'
 );
 
 const mapper = new AnthropicSemanticMapper();

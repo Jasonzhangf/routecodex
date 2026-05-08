@@ -1,6 +1,29 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
-import { isAdapterClientDisconnected } from './stop-message-state-block.js';
+
+export function isAdapterClientDisconnected(adapterContext: AdapterContext): boolean {
+  if (!adapterContext || typeof adapterContext !== 'object') {
+    return false;
+  }
+  const state = (adapterContext as { clientConnectionState?: unknown }).clientConnectionState;
+  if (state && typeof state === 'object' && !Array.isArray(state)) {
+    const disconnected = (state as { disconnected?: unknown }).disconnected;
+    if (disconnected === true) {
+      return true;
+    }
+    if (typeof disconnected === 'string' && disconnected.trim().toLowerCase() === 'true') {
+      return true;
+    }
+  }
+  const raw = (adapterContext as { clientDisconnected?: unknown }).clientDisconnected;
+  if (raw === true) {
+    return true;
+  }
+  if (typeof raw === 'string' && raw.trim().toLowerCase() === 'true') {
+    return true;
+  }
+  return false;
+}
 
 export function withTimeout<T>(
   promise: Promise<T>,

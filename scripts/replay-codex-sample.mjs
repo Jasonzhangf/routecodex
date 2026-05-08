@@ -45,6 +45,59 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
+function findNearbyReplayableCandidates(samplePath) {
+  const startDir = path.dirname(samplePath);
+  const candidates = [];
+  const queue = [startDir];
+  const seen = new Set();
+  let steps = 0;
+  while (queue.length && steps < 12) {
+    const dir = queue.shift();
+    steps += 1;
+    if (!dir || seen.has(dir)) {
+      continue;
+    }
+    seen.add(dir);
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      entries = [];
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isFile()) {
+        const lower = entry.name.toLowerCase();
+        if (
+          lower === 'client-request.json'
+          || lower === 'http-request.json'
+          || (lower === 'request.json' && dir.includes(`${path.sep}runs${path.sep}`))
+        ) {
+          candidates.push(full);
+        }
+      } else if (
+        entry.isDirectory()
+        && (entry.name === 'runs' || entry.name.startsWith('req_') || dir === startDir)
+      ) {
+        queue.push(full);
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent && parent !== dir && (dir === startDir || path.basename(dir) === 'runs')) {
+      queue.push(parent);
+    }
+  }
+  return Array.from(new Set(candidates)).sort();
+}
+
+function buildReplayGuidanceError(samplePath, reason) {
+  const nearby = findNearbyReplayableCandidates(samplePath);
+  const guidance = nearby.length > 0
+    ? `Nearby replayable client snapshots:\n- ${nearby.join('\n- ')}`
+    : 'No nearby `client-request.json` / `http-request.json` / `runs/**/request.json` found. Re-capture with `--snap-stages "client-request,http-request,provider-request,provider-response"` and replay the client-side snapshot instead.';
+  return `${reason}\n${guidance}`;
+}
+
 function extractEndpoint(doc) {
   return doc?.data?.url || doc?.url || doc?.endpoint || '/v1/responses';
 }
@@ -61,6 +114,72 @@ function extractBody(doc) {
   if (typeof doc?.data?.data === 'object') return doc.data.data;
   if (typeof doc?.body?.data === 'object') return doc.body.data;
   return undefined;
+}
+
+function isProviderRequestShape(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return false;
+  }
+  const hasMessages = Array.isArray(body.messages) && body.messages.length > 0;
+  const hasResponsesInput = Array.isArray(body.input) || typeof body.input === 'string';
+  const hasSystem = typeof body.system === 'string' || Array.isArray(body.system);
+  const looksProviderMetadata =
+    body.output_config !== undefined
+    || body.thinking !== undefined
+    || body.max_tokens !== undefined;
+  return (hasMessages && hasSystem) || (hasMessages && !hasResponsesInput && looksProviderMetadata);
+}
+
+function normalizeResponsesContentBlock(role, value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const type = typeof value.type === 'string' ? value.type : '';
+    if (type) {
+      return value;
+    }
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return {
+      type: role === 'assistant' ? 'output_text' : 'input_text',
+      text: value
+    };
+  }
+  return null;
+}
+
+function buildReplayInputFromProviderRequest(body, endpoint) {
+  const cloned = JSON.parse(JSON.stringify(body));
+  if (!endpoint.includes('/v1/responses')) {
+    return cloned;
+  }
+  const messages = Array.isArray(cloned.messages) ? cloned.messages : [];
+  const input = messages.map((message) => {
+    const role = typeof message?.role === 'string' ? message.role : 'user';
+    const content = Array.isArray(message?.content)
+      ? message.content.map((entry) => normalizeResponsesContentBlock(role, entry)).filter(Boolean)
+      : [normalizeResponsesContentBlock(role, message?.content)].filter(Boolean);
+    return { role, content };
+  }).filter((entry) => entry.content.length > 0);
+
+  return {
+    model: cloned.model,
+    input,
+    ...(Array.isArray(cloned.tools) ? { tools: cloned.tools } : {}),
+    ...(cloned.metadata && typeof cloned.metadata === 'object' ? { metadata: cloned.metadata } : {}),
+    ...(cloned.stream === true ? { stream: true } : {})
+  };
+}
+
+function hasOrphanToolHistoryContent(value) {
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  return value.some((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return false;
+    }
+    const type = typeof entry.type === 'string' ? entry.type.trim().toLowerCase() : '';
+    return type === 'tool_result' || type === 'tool_use' || type === 'function_call' || type === 'function_call_output';
+  });
 }
 
 function detectStream(doc, requestBody) {
@@ -143,9 +262,31 @@ async function main() {
   const opts = parseArgs();
   const samplePath = path.resolve(opts.sample);
   const sample = readJson(samplePath);
-  const requestBody = extractBody(sample);
-  if (!requestBody) throw new Error('Sample does not contain request body');
   const endpoint = extractEndpoint(sample);
+  const rawRequestBody = extractBody(sample);
+  if (!rawRequestBody) throw new Error('Sample does not contain request body');
+  const requestBody = isProviderRequestShape(rawRequestBody)
+    ? buildReplayInputFromProviderRequest(rawRequestBody, endpoint)
+    : rawRequestBody;
+  if (
+    endpoint.includes('/v1/responses')
+    && (!Array.isArray(requestBody?.input) || requestBody.input.length === 0)
+  ) {
+    throw new Error(buildReplayGuidanceError(
+      samplePath,
+      'Replay sample cannot be converted into a valid /v1/responses client payload; provide a client-request snapshot instead of provider-request.json.'
+    ));
+  }
+  if (
+    endpoint.includes('/v1/responses')
+    && Array.isArray(requestBody?.input)
+    && requestBody.input.some((message) => hasOrphanToolHistoryContent(message?.content))
+  ) {
+    throw new Error(buildReplayGuidanceError(
+      samplePath,
+      'Replay sample still contains tool history blocks (`tool_result`/`tool_use`) without the original client request chain; use a client-request snapshot instead of provider-request.json.'
+    ));
+  }
   const wantsSse = detectStream(sample, requestBody);
   const requestId = sample?.requestId || sample?.data?.meta?.requestId || `sample_${Date.now()}`;
   const label = opts.label || new Date().toISOString().replace(/[:.]/g, '-');

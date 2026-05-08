@@ -1,7 +1,7 @@
 import { runInboundPipeline, type InboundPlan } from '../../src/conversion/hub/pipelines/inbound.js';
 import { runOutboundPipeline, type OutboundPlan } from '../../src/conversion/hub/pipelines/outbound.js';
 import { AnthropicFormatAdapter } from '../../src/conversion/hub/format-adapters/anthropic-format-adapter.js';
-import { AnthropicSemanticMapper } from '../../src/conversion/hub/semantic-mappers/anthropic-mapper.js';
+import { AnthropicSemanticMapper } from '../../src/conversion/hub/operation-table/semantic-mappers/anthropic-mapper.js';
 import type { AdapterContext } from '../../src/conversion/hub/types/chat-envelope.js';
 import type { StageRecorder } from '../../src/conversion/hub/format-adapters/index.js';
 

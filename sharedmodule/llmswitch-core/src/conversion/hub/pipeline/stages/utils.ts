@@ -10,8 +10,9 @@ function normalizeRecordPayload(payload: unknown): object {
     if (nativeParsed && typeof nativeParsed === 'object' && !Array.isArray(nativeParsed)) {
       return nativeParsed as object;
     }
-  } catch {
-    // native normalization is best-effort
+  } catch (error) {
+    // native normalization is best-effort, but failures should be visible for diagnostics
+    console.warn('[hub-pipeline] native normalization failed (non-blocking):', error instanceof Error ? error.message : String(error));
   }
   return {};
 }

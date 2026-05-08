@@ -4,6 +4,7 @@ import { resolveRccProviderDir } from '../../../config/user-data-paths.js';
 
 import type { InitProviderTemplate } from '../../config/init-provider-catalog.js';
 import { buildInitRouting, buildV2ConfigObject } from '../../config/init-v2-builder.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import type {
   ConfigState,
   LoggerLike,
@@ -12,9 +13,6 @@ import type {
   UnknownRecord
 } from './shared.js';
 
-export function isRecord(value: unknown): value is UnknownRecord {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 export function asRecord(value: unknown): UnknownRecord {
   return isRecord(value) ? value : {};

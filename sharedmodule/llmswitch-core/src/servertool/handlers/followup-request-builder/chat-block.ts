@@ -8,7 +8,11 @@ import {
   shouldIncludeReasoningStopToolFromOps
 } from './op-blocks.js';
 import type { CapturedChatSeed } from './seed.js';
-import { extractCapturedChatSeed, resolveFollowupModel } from './seed.js';
+import {
+  extractCapturedChatSeed,
+  resolveFollowupModel,
+  sanitizeFollowupParametersForResolvedModel
+} from './seed.js';
 
 export function buildChatFollowupPayloadFromInjection(args: {
   adapterContext: unknown;
@@ -50,7 +54,11 @@ function materializeFollowupChatPayload(args: {
     state: {
       messages,
       tools,
-      parameters: args.seed.parameters ? (cloneJson(args.seed.parameters) as Record<string, unknown>) : undefined
+      parameters: sanitizeFollowupParametersForResolvedModel({
+        parameters: args.seed.parameters ? (cloneJson(args.seed.parameters) as Record<string, unknown>) : undefined,
+        seedModel: args.seed.model,
+        followupModel
+      })
     },
     ops,
     context: {

@@ -2,6 +2,7 @@ import path from 'path';
 const fetch = globalThis.fetch;
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
 import { resolveRccConfigFile } from '../config/user-data-paths.js';
+import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 import {
   describeHealthProbeFailure,
   probeRouteCodexHealth,
@@ -72,12 +73,6 @@ export type DetectLocalServerInstanceDetailedResult =
 //   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 // }
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  return String(error ?? 'unknown');
-}
 
 function shouldLogNonBlockingStage(stage: string): boolean {
   const now = Date.now();

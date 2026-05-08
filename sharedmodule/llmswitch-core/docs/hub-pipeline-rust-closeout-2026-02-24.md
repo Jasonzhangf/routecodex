@@ -35,7 +35,6 @@
   - `node scripts/tests/coverage-hub-chat-process-servertool-orchestration.mjs`
   - `node scripts/tests/servertool-continue-execution-followup.mjs`
 - Resp outbound:
-  - `node scripts/tests/coverage-hub-resp-outbound-client-semantics.mjs`
   - `node scripts/tests/coverage-hub-resp-outbound-client-remap-protocol-switch.mjs`
   - `node scripts/tests/coverage-hub-resp-outbound-sse-stream.mjs`
 
@@ -55,7 +54,6 @@
 
 ## Risk List
 - `resp_process_stage2_finalize` Rust input fields `stream/endpoint/requestId` are currently parsed but not used for behavior branching.
-- Native wrappers intentionally keep fallback paths for compatibility (`fallbackOrThrow`), so strict no-fallback behavior still depends on runtime policy flags.
 - Rust crate still has a large number of dead-code warnings; this does not block runtime but increases maintenance noise.
 
 ## Conclusion

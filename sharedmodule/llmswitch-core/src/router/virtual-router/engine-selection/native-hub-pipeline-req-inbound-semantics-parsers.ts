@@ -1,17 +1,9 @@
+import { formatUnknownError } from '../../../shared/common-utils.js';
+
 const NON_BLOCKING_REQ_INBOUND_LOG_THROTTLE_MS = 60_000;
 const nonBlockingReqInboundLogState = new Map<string, number>();
 const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-req-inbound-semantics-parsers.parse-failed');
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error ?? 'unknown');
-  }
-}
 
 function logNativeReqInboundNonBlocking(stage: string, error: unknown): void {
   const now = Date.now();

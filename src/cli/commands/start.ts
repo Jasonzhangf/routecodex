@@ -25,19 +25,10 @@ import {
   stageSelectorNeedsHubSnapshots
 } from '../../utils/snapshot-stage-policy.js';
 import type { StartCommandContext, StartCommandOptions } from './start-types.js';
+import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 
 export type { StartCommandContext, StartCommandOptions } from './start-types.js';
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logStartNonBlocking(
   ctx: StartCommandContext,

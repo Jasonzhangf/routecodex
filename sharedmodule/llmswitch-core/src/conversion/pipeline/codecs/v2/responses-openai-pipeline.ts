@@ -19,20 +19,11 @@ import {
 import { buildAdapterContextFromPipeline } from '../../hooks/adapter-context.js';
 import { chatEnvelopeToStandardizedWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
 import { standardizedToChatEnvelopeWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
+import { formatUnknownError } from '../../../../shared/common-utils.js';
 
 const DEFAULT_RESPONSES_ENDPOINT = '/v1/responses';
 const RESPONSES_PROTOCOL = 'openai-responses';
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logResponsesOpenAiPipelineNonBlocking(
   stage: string,

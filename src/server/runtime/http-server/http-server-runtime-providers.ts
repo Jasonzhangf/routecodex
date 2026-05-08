@@ -13,6 +13,7 @@ import {
   startAntigravityWarmup
 } from './antigravity-startup-tasks.js';
 import { resolveProviderRoutingScope } from './provider-routing-scope.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
 type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   token_file?: unknown;
@@ -28,13 +29,6 @@ type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   accountAlias?: unknown;
   account_alias?: unknown;
 };
-
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error ?? 'unknown');
-}
 
 function logRuntimeProvidersNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {

@@ -1,8 +1,11 @@
+import * as fsp from 'node:fs/promises';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { FilterEngine } from '../../filters/index.js';
-import type { FilterContext, ToolFilterHints } from '../../filters/index.js';
-import { loadFieldMapConfig } from '../../filters/utils/fieldmap-loader.js';
+import type { FieldMapConfig, FilterContext, ToolFilterHints } from '../../filters/index.js';
 import { createSnapshotWriter } from '../snapshot-utils.js';
 import { normalizeChatResponseReasoningToolsWithNative as normalizeChatResponseReasoningTools } from '../../router/virtual-router/engine-selection/native-hub-bridge-action-semantics.js';
+import { formatUnknownError } from '../../shared/common-utils.js';
 
 interface RequestFilterOptions {
   entryEndpoint?: string;
@@ -37,16 +40,18 @@ const RESPONSE_FILTER_STAGES: Array<FilterContext['stage']> = [
   'response_finalize'
 ];
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
+async function loadFieldMapConfig(relativeJsonPath: string): Promise<FieldMapConfig | null> {
   try {
-    return JSON.stringify(error);
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const configPath = path.resolve(__dirname, '..', '..', 'filters', 'config', relativeJsonPath);
+    const text = await fsp.readFile(configPath, 'utf-8');
+    return JSON.parse(text) as FieldMapConfig;
   } catch {
-    return String(error);
+    return null;
   }
 }
+
 
 function logToolFilterNonBlockingError(
   stage: string,

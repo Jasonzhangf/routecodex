@@ -1,9 +1,8 @@
-import { OpenAIHttpProvider } from './openai-http-provider.js';
-import { ResponsesHttpProvider } from './responses-http-provider.js';
-import { AnthropicHttpProvider } from './anthropic-http-provider.js';
 import { DeepSeekHttpProvider } from './deepseek-http-provider.js';
-import { ChatHttpProvider } from './chat-http-provider.js';
 import { GeminiHttpProvider } from './gemini-http-provider.js';
+import { HttpTransportProvider } from './http-transport-provider.js';
+import { ResponsesProvider } from './responses-provider.js';
+import { AnthropicProtocolClient } from '../../../client/anthropic/anthropic-protocol-client.js';
 import { MockProvider } from '../../mock/index.js';
 import { GeminiCLIHttpProvider } from './gemini-cli-http-provider.js';
 import { MimowebProvider } from './mimoweb/mimoweb-provider.js';
@@ -231,11 +230,19 @@ export function instantiateProvider(
 
   switch (providerType) {
     case 'openai':
-      return new ChatHttpProvider(config, dependencies);
+      return new HttpTransportProvider(config, dependencies, 'openai-standard');
     case 'responses':
-      return new ResponsesHttpProvider(config, dependencies);
+      return new ResponsesProvider(
+        { ...config, config: { ...config.config, providerType: 'responses' } },
+        dependencies
+      );
     case 'anthropic':
-      return new AnthropicHttpProvider(config, dependencies);
+      return new HttpTransportProvider(
+        { ...config, config: { ...config.config, providerType: 'anthropic' } },
+        dependencies,
+        'anthropic-http-provider',
+        new AnthropicProtocolClient()
+      );
     case 'gemini': {
       const oauthType = config?.config?.auth?.type;
       if (oauthType === 'gemini-cli-oauth') {
@@ -248,13 +255,25 @@ export function instantiateProvider(
   }
 
   if (moduleType === 'openai-http-provider' || moduleType === 'openai-standard') {
-    return new OpenAIHttpProvider(config, dependencies);
+    return new HttpTransportProvider(
+      { ...config, config: { ...config.config, providerType: 'openai' } },
+      dependencies,
+      'openai-http-provider'
+    );
   }
   if (moduleType === 'responses-http-provider') {
-    return new ResponsesHttpProvider(config, dependencies);
+    return new ResponsesProvider(
+      { ...config, config: { ...config.config, providerType: 'responses' } },
+      dependencies
+    );
   }
   if (moduleType === 'anthropic-http-provider') {
-    return new AnthropicHttpProvider(config, dependencies);
+    return new HttpTransportProvider(
+      { ...config, config: { ...config.config, providerType: 'anthropic' } },
+      dependencies,
+      'anthropic-http-provider',
+      new AnthropicProtocolClient()
+    );
   }
   if (providerType === 'mimoweb') {
     return new MimowebProvider(config, dependencies);

@@ -15,17 +15,8 @@ import { buildInfo } from '../../../build-info.js';
 import { logProcessLifecycleSync } from '../../../utils/process-lifecycle-logger.js';
 import { setShutdownCallerContext } from '../../../utils/shutdown-caller-context.js';
 import { loadProviderConfigsV2 } from '../../../config/provider-v2-loader.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logRoutesNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {

@@ -1,20 +1,11 @@
 import fsp from 'fs/promises';
 import path from 'path';
+import { formatUnknownError, isRecord } from './common-utils.js';
 
 const DEFAULT_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS = 50;
 const SNAPSHOT_RETENTION_NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const snapshotRetentionNonBlockingLogState = new Map<string, number>();
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logSnapshotRequestRetentionNonBlockingError(
   stage: string,

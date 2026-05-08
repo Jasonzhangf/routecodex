@@ -9,17 +9,8 @@ import { getSessionClientRegistry } from './session-client-registry.js';
 import { resolveTmuxSessionIdAndSource } from './session-scope-resolution.js';
 import { evaluateTmuxScopeCleanup } from './tmux-scope-cleanup-policy.js';
 import { isTmuxSessionAlive, resolveTmuxSessionWorkingDirectory } from './tmux-session-probe.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logExecutorMetadataNonBlocking(
   stage: string,

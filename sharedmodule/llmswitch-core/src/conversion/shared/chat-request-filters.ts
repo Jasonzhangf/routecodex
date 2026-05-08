@@ -6,9 +6,6 @@ import { pruneChatRequestPayloadWithNative } from '../../router/virtual-router/e
 
 /**
  * Native-primary Chat request filters.
- *
- * Historical TS FilterEngine implementation archived at:
- * - src/conversion/shared/archive/chat-request-filters.ts
  */
 export async function runStandardChatRequestFilters(
   chatRequest: any,

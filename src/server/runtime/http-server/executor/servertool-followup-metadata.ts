@@ -142,8 +142,7 @@ export function buildServerToolNestedRequestMetadata(args: {
   if (
     args.requestSemantics &&
     typeof args.requestSemantics === 'object' &&
-    !Array.isArray(args.requestSemantics) &&
-    !('requestSemantics' in out)
+    !Array.isArray(args.requestSemantics)
   ) {
     out.requestSemantics = args.requestSemantics;
   }

@@ -1,3 +1,5 @@
+import { formatUnknownError } from '../../../shared/common-utils.js';
+
 export type PendingToolSyncPayload = {
   ready: boolean;
   insertAt: number;
@@ -160,16 +162,6 @@ const NON_BLOCKING_PARSE_LOG_THROTTLE_MS = 60_000;
 const nonBlockingParseLogState = new Map<string, number>();
 const JSON_PARSE_FAILED = Symbol('native-router-hotpath-analysis.parse-failed');
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error ?? 'unknown');
-  }
-}
 
 function logNativeRouterHotpathAnalysisNonBlocking(stage: string, error: unknown): void {
   const now = Date.now();

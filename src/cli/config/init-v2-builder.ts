@@ -1,4 +1,5 @@
 import type { UnknownRecord } from '../commands/init/shared.js';
+import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 
 const OPTIONAL_POLICY_KEYS = [
   'loadBalancing',
@@ -24,9 +25,6 @@ const LEGACY_TOP_LEVEL_KEYS = [
 export type RoutingConfig = Record<string, unknown>;
 export type PolicyOptions = Partial<Record<(typeof OPTIONAL_POLICY_KEYS)[number], Record<string, unknown>>>;
 
-function isRecord(value: unknown): value is UnknownRecord {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 function asRecord(value: unknown): UnknownRecord {
   return isRecord(value) ? value : {};

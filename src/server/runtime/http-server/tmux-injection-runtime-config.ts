@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { resolveRccConfigDir, resolveRccLogsDir } from '../../../config/user-data-paths.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -92,9 +93,6 @@ function readPositiveInt(value: unknown): number | undefined {
   return floored > 0 ? floored : undefined;
 }
 
-function isRecord(value: unknown): value is UnknownRecord {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
 
 function expandHome(value: string): string {
   if (!value.startsWith('~/')) {

@@ -3,7 +3,7 @@ import { runOutboundPipeline, type OutboundPlan } from '../../src/conversion/hub
 import type { AdapterContext, ChatEnvelope } from '../../src/conversion/hub/types/chat-envelope.js';
 import type { StageRecorder } from '../../src/conversion/hub/format-adapters/index.js';
 import { ChatFormatAdapter } from '../../src/conversion/hub/format-adapters/chat-format-adapter.js';
-import { ChatSemanticMapper } from '../../src/conversion/hub/semantic-mappers/chat-mapper.js';
+import { ChatSemanticMapper } from '../../src/conversion/hub/operation-table/semantic-mappers/chat-mapper.js';
 
 class MemoryRecorder implements StageRecorder {
   public stages: Array<{ stage: string; payload: object }> = [];

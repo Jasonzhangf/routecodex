@@ -7,6 +7,7 @@ import {
   resolveHeartbeatTtlMs
 } from './session-client-registry-utils.js';
 import { evaluateTmuxScopeCleanup } from './tmux-scope-cleanup-policy.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
 type CleanupSummary = {
   removedLegacyScopeFiles: number;
@@ -19,13 +20,6 @@ type CleanupSummary = {
   removedRegistryMappings: number;
   removedToolStateEntries: number;
 };
-
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error ?? 'unknown');
-}
 
 function logSessionStorageCleanupNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {
@@ -40,9 +34,6 @@ function logSessionStorageCleanupNonBlockingError(stage: string, error: unknown,
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 function parseJsonFile(filepath: string): Record<string, unknown> | null {
   try {

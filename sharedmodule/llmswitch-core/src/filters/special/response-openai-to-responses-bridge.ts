@@ -12,15 +12,11 @@ export class ResponseOpenAIToResponsesBridgeFilter implements Filter<JsonObject>
   readonly stage: FilterContext['stage'] = 'response_post';
 
   async apply(input: JsonObject, ctx: FilterContext): Promise<FilterResult<JsonObject>> {
-    try {
-      const requestId = ctx.requestId || `resp_${Date.now()}`;
+          const requestId = ctx.requestId || `resp_${Date.now()}`;
       const context = { requestId, endpoint: '/v1/responses', metadata: {} } as any;
       const bridged = buildResponsesPayloadFromChat(input as any, context);
       return { ok: true, data: bridged as unknown as JsonObject };
-    } catch {
-      // 桥接失败则保持原样（Fail Fast 由上层处理）
-      return { ok: true, data: input };
-    }
+
   }
 }
 

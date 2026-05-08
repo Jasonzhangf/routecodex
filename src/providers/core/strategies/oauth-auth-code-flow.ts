@@ -13,6 +13,7 @@ import { logOAuthDebug } from '../../auth/oauth-logger.js';
 import { formatOAuthErrorMessage } from '../../auth/oauth-error-message.js';
 import crypto from 'crypto';
 import { isPermanentOAuthRefreshErrorMessage } from './oauth-refresh-errors.js';
+import { isTruthyFlag } from '../../../utils/common-utils.js';
 
 /**
  * 授权码令牌响应
@@ -84,10 +85,6 @@ function resolveGoogleUiLanguageHint(): string | null {
   return raw;
 }
 
-function isTruthyFlag(value: string | undefined): boolean {
-  const raw = String(value || '').trim().toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
-}
 
 const normalizeFlowStyle = (value: string | undefined, fallback: FlowStyle): FlowStyle => {
   if (value === 'web' || value === 'standard' || value === 'legacy') {

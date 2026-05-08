@@ -8,6 +8,7 @@ import { registerClockRuntimeHooks } from './clock-runtime-hooks.js';
 import { registerHeartbeatRuntimeHooks } from './heartbeat-runtime-hooks.js';
 import { getSharedProviderTrafficGovernor } from './provider-traffic-governor.js';
 import { preloadCriticalBridgeRuntimeModules } from '../../../modules/llmswitch/bridge.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
 type RoutingProviderScope = {
   providerKeys: string[];
@@ -18,16 +19,6 @@ type RoutingProviderScope = {
 
 const TRUTHY_FLAG_SET = new Set(['1', 'true', 'yes', 'on']);
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logRuntimeSetupNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {

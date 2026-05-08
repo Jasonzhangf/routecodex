@@ -11,6 +11,7 @@ import {
 } from '../core/contracts/deepseek-provider-contract.js';
 import { resolveRccAuthDir, resolveRccCamoufoxFingerprintDir } from '../../config/user-data-paths.js';
 import { ensureCamoufoxFingerprintForToken, getCamoufoxProfileDir } from '../core/config/camoufox-launcher.js';
+import { formatUnknownError, isRecord, normalizeString } from '../../utils/common-utils.js';
 
 type DeepSeekAuthError = Error & {
   code?: string;
@@ -111,13 +112,6 @@ function logDeepSeekAccountNonBlocking(
   console.warn(`[DeepSeekAccount] ${operation} failed (non-blocking): ${reason}${suffix}`);
 }
 
-function normalizeString(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length ? trimmed : undefined;
-}
 
 function createDeepSeekAuthError(params: {
   code: DeepSeekErrorCode;
@@ -247,9 +241,6 @@ function readEnvBoolean(keys: string[], fallback: boolean): boolean {
   return fallback;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 function parseCamoufoxConfig(payload: unknown): CamoufoxFingerprintSnapshot | null {
   if (!isRecord(payload)) {

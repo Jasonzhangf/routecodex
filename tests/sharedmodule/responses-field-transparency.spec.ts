@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import { ResponsesSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/semantic-mappers/responses-mapper.js';
+import { ResponsesSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/responses-mapper.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import { buildResponsesPayloadFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
 import { registerResponsesPayloadSnapshot } from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.js';

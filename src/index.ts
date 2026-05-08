@@ -1278,12 +1278,12 @@ async function isServerHealthyQuick(port: number): Promise<boolean> {
     const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}${API_PATHS.HEALTH}`, {
       method: 'GET',
       signal: controller.signal
-    }).catch(() => null);
+    }).catch(() => { return null; });
     clearTimeout(timeout);
     if (!res || !res.ok) {
       return false;
     }
-    const data = await res.json().catch(() => null);
+    const data = await res.json().catch(() => { return null; });
     const status = typeof data?.status === 'string' ? data.status.toLowerCase() : '';
     return !!data && (status === 'healthy' || status === 'ready' || status === 'ok' || data?.ready === true || data?.pipelineReady === true);
   } catch (error) {
@@ -1520,7 +1520,7 @@ async function attemptHttpShutdown(port: number): Promise<boolean> {
     const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}${API_PATHS.SHUTDOWN}`, {
       method: 'POST',
       signal: controller.signal
-    }).catch(() => null);
+    }).catch(() => { return null; });
     clearTimeout(timeout);
     const ok = !!(res && res.ok);
     logProcessLifecycle({

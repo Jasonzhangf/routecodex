@@ -17,17 +17,8 @@ import {
 } from '../token-daemon/leader-lock.js';
 import { resolveRccPath } from '../config/user-data-paths.js';
 import { logProcessLifecycle } from '../utils/process-lifecycle-logger.js';
+import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logTokenDaemonCommandNonBlockingError(
   stage: string,

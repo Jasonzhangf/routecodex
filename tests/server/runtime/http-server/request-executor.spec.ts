@@ -70,8 +70,16 @@ function buildHandle(providerKey: string, processFn: () => Promise<unknown>): Pr
 }
 
 describe('HubRequestExecutor failover', () => {
+  let previousServerToolState: ReturnType<typeof getServerToolRuntimeState>;
+
   beforeEach(() => {
     __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
+    previousServerToolState = getServerToolRuntimeState();
+    setServerToolEnabled(false, 'request-executor.spec failover');
+  });
+
+  afterEach(() => {
+    setServerToolEnabled(previousServerToolState.enabled, previousServerToolState.updatedBy);
   });
 
   test('covers request-executor helper snapshots and truncation utilities', async () => {
@@ -422,6 +430,79 @@ describe('HubRequestExecutor failover', () => {
     expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       choices: [
         {
+          finish_reason: 'tool_calls',
+          message: {
+            role: 'assistant',
+            tool_calls: [
+              {
+                id: 'call_exec_1',
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  arguments: JSON.stringify({ cmd: 'pwd' })
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }, {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      },
+      __routecodex: {
+        serverToolFollowup: true,
+        serverToolFollowupSource: 'servertool.reasoning_stop_guard'
+      }
+    })).toBeNull();
+
+    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+      status: 'requires_action',
+      required_action: {
+        submit_tool_outputs: {
+          tool_calls: [
+            {
+              id: 'call_exec_2',
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                arguments: JSON.stringify({ cmd: 'ls' })
+              }
+            }
+          ]
+        }
+      },
+      output: [
+        {
+          type: 'function_call',
+          name: 'exec_command',
+          call_id: 'call_exec_2',
+          arguments: JSON.stringify({ cmd: 'ls' })
+        }
+      ]
+    }, {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      },
+      __routecodex: {
+        serverToolFollowup: true,
+        serverToolFollowupSource: 'servertool.reasoning_stop_guard'
+      }
+    })).toBeNull();
+
+    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+      choices: [
+        {
           finish_reason: 'stop',
           message: {
             content: '我已经完成了，下面给你结果。'
@@ -584,7 +665,7 @@ describe('HubRequestExecutor failover', () => {
         }
       ]
     }, 'on')).toMatchObject({
-      marker: 'responses_stopless_missing_reasoning_stop_finalization'
+      marker: 'derived_stopless_missing_reasoning_stop_finalization'
     });
 
     expect(__requestExecutorTestables.detectStoplessTerminationWithoutFinalization({
@@ -665,7 +746,7 @@ describe('HubRequestExecutor failover', () => {
       maxContextOverflowRetries: 2
     });
     expect(promptTooLongPlan).toEqual({
-      shouldRetry: false,
+      shouldRetry: true,
       blockingRecoverable: false
     });
 
@@ -707,6 +788,20 @@ describe('HubRequestExecutor failover', () => {
       },
       stage: 'provider.send'
     })).toBe('recoverable');
+
+    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
+      error: Object.assign(new Error('HTTP 404: {"detail":"Not Found"}'), {
+        code: 'HTTP_404',
+        statusCode: 404
+      }),
+      retryError: {
+        statusCode: 404,
+        errorCode: 'HTTP_404',
+        upstreamCode: 'HTTP_404',
+        reason: 'HTTP 404: {"detail":"Not Found"}'
+      },
+      stage: 'provider.send'
+    })).toBe('unrecoverable');
 
     expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
       error: Object.assign(new Error('tool history contract violated'), {
@@ -898,6 +993,46 @@ describe('HubRequestExecutor failover', () => {
         })
       }));
       expect(Array.from(networkExcluded)).toEqual([]);
+
+      const notFoundExcluded = new Set<string>();
+      const notFoundExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+        error: Object.assign(new Error('HTTP 404: {"detail":"Not Found"}'), {
+          code: 'HTTP_404',
+          statusCode: 404
+        }),
+        retryError: {
+          statusCode: 404,
+          errorCode: 'HTTP_404',
+          upstreamCode: 'HTTP_404',
+          reason: 'HTTP 404: {"detail":"Not Found"}'
+        },
+        attempt: 1,
+        maxAttempts: 6,
+        providerKey: 'mimo.key1.mimo-v2.5-pro',
+        runtimeKey: 'runtime:mimo',
+        logicalRequestChainKey: 'req-http-404',
+        logicalChainRetryLimitStageRequestId: 'req-http-404',
+        routePool: [
+          'mimo.key1.mimo-v2.5-pro',
+          'whitedrem.key1.deepseek-v4-pro'
+        ],
+        runtimeManager: {
+          resolveRuntimeKey: () => 'runtime:mimo'
+        },
+        excludedProviderKeys: notFoundExcluded,
+        recordAttempt,
+        logStage: () => undefined,
+        status: 404
+      });
+      expect(notFoundExecutionPlan).toEqual({
+        shouldRetry: false,
+        blockingRecoverable: false,
+        excludedCurrentProvider: false,
+        holdOnLastAvailable429: false,
+        retryBackoffMs: 0,
+        recoverableBackoffMs: 0,
+        antigravityRetrySignal: null
+      });
 
       const sqliteBusyExcluded = new Set<string>();
       const sqliteBusyExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
@@ -1374,6 +1509,98 @@ describe('HubRequestExecutor failover', () => {
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('provider=crs.key2.gpt-5.3-codex'));
       expect(successProcess).toHaveBeenCalledTimes(0);
     } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  test('prints compact aggregated provider-switch logs without dedupe key payload', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => { });
+    const nowSpy = jest.spyOn(Date, 'now');
+    try {
+      let nowCall = 0;
+      nowSpy.mockImplementation(() => {
+        nowCall += 1;
+        if (nowCall <= 1) {
+          return 0;
+        }
+        if (nowCall === 2) {
+          return 1_000;
+        }
+        if (nowCall === 3) {
+          return 1_500;
+        }
+        return 7_000;
+      });
+      const executor = createRequestExecutor({
+        runtimeManager: undefined as any,
+        getHubPipeline: undefined as any,
+        getModuleDependencies: undefined as any,
+        logStage: jest.fn(),
+        stats: new StatsManager()
+      });
+      const logger = (executor as any).logProviderRetrySwitch.bind(executor);
+      logger({
+        requestId: 'req-agg-1',
+        attempt: 1,
+        maxAttempts: 6,
+        providerKey: 'mimo.key1.mimo-v2.5-pro',
+        nextAttempt: 2,
+        reason: 'HTTP 504: <!DOCTYPE html><html><body>gateway timeout</body></html>',
+        backoffMs: 1000,
+        statusCode: 504,
+        errorCode: 'HTTP_504',
+        upstreamCode: 'HTTP_504',
+        switchAction: 'retry_same_provider',
+        backoffScope: 'recoverable',
+        decisionLabel: 'recoverable_backoff_same_provider',
+        stage: 'provider.send'
+      });
+      logger({
+        requestId: 'req-agg-2',
+        attempt: 1,
+        maxAttempts: 6,
+        providerKey: 'mimo.key1.mimo-v2.5-pro',
+        nextAttempt: 2,
+        reason: 'HTTP 504: <!DOCTYPE html><html><body>gateway timeout again</body></html>',
+        backoffMs: 1000,
+        statusCode: 504,
+        errorCode: 'HTTP_504',
+        upstreamCode: 'HTTP_504',
+        switchAction: 'retry_same_provider',
+        backoffScope: 'recoverable',
+        decisionLabel: 'recoverable_backoff_same_provider',
+        stage: 'provider.send'
+      });
+      const lines = warnSpy.mock.calls.map((call) => String(call[0] ?? ''));
+      expect(lines.some((line) => line.includes('[provider-switch] aggregated'))).toBe(false);
+      logger({
+        requestId: 'req-agg-3',
+        attempt: 1,
+        maxAttempts: 6,
+        providerKey: 'mimo.key1.mimo-v2.5-pro',
+        nextAttempt: 2,
+        reason: 'HTTP 504: <!DOCTYPE html><html><body>gateway timeout final</body></html>',
+        backoffMs: 1000,
+        statusCode: 504,
+        errorCode: 'HTTP_504',
+        upstreamCode: 'HTTP_504',
+        switchAction: 'retry_same_provider',
+        backoffScope: 'recoverable',
+        decisionLabel: 'recoverable_backoff_same_provider',
+        stage: 'provider.send'
+      });
+      const finalLines = warnSpy.mock.calls.map((call) => String(call[0] ?? ''));
+      const aggregated = finalLines.find((line) => line.includes('[provider-switch] aggregated'));
+      expect(aggregated).toBeDefined();
+      expect(aggregated).toContain('provider=mimo.key1.mimo-v2.5-pro');
+      expect(aggregated).toContain('status=504');
+      expect(aggregated).toContain('code=HTTP_504');
+      expect(aggregated).toContain('upstreamCode=HTTP_504');
+      expect(aggregated).toContain('suppressed=1');
+      expect(aggregated).not.toContain('aggregated key=');
+      expect(aggregated).not.toContain('<!DOCTYPE html>');
+    } finally {
+      nowSpy.mockRestore();
       warnSpy.mockRestore();
     }
   });
@@ -2730,9 +2957,9 @@ describe('HubRequestExecutor failover', () => {
         reason: 'fetch failed'
       });
 
-      expect(delayA1).toBe(1000);
-      expect(delayA2).toBe(2000);
-      expect(delayB1).toBe(1000);
+      expect(delayA1).toBe(2000);
+      expect(delayA2).toBe(4000);
+      expect(delayB1).toBe(2000);
     } finally {
       if (prevBase === undefined) {
         delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
@@ -2944,15 +3171,15 @@ describe('HubRequestExecutor provider transport backoff', () => {
       statusCode: 429
     };
 
-    expect(__requestExecutorTestables.consumeProviderTransportBackoffMs(key!, retryable429)).toBe(1000);
-    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(1000);
-
-    jest.setSystemTime(new Date('2026-04-22T13:00:00.500Z'));
-    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(500);
-
-    jest.setSystemTime(new Date('2026-04-22T13:00:01.000Z'));
     expect(__requestExecutorTestables.consumeProviderTransportBackoffMs(key!, retryable429)).toBe(2000);
     expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(2000);
+
+    jest.setSystemTime(new Date('2026-04-22T13:00:00.500Z'));
+    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(1500);
+
+    jest.setSystemTime(new Date('2026-04-22T13:00:02.000Z'));
+    expect(__requestExecutorTestables.consumeProviderTransportBackoffMs(key!, retryable429)).toBe(4000);
+    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(4000);
 
     __requestExecutorTestables.clearProviderTransportBackoff(key!);
     expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(0);

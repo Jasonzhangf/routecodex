@@ -1,12 +1,13 @@
 import type { StageRecorder } from '../../../../format-adapters/index.js';
 import type { JsonObject } from '../../../../types/json.js';
-import type { ChatReasoningMode } from '../../../../../shared/openai-finalizer.js';
 import { buildProcessedRequestFromChatResponse } from '../../../../response/chat-response-utils.js';
 import type { ProcessedRequest } from '../../../../types/standardized.js';
 import { recordStage } from '../../../stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../../hub-stage-timing.js';
 import { finalizeRespProcessChatResponseWithNative } from '../../../../../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
 import { filterOutExecutedServerToolCalls } from '../../../../../../servertool/strip-servertool-calls.js';
+
+export type ChatReasoningMode = 'keep' | 'drop' | 'append_to_content';
 
 export interface RespProcessStage2FinalizeOptions {
   payload: JsonObject;

@@ -5,6 +5,7 @@
  */
 
 import { importCoreDist, requireCoreDist } from './module-loader.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
 type AntigravitySessionSignatureModule = {
   extractAntigravityGeminiSessionId?: (payload: unknown) => string;
@@ -21,16 +22,6 @@ type AntigravitySessionSignatureModule = {
 let cachedAntigravitySignatureModule: AntigravitySessionSignatureModule | null = null;
 let antigravitySignatureModuleWarmupPromise: Promise<AntigravitySessionSignatureModule | null> | null = null;
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logAntigravitySignatureNonBlocking(
   stage: string,

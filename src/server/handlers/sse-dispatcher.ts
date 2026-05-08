@@ -3,6 +3,7 @@ import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { Response } from 'express';
 import { logPipelineStage } from '../utils/stage-logger.js';
 import { applyResponseHeaders } from './response-headers.js';
+import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on']);
 const FALSY_VALUES = new Set(['0', 'false', 'no', 'off']);
@@ -29,13 +30,6 @@ type FlushableResponse = Response & {
 type PipeCapable = { pipe?: unknown };
 type WebReadable = { getReader?: () => unknown };
 type AsyncIterableLike = { [Symbol.asyncIterator]?: () => AsyncIterator<unknown> };
-
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error ?? 'unknown');
-}
 
 function logSseDispatchNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {

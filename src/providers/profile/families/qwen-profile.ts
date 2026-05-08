@@ -10,6 +10,7 @@ import {
   buildQwenStainlessHeaderEntries,
   resolveQwenCodeUserAgent
 } from '../../core/utils/qwen-client-fingerprint.js';
+import { isRecord } from '../../../utils/common-utils.js';
 
 type UnknownRecord = Record<string, unknown>;
 type QwenMessageNode = Record<string, unknown>;
@@ -80,10 +81,6 @@ function resolveDashScopeAuthType(input: ApplyRequestHeadersInput): string {
 
 function hasConfiguredOAuthClient(auth: ResolveOAuthTokenFileInput['auth']): boolean {
   return !!auth.clientId || !!auth.tokenUrl || !!auth.deviceCodeUrl;
-}
-
-function isRecord(value: unknown): value is UnknownRecord {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 function toTextPart(text: string): UnknownRecord {

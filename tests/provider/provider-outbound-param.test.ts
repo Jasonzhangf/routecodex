@@ -21,12 +21,12 @@ jest.mock('../../src/modules/llmswitch/bridge.ts', () => ({
   saveRoutingInstructionStateAsync: () => {},
 }), { virtual: true });
 
-import { ChatHttpProvider } from '../../src/providers/core/runtime/chat-http-provider.ts';
-import { AnthropicHttpProvider } from '../../src/providers/core/runtime/anthropic-http-provider.ts';
+import { HttpTransportProvider } from '../../src/providers/core/runtime/http-transport-provider.ts';
+import { AnthropicProtocolClient } from '../../src/client/anthropic/anthropic-protocol-client.js';
 import { attachProviderRuntimeMetadata } from '../../src/providers/core/runtime/provider-runtime-metadata.ts';
 
 // Lazy import for Responses to allow mock above
-const importResponsesProvider = async () => (await import('../../src/providers/core/runtime/responses-http-provider.ts')).ResponsesHttpProvider as any;
+const importResponsesProvider = async () => (await import('../../src/providers/core/runtime/responses-provider.ts')).ResponsesProvider as any;
 
 const deps: any = { logger: { logModule: () => {}, logProviderRequest: () => {} }, errorHandlingCenter: { handleError: async () => {} } };
 
@@ -81,12 +81,12 @@ describe('Param: chat → all providers (openai/responses/anthropic)', () => {
       const messages = extractChatMessagesFromAggregate(agg);
 
       test('openai-standard outbound', async () => {
-        const provider = new ChatHttpProvider({
+        const provider = new HttpTransportProvider({
           type: 'openai-standard',
           config: {
             providerType: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', auth: { type: 'apikey', apiKey: 'testapikey12345' }, overrides: { maxRetries: 0 }
           }
-        } as any, deps);
+        } as any, deps, 'openai-standard');
         (provider as any).httpClient = new FakeHttpClient({}); await provider.initialize();
         const request: any = { data: { messages, model: 'gpt-4o-mini', stream: true, metadata: { debug: true } } };
         attachProviderRuntimeMetadata(request, { requestId: 'req_param_openai', providerType: 'openai', providerProtocol: 'openai-chat', providerId: 'openai' });
@@ -102,8 +102,8 @@ describe('Param: chat → all providers (openai/responses/anthropic)', () => {
       });
 
       test('responses outbound', async () => {
-        const ResponsesHttpProvider = await importResponsesProvider();
-        const provider = new ResponsesHttpProvider({
+        const ResponsesProvider = await importResponsesProvider();
+        const provider = new ResponsesProvider({
           type: 'responses-http-provider',
           config: {
             providerType: 'responses', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', auth: { type: 'apikey', apiKey: 'testapikey12345' }, overrides: { maxRetries: 0 }
@@ -130,12 +130,12 @@ describe('Param: chat → all providers (openai/responses/anthropic)', () => {
       });
 
       test('anthropic outbound', async () => {
-        const provider = new AnthropicHttpProvider({
+        const provider = new HttpTransportProvider({
           type: 'anthropic-http-provider',
           config: {
             providerType: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', model: 'claude-3-5-sonnet', auth: { type: 'apikey', apiKey: 'testapikey12345' }, overrides: { maxRetries: 0 }
           }
-        } as any, deps);
+        } as any, deps, 'anthropic-http-provider', new AnthropicProtocolClient());
         (provider as any).httpClient = new FakeHttpClient({}); await provider.initialize();
         const request: any = { data: { messages, model: 'claude-3-5-sonnet', stream: true, metadata: { debug: true } } };
         attachProviderRuntimeMetadata(request, { requestId: 'req_param_anthropic', providerType: 'anthropic', providerProtocol: 'anthropic-messages', providerId: 'anthropic' });

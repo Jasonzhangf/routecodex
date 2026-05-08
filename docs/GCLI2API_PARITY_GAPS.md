@@ -45,7 +45,7 @@
 
 ### 2.1 已覆盖点
 
-- `llmswitch-core/src/conversion/shared/thought-signature-validator.ts`：thinking 块签名校验/清理（与 gcli2api 的逻辑一致）
+- thinking 块签名校验/清理已收口到 native shared conversion semantics（不再保留单独 TS validator 壳）
 - Gemini ↔ OpenAI 转换中已存在 `skip_thought_signature_validator` dummy 签名兜底（用于满足上游结构要求）
 
 ### 2.2 仍缺口点（需要补齐/确认）
@@ -95,4 +95,3 @@
 1. 是否默认对 `gemini-chat`/`antigravity` 开启 tool_call_id 的 thoughtSignature 编码？还是仅在 `ROUTECODEX_PRESERVE_THOUGHT_SIGNATURE=1` 时开启？
 2. 分隔符是否固定为 `__thought__`（与 gcli2api 对齐），还是做成 profile 可覆盖？
 3. 429 容量耗尽的“model 系列”归并规则：按 `providerKey::model` 归并，还是按 `providerId::modelFamily`（例如 `claude-sonnet-4-5-*`）归并？
-

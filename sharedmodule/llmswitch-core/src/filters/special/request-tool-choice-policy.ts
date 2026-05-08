@@ -10,8 +10,7 @@ export class RequestToolChoicePolicyFilter implements Filter<JsonObject> {
   readonly stage: FilterContext['stage'] = 'request_post';
 
   apply(input: JsonObject): FilterResult<JsonObject> {
-    try {
-      const out = JSON.parse(JSON.stringify(input || {}));
+          const out = JSON.parse(JSON.stringify(input || {}));
       const tools = Array.isArray((out as any).tools) ? ((out as any).tools as any[]) : [];
       if (tools.length > 0) {
         const hasOwn = Object.prototype.hasOwnProperty.call(out as any, 'tool_choice');
@@ -22,8 +21,6 @@ export class RequestToolChoicePolicyFilter implements Filter<JsonObject> {
         if (Object.prototype.hasOwnProperty.call(out as any, 'tool_choice')) delete (out as any).tool_choice;
       }
       return { ok: true, data: out };
-    } catch {
-      return { ok: true, data: input };
-    }
+
   }
 }

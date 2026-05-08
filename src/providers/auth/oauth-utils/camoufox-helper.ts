@@ -1,36 +1,15 @@
 /**
  * Camoufox Helper for OAuth
  *
- * Opens Google account verification in Camoufox browser.
+ * Re-exports resolveCamoufoxAliasForAuth from canonical path-resolver.
+ * openGoogleAccountVerificationInCamoufox remains the unique implementation here.
  */
 
 import path from 'path';
 import { openAuthInCamoufox } from '../../core/config/camoufox-launcher.js';
+import { resolveCamoufoxAliasForAuth, type ExtendedOAuthAuth } from '../oauth-lifecycle/path-resolver.js';
 
-type ExtendedOAuthAuth = {
-  tokenFile?: string;
-};
-
-/**
- * Resolve Camoufox alias from auth configuration
- */
-export function resolveCamoufoxAliasForAuth(providerType: string, auth: ExtendedOAuthAuth): string {
-  const raw = typeof auth.tokenFile === 'string' ? auth.tokenFile.trim() : '';
-  if (raw && !raw.includes('/') && !raw.includes('\\') && !raw.endsWith('.json')) {
-    return raw;
-  }
-  const base = raw ? path.basename(raw) : '';
-  const pt = String(providerType || '').trim().toLowerCase();
-  if (base && pt) {
-    const re = new RegExp(`^${pt}-oauth-\\d+(?:-(.+))?\\.json$`, 'i');
-    const m = base.match(re);
-    const alias = m && m[1] ? String(m[1]).trim() : '';
-    if (alias) {
-      return alias;
-    }
-  }
-  return 'default';
-}
+export { resolveCamoufoxAliasForAuth };
 
 /**
  * Open Google account verification URL in Camoufox browser
@@ -61,8 +40,9 @@ export async function openGoogleAccountVerificationInCamoufox(args: {
     if (ok) {
       console.warn(`[OAuth] Google account verification opened in Camoufox (provider=${providerType} alias=${alias}).`);
     }
-  } catch {
-    // best-effort; never block requests
+  } catch (error) {
+    // best-effort; log but never block requests
+    console.warn('[OAuth] Failed to open Camoufox for Google verification', { providerType, alias, error });
   } finally {
     if (prevBrowser === undefined) {
       delete process.env.ROUTECODEX_OAUTH_BROWSER;

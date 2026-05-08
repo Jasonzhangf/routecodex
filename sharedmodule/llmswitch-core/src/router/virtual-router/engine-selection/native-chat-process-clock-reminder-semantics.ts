@@ -3,21 +3,12 @@ import {
   isNativeDisabledByEnv
 } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
+import { formatUnknownError } from '../../../shared/common-utils.js';
 
 const NON_BLOCKING_CLOCK_REMINDER_LOG_THROTTLE_MS = 60_000;
 const nonBlockingClockReminderLogState = new Map<string, number>();
 const JSON_PARSE_FAILED = Symbol('native-chat-process-clock-reminder-semantics.parse-failed');
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error ?? 'unknown');
-  }
-}
 
 function logNativeClockReminderNonBlocking(stage: string, error: unknown): void {
   const now = Date.now();

@@ -1,4 +1,5 @@
 import { API_PATHS, HTTP_PROTOCOLS } from '../constants/index.js';
+import { formatUnknownError, isRecord } from './common-utils.js';
 
 type ProbeFailureKind =
   | 'timeout'
@@ -55,13 +56,6 @@ type RawHttpResponse =
 type TimedFetchResult =
   | { ok: true; response: RawHttpResponse; status: number }
   | { ok: false; kind: 'timeout' | 'network_error'; errorMessage: string };
-
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error ?? 'unknown');
-}
 
 function compactSnippet(text: string, max = 180): string {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();

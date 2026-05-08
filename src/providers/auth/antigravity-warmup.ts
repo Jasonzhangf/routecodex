@@ -7,6 +7,16 @@ import { resolveAntigravityUserAgent } from './antigravity-user-agent.js';
 import { clearAntigravityReauthRequired, getAntigravityReauthRequiredRecord } from './antigravity-reauth-state.js';
 import { getCamoufoxProfileDir } from '../core/config/camoufox-launcher.js';
 
+function logAntigravityWarmupNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[antigravity-warmup] ${stage} failed (non-blocking): ${String(error instanceof Error ? error.message : error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
+
 export type AntigravityWarmupCheckResult =
   | {
       ok: true;
@@ -119,13 +129,19 @@ export async function warmupCheckAntigravityAlias(alias: string): Promise<Antigr
     }
   })();
 
-  let reauth = await getAntigravityReauthRequiredRecord(normalizedAlias).catch(() => null);
+  let reauth: Awaited<ReturnType<typeof getAntigravityReauthRequiredRecord>> | null = null;
+  try { reauth = await getAntigravityReauthRequiredRecord(normalizedAlias); } catch (e) {
+    logAntigravityWarmupNonBlockingError('get_reauth_record', e, { alias: normalizedAlias });
+  }
   if (reauth && reauth.provider !== 'antigravity') {
     // Avoid cross-provider alias collisions (e.g. gemini-cli vs antigravity).
     reauth = null;
   }
 
-  const fp = await loadAntigravityCamoufoxFingerprint(normalizedAlias).catch(() => null);
+  let fp: Awaited<ReturnType<typeof loadAntigravityCamoufoxFingerprint>> | null = null;
+  try { fp = await loadAntigravityCamoufoxFingerprint(normalizedAlias); } catch (e) {
+    logAntigravityWarmupNonBlockingError('load_fingerprint', e, { alias: normalizedAlias });
+  }
   if (!fp && !reauth) {
     return {
       ok: false,

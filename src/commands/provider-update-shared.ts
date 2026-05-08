@@ -4,6 +4,8 @@ import readline from 'node:readline';
 
 import { resolveRccProviderDir } from '../config/user-data-paths.js';
 import type { UnknownRecord } from '../config/virtual-router-types.js';
+import { formatUnknownError, isRecord } from '../utils/common-utils.js';
+export { isRecord };
 
 export type ProviderUpdateAuth = {
   type: 'apikey' | 'oauth';
@@ -134,9 +136,6 @@ export function readStringArray(value: unknown): string[] | undefined {
   return out.length ? out : undefined;
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 export function extractApiKeyFromAuthNode(authNode: Record<string, unknown>): string | undefined {
   const direct = readString(authNode.apiKey);

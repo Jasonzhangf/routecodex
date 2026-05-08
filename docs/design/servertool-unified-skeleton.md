@@ -47,7 +47,7 @@
 ### 阶段 3：servertool orchestration（唯一消费入口）
 - 责任：
   - 统一消费 internal servertool：
-    - `reasoning.stop`
+    - `reasoning.stop`（完成型 stop 必须附带 ssot_assessment：feature 要声明是否唯一实现点，bug fix 要声明是否最佳修复点，并给出 rationale）
     - `review`
     - `clock`
     - `continue_execution`

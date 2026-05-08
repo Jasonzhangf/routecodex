@@ -5,22 +5,13 @@
  */
 
 import type { UsageMetrics } from '../stats-manager.js';
+import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
 
 export { type UsageMetrics };
 
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logUsageAggregatorNonBlockingError(
   stage: string,

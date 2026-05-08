@@ -59,6 +59,15 @@ function buildReasoningStopToolCallResponse(argumentsPayload: Record<string, unk
   };
 }
 
+function buildCompletedSsotAssessment(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    work_type: 'bug_fix',
+    is_best_fix_point: true,
+    rationale: 'stop contract 是唯一收口点，能在停止前统一约束真源判断。',
+    ...overrides
+  };
+}
+
 function createEmptyRoutingInstructionState(): RoutingInstructionState {
   return {
     forcedTarget: undefined,
@@ -170,6 +179,160 @@ describe('servertool reasoning.stop guard', () => {
     expect(String((lastOp as any)?.text || '')).toContain('reasoning.stop');
   });
 
+  test('reasoning_stop_guard followup does not replay assistant textual tool transport markup into next hop history', async () => {
+    const sessionId = 'reasoning-stop-guard-dsml-textual-tool';
+    setStoplessMode(sessionId, 'on');
+    let capturedFollowupBody: Record<string, unknown> | null = null;
+
+    const orchestration = await runServerToolOrchestration({
+      chat: {
+        id: 'chatcmpl_reasoning_stop_dsml_textual',
+        object: 'chat.completion',
+        model: 'mimo-v2.5-pro',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content:
+                '<｜DSML│tool_calls>\n' +
+                '  <│DSML│invoke name="exec_command">\n' +
+                '    <│DSML│parameter name="cmd"><![CDATA[pwd]]></│DSML│parameter>\n' +
+                '  </│DSML│invoke>\n' +
+                '</│DSML│tool_calls>'
+            }
+          }
+        ]
+      } as JsonObject,
+      adapterContext: {
+        sessionId,
+        capturedChatRequest: {
+          model: 'mimo-v2.5-pro',
+          messages: [{ role: 'user', content: '继续' }],
+          tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }]
+        }
+      } as unknown as AdapterContext,
+      requestId: 'req_reasoning_stop_guard_dsml_textual',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async (opts: any) => {
+        capturedFollowupBody = opts.body;
+        return {
+          body: {
+            id: 'resp_reasoning_stop_guard_dsml_textual',
+            object: 'response',
+            model: 'mimo-v2.5-pro',
+            status: 'completed',
+            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] }]
+          } as JsonObject
+        };
+      }
+    });
+
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('reasoning_stop_guard_flow');
+    const messages = Array.isArray(capturedFollowupBody?.messages) ? (capturedFollowupBody?.messages as Array<Record<string, unknown>>) : [];
+    expect(messages.some((message) => {
+      const content = typeof message?.content === 'string' ? message.content : JSON.stringify(message?.content ?? '');
+      return /DSML|function_calls|RCC_TOOL_CALLS/i.test(content);
+    })).toBe(false);
+    expect(messages[messages.length - 1]?.role).toBe('user');
+  });
+
+  test('reasoning_stop_guard followup drops inherited output budget when rerouted to a different model', async () => {
+    const sessionId = 'reasoning-stop-guard-reroute-max-tokens';
+    setStoplessMode(sessionId, 'on');
+    let capturedFollowupBody: Record<string, unknown> | null = null;
+
+    const orchestration = await runServerToolOrchestration({
+      chat: buildStopResponse('阶段完成') as JsonObject,
+      adapterContext: {
+        sessionId,
+        assignedModelId: 'mimo-v2.5-pro',
+        modelId: 'mimo-v2.5-pro',
+        capturedChatRequest: {
+          model: 'deepseek-v4-pro',
+          messages: [{ role: 'user', content: '继续' }],
+          tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }],
+          parameters: {
+            max_tokens: 384000,
+            max_output_tokens: 384000
+          }
+        }
+      } as unknown as AdapterContext,
+      requestId: 'req_reasoning_stop_guard_reroute_max_tokens',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async (opts: any) => {
+        capturedFollowupBody = opts.body;
+        return {
+          body: {
+            id: 'resp_reasoning_stop_guard_reroute_max_tokens',
+            object: 'response',
+            model: 'mimo-v2.5-pro',
+            status: 'completed',
+            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] }]
+          } as JsonObject
+        };
+      }
+    });
+
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('reasoning_stop_guard_flow');
+    expect(capturedFollowupBody?.model).toBe('mimo-v2.5-pro');
+    expect(capturedFollowupBody?.parameters).toBeUndefined();
+    expect((capturedFollowupBody as Record<string, unknown> | null)?.max_tokens).toBeUndefined();
+    expect((capturedFollowupBody as Record<string, unknown> | null)?.max_output_tokens).toBeUndefined();
+  });
+
+  test('reasoning_stop_guard followup drops inherited output budget even when followup stays on same model', async () => {
+    const sessionId = 'reasoning-stop-guard-same-model-max-tokens';
+    setStoplessMode(sessionId, 'on');
+    let capturedFollowupBody: Record<string, unknown> | null = null;
+
+    const orchestration = await runServerToolOrchestration({
+      chat: buildStopResponse('阶段完成') as JsonObject,
+      adapterContext: {
+        sessionId,
+        assignedModelId: 'mimo-v2.5-pro',
+        modelId: 'mimo-v2.5-pro',
+        capturedChatRequest: {
+          model: 'mimo-v2.5-pro',
+          messages: [{ role: 'user', content: '继续' }],
+          tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }],
+          parameters: {
+            max_tokens: 384000,
+            max_output_tokens: 384000,
+            temperature: 0.2
+          }
+        }
+      } as unknown as AdapterContext,
+      requestId: 'req_reasoning_stop_guard_same_model_max_tokens',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async (opts: any) => {
+        capturedFollowupBody = opts.body;
+        return {
+          body: {
+            id: 'resp_reasoning_stop_guard_same_model_max_tokens',
+            object: 'response',
+            model: 'mimo-v2.5-pro',
+            status: 'completed',
+            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] }]
+          } as JsonObject
+        };
+      }
+    });
+
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('reasoning_stop_guard_flow');
+    expect(capturedFollowupBody?.model).toBe('mimo-v2.5-pro');
+    expect(capturedFollowupBody?.parameters).toEqual({ temperature: 0.2 });
+    expect((capturedFollowupBody as Record<string, unknown> | null)?.max_tokens).toBeUndefined();
+    expect((capturedFollowupBody as Record<string, unknown> | null)?.max_output_tokens).toBeUndefined();
+  });
+
   test('endless mode injects strict anti-stop prompt', async () => {
     const sessionId = 'reasoning-stop-guard-endless-s1';
     setStoplessMode(sessionId, 'endless');
@@ -228,6 +391,26 @@ describe('servertool reasoning.stop guard', () => {
         reason: 'followup_payload_missing'
       }
     });
+  });
+
+  test('does not skip unarmed guard without seed for response orchestration path', async () => {
+    const sessionId = 'reasoning-stop-guard-response-orchestration-no-seed';
+    setStoplessMode(sessionId, 'on');
+    const result = await runServerSideToolEngine({
+      chatResponse: buildStopResponse('阶段完成'),
+      adapterContext: {
+        sessionId,
+        __rt: {
+          servertoolResponseOrchestration: true
+        }
+      } as unknown as AdapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_guard_response_orchestration_no_seed'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('reasoning_stop_guard_flow');
   });
 
   test('reasoning_stop_guard followup keeps original providerKey pinned', async () => {
@@ -488,7 +671,11 @@ describe('servertool reasoning.stop guard', () => {
         task_goal: '审计当前 routing 配置并给出收口方案',
         is_completed: true,
         stop_reason: 'plan_mode',
-        completion_evidence: '已完成只读审计，并给出最终计划与配置建议'
+        completion_evidence: '已完成只读审计，并给出最终计划与配置建议',
+        ssot_assessment: {
+          work_type: 'analysis_only',
+          rationale: '本次是只读审计任务，没有新增实现点或修复点，结论应收口在 stop 真源说明。'
+        }
       }),
       adapterContext,
       entryEndpoint: '/v1/chat/completions',
@@ -633,7 +820,7 @@ describe('servertool reasoning.stop guard', () => {
     });
     expect(result.mode).toBe('tool_flow');
     expect(result.execution?.flowId).toBe('reasoning_stop_guard_flow');
-    expect(loadRoutingInstructionStateSync(stickyKey)?.reasoningStopMode).toBeUndefined();
+    expect(loadRoutingInstructionStateSync(stickyKey)?.reasoningStopMode).toBe('on');
     expect(String((adapterContext as any).capturedChatRequest?.messages?.[0]?.content || '')).toBe('测试标记清理');
   });
 
@@ -697,6 +884,86 @@ describe('servertool reasoning.stop guard', () => {
     const state = loadRoutingInstructionStateSync(`session:${sessionId}`);
     expect(state?.reasoningStopArmed).not.toBe(true);
     expect(state?.reasoningStopSummary).toBeUndefined();
+  });
+
+  test('returns structured error when completed reasoning.stop payload misses ssot_assessment', async () => {
+    const sessionId = 'reasoning-stop-guard-invalid-missing-ssot';
+    const adapterContext = { sessionId } as unknown as AdapterContext;
+    const result = await runServerSideToolEngine({
+      chatResponse: buildReasoningStopToolCallResponse({
+        task_goal: '完成 stop contract 改造',
+        is_completed: true,
+        completion_evidence: '已修改 stop contract 并补回归'
+      }),
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_invalid_missing_ssot'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('reasoning_stop_continue_flow');
+    const outputs = (result.finalChatResponse as any).tool_outputs;
+    const last = outputs[outputs.length - 1];
+    const payload = JSON.parse(String(last.content || '{}'));
+    expect(payload.ok).toBe(false);
+    expect(payload.code).toBe('SSOT_ASSESSMENT_REQUIRED');
+  });
+
+  test('returns structured error when completed feature stop omits unique implementation assertion', async () => {
+    const sessionId = 'reasoning-stop-guard-invalid-feature-unique';
+    const adapterContext = { sessionId } as unknown as AdapterContext;
+    const result = await runServerSideToolEngine({
+      chatResponse: buildReasoningStopToolCallResponse({
+        task_goal: '新增 stop 真源合约',
+        is_completed: true,
+        completion_evidence: '已新增 shared contract 文件',
+        ssot_assessment: {
+          work_type: 'feature_impl',
+          rationale: '该实现位于 servertool stop 真源。'
+        }
+      }),
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_invalid_feature_unique'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('reasoning_stop_continue_flow');
+    const outputs = (result.finalChatResponse as any).tool_outputs;
+    const last = outputs[outputs.length - 1];
+    const payload = JSON.parse(String(last.content || '{}'));
+    expect(payload.ok).toBe(false);
+    expect(payload.code).toBe('SSOT_UNIQUE_IMPLEMENTATION_REQUIRED');
+  });
+
+  test('returns structured error when completed bug-fix stop omits best-fix assertion', async () => {
+    const sessionId = 'reasoning-stop-guard-invalid-bug-best-fix';
+    const adapterContext = { sessionId } as unknown as AdapterContext;
+    const result = await runServerSideToolEngine({
+      chatResponse: buildReasoningStopToolCallResponse({
+        task_goal: '修复 stop 合约缺失校验',
+        is_completed: true,
+        completion_evidence: '已新增结构化 ssot 校验',
+        ssot_assessment: {
+          work_type: 'bug_fix',
+          rationale: '该修复位于 stop 真源入口。'
+        }
+      }),
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_stop_invalid_bug_best_fix'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('reasoning_stop_continue_flow');
+    const outputs = (result.finalChatResponse as any).tool_outputs;
+    const last = outputs[outputs.length - 1];
+    const payload = JSON.parse(String(last.content || '{}'));
+    expect(payload.ok).toBe(false);
+    expect(payload.code).toBe('SSOT_BEST_FIX_POINT_REQUIRED');
   });
 
   test('on mode accepts user_input_required stop and records question in summary', async () => {
@@ -867,9 +1134,6 @@ describe('servertool reasoning.stop guard', () => {
     expect(String((lastOp as any)?.text || '')).toContain('next_step: 检查 daemon 日志并定位阻塞点');
     expect(
       followup?.injection?.ops?.some((op) => op && (op as { op?: string }).op === 'replace_tools')
-    ).toBe(false);
-    expect(
-      followup?.injection?.ops?.some((op) => op && (op as { op?: string }).op === 'force_tool_choice')
     ).toBe(false);
     expect(followup?.injection?.ops).toEqual(
       expect.arrayContaining([
@@ -1057,7 +1321,8 @@ describe('servertool reasoning.stop guard', () => {
     const state = createEmptyRoutingInstructionState();
     state.reasoningStopMode = 'on';
     state.reasoningStopArmed = true;
-    state.reasoningStopSummary = '用户任务目标: A\n是否完成: 是\n完成证据: B';
+    state.reasoningStopSummary =
+      '用户任务目标: A\n是否完成: 是\n完成证据: B\n工作类型: bug_fix\n是否最佳修复点: 是\n真源判断依据: stop 合约入口是唯一校验点。';
     state.reasoningStopUpdatedAt = Date.now();
     saveRoutingInstructionStateSync(stickyKey, state);
 

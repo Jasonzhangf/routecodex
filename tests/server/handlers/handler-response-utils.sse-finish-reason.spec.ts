@@ -157,4 +157,101 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"closeBeforeStreamEnd":true'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"sawTerminalEvent":false'));
   });
+
+  it('emits SSE error when stopless stream ends with finish_reason=stop but no reasoning.stop finalization', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      writeSnapshotViaHooks: async () => undefined
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const chunks: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+    const stream = Readable.from([
+      'event: content_block_delta\n',
+      'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"继续处理，但没有完成标记"}}\n\n',
+      'event: message_stop\n',
+      'data: {"type":"message_stop"}\n\n',
+      'data: [DONE]\n\n'
+    ]);
+
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: stream
+        },
+        usageLogInfo: {
+          stoplessMode: 'on',
+          stoplessArmed: true
+        }
+      } as any,
+      'req-stopless-sse-missing-finalization',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    await finished;
+
+    const output = chunks.join('');
+    expect(output).toContain('event: error');
+    expect(output).toContain('STOPLESS_FINALIZATION_MISSING');
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[host][req-stopless-sse-missing-finalization] stopless_finalization_missing'));
+  });
+
+  it('emits SSE error when stopless wrapper is already resolved to stop before stream end', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      writeSnapshotViaHooks: async () => undefined
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const chunks: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+    const stream = Readable.from([
+      'event: response.output_text.delta\n',
+      'data: {"type":"response.output_text.delta","delta":"阶段性输出"}\n\n',
+      'data: [DONE]\n\n'
+    ]);
+
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: stream,
+          __routecodex_finish_reason: 'stop'
+        },
+        usageLogInfo: {
+          stoplessMode: 'on',
+          stoplessArmed: true
+        }
+      } as any,
+      'req-stopless-sse-wrapper-stop',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    await finished;
+
+    const output = chunks.join('');
+    expect(output).toContain('event: error');
+    expect(output).toContain('STOPLESS_FINALIZATION_MISSING');
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[host][req-stopless-sse-wrapper-stop] stopless_finalization_missing'));
+  });
 });

@@ -7,6 +7,7 @@ import type {
 } from './provider-profile.js';
 
 import type { ApiKeyEntry, ApiKeyAuthConfig } from './provider-profile.js';
+import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 
 type UnknownRecord = Record<string, unknown>;
 type DeepSeekMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['deepseek']>;
@@ -415,9 +416,6 @@ function collectProviderNodes(config: UnknownRecord): Record<string, UnknownReco
   return entries;
 }
 
-function isRecord(value: unknown): value is UnknownRecord {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
 
 function pickString(value: unknown): string | undefined {
   if (typeof value === 'string') {

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
-import { OpenAIHttpProvider } from '../../../../src/providers/core/runtime/openai-http-provider.js';
+import { HttpTransportProvider } from '../../../../src/providers/core/runtime/http-transport-provider.js';
 
 const emptyDeps: ModuleDependencies = {} as ModuleDependencies;
 const tempDirs: string[] = [];
@@ -36,7 +36,7 @@ describe('Qwen OAuth recovery routing', () => {
       'utf8'
     );
 
-    const provider = new OpenAIHttpProvider(
+    const provider = new HttpTransportProvider(
       {
         id: 'test-qwen-recovery',
         type: 'openai-http-provider',

@@ -21,21 +21,12 @@ import type {
   NativeResolveResponsesBridgeToolsOutput,
   NativeResolveResponsesRequestBridgeDecisionsOutput
 } from './native-hub-bridge-action-semantics-types.js';
+import { formatUnknownError } from '../../../shared/common-utils.js';
 
 const NON_BLOCKING_PARSE_LOG_THROTTLE_MS = 60_000;
 const nonBlockingParseLogState = new Map<string, number>();
 const JSON_PARSE_FAILED = Symbol('native-hub-bridge-action-semantics.parse-failed');
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error ?? 'unknown');
-  }
-}
 
 function logNativeBridgeActionParserNonBlocking(stage: string, error: unknown): void {
   const now = Date.now();

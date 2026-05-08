@@ -9,6 +9,7 @@ import type { UnknownRecord } from '../config/virtual-router-types.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 
 export type ProviderCapabilityMap = Record<string, boolean>;
 type CompatProfileRuntimeMetadata = {
@@ -17,9 +18,6 @@ type CompatProfileRuntimeMetadata = {
 
 const compatProfileRuntimeMetadataCache = new Map<string, CompatProfileRuntimeMetadata | null>();
 
-function isRecord(value: unknown): value is UnknownRecord {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 export function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;

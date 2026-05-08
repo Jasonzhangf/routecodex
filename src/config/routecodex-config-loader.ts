@@ -5,6 +5,7 @@ import { resolveRccConfigFile } from './user-data-paths.js';
 import { buildProviderProfiles } from '../providers/profile/provider-profile-loader.js';
 import type { ProviderProfileCollection } from '../providers/profile/provider-profile.js';
 import { buildVirtualRouterInputV2 } from './virtual-router-builder.js';
+import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -61,9 +62,6 @@ async function resolveConfigPath(explicit?: string): Promise<string> {
   return resolveRccConfigFile();
 }
 
-function isRecord(value: unknown): value is UnknownRecord {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 export function collectV2ConfigSourceErrors(userConfig: UnknownRecord): string[] {
   const errors: string[] = [];

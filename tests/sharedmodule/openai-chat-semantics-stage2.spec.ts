@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { ChatSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/semantic-mappers/chat-mapper.js';
+import { ChatSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/chat-mapper.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 
 const mapper = new ChatSemanticMapper();

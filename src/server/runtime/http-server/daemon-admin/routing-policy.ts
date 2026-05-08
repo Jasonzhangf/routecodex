@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { stableStringify } from '../../../../monitoring/semantic-tracker.js';
+import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
 import {
   applyRoutingPolicyAtLocation,
   extractRoutingGroupsSnapshot
@@ -24,9 +25,6 @@ export type RoutingPolicySnapshotV1 = {
   };
 };
 
-function isRecord(value: unknown): value is UnknownRecord {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 function coercePolicyVirtualRouterNode(policy: unknown): UnknownRecord | null {
   if (!isRecord(policy)) {

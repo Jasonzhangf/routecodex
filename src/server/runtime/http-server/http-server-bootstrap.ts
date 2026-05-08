@@ -16,16 +16,6 @@ import { initializeRouteErrorHub as initializeRouteErrorHubImpl } from '../../..
 import { formatErrorForErrorCenter } from '../../../utils/error-center-payload.js';
 import { resolveRuntimePathFromModuleUrl } from '../../../utils/runtime-package-root.js';
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logBootstrapNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {
@@ -373,36 +363,17 @@ export function logStage(server: any, stage: string, requestId: string, details?
   logPipelineStage(stage, requestId, details);
 }
 
+// Delegates to canonical implementation in executor/provider-response-utils
+import { extractProviderModel as _extractProviderModel } from './executor/provider-response-utils.js';
 export function extractProviderModel(_server: any, payload?: Record<string, unknown>): string | undefined {
-  if (!payload) {
-    return undefined;
-  }
-  const source =
-    payload.data && typeof payload.data === 'object'
-      ? (payload.data as Record<string, unknown>)
-      : payload;
-  const raw = (source as Record<string, unknown>).model;
-  if (typeof raw === 'string' && raw.trim()) {
-    return raw.trim();
-  }
-  return undefined;
+  return _extractProviderModel(payload);
 }
 
+// Delegates to canonical implementation in executor/provider-response-utils
+import { buildProviderLabel as _buildProviderLabel } from './executor/provider-response-utils.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 export function buildProviderLabel(_server: any, providerKey?: string, model?: string): string | undefined {
-  const key = typeof providerKey === 'string' && providerKey.trim() ? providerKey.trim() : undefined;
-  const modelId = typeof model === 'string' && model.trim() ? model.trim() : undefined;
-  if (!key && !modelId) {
-    return undefined;
-  }
-  if (key && modelId) {
-    const normalizedKey = key.toLowerCase();
-    const normalizedModel = modelId.toLowerCase();
-    if (normalizedKey === normalizedModel || normalizedKey.endsWith(`.${normalizedModel}`)) {
-      return key;
-    }
-    return `${key}.${modelId}`;
-  }
-  return key || modelId;
+  return _buildProviderLabel(providerKey, model);
 }
 
 export function normalizeAuthType(_server: any, input: unknown): 'apikey' | 'oauth' {

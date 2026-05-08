@@ -4,6 +4,7 @@ import { applyReqProcessToolGovernanceWithNative } from '../../../router/virtual
 import { maybeInjectClockRemindersAndApplyDirectives } from './chat-process-clock-reminders.js';
 import { finalizeGovernedRequest } from './chat-process-governance-finalize.js';
 import { sanitizeChatProcessRequest } from './chat-process-request-sanitizer.js';
+import { isRecord } from '../../../shared/common-utils.js';
 
 export interface GovernanceContext {
   entryEndpoint: string;
@@ -12,9 +13,6 @@ export interface GovernanceContext {
   rawPayload?: Record<string, unknown>;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 function parseGovernedRequest(value: unknown): StandardizedRequest {
   const row = value as Record<string, unknown>;

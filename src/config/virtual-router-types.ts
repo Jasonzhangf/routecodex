@@ -1,3 +1,5 @@
+import { isRecord } from '../utils/common-utils.js';
+
 export type UnknownRecord = Record<string, unknown>;
 
 export interface VirtualRouterRoutingPool extends UnknownRecord {
@@ -17,10 +19,6 @@ export type VirtualRouterProvidersConfig = Record<string, UnknownRecord>;
 export interface VirtualRouterInput extends UnknownRecord {
   providers: VirtualRouterProvidersConfig;
   routing: VirtualRouterRoutingConfig;
-}
-
-function isRecord(value: unknown): value is UnknownRecord {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**

@@ -7,54 +7,37 @@ import {
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
 import { extractCapturedChatSeed } from './followup-request-builder.js';
 import { resolveServertoolPersistentScopeKey } from '../state-scope.js';
+import {
+  REASONING_STOP_REASON_VALUES,
+  REASONING_STOP_TOOL_DESCRIPTION,
+  REASONING_STOP_TOOL_PARAMETERS_PROPERTIES
+} from './reasoning-stop-schema.js';
+import type { ReasoningStopReason } from './reasoning-stop-schema.js';
+import type { ReasoningStopMode } from './reasoning-stop-stopless-directive.js';
+import {
+  extractStoplessDirectiveModeFromAdapterContext,
+  normalizeReasoningStopMode
+} from './reasoning-stop-stopless-directive.js';
 
 const REASONING_STOP_SUMMARY_MAX_CHARS = 4000;
-const STOPLESS_DIRECTIVE_PATTERN = /<\*\*stopless:([a-z0-9_-]+)\*\*>/gi;
-const STOPLESS_DIRECTIVE_STRIP_PATTERN = /<\*\*stopless:[^*]+\*\*>/gi;
 
-export type ReasoningStopMode = 'on' | 'off' | 'endless';
 export const DEFAULT_REASONING_STOP_MODE: ReasoningStopMode = 'on';
-export type ReasoningStopReason =
-  | 'completed'
-  | 'blocked'
-  | 'user_input'
-  | 'simple_question'
-  | 'plan_mode';
+export type { ReasoningStopReason } from './reasoning-stop-schema.js';
+export type { ReasoningStopMode } from './reasoning-stop-stopless-directive.js';
+
 export const REASONING_STOP_TOOL_DEF: JsonObject = {
   type: 'function',
   function: {
     name: 'reasoning.stop',
-    description:
-      'Structured stop self-check gate. Stop is allowed only when either: (A) task is completed with completion_evidence; or (B) all feasible attempts are exhausted and the task is irrecoverably blocked, with cannot_complete_reason + blocking_evidence + attempts_exhausted=true; or (C) is_simple_question=true (simple factual question that can be answered directly). If the current task is plan mode / audit / other intentionally read-only work and the requested deliverable is already complete, set is_completed=true, stop_reason=plan_mode, and provide completion_evidence. If user input is required, also provide user_input_required=true and user_question. Required: task_goal, is_completed. If not completed but a concrete next action exists, fill next_step and continue instead of stopping.',
+    description: REASONING_STOP_TOOL_DESCRIPTION,
     parameters: {
       type: 'object',
-      properties: {
-        task_goal: { type: 'string' },
-        is_completed: { type: 'boolean' },
-        stop_reason: {
-          type: 'string',
-          enum: ['completed', 'blocked', 'user_input', 'simple_question', 'plan_mode'],
-          description: 'Optional structured stop reason. Use plan_mode for plan/audit/other intentionally read-only tasks whose requested deliverable is already complete.'
-        },
-        completion_evidence: { type: 'string' },
-        cannot_complete_reason: { type: 'string' },
-        blocking_evidence: { type: 'string' },
-        attempts_exhausted: { type: 'boolean' },
-        next_step: { type: 'string' },
-        user_input_required: { type: 'boolean' },
-       user_question: { type: 'string' },
-       learning: { type: 'string' },
-        is_simple_question: { type: 'boolean', description: 'True if this is a simple factual question that can be answered directly without further execution' }
-     },
+      properties: REASONING_STOP_TOOL_PARAMETERS_PROPERTIES,
       required: ['task_goal', 'is_completed'],
       additionalProperties: false
     }
   }
 } as const satisfies JsonObject;
-const REASONING_STOP_DIRECTIVE_MODE_KEYS = [
-  'reasoningStopDirectiveMode',
-  '__reasoningStopDirectiveMode'
-] as const;
 
 function createEmptyRoutingInstructionState(): RoutingInstructionState {
   return {
@@ -164,239 +147,6 @@ function isStateEmpty(state: RoutingInstructionState): boolean {
   );
 }
 
-function normalizeReasoningStopMode(value: unknown): ReasoningStopMode | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'on' || normalized === 'off' || normalized === 'endless') {
-    return normalized;
-  }
-  return undefined;
-}
-
-function readStoredReasoningStopDirectiveMode(source: unknown): ReasoningStopMode | undefined {
-  if (!source || typeof source !== 'object' || Array.isArray(source)) {
-    return undefined;
-  }
-  const record = source as Record<string, unknown>;
-  for (const key of REASONING_STOP_DIRECTIVE_MODE_KEYS) {
-    const mode = normalizeReasoningStopMode(record[key]);
-    if (mode) {
-      return mode;
-    }
-  }
-  return undefined;
-}
-
-function storeReasoningStopDirectiveMode(source: unknown, mode: ReasoningStopMode | undefined): void {
-  if (!source || typeof source !== 'object' || Array.isArray(source) || !mode) {
-    return;
-  }
-  const record = source as Record<string, unknown>;
-  for (const key of REASONING_STOP_DIRECTIVE_MODE_KEYS) {
-    record[key] = mode;
-  }
-}
-
-function extractMessageContentText(content: unknown): string {
-  if (typeof content === 'string') {
-    return content.trim();
-  }
-  if (Array.isArray(content)) {
-    const parts: string[] = [];
-    for (const item of content) {
-      if (typeof item === 'string') {
-        const text = item.trim();
-        if (text) {
-          parts.push(text);
-        }
-        continue;
-      }
-      if (!item || typeof item !== 'object') {
-        continue;
-      }
-      const record = item as Record<string, unknown>;
-      const text = typeof record.text === 'string' ? record.text.trim() : '';
-      if (text) {
-        parts.push(text);
-      }
-    }
-    return parts.join('\n').trim();
-  }
-  return '';
-}
-
-function extractLatestUserTextFromCapturedRequest(source: unknown): string {
-  const seed = extractCapturedChatSeed(source);
-  if (!seed || !Array.isArray(seed.messages) || seed.messages.length === 0) {
-    return '';
-  }
-  for (let i = seed.messages.length - 1; i >= 0; i -= 1) {
-    const msg = seed.messages[i];
-    if (!msg || typeof msg !== 'object') {
-      continue;
-    }
-    const role = typeof (msg as Record<string, unknown>).role === 'string'
-      ? String((msg as Record<string, unknown>).role).trim().toLowerCase()
-      : '';
-    if (role !== 'user') {
-      continue;
-    }
-    const content = (msg as Record<string, unknown>).content;
-    const text = extractMessageContentText(content);
-    if (text) {
-      return text;
-    }
-  }
-  return '';
-}
-
-function extractStoplessDirectiveModeFromText(text: string): ReasoningStopMode | undefined {
-  const source = typeof text === 'string' ? text : '';
-  if (!source) {
-    return undefined;
-  }
-  STOPLESS_DIRECTIVE_PATTERN.lastIndex = 0;
-  let matched: ReasoningStopMode | undefined;
-  for (const match of source.matchAll(STOPLESS_DIRECTIVE_PATTERN)) {
-    const mode = normalizeReasoningStopMode(match[1]);
-    if (mode) {
-      matched = mode;
-    }
-  }
-  return matched;
-}
-
-function stripStoplessDirectiveMarkersFromText(text: string): { text: string; stripped: boolean } {
-  if (typeof text !== 'string' || !text) {
-    return { text: '', stripped: false };
-  }
-  let stripped = false;
-  STOPLESS_DIRECTIVE_STRIP_PATTERN.lastIndex = 0;
-  const replaced = text.replace(STOPLESS_DIRECTIVE_STRIP_PATTERN, () => {
-    stripped = true;
-    return ' ';
-  });
-  if (!stripped) {
-    return { text, stripped: false };
-  }
-  const compacted = replaced
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n[ \t]+/g, '\n')
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  return { text: compacted, stripped: true };
-}
-
-function stripStoplessDirectiveMarkersFromContent(content: unknown): {
-  content: unknown;
-  stripped: boolean;
-} {
-  if (typeof content === 'string') {
-    const stripped = stripStoplessDirectiveMarkersFromText(content);
-    return { content: stripped.text, stripped: stripped.stripped };
-  }
-  if (!Array.isArray(content)) {
-    return { content, stripped: false };
-  }
-  const nextContent: unknown[] = [];
-  let strippedAny = false;
-  for (const item of content) {
-    if (typeof item === 'string') {
-      const stripped = stripStoplessDirectiveMarkersFromText(item);
-      if (stripped.stripped) {
-        strippedAny = true;
-      }
-      nextContent.push(stripped.text);
-      continue;
-    }
-    if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      nextContent.push(item);
-      continue;
-    }
-    const record = item as Record<string, unknown>;
-    if (typeof record.text !== 'string') {
-      nextContent.push(item);
-      continue;
-    }
-    const stripped = stripStoplessDirectiveMarkersFromText(record.text);
-    if (!stripped.stripped) {
-      nextContent.push(item);
-      continue;
-    }
-    strippedAny = true;
-    nextContent.push({
-      ...record,
-      text: stripped.text
-    });
-  }
-  return {
-    content: nextContent,
-    stripped: strippedAny
-  };
-}
-
-function stripStoplessDirectiveMarkersInMessages(messages: unknown[]): boolean {
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return false;
-  }
-  let strippedAny = false;
-  for (const message of messages) {
-    if (!message || typeof message !== 'object') {
-      continue;
-    }
-    const role = typeof (message as Record<string, unknown>).role === 'string'
-      ? String((message as Record<string, unknown>).role).trim().toLowerCase()
-      : '';
-    if (role !== 'user') {
-      continue;
-    }
-    const originalContent = (message as Record<string, unknown>).content;
-    const stripped = stripStoplessDirectiveMarkersFromContent(originalContent);
-    if (!stripped.stripped) {
-      continue;
-    }
-    strippedAny = true;
-    (message as Record<string, unknown>).content = stripped.content;
-  }
-  return strippedAny;
-}
-
-function stripStoplessDirectiveMarkersFromCapturedRequest(source: unknown): boolean {
-  if (!source || typeof source !== 'object' || Array.isArray(source)) {
-    return false;
-  }
-  const record = source as Record<string, unknown>;
-  const messages = Array.isArray(record.messages) ? (record.messages as unknown[]) : [];
-  const input = Array.isArray(record.input) ? (record.input as unknown[]) : [];
-  const strippedInMessages = stripStoplessDirectiveMarkersInMessages(messages);
-  const strippedInInput = stripStoplessDirectiveMarkersInMessages(input);
-  return strippedInMessages || strippedInInput;
-}
-
-function extractStoplessDirectiveModeFromAdapterContext(adapterContext: unknown): ReasoningStopMode | undefined {
-  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
-    return undefined;
-  }
-  const record = adapterContext as Record<string, unknown>;
-  const captured = record.capturedChatRequest;
-  const storedMode = readStoredReasoningStopDirectiveMode(captured) ?? readStoredReasoningStopDirectiveMode(record);
-  if (storedMode) {
-    return storedMode;
-  }
-  const text = extractLatestUserTextFromCapturedRequest(captured);
-  const mode = extractStoplessDirectiveModeFromText(text);
-  if (mode) {
-    storeReasoningStopDirectiveMode(record, mode);
-    storeReasoningStopDirectiveMode(captured, mode);
-  }
-  // Marker is transport control signal and must never leak into followup payloads,
-  // regardless of whether parsing succeeds.
-  stripStoplessDirectiveMarkersFromCapturedRequest(captured);
-  return mode;
-}
 
 export function readReasoningStopMode(
   adapterContext: unknown,
@@ -407,11 +157,7 @@ export function readReasoningStopMode(
     return fallbackMode;
   }
   let state: RoutingInstructionState | null = null;
-  try {
-    state = loadRoutingInstructionStateSync(stickyKey);
-  } catch {
-    return fallbackMode;
-  }
+  state = loadRoutingInstructionStateSync(stickyKey);
   return normalizeReasoningStopMode(state?.reasoningStopMode) ?? fallbackMode;
 }
 
@@ -428,11 +174,7 @@ export function syncReasoningStopModeFromRequest(
   }
 
   let state: RoutingInstructionState | null = null;
-  try {
-    state = loadRoutingInstructionStateSync(stickyKey);
-  } catch {
-    state = null;
-  }
+  state = loadRoutingInstructionStateSync(stickyKey);
 
   const persistedMode = normalizeReasoningStopMode(state?.reasoningStopMode) ?? fallbackMode;
   if (!directiveMode) {
@@ -466,11 +208,7 @@ export function readReasoningStopState(adapterContext: unknown): {
     return { stickyKey: '', armed: false, summary: '' };
   }
   let state: RoutingInstructionState | null = null;
-  try {
-    state = loadRoutingInstructionStateSync(stickyKey);
-  } catch {
-    return { stickyKey, armed: false, summary: '' };
-  }
+  state = loadRoutingInstructionStateSync(stickyKey);
   if (!hasReasoningStopState(state)) {
     return { stickyKey, armed: false, summary: '' };
   }
@@ -491,11 +229,7 @@ export function armReasoningStopState(adapterContext: unknown, summary: string):
     return false;
   }
   let state: RoutingInstructionState | null = null;
-  try {
-    state = loadRoutingInstructionStateSync(stickyKey);
-  } catch {
-    state = null;
-  }
+  state = loadRoutingInstructionStateSync(stickyKey);
   const next = state ?? createEmptyRoutingInstructionState();
   next.reasoningStopArmed = true;
   next.reasoningStopSummary = normalizedSummary;
@@ -510,11 +244,7 @@ export function clearReasoningStopState(adapterContext: unknown): void {
     return;
   }
   let state: RoutingInstructionState | null = null;
-  try {
-    state = loadRoutingInstructionStateSync(stickyKey);
-  } catch {
-    state = null;
-  }
+  state = loadRoutingInstructionStateSync(stickyKey);
   if (!state) {
     return;
   }
@@ -535,11 +265,7 @@ export function readReasoningStopFailCount(adapterContext: unknown): number {
     return 0;
   }
   let state: RoutingInstructionState | null = null;
-  try {
-    state = loadRoutingInstructionStateSync(stickyKey);
-  } catch {
-    state = null;
-  }
+  state = loadRoutingInstructionStateSync(stickyKey);
   if (!state) {
     return 0;
   }
@@ -553,11 +279,7 @@ export function incrementReasoningStopFailCount(adapterContext: unknown): number
     return 0;
   }
   let state: RoutingInstructionState | null = null;
-  try {
-    state = loadRoutingInstructionStateSync(stickyKey);
-  } catch {
-    state = null;
-  }
+  state = loadRoutingInstructionStateSync(stickyKey);
   const next = state ?? createEmptyRoutingInstructionState();
   const currentCount = typeof next.reasoningStopFailCount === 'number' && Number.isFinite(next.reasoningStopFailCount)
     ? next.reasoningStopFailCount
@@ -574,11 +296,7 @@ export function resetReasoningStopFailCount(adapterContext: unknown): void {
     return;
   }
   let state: RoutingInstructionState | null = null;
-  try {
-    state = loadRoutingInstructionStateSync(stickyKey);
-  } catch {
-    state = null;
-  }
+  state = loadRoutingInstructionStateSync(stickyKey);
   if (!state) {
     return;
   }
@@ -597,11 +315,7 @@ export function readReasoningStopGuardTriggerCount(adapterContext: unknown): { c
     return { count: 0, lastTriggerAt: undefined };
   }
   let state: RoutingInstructionState | null = null;
-  try {
-    state = loadRoutingInstructionStateSync(stickyKey);
-  } catch {
-    state = null;
-  }
+  state = loadRoutingInstructionStateSync(stickyKey);
   if (!state) {
     return { count: 0, lastTriggerAt: undefined };
   }
@@ -619,11 +333,7 @@ export function incrementReasoningStopGuardTriggerCount(adapterContext: unknown)
     return 0;
   }
   let state: RoutingInstructionState | null = null;
-  try {
-    state = loadRoutingInstructionStateSync(stickyKey);
-  } catch {
-    state = null;
-  }
+  state = loadRoutingInstructionStateSync(stickyKey);
   const next = state ?? createEmptyRoutingInstructionState();
   const currentCount = typeof next.reasoningStopGuardTriggerCount === 'number' && Number.isFinite(next.reasoningStopGuardTriggerCount)
     ? next.reasoningStopGuardTriggerCount
@@ -641,11 +351,7 @@ export function resetReasoningStopGuardTriggerCount(adapterContext: unknown): vo
     return;
   }
   let state: RoutingInstructionState | null = null;
-  try {
-    state = loadRoutingInstructionStateSync(stickyKey);
-  } catch {
-    state = null;
-  }
+  state = loadRoutingInstructionStateSync(stickyKey);
   if (!state) {
     return;
   }

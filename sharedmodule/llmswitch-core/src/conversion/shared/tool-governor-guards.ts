@@ -4,12 +4,10 @@ import {
   parseLenientJsonishWithNative as parseLenient,
   repairArgumentsToStringWithNative as repairArgumentsToString
 } from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+import { isObject } from '../../shared/common-utils.js';
 
 type Unknown = Record<string, unknown>;
 
-function isObject(v: unknown): v is Unknown {
-  return !!v && typeof v === 'object' && !Array.isArray(v);
-}
 
 export function resolveExecCommandGuardValidationOptions(payload: Unknown): ToolValidationOptions | undefined {
   const carrier = isObject((payload as any).metadata)

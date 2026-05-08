@@ -376,7 +376,7 @@ export class ProviderFactory {
 /**
  * 便捷函数 - 创建Provider实例
  */
-export function createChatHttpProvider(
+export function createHttpTransportProvider(
   config: OpenAIStandardConfig,
   dependencies: ModuleDependencies
 ): IProviderV2 {

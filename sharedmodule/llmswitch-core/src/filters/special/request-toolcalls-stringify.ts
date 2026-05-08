@@ -1,15 +1,6 @@
 import type { Filter, FilterContext, FilterResult, JsonObject } from '../types.js';
+import { formatUnknownError } from '../../shared/common-utils.js';
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logRequestToolcallsStringifyNonBlocking(
   stage: string,
@@ -36,82 +27,78 @@ export class RequestToolCallsStringifyFilter implements Filter<JsonObject> {
   readonly stage: FilterContext['stage'] = 'request_post';
 
   apply(input: JsonObject): FilterResult<JsonObject> {
+const out = JSON.parse(JSON.stringify(input || {}));
+const msgs = Array.isArray((out as any).messages) ? (out as any).messages : [];
+for (const m of msgs) {
+  if (!m || typeof m !== 'object') continue;
+  if (m.role === 'assistant' && Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length) {
     try {
-      const out = JSON.parse(JSON.stringify(input || {}));
-      const msgs = Array.isArray((out as any).messages) ? (out as any).messages : [];
-      for (const m of msgs) {
-        if (!m || typeof m !== 'object') continue;
-        if (m.role === 'assistant' && Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length) {
+      for (const tc of (m as any).tool_calls as any[]) {
+        if (!tc || typeof tc !== 'object') continue;
+        const fn = tc.function || {};
+        if (!fn || typeof fn !== 'object') continue;
+        const currentArgs = (fn as any).arguments;
+        const fnName = typeof (fn as any).name === 'string' ? (fn as any).name.trim() : '';
+        // Case 1: non-string arguments → stringify directly
+        if (currentArgs !== undefined && typeof currentArgs !== 'string') {
+          let argsJson = '{}';
           try {
-            for (const tc of (m as any).tool_calls as any[]) {
-              if (!tc || typeof tc !== 'object') continue;
-              const fn = tc.function || {};
-              if (!fn || typeof fn !== 'object') continue;
-              const currentArgs = (fn as any).arguments;
-              const fnName = typeof (fn as any).name === 'string' ? (fn as any).name.trim() : '';
-              // Case 1: non-string arguments → stringify directly
-              if (currentArgs !== undefined && typeof currentArgs !== 'string') {
-                let argsJson = '{}';
-                try {
-                  argsJson = JSON.stringify(currentArgs ?? {});
-                } catch {
-                  argsJson = '{}';
-                }
-                (fn as any).arguments = argsJson;
-                tc.function = fn;
-                continue;
-              }
-              // Case 2: string arguments → ensure it is valid JSON
-              if (typeof currentArgs === 'string') {
-                const trimmed = currentArgs.trim();
-                if (trimmed.length === 0) {
-                  (fn as any).arguments = '{}';
-                  tc.function = fn;
-                  continue;
-                }
-                let parsedOk = false;
-                let parsedValue: any = undefined;
-                try {
-                  parsedValue = JSON.parse(trimmed);
-                  parsedOk = true;
-                } catch {
-                  parsedOk = false;
-                }
-                if (!parsedOk) {
-                  // Wrap raw string into a JSON object to keep payload syntactically valid.
-                  // For shell, align with GLM/统一工具治理约定，优先映射到 { command }，
-                  // 其余模型仍使用 { input } 形式。
-                  try {
-                    if (fnName === 'shell') {
-                      (fn as any).arguments = JSON.stringify({ command: currentArgs });
-                    } else {
-                      (fn as any).arguments = JSON.stringify({ input: currentArgs });
-                    }
-                  } catch {
-                    (fn as any).arguments = '{}';
-                  }
-                  tc.function = fn;
-                  continue;
-                }
-                // 合法 JSON 场景保持原样
-                (fn as any).arguments = trimmed;
-                tc.function = fn;
-              }
-            }
-          } catch (error) {
-            logRequestToolcallsStringifyNonBlocking('normalize_tool_calls_for_message', error, {
-              messageRole: String((m as any)?.role ?? ''),
-              toolCallCount: Array.isArray((m as any)?.tool_calls) ? (m as any).tool_calls.length : 0
-            });
+            argsJson = JSON.stringify(currentArgs ?? {});
+          } catch {
+            argsJson = '{}';
           }
-          // Invariant: assistant with tool_calls should use content=null
-          (m as any).content = null;
+          (fn as any).arguments = argsJson;
+          tc.function = fn;
+          continue;
+        }
+        // Case 2: string arguments → ensure it is valid JSON
+        if (typeof currentArgs === 'string') {
+          const trimmed = currentArgs.trim();
+          if (trimmed.length === 0) {
+            (fn as any).arguments = '{}';
+            tc.function = fn;
+            continue;
+          }
+          let parsedOk = false;
+          let parsedValue: any = undefined;
+          try {
+            parsedValue = JSON.parse(trimmed);
+            parsedOk = true;
+          } catch {
+            parsedOk = false;
+          }
+          if (!parsedOk) {
+            // Wrap raw string into a JSON object to keep payload syntactically valid.
+            // For shell, align with GLM/统一工具治理约定，优先映射到 { command }，
+            // 其余模型仍使用 { input } 形式。
+            try {
+              if (fnName === 'shell') {
+                (fn as any).arguments = JSON.stringify({ command: currentArgs });
+              } else {
+                (fn as any).arguments = JSON.stringify({ input: currentArgs });
+              }
+            } catch {
+              (fn as any).arguments = '{}';
+            }
+            tc.function = fn;
+            continue;
+          }
+          // 合法 JSON 场景保持原样
+          (fn as any).arguments = trimmed;
+          tc.function = fn;
         }
       }
-      (out as any).messages = msgs;
-      return { ok: true, data: out };
-    } catch {
-      return { ok: true, data: input };
+    } catch (error) {
+      logRequestToolcallsStringifyNonBlocking('normalize_tool_calls_for_message', error, {
+        messageRole: String((m as any)?.role ?? ''),
+        toolCallCount: Array.isArray((m as any)?.tool_calls) ? (m as any).tool_calls.length : 0
+      });
     }
+    // Invariant: assistant with tool_calls should use content=null
+    (m as any).content = null;
+  }
+}
+(out as any).messages = msgs;
+return { ok: true, data: out };
   }
 }

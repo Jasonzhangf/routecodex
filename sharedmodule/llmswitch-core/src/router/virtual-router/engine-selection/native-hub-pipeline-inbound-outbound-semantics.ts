@@ -3,6 +3,7 @@ import {
   isNativeDisabledByEnv
 } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
+import { formatUnknownError } from '../../../shared/common-utils.js';
 
 export type NativeResumeToolOutput = { tool_call_id: string; content: string };
 export type NativeContextToolOutput = { tool_call_id: string; call_id: string; output?: string; name?: string };
@@ -11,16 +12,6 @@ const NON_BLOCKING_INBOUND_OUTBOUND_LOG_THROTTLE_MS = 60_000;
 const nonBlockingInboundOutboundLogState = new Map<string, number>();
 const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-inbound-outbound-semantics.parse-failed');
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error ?? 'unknown');
-  }
-}
 
 function logNativeInboundOutboundNonBlocking(stage: string, error: unknown): void {
   const now = Date.now();

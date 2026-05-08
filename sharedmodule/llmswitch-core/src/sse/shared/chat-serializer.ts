@@ -1,16 +1,7 @@
 import { PassThrough, Readable } from 'node:stream';
 import type { ChatSseEvent } from '../types/index.js';
+import { formatUnknownError } from '../../shared/common-utils.js';
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logChatSerializerNonBlocking(stage: string, error: unknown): void {
   try {

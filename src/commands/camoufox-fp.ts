@@ -168,7 +168,7 @@ export function createCamoufoxFpCommand(): Command {
         const osPolicy = getCamoufoxOsPolicy(provider, alias) || 'windows';
         const tokenFile = tokenFileByAlias.get(alias);
 
-        const fp = await loadAntigravityCamoufoxFingerprint(alias).catch(() => null);
+        const fp = await loadAntigravityCamoufoxFingerprint(alias).catch(() => { return null; });
         const suffix = fp ? inferAntigravityUaSuffixFromFingerprint(fp) : undefined;
         const isLinux = Boolean(suffix && suffix.startsWith('linux/'));
 
@@ -206,7 +206,7 @@ export function createCamoufoxFpCommand(): Command {
           // ensureCamoufoxFingerprintForToken is best-effort; verify via file existence below.
         }
 
-        const newFp = await loadAntigravityCamoufoxFingerprint(alias).catch(() => null);
+        const newFp = await loadAntigravityCamoufoxFingerprint(alias).catch(() => { return null; });
         const newSuffix = newFp ? inferAntigravityUaSuffixFromFingerprint(newFp) : undefined;
 
         if (!newSuffix || newSuffix.startsWith('linux/')) {

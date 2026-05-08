@@ -178,10 +178,6 @@ describe('servertool followup dispatch helper', () => {
             }
           }
         ]
-      },
-      __routecodex: {
-        serverToolFollowup: true,
-        serverToolFollowupSource: 'servertool.reasoning_stop_continue'
       }
     };
 
@@ -194,15 +190,209 @@ describe('servertool followup dispatch helper', () => {
         input: 'continue',
         tools: [{ type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }]
       },
+      metadata: {
+        __rt: {
+          serverToolFollowup: true,
+          clientInjectSource: 'servertool.reasoning_stop_continue'
+        }
+      },
       requestSemantics,
       executeNested
     });
 
     const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
-    expect(nestedInput?.body?.tools?.map((tool: any) => tool?.function?.name)).toEqual(['reasoning.stop']);
-    expect(nestedInput?.body?.semantics).toEqual(requestSemantics);
+    expect(nestedInput?.body?.tools?.map((tool: any) => tool?.function?.name)).toEqual([
+      'exec_command',
+      'reasoning.stop'
+    ]);
+    expect((nestedInput?.body?.semantics as any)?.__routecodex).toEqual({
+      serverToolFollowup: true,
+      serverToolFollowupSource: 'servertool.reasoning_stop_continue'
+    });
     expect((nestedInput?.body?.semantics as any)?.tools?.clientToolsRaw?.[0]?.function?.name).toBe('exec_command');
+    expect((nestedInput?.metadata?.requestSemantics as any)?.__routecodex).toEqual({
+      serverToolFollowup: true,
+      serverToolFollowupSource: 'servertool.reasoning_stop_continue'
+    });
     expect(((result.body as Record<string, any>)?.tools ?? [])[0]?.function?.name).toBe('exec_command');
+  });
+
+  it('reenter path strips stale responses output budget from servertool followup semantics', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: {
+        semantics: input.body?.semantics,
+        requestSemantics: input.metadata?.requestSemantics
+      }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    const requestSemantics = {
+      responses: {
+        requestParameters: {
+          model: 'deepseek-v4-pro',
+          max_tokens: 384000,
+          max_output_tokens: 384000,
+          reasoning: { effort: 'high' }
+        }
+      },
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: { type: 'object', properties: { cmd: { type: 'string' } } }
+            }
+          }
+        ]
+      }
+    };
+
+    await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_followup_dispatch_strip_stale_budget',
+      body: {
+        model: 'mimo-v2.5-pro',
+        max_tokens: 384000,
+        max_output_tokens: 384000,
+        input: 'continue',
+        tools: [{ type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }]
+      },
+      metadata: {
+        __rt: {
+          serverToolFollowup: true,
+          clientInjectSource: 'servertool.reasoning_stop_guard'
+        }
+      },
+      requestSemantics,
+      executeNested
+    });
+
+    const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
+    expect(nestedInput?.body?.max_tokens).toBeUndefined();
+    expect(nestedInput?.body?.max_output_tokens).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.reasoning).toEqual({ effort: 'high' });
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.max_tokens).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.max_output_tokens).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.model).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.__routecodex).toEqual({
+      serverToolFollowup: true,
+      serverToolFollowupSource: 'servertool.reasoning_stop_guard'
+    });
+    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.max_tokens).toBeUndefined();
+    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.max_output_tokens).toBeUndefined();
+    expect((nestedInput?.metadata?.requestSemantics as any)?.__routecodex).toEqual({
+      serverToolFollowup: true,
+      serverToolFollowupSource: 'servertool.reasoning_stop_guard'
+    });
+  });
+
+  it('reenter path overwrites stale metadata requestSemantics with materialized followup semantics', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: {
+        semantics: input.body?.semantics,
+        requestSemantics: input.metadata?.requestSemantics
+      }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    const requestSemantics = {
+      responses: {
+        requestParameters: {
+          model: 'deepseek-v4-pro',
+          max_tokens: 384000,
+          max_output_tokens: 384000,
+          reasoning: { effort: 'high' }
+        }
+      },
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: { type: 'object', properties: { cmd: { type: 'string' } } }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'apply_patch',
+              parameters: { type: 'object', properties: { patch: { type: 'string' } } }
+            }
+          }
+        ]
+      }
+    };
+
+    await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_followup_dispatch_overwrite_stale_metadata_semantics',
+      body: {
+        model: 'mimo-v2.5-pro',
+        max_tokens: 384000,
+        max_output_tokens: 384000,
+        input: 'continue',
+        tools: [{ type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }]
+      },
+      metadata: {
+        requestSemantics: {
+          responses: {
+            requestParameters: {
+              model: 'stale-model',
+              max_tokens: 384000,
+              max_output_tokens: 384000
+            }
+          },
+          tools: {
+            clientToolsRaw: [
+              {
+                type: 'function',
+                function: { name: 'reasoning.stop', parameters: { type: 'object' } }
+              }
+            ]
+          }
+        },
+        __rt: {
+          serverToolFollowup: true,
+          clientInjectSource: 'servertool.reasoning_stop_guard'
+        }
+      },
+      requestSemantics,
+      executeNested
+    });
+
+    const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
+    expect(nestedInput?.body?.tools?.map((tool: any) => tool?.function?.name)).toEqual([
+      'exec_command',
+      'apply_patch',
+      'reasoning.stop'
+    ]);
+    expect(nestedInput?.body?.max_tokens).toBeUndefined();
+    expect(nestedInput?.body?.max_output_tokens).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.reasoning).toEqual({ effort: 'high' });
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.max_tokens).toBeUndefined();
+    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.model).toBeUndefined();
+    expect((nestedInput?.metadata?.requestSemantics as any)?.tools?.clientToolsRaw?.map((tool: any) => tool?.function?.name)).toEqual([
+      'exec_command',
+      'apply_patch'
+    ]);
+    expect((nestedInput?.metadata?.requestSemantics as any)?.__routecodex).toEqual({
+      serverToolFollowup: true,
+      serverToolFollowupSource: 'servertool.reasoning_stop_guard'
+    });
   });
 
   it('reenter path throws when nested pipeline returns HTTP error body instead of success payload', async () => {

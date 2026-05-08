@@ -6,10 +6,8 @@ import type {
   ToolFilterDecision,
   ToolFilterHints,
 } from '../types.js';
+import { isObject } from '../../shared/common-utils.js';
 
-function isObject(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === 'object' && !Array.isArray(v);
-}
 
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;
@@ -392,72 +390,67 @@ export class ToolFilterHookFilter implements Filter<JsonObject> {
   readonly stage: FilterContext['stage'] = 'request_finalize';
 
   apply(input: JsonObject, ctx: FilterContext): FilterResult<JsonObject> {
-    try {
-      const out = clone(input || {});
-      const tools = Array.isArray((out as any).tools)
-        ? ((out as any).tools as any[])
-        : [];
-      if (!tools.length) {
-        return { ok: true, data: out };
-      }
+const out = clone(input || {});
+const tools = Array.isArray((out as any).tools)
+  ? ((out as any).tools as any[])
+  : [];
+if (!tools.length) {
+  return { ok: true, data: out };
+}
 
-      const messages = Array.isArray((out as any).messages)
-        ? ((out as any).messages as any[])
-        : [];
-      const hints: ToolFilterHints = (ctx.toolFilterHints && clone(ctx.toolFilterHints)) || {
-        requestedDecisions: [],
-      };
-      const config = getGlobalToolFilterConfig();
-      const decisions: ToolFilterDecision[] = [];
+const messages = Array.isArray((out as any).messages)
+  ? ((out as any).messages as any[])
+  : [];
+const hints: ToolFilterHints = (ctx.toolFilterHints && clone(ctx.toolFilterHints)) || {
+  requestedDecisions: [],
+};
+const config = getGlobalToolFilterConfig();
+const decisions: ToolFilterDecision[] = [];
 
-      const hookCtx: ToolFilterHookContext = {
-        tools,
-        messages,
-        hints,
-        config,
-        stage: 'request',
-        recordDecision: d => {
-          decisions.push(d);
-        },
-      };
+const hookCtx: ToolFilterHookContext = {
+  tools,
+  messages,
+  hints,
+  config,
+  stage: 'request',
+  recordDecision: d => {
+    decisions.push(d);
+  },
+};
 
-      for (const hook of requestHooks) {
-        try {
-          const res = hook(hookCtx);
-          if (res && typeof (res as any).then === 'function') {
-            // eslint-disable-next-line @typescript-eslint/no-floating-promises
-            (res as Promise<void>).catch((error) => {
-              logToolFilterHookWarning('requestHook(async)', error);
-            });
-          }
-        } catch (error) {
-          logToolFilterHookWarning('requestHook(sync)', error);
-        }
-      }
-
-      (out as any).tools = hookCtx.tools;
-      if (Array.isArray((out as any).tools) && (out as any).tools.length === 0) {
-        try {
-          if ('tool_choice' in (out as any)) delete (out as any).tool_choice;
-        } catch (error) {
-          logToolFilterHookWarning('apply.drop_tool_choice_when_empty', error);
-        }
-      }
-
-      // 记录决策（供调试/快照使用）
-      if (!Array.isArray(hints.decided)) hints.decided = [];
-      hints.decided = hints.decided.concat(decisions);
-
-      return {
-        ok: true,
-        data: out,
-        metrics: decisions.length
-          ? { toolFilterDecisions: clone(decisions) }
-          : undefined,
-      };
-    } catch (error) {
-      logToolFilterHookWarning('apply', error);
-      return { ok: true, data: input };
+for (const hook of requestHooks) {
+  try {
+    const res = hook(hookCtx);
+    if (res && typeof (res as any).then === 'function') {
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      (res as Promise<void>).catch((error) => {
+        logToolFilterHookWarning('requestHook(async)', error);
+      });
     }
+  } catch (error) {
+    logToolFilterHookWarning('requestHook(sync)', error);
+  }
+}
+
+(out as any).tools = hookCtx.tools;
+if (Array.isArray((out as any).tools) && (out as any).tools.length === 0) {
+  try {
+    if ('tool_choice' in (out as any)) delete (out as any).tool_choice;
+  } catch (error) {
+    logToolFilterHookWarning('apply.drop_tool_choice_when_empty', error);
+  }
+}
+
+// 记录决策（供调试/快照使用）
+if (!Array.isArray(hints.decided)) hints.decided = [];
+hints.decided = hints.decided.concat(decisions);
+
+return {
+  ok: true,
+  data: out,
+  metrics: decisions.length
+    ? { toolFilterDecisions: clone(decisions) }
+    : undefined,
+};
   }
 }

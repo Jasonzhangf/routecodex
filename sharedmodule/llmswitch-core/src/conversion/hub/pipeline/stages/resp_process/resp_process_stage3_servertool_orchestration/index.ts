@@ -46,6 +46,21 @@ function readFollowupClientInjectSource(
     : '';
 }
 
+function markServertoolResponseOrchestration(adapterContext: AdapterContext): void {
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    return;
+  }
+  const record = adapterContext as Record<string, unknown>;
+  const currentRt =
+    record.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
+      ? (record.__rt as Record<string, unknown>)
+      : {};
+  record.__rt = {
+    ...currentRt,
+    servertoolResponseOrchestration: true
+  };
+}
+
 export interface RespProcessStage3ServerToolOrchestrationOptions {
   payload: ChatCompletionLike;
   adapterContext: AdapterContext;
@@ -113,6 +128,7 @@ export async function runRespProcessStage3ServerToolOrchestration(
 
   logHubStageTiming(options.requestId, 'resp_process.stage3_orchestration_engine', 'start');
   const orchestrationStart = Date.now();
+  markServertoolResponseOrchestration(options.adapterContext);
   const orchestration = await runServerToolOrchestration({
     chat: options.payload as JsonObject,
     adapterContext: options.adapterContext,

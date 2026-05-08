@@ -50,18 +50,6 @@ function assertAllowedOnly(lines, allowedPrefixes, message) {
 }
 
 async function main() {
-  const archiveJsRefs = runRg(
-    'chat-mapper\\.archive\\.js|archive/engine\\.legacy\\.js|archive/chat-request-filters\\.legacy\\.js'
-  );
-  assertAllowedOnly(
-    archiveJsRefs,
-    [
-      'scripts/tests/archive-import-guard.mjs:',
-      'scripts/tests/semantic-mapper-chat-native-compare.mjs:'
-    ],
-    'Only approved scripts may import archive runtime modules'
-  );
-
   const engineLegacyJsRefs = runRg('engine-legacy\\.js');
   assertAllowedOnly(
     engineLegacyJsRefs,

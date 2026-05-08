@@ -49,6 +49,46 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
+  it('classifies HTTP 404 as unrecoverable direct-return', () => {
+    const error = Object.assign(new Error('HTTP 404: {"detail":"Not Found"}'), {
+      code: 'HTTP_404',
+      statusCode: 404
+    });
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 404,
+      errorCode: 'HTTP_404',
+      upstreamCode: 'HTTP_404',
+      reason: 'HTTP 404: {"detail":"Not Found"}'
+    });
+
+    expect(classification).toBe('unrecoverable');
+    expect(isProviderFailureHealthNeutral({
+      stage: 'provider.send',
+      errorCode: 'HTTP_404',
+      upstreamCode: 'HTTP_404',
+      statusCode: 404,
+      classification
+    })).toBe(false);
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 404,
+      errorCode: 'HTTP_404',
+      upstreamCode: 'HTTP_404',
+      reason: 'HTTP 404: {"detail":"Not Found"}',
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'unrecoverable',
+      affectsHealth: true,
+      shouldRetry: false,
+      action: 'direct_return',
+      decisionLabel: 'direct_return'
+    }));
+  });
+
   it('classifies context overflow as special_400', () => {
     const error = Object.assign(new Error('Request input tokens exceeds the model maximum context length'), {
       code: 'CONTEXT_LENGTH_EXCEEDED',
@@ -247,5 +287,21 @@ describe('provider failure policy ssot', () => {
       statusCode: 502,
       reason: 'stopless contract violated'
     })).toBeUndefined();
+  });
+
+  it('loads native failure policy via bridge and classifies recoverable upstream failures', () => {
+    const classification = resolveProviderFailureClassification({
+      error: Object.assign(new Error('HTTP 502: upstream temporary unavailable'), {
+        code: 'HTTP_502',
+        statusCode: 502
+      }),
+      stage: 'provider.send',
+      statusCode: 502,
+      errorCode: 'HTTP_502',
+      upstreamCode: 'HTTP_502',
+      reason: 'HTTP 502: upstream temporary unavailable'
+    });
+
+    expect(classification).toBe('recoverable');
   });
 });

@@ -1,5 +1,6 @@
 import http from 'http';
 import { URL } from 'url';
+import { formatUnknownError } from '../utils/common-utils.js';
 import { HTTP_PROTOCOLS, LOCAL_HOSTS } from '../constants/index.js';
 import { renderTokenPortalPage } from './render.js';
 import { loadTokenPortalFingerprintSummary } from './fingerprint-summary.js';
@@ -97,7 +98,8 @@ class LocalTokenPortalServer {
     const sessionId = url.searchParams.get('sessionId') || 'local-session';
     const displayName = url.searchParams.get('displayName') || undefined;
 
-    const fingerprint = await loadTokenPortalFingerprintSummary(provider, alias).catch(() => null);
+    let fingerprint: Awaited<ReturnType<typeof loadTokenPortalFingerprintSummary>> | null = null;
+    try { fingerprint = await loadTokenPortalFingerprintSummary(provider, alias); } catch (e) { console.warn('[token-portal] fingerprint load failed:', formatUnknownError(e)); }
 
     const html = renderTokenPortalPage({
       provider,

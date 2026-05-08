@@ -6,6 +6,8 @@ import {
   buildToolGovernanceNodeResultWithNative,
   mergeClockReservationIntoMetadataWithNative,
 } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
+import { replaceMutableRecord } from "./hub-pipeline-mutable-record-utils.js";
+import { logHubPipelineNonBlockingError } from "./hub-pipeline-runtime-blocks.js";
 
 type ToolGovernanceNodeResult = {
   success: boolean;
@@ -26,12 +28,12 @@ export function propagateClockReservationToMetadata(
       processedRequest: processedRequest as unknown as Record<string, unknown>,
       metadata,
     });
-    for (const key of Object.keys(metadata)) {
-      delete metadata[key];
-    }
-    Object.assign(metadata, next);
-  } catch {
-    // best-effort: do not block request handling due to metadata propagation failures
+    replaceMutableRecord(metadata, next);
+  } catch (error) {
+    logHubPipelineNonBlockingError(
+      "propagateClockReservationToMetadata",
+      error,
+    );
   }
 }
 
@@ -64,8 +66,5 @@ export function annotatePassthroughAuditSkipped(
     return;
   }
   const next = annotatePassthroughGovernanceSkipWithNative(passthroughAudit);
-  for (const key of Object.keys(passthroughAudit)) {
-    delete passthroughAudit[key];
-  }
-  Object.assign(passthroughAudit, next);
+  replaceMutableRecord(passthroughAudit, next);
 }

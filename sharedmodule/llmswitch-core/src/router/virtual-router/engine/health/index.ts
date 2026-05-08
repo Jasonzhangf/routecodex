@@ -6,6 +6,7 @@ import type {
   ProviderHealthConfig,
   TargetMetadata
 } from '../../types.js';
+import { formatUnknownError } from '../../../../shared/common-utils.js';
 
 const SERIES_COOLDOWN_DETAIL_KEY = 'virtualRouterSeriesCooldown' as const;
 const QUOTA_RECOVERY_DETAIL_KEY = 'virtualRouterQuotaRecovery' as const;
@@ -30,16 +31,6 @@ type QuotaDepletedPayload = {
 
 type DebugLike = { log?: (...args: unknown[]) => void } | Console | undefined;
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logHealthNonBlockingError(
   stage: string,

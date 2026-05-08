@@ -9,6 +9,7 @@ import {
   type DeepSeekErrorCode
 } from '../core/contracts/deepseek-provider-contract.js';
 import { ensureDeepSeekAccountToken, type EnsureDeepSeekTokenReason } from './deepseek-account-token-acquirer.js';
+import { normalizeString, expandHome } from '../../utils/common-utils.js';
 import type { AuthStatus, IAuthProvider } from './auth-interface.js';
 
 const DEFAULT_TOKEN_FILE_PREFIX = 'deepseek-account';
@@ -40,21 +41,7 @@ type DeepSeekAuthError = Error & {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
-function normalizeString(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length ? trimmed : undefined;
-}
 
-function expandHome(inputPath: string): string {
-  if (!inputPath.startsWith('~')) {
-    return inputPath;
-  }
-  const homeDir = String(process.env.HOME || '').trim() || os.homedir();
-  return path.join(homeDir, inputPath.slice(1));
-}
 
 function sanitizeFileSegment(value: string): string {
   const normalized = value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');

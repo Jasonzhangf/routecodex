@@ -5,10 +5,8 @@ import type {
   VirtualRouterRoutingConfig
 } from './virtual-router-types.js';
 import { loadProviderConfigsV2 } from './provider-v2-loader.js';
+import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 
-function isRecord(value: unknown): value is UnknownRecord {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 function resolveReferencedProviderIdsFromRouting(routing: VirtualRouterRoutingConfig): Set<string> {
   const providerIds = new Set<string>();

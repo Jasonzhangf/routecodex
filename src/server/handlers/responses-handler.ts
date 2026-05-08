@@ -22,6 +22,7 @@ import { trackClientConnectionState } from '../utils/client-connection-state.js'
 import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { payloadContainsVideoInput, VIDEO_REQUEST_TIMEOUT_MS } from '../utils/video-request-detection.js';
 import { writeErrorsampleJson } from '../../utils/errorsamples.js';
+import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 
 interface ResponsesHandlerOptions {
   entryEndpoint?: string;
@@ -44,13 +45,6 @@ function isResponsesSubmitToolOutputsPayload(payload: ResponsesPayload | undefin
     return false;
   }
   return Array.isArray(payload.tool_outputs);
-}
-
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error ?? 'unknown');
 }
 
 function logResponsesHandlerNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {

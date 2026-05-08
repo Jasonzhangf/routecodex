@@ -31,21 +31,12 @@ import { isCamoufoxAvailable, openAuthInCamoufox } from '../providers/core/confi
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
 import { withOAuthRepairEnv } from '../providers/auth/oauth-repair-env.js';
 import { findGoogleAccountVerificationIssue } from './quota-auth-issue.js';
+import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 
 export { TokenDaemon };
 
 const historyStore = new TokenHistoryStore();
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logTokenDaemonNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {

@@ -1,6 +1,7 @@
 import type { Application, NextFunction, Request, Response } from 'express';
 import express from 'express';
 import type { ServerConfigV2 } from './types.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import {
   extractSessionClientDaemonIdFromApiKey,
   extractSessionClientScopeIdFromApiKey,
@@ -13,16 +14,6 @@ import {
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logMiddlewareNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   const now = Date.now();

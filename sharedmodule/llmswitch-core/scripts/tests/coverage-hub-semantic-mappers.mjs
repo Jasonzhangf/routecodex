@@ -1531,6 +1531,72 @@ async function runGeminiMainCoverage() {
   assert.equal(Array.isArray(builtEdgeBranches.contents) && builtEdgeBranches.contents.length > 0, true);
 }
 
+async function runChatMainCoverage() {
+  const { ChatSemanticMapper, maybeAugmentApplyPatchErrorContent, mapReqInboundBridgeToolsToChatWithNative } =
+    await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/chat-mapper.js'));
+
+  assert.equal(typeof ChatSemanticMapper, 'function');
+  assert.equal(typeof maybeAugmentApplyPatchErrorContent, 'function');
+  assert.equal(typeof mapReqInboundBridgeToolsToChatWithNative, 'function');
+
+  const mapper = new ChatSemanticMapper();
+  const ctx = {
+    requestId: 'semantic-coverage-chat',
+    providerProtocol: 'openai-chat',
+    entryEndpoint: '/v1/chat/completions',
+    metadata: { context: { entryEndpoint: '/v1/chat/completions' } }
+  };
+
+  const inbound = await mapper.toChat(
+    {
+      protocol: 'openai-chat',
+      direction: 'request',
+      payload: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'hello' }],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              description: 'run shell',
+              parameters: { type: 'object', properties: { cmd: { type: 'string' } } }
+            }
+          }
+        ]
+      }
+    },
+    ctx
+  );
+  assert.equal(Array.isArray(inbound.messages), true);
+  assert.equal(inbound.messages[0].content, 'hello');
+
+  const outbound = await mapper.fromChat(
+    {
+      messages: [{ role: 'assistant', content: 'done' }],
+      parameters: { model: 'gpt-test' },
+      metadata: { context: { entryEndpoint: '/v1/chat/completions' } }
+    },
+    ctx
+  );
+  assert.equal(outbound.protocol, 'openai-chat');
+  assert.equal(outbound.direction, 'request');
+
+  const augmented = maybeAugmentApplyPatchErrorContent('invalid patch', 'apply_patch');
+  assert.equal(typeof augmented, 'string');
+  assert.equal(
+    Array.isArray(
+      mapReqInboundBridgeToolsToChatWithNative([
+        {
+          type: 'function',
+          function: { name: 'exec_command', parameters: { type: 'object', properties: { cmd: { type: 'string' } } } }
+        }
+      ])
+    ),
+    true
+  );
+}
+
 async function main() {
   runNodeScript('scripts/tests/semantic-mapper-core-replay.mjs');
   runNodeScript('scripts/tests/semantic-mapper-public-replay.mjs');
@@ -1541,6 +1607,9 @@ async function main() {
   if (includesTarget('anthropic')) {
     await runAnthropicMainCoverage();
     await runAnthropicHelperCoverage();
+  }
+  if (includesTarget('chat')) {
+    await runChatMainCoverage();
   }
   if (includesTarget('gemini')) {
     await runGeminiMainCoverage();

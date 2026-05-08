@@ -43,7 +43,9 @@ export async function runReqInboundStage3ContextCaptureOrchestration(
         rawRequest: options.rawRequest,
         adapterContext: options.adapterContext
       });
-    } catch {
+    } catch (error) {
+      // Context capture failure must not block the inbound stage
+      console.warn('[hub-pipeline] context capture failed (non-blocking):', error instanceof Error ? error.message : String(error));
       context = undefined;
     }
   }

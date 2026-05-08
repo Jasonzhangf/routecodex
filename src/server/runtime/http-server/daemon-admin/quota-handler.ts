@@ -8,20 +8,11 @@ import type { ProviderQuotaDaemonModule } from '../../../../manager/modules/quot
 import { loadTokenPortalFingerprintSummary } from '../../../../token-portal/fingerprint-summary.js';
 import { findGoogleAccountVerificationIssue } from '../../../../token-daemon/quota-auth-issue.js';
 import { createQuotaManagerAdapter } from '../../../../manager/modules/quota/quota-adapter.js';
+import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
 
 const QUOTA_HANDLER_NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const quotaHandlerNonBlockingLogState = new Map<string, number>();
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logQuotaHandlerNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   const now = Date.now();
@@ -104,9 +95,6 @@ function getQuotaRawSnapshot(options: DaemonAdminRouteOptions): Record<string, Q
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-}
 
 function normalizeGoogleVerifyUrl(rawUrl: unknown): string | null {
   if (typeof rawUrl !== 'string') {

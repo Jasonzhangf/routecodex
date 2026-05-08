@@ -1,6 +1,66 @@
 import type { JsonObject } from '../../../conversion/hub/types/json.js';
 import { cloneJson } from '../../server-side-tools.js';
 
+const TEXTUAL_TOOL_TRANSPORT_PATTERNS: RegExp[] = [
+  /<\｜?DSML[\s\S]*tool_calls/i,
+  /<\|DSML[\s\S]*tool_calls/i,
+  /<function_calls?>/i,
+  /<<\s*RCC_TOOL_CALLS(?:_JSON)?/i,
+  /<tool_?call\b/i,
+  /<invoke\b/i,
+  /<use_mcp_tool\b/i
+];
+
+function readAssistantContentText(content: unknown): string {
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+  if (!Array.isArray(content)) {
+    return '';
+  }
+  const parts: string[] = [];
+  for (const entry of content) {
+    if (typeof entry === 'string') {
+      const text = entry.trim();
+      if (text) {
+        parts.push(text);
+      }
+      continue;
+    }
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const text =
+      typeof record.text === 'string'
+        ? record.text.trim()
+        : typeof record.output_text === 'string'
+          ? record.output_text.trim()
+          : typeof record.content === 'string'
+            ? record.content.trim()
+            : '';
+    if (text) {
+      parts.push(text);
+    }
+  }
+  return parts.join('\n').trim();
+}
+
+function hasStructuredToolCalls(message: Record<string, unknown>): boolean {
+  return Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+}
+
+export function isTextualToolTransportOnlyAssistantMessage(message: Record<string, unknown>): boolean {
+  if (hasStructuredToolCalls(message)) {
+    return false;
+  }
+  const text = readAssistantContentText(message.content);
+  if (!text) {
+    return false;
+  }
+  return TEXTUAL_TOOL_TRANSPORT_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 export function extractAssistantMessageFromChatLike(chatResponse: JsonObject): JsonObject | null {
   if (!chatResponse || typeof chatResponse !== 'object') {
     return null;
@@ -20,6 +80,9 @@ export function extractAssistantMessageFromChatLike(chatResponse: JsonObject): J
         ? (first.message as Record<string, unknown>)
         : null;
     if (msg) {
+      if (isTextualToolTransportOnlyAssistantMessage(msg)) {
+        return null;
+      }
       return cloneJson(msg as JsonObject);
     }
   }

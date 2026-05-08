@@ -11,8 +11,7 @@ import {
 import {
   executeRouteAndBuildOutbound,
 } from "./hub-pipeline-route-and-outbound.js";
-import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
-import { peekHubStageTopSummary } from "./hub-stage-timing.js";
+import { attachHubStageTopSummary } from "./hub-pipeline-governance-blocks.js";
 
 export async function executeRequestStagePipeline<TContext = Record<string, unknown>>(args: {
   normalized: NormalizedRequest;
@@ -51,11 +50,10 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     },
   });
 
-  const hubStageTop = peekHubStageTopSummary(normalized.id);
-  if (hubStageTop.length) {
-    const rt = ensureRuntimeMetadata(outbound.metadata);
-    (rt as Record<string, unknown>).hubStageTop = hubStageTop as unknown;
-  }
+  attachHubStageTopSummary({
+    requestId: normalized.id,
+    metadata: outbound.metadata,
+  });
 
   return {
     requestId: normalized.id,

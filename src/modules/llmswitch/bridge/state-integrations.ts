@@ -7,20 +7,17 @@
 
 import { importCoreDist, requireCoreDist } from './module-loader.js';
 import type { AnyRecord } from './module-loader.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
+import {
+  extractSessionIdentifiersFromMetadataWithNative
+} from '../../../../node_modules/rcc-llmswitch-core/dist/router/virtual-router/engine-selection/native-hub-pipeline-session-identifiers-semantics.js';
+import {
+  syncReasoningStopModeFromRequest as syncReasoningStopModeFromRequestFromCore
+} from '../../../../node_modules/rcc-llmswitch-core/dist/servertool/handlers/reasoning-stop-state.js';
 
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error ?? 'unknown');
-  }
-}
 
 function logStateIntegrationsNonBlocking(
   stage: string,
@@ -113,30 +110,12 @@ export function saveRoutingInstructionStateSync(key: string, state: unknown | nu
   }
 }
 
-type ReasoningStopStateExports = {
-  syncReasoningStopModeFromRequest?: (
-    adapterContext: unknown,
-    fallbackMode?: 'on' | 'off' | 'endless'
-  ) => 'on' | 'off' | 'endless';
-};
-
 export function syncReasoningStopModeFromRequest(
   adapterContext: unknown,
   fallbackMode: 'on' | 'off' | 'endless' = 'off'
 ): 'on' | 'off' | 'endless' {
-  const reasoningStopStateModule = requireCoreDist<ReasoningStopStateExports>(
-    'servertool/handlers/reasoning-stop-state'
-  );
-  const fn = (reasoningStopStateModule as ReasoningStopStateExports).syncReasoningStopModeFromRequest;
-  if (typeof fn !== 'function') {
-    throw buildStateIntegrationFailure(
-      'reasoning_stop_state.sync_mode.api_unavailable',
-      'syncReasoningStopModeFromRequest not available',
-      { fallbackMode }
-    );
-  }
   try {
-    return fn(adapterContext, fallbackMode);
+    return syncReasoningStopModeFromRequestFromCore(adapterContext, fallbackMode);
   } catch (error) {
     throw buildStateIntegrationFailure('reasoning_stop_state.sync_mode.invoke', error, { fallbackMode });
   }
@@ -144,23 +123,9 @@ export function syncReasoningStopModeFromRequest(
 
 type SessionIdentifiers = { sessionId?: string; conversationId?: string };
 
-type SessionIdentifiersModule = {
-  extractSessionIdentifiersFromMetadata?: (meta: Record<string, unknown> | undefined) => SessionIdentifiers;
-};
-
 export function extractSessionIdentifiersFromMetadata(meta: Record<string, unknown> | undefined): SessionIdentifiers {
-  const sessionIdentifiersModule = requireCoreDist<SessionIdentifiersModule>(
-    'conversion/hub/pipeline/session-identifiers'
-  );
-  const fn = (sessionIdentifiersModule as SessionIdentifiersModule).extractSessionIdentifiersFromMetadata;
-  if (typeof fn !== 'function') {
-    throw buildStateIntegrationFailure(
-      'session_identifiers.extract.api_unavailable',
-      'extractSessionIdentifiersFromMetadata not available'
-    );
-  }
   try {
-    return fn(meta);
+    return extractSessionIdentifiersFromMetadataWithNative(meta);
   } catch (error) {
     throw buildStateIntegrationFailure('session_identifiers.extract.invoke', error);
   }

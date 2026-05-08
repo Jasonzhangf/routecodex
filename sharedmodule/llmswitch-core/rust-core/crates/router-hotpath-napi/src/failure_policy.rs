@@ -136,7 +136,8 @@ pub fn compute_backoff(
     if classification != FailureClassification::Recoverable {
         return 0;
     }
-    let delay = base_ms * (1u64 << attempt.min(6));
+    let step = attempt.saturating_sub(1).min(6);
+    let delay = base_ms * (1u64 << step);
     delay.min(max_ms)
 }
 

@@ -1,12 +1,12 @@
 import type { FormatAdapter, SemanticMapper } from "../format-adapters/index.js";
 import { ResponsesFormatAdapter } from "../format-adapters/responses-format-adapter.js";
-import { ResponsesSemanticMapper } from "../semantic-mappers/responses-mapper.js";
+import { ResponsesSemanticMapper } from "../operation-table/semantic-mappers/responses-mapper.js";
 import { AnthropicFormatAdapter } from "../format-adapters/anthropic-format-adapter.js";
-import { AnthropicSemanticMapper } from "../semantic-mappers/anthropic-mapper.js";
+import { AnthropicSemanticMapper } from "../operation-table/semantic-mappers/anthropic-mapper.js";
 import { GeminiFormatAdapter } from "../format-adapters/gemini-format-adapter.js";
-import { GeminiSemanticMapper } from "../semantic-mappers/gemini-mapper.js";
+import { GeminiSemanticMapper } from "../operation-table/semantic-mappers/gemini-mapper.js";
 import { ChatFormatAdapter } from "../format-adapters/chat-format-adapter.js";
-import { ChatSemanticMapper } from "../semantic-mappers/chat-mapper.js";
+import { ChatSemanticMapper } from "../operation-table/semantic-mappers/chat-mapper.js";
 import {
   runChatContextCapture,
   captureResponsesContextSnapshot,

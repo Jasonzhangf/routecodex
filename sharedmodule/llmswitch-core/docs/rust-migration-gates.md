@@ -61,12 +61,6 @@ Next module baseline check (hub chat-process media attachments, pre-shadow):
 npm run verify:shadow-gate:hub-chat-process-media
 ```
 
-Next module baseline check (hub chat-process continue execution, pre-shadow):
-
-```bash
-npm run verify:shadow-gate:hub-chat-process-continue-execution
-```
-
 Next module baseline check (hub chat-process pending tool sync, pre-shadow):
 
 ```bash
@@ -77,12 +71,6 @@ Next module baseline check (hub req inbound semantic lift, pre-shadow):
 
 ```bash
 npm run verify:shadow-gate:hub-req-inbound-semantic-lift
-```
-
-Next module baseline check (hub resp outbound chat-process semantics bridge, pre-shadow):
-
-```bash
-npm run verify:shadow-gate:hub-resp-outbound-client-semantics
 ```
 
 Next module baseline check (virtual-router tier antigravity target split, pre-shadow):

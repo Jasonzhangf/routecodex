@@ -1,4 +1,5 @@
 import { extractSessionClientScopeIdFromApiKey } from '../../../utils/session-client-token.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
 const SESSION_SCOPE_NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const sessionScopeNonBlockingLogState = new Map<string, number>();
@@ -19,16 +20,6 @@ export type TmuxSessionResolution = {
   source: 'metadata' | 'body_metadata' | 'headers_or_api_key' | 'registry_by_daemon' | 'registry_by_binding' | 'none';
 };
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logSessionScopeResolutionNonBlockingError(
   stage: string,

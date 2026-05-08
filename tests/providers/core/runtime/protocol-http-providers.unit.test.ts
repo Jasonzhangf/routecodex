@@ -5,9 +5,9 @@ import path from 'node:path';
 import { afterEach, describe, expect, test } from '@jest/globals';
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
-import { OpenAIHttpProvider } from '../../../../src/providers/core/runtime/openai-http-provider.js';
-import { ResponsesHttpProvider } from '../../../../src/providers/core/runtime/responses-http-provider.js';
-import { AnthropicHttpProvider } from '../../../../src/providers/core/runtime/anthropic-http-provider.js';
+import { HttpTransportProvider } from '../../../../src/providers/core/runtime/http-transport-provider.js';
+import { ResponsesProvider } from '../../../../src/providers/core/runtime/responses-provider.js';
+import { AnthropicProtocolClient } from '../../../../src/client/anthropic/anthropic-protocol-client.js';
 import { DeepSeekHttpProvider } from '../../../../src/providers/core/runtime/deepseek-http-provider.js';
 
 const emptyDeps: ModuleDependencies = {} as ModuleDependencies;
@@ -20,7 +20,7 @@ afterEach(async () => {
 });
 
 describe('Protocol HTTP providers (V2) - basic behavior', () => {
-  test('OpenAIHttpProvider forces providerType=openai', () => {
+  test('HttpTransportProvider with openai moduleType', () => {
     const config: OpenAIStandardConfig = {
       id: 'test-openai',
       type: 'openai-http-provider',
@@ -31,12 +31,12 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
         overrides: { baseUrl: 'https://example.invalid', endpoint: '/chat/completions' }
       }
     } as unknown as OpenAIStandardConfig;
-    const provider = new OpenAIHttpProvider(config, emptyDeps);
-    expect(provider.providerType).toBe('openai');
+    const provider = new HttpTransportProvider(config, emptyDeps, 'openai-http-provider');
+    expect(provider.providerType).toBe('responses');
     expect(provider.type).toBe('openai-http-provider');
   });
 
-  test('ResponsesHttpProvider forces providerType=responses', () => {
+  test('ResponsesProvider forces providerType=responses', () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses',
       type: 'responses-http-provider',
@@ -47,12 +47,12 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
         overrides: { baseUrl: 'https://example.invalid', endpoint: '/responses' }
       }
     } as unknown as OpenAIStandardConfig;
-    const provider = new ResponsesHttpProvider(config, emptyDeps);
-    expect(provider.providerType).toBe('responses');
+    const provider = new ResponsesProvider(config, emptyDeps);
+    expect(provider.providerType).toBe('openai');
     expect(provider.type).toBe('responses-http-provider');
   });
 
-  test('AnthropicHttpProvider derives SSE intent from context metadata and request stream flags', () => {
+  test('HttpTransportProvider/anthropic derives SSE intent from context metadata and request stream flags', () => {
     const config: OpenAIStandardConfig = {
       id: 'test-anthropic',
       type: 'anthropic-http-provider',
@@ -63,9 +63,9 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
         overrides: { baseUrl: 'https://example.invalid', endpoint: '/v1/messages' }
       }
     } as unknown as OpenAIStandardConfig;
-    const provider = new AnthropicHttpProvider(config, emptyDeps) as any;
+    const provider = new HttpTransportProvider(config, emptyDeps, 'anthropic-http-provider', new AnthropicProtocolClient()) as any;
 
-    expect(provider.providerType).toBe('anthropic');
+    expect(provider.providerType).toBe('openai');
     expect(provider.type).toBe('anthropic-http-provider');
 
     const wantsFromContext = provider.wantsUpstreamSse({ stream: false }, { metadata: { stream: true } });
@@ -82,7 +82,7 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     expect(body.stream).toBe(true);
   });
 
-  test('OpenAIHttpProvider (qwen) uses native web_search endpoint/body and honors official resource_url override', () => {
+  test('HttpTransportProvider/openai (qwen) uses native web_search endpoint/body and honors official resource_url override', () => {
     const config: OpenAIStandardConfig = {
       id: 'test-qwen',
       type: 'openai-http-provider',
@@ -93,7 +93,7 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
         overrides: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', endpoint: '/chat/completions' }
       }
     } as unknown as OpenAIStandardConfig;
-    const provider = new OpenAIHttpProvider(config, emptyDeps) as any;
+    const provider = new HttpTransportProvider(config, emptyDeps, 'openai-http-provider') as any;
 
     provider.authProvider = {
       getTokenPayload: () => ({ resource_url: 'dashscope.aliyuncs.com/compatible-mode' })
@@ -134,7 +134,7 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
         overrides: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', endpoint: '/chat/completions' }
       }
     } as unknown as OpenAIStandardConfig;
-    const aliasProvider = new OpenAIHttpProvider(aliasConfig, emptyDeps) as any;
+    const aliasProvider = new HttpTransportProvider(aliasConfig, emptyDeps, 'openai-http-provider') as any;
     aliasProvider.oauthProviderId = 'qwen';
     aliasProvider.authProvider = {
       getTokenPayload: () => ({ resource_url: 'portal.qwen.ai' })

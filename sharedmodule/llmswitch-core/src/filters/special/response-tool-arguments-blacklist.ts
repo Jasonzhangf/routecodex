@@ -1,7 +1,7 @@
 import type { Filter, FilterContext, FilterResult, JsonObject } from '../types.js';
+import { isObject } from '../../shared/common-utils.js';
+import { tryParseJson } from '../../conversion/jsonish.js';
 
-function isObject(v: unknown): v is Record<string, unknown> { return !!v && typeof v === 'object' && !Array.isArray(v); }
-function parseJson(str: string): any { try { return JSON.parse(str); } catch { return null; } }
 
 function logResponseToolArgsBlacklistNonBlocking(
   stage: string,
@@ -42,7 +42,7 @@ export class ResponseToolArgumentsBlacklistFilter implements Filter<JsonObject> 
           const fn = tc && (tc as any).function ? ((tc as any).function as any) : undefined;
           const argStr = fn && typeof fn.arguments === 'string' ? (fn.arguments as string) : undefined;
           if (!argStr) continue;
-          const parsed = parseJson(argStr);
+          const parsed = tryParseJson(argStr);
           if (!isObject(parsed)) continue;
           let changed = false;
           for (const k of blacklist) {
@@ -61,7 +61,10 @@ export class ResponseToolArgumentsBlacklistFilter implements Filter<JsonObject> 
       }
       (out as any).choices = choices;
       return { ok: true, data: out };
-    } catch {
+    } catch (error) {
+      logResponseToolArgsBlacklistNonBlocking('apply', error, {
+        blacklistSize: blacklist.length
+      });
       return { ok: true, data: input };
     }
   }

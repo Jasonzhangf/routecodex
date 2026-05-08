@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { resolveRccPath } from '../config/user-data-paths.js';
+import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 
 export interface TokenManagerLeaderInfo {
   ownerId: string;
@@ -13,16 +14,6 @@ const LEADER_FILE = path.join(STATE_DIR, 'leader.json');
 const NON_BLOCKING_WARN_THROTTLE_MS = 60_000;
 const nonBlockingWarnByStage = new Map<string, number>();
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function shouldLogNonBlockingStage(stage: string): boolean {
   const now = Date.now();

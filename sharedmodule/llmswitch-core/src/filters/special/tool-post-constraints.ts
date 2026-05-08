@@ -73,70 +73,66 @@ export class ToolPostConstraintsFilter implements Filter<JsonObject> {
   }
 
   apply(input: JsonObject, ctx: FilterContext): FilterResult<JsonObject> {
-    try {
-      if (!this.config.rules || !this.config.rules.length) {
-        return { ok: true, data: input };
-      }
-      const out = JSON.parse(JSON.stringify(input || {}));
-      const direction: 'request' | 'response' =
-        (typeof ctx.stage === 'string' && ctx.stage.startsWith('request_')) ? 'request' : 'response';
+if (!this.config.rules || !this.config.rules.length) {
+  return { ok: true, data: input };
+}
+const out = JSON.parse(JSON.stringify(input || {}));
+const direction: 'request' | 'response' =
+  (typeof ctx.stage === 'string' && ctx.stage.startsWith('request_')) ? 'request' : 'response';
 
-      const providerProtocol = ctx.profile || '';
-      const providerId = (ctx as any).providerId || '';
-      const modelId = (ctx as any).modelId || '';
+const providerProtocol = ctx.profile || '';
+const providerId = (ctx as any).providerId || '';
+const modelId = (ctx as any).modelId || '';
 
-      const tools = getToolArray(out);
-      if (!tools.length) {
-        return { ok: true, data: out };
-      }
+const tools = getToolArray(out);
+if (!tools.length) {
+  return { ok: true, data: out };
+}
 
-      const issues: Array<{ ruleId: string; toolName?: string; action: string }> = [];
+const issues: Array<{ ruleId: string; toolName?: string; action: string }> = [];
 
-      for (const rule of this.config.rules) {
-        if (rule.direction !== 'both' && rule.direction !== direction) continue;
-        if (rule.providerProtocol && rule.providerProtocol !== providerProtocol) continue;
-        if (rule.providerId && rule.providerId !== providerId) continue;
-        if (rule.modelId && rule.modelId !== modelId) continue;
+for (const rule of this.config.rules) {
+  if (rule.direction !== 'both' && rule.direction !== direction) continue;
+  if (rule.providerProtocol && rule.providerProtocol !== providerProtocol) continue;
+  if (rule.providerId && rule.providerId !== providerId) continue;
+  if (rule.modelId && rule.modelId !== modelId) continue;
 
-        // 当前仅支持 tools[*].function.description 这一类路径
-        if (rule.path !== 'tools[*].function.description') continue;
+  // 当前仅支持 tools[*].function.description 这一类路径
+  if (rule.path !== 'tools[*].function.description') continue;
 
-        for (let i = 0; i < tools.length; i++) {
-          const t = tools[i];
-          if (!t || typeof t !== 'object') continue;
-          const fn = (t as any).function;
-          const name = typeof fn?.name === 'string' ? fn.name : '';
-          if (!matchesPattern(name, rule.toolNamePattern)) continue;
+  for (let i = 0; i < tools.length; i++) {
+    const t = tools[i];
+    if (!t || typeof t !== 'object') continue;
+    const fn = (t as any).function;
+    const name = typeof fn?.name === 'string' ? fn.name : '';
+    if (!matchesPattern(name, rule.toolNamePattern)) continue;
 
-          const desc = fn?.description;
-          if (!checkCondition(desc, rule.when)) continue;
+    const desc = fn?.description;
+    if (!checkCondition(desc, rule.when)) continue;
 
-          if (rule.action === 'patch' && rule.patchText) {
-            (fn as any).description = rule.patchText.replace('${toolName}', name || 'tool');
-          } else if (rule.action === 'drop') {
-            tools.splice(i, 1);
-            i--;
-          }
-          issues.push({ ruleId: rule.id, toolName: name, action: rule.action });
-        }
-      }
-
-      if (issues.length && (ctx as any)?.logger && typeof (ctx as any).logger.log === 'function') {
-        try {
-          (ctx as any).logger.log('tool-post-constraints', {
-            requestId: ctx.requestId,
-            endpoint: ctx.endpoint,
-            profile: ctx.profile,
-            issues
-          });
-        } catch {
-          // ignore logging failures
-        }
-      }
-
-      return { ok: true, data: out };
-    } catch {
-      return { ok: true, data: input };
+    if (rule.action === 'patch' && rule.patchText) {
+      (fn as any).description = rule.patchText.replace('${toolName}', name || 'tool');
+    } else if (rule.action === 'drop') {
+      tools.splice(i, 1);
+      i--;
     }
+    issues.push({ ruleId: rule.id, toolName: name, action: rule.action });
+  }
+}
+
+if (issues.length && (ctx as any)?.logger && typeof (ctx as any).logger.log === 'function') {
+  try {
+    (ctx as any).logger.log('tool-post-constraints', {
+      requestId: ctx.requestId,
+      endpoint: ctx.endpoint,
+      profile: ctx.profile,
+      issues
+    });
+  } catch {
+    // ignore logging failures
+  }
+}
+
+return { ok: true, data: out };
   }
 }

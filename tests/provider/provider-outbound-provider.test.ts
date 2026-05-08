@@ -8,7 +8,7 @@ jest.mock('../../src/providers/core/utils/snapshot-writer.ts', () => ({
   writeProviderSnapshot: async () => {}
 }), { virtual: true });
 
-import { ChatHttpProvider } from '../../src/providers/core/runtime/chat-http-provider.ts';
+import { HttpTransportProvider } from '../../src/providers/core/runtime/http-transport-provider.ts';
 import { HttpRequestExecutor } from '../../src/providers/core/runtime/http-request-executor.ts';
 import { attachProviderRuntimeMetadata } from '../../src/providers/core/runtime/provider-runtime-metadata.ts';
 
@@ -47,7 +47,7 @@ describe('Provider outbound → upstream (openai-chat)', () => {
   test('glm: compat.minimal + provider body/headers shaping', async () => {
     const golden = loadGolden('glm', 'openai-chat') || { messages: [{ role: 'user', content: 'hi' }] };
 
-    const provider = new ChatHttpProvider({
+    const provider = new HttpTransportProvider({
       type: 'openai-standard',
       config: {
         providerType: 'openai',
@@ -56,7 +56,7 @@ describe('Provider outbound → upstream (openai-chat)', () => {
         auth: { type: 'apikey', apiKey: 'testapikey12345' },
         overrides: { maxRetries: 0 }
       }
-    } as any, deps);
+    } as any, deps, 'openai-standard');
     // Patch http client + executor (constructor wires executor to the original HttpClient)
     (provider as any).httpClient = new FakeHttpClient({});
     (provider as any).requestExecutor = new HttpRequestExecutor(
@@ -90,7 +90,7 @@ describe('Provider outbound → upstream (openai-chat)', () => {
   test('qwen: passthrough compat + provider shaping', async () => {
     const golden = loadGolden('qwen', 'openai-chat') || { messages: [{ role: 'user', content: 'hi' }] };
 
-    const provider = new ChatHttpProvider({
+    const provider = new HttpTransportProvider({
       type: 'openai-standard',
       config: {
         providerType: 'openai',
@@ -99,7 +99,7 @@ describe('Provider outbound → upstream (openai-chat)', () => {
         auth: { type: 'apikey', apiKey: 'testapikey12345' },
         overrides: { maxRetries: 0 }
       }
-    } as any, deps);
+    } as any, deps, 'openai-standard');
     (provider as any).httpClient = new FakeHttpClient({});
     (provider as any).requestExecutor = new HttpRequestExecutor(
       (provider as any).httpClient,
@@ -130,12 +130,12 @@ describe('Provider outbound → upstream (glm/lmstudio)', () => {
   test('glm: compat.minimal + provider shaping', async () => {
     process.env.RCC_TEST_FAKE_GLM = '1';
     const golden = loadGolden('glm', 'openai-chat') || { messages: [{ role: 'user', content: 'hi' }] };
-    const provider = new ChatHttpProvider({
+    const provider = new HttpTransportProvider({
       type: 'openai-standard',
       config: {
         providerType: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'glm-gpt4-1106', auth: { type: 'apikey', apiKey: 'testapikey12345' }, overrides: { maxRetries: 0 }
       }
-    } as any, deps);
+    } as any, deps, 'openai-standard');
     (provider as any).httpClient = new FakeHttpClient({});
     (provider as any).requestExecutor = new HttpRequestExecutor(
       (provider as any).httpClient,
@@ -156,12 +156,12 @@ describe('Provider outbound → upstream (glm/lmstudio)', () => {
   test('lmstudio: compat.minimal + provider shaping', async () => {
     process.env.RCC_TEST_FAKE_LMSTUDIO = '1';
     const golden = loadGolden('lmstudio', 'openai-chat') || { messages: [{ role: 'user', content: 'hi' }] };
-    const provider = new ChatHttpProvider({
+    const provider = new HttpTransportProvider({
       type: 'openai-standard',
       config: {
         providerType: 'openai', baseUrl: 'http://localhost:1234/v1', model: 'lmstudio-phi3', auth: { type: 'apikey', apiKey: 'testapikey12345' }, overrides: { maxRetries: 0 }
       }
-    } as any, deps);
+    } as any, deps, 'openai-standard');
     (provider as any).httpClient = new FakeHttpClient({});
     (provider as any).requestExecutor = new HttpRequestExecutor(
       (provider as any).httpClient,
@@ -191,8 +191,8 @@ describe('Provider outbound → upstream (responses wire)', () => {
 
   test('responses: provider expects responses wire payload (no chat→responses conversion)', async () => {
     const golden = loadGolden('fc', 'openai-responses') || null; // optional shape hints
-    const { ResponsesHttpProvider } = await import('../../src/providers/core/runtime/responses-http-provider.ts');
-    const provider = new (ResponsesHttpProvider as any)({
+    const { ResponsesProvider } = await import('../../src/providers/core/runtime/responses-provider.ts');
+    const provider = new (ResponsesProvider as any)({
       type: 'responses-http-provider',
       config: {
         providerType: 'responses', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', auth: { type: 'apikey', apiKey: 'testapikey12345' }, overrides: { maxRetries: 0 }

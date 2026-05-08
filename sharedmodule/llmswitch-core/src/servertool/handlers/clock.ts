@@ -30,6 +30,7 @@ import { nowMs } from '../clock/state.js';
 import { logClock } from '../clock/log.js';
 import { resolveClockSessionScope } from '../clock/session-scope.js';
 import { resolveWorkingDirectoryFromAdapterContextOrFallback } from './memory/cache-writer.js';
+import { formatUnknownError } from '../../shared/common-utils.js';
 
 const FLOW_ID = 'clock_flow';
 const CLOCK_LIST_REQUIRED_MESSAGE =
@@ -144,12 +145,6 @@ function stripClockStopMarkerFromText(raw: string): { updated: string; changed: 
   return { updated: kept.join('\n'), changed };
 }
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error ?? 'unknown');
-}
 
 async function clearClockStopMarkerForReactivation(adapterContext: Record<string, unknown>): Promise<void> {
   const workdir = resolveWorkingDirectoryFromAdapterContextOrFallback(adapterContext);

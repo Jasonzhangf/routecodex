@@ -1,6 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { resolveRccPath } from '../runtime/user-data-paths.js';
+import { formatUnknownError } from '../shared/common-utils.js';
 
 export interface VirtualRouterHitEvent {
   requestId: string;
@@ -91,16 +92,6 @@ export interface StatsCenter {
   reset(): void;
 }
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logStatsCenterNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {

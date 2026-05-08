@@ -159,7 +159,8 @@ async function fetchDaemonList(ctx: SessionInjectCommandContext, baseUrl: string
     const text = await response.text().catch(() => String(response.status));
     throw new Error(`Failed to list session daemons (${response.status}): ${text}`);
   }
-  const data = (await response.json().catch(() => null)) as { records?: unknown } | null;
+  let data: { records?: unknown } | null = null;
+  try { data = (await response.json()) as { records?: unknown } | null; } catch { /* json parse best-effort; handled below */ }
   const records = Array.isArray(data?.records) ? data?.records : [];
   return records.filter((item) => item && typeof item === 'object') as SessionClientRecord[];
 }
@@ -299,7 +300,8 @@ export function createSessionInjectCommand(program: Command, ctx: SessionInjectC
           },
           body: JSON.stringify(payload)
         });
-        const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+        let data: Record<string, unknown> | null = null;
+        try { data = (await response.json()) as Record<string, unknown> | null; } catch { /* json parse best-effort; handled below */ }
         if (!response.ok) {
           const reason =
             (typeof data?.reason === 'string' && data.reason) ||

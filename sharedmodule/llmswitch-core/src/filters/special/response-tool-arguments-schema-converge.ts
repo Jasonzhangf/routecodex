@@ -1,12 +1,8 @@
 import type { Filter, FilterContext, FilterResult, JsonObject } from '../types.js';
+import { isObject } from '../../shared/common-utils.js';
+import { tryParseJson } from '../../conversion/jsonish.js';
 
-function isObject(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === 'object' && !Array.isArray(v);
-}
 
-function parseJson(str: string): any {
-  try { return JSON.parse(str); } catch { return null; }
-}
 
 function logResponseToolArgsSchemaConvergeNonBlocking(
   stage: string,
@@ -30,7 +26,6 @@ export class ResponseToolArgumentsSchemaConvergeFilter implements Filter<JsonObj
   readonly stage: FilterContext['stage'] = 'response_pre';
 
   apply(input: JsonObject, context?: FilterContext): FilterResult<JsonObject> {
-    try {
       const schemaMap = (context as any)?.toolSchemas as Record<string, any> | undefined;
       if (!schemaMap || typeof schemaMap !== 'object') return { ok: true, data: input };
 
@@ -48,7 +43,7 @@ export class ResponseToolArgumentsSchemaConvergeFilter implements Filter<JsonObj
           const props = schema && schema.properties && isObject(schema.properties) ? (schema.properties as Record<string, unknown>) : undefined;
           if (!props || !isObject(fn)) continue;
           const argStr = typeof fn.arguments === 'string' ? (fn.arguments as string) : undefined;
-          const parsed = argStr ? parseJson(argStr) : (isObject((fn as any).arguments) ? (fn as any).arguments : null);
+          const parsed = argStr ? tryParseJson(argStr) : (isObject((fn as any).arguments) ? (fn as any).arguments : null);
           if (!isObject(parsed)) continue;
           const whitelisted: Record<string, unknown> = {};
           for (const k of Object.keys(props)) {
@@ -65,8 +60,5 @@ export class ResponseToolArgumentsSchemaConvergeFilter implements Filter<JsonObj
       }
       (out as any).choices = choices;
       return { ok: true, data: out };
-    } catch {
-      return { ok: true, data: input };
-    }
   }
 }

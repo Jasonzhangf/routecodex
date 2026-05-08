@@ -32,7 +32,11 @@ const ENV_KEYS = [
   'ROUTECODEX_ERRORSAMPLE_QUEUE_MEMORY_BUDGET_BYTES',
   'RCC_ERRORSAMPLE_QUEUE_MEMORY_BUDGET_BYTES',
   'ROUTECODEX_ERRORSAMPLE_RESPONSES_TOOL_HISTORY_MAX_SAMPLE_BYTES',
-  'RCC_ERRORSAMPLE_RESPONSES_TOOL_HISTORY_MAX_SAMPLE_BYTES'
+  'RCC_ERRORSAMPLE_RESPONSES_TOOL_HISTORY_MAX_SAMPLE_BYTES',
+  'ROUTECODEX_SNAPSHOT',
+  'RCC_SNAPSHOT',
+  'ROUTECODEX_SNAPSHOT_FULL',
+  'RCC_SNAPSHOT_FULL'
 ] as const;
 
 async function listFiles(dir: string): Promise<string[]> {
@@ -65,6 +69,45 @@ describe('errorsample writer safeguards', () => {
       expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(1024);
       expect(json.truncated).toBe(true);
       expect(typeof json.reason).toBe('string');
+    } finally {
+      for (const key of ENV_KEYS) {
+        const value = envBackup.get(key);
+        if (value == null) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+      __resetErrorsampleQueueForTests();
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('writes full oversized payload when snapshot mode is enabled', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-errorsamples-snap-full-'));
+    const envBackup = new Map<string, string | undefined>();
+    for (const key of ENV_KEYS) {
+      envBackup.set(key, process.env[key]);
+    }
+    try {
+      process.env.RCC_ERRORSAMPLES_DIR = tmp;
+      process.env.ROUTECODEX_ERRORSAMPLE_MAX_BYTES = '1024';
+      process.env.ROUTECODEX_ERRORSAMPLE_PRUNE_INTERVAL_MS = '0';
+      process.env.ROUTECODEX_SNAPSHOT = '1';
+
+      const payload = { text: 'x'.repeat(40_000) };
+      const file = await writeErrorsampleJson({
+        group: 'payload-contract-error',
+        kind: 'provider-response.chat_missing_required_tool_call',
+        payload
+      });
+      await __flushErrorsampleQueueForTests();
+      const text = await fs.readFile(file!, 'utf8');
+      const json = JSON.parse(text) as Record<string, unknown>;
+
+      expect(Buffer.byteLength(text, 'utf8')).toBeGreaterThan(1024);
+      expect(json.truncated).toBeUndefined();
+      expect((json.text as string).length).toBe(40_000);
     } finally {
       for (const key of ENV_KEYS) {
         const value = envBackup.get(key);

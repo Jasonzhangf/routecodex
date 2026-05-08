@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { evaluateTmuxScopeCleanup } from './tmux-scope-cleanup-policy.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
 export type SessionClientRecord = {
   daemonId: string;
@@ -70,13 +71,6 @@ type ManagedProcessInfo = {
 };
 
 const HEARTBEAT_TTL_MS = 45_000;
-
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error ?? 'unknown');
-}
 
 function logRegistryUtilsNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {

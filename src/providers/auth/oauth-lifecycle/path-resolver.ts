@@ -144,3 +144,15 @@ export function resolveCamoufoxAliasForAuth(providerType: string, auth: Extended
   }
   return 'default';
 }
+
+export function resolveTokenAliasFromPath(tokenFilePath: string): string | undefined {
+  if (!tokenFilePath) {
+    return undefined;
+  }
+  const base = path.basename(tokenFilePath);
+  const ptMatch = base.match(/^(?:qwen|gemini|anthropic|deepseek|openai)-oauth-\d+(?:-(.+))?\.json$/i);
+  if (ptMatch && ptMatch[1]) {
+    return ptMatch[1].trim();
+  }
+  return undefined;
+}

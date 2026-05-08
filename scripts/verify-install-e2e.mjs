@@ -6,6 +6,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const REQUESTED_PORT = Number(process.env.ROUTECODEX_INSTALL_VERIFY_PORT || process.env.RCC_INSTALL_VERIFY_PORT || 5560);
 const HOST = process.env.ROUTECODEX_INSTALL_VERIFY_HOST || '127.0.0.1';
@@ -137,29 +138,13 @@ async function main() {
     : await writeVerifyConfig(mockServer.baseUrl, HOST, port);
   const verifyConfigPath = verifyLayout.filePath;
   const verifyRootDir = verifyLayout.rootDir;
-  const env = {
-    ...process.env,
-    ROUTECODEX_BUILD_RESTART_ONLY: '0',
-    RCC_BUILD_RESTART_ONLY: '0',
-    ROUTECODEX_PORT: String(port),
-    RCC_PORT: String(port),
-    ROUTECODEX_HOST: HOST,
-    RCC_HOST: HOST,
-    ROUTECODEX_CONFIG: verifyConfigPath,
-    ROUTECODEX_CONFIG_PATH: verifyConfigPath,
-    RCC4_CONFIG_PATH: verifyConfigPath,
-    ...(verifyRootDir
-      ? {
-          RCC_HOME: verifyRootDir,
-          ROUTECODEX_USER_DIR: verifyRootDir,
-          ROUTECODEX_HOME: verifyRootDir
-        }
-      : {}),
-    // Install verification uses a mock upstream; skip ManagerDaemon modules (token/quota) so startup
-    // does not depend on external network availability.
-    ROUTECODEX_USE_MOCK: '1',
-    ROUTECODEX_ALLOW_MOCK_RUNTIME: '1'
-  };
+  const env = buildVerifyServerEnv({
+    baseEnv: process.env,
+    port,
+    host: HOST,
+    verifyConfigPath,
+    verifyRootDir
+  });
   const server = spawn(process.execPath, serverArgs, {
     env,
     stdio: ['ignore', 'pipe', 'pipe']
@@ -197,10 +182,47 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error('[verify-install-e2e] failed:', error);
-  process.exit(1);
-});
+export function buildVerifyServerEnv(args) {
+  const {
+    baseEnv,
+    port,
+    host,
+    verifyConfigPath,
+    verifyRootDir
+  } = args;
+  return {
+    ...baseEnv,
+    ROUTECODEX_BUILD_RESTART_ONLY: '0',
+    RCC_BUILD_RESTART_ONLY: '0',
+    ROUTECODEX_PORT: String(port),
+    RCC_PORT: String(port),
+    ROUTECODEX_HOST: HOST,
+    RCC_HOST: HOST,
+    ROUTECODEX_CONFIG: verifyConfigPath,
+    ROUTECODEX_CONFIG_PATH: verifyConfigPath,
+    RCC4_CONFIG_PATH: verifyConfigPath,
+    ...(verifyRootDir
+      ? {
+          RCC_HOME: verifyRootDir,
+          ROUTECODEX_USER_DIR: verifyRootDir,
+          ROUTECODEX_HOME: verifyRootDir
+        }
+      : {}),
+    ROUTECODEX_SERVERTOOL_ENABLED: '0',
+    RCC_SERVERTOOL_ENABLED: '0',
+    // Install verification uses a mock upstream; skip ManagerDaemon modules (token/quota) so startup
+    // does not depend on external network availability.
+    ROUTECODEX_USE_MOCK: '1',
+    ROUTECODEX_ALLOW_MOCK_RUNTIME: '1'
+  };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error('[verify-install-e2e] failed:', error);
+    process.exit(1);
+  });
+}
 async function startMockProviderServer() {
   const server = http.createServer((req, res) => {
     handleMockRequest(req, res).catch((error) => {

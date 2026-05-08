@@ -2,6 +2,7 @@ import path from 'node:path';
 import * as fsp from 'node:fs/promises';
 import type { FilterStage } from '../types.js';
 import { resolveRccSnapshotsDirFromEnv } from '../../runtime/user-data-paths.js';
+import { formatUnknownError } from '../../shared/common-utils.js';
 
 const SNAPSHOT_LOG_THROTTLE_MS = 30_000;
 const lastSnapshotErrorLogAt = new Map<string, number>();
@@ -47,16 +48,6 @@ function toErrorCode(error: unknown): string | undefined {
   return typeof code === 'string' && code.trim() ? code : undefined;
 }
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logSnapshotNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   const errorCode = toErrorCode(error) || 'unknown';

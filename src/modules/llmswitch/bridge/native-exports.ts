@@ -5,6 +5,15 @@
  */
 
 import { importCoreDist, type AnyRecord } from './module-loader.js';
+import {
+  classifyProviderFailure as classifyProviderFailureFromCore,
+  computeBackoffMsNative as computeBackoffMsNativeFromCore,
+  getNetworkErrorCodes as getNetworkErrorCodesFromCore,
+  isBlockingRecoverableNative as isBlockingRecoverableNativeFromCore,
+  shouldRetryNative as shouldRetryNativeFromCore
+} from '../../../../node_modules/rcc-llmswitch-core/dist/router/virtual-router/engine-selection/native-failure-policy.js';
+
+type NativeFailureClassification = Parameters<typeof isBlockingRecoverableNativeFromCore>[0];
 
 type NativeSharedConversionSemantics = {
   mapChatToolsToBridgeWithNative?: (rawTools: unknown) => Array<Record<string, unknown>>;
@@ -201,58 +210,39 @@ export async function sanitizeFollowupText(raw: unknown): Promise<string> {
   return fn(raw);
 }
 
-// --- Native Failure Policy exports (sync, via requireCoreDist) ---
-type NativeFailurePolicyModule = {
-  classifyProviderFailure?: (statusCode: number | undefined, errorCode: string | undefined, upstreamCode: string | undefined, isNetworkError: boolean) => string;
-  isBlockingRecoverableNative?: (classification: string, stage: string | undefined) => boolean;
-  shouldRetryNative?: (classification: string, attempt: number, maxAttempts: number) => boolean;
-  computeBackoffMsNative?: (classification: string, attempt: number, baseMs: number, maxMs: number) => number;
-  getNetworkErrorCodes?: () => string[];
-};
-
-import { requireCoreDist } from './module-loader.js';
-
-let cachedFailurePolicy: NativeFailurePolicyModule | null | undefined;
-
-function getFailurePolicyModule(): NativeFailurePolicyModule {
-  if (cachedFailurePolicy !== undefined) {
-    if (!cachedFailurePolicy) {
-      throw new Error('[llmswitch-bridge] native-failure-policy module not available');
-    }
-    return cachedFailurePolicy;
-  }
-  try {
-    cachedFailurePolicy = requireCoreDist<NativeFailurePolicyModule>(
-      'router/virtual-router/engine-selection/native-failure-policy'
-    );
-  } catch {
-    cachedFailurePolicy = null;
-  }
-  if (!cachedFailurePolicy) {
-    throw new Error('[llmswitch-bridge] native-failure-policy module not available');
-  }
-  return cachedFailurePolicy;
-}
-
 export function classifyProviderFailure(
   statusCode: number | undefined,
   errorCode: string | undefined,
   upstreamCode: string | undefined,
   isNetworkError: boolean,
 ): string {
-  const mod = getFailurePolicyModule();
-  const fn = mod.classifyProviderFailure;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] classifyProviderFailure not available');
-  }
-  return fn(statusCode, errorCode, upstreamCode, isNetworkError);
+  return classifyProviderFailureFromCore(statusCode, errorCode, upstreamCode, isNetworkError);
+}
+
+export function isBlockingRecoverableNative(
+  classification: NativeFailureClassification,
+  stage: string | undefined
+): boolean {
+  return isBlockingRecoverableNativeFromCore(classification, stage);
+}
+
+export function shouldRetryNative(
+  classification: NativeFailureClassification,
+  attempt: number,
+  maxAttempts: number
+): boolean {
+  return shouldRetryNativeFromCore(classification, attempt, maxAttempts);
+}
+
+export function computeBackoffMsNative(
+  classification: NativeFailureClassification,
+  attempt: number,
+  baseMs: number,
+  maxMs: number
+): number {
+  return computeBackoffMsNativeFromCore(classification, attempt, baseMs, maxMs);
 }
 
 export function getNetworkErrorCodes(): string[] {
-  const mod = getFailurePolicyModule();
-  const fn = mod.getNetworkErrorCodes;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] getNetworkErrorCodes not available');
-  }
-  return fn();
+  return getNetworkErrorCodesFromCore();
 }

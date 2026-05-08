@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { logProcessLifecycle } from '../../../utils/process-lifecycle-logger.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
 let tmuxAvailableCache: boolean | null = null;
 const DEFAULT_TMUX_PROBE_CACHE_TTL_MS = 1200;
@@ -13,13 +14,6 @@ const tmuxAliveCache = new Map<string, TmuxAliveCacheEntry>();
 const tmuxWorkdirCache = new Map<string, TmuxWorkdirCacheEntry>();
 const tmuxIdleCache = new Map<string, TmuxIdleCacheEntry>();
 const tmuxProbeErrorLogAt = new Map<string, number>();
-
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error ?? 'unknown');
-}
 
 function logTmuxProbeNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {

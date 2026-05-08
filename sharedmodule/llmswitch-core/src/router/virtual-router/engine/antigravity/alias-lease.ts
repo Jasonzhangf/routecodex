@@ -6,6 +6,7 @@ import {
   resolveRccPath,
   resolveRccPathForRead
 } from '../../../../runtime/user-data-paths.js';
+import { formatUnknownError } from '../../../../shared/common-utils.js';
 
 export type AntigravityAliasLeaseStore = Map<string, { sessionKey: string; lastSeenAt: number }>;
 export type AntigravitySessionAliasStore = Map<string, string>;
@@ -16,16 +17,6 @@ export type AntigravityLeasePersistenceState = {
   flushTimer: ReturnType<typeof setTimeout> | null;
 };
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logAliasLeaseNonBlockingError(
   stage: string,

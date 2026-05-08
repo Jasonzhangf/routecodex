@@ -1,18 +1,9 @@
 import type { Filter, FilterContext, FilterResult, FieldMapConfig, FieldMapRule, JsonObject } from './types.js';
 import { writeFilterSnapshot } from './utils/snapshot-writer.js';
+import { formatUnknownError } from '../shared/common-utils.js';
 
 // Lightweight, dependency-free filter engine. Field-mapping supports a minimal dot-path subset.
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logFilterEngineNonBlockingError(
   stage: string,

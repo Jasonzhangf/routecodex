@@ -821,7 +821,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(switchLine).toContain('status=429');
     expect(switchLine).toContain('code=SSE_TO_JSON_ERROR');
     expect(switchLine).toContain('upstreamCode=EPIPE');
-    expect(switchLine).toContain('reason="decoder crashed"');
+    expect(switchLine).not.toContain('reason=');
   });
 
   it('retries and reroutes when converted response returns status 429 without error envelope', async () => {

@@ -11,7 +11,7 @@
 - `ProcessedRequest`（由 `buildProcessedRequestFromChatResponse` 生成）。
 
 **依赖**
-- `finalizeOpenAIChatResponse`。
+- `finalizeRespProcessChatResponseWithNative`。
 - `buildProcessedRequestFromChatResponse`。
 - 环境变量 `ROUTECODEX_CHAT_REASONING_MODE` 控制 reasoning 投影。
 

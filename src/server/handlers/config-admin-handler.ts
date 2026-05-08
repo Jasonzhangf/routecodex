@@ -8,22 +8,13 @@ import { getBootstrapProviderTemplates, isManagedBootstrapTemplate } from '../..
 import { collectV2ConfigSourceErrors, loadRouteCodexConfig } from '../../config/routecodex-config-loader.js';
 import { ServerFactory } from '../../server-factory.js';
 import type { ServerInstance } from '../../server-factory.js';
+import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 
 type JsonObject = Record<string, unknown>;
 type ReloadableServerInstance = ServerInstance & {
   reloadRuntime?: (config: JsonObject, options: { providerProfiles?: unknown }) => Promise<void>;
 };
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logConfigAdminNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {
@@ -348,9 +339,6 @@ function isVirtualRouterLike(value: unknown): value is VirtualRouterLike {
   return isRecord(value);
 }
 
-function isRecord(value: unknown): value is JsonObject {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 function readString(value: unknown): string | undefined {
   if (typeof value === 'string' && value.trim()) {

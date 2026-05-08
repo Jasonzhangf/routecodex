@@ -801,6 +801,93 @@ describe('Responses协议转换器测试', () => {
       expect(reasoning.content[0].text).toBe('Planning to update the command list.');
     });
 
+    it('output_text.delta 使用累计文本时不应重复拼接', async () => {
+      const events: ResponsesSseEvent[] = [
+        {
+          type: 'response.created',
+          timestamp: new Date().toISOString(),
+          data: {
+            response: {
+              id: 'resp_output_text_merge',
+              object: 'response',
+              created: Date.now(),
+              status: 'in_progress',
+              model: 'gpt-4o-mini'
+            }
+          }
+        },
+        {
+          type: 'response.output_item.added',
+          timestamp: new Date().toISOString(),
+          data: {
+            item_id: 'msg_merge_1',
+            item: {
+              index: 0,
+              type: 'message',
+              id: 'msg_merge_1',
+              status: 'in_progress',
+              role: 'assistant'
+            }
+          }
+        },
+        {
+          type: 'response.content_part.added',
+          timestamp: new Date().toISOString(),
+          data: {
+            item_id: 'msg_merge_1',
+            content_index: 0,
+            part: {
+              type: 'output_text',
+              text: ''
+            }
+          }
+        },
+        {
+          type: 'response.output_text.delta',
+          timestamp: new Date().toISOString(),
+          data: {
+            item_id: 'msg_merge_1',
+            content_index: 0,
+            delta: 'We'
+          }
+        },
+        {
+          type: 'response.output_text.delta',
+          timestamp: new Date().toISOString(),
+          data: {
+            item_id: 'msg_merge_1',
+            content_index: 0,
+            delta: 'WeWe'
+          }
+        },
+        {
+          type: 'response.completed',
+          timestamp: new Date().toISOString(),
+          data: {
+            response: {
+              id: 'resp_output_text_merge',
+              status: 'completed',
+              usage: {
+                prompt_tokens: 6,
+                completion_tokens: 3,
+                total_tokens: 9
+              }
+            }
+          }
+        }
+      ];
+
+      const sseStream = createSseStream(events);
+      const options: SseToResponsesJsonOptions = {
+        enableValidation: true
+      };
+
+      const response = await sseToJsonConverter.convertSseToJson(sseStream, options);
+      const message = (response.output || []).find((item) => item.type === 'message') as any;
+      expect(message).toBeDefined();
+      expect(message.content?.[0]?.text).toBe('WeWe');
+    });
+
     it('应该保留reasoning的encrypted_content', async () => {
       const events: ResponsesSseEvent[] = [
         {

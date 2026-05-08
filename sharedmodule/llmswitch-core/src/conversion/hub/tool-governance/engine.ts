@@ -18,9 +18,6 @@ import {
  * Hybrid governance engine:
  * - request path: native-primary
  * - response path: native-primary
- *
- * Legacy-only snapshot retained at:
- * - src/conversion/hub/tool-governance/archive/engine.legacy.ts
  */
 
 export class ToolGovernanceError extends Error {

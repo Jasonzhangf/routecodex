@@ -86,6 +86,7 @@ describe('reasoning stop request tooling', () => {
     expect(properties?.user_input_required).toBeDefined();
     expect(properties?.user_question).toBeDefined();
     expect(properties?.learning).toBeDefined();
+    expect(properties?.ssot_assessment).toBeDefined();
   });
 
   test('parses directive, strips marker, persists mode, and injects reasoning.stop', () => {

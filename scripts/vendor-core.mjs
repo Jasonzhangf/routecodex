@@ -16,7 +16,7 @@ async function main() {
   const mode = rawMode === 'dev' ? 'dev' : 'release';
   const sharedDist = path.join(root, 'sharedmodule', 'llmswitch-core', 'dist');
   const legacyVendorDir = path.join(root, 'vendor', 'rcc-llmswitch-core');
-  const scopedVendorDir = path.join(root, 'vendor', '@jsonstudio', 'llms');
+  const legacyScopedVendorDir = path.join(root, 'vendor', '@jsonstudio', 'llms');
 
   const hasLocalSharedDist = await exists(sharedDist);
 
@@ -32,9 +32,9 @@ async function main() {
     await rmrf(legacyVendorDir);
     console.log('[vendor-core] removed legacy vendor/rcc-llmswitch-core directory');
   }
-  if (await exists(scopedVendorDir)) {
-    await rmrf(scopedVendorDir);
-    console.log('[vendor-core] removed legacy vendor/@jsonstudio/llms directory');
+  if (await exists(legacyScopedVendorDir)) {
+    await rmrf(legacyScopedVendorDir);
+    console.log('[vendor-core] removed legacy scoped vendor llms directory');
   }
 
   if (hasLocalSharedDist) {

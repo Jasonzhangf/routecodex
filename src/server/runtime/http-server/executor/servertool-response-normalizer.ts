@@ -1,18 +1,8 @@
 import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../../../utils/finish-reason.js';
+import { bodyContainsReasoningStopFinalizedMarker } from './reasoning-stop-finalization-visibility.js';
 
 export const REASONING_STOP_FINALIZED_MARKER = '[app.finished:reasoning.stop]';
 export const REASONING_STOP_FINALIZED_FLAG_KEY = '__routecodex_reasoning_stop_finalized';
-
-export function bodyContainsReasoningStopFinalizedMarker(body: unknown): boolean {
-  if (!body || typeof body !== 'object') {
-    return false;
-  }
-  try {
-    return JSON.stringify(body).includes(REASONING_STOP_FINALIZED_MARKER);
-  } catch {
-    return false;
-  }
-}
 
 export function buildServerToolSseWrapperBody(args: {
   sseResponses: unknown;

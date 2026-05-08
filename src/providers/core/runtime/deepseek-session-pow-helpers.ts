@@ -3,6 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { DeepSeekErrorCode } from '../contracts/deepseek-provider-contract.js';
+import { normalizeString } from '../../../utils/common-utils.js';
+export { normalizeString };
 
 export type DeepSeekSessionPowError = Error & {
   code?: string;
@@ -12,13 +14,6 @@ export type DeepSeekSessionPowError = Error & {
   details?: Record<string, unknown>;
 };
 
-export function normalizeString(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length ? trimmed : undefined;
-}
 
 export function normalizeInteger(value: unknown, fallback: number, min: number, max: number): number {
   const parsed =

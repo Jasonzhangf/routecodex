@@ -1,10 +1,8 @@
 import { getBootstrapProviderTemplates, isManagedBootstrapTemplate } from '../cli/config/bootstrap-provider-templates.js';
 import type { InitProviderTemplate } from '../cli/config/init-provider-catalog.js';
 import type { UnknownRecord } from '../config/virtual-router-types.js';
+import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 
-function isRecord(value: unknown): value is UnknownRecord {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;

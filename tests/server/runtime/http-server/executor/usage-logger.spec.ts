@@ -463,4 +463,17 @@ describe('usage logger timing summary', () => {
     expect(lines.some((line) => line.includes('avg.internal=450ms'))).toBe(true);
     expect(lines.some((line) => line.includes('avg.external=650ms'))).toBe(true);
   });
+
+  it('treats hub codec stream drain as decode wait in hub decode breakdown', async () => {
+    const { readHubDecodeBreakdown } = await import('../../../../../src/server/runtime/http-server/executor/retry-payload-snapshot.js');
+
+    const decode = readHubDecodeBreakdown([
+      { stage: 'resp_inbound.stage1_codec_decode', totalMs: 33734, count: 1 }
+    ]);
+
+    expect(decode).toEqual({
+      sseDecodeMs: 33734,
+      codecDecodeMs: 33734
+    });
+  });
 });

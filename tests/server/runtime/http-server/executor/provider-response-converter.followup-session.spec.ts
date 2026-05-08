@@ -286,7 +286,10 @@ describe('provider-response-converter serverTool followup metadata', () => {
 
     expect(executeNested).toHaveBeenCalledTimes(1);
     const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
-    expect(nestedInput?.body?.tools?.map((tool: any) => tool?.function?.name)).toEqual(['reasoning.stop']);
+    expect(nestedInput?.body?.tools?.map((tool: any) => tool?.function?.name)).toEqual([
+      'exec_command',
+      'reasoning.stop'
+    ]);
     expect((nestedInput?.body?.semantics as any)?.tools?.clientToolsRaw).toEqual(clientToolsRaw);
     expect(((nestedInput?.body?.semantics as any)?.tools?.clientToolsRaw ?? [])[0]?.function?.name).toBe('exec_command');
     expect((converted.body as any)?.observedSemantics?.tools?.clientToolsRaw?.[0]?.function?.name).toBe('exec_command');

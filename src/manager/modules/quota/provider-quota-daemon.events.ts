@@ -17,6 +17,7 @@ import {
   computeDailyResetUntilMs
 } from './provider-quota-daemon.cooldown.js';
 import { isModelCapacityExhausted429, ProviderModelBackoffTracker } from './provider-quota-daemon.model-backoff.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import {
   extractAntigravityAlias,
   extractProviderKey,
@@ -27,16 +28,6 @@ import {
   parseAntigravityGoogleAccountVerification
 } from './provider-quota-daemon.error-helpers.js';
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logProviderQuotaDaemonEventNonBlockingError(
   stage: string,

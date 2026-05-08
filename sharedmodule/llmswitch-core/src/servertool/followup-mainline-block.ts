@@ -18,7 +18,6 @@ import { evaluateStopMessageLoopGuard } from './stop-message-loop-guard-block.js
 import { runClientInjectOnlyFollowup } from './client-inject-followup-block.js';
 import { runReenterFollowup } from './reenter-followup-block.js';
 import { maybeRunTransparentBootstrapReplay } from './bootstrap-followup-replay-block.js';
-import { buildFollowupRequestId } from './followup-request-id.js';
 import {
   decorateFinalChatWithServerToolContext,
   shouldShortCircuitRequiresActionFollowup
@@ -50,14 +49,26 @@ import {
   readClientInjectOnly,
   resolveAdapterContextProviderKey
 } from './orchestration-policy-block.js';
-import { disableStopMessageAfterFailedFollowup, isAdapterClientDisconnected } from './stop-message-state-block.js';
+import { isAdapterClientDisconnected } from './timeout-error-block.js';
 import { resolveFollowupFlowDecision } from './followup-flow-policy.js';
+import { clearStopMessageState } from './handlers/stop-message-auto/routing-state.js';
+import { resolveServertoolPersistentScopeKey } from './state-scope.js';
+import {
+  loadRoutingInstructionStateSync,
+  saveRoutingInstructionStateSync
+} from '../router/virtual-router/sticky-session-store.js';
 
 type OrchestrationResult = {
   chat: JsonObject;
   executed: true;
   flowId?: string;
 };
+
+function buildFollowupRequestId(baseRequestId: string, suffix?: string): string {
+  const trimmedBase = typeof baseRequestId === 'string' && baseRequestId.trim() ? baseRequestId.trim() : 'servertool';
+  const trimmedSuffix = typeof suffix === 'string' && suffix.trim() ? suffix.trim() : ':followup';
+  return `${trimmedBase}${trimmedSuffix}`;
+}
 
 function appendLoopWarning(payload: JsonObject, repeatCountRaw: number, warnThreshold: number, failThreshold: number): void {
   appendStopMessageLoopWarning({
@@ -66,6 +77,31 @@ function appendLoopWarning(payload: JsonObject, repeatCountRaw: number, warnThre
     warnThreshold,
     failThreshold
   });
+}
+
+function disableStopMessageAfterFailedFollowup(args: {
+  adapterContext: AdapterContext;
+  reservation: { stickyKey: string; previousState: Record<string, unknown> | null } | null;
+  logNonBlocking: (stage: string, error: unknown) => void;
+}): void {
+  try {
+    const key =
+      args.reservation && typeof args.reservation.stickyKey === 'string' && args.reservation.stickyKey.trim()
+        ? args.reservation.stickyKey.trim()
+        : resolveServertoolPersistentScopeKey(args.adapterContext);
+    if (!key) {
+      return;
+    }
+    const state = loadRoutingInstructionStateSync(key);
+    if (!state) {
+      return;
+    }
+    clearStopMessageState(state, Date.now());
+    state.stopMessageLastUsedAt = Date.now();
+    saveRoutingInstructionStateSync(key, state);
+  } catch (error) {
+    args.logNonBlocking('disable_stop_message_after_failed_followup', error);
+  }
 }
 
 export async function runFollowupMainline(args: {

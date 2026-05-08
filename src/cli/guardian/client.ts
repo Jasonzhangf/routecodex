@@ -3,6 +3,7 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 
 import { resolveGuardianPaths } from './paths.js';
 import type { GuardianLifecycleEvent, GuardianRegistration, GuardianState, GuardianStopResult } from './types.js';
+import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 import {
   describeHealthProbeFailure,
   probeGuardianHealth
@@ -49,12 +50,6 @@ const GUARDIAN_POLL_INTERVAL_MS = 150;
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  return String(error ?? 'unknown');
-}
 
 function logGuardianNonBlocking(stage: string, error: unknown, details?: Record<string, unknown>): void {
   const now = Date.now();
@@ -269,7 +264,7 @@ export async function registerGuardianProcess(args: RegisterGuardianArgs): Promi
       'x-rcc-guardian-token': state.token
     },
     body: JSON.stringify(args.registration)
-  }).catch(() => null);
+  }).catch(() => { return null; });
 
   if (!response?.ok) {
     const status = response?.status ?? 'n/a';
@@ -290,7 +285,7 @@ export async function stopGuardianDaemon(args: StopGuardianArgs): Promise<Guardi
       'x-rcc-guardian-token': state.token,
       'x-rcc-guardian-stop-token': state.stopToken
     }
-  }).catch(() => null);
+  }).catch(() => { return null; });
 
   if (!response?.ok) {
     return {
@@ -329,6 +324,6 @@ export async function reportGuardianLifecycleEvent(args: ReportGuardianLifecycle
       'x-rcc-guardian-token': state.token
     },
     body: JSON.stringify(args.event)
-  }).catch(() => null);
+  }).catch(() => { return null; });
   return Boolean(response?.ok);
 }

@@ -7,7 +7,7 @@
  * 不在这里做“只保留最新 user”之类的非标裁剪，保持协议转换层的纯粹性。
  */
 
-import { GeminiSemanticMapper } from '../../dist/conversion/hub/semantic-mappers/gemini-mapper.js';
+import { GeminiSemanticMapper } from '../../dist/conversion/hub/operation-table/semantic-mappers/gemini-mapper.js';
 
 async function buildPayloadFromChat(chat, adapterContext) {
   const mapper = new GeminiSemanticMapper();

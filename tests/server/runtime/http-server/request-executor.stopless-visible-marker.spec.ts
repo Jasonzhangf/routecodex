@@ -25,7 +25,7 @@ describe('request-executor stopless visible marker guard', () => {
     expect(
       __requestExecutorTestables.detectStoplessTerminationWithoutFinalization(hiddenOnly, 'on')
     ).toMatchObject({
-      marker: 'responses_stopless_missing_reasoning_stop_finalization'
+      marker: 'derived_stopless_missing_reasoning_stop_finalization'
     });
   });
 
@@ -112,5 +112,26 @@ describe('request-executor stopless visible marker guard', () => {
     expect(
       __requestExecutorTestables.detectStoplessTerminationWithoutFinalization(visibleDone, 'on')
     ).toBeNull();
+  });
+
+  it('rejects assistant content that resolves to stop via derived finish reason without finalized marker', () => {
+    const derivedStopChat = {
+      id: 'chatcmpl_derived_stop_1',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: '阶段性汇报，但没有 reasoning.stop 完成标记'
+          }
+        }
+      ]
+    };
+
+    expect(
+      __requestExecutorTestables.detectStoplessTerminationWithoutFinalization(derivedStopChat, 'on')
+    ).toMatchObject({
+      marker: 'derived_stopless_missing_reasoning_stop_finalization'
+    });
   });
 });

@@ -4,7 +4,7 @@
  * so upstream can emit structured functionCall/functionResponse parts instead of textual tool markup.
  */
 
-import { GeminiSemanticMapper } from '../../dist/conversion/hub/semantic-mappers/gemini-mapper.js';
+import { GeminiSemanticMapper } from '../../dist/conversion/hub/operation-table/semantic-mappers/gemini-mapper.js';
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);

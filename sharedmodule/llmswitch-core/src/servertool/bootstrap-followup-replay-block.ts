@@ -3,10 +3,15 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { ensureRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
-import { buildFollowupRequestId } from './followup-request-id.js';
 import { applyFollowupRuntimeMetadata } from './followup-runtime-block.js';
 import { resolveFollowupFlowDecision, resolveTransparentReplayRequestSuffixForFlowId, type FollowupFlowDecision } from './followup-flow-policy.js';
 import { extractCapturedChatSeed } from './handlers/followup-request-builder.js';
+
+function buildFollowupRequestId(baseRequestId: string, suffix?: string): string {
+  const trimmedBase = typeof baseRequestId === 'string' && baseRequestId.trim() ? baseRequestId.trim() : 'servertool';
+  const trimmedSuffix = typeof suffix === 'string' && suffix.trim() ? suffix.trim() : ':followup';
+  return `${trimmedBase}${trimmedSuffix}`;
+}
 
 export function createBootstrapPreflightFailedError(args: {
   requestId: string;

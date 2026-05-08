@@ -90,6 +90,22 @@ function parseEnvPositiveInt(keys: string[], fallback: number, min = 1): number 
   return fallback;
 }
 
+function parseEnvBool(keys: string[], fallback = false): boolean {
+  for (const key of keys) {
+    const raw = String(process.env[key] ?? '').trim().toLowerCase();
+    if (!raw) {
+      continue;
+    }
+    if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') {
+      return true;
+    }
+    if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') {
+      return false;
+    }
+  }
+  return fallback;
+}
+
 function resolveErrorsampleQueueMaxItems(): number {
   return parseEnvPositiveInt(
     ['ROUTECODEX_ERRORSAMPLE_QUEUE_MAX_ITEMS', 'RCC_ERRORSAMPLE_QUEUE_MAX_ITEMS'],
@@ -169,7 +185,31 @@ function resolveGroupBudget(group: string, kind?: string): ErrorsampleGroupBudge
   };
 }
 
+function shouldWriteFullErrorsamplePayload(): boolean {
+  if (
+    parseEnvBool(['ROUTECODEX_SNAPSHOT_FULL', 'RCC_SNAPSHOT_FULL'], false)
+  ) {
+    return true;
+  }
+  return parseEnvBool(['ROUTECODEX_SNAPSHOT', 'RCC_SNAPSHOT'], false);
+}
+
 function serializePayloadForWrite(payload: unknown, maxSampleBytes: number): string {
+  if (shouldWriteFullErrorsamplePayload()) {
+    try {
+      return JSON.stringify(payload, null, 2);
+    } catch {
+      return JSON.stringify(
+        {
+          truncated: true,
+          reason: 'payload_unserializable',
+          preview: String(payload)
+        },
+        null,
+        2
+      );
+    }
+  }
   const maxBytes = Math.max(1024, Math.floor(maxSampleBytes));
   let pretty = '';
   try {

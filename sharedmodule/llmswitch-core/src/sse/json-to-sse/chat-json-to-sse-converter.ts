@@ -17,17 +17,8 @@ import type {
 import { ErrorUtils } from '../shared/utils.js';
 import { createChatSequencer } from './sequencers/chat-sequencer.js';
 import { createChatStreamWriter } from '../shared/writer.js';
+import { formatUnknownError } from '../../shared/common-utils.js';
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logChatJsonToSseNonBlocking(
   stage: string,

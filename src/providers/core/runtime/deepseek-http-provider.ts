@@ -214,7 +214,7 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
 
   private extractCompatPayload(request: UnknownObject): UnknownObject {
     if (isRecord(request) && isRecord(request.data)) {
-      return request.data;
+      return request.data as UnknownObject;
     }
     return request;
   }

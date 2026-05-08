@@ -120,7 +120,6 @@ async function main() {
   // 1c.1) tool governance invariants
   results.push(await run('matrix:tool-governance', 'scripts/tests/tool-governance-check.mjs'));
   results.push(await run('matrix:tool-governance-native-compare', 'scripts/tests/tool-governance-native-compare.mjs'));
-  results.push(await run('matrix:semantic-mapper-chat-native-compare', 'scripts/tests/semantic-mapper-chat-native-compare.mjs'));
   // 1c.1.1) hub pipeline full-stage smoke (inbound→process→outbound + chat_process re-entry)
   results.push(await run('matrix:hub-pipeline-smoke', 'scripts/tests/hub-pipeline-smoke.mjs'));
   // 1c.1.1.1) coverage boosts (pure, deterministic)
@@ -342,8 +341,8 @@ async function main() {
   );
   results.push(
     await run(
-      'matrix:coverage-hub-native-batch',
-      'scripts/tests/coverage-hub-native-batch.mjs'
+      'matrix:coverage-hub-format-adapters-protocol-family',
+      'scripts/tests/coverage-hub-format-adapters-protocol-family.mjs'
     )
   );
   results.push(

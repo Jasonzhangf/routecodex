@@ -2,19 +2,10 @@ import { Command } from 'commander';
 import fs from 'fs';
 const fetch = globalThis.fetch;
 import { resolveRccPathForRead } from '../config/user-data-paths.js';
+import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 
 async function sleep(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logValidateNonBlocking(
   stage: string,

@@ -31,11 +31,225 @@ function asObjectBody(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function cloneJsonRecord<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function readToolName(tool: unknown): string {
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+    return '';
+  }
+  const directName =
+    typeof (tool as { name?: unknown }).name === 'string'
+      ? String((tool as { name: string }).name).trim().toLowerCase()
+      : '';
+  if (directName) {
+    return directName;
+  }
+  const fn = (tool as { function?: unknown }).function;
+  if (!fn || typeof fn !== 'object' || Array.isArray(fn)) {
+    return '';
+  }
+  return typeof (fn as { name?: unknown }).name === 'string'
+    ? String((fn as { name: string }).name).trim().toLowerCase()
+    : '';
+}
+
+function isCollapsedReasoningStopOnlyTools(tools: unknown): boolean {
+  if (!Array.isArray(tools) || tools.length === 0) {
+    return false;
+  }
+  const names = tools.map(readToolName).filter(Boolean);
+  return names.length > 0 && names.every((name) => name === 'reasoning.stop' || name === 'reasoning_stop' || name === 'reasoning-stop');
+}
+
+function mergeUniqueTools(primary?: unknown[], secondary?: unknown[]): unknown[] | undefined {
+  const out: unknown[] = [];
+  const seen = new Set<string>();
+  const append = (tool: unknown) => {
+    const name = readToolName(tool);
+    if (!name || seen.has(name)) {
+      return;
+    }
+    seen.add(name);
+    out.push(tool);
+  };
+  for (const tool of primary ?? []) {
+    append(tool);
+  }
+  for (const tool of secondary ?? []) {
+    append(tool);
+  }
+  return out.length ? out : undefined;
+}
+
+function extractClientToolsRaw(requestSemantics: Record<string, unknown> | undefined): unknown[] | undefined {
+  if (!requestSemantics || typeof requestSemantics !== 'object') {
+    return undefined;
+  }
+  const toolsNode =
+    requestSemantics.tools && typeof requestSemantics.tools === 'object' && !Array.isArray(requestSemantics.tools)
+      ? (requestSemantics.tools as Record<string, unknown>)
+      : undefined;
+  return Array.isArray(toolsNode?.clientToolsRaw) ? toolsNode.clientToolsRaw : undefined;
+}
+
+function isServerToolFollowup(requestSemantics: Record<string, unknown> | undefined): boolean {
+  const routecodex =
+    requestSemantics?.__routecodex && typeof requestSemantics.__routecodex === 'object' && !Array.isArray(requestSemantics.__routecodex)
+      ? (requestSemantics.__routecodex as Record<string, unknown>)
+      : undefined;
+  return routecodex?.serverToolFollowup === true;
+}
+
+function readBooleanFlag(value: unknown): boolean {
+  return value === true || (typeof value === 'string' && value.trim().toLowerCase() === 'true');
+}
+
+function readFollowupMarkerFromMetadata(
+  metadata?: Record<string, unknown>
+): { serverToolFollowup: boolean; followupSource?: string } {
+  const rt =
+    metadata?.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+      ? (metadata.__rt as Record<string, unknown>)
+      : undefined;
+  const sourceCandidate = [
+    metadata?.clientInjectSource,
+    rt?.clientInjectSource
+  ].find((value) => typeof value === 'string' && value.trim().length > 0);
+
+  return {
+    serverToolFollowup: [
+      metadata?.serverToolFollowup,
+      metadata?.isServerToolFollowup,
+      rt?.serverToolFollowup
+    ].some(readBooleanFlag),
+    ...(typeof sourceCandidate === 'string' && sourceCandidate.trim()
+      ? { followupSource: sourceCandidate.trim() }
+      : {})
+  };
+}
+
+function materializeFollowupRequestSemantics(args: {
+  requestSemantics?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  baseMetadata?: Record<string, unknown>;
+}): Record<string, unknown> | undefined {
+  const fromMetadata = readFollowupMarkerFromMetadata(args.metadata);
+  const fromBaseMetadata = readFollowupMarkerFromMetadata(args.baseMetadata);
+  const serverToolFollowup =
+    isServerToolFollowup(args.requestSemantics)
+    || fromMetadata.serverToolFollowup
+    || fromBaseMetadata.serverToolFollowup;
+  const followupSource = fromMetadata.followupSource ?? fromBaseMetadata.followupSource;
+
+  if (!args.requestSemantics && !serverToolFollowup && !followupSource) {
+    return undefined;
+  }
+
+  const nextSemantics = cloneJsonRecord((args.requestSemantics ?? {}) as Record<string, unknown>);
+  if (!serverToolFollowup && !followupSource) {
+    return nextSemantics;
+  }
+
+  const routecodex =
+    nextSemantics.__routecodex && typeof nextSemantics.__routecodex === 'object' && !Array.isArray(nextSemantics.__routecodex)
+      ? (nextSemantics.__routecodex as Record<string, unknown>)
+      : {};
+  nextSemantics.__routecodex = {
+    ...routecodex,
+    ...(serverToolFollowup ? { serverToolFollowup: true } : {}),
+    ...(followupSource ? { serverToolFollowupSource: followupSource } : {})
+  };
+  return nextSemantics;
+}
+
+function sanitizeFollowupRequestSemantics(
+  requestSemantics: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!isServerToolFollowup(requestSemantics)) {
+    return requestSemantics;
+  }
+  const responsesNode = asRecord(requestSemantics?.responses);
+  const requestParameters = asRecord(responsesNode?.requestParameters);
+  if (!responsesNode || !requestParameters) {
+    return requestSemantics;
+  }
+
+  const nextRequestParameters = { ...requestParameters };
+  delete nextRequestParameters.model;
+  delete nextRequestParameters.max_tokens;
+  delete nextRequestParameters.max_output_tokens;
+  if (Object.keys(nextRequestParameters).length === Object.keys(requestParameters).length) {
+    return requestSemantics;
+  }
+
+  const nextSemantics = cloneJsonRecord(requestSemantics) as Record<string, unknown>;
+  const nextResponsesNode = asRecord(nextSemantics.responses);
+  if (!nextResponsesNode) {
+    return requestSemantics;
+  }
+  if (Object.keys(nextRequestParameters).length === 0) {
+    delete nextResponsesNode.requestParameters;
+  } else {
+    nextResponsesNode.requestParameters = nextRequestParameters;
+  }
+  return nextSemantics;
+}
+
+function restoreFollowupRootToolsIfNeeded(
+  body: Record<string, unknown>,
+  requestSemantics: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  if (!isServerToolFollowup(requestSemantics)) {
+    return body;
+  }
+  const clientToolsRaw = extractClientToolsRaw(requestSemantics);
+  if (!Array.isArray(clientToolsRaw) || clientToolsRaw.length === 0) {
+    return body;
+  }
+  const rootTools = Array.isArray(body.tools) ? body.tools : undefined;
+  if (rootTools && !isCollapsedReasoningStopOnlyTools(rootTools)) {
+    return body;
+  }
+  const mergedTools = mergeUniqueTools(clientToolsRaw, rootTools);
+  if (!mergedTools?.length) {
+    return body;
+  }
+  return {
+    ...body,
+    tools: mergedTools
+  };
+}
+
+function sanitizeFollowupRootBodyRequestParameters(
+  body: Record<string, unknown>,
+  requestSemantics: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  if (!isServerToolFollowup(requestSemantics)) {
+    return body;
+  }
+  let changed = false;
+  const nextBody = { ...body };
+  if ('max_tokens' in nextBody) {
+    delete nextBody.max_tokens;
+    changed = true;
+  }
+  if ('max_output_tokens' in nextBody) {
+    delete nextBody.max_output_tokens;
+    changed = true;
+  }
+  return changed ? nextBody : body;
+}
+
 function cloneNestedBodyWithSemantics(
   body: Record<string, unknown> | undefined,
   requestSemantics: Record<string, unknown> | undefined
 ): Record<string, unknown> {
-  const out = body ? { ...body } : {};
+  const out = sanitizeFollowupRootBodyRequestParameters(
+    restoreFollowupRootToolsIfNeeded(body ? { ...body } : {}, requestSemantics),
+    requestSemantics
+  );
   if (
     requestSemantics
     && typeof requestSemantics === 'object'
@@ -129,11 +343,17 @@ function buildServerToolNestedInput(args: {
 } {
   const nestedEntry = args.entryEndpoint || args.fallbackEntryEndpoint;
   const nestedExtra = asRecord(args.metadata) ?? {};
+  const materializedRequestSemantics = materializeFollowupRequestSemantics({
+    requestSemantics: args.requestSemantics,
+    metadata: nestedExtra,
+    baseMetadata: args.baseMetadata
+  });
+  const sanitizedRequestSemantics = sanitizeFollowupRequestSemantics(materializedRequestSemantics);
   const nestedMetadata = buildServerToolNestedRequestMetadata({
     baseMetadata: args.baseMetadata,
     extraMetadata: nestedExtra,
     entryEndpoint: nestedEntry,
-    requestSemantics: args.requestSemantics,
+    requestSemantics: sanitizedRequestSemantics,
     onMergeRuntimeMetaError: args.onMergeRuntimeMetaError
       ? (error) => {
           args.onMergeRuntimeMetaError?.(error, {
@@ -154,7 +374,7 @@ function buildServerToolNestedInput(args: {
       requestId: args.requestId,
       headers: cloneStringHeaders(nestedMetadata.clientHeaders) ?? {},
       query: {},
-      body: cloneNestedBodyWithSemantics(args.body, args.requestSemantics),
+      body: cloneNestedBodyWithSemantics(args.body, sanitizedRequestSemantics),
       metadata: nestedMetadata
     }
   };

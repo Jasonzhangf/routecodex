@@ -52,6 +52,17 @@ function buildReasoningStopSummaryBlock(summary: string): string {
   return `[reasoning.stop]\n${summary}\n结束标记: [app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}`;
 }
 
+function buildCompletedSummary(goal = 'A', evidence = 'B'): string {
+  return [
+    `用户任务目标: ${goal}`,
+    '是否完成: 是',
+    `完成证据: ${evidence}`,
+    '工作类型: bug_fix',
+    '是否最佳修复点: 是',
+    '真源判断依据: 该修复位于 stop 真源校验入口，能避免下游重复补丁。'
+  ].join('\n');
+}
+
 function createEmptyRoutingInstructionState(): RoutingInstructionState {
   return {
     forcedTarget: undefined,
@@ -133,7 +144,7 @@ describe('reasoning_stop_guard followup reentry', () => {
     const state = createEmptyRoutingInstructionState();
     state.reasoningStopMode = 'on';
     state.reasoningStopArmed = true;
-    state.reasoningStopSummary = '用户任务目标: A\n是否完成: 是\n完成证据: B';
+    state.reasoningStopSummary = buildCompletedSummary();
     state.reasoningStopUpdatedAt = Date.now();
     saveRoutingInstructionStateSync(stickyKey, state);
 
@@ -205,7 +216,7 @@ describe('reasoning_stop_guard followup reentry', () => {
       }
     } as unknown as AdapterContext;
 
-    const freshSummary = '用户任务目标: A\n是否完成: 是\n完成证据: B';
+    const freshSummary = buildCompletedSummary();
     const result = await runServerSideToolEngine({
       chatResponse: buildStopResponse(buildReasoningStopSummaryBlock(freshSummary)),
       adapterContext,
@@ -224,7 +235,7 @@ describe('reasoning_stop_guard followup reentry', () => {
   test('appendReasoningStopSummaryToChatResponse writes stop marker into responses output message content', () => {
     const result = appendReasoningStopSummaryToChatResponse(
       buildResponsesStopResponse(),
-      '用户任务目标: A\n是否完成: 是\n完成证据: B'
+      buildCompletedSummary()
     ) as any;
     const output = result.output;
     expect(Array.isArray(output)).toBe(true);
@@ -242,7 +253,7 @@ describe('reasoning_stop_guard followup reentry', () => {
     const state = createEmptyRoutingInstructionState();
     state.reasoningStopMode = 'on';
     state.reasoningStopArmed = true;
-    state.reasoningStopSummary = '用户任务目标: A\n是否完成: 是\n完成证据: B';
+    state.reasoningStopSummary = buildCompletedSummary();
     state.reasoningStopUpdatedAt = Date.now();
     saveRoutingInstructionStateSync(stickyKey, state);
 
@@ -287,12 +298,12 @@ describe('reasoning_stop_guard followup reentry', () => {
               content: [
                 {
                   type: 'output_text',
-                  text: buildReasoningStopSummaryBlock('用户任务目标: A\n是否完成: 是\n完成证据: B')
+                  text: buildReasoningStopSummaryBlock(buildCompletedSummary())
                 }
               ]
             }
           ],
-          output_text: buildReasoningStopSummaryBlock('用户任务目标: A\n是否完成: 是\n完成证据: B')
+          output_text: buildReasoningStopSummaryBlock(buildCompletedSummary())
         } as JsonObject
       })
     });

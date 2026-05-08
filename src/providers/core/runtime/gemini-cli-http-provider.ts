@@ -16,6 +16,15 @@ import { getDefaultProjectId } from '../../auth/gemini-cli-userinfo-helper.js';
 import { resolveAntigravityApiBaseCandidates } from '../../auth/antigravity-userinfo-helper.js';
 import { resolveAntigravityRequestTypeFromPayload } from './antigravity-request-type.js';
 
+
+import {
+  isAntigravityRuntime,
+  resolveAntigravityStableSessionId,
+  swapAntigravityRuntimeSessionId as swapAntigravitySessionId,
+  restoreAntigravityRuntimeSessionId,
+  wrapAntigravityHttpErrorAsResponse as wrapAntigravityErrorAsResponse,
+} from './gemini-antigravity-mixin.js';
+
 type DataEnvelope = UnknownObject & { data?: UnknownObject };
 
 type MutablePayload = Record<string, unknown> & {
@@ -49,71 +58,21 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     try {
       return await super.sendRequestInternal(request);
     } catch (error) {
-      if (this.isAntigravityRuntime()) {
-        const wrapped = this.wrapAntigravityHttpErrorAsResponse(error);
+      if (isAntigravityRuntime(this)) {
+        const wrapped = wrapAntigravityErrorAsResponse(error);
         if (wrapped) {
           return wrapped;
         }
       }
       throw error;
     } finally {
-      this.restoreAntigravityRuntimeSessionId();
+      restoreAntigravityRuntimeSessionId(this);
     }
   }
 
-  private wrapAntigravityHttpErrorAsResponse(error: unknown): UnknownObject | null {
-    const err = error as {
-      statusCode?: unknown;
-      status?: unknown;
-      response?: { data?: unknown; raw?: unknown; status?: unknown };
-      headers?: unknown;
-      message?: unknown;
-    };
-    const status =
-      typeof err?.statusCode === 'number'
-        ? err.statusCode
-        : typeof err?.status === 'number'
-          ? err.status
-          : typeof err?.response?.status === 'number'
-            ? err.response.status
-            : undefined;
-    if (typeof status !== 'number' || !Number.isFinite(status)) {
-      return null;
-    }
-    const message = typeof err?.message === 'string' ? err.message : String(err?.message ?? '');
-    const looksLikeSignatureError =
-      status === 429 ||
-      (status === 400 && /signature/i.test(message));
-    if (!looksLikeSignatureError) {
-      return null;
-    }
-    const data =
-      err?.response && typeof err.response === 'object' && 'data' in err.response
-        ? (err.response as { data?: unknown }).data
-        : undefined;
-    const errorBody =
-      data && typeof data === 'object' && !Array.isArray(data)
-        ? (data as Record<string, unknown>)
-        : {
-            error: {
-              code: status,
-              message: message || `HTTP ${status}`,
-              status
-            }
-          };
-    const headers =
-      err?.headers && typeof err.headers === 'object' && !Array.isArray(err.headers)
-        ? (err.headers as Record<string, unknown>)
-        : undefined;
-    return {
-      status,
-      ...(headers ? { headers } : {}),
-      data: errorBody
-    } as UnknownObject;
-  }
 
   protected override getBaseUrlCandidates(_context: ProviderContext): string[] | undefined {
-    if (!this.isAntigravityRuntime()) {
+    if (!isAntigravityRuntime(this)) {
       return undefined;
     }
     return resolveAntigravityApiBaseCandidates(this.getEffectiveBaseUrl());
@@ -170,7 +129,7 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     }
     delete (recordPayload as { stream?: unknown }).stream;
 
-    if (this.isAntigravityRuntime()) {
+    if (isAntigravityRuntime(this)) {
       const headerMode = this.getAntigravityHeaderMode();
       const record = payload as Record<string, unknown>;
       if (headerMode !== 'minimal') {
@@ -191,10 +150,10 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       }
     }
 
-    if (this.isAntigravityRuntime()) {
+    if (isAntigravityRuntime(this)) {
       const alias = this.extractAntigravityAliasFromRuntime();
       const aliasKey = alias && alias.trim().length ? `antigravity.${alias.trim()}` : 'antigravity.unknown';
-      const stableSessionId = this.resolveAntigravityStableSessionId(metadata);
+      const stableSessionId = resolveAntigravityStableSessionId(metadata);
       const derivedSessionId = extractAntigravityGeminiSessionId(processedRequest);
       const candidateSessionId = stableSessionId || (typeof derivedSessionId === 'string' ? derivedSessionId.trim() : '');
       if (candidateSessionId) {
@@ -221,7 +180,7 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
           ...(effectiveSessionId !== candidateSessionId ? { antigravitySessionIdOriginal: candidateSessionId } : {})
         };
         if (effectiveSessionId !== candidateSessionId) {
-          this.swapAntigravityRuntimeSessionId(effectiveSessionId, candidateSessionId);
+          swapAntigravitySessionId(this, effectiveSessionId, candidateSessionId);
         }
       }
     }
@@ -232,7 +191,7 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
   protected override wantsUpstreamSse(request: UnknownObject, context: ProviderContext): boolean {
     const fromRequest = this.extractStreamFlag(request);
     const fromContext = this.extractStreamFlag(context.metadata as UnknownObject);
-    const isAntigravity = this.isAntigravityRuntime();
+    const isAntigravity = isAntigravityRuntime(this);
     const wantsStream =
       isAntigravity
         ? true
@@ -282,7 +241,7 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       response,
       context,
       providerType: this.providerType,
-      isAntigravityRuntime: this.isAntigravityRuntime(),
+      isAntigravityRuntime: isAntigravityRuntime(this),
       antigravityAlias: this.extractAntigravityAliasFromRuntime()
     });
   }
@@ -297,21 +256,13 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
         : context && context.metadata && typeof context.metadata.antigravitySessionId === 'string'
           ? String(context.metadata.antigravitySessionId)
           : undefined;
-    const alias = this.isAntigravityRuntime() ? this.extractAntigravityAliasFromRuntime() : undefined;
+    const alias = isAntigravityRuntime(this) ? this.extractAntigravityAliasFromRuntime() : undefined;
     const aliasKey = alias && alias.trim().length ? `antigravity.${alias.trim()}` : undefined;
-    const normalizer = new GeminiSseNormalizer({ sessionId, aliasKey, enableAntigravitySignatureCache: this.isAntigravityRuntime() });
+    const normalizer = new GeminiSseNormalizer({ sessionId, aliasKey, enableAntigravitySignatureCache: isAntigravityRuntime(this) });
     stream.pipe(normalizer);
     return super.wrapUpstreamSseResponse(normalizer, context);
   }
 
-  private isAntigravityRuntime(): boolean {
-    const fromConfig =
-      typeof this.config?.config?.providerId === 'string' && this.config.config.providerId.trim()
-        ? this.config.config.providerId.trim().toLowerCase()
-        : '';
-    const fromOAuth = typeof this.oauthProviderId === 'string' ? this.oauthProviderId.trim().toLowerCase() : '';
-    return fromConfig === 'antigravity' || fromOAuth === 'antigravity';
-  }
 
   private resolvePayload(source: UnknownObject): {
     payload: MutablePayload;
@@ -367,7 +318,7 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
   }
 
   private ensureRequestMetadata(payload: MutablePayload): void {
-    const isAntigravity = this.isAntigravityRuntime();
+    const isAntigravity = isAntigravityRuntime(this);
 
     if (!this.hasNonEmptyString(payload.requestId)) {
       payload.requestId = isAntigravity ? `agent-${randomUUID()}` : `req-${randomUUID()}`;
@@ -381,25 +332,6 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     return typeof value === 'string' && value.trim().length > 0;
   }
 
-  private resolveAntigravityStableSessionId(metadata: Record<string, unknown> | undefined): string | undefined {
-    if (!metadata || typeof metadata !== 'object') {
-      return undefined;
-    }
-    const userIdCandidateRaw =
-      typeof (metadata as any)?.user_id === 'string'
-        ? String((metadata as any).user_id)
-        : typeof (metadata as any)?.metadata?.user_id === 'string'
-          ? String((metadata as any).metadata.user_id)
-          : '';
-    const userIdCandidate = userIdCandidateRaw.trim();
-    if (!userIdCandidate) {
-      return undefined;
-    }
-    if (userIdCandidate.toLowerCase().includes('session-')) {
-      return undefined;
-    }
-    return userIdCandidate;
-  }
 
   private extractStreamFlag(source: UnknownObject | undefined): boolean | undefined {
     if (!source || typeof source !== 'object') {
@@ -426,53 +358,7 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     return undefined;
   }
 
-  private swapAntigravityRuntimeSessionId(effectiveSessionId: string, originalSessionId: string): void {
-    if (!this.isAntigravityRuntime()) {
-      return;
-    }
-    const runtime = this.getCurrentRuntimeMetadata();
-    const meta = runtime?.metadata;
-    if (!meta || typeof meta !== 'object') {
-      return;
-    }
-    const record = meta as Record<string, unknown>;
-    if (!('__antigravitySessionIdRestore' in record)) {
-      record.__antigravitySessionIdRestore = typeof record.antigravitySessionId === 'string' ? record.antigravitySessionId : null;
-      record.__antigravitySessionIdOriginalRestore =
-        typeof record.antigravitySessionIdOriginal === 'string' ? record.antigravitySessionIdOriginal : null;
-    }
-    record.antigravitySessionId = effectiveSessionId;
-    record.antigravitySessionIdOriginal = originalSessionId;
-  }
 
-  private restoreAntigravityRuntimeSessionId(): void {
-    if (!this.isAntigravityRuntime()) {
-      return;
-    }
-    const runtime = this.getCurrentRuntimeMetadata();
-    const meta = runtime?.metadata;
-    if (!meta || typeof meta !== 'object') {
-      return;
-    }
-    const record = meta as Record<string, unknown>;
-    if (!('__antigravitySessionIdRestore' in record)) {
-      return;
-    }
-    const restore = record.__antigravitySessionIdRestore;
-    const restoreOriginal = record.__antigravitySessionIdOriginalRestore;
-    delete record.__antigravitySessionIdRestore;
-    delete record.__antigravitySessionIdOriginalRestore;
-    if (typeof restore === 'string' && restore.trim().length) {
-      record.antigravitySessionId = restore;
-    } else {
-      delete record.antigravitySessionId;
-    }
-    if (typeof restoreOriginal === 'string' && restoreOriginal.trim().length) {
-      record.antigravitySessionIdOriginal = restoreOriginal;
-    } else {
-      delete record.antigravitySessionIdOriginal;
-    }
-  }
 }
 
 export default GeminiCLIHttpProvider;

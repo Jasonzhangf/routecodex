@@ -10,8 +10,7 @@ export class ResponseFinishInvariantsFilter implements Filter<JsonObject> {
   readonly stage: FilterContext['stage'] = 'response_post';
 
   apply(input: JsonObject): FilterResult<JsonObject> {
-    try {
-      const out = JSON.parse(JSON.stringify(input || {}));
+          const out = JSON.parse(JSON.stringify(input || {}));
       const choices = Array.isArray((out as any).choices) ? (out as any).choices : [];
       for (const ch of choices) {
         const msg = ch && (ch as any).message ? (ch as any).message : undefined;
@@ -23,9 +22,7 @@ export class ResponseFinishInvariantsFilter implements Filter<JsonObject> {
       }
       (out as any).choices = choices;
       return { ok: true, data: out };
-    } catch {
-      return { ok: true, data: input };
-    }
+
   }
 }
 

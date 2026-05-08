@@ -1,88 +1,30 @@
 import { ProviderProtocolError } from '../provider-protocol-error.js';
-import {
-  convertResponsesOutputToInputItemsWithNative,
-  materializeResponsesContinuationPayloadWithNative,
-  pickResponsesPersistedFieldsWithNative,
-  prepareResponsesConversationEntryWithNative,
-  restoreResponsesContinuationPayloadWithNative,
-  resumeResponsesConversationPayloadWithNative
-} from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+import { formatUnknownError, isRecord } from '../../shared/common-utils.js';
 import {
   inspectBridgeInputToolHistory,
   inspectSyntheticRouteCodexBridgeInput,
   type ToolHistoryContractViolation
 } from './openai-message-normalize.js';
-
-type AnyRecord = Record<string, unknown>;
-
-interface CaptureContextArgs {
-  requestId?: string;
-  payload: AnyRecord;
-  context: AnyRecord;
-  sessionId?: string;
-  conversationId?: string;
-}
-
-interface RecordResponseArgs {
-  requestId?: string;
-  response: AnyRecord;
-}
-
-interface ResumeOptions {
-  requestId?: string;
-}
-
-interface ResumeResult {
-  payload: AnyRecord;
-  meta: AnyRecord;
-}
-
-interface RestoreByScopeArgs {
-  payload: AnyRecord;
-  sessionId?: string;
-  conversationId?: string;
-  requestId?: string;
-}
-
-interface ConversationEntry {
-  requestId: string;
-  basePayload: AnyRecord;
-  input: AnyRecord[];
-  tools?: AnyRecord[];
-  createdAt: number;
-  updatedAt: number;
-  lastResponseId?: string;
-  sessionId?: string;
-  conversationId?: string;
-  scopeKeys: string[];
-}
+import {
+  assertResponsesConversationStoreNativeAvailable,
+  convertOutputToInputItems,
+  materializeContinuationPayload,
+  pickPersistedFields,
+  prepareConversationEntry,
+  restoreContinuationPayload,
+  resumeConversationPayload
+} from './responses-conversation-store-native.js';
+import type {
+  AnyRecord,
+  CaptureContextArgs,
+  ConversationEntry,
+  RecordResponseArgs,
+  RestoreByScopeArgs,
+  ResumeOptions,
+  ResumeResult
+} from './responses-conversation-store-types.js';
 
 const TTL_MS = 1000 * 60 * 30; // 30min
-
-function isRecord(value: unknown): value is AnyRecord {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-}
-
-function pickPersistedFields(payload: AnyRecord): AnyRecord {
-  return pickResponsesPersistedFieldsWithNative(payload) as AnyRecord;
-}
-
-function convertOutputToInputItems(response: AnyRecord): AnyRecord[] {
-  return convertResponsesOutputToInputItemsWithNative(response) as AnyRecord[];
-}
-
-function assertResponsesConversationStoreNativeAvailable(): void {
-  if (
-    typeof pickResponsesPersistedFieldsWithNative !== 'function' ||
-    typeof convertResponsesOutputToInputItemsWithNative !== 'function' ||
-    typeof prepareResponsesConversationEntryWithNative !== 'function' ||
-    typeof materializeResponsesContinuationPayloadWithNative !== 'function' ||
-    typeof restoreResponsesContinuationPayloadWithNative !== 'function' ||
-    typeof resumeResponsesConversationPayloadWithNative !== 'function'
-  ) {
-    throw new Error('[responses-conversation-store] native bindings unavailable');
-  }
-}
 
 function readScopeToken(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -166,7 +108,7 @@ class ResponsesConversationStore {
     if (existing) {
       this.detachEntry(existing);
     }
-    const prepared = prepareResponsesConversationEntryWithNative(payload, context);
+    const prepared = prepareConversationEntry(payload, context);
     const scopeKeys = buildScopeKeys(args);
     const entry: ConversationEntry = {
       requestId,
@@ -255,17 +197,7 @@ class ResponsesConversationStore {
       });
     }
     assertResponsesConversationStoreNativeAvailable();
-    const resumed = resumeResponsesConversationPayloadWithNative(
-      {
-        requestId: entry.requestId,
-        basePayload: entry.basePayload,
-        input: entry.input,
-        tools: entry.tools
-      },
-      responseId,
-      submitPayload,
-      options?.requestId
-    );
+    const resumed = resumeConversationPayload(entry, responseId, submitPayload, options?.requestId);
     this.cleanupEntry(entry, responseId);
     return {
       payload: resumed.payload,
@@ -289,18 +221,7 @@ class ResponsesConversationStore {
         continue;
       }
       assertResponsesConversationStoreNativeAvailable();
-      const restored = restoreResponsesContinuationPayloadWithNative(
-        {
-          requestId: entry.requestId,
-          basePayload: entry.basePayload,
-          input: entry.input,
-          tools: entry.tools,
-          lastResponseId: entry.lastResponseId
-        },
-        args.payload,
-        args.requestId,
-        scopeKey
-      );
+      const restored = restoreContinuationPayload(entry, args.payload, args.requestId, scopeKey);
       if (!restored) {
         continue;
       }
@@ -321,18 +242,7 @@ class ResponsesConversationStore {
         continue;
       }
       assertResponsesConversationStoreNativeAvailable();
-      const materialized = materializeResponsesContinuationPayloadWithNative(
-        {
-          requestId: entry.requestId,
-          basePayload: entry.basePayload,
-          input: entry.input,
-          tools: entry.tools,
-          lastResponseId: entry.lastResponseId
-        },
-        args.payload,
-        args.requestId,
-        scopeKey
-      );
+      const materialized = materializeContinuationPayload(entry, args.payload, args.requestId, scopeKey);
       if (!materialized) {
         continue;
       }
@@ -393,12 +303,6 @@ const RESPONSES_DEBUG = (process.env.ROUTECODEX_RESPONSES_DEBUG || '').trim() ==
 const RESPONSES_WARN_THROTTLE_MS = 60_000;
 const responsesWarnAt = new Map<string, number>();
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error ?? 'unknown');
-}
 
 function logResponsesStoreNonBlockingError(
   stage: string,

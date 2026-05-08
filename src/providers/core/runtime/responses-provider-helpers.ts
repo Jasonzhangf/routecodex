@@ -1,6 +1,7 @@
 import type { ProviderContext } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import { resolveProviderFailureOutcome } from './provider-failure-policy.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
 export type ResponsesStreamingMode = 'auto' | 'always' | 'never';
 
@@ -34,9 +35,6 @@ export type ResponsesFailure = {
   rawError?: Record<string, unknown>;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
 
 function parseStreamingMode(value: unknown): ResponsesStreamingMode {
   if (typeof value === 'string') {

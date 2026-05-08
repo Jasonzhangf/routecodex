@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { resolveRccQuotaDirForRead } from '../config/user-data-paths.js';
+import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 
 type QuotaManagerRecord = Record<string, unknown> & {
   providers?: Record<string, unknown>;
@@ -33,9 +34,6 @@ function resolveProviderErrorLogPath(): string {
   return path.join(resolveQuotaDirPath(), 'provider-errors.ndjson');
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-}
 
 function normalizeProvider(provider: string): string {
   return String(provider || '').trim().toLowerCase();

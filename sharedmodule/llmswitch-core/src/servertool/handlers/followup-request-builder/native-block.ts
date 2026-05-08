@@ -3,7 +3,12 @@ import { buildServertoolGenericFollowupPayloadWithNative } from '../../../router
 import { buildServertoolFollowupConfig } from '../../skeleton-config.js';
 import type { ServerToolFollowupInjectionPlan } from '../../types.js';
 import { resolveFollowupInjectionOpsForNative } from './op-blocks.js';
-import { extractCapturedChatSeed, resolveFollowupModel } from './seed.js';
+import {
+  extractCapturedChatSeed,
+  resolveFollowupModel,
+  sanitizeFollowupParametersForResolvedModel
+} from './seed.js';
+import { isTextualToolTransportOnlyAssistantMessage } from './message-blocks.js';
 
 export function isNativeSupportedFollowupInjectionPlan(injection: ServerToolFollowupInjectionPlan): boolean {
   const injectionOps = Array.isArray(injection?.ops) ? (injection.ops as Array<Record<string, unknown>>) : [];
@@ -39,6 +44,10 @@ export function buildNativeFollowupPayloadFromInjection(args: {
     choices[0]?.message && typeof choices[0].message === 'object' && !Array.isArray(choices[0].message)
       ? (choices[0].message as Record<string, unknown>)
       : undefined;
+  const assistantMessage =
+    firstMessage && !isTextualToolTransportOnlyAssistantMessage(firstMessage)
+      ? firstMessage
+      : undefined;
   const toolOutputs = Array.isArray((args.chatResponse as any)?.tool_outputs)
     ? ((args.chatResponse as any).tool_outputs as unknown[])
     : [];
@@ -50,8 +59,12 @@ export function buildNativeFollowupPayloadFromInjection(args: {
     model: followupModel,
     messages: seed.messages,
     tools: seed.tools,
-    parameters: seed.parameters,
-    assistantMessage: firstMessage,
+    parameters: sanitizeFollowupParametersForResolvedModel({
+      parameters: seed.parameters,
+      seedModel: seed.model,
+      followupModel
+    }),
+    assistantMessage,
     toolOutputs,
     followupInjectionOps: resolveFollowupInjectionOpsForNative({
       ops: injectionOps,

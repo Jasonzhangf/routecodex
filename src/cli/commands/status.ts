@@ -3,6 +3,7 @@ import type { Command } from 'commander';
 import { LOCAL_HOSTS } from '../../constants/index.js';
 import type { LoadedRouteCodexConfig } from '../../config/routecodex-config-loader.js';
 import type { ManagedZombieProcess } from '../../utils/managed-server-pids.js';
+import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 
 type LoggerLike = {
   info: (msg: string) => void;
@@ -32,16 +33,6 @@ export type StatusCommandContext = {
 const NON_BLOCKING_WARN_THROTTLE_MS = 60_000;
 const nonBlockingWarnByStage = new Map<string, number>();
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error ?? 'unknown');
-  }
-}
 
 function shouldLogNonBlockingStage(stage: string): boolean {
   const now = Date.now();

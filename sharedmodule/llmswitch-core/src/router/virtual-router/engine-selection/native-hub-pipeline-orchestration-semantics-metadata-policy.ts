@@ -1,5 +1,6 @@
 import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
+import { formatUnknownError } from '../../../shared/common-utils.js';
 
 type StopMessageRouterMetadataOutput = {
   stopMessageClientInjectSessionScope?: string;
@@ -46,16 +47,6 @@ const NON_BLOCKING_METADATA_POLICY_LOG_THROTTLE_MS = 60_000;
 const nonBlockingMetadataPolicyLogState = new Map<string, number>();
 const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-orchestration-semantics-metadata-policy.parse-failed');
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error ?? 'unknown');
-  }
-}
 
 function logNativeMetadataPolicyNonBlocking(stage: string, error: unknown): void {
   const now = Date.now();

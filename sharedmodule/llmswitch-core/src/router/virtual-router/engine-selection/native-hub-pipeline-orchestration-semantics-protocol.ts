@@ -1,5 +1,6 @@
 import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
+import { formatUnknownError } from '../../../shared/common-utils.js';
 
 type HubPipelineInput = {
   requestId: string;
@@ -30,16 +31,6 @@ const NON_BLOCKING_PROTOCOL_LOG_THROTTLE_MS = 60_000;
 const nonBlockingProtocolLogState = new Map<string, number>();
 const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-orchestration-semantics-protocol.parse-failed');
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error ?? 'unknown');
-  }
-}
 
 function logNativeProtocolNonBlocking(stage: string, error: unknown): void {
   const now = Date.now();

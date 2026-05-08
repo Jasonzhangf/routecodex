@@ -1,4 +1,5 @@
 import { importCoreDist } from '../../../modules/llmswitch/bridge/module-loader.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
 type ToolGovernorModule = {
   processChatResponseTools?: (payload: Record<string, unknown>) => Record<string, unknown>;
@@ -13,9 +14,6 @@ const processChatResponseToolsFn: NonNullable<ToolGovernorModule['processChatRes
   return fn;
 })();
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 /**
  * Provider-agnostic text-tool response harvest entry.

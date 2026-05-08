@@ -1,7 +1,7 @@
 import { runInboundPipeline, type InboundPlan } from '../../src/conversion/hub/pipelines/inbound.js';
 import { runOutboundPipeline, type OutboundPlan } from '../../src/conversion/hub/pipelines/outbound.js';
 import { GeminiFormatAdapter } from '../../src/conversion/hub/format-adapters/gemini-format-adapter.js';
-import { GeminiSemanticMapper } from '../../src/conversion/hub/semantic-mappers/gemini-mapper.js';
+import { GeminiSemanticMapper } from '../../src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.js';
 import { GeminiResponseMapper } from '../../src/conversion/hub/response/response-mappers.js';
 import type { AdapterContext } from '../../src/conversion/hub/types/chat-envelope.js';
 

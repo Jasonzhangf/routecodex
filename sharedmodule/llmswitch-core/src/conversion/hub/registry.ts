@@ -1,10 +1,10 @@
 import { ChatFormatAdapter } from './format-adapters/chat-format-adapter.js';
 import { AnthropicFormatAdapter } from './format-adapters/anthropic-format-adapter.js';
 import { ResponsesFormatAdapter } from './format-adapters/responses-format-adapter.js';
-import { ChatSemanticMapper } from './semantic-mappers/chat-mapper.js';
-import { AnthropicSemanticMapper } from './semantic-mappers/anthropic-mapper.js';
-import { ResponsesSemanticMapper } from './semantic-mappers/responses-mapper.js';
-import { GeminiSemanticMapper } from './semantic-mappers/gemini-mapper.js';
+import { ChatSemanticMapper } from './operation-table/semantic-mappers/chat-mapper.js';
+import { AnthropicSemanticMapper } from './operation-table/semantic-mappers/anthropic-mapper.js';
+import { ResponsesSemanticMapper } from './operation-table/semantic-mappers/responses-mapper.js';
+import { GeminiSemanticMapper } from './operation-table/semantic-mappers/gemini-mapper.js';
 import { GeminiFormatAdapter } from './format-adapters/gemini-format-adapter.js';
 import type { InboundPlan, InboundPassthroughConfig, InboundStage } from './pipelines/inbound.js';
 import type { OutboundPlan, OutboundPassthroughConfig, OutboundStage } from './pipelines/outbound.js';

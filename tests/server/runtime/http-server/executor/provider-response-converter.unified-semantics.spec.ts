@@ -1,4 +1,6 @@
 import { describe, expect, it, jest } from '@jest/globals';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
@@ -252,5 +254,100 @@ describe('provider-response-converter unified semantics handoff', () => {
         })
       ]
     });
+  });
+
+  it('preserves anthropic tool_use on real reasoning_stop_guard followup sample instead of collapsing to empty tool_calls', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+    mockSyncReasoningStopModeFromRequest.mockClear();
+
+    const sampleDir = path.join(
+      '/Volumes/extension/.rcc/codex-samples/openai-responses/mimo.key1.mimo-v2.5-pro',
+      'openai-responses-mimo.key1-mimo-v2.5-pro-20260507T220242798-168767-1436_reasoning_stop_guard'
+    );
+    if (!fs.existsSync(sampleDir)) {
+      return;
+    }
+
+    const { convertProviderResponse: coreConvertProviderResponse } = await import(
+      '../../../../../sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.js'
+    );
+    mockConvertProviderResponse.mockImplementation(async (args) => coreConvertProviderResponse(args as any));
+
+    const providerResponseDoc = JSON.parse(
+      fs.readFileSync(path.join(sampleDir, 'provider-response.json'), 'utf8')
+    ) as Record<string, any>;
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const result = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'anthropic-messages',
+        requestId: 'req_converter_real_reasoning_stop_guard_followup',
+        wantsStream: false,
+        requestSemantics: {
+          tools: {
+            clientToolsRaw: [
+              {
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  parameters: {
+                    type: 'object',
+                    properties: { cmd: { type: 'string' } },
+                    required: ['cmd']
+                  }
+                }
+              }
+            ]
+          },
+          __routecodex: {
+            serverToolFollowup: true,
+            serverToolFollowupSource: 'servertool.reasoning_stop_guard'
+          }
+        } as any,
+        originalRequest: {
+          model: 'mimo-v2.5-pro',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }]
+        },
+        response: providerResponseDoc as any,
+        pipelineMetadata: {
+          capturedChatRequest: {
+            model: 'mimo-v2.5-pro',
+            messages: [{ role: 'user', content: '继续执行' }],
+            tools: [
+              {
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  parameters: { type: 'object' }
+                }
+              }
+            ]
+          },
+          __rt: {
+            serverToolFollowup: true,
+            clientProtocol: 'openai-responses'
+          }
+        }
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    const body = (result as any).body;
+    const toolCalls = body?.choices?.[0]?.message?.tool_calls;
+    expect(Array.isArray(toolCalls)).toBe(true);
+    expect(toolCalls?.[0]?.function?.name).toBe('exec_command');
+    expect(body?.choices?.[0]?.finish_reason).toBe('tool_calls');
   });
 });

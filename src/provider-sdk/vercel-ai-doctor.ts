@@ -3,6 +3,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { generateText } from 'ai';
 import { TokenFileAuthProvider } from '../providers/auth/tokenfile-auth.js';
 import type { UnknownRecord } from '../config/virtual-router-types.js';
+import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 import {
   readString,
   resolveProviderRuntimeMetadata,
@@ -42,9 +43,6 @@ export type ProviderDoctorDeps = {
   }) => Promise<{ text: string; usage?: unknown }>;
 };
 
-function isRecord(value: unknown): value is UnknownRecord {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 function normalizeString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';

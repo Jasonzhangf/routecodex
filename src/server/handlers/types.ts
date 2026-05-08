@@ -26,6 +26,8 @@ export interface PipelineExecutionResult {
     routeName?: string;
     poolId?: string;
     finishReason?: string;
+    stoplessMode?: 'on' | 'off' | 'endless';
+    stoplessArmed?: boolean;
     usage?: Record<string, unknown>;
     externalLatencyMs?: number;
     trafficWaitMs?: number;

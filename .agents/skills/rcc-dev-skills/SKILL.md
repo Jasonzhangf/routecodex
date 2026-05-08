@@ -23,6 +23,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 4. **proxy payload 语义边界**：主传输链 payload 必须完整翻译/转发、保持语义等价；禁止用 budget/history/media placeholder/自动续接 去裁切或改写真实主链。仅允许内部派生 followup 链做显式桥接（附件仅当前请求存在、不入历史；非视觉模型可注入 vision summary），且不得冒充主链 payload，也不得作为 fallback/静默补偿。
 5. **错误路径改动必须复测原错误请求**：凡是修复错误请求、空响应、工具配对、servertool、兼容、重试/回退、history/payload 相关问题，**必须先复测原 requestId / 原 errorsample / 原 codex-sample**；禁止“只跑编译/单测绿”就宣称修好。
 6. **不复测=未完成**：如果还没对原失败样本做 same-shape replay、实机复现或等价历史回放，就不能汇报“已修复”，最多只能说“已改代码，待复测”。
+7. **servertool/stopless/followup 必须有 live-sample matrix 门禁**：凡触达 `reasoning_stop_guard_flow`、tool history 配对、responses→anthropic 出口、或 stopless contract，至少补 1 条“真实坏样本 same-shape 回放”回归；只写局部单测不足以宣称修复。
 
 ## Chat Process 定义
 
@@ -163,6 +164,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - Anthropic multimodal 排查铁律（2026-05-05）：若请求已命中 `multimodal` 路由但 provider 仍在 `provider.send` 早期 `fetch failed`，**先验证 `input_image / image_url` 是否已在 anthropic transport 里规范化成 `type=image + source.{url|base64}`**；在确认标准图片 shape 已被消费前，禁止先改 remote-image/inline 策略。
 - Errorsamples 背压精华（2026-04-13）：**errorsamples 也不能同步直写**；必须和 snapshot 一样走**有界异步队列 + drop oldest pending**。`429/502` 这类瞬时上游错误默认**直接跳过写盘**，否则最容易在重试风暴里把磁盘和内存一起打爆。
 - 空 payload/空响应取证精华（2026-04-27 / 2026-04-28）：即使未开启 `--snap`，凡是命中**provider request 空消息/空 input**、**empty assistant**、或 **assistant sanitize 后变空**，都要**默认写 `errorsamples/payload-contract-error` + 强制保留 `provider-request/provider-response` 本地原始样本**；只留 errorsample 不足以做根因回放。
+- `--snap` errorsample 真相保留（2026-05-07）：只要开启 `--snap`（或 full snapshot），`errorsamples` 就必须写**完整 payload**；禁止再落 `truncated/payload_too_large` 占位样本，否则会直接破坏故障复盘价值。
 - tool history 配对铁律（2026-04-28）：`assistant tool_call/function_call` 与 `tool/tool_result/function_call_output` 必须**显式 id 一一配对**；禁止补 `fallback id`、禁止拿“最近一个 tool_call”隐式配对、禁止 orphan/dangling 继续上游，命中即 `MALFORMED_REQUEST/RESPONSE` fail-fast。
 - Responses input seed 对齐（2026-04-29）：`/v1/responses` 历史 seed 里 `function_call` 的合法 id 来源是 **`call_id / tool_call_id / id` 同权**；任何只认其中一个字段的 sanitize/filter 都会把后续 `function_call_output` 错删，现场表现为 `dangling_tool_call`。
 - servertool tool_call id 真源（2026-04-28）：internal servertool（如 `clock` / `web_search` / `reasoning.stop` / `continue_execution`）若需要自有 `tool_call_id`，必须在 **servertool 抽取真源** 当场生成正式 `call_servertool_*` id，并让 assistant tool_call / tool_output / pending injection 全链复用同一个 id；禁止后续 bridge/history 层再 canonicalize 或补写。

@@ -41,13 +41,7 @@ import {
 } from './session-client-route-utils.js';
 import { clearStopMessageTmuxScope, migrateStopMessageTmuxScope } from './stopmessage-scope-rebind.js';
 import { matchesExpectedClientApiKey } from '../../../utils/session-client-token.js';
-
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error ?? 'unknown');
-}
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
 function logSessionClientRoutesNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {

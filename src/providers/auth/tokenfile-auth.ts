@@ -10,6 +10,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { IAuthProvider, AuthStatus } from './auth-interface.js';
+import { expandHome } from '../../utils/common-utils.js';
 import type { OAuthAuth } from '../core/api/provider-config.js';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { resolveRccAuthDirForRead, resolveRccTokensDirForRead } from '../../config/user-data-paths.js';
@@ -339,7 +340,7 @@ export class TokenFileAuthProvider implements IAuthProvider {
   }
 
   private expandHome(p: string): string {
-    return p.startsWith('~/') ? p.replace(/^~\//, `${process.env.HOME || ''}/`) : p;
+    return expandHome(p);
   }
   private readJson(p: string): TokenPayload | null {
     try {

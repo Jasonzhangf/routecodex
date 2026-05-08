@@ -1,6 +1,7 @@
 import { clearPendingServerToolInjection, loadPendingServerToolInjection } from '../../../servertool/pending-session.js';
 import { analyzePendingToolSync } from '../../../router/virtual-router/engine-selection/native-router-hotpath.js';
 import type { StandardizedMessage, StandardizedRequest } from '../types/standardized.js';
+import { formatUnknownError } from '../../../shared/common-utils.js';
 
 const NON_BLOCKING_WARN_THROTTLE_MS = 60_000;
 const nonBlockingWarnByStage = new Map<string, number>();
@@ -17,16 +18,6 @@ type PendingToolSyncDeps = {
   ) => { ready: boolean; insertAt: number };
 };
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function shouldLogNonBlockingStage(stage: string): boolean {
   const now = Date.now();

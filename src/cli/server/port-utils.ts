@@ -5,17 +5,8 @@ import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js
 import { logProcessLifecycle } from '../../utils/process-lifecycle-logger.js';
 import { probeRouteCodexHealth, type RouteCodexHealthProbeResult } from '../../utils/http-health-probe.js';
 import { listManagedServerPidsByPort } from '../../utils/managed-server-pids.js';
+import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logPortUtilsNonBlockingError(
   stage: string,

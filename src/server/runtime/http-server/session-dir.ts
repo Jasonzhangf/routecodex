@@ -1,19 +1,10 @@
 import path from 'node:path';
 import { resolveRccSessionsDir } from '../../../config/user-data-paths.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logSessionDirNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   const now = Date.now();

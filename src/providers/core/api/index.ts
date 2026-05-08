@@ -5,8 +5,8 @@
  */
 
 // 核心实现
-export { ChatHttpProvider } from '../runtime/chat-http-provider.js';
-export { ProviderFactory, createChatHttpProvider } from '../runtime/provider-factory.js';
+export { HttpTransportProvider } from '../runtime/http-transport-provider.js';
+export { ProviderFactory, createHttpTransportProvider } from '../runtime/provider-factory.js';
 
 // 配置类型
 export type { OpenAIStandardConfig } from './provider-config.js';
@@ -38,9 +38,9 @@ export type { UnknownObject } from '../../../types/common-types.js';
 /**
  * V2主要导出摘要：
  *
- * 1. ChatHttpProvider - 统一的 OpenAI Chat 兼容 Provider 实现
+ * 1. HttpTransportProvider - 统一的 HTTP 传输 Provider 骨架实现
  * 2. ProviderFactory - Provider实例工厂
- * 3. createChatHttpProvider - 便捷创建函数
+ * 3. createHttpTransportProvider - 便捷创建函数
  * 4. OpenAIStandardConfig - 统一配置接口
  * 5. fromV1Config - V1到V2配置转换
  * 6. ApiKeyAuthProvider/OAuthAuthProvider - 认证模块

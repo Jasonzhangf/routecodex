@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { resolveRouteCodexConfigPath } from '../../../../config/config-paths.js';
 import { resolveRccProviderDir, resolveRccUserDir } from '../../../../config/user-data-paths.js';
+import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -67,20 +68,7 @@ export interface RoutingSourceSummary {
   version: string | null;
 }
 
-function isRecord(value: unknown): value is UnknownRecord {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logRoutingUtilsNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {

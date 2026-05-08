@@ -3,6 +3,7 @@ import {
   isNativeDisabledByEnv
 } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
+import { formatUnknownError } from '../../../shared/common-utils.js';
 
 export interface NativeBridgeActionDescriptor {
   name: string;
@@ -32,16 +33,6 @@ const NON_BLOCKING_BRIDGE_POLICY_LOG_THROTTLE_MS = 60_000;
 const nonBlockingBridgePolicyLogState = new Map<string, number>();
 const JSON_PARSE_FAILED = Symbol('native-hub-bridge-policy-semantics.parse-failed');
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error ?? 'unknown');
-  }
-}
 
 function logNativeBridgePolicyNonBlocking(stage: string, error: unknown): void {
   const now = Date.now();

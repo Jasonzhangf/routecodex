@@ -1,11 +1,11 @@
 import type { JsonObject } from '../types/json.js';
 import { extractToolCallsFromReasoningText } from '../../shared/reasoning-tool-parser.js';
-import { deriveToolCallKey } from '../../shared/tool-call-utils.js';
 import {
   buildAnthropicResponseFromChatWithNative,
   resolveAnthropicChatCompletionOutcomeWithNative
 } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
 import { buildChatResponseFromResponsesWithNative } from '../../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+import { deriveToolCallKeyWithNative } from '../../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
 import {
   registerResponsesReasoning,
   consumeResponsesReasoning,
@@ -210,11 +210,11 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
   if (inferredToolCalls.length) {
     const seen = new Set<string>();
     for (const existing of canonicalToolCalls) {
-      const key = deriveToolCallKey(existing);
+      const key = deriveToolCallKeyWithNative(existing);
       if (key) seen.add(key);
     }
     for (const inferred of inferredToolCalls) {
-      const key = deriveToolCallKey(inferred);
+      const key = deriveToolCallKeyWithNative(inferred);
       if (key && seen.has(key)) continue;
       if (includeToolCallIds && typeof (inferred as any).id === 'string') {
         const inferredId = String((inferred as any).id);

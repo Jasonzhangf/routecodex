@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { resolveTmuxInjectionLoggingConfig } from './tmux-injection-runtime-config.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
 type TmuxInjectionSource = 'clock' | 'heartbeat';
 type TmuxInjectionOutcome = 'triggered' | 'skipped' | 'failed' | 'disabled';
@@ -12,13 +13,6 @@ type TmuxInjectionCounterState = {
   totalTriggered: number;
   bySource: Record<TmuxInjectionSource, number>;
 };
-
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error ?? 'unknown');
-}
 
 function logTmuxInjectionHistoryNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {

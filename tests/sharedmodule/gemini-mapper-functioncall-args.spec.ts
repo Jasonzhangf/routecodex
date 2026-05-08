@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { GeminiSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/semantic-mappers/gemini-mapper.js';
+import { GeminiSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.js';
 import type { ChatEnvelope } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 
 describe('GeminiSemanticMapper functionCall.args shape', () => {

@@ -1,4 +1,5 @@
 import type { UnknownObject } from '../../../types/common-types.js';
+import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
 const NETWORKING_TOOL_KEYWORDS = new Set([
   'web_search',
@@ -8,9 +9,6 @@ const NETWORKING_TOOL_KEYWORDS = new Set([
   'google_search_retrieval'
 ]);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 function readNonEmptyString(value: unknown): string | undefined {
   if (typeof value !== 'string') {

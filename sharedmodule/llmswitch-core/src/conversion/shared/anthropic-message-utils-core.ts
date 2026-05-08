@@ -9,9 +9,7 @@ const ANTHROPIC_TOOL_NAME_ALIASES = new Map<string, string>([
 ]);
 const CANONICAL_TO_ANTHROPIC_TOOL_NAMES = new Map<string, string>([['shell_command', 'Bash']]);
 
-export function isObject(v: unknown): v is Unknown {
-  return !!v && typeof v === 'object' && !Array.isArray(v);
-}
+export { isObject } from '../../shared/common-utils.js';
 
 export function safeJson(v: unknown): string {
   try {

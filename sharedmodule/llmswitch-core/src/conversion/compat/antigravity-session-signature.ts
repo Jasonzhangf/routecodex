@@ -6,6 +6,7 @@ import {
   getAntigravityRequestSessionMetaWithNative,
   resetAntigravitySignatureCachesWithNative
 } from '../../router/virtual-router/engine-selection/native-router-hotpath.js';
+import { isRecord } from '../../shared/common-utils.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -363,9 +364,6 @@ function extractSessionIdFromCacheKey(key: string): string {
   return key.slice(idx + 1).trim();
 }
 
-function isRecord(value: unknown): value is UnknownRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function stableStringify(value: unknown): string {
   if (value === null || value === undefined) {

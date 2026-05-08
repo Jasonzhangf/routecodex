@@ -419,7 +419,6 @@ export class HttpRequestExecutor {
       if (isAntigravity && statusCode === 429) return true;
       if (isAntigravity && statusCode === 400) return true;
       if (statusCode === 403) return true;
-      if (statusCode === 404) return true;
       if (statusCode >= 500) return true;
     }
     return false;

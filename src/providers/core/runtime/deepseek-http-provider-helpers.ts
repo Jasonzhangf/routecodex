@@ -1,4 +1,6 @@
 import type { UnknownObject } from '../../../types/common-types.js';
+import { formatUnknownError, isRecord, normalizeString } from '../../../utils/common-utils.js';
+export { isRecord, normalizeString };
 
 export type DeepSeekCompletionBody = {
   chat_session_id: string;
@@ -23,17 +25,6 @@ export type CamoufoxFingerprintSnapshot = {
   oscpu?: string;
 };
 
-export function normalizeString(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length ? trimmed : undefined;
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 function stringifyUnknown(value: unknown): string {
   if (typeof value === 'string') {

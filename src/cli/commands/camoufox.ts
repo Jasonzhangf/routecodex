@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 
 type TokenDescriptorLike = {
   provider: string;
@@ -21,16 +22,6 @@ type PathLike = {
 const NON_BLOCKING_WARN_THROTTLE_MS = 60_000;
 const nonBlockingWarnByStage = new Map<string, number>();
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error ?? 'unknown');
-  }
-}
 
 function shouldLogNonBlockingStage(stage: string): boolean {
   const now = Date.now();

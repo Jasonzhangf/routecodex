@@ -1,5 +1,6 @@
 // Tool guidance augmentation utilities (OpenAI + Anthropic shapes)
 // Standalone module to keep guidance policy centralized and easy to evolve.
+import { isObject } from '../shared/common-utils.js';
 
 type Unknown = Record<string, unknown>;
 
@@ -17,9 +18,6 @@ function logGuidanceNonBlocking(
   }
 }
 
-function isObject(v: unknown): v is Unknown {
-  return !!v && typeof v === 'object' && !Array.isArray(v);
-}
 
 function ensureObjectSchema(obj?: unknown): Unknown {
   const o = (obj && typeof obj === 'object') ? (obj as Unknown) : {};

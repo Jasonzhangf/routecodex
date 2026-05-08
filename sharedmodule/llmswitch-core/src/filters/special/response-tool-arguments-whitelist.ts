@@ -1,7 +1,7 @@
 import type { Filter, FilterContext, FilterResult, JsonObject } from '../types.js';
+import { isObject } from '../../shared/common-utils.js';
+import { tryParseJson } from '../../conversion/jsonish.js';
 
-function parseJson(str: string): any { try { return JSON.parse(str); } catch { return null; } }
-function isObject(v: unknown): v is Record<string, unknown> { return !!v && typeof v === 'object' && !Array.isArray(v); }
 
 function logResponseToolArgsWhitelistNonBlocking(
   stage: string,
@@ -29,36 +29,32 @@ export class ResponseToolArgumentsWhitelistFilter implements Filter<JsonObject> 
   }
 
   apply(input: JsonObject, context?: FilterContext): FilterResult<JsonObject> {
-    try {
-      const out = JSON.parse(JSON.stringify(input || {}));
-      const choices = Array.isArray((out as any).choices) ? (out as any).choices : [];
-      const keys = this.getWhitelist(context);
-      for (const ch of choices) {
-        const msg = ch && (ch as any).message ? (ch as any).message : undefined;
-        const tcs = msg && Array.isArray((msg as any).tool_calls) ? ((msg as any).tool_calls as any[]) : [];
-        for (const tc of tcs) {
-          const fn = tc && (tc as any).function ? ((tc as any).function as any) : undefined;
-          const argStr = fn && typeof fn.arguments === 'string' ? (fn.arguments as string) : undefined;
-          if (!argStr) continue;
-          const parsed = parseJson(argStr);
-          if (!isObject(parsed)) continue;
-          const whitelisted: Record<string, unknown> = {};
-          for (const k of keys) {
-            if (k in parsed) whitelisted[k] = (parsed as any)[k];
-          }
-          try {
-            (fn as any).arguments = JSON.stringify(whitelisted);
-          } catch (error) {
-            logResponseToolArgsWhitelistNonBlocking('stringify_whitelisted_arguments', error, {
-              toolName: typeof (fn as any)?.name === 'string' ? String((fn as any).name) : ''
-            });
-          }
-        }
-      }
-      (out as any).choices = choices;
-      return { ok: true, data: out };
-    } catch {
-      return { ok: true, data: input };
+const out = JSON.parse(JSON.stringify(input || {}));
+const choices = Array.isArray((out as any).choices) ? (out as any).choices : [];
+const keys = this.getWhitelist(context);
+for (const ch of choices) {
+  const msg = ch && (ch as any).message ? (ch as any).message : undefined;
+  const tcs = msg && Array.isArray((msg as any).tool_calls) ? ((msg as any).tool_calls as any[]) : [];
+  for (const tc of tcs) {
+    const fn = tc && (tc as any).function ? ((tc as any).function as any) : undefined;
+    const argStr = fn && typeof fn.arguments === 'string' ? (fn.arguments as string) : undefined;
+    if (!argStr) continue;
+    const parsed = tryParseJson(argStr);
+    if (!isObject(parsed)) continue;
+    const whitelisted: Record<string, unknown> = {};
+    for (const k of keys) {
+      if (k in parsed) whitelisted[k] = (parsed as any)[k];
     }
+    try {
+      (fn as any).arguments = JSON.stringify(whitelisted);
+    } catch (error) {
+      logResponseToolArgsWhitelistNonBlocking('stringify_whitelisted_arguments', error, {
+        toolName: typeof (fn as any)?.name === 'string' ? String((fn as any).name) : ''
+      });
+    }
+  }
+}
+(out as any).choices = choices;
+return { ok: true, data: out };
   }
 }

@@ -6,6 +6,7 @@ import type { Command } from 'commander';
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { resolveRccConfigFile, resolveRccSessionsDir, resolveRccUserDir } from '../../config/user-data-paths.js';
 import type { GuardianLifecycleEvent, GuardianRegistration } from '../guardian/types.js';
+import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 import {
   describeHealthProbeFailure,
   probeRouteCodexHealth,
@@ -61,16 +62,6 @@ type RestartApiKeyResolution = {
   source: 'config' | 'env' | 'none';
 };
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logRestartNonBlocking(
   ctx: RestartCommandContext,

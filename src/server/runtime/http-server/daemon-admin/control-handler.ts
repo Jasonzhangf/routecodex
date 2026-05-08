@@ -23,6 +23,7 @@ import {
   setServerToolEnabled
 } from '../servertool-admin-state.js';
 import { resolveRccPath, resolveRccSessionsDir } from '../../../../config/user-data-paths.js';
+import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
 
 type ControlServerInfo = {
   host: string;
@@ -60,16 +61,6 @@ type ControlSnapshot = {
   };
 };
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logControlNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {

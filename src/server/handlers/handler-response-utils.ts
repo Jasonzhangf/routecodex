@@ -17,8 +17,11 @@ import {
   registerRequestLogContext
 } from '../utils/request-log-color.js';
 import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
+import { REASONING_STOP_FINALIZED_FLAG_KEY } from '../runtime/http-server/executor/servertool-response-normalizer.js';
+import { detectStoplessTerminationWithoutFinalization } from '../runtime/http-server/executor/request-executor-response-contract.js';
 
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);
+const REASONING_STOP_FINALIZED_MARKER = '[app.finished:reasoning.stop]';
 
 interface DispatchOptions {
   forceSSE?: boolean;
@@ -41,12 +44,14 @@ type AsyncIterableLike = { [Symbol.asyncIterator]?: () => AsyncIterator<unknown>
 
 type SseFinishReasonTracker = {
   buffer: string;
+  visibleTextBuffer: string;
   finishReason?: string;
   seenCompletedEvent: boolean;
   seenDoneEvent: boolean;
   seenDoneMarker: boolean;
   seenRequiredActionEvent: boolean;
   seenTerminalEvent: boolean;
+  seenReasoningStopFinalizedMarker: boolean;
   lastEventName?: string;
 };
 
@@ -115,9 +120,32 @@ function trackSseFinishReason(tracker: SseFinishReasonTracker, chunk: unknown): 
     const rawBlock = tracker.buffer.slice(0, boundaryMatch.index);
     tracker.buffer = tracker.buffer.slice(boundaryMatch.index + boundaryLength);
     trackSseTerminalState(tracker, rawBlock);
+    trackSseReasoningStopFinalization(tracker, rawBlock);
     const derived = deriveFinishReasonFromSseBlock(rawBlock, tracker.finishReason);
     if (derived) {
       tracker.finishReason = derived;
+    }
+  }
+}
+
+function trackSseReasoningStopFinalization(tracker: SseFinishReasonTracker, block: string): void {
+  const trimmed = block.trim();
+  if (!trimmed) {
+    return;
+  }
+  const payloads = extractSseJsonPayloads(trimmed);
+  if (payloads.length <= 0) {
+    return;
+  }
+  for (const payload of payloads) {
+    const visibleText = extractVisibleTextFromSsePayload(payload);
+    if (!visibleText) {
+      continue;
+    }
+    tracker.visibleTextBuffer += visibleText;
+    if (tracker.visibleTextBuffer.includes(REASONING_STOP_FINALIZED_MARKER)) {
+      tracker.seenReasoningStopFinalizedMarker = true;
+      return;
     }
   }
 }
@@ -228,6 +256,81 @@ function deriveFinishReasonFromSsePayload(payload: unknown, eventName?: string):
     return 'stop';
   }
   return undefined;
+}
+
+function extractSseJsonPayloads(block: string): unknown[] {
+  const payloads: unknown[] = [];
+  const dataLines: string[] = [];
+  for (const rawLine of block.split(/\r?\n/)) {
+    const line = rawLine.trimEnd();
+    if (!line || line.startsWith(':') || !line.startsWith('data:')) {
+      continue;
+    }
+    dataLines.push(line.slice(5).trimStart());
+  }
+  const dataText = dataLines.join('\n').trim();
+  if (!dataText || dataText === '[DONE]') {
+    return payloads;
+  }
+  try {
+    payloads.push(JSON.parse(dataText) as unknown);
+  } catch {
+    return payloads;
+  }
+  return payloads;
+}
+
+function extractVisibleTextFromSsePayload(payload: unknown): string {
+  if (typeof payload === 'string') {
+    return payload;
+  }
+  if (!payload || typeof payload !== 'object') {
+    return '';
+  }
+  if (Array.isArray(payload)) {
+    return payload.map((entry) => extractVisibleTextFromSsePayload(entry)).join('');
+  }
+  const record = payload as Record<string, unknown>;
+  const type = typeof record.type === 'string' ? record.type.trim().toLowerCase() : '';
+  if (type === 'thinking' || type === 'reasoning' || type === 'thinking_delta' || type === 'reasoning_delta') {
+    return '';
+  }
+  if (type === 'message') {
+    return extractVisibleTextFromSsePayload(record.content);
+  }
+
+  let out = '';
+  if (
+    (type === 'text' || type === 'output_text' || type === 'input_text' || type === 'text_delta' || type === 'output_text_delta')
+    && typeof record.text === 'string'
+  ) {
+    out += record.text;
+  }
+  if (typeof record.output_text === 'string') {
+    out += record.output_text;
+  }
+  if (
+    (type.includes('text') || type.endsWith('_delta') || type === 'content_block_delta')
+    && typeof record.delta === 'string'
+  ) {
+    out += record.delta;
+  }
+  if (Array.isArray(record.content)) {
+    out += extractVisibleTextFromSsePayload(record.content);
+  }
+  if (record.delta && typeof record.delta === 'object') {
+    out += extractVisibleTextFromSsePayload(record.delta);
+  }
+  if (record.message && typeof record.message === 'object') {
+    out += extractVisibleTextFromSsePayload(record.message);
+  }
+  if (record.response && typeof record.response === 'object') {
+    out += extractVisibleTextFromSsePayload(record.response);
+  }
+  if (record.output && typeof record.output === 'object') {
+    out += extractVisibleTextFromSsePayload(record.output);
+  }
+  return out;
 }
 
 function extractChunkText(chunk: unknown): string | undefined {
@@ -545,6 +648,7 @@ export function sendPipelineResponse(
     let streamEnded = false;
     const finishTracker: SseFinishReasonTracker = {
       buffer: '',
+      visibleTextBuffer: '',
       finishReason:
         body && typeof body === 'object' && typeof (body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY] === 'string'
           ? String((body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY])
@@ -554,6 +658,8 @@ export function sendPipelineResponse(
       seenDoneMarker: false,
       seenRequiredActionEvent: false,
       seenTerminalEvent: false
+      ,
+      seenReasoningStopFinalizedMarker: false
     };
     let idleTimer: NodeJS.Timeout | null = null;
     let totalTimer: NodeJS.Timeout | null = null;
@@ -757,13 +863,64 @@ export function sendPipelineResponse(
       ended = true;
       streamEnded = true;
       clearTimers();
+      const stoplessMode = result.usageLogInfo?.stoplessMode;
+      const resolvedStreamFinishReason =
+        finishTracker.finishReason
+        || (typeof result.usageLogInfo?.finishReason === 'string' && result.usageLogInfo.finishReason.trim()
+          ? result.usageLogInfo.finishReason.trim()
+          : undefined);
+      const stoplessTerminationSignal = detectStoplessTerminationWithoutFinalization(
+        {
+          __sse_responses: true,
+          ...(resolvedStreamFinishReason ? { [STREAM_LOG_FINISH_REASON_KEY]: resolvedStreamFinishReason } : {}),
+          ...(finishTracker.seenReasoningStopFinalizedMarker
+            ? { [REASONING_STOP_FINALIZED_FLAG_KEY]: true }
+            : {})
+        },
+        stoplessMode
+      );
+      if (stoplessTerminationSignal) {
+        logPipelineStage('host.stopless_finalization_missing', requestLabel, {
+          marker: stoplessTerminationSignal.marker,
+          reason: stoplessTerminationSignal.reason,
+          stoplessMode
+        });
+        try {
+          const payload = {
+            type: 'error',
+            status: 502,
+            error: {
+              message: `Stopless contract violated: ${stoplessTerminationSignal.reason}`,
+              code: 'STOPLESS_FINALIZATION_MISSING',
+              request_id: requestLabel
+            }
+          };
+          res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
+        } catch (writeError) {
+          logResponseNonBlockingError(`response.sse.stopless_contract.write_error_event:${requestLabel}`, writeError);
+        }
+        logResponseCompleted({
+          status,
+          mode: 'sse',
+          reason: 'stopless_contract',
+          bridgeStatus: 502,
+          finishReason: resolvedStreamFinishReason
+        });
+      }
       getSessionExecutionStateTracker().recordSseStreamEnd(requestLabel, {
-        finishReason: finishTracker.finishReason,
+        finishReason: resolvedStreamFinishReason,
         terminal: finishTracker.seenTerminalEvent
       });
-      if (!completedLogged) {
+      if (!completedLogged && !stoplessTerminationSignal) {
         completedLogged = true;
-        logStreamRequestComplete(entryEndpoint, requestLabel, status, finishTracker.finishReason, requestLogContext);
+        logStreamRequestComplete(entryEndpoint, requestLabel, status, resolvedStreamFinishReason, requestLogContext);
+      }
+      if (!res.writableEnded && !res.destroyed) {
+        try {
+          res.end();
+        } catch (endError) {
+          logResponseNonBlockingError(`response.sse.stream.end:${requestLabel}`, endError);
+        }
       }
     });
     res.on('close', () => {
@@ -777,7 +934,7 @@ export function sendPipelineResponse(
       cleanup('close');
     });
     res.on('finish', () => cleanup('finish'));
-    outboundStream.pipe(res);
+    outboundStream.pipe(res, { end: false });
     return;
   }
 

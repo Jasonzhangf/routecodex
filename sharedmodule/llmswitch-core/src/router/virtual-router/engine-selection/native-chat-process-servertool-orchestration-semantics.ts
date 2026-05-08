@@ -3,6 +3,7 @@ import {
   isNativeDisabledByEnv
 } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
+import { formatUnknownError } from '../../../shared/common-utils.js';
 import {
   parseServertoolDispatchPlanPayload,
   parseServertoolFollowupFlowProfilePayload,
@@ -76,16 +77,6 @@ const NON_BLOCKING_SERVERTOOL_ORCHESTRATION_LOG_THROTTLE_MS = 60_000;
 const nonBlockingServertoolOrchestrationLogState = new Map<string, number>();
 const JSON_PARSE_FAILED = Symbol('native-chat-process-servertool-orchestration-semantics.parse-failed');
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error ?? 'unknown');
-  }
-}
 
 function logNativeServertoolOrchestrationNonBlocking(stage: string, error: unknown): void {
   const now = Date.now();

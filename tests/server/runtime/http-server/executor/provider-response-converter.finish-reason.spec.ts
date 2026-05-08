@@ -113,4 +113,58 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
     expect((converted.body as Record<string, unknown>).__sse_responses).toBe(sseStream);
   });
 
+  it('does not set streamed finalized flag from hidden metadata marker only', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    const sseStream = { pipe: () => undefined };
+    mockConvertProviderResponse.mockResolvedValue({
+      __sse_responses: sseStream,
+      body: {
+        id: 'chatcmpl_reasoning_stop_hidden_marker_only',
+        object: 'chat.completion',
+        metadata: {
+          hidden: '[app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}'
+        },
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: '普通状态汇报，没有可见 completed marker'
+            }
+          }
+        ]
+      }
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'anthropic-messages',
+        requestId: 'req_stream_reasoning_stop_hidden_marker_only',
+        wantsStream: true,
+        response: { body: { id: 'upstream_body' } } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect((converted.body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY]).toBe('stop');
+    expect((converted.body as Record<string, unknown>)[REASONING_STOP_FINALIZED_FLAG_KEY]).toBeUndefined();
+    expect((converted.body as Record<string, unknown>).__sse_responses).toBe(sseStream);
+  });
+
 });

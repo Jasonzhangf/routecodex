@@ -1,7 +1,7 @@
 /**
  * ResponsesProvider - 真实 OpenAI Responses SSE 透传 Provider
  *
- * 最小实现：继承 ChatHttpProvider，覆写 ServiceProfile 与发送路径，
+ * 最小实现：继承 HttpTransportProvider，覆写 ServiceProfile 与发送路径，
  * 在 /v1/responses 入口下一律走上游 /responses 并使用 SSE（Accept: text/event-stream）。
  */
 

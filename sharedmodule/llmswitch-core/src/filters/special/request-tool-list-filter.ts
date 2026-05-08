@@ -1,19 +1,7 @@
 import type { Filter, FilterContext, FilterResult, JsonObject } from '../types.js';
+import { formatUnknownError, isObject } from '../../shared/common-utils.js';
 
-function isObject(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === 'object' && !Array.isArray(v);
-}
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logRequestToolListFilterNonBlockingError(
   stage: string,
@@ -224,121 +212,116 @@ export class RequestToolListFilter implements Filter<JsonObject> {
   readonly stage: FilterContext['stage'] = 'request_pre';
 
   apply(input: JsonObject, ctx: FilterContext): FilterResult<JsonObject> {
-    try {
-      const out = JSON.parse(JSON.stringify(input || {}));
-      const hadIncomingTools = Array.isArray((out as any).tools);
-      const tools = hadIncomingTools ? ((out as any).tools as any[]) : [];
-      if (!hadIncomingTools) {
-        (out as any).tools = tools;
-      }
+const out = JSON.parse(JSON.stringify(input || {}));
+const hadIncomingTools = Array.isArray((out as any).tools);
+const tools = hadIncomingTools ? ((out as any).tools as any[]) : [];
+if (!hadIncomingTools) {
+  (out as any).tools = tools;
+}
 
-      const mode = envMode();
-      if (mode === 'off') {
-        if (!hadIncomingTools && tools.length === 0) {
-          delete (out as any).tools;
-        }
-        return { ok: true, data: out };
-      }
+const mode = envMode();
+if (mode === 'off') {
+  if (!hadIncomingTools && tools.length === 0) {
+    delete (out as any).tools;
+  }
+  return { ok: true, data: out };
+}
 
-      const messages = Array.isArray((out as any).messages) ? ((out as any).messages as any[]) : [];
-      const servers = new Set<string>();
-      for (const s of getEnvServers()) servers.add(s);
-      for (const s of collectServersFromMessages(messages)) servers.add(s);
-      const knownServers = Array.from(servers);
-      const mcpListEmpty = detectEmptyMcpListFromMessages(messages);
-      const formatKnownServers = (list: string[]): string => {
-        if (!Array.isArray(list) || list.length === 0) return '';
-        const shown = list.slice(0, 8);
-        const suffix = list.length > shown.length ? ` (+${list.length - shown.length} more)` : '';
-        return `Known MCP servers: ${shown.join(', ')}${suffix}.`;
-      };
-      const mcpServerReminder =
-        'Note: arguments.server is an MCP server label (NOT a tool name like shell/exec_command/apply_patch).';
+const messages = Array.isArray((out as any).messages) ? ((out as any).messages as any[]) : [];
+const servers = new Set<string>();
+for (const s of getEnvServers()) servers.add(s);
+for (const s of collectServersFromMessages(messages)) servers.add(s);
+const knownServers = Array.from(servers);
+const mcpListEmpty = detectEmptyMcpListFromMessages(messages);
+const formatKnownServers = (list: string[]): string => {
+  if (!Array.isArray(list) || list.length === 0) return '';
+  const shown = list.slice(0, 8);
+  const suffix = list.length > shown.length ? ` (+${list.length - shown.length} more)` : '';
+  return `Known MCP servers: ${shown.join(', ')}${suffix}.`;
+};
+const mcpServerReminder =
+  'Note: arguments.server is an MCP server label (NOT a tool name like shell/exec_command/apply_patch).';
 
-      // If the session already attempted list_mcp_resources and got an empty/unsupported response,
-      // stop exposing MCP *resource* tools to avoid repeated "server" probing loops.
-      if (mcpListEmpty) {
-        removeToolByName(tools, 'list_mcp_resources');
-        removeToolByName(tools, 'list_mcp_resource_templates');
-        removeToolByName(tools, 'read_mcp_resource');
-        (out as any).tools = tools;
-        return { ok: true, data: out };
-      }
+// If the session already attempted list_mcp_resources and got an empty/unsupported response,
+// stop exposing MCP *resource* tools to avoid repeated "server" probing loops.
+if (mcpListEmpty) {
+  removeToolByName(tools, 'list_mcp_resources');
+  removeToolByName(tools, 'list_mcp_resource_templates');
+  removeToolByName(tools, 'read_mcp_resource');
+  (out as any).tools = tools;
+  return { ok: true, data: out };
+}
 
-      // MCP tool schemas
-      const listResParams: any = {
-        type: 'object',
-        properties: {
-          server: knownServers.length > 0 ? { type: 'string', enum: knownServers, minLength: 1 } : { type: 'string', minLength: 1 },
-          filter: { type: 'string' },
-          root: { type: 'string' }
-        },
-        additionalProperties: false
-      };
-      const listTplParams: any = {
-        type: 'object',
-        properties: {
-          cursor: { type: 'string' },
-          server: knownServers.length > 0 ? { type: 'string', enum: knownServers, minLength: 1 } : { type: 'string', minLength: 1 }
-        },
-        additionalProperties: false
-      };
-      const readResParamsBase = {
-        type: 'object',
-        properties: {
-          server: { type: 'string' },
-          uri: { type: 'string' }
-        },
-        required: ['server', 'uri'],
-        additionalProperties: false
-      } as any;
+// MCP tool schemas
+const listResParams: any = {
+  type: 'object',
+  properties: {
+    server: knownServers.length > 0 ? { type: 'string', enum: knownServers, minLength: 1 } : { type: 'string', minLength: 1 },
+    filter: { type: 'string' },
+    root: { type: 'string' }
+  },
+  additionalProperties: false
+};
+const listTplParams: any = {
+  type: 'object',
+  properties: {
+    cursor: { type: 'string' },
+    server: knownServers.length > 0 ? { type: 'string', enum: knownServers, minLength: 1 } : { type: 'string', minLength: 1 }
+  },
+  additionalProperties: false
+};
+const readResParamsBase = {
+  type: 'object',
+  properties: {
+    server: { type: 'string' },
+    uri: { type: 'string' }
+  },
+  required: ['server', 'uri'],
+  additionalProperties: false
+} as any;
 
-      const listDescription = [
-        'List resources exposed by MCP servers.',
-        'Only use this for MCP resources (not MCP tools). Many MCP servers expose tools only; if the result is empty, do not retry.',
-        'If you do not know the MCP server name yet, call this tool with {} once; then reuse the returned server names for subsequent calls.',
-        mcpServerReminder,
-        formatKnownServers(knownServers)
-      ].filter(Boolean).join('\n');
-      const templatesDescription = [
-        'List resource templates exposed by MCP servers.',
-        'Only use this for MCP resources (not MCP tools). If list_mcp_resources returns empty, do not retry.',
-        'If you do not know the MCP server name yet, call list_mcp_resources({}) once first.',
-        mcpServerReminder,
-        formatKnownServers(knownServers)
-      ].filter(Boolean).join('\n');
-      const readDescription = [
-        'Read a specific MCP resource by { server, uri }.',
-        'Only use this for MCP resources (not MCP tools). If list_mcp_resources returns empty, do not retry.',
-        'If you do not know the MCP server name yet, call list_mcp_resources({}) once first.',
-        mcpServerReminder,
-        formatKnownServers(knownServers)
-      ].filter(Boolean).join('\n');
+const listDescription = [
+  'List resources exposed by MCP servers.',
+  'Only use this for MCP resources (not MCP tools). Many MCP servers expose tools only; if the result is empty, do not retry.',
+  'If you do not know the MCP server name yet, call this tool with {} once; then reuse the returned server names for subsequent calls.',
+  mcpServerReminder,
+  formatKnownServers(knownServers)
+].filter(Boolean).join('\n');
+const templatesDescription = [
+  'List resource templates exposed by MCP servers.',
+  'Only use this for MCP resources (not MCP tools). If list_mcp_resources returns empty, do not retry.',
+  'If you do not know the MCP server name yet, call list_mcp_resources({}) once first.',
+  mcpServerReminder,
+  formatKnownServers(knownServers)
+].filter(Boolean).join('\n');
+const readDescription = [
+  'Read a specific MCP resource by { server, uri }.',
+  'Only use this for MCP resources (not MCP tools). If list_mcp_resources returns empty, do not retry.',
+  'If you do not know the MCP server name yet, call list_mcp_resources({}) once first.',
+  mcpServerReminder,
+  formatKnownServers(knownServers)
+].filter(Boolean).join('\n');
 
-      if (mode === 'all') {
-        ensureFunctionTool(tools, 'list_mcp_resources', listDescription, listResParams);
-        ensureFunctionTool(tools, 'list_mcp_resource_templates', templatesDescription, listTplParams);
-        ensureFunctionTool(tools, 'read_mcp_resource', readDescription, readResParamsBase);
-      } else {
-        // phase
-        ensureFunctionTool(tools, 'list_mcp_resources', listDescription, listResParams);
-        ensureFunctionTool(tools, 'list_mcp_resource_templates', templatesDescription, listTplParams);
-        // read is only exposed when we have known servers
-        if (knownServers.length > 0) {
-          const withEnum = JSON.parse(JSON.stringify(readResParamsBase));
-          (withEnum as any).properties.server = { type: 'string', enum: knownServers };
-          ensureFunctionTool(tools, 'read_mcp_resource', readDescription, withEnum);
-        } else {
-          // remove any existing read tool to prevent premature exposure
-          removeToolByName(tools, 'read_mcp_resource');
-        }
-      }
+if (mode === 'all') {
+  ensureFunctionTool(tools, 'list_mcp_resources', listDescription, listResParams);
+  ensureFunctionTool(tools, 'list_mcp_resource_templates', templatesDescription, listTplParams);
+  ensureFunctionTool(tools, 'read_mcp_resource', readDescription, readResParamsBase);
+} else {
+  // phase
+  ensureFunctionTool(tools, 'list_mcp_resources', listDescription, listResParams);
+  ensureFunctionTool(tools, 'list_mcp_resource_templates', templatesDescription, listTplParams);
+  // read is only exposed when we have known servers
+  if (knownServers.length > 0) {
+    const withEnum = JSON.parse(JSON.stringify(readResParamsBase));
+    (withEnum as any).properties.server = { type: 'string', enum: knownServers };
+    ensureFunctionTool(tools, 'read_mcp_resource', readDescription, withEnum);
+  } else {
+    // remove any existing read tool to prevent premature exposure
+    removeToolByName(tools, 'read_mcp_resource');
+  }
+}
 
-      (out as any).tools = tools;
-      return { ok: true, data: out };
-    } catch (applyError) {
-      logRequestToolListFilterNonBlockingError('apply', applyError);
-      return { ok: true, data: input };
-    }
+(out as any).tools = tools;
+return { ok: true, data: out };
   }
 }

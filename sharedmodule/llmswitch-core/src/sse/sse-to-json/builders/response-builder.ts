@@ -15,16 +15,7 @@ import type {
   SseToResponsesJsonContext
 } from '../../types/index.js';
 import { normalizeResponsesMessageItem } from '../../shared/responses-output-normalizer.js';
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
+import { formatUnknownError } from '../../../shared/common-utils.js';
 function logResponseBuilderNonBlocking(
   stage: string,
   error: unknown,
@@ -420,7 +411,16 @@ export class ResponsesResponseBuilder {
         ? data.delta
         : data.delta?.text;
       if (deltaChunk) {
-        (contentPart as any).text = ((contentPart as any).text || '') + deltaChunk;
+        const previousText = typeof (contentPart as any).text === 'string'
+          ? (contentPart as any).text
+          : '';
+        if (deltaChunk.startsWith(previousText)) {
+          (contentPart as any).text = deltaChunk;
+        } else if (previousText.startsWith(deltaChunk)) {
+          (contentPart as any).text = previousText;
+        } else {
+          (contentPart as any).text = `${previousText}${deltaChunk}`;
+        }
         (contentPart as any)._hasDelta = true;
       }
     } else if (contentPart.type === 'function_call') {
@@ -838,10 +838,16 @@ export class ResponsesResponseBuilder {
           const input = (item as any).input;
           if (typeof input === 'string') {
             try { outputItemState.arguments = JSON.stringify({ input }); }
-            catch { outputItemState.arguments = JSON.stringify({ input: String(input) }); }
+            catch (err) {
+              logResponseBuilderNonBlocking('output_item.done.stringify_input', err, { inputType: typeof input });
+              outputItemState.arguments = JSON.stringify({ input: String(input) });
+            }
           } else if (input && typeof input === 'object') {
             try { outputItemState.arguments = JSON.stringify(input); }
-            catch { outputItemState.arguments = '{}'; }
+            catch (err) {
+              logResponseBuilderNonBlocking('output_item.done.stringify_object', err, {});
+              outputItemState.arguments = '{}';
+            }
           }
         }
       }
@@ -906,13 +912,7 @@ export class ResponsesResponseBuilder {
   private handleError(event: ResponsesSseEvent): void {
     const payload = event.data as { error?: { message?: string } } | undefined;
     const msg = typeof payload?.error?.message === 'string' ? payload.error.message : undefined;
-    // 容错：若无有效错误消息或当前响应已标记 completed，则将错误降级为非致命告警
-    const status: string | undefined = (this.response as any)?.status;
-    if (!msg || status === 'completed' || this.config.enableEventRecovery) {
-      // keep building; do not flip to error state
-      return;
-    }
-    this.error = new Error(msg || 'Unknown error');
+    this.error = new Error(msg || 'SSE stream error');
     this.state = 'error';
   }
   private handleResponseCompleted(event: ResponsesSseEvent): void {
@@ -1156,38 +1156,29 @@ export class ResponsesResponseBuilder {
     if (this.state === 'completed') {
       return { success: true, response: this.response as ResponsesResponse };
     }
-    // 容错：部分上游以 response.completed 作为终结事件，不再发送 response.done。
-    // 若状态仍为 building 但已收到 response.completed 且 response.status=completed，视为成功聚合。
-    try {
-      const status: string | undefined = (this.response as any)?.status;
-      if (status === 'completed') {
-        // 确保输出结构完整
-        try {
-          const cur = (this.response as any).output;
-          if (!Array.isArray(cur) || cur.length === 0) {
-            (this.response as any).output = this.buildOutputItems();
-          }
-        } catch {
+    const status: string | undefined = (this.response as any)?.status;
+    if (status === 'completed') {
+      // 确保输出结构完整
+      try {
+        const cur = (this.response as any).output;
+        if (!Array.isArray(cur) || cur.length === 0) {
           (this.response as any).output = this.buildOutputItems();
         }
-        return { success: true, response: this.response as ResponsesResponse };
+      } catch {
+        (this.response as any).output = this.buildOutputItems();
       }
-      const salvagedOutput = this.buildOutputItems();
-      if (salvagedOutput.length > 0) {
-        const response = {
-          ...(this.response as ResponsesResponse),
-          object: 'response',
-          status: 'completed',
-          output: salvagedOutput
-        } as ResponsesResponse;
-        this.response = response;
-        return { success: true, response };
-      }
-    } catch (error) {
-      logResponseBuilderNonBlocking('build.salvage_fallback', error, {
-        state: this.state,
-        outputItemCount: this.outputItemBuilders.size
-      });
+      return { success: true, response: this.response as ResponsesResponse };
+    }
+    const salvagedOutput = this.buildOutputItems();
+    if (salvagedOutput.length > 0) {
+      const response = {
+        ...(this.response as ResponsesResponse),
+        object: 'response',
+        status: 'completed',
+        output: salvagedOutput
+      } as ResponsesResponse;
+      this.response = response;
+      return { success: true, response };
     }
     return {
       success: false,

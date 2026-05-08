@@ -5,6 +5,7 @@ import { recordStage } from '../../../stages/utils.js';
 import { applyReqProcessToolGovernanceWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-process-semantics.js';
 import { maybeInjectClockRemindersAndApplyDirectives } from '../../../../process/chat-process-clock-reminders.js';
 import { sanitizeChatProcessRequest } from '../../../../process/chat-process-request-sanitizer.js';
+import { isRecord } from '../../../../../../shared/common-utils.js';
 
 export interface ReqProcessStage1ToolGovernanceOptions {
   request: StandardizedRequest;
@@ -20,9 +21,6 @@ export interface ReqProcessStage1ToolGovernanceResult {
   nodeResult?: HubProcessNodeResult;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 function parseProcessedRequest(value: unknown): ProcessedRequest {
   if (!isRecord(value)) {

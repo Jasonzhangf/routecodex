@@ -6,21 +6,9 @@ import {
   isShellToolName,
   normalizeToolName
 } from '../../tools/tool-description-utils.js';
+import { formatUnknownError, isObject } from '../../shared/common-utils.js';
 
-function isObject(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === 'object' && !Array.isArray(v);
-}
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logRequestToolsNormalizeNonBlocking(
   stage: string,
@@ -45,7 +33,6 @@ export class RequestOpenAIToolsNormalizeFilter implements Filter<JsonObject> {
   readonly stage: FilterContext['stage'] = 'request_finalize';
 
   async apply(input: JsonObject): Promise<FilterResult<JsonObject>> {
-    try {
       const out: JsonObject = JSON.parse(JSON.stringify(input || {}));
       const tools = Array.isArray((out as any).tools) ? ((out as any).tools as any[]) : [];
       const hasApplyPatchTool = hasApplyPatchToolDeclared(tools);
@@ -147,8 +134,5 @@ export class RequestOpenAIToolsNormalizeFilter implements Filter<JsonObject> {
         logRequestToolsNormalizeNonBlocking('drop_tool_choice_after_normalize', error);
       }
       return { ok: true, data: out };
-    } catch {
-      return { ok: true, data: input };
-    }
   }
 }

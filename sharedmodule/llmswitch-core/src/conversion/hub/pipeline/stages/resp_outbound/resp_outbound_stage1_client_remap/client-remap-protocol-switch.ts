@@ -6,13 +6,11 @@ import { normalizeResponsesToolCallIds } from '../../../../../shared/responses-t
 import { isShellToolName } from '../../../../../../tools/tool-description-utils.js';
 import {
   applyClientPassthroughPatchWithNative,
-  buildResponsesPayloadFromChatWithNative
+  buildResponsesPayloadFromChatWithNative,
+  resolveAliasMapFromRespSemanticsWithNative,
+  resolveClientToolsRawFromRespSemanticsWithNative
 } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
 import { normalizeOpenaiChatReasoningOutboundWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js';
-import {
-  resolveAliasMapFromSemantics,
-  resolveClientToolsRawFromSemantics
-} from './chat-process-semantics-bridge.js';
 
 export type ClientProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages';
 
@@ -283,7 +281,9 @@ function remapChatToolCallsToClientNames(
       if (typeof rawArgs === 'string') {
         try {
           parsedArgs = JSON.parse(rawArgs);
-        } catch {
+        } catch (error) {
+          // JSON.parse fallback to raw args — log for diagnostics
+          console.warn('[client-remap] arg parse fallback (non-blocking):', error instanceof Error ? error.message : String(error));
           parsedArgs = rawArgs;
         }
       }
@@ -291,8 +291,9 @@ function remapChatToolCallsToClientNames(
       if (normalized.ok && normalized.value) {
         try {
           functionBag!.arguments = JSON.stringify(normalized.value);
-        } catch {
-          // keep existing args when client-arg serialization fails
+        } catch (error) {
+          // keep existing args when client-arg serialization fails, but log
+          console.warn('[client-remap] arg serialization fallback (non-blocking):', error instanceof Error ? error.message : String(error));
         }
       }
     }
@@ -328,7 +329,8 @@ function remapResponsesToolCallsToClientNames(
     if (typeof rawArgs === 'string') {
       try {
         parsedArgs = JSON.parse(rawArgs);
-      } catch {
+      } catch (error) {
+        console.warn('[client-remap] arg parse fallback (non-blocking):', error instanceof Error ? error.message : String(error));
         parsedArgs = rawArgs;
       }
     }
@@ -346,8 +348,9 @@ function remapResponsesToolCallsToClientNames(
       if ('input' in callBag) {
         callBag.input = normalized.value as Record<string, unknown>;
       }
-    } catch {
-      // keep existing args when client-arg serialization fails
+    } catch (error) {
+      // keep existing args when client-arg serialization fails, but log
+      console.warn('[client-remap] arg serialization fallback (non-blocking):', error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -480,13 +483,15 @@ function enforceClientToolNameContract(
 
 export function buildClientPayloadForProtocol(options: ClientRemapProtocolSwitchOptions): JsonObject {
   let clientPayload: JsonObject;
-  const toolsRaw = resolveClientToolsRawFromSemantics(options.requestSemantics) as BridgeToolDefinition[] | undefined;
+  const toolsRaw = resolveClientToolsRawFromRespSemanticsWithNative(options.requestSemantics) as
+    | BridgeToolDefinition[]
+    | undefined;
   const shouldLogDebug = shouldLogClientRemapDebug(options.payload);
   if (options.clientProtocol === 'openai-chat') {
     clientPayload = normalizeOpenaiChatReasoningOutboundWithNative(options.payload) as JsonObject;
   } else if (options.clientProtocol === 'anthropic-messages') {
     clientPayload = buildAnthropicResponseFromChat(options.payload, {
-      aliasMap: resolveAliasMapFromSemantics(options.requestSemantics)
+      aliasMap: resolveAliasMapFromRespSemanticsWithNative(options.requestSemantics)
     });
   } else {
     if (shouldLogDebug) {

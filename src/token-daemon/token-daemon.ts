@@ -24,6 +24,7 @@ import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
 import { buildVirtualRouterInputFromUserConfig } from '../config/virtual-router-types.js';
 import { ensureAntigravityTokenProjectMetadata } from '../providers/auth/antigravity-userinfo-helper.js';
 import { DEFAULT_TOKEN_DAEMON } from '../constants/index.js';
+import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 
 export interface TokenDaemonOptions {
   intervalMs: number;
@@ -54,16 +55,6 @@ type CamoufoxOverrideOptions = {
   devMode?: boolean;
 };
 
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack || `${error.name}: ${error.message}`;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
 function logTokenDaemonNonBlockingError(
   stage: string,

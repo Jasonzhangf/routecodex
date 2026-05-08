@@ -1,0 +1,320 @@
+import type { ModuleDependencies } from '../../../../modules/pipeline/interfaces/pipeline-interfaces.js';
+import type { ProviderProtocol } from '../types.js';
+import type { ProviderTrafficGovernorLike } from '../provider-traffic-governor.js';
+import {
+  emitRequestExecutorProviderRetryTelemetry,
+  peekProviderTransportBackoffConsecutiveForTests
+} from './request-executor-retry-planner.js';
+import {
+  resolveRequestExecutorProviderFailurePlan
+} from './request-executor-provider-failure-plan.js';
+import {
+  extractRetryErrorSignature,
+  extractStatusCodeFromError,
+  isAntigravityProviderKey,
+  isAntigravityReauthRequired403,
+  isGoogleAccountVerificationRequiredError,
+  type AntigravityRetrySignal
+} from './request-retry-helpers.js';
+import { isPromptTooLongError } from './retry-engine.js';
+import { shouldApplyProviderTransportBackoff } from './request-executor-provider-failure.js';
+import type {
+  RetryErrorSnapshot,
+  BlockingRecoverableRouteHoldState
+} from './request-executor-error-types.js';
+
+type RequestExecutorProviderSendFailureArgs = {
+  error: unknown;
+  requestId: string;
+  providerKey: string;
+  providerId: string;
+  providerType?: string;
+  providerFamily?: string;
+  providerProtocol: ProviderProtocol;
+  providerModel?: string;
+  providerLabel?: string;
+  routeName?: string;
+  runtimeKey?: string;
+  target: Record<string, unknown>;
+  dependencies: ModuleDependencies;
+  runtimeManager: {
+    resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
+  };
+  attempt: number;
+  maxAttempts: number;
+  logicalRequestChainKey: string;
+  routePoolForAttempt?: string[];
+  excludedProviderKeys: Set<string>;
+  recordAttempt: (args: { error: boolean }) => void;
+  logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => void;
+  logProviderRetrySwitch: (args: {
+    requestId: string;
+    attempt: number;
+    maxAttempts: number;
+    providerKey?: string;
+    nextAttempt: number;
+    reason: string;
+    backoffMs?: number;
+    statusCode?: number;
+    errorCode?: string;
+    upstreamCode?: string;
+    switchAction: 'exclude_and_reroute' | 'retry_same_provider';
+    backoffScope?: 'provider' | 'recoverable' | 'attempt';
+    decisionLabel?: string;
+    stage?: 'provider.runtime_resolve' | 'provider.send';
+    runtimeScopeExcludedCount?: number;
+  }) => void;
+  bypassTrafficGovernor: boolean;
+  trafficGovernor: ProviderTrafficGovernorLike;
+  trafficActiveInFlightAtAcquire: number;
+  trafficPolicyMaxInFlight: number;
+  providerTransportBackoffKey?: string;
+  consumeProviderTransportBackoffMs: (key: string, args: { error: unknown; statusCode?: number }) => number;
+  sessionStormBackoffScope?: string;
+  isSessionStormBackoffCandidate: (error: unknown) => boolean;
+  consumeSessionStormBackoffMs: (key: string) => number;
+  getSessionStormBackoffConsecutive: (key: string) => number;
+  providerSendStartedAtMs: number;
+  providerSendElapsedMs: number;
+  cumulativeExternalLatencyMs: number;
+  forcedRouteHint?: string;
+  contextOverflowRetries: number;
+  maxContextOverflowRetries: number;
+  antigravityRetrySignal: AntigravityRetrySignal | null;
+  abortSignal?: AbortSignal;
+  logNonBlockingError: (stage: string, error: unknown, details?: Record<string, unknown>) => void;
+  extractRetryErrorSnapshot: (error: unknown) => RetryErrorSnapshot;
+};
+
+export type RequestExecutorProviderSendFailureResult = {
+  lastError: unknown;
+  antigravityRetrySignal: AntigravityRetrySignal | null;
+  blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
+  allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
+  forcedRouteHint?: string;
+  contextOverflowRetries: number;
+  cumulativeExternalLatencyMs: number;
+};
+
+async function observeFailedTrafficOutcome(args: {
+  governor: ProviderTrafficGovernorLike;
+  runtimeKey: string;
+  providerKey: string;
+  requestId: string;
+  retryError: {
+    statusCode?: number;
+    errorCode?: string;
+    upstreamCode?: string;
+    reason: string;
+  };
+  activeInFlight: number;
+  configuredMaxInFlight?: number;
+}): Promise<void> {
+  await args.governor.observeOutcome?.({
+    runtimeKey: args.runtimeKey,
+    providerKey: args.providerKey,
+    requestId: args.requestId,
+    success: false,
+    statusCode: args.retryError.statusCode,
+    errorCode: args.retryError.errorCode,
+    upstreamCode: args.retryError.upstreamCode,
+    reason: args.retryError.reason,
+    activeInFlight: args.activeInFlight,
+    configuredMaxInFlight: args.configuredMaxInFlight
+  });
+}
+
+export async function processProviderSendFailure(
+  args: RequestExecutorProviderSendFailureArgs
+): Promise<RequestExecutorProviderSendFailureResult> {
+  let cumulativeExternalLatencyMs = args.cumulativeExternalLatencyMs;
+  if (args.providerSendStartedAtMs > 0 && args.providerSendElapsedMs <= 0) {
+    const failedSendElapsedMs = Math.max(0, Date.now() - args.providerSendStartedAtMs);
+    if (failedSendElapsedMs > 0) {
+      cumulativeExternalLatencyMs += failedSendElapsedMs;
+      args.logStage('provider.send.failed_elapsed', args.requestId, {
+        providerKey: args.providerKey,
+        elapsedMs: failedSendElapsedMs,
+        attempt: args.attempt
+      });
+    }
+  }
+
+  const errorMessage = args.error instanceof Error ? args.error.message : String(args.error ?? 'Unknown error');
+  const retryError = args.extractRetryErrorSnapshot(args.error);
+
+  if (args.sessionStormBackoffScope && args.isSessionStormBackoffCandidate(args.error)) {
+    const backoffMs = args.consumeSessionStormBackoffMs(args.sessionStormBackoffScope);
+    args.logStage('request.session_storm_backoff.recorded', args.requestId, {
+      scope: args.sessionStormBackoffScope,
+      backoffMs,
+      consecutive: args.getSessionStormBackoffConsecutive(args.sessionStormBackoffScope),
+      reason: retryError.reason,
+      errorCode: retryError.errorCode,
+      upstreamCode: retryError.upstreamCode,
+      statusCode: retryError.statusCode
+    });
+  }
+
+  if (!args.bypassTrafficGovernor) {
+    try {
+      if (args.runtimeKey) {
+        await observeFailedTrafficOutcome({
+          governor: args.trafficGovernor,
+          runtimeKey: args.runtimeKey,
+          providerKey: args.providerKey,
+          requestId: args.requestId,
+          retryError,
+          activeInFlight: args.trafficActiveInFlightAtAcquire,
+          configuredMaxInFlight: args.trafficPolicyMaxInFlight || undefined
+        });
+      }
+    } catch (observeError) {
+      args.logStage('provider.traffic.observe_outcome.error', args.requestId, {
+        providerKey: args.providerKey,
+        runtimeKey: args.runtimeKey,
+        message:
+          observeError instanceof Error
+            ? observeError.message
+            : String(observeError ?? 'Unknown observe outcome error'),
+        attempt: args.attempt
+      });
+    }
+  }
+
+  args.logStage('provider.send.error', args.requestId, {
+    providerKey: args.providerKey,
+    message: errorMessage,
+    providerType: args.providerType,
+    providerFamily: args.providerFamily,
+    model: args.providerModel,
+    providerLabel: args.providerLabel,
+    ...(typeof retryError.statusCode === 'number' ? { statusCode: retryError.statusCode } : {}),
+    ...(retryError.errorCode ? { errorCode: retryError.errorCode } : {}),
+    ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {}),
+    attempt: args.attempt
+  });
+
+  const status =
+    typeof retryError.statusCode === 'number'
+      ? retryError.statusCode
+      : extractStatusCodeFromError(args.error);
+  if (
+    args.providerTransportBackoffKey
+    && shouldApplyProviderTransportBackoff({
+      error: args.error,
+      retryError,
+      stage: 'provider.send'
+    })
+  ) {
+    const providerBackoffMs = args.consumeProviderTransportBackoffMs(args.providerTransportBackoffKey, {
+      error: args.error,
+      statusCode: status
+    });
+    args.logStage('provider.transport_backoff.recorded', args.requestId, {
+      providerKey: args.providerKey,
+      runtimeKey: args.runtimeKey,
+      backoffKey: args.providerTransportBackoffKey,
+      backoffMs: providerBackoffMs,
+      consecutive: peekProviderTransportBackoffConsecutiveForTests(args.providerTransportBackoffKey),
+      reason: retryError.reason,
+      errorCode: retryError.errorCode,
+      upstreamCode: retryError.upstreamCode,
+      statusCode: status,
+      attempt: args.attempt
+    });
+  }
+
+  const nextAntigravityRetrySignal = isAntigravityProviderKey(args.providerKey)
+    ? (() => {
+      const signature = extractRetryErrorSignature(args.error);
+      const consecutive =
+        args.antigravityRetrySignal && args.antigravityRetrySignal.signature === signature
+          ? args.antigravityRetrySignal.consecutive + 1
+          : 1;
+      return { signature, consecutive } satisfies AntigravityRetrySignal;
+    })()
+    : null;
+  const isVerify = status === 403 && isGoogleAccountVerificationRequiredError(args.error);
+  const isReauth = status === 403 && isAntigravityReauthRequired403(args.error);
+  const promptTooLong = isPromptTooLongError(args.error);
+  const forcedRouteHint = promptTooLong && args.forcedRouteHint !== 'longcontext'
+    ? 'longcontext'
+    : args.forcedRouteHint;
+  const contextOverflowRetries = promptTooLong
+    ? args.contextOverflowRetries + 1
+    : args.contextOverflowRetries;
+
+  const providerFailurePlan = await resolveRequestExecutorProviderFailurePlan({
+    error: args.error,
+    retryError,
+    requestId: args.requestId,
+    providerKey: args.providerKey,
+    providerId: args.providerId,
+    providerType: args.providerType,
+    providerFamily: args.providerFamily,
+    providerProtocol: args.providerProtocol,
+    routeName: args.routeName,
+    runtimeKey: args.runtimeKey,
+    target: args.target,
+    dependencies: args.dependencies,
+    attempt: args.attempt,
+    maxAttempts: args.maxAttempts,
+    stage: 'provider.send',
+    logicalRequestChainKey: args.logicalRequestChainKey,
+    logicalChainRetryLimitStageRequestId: args.requestId,
+    routePool: args.routePoolForAttempt,
+    runtimeManager: args.runtimeManager,
+    excludedProviderKeys: args.excludedProviderKeys,
+    recordAttempt: args.recordAttempt,
+    logStage: args.logStage,
+    routeHint: forcedRouteHint,
+    promptTooLong,
+    contextOverflowRetries,
+    maxContextOverflowRetries: args.maxContextOverflowRetries,
+    isVerify,
+    isReauth,
+    allowAntigravityRecovery: true,
+    antigravityRetrySignal: nextAntigravityRetrySignal,
+    status,
+    abortSignal: args.abortSignal,
+    logNonBlockingError: args.logNonBlockingError
+  });
+  const retryExecutionPlan = providerFailurePlan.retryExecutionPlan;
+  if (!retryExecutionPlan.shouldRetry || !retryExecutionPlan.retrySwitchPlan || !retryExecutionPlan.backoffScope) {
+    throw args.error;
+  }
+  if (!providerFailurePlan.retryTelemetryPlan) {
+    throw args.error;
+  }
+
+  const blockingRecoverableRouteHoldState =
+    retryExecutionPlan.blockingRecoverable
+      ? {
+        providerKey: args.providerKey,
+        runtimeKey: args.runtimeKey,
+        retryError,
+        holdOnLastAvailable429: retryExecutionPlan.holdOnLastAvailable429,
+        explicitSingletonPool: Array.isArray(args.routePoolForAttempt) && args.routePoolForAttempt.length === 1
+      }
+      : null;
+  const allowBlockingRecoverableRetryBeyondAttemptBudget =
+    retryExecutionPlan.blockingRecoverable && args.attempt >= args.maxAttempts;
+
+  emitRequestExecutorProviderRetryTelemetry({
+    requestId: args.requestId,
+    retryTelemetryPlan: providerFailurePlan.retryTelemetryPlan,
+    logStage: args.logStage,
+    logProviderRetrySwitch: args.logProviderRetrySwitch
+  });
+
+  return {
+    lastError: args.error,
+    antigravityRetrySignal: retryExecutionPlan.antigravityRetrySignal,
+    blockingRecoverableRouteHoldState,
+    allowBlockingRecoverableRetryBeyondAttemptBudget,
+    forcedRouteHint,
+    contextOverflowRetries,
+    cumulativeExternalLatencyMs
+  };
+}
