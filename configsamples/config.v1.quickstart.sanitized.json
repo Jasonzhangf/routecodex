@@ -9,10 +9,6 @@
   },
   "loadBalancing": {
     "aliasSelection": {
-      "antigravitySessionBindingEnabled": false,
-      "antigravitySingleActiveQueuesEnabled": true,
-      "antigravityShortCooldownNoSwitchMs": 180000,
-      "antigravitySessionBinding": "strict",
       "sessionLeaseCooldownMs": 300000
     }
   },
@@ -31,11 +27,6 @@
         ]
       },
       {
-        "id": "gemini-2.5-flash-lite",
-        "providerKey": "gemini-cli.gemini-2.5-flash-lite",
-        "description": "Google Search via Gemini 2.5 Flash Lite"
-      },
-      {
         "id": "glm-4.7",
         "providerKey": "tabglm.glm-4.7",
         "description": "GLM 4.7 web search backend"
@@ -48,10 +39,6 @@
         "providerKey": "iflow",
         "weight": 1
       },
-      "gemini-2.5-flash-lite": {
-        "providerKey": "gemini-cli.gemini-2.5-flash-lite",
-        "weight": 1
-      },
       "glm-4.7": {
         "providerKey": "tabglm.glm-4.7",
         "weight": 1
@@ -60,135 +47,6 @@
   },
   "virtualrouter": {
     "providers": {
-      "gemini-cli": {
-        "id": "gemini-cli",
-        "enabled": true,
-        "type": "gemini-cli-http-provider",
-        "providerType": "gemini",
-        "compatibilityProfile": "chat:gemini",
-        "baseURL": "https://daily-cloudcode-pa.sandbox.googleapis.com",
-        "auth": {
-          "type": "gemini-cli-oauth",
-          "entries": [
-            {
-              "alias": "alias1",
-              "type": "gemini-cli-oauth",
-              "tokenFile": "~/.routecodex/auth/gemini-oauth-1-alias1.json"
-            },
-            {
-              "alias": "alias2",
-              "type": "gemini-cli-oauth",
-              "tokenFile": "~/.routecodex/auth/gemini-oauth-2-alias2.json"
-            }
-          ]
-        },
-        "models": {
-          "gemini-2.5-pro": {
-            "maxTokens": 64000,
-            "maxContext": 1000000,
-            "supportsStreaming": true
-          },
-          "gemini-2.5-flash": {
-            "maxTokens": 64000,
-            "maxContext": 1000000,
-            "supportsStreaming": true
-          },
-          "gemini-2.5-flash-lite": {
-            "maxTokens": 64000,
-            "maxContext": 1000000,
-            "supportsStreaming": true
-          }
-        }
-      },
-      "antigravity": {
-        "id": "antigravity",
-        "enabled": true,
-        "type": "gemini-cli-http-provider",
-        "providerType": "gemini",
-        "compatibilityProfile": "chat:gemini-cli",
-        "baseURL": "https://daily-cloudcode-pa.sandbox.googleapis.com",
-        "auth": {
-          "type": "antigravity-oauth",
-          "entries": [
-            {
-              "alias": "alias1",
-              "type": "antigravity-oauth",
-              "tokenFile": "~/.routecodex/auth/antigravity-oauth-1-alias1.json"
-            },
-            {
-              "alias": "alias2",
-              "type": "antigravity-oauth",
-              "tokenFile": "~/.routecodex/auth/antigravity-oauth-2-alias2.json"
-            },
-            {
-              "alias": "alias3",
-              "type": "antigravity-oauth",
-              "tokenFile": "~/.routecodex/auth/antigravity-oauth-3-alias3.json"
-            },
-            {
-              "alias": "alias4",
-              "type": "antigravity-oauth",
-              "tokenFile": "~/.routecodex/auth/antigravity-oauth-4-alias4.json"
-            }
-          ]
-        },
-        "models": {
-          "gemini-2.5-pro": {
-            "maxTokens": 64000,
-            "maxContext": 1000000,
-            "supportsStreaming": true
-          },
-          "gemini-2.5-flash": {
-            "maxTokens": 64000,
-            "maxContext": 1000000,
-            "supportsStreaming": true
-          },
-          "gemini-2.5-flash-lite": {
-            "maxTokens": 64000,
-            "maxContext": 1000000,
-            "supportsStreaming": true
-          },
-          "gemini-3-pro-high": {
-            "maxTokens": 64000,
-            "maxContext": 1000000,
-            "supportsStreaming": true
-          },
-          "gemini-3-pro-low": {
-            "maxTokens": 64000,
-            "maxContext": 256000,
-            "supportsStreaming": true
-          },
-          "claude-sonnet-4-5": {
-            "maxTokens": 64000,
-            "maxContext": 138000,
-            "supportsStreaming": true,
-            "maxContextTokens": 148000
-          },
-          "claude-sonnet-4-5-thinking": {
-            "maxTokens": 64000,
-            "maxContext": 138000,
-            "supportsStreaming": true,
-            "maxContextTokens": 148000
-          },
-          "claude-opus-4-5": {
-            "maxTokens": 64000,
-            "maxContext": 138000,
-            "supportsStreaming": true,
-            "maxContextTokens": 148000
-          },
-          "claude-opus-4-5-thinking": {
-            "maxTokens": 64000,
-            "maxContext": 138000,
-            "supportsStreaming": true,
-            "maxContextTokens": 148000
-          }
-        },
-        "config": {
-          "responses": {
-            "streaming": "always"
-          }
-        }
-      },
       "modelscope": {
         "id": "modelscope",
         "enabled": true,
@@ -974,10 +832,8 @@
             "iflow.glm-5",
             "crs.gpt-5.3-codex",
             "tab.gpt-5.3-codex",
-            "antigravity.claude-sonnet-4-5-thinking",
-            "antigravity.claude-sonnet-4-5",
             "tabglm.glm-4.7",
-            "antigravity.gemini-3-pro-high",
+            "gemini.models/gemini-2.5-pro",
             "deepseek-web.deepseek-reasoner",
             "deepseek-web.deepseek-chat"
           ]
@@ -997,7 +853,7 @@
           "priority": 200,
           "mode": "round-robin",
           "targets": [
-            "antigravity.claude-sonnet-4-5-thinking",
+            "tabglm.glm-4.7",
             "iflow.glm-5",
             "crs.gpt-5.3-codex",
             "tab.gpt-5.3-codex"
@@ -1029,7 +885,7 @@
           "priority": 180,
           "mode": "priority",
           "targets": [
-            "antigravity.gemini-3-pro-high"
+            "gemini.models/gemini-2.5-pro"
           ]
         },
         {
@@ -1048,7 +904,7 @@
           "priority": 200,
           "mode": "round-robin",
           "targets": [
-            "antigravity.claude-sonnet-4-5-thinking",
+            "tabglm.glm-4.7",
             "crs.gpt-5.3-codex",
             "tab.gpt-5.3-codex",
             "iflow.kimi-k2.5"
@@ -1059,7 +915,7 @@
           "backup": true,
           "mode": "priority",
           "targets": [
-            "antigravity.gemini-3-pro-high",
+            "gemini.models/gemini-2.5-pro",
             "deepseek-web.deepseek-chat"
           ]
         }
@@ -1109,7 +965,6 @@
           "mode": "priority",
           "targets": [
             "iflow.glm-4.7",
-            "gemini-cli.gemini-2.5-flash-lite",
             "tabglm.glm-4.7"
           ]
         }

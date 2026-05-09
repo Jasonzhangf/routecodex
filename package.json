@@ -31,7 +31,7 @@
   "scripts": {
     "build": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && npm run build:webui && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs && npm run fix:cli-permission",
     "build:dev": "bash -lc 'export BUILD_MODE=dev ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_INSTALL_VERIFY_PORT=5555; npm run build && npm run fix:cli-permission && npm run install:global'",
-    "build:dev:full": "bash -lc 'export BUILD_MODE=dev ROUTECODEX_BUILD_RESTART_ONLY=1; npm run cleanup:stale-server-pids || true; trap \"npm run cleanup:stale-server-pids >/dev/null 2>&1 || true\" EXIT; npm run build && npm run fix:cli-permission && npm run test:unified-hub-shadow && npm run verify:e2e-toolcall && npm run verify:apply-patch && npm run verify:apply-patch-regressions && npm run verify:exec-command && npm run test:routing-instructions && npm run test:cli && npm run install:global && npm run mock:regressions && npm run verify:errorsamples && npm run verify:e2e-gemini-followup-sample'",
+    "build:dev:full": "bash -lc 'export BUILD_MODE=dev ROUTECODEX_BUILD_RESTART_ONLY=1; npm run cleanup:stale-server-pids || true; trap \"npm run cleanup:stale-server-pids >/dev/null 2>&1 || true\" EXIT; npm run build && npm run fix:cli-permission && npm run test:unified-hub-shadow && npm run verify:e2e-toolcall && npm run verify:apply-patch && npm run verify:apply-patch-regressions && npm run verify:exec-command && npm run test:routing-instructions && npm run test:cli && npm run install:global && npm run mock:regressions && npm run verify:errorsamples'",
     "build:min": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && npm run build:webui && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs && npm run fix:cli-permission",
     "build:webui": "vite build --config webui/vite.config.ts",
     "prepack": "echo skip-prepack",
@@ -81,7 +81,6 @@
     "verify:errorsamples": "node scripts/verify-codex-error-samples.mjs",
     "verify:finalize-empty-sanitize-errorsample": "node sharedmodule/llmswitch-core/scripts/tests/coverage-finalize-empty-sanitize-errorsample.mjs",
     "triage:errorsamples": "node scripts/triage-errorsamples.mjs",
-    "verify:e2e-gemini-followup-sample": "node scripts/verify-e2e-gemini-followup-sample.mjs",
     "install:global": "./scripts/install-global.sh",
     "install:release": "./scripts/install-release.sh",
     "pack:rcc": "node scripts/pack-rcc.mjs",
