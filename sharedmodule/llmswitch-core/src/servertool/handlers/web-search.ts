@@ -7,6 +7,24 @@ import {
   extractCapturedChatSeed
 } from './followup-request-builder.js';
 import { reenterServerToolBackend } from '../reenter-backend.js';
+import {
+  resolveWebSearchToolName,
+  parseToolArguments,
+  isGeminiWebSearchEngine,
+  isQwenWebSearchEngine,
+  isIflowRetrieveWebSearchEngine,
+  normalizeResultCount,
+  extractAssistantMessage,
+  buildToolMessages,
+  findWebSearchArray,
+  collectWebSearchHits,
+  limitHits,
+  formatHitsSummary,
+  getArray,
+  sanitizeBackendError,
+  buildWebSearchSystemPrompt,
+  type WebSearchItem
+} from './web-search-pure-blocks.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
 interface WebSearchEngineConfig {
   id: string;
@@ -25,14 +43,6 @@ interface WebSearchConfig {
   injectPolicy?: 'always' | 'selective';
   force?: boolean;
 }
-interface WebSearchItem {
-  title?: string;
-  link: string;
-  media?: string;
-  publish_date?: string;
-  content?: string;
-  refer?: string;
-}
 interface WebSearchBackendResult {
   summary: string;
   hits: WebSearchItem[];
@@ -41,16 +51,6 @@ interface WebSearchBackendResult {
 const FLOW_ID = 'web_search_flow';
 const LEGACY_TOOL_NAME = 'web_search';
 const SERVERTOOL_TOOL_NAME = 'websearch';
-function resolveWebSearchToolName(raw: unknown): string {
-  const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
-  if (normalized === 'websearch' || normalized === 'web-search') {
-    return SERVERTOOL_TOOL_NAME;
-  }
-  if (normalized === LEGACY_TOOL_NAME) {
-    return LEGACY_TOOL_NAME;
-  }
-  return SERVERTOOL_TOOL_NAME;
-}
 const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promise<ServerToolHandlerPlan | null> => {
   const toolCall = ctx.toolCall;
   if (!toolCall) {
@@ -143,16 +143,6 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
   };
 };
 registerServerToolHandler('web_search', handler);
-function parseToolArguments(toolCall: ToolCall): Record<string, unknown> {
-  if (!toolCall.arguments || typeof toolCall.arguments !== 'string') {
-    return {};
-  }
-  try {
-    return JSON.parse(toolCall.arguments) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
 function getWebSearchConfig(ctx: unknown): WebSearchConfig | undefined {
   const rt = readRuntimeMetadata(ctx as Record<string, unknown>);
   const raw = rt ? (rt as any).webSearch : undefined;
@@ -291,26 +281,6 @@ function resolveEnvServerSideToolsEnabled(): boolean {
   if (raw === 'web_search' || raw === 'websearch') return true;
   return false;
 }
-function isGeminiWebSearchEngine(engine: WebSearchEngineConfig): boolean {
-  const key = engine.providerKey.toLowerCase();
-  return key.startsWith('gemini.');
-}
-function isQwenWebSearchEngine(engine: WebSearchEngineConfig): boolean {
-  const key = engine.providerKey.toLowerCase();
-  return key.startsWith('qwen.');
-}
-function isIflowRetrieveWebSearchEngine(engine: WebSearchEngineConfig): boolean {
-  return Array.isArray(engine.searchEngineList) && engine.searchEngineList.length > 0;
-}
-function normalizeResultCount(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    const normalized = Math.trunc(value);
-    if (normalized >= 5 && normalized <= 15) {
-      return normalized;
-    }
-  }
-  return 10;
-}
 async function executeWebSearchBackend(args: {
   options: ServerSideToolEngineOptions;
   engine: WebSearchEngineConfig;
@@ -364,7 +334,7 @@ async function executeWebSearchBackend(args: {
       const body = followup.body && typeof followup.body === 'object' ? (followup.body as JsonObject) : null;
       if (body) {
         summary = extractTextFromChatLike(body);
-        hits = collectWebSearchHits(body);
+        hits = collectWebSearchHits(body, 10);
         if (!summary && process.env.ROUTECODEX_DEBUG_GLM_WEB_SEARCH === '1') {
           try {
             // eslint-disable-next-line no-console
@@ -799,53 +769,6 @@ function injectWebSearchToolResult(
   ];
   return cloned;
 }
-function extractAssistantMessage(chatResponse: JsonObject): JsonObject | null {
-  const choices = Array.isArray((chatResponse as { choices?: unknown }).choices)
-    ? ((chatResponse as { choices: JsonValue[] }).choices as JsonValue[])
-    : [];
-  if (!choices.length) return null;
-  const firstChoice = choices[0] && typeof choices[0] === 'object' && !Array.isArray(choices[0])
-    ? (choices[0] as JsonObject)
-    : null;
-  if (!firstChoice) return null;
-  return firstChoice.message && typeof firstChoice.message === 'object'
-    ? (firstChoice.message as JsonObject)
-    : null;
-}
-function buildToolMessages(chatResponse: JsonObject): JsonObject[] {
-  const toolOutputs = Array.isArray((chatResponse as { tool_outputs?: unknown }).tool_outputs)
-    ? ((chatResponse as { tool_outputs: JsonValue[] }).tool_outputs as JsonValue[])
-    : [];
-  const messages: JsonObject[] = [];
-  for (const entry of toolOutputs) {
-    if (!entry || typeof entry !== 'object') continue;
-    const toolCallId = typeof (entry as { tool_call_id?: unknown }).tool_call_id === 'string'
-      ? ((entry as { tool_call_id: string }).tool_call_id as string)
-      : undefined;
-    if (!toolCallId) continue;
-    const name = typeof (entry as { name?: unknown }).name === 'string'
-      ? ((entry as { name: string }).name as string)
-      : SERVERTOOL_TOOL_NAME;
-    const rawContent = (entry as { content?: unknown }).content;
-    let contentText: string;
-    if (typeof rawContent === 'string') {
-      contentText = rawContent;
-    } else {
-      try {
-        contentText = JSON.stringify(rawContent ?? {});
-      } catch {
-        contentText = String(rawContent ?? '');
-      }
-    }
-    messages.push({
-      role: 'tool',
-      tool_call_id: toolCallId,
-      name,
-      content: contentText
-    } as JsonObject);
-  }
-  return messages;
-}
 function logServerToolWebSearch(engine: WebSearchEngineConfig, requestId: string, query: string): void {
   const providerAlias = engine.providerKey.split('.')[0] || engine.providerKey;
   const backendLabel = `${providerAlias}:${engine.id}`;
@@ -858,99 +781,4 @@ function logServerToolWebSearch(engine: WebSearchEngineConfig, requestId: string
   const vrLine = `${vrPrefix} requestId=${requestId} backend=${vrBackend}`;
   // eslint-disable-next-line no-console
   console.log(`\x1b[31m${vrLine}\x1b[0m`);
-}
-function findWebSearchArray(payload: JsonObject): JsonValue[] | undefined {
-  let current: JsonObject | undefined = payload;
-  const visited = new Set<JsonObject>();
-  while (current && !visited.has(current)) {
-    visited.add(current);
-    const hits = getArray((current as { web_search?: unknown }).web_search);
-    if (hits.length) {
-      return hits;
-    }
-    const nextData = (current as { data?: unknown }).data;
-    if (nextData && typeof nextData === 'object' && !Array.isArray(nextData)) {
-      current = nextData as JsonObject;
-      continue;
-    }
-    const nextResponse = (current as { response?: unknown }).response;
-    if (nextResponse && typeof nextResponse === 'object' && !Array.isArray(nextResponse)) {
-      current = nextResponse as JsonObject;
-      continue;
-    }
-    break;
-  }
-  return undefined;
-}
-function collectWebSearchHits(payload: JsonObject): WebSearchItem[] {
-  const array = findWebSearchArray(payload);
-  if (!array) {
-    return [];
-  }
-  const hits: WebSearchItem[] = [];
-  for (const entry of array) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-    const record = entry as Record<string, JsonValue>;
-    const link = typeof record.link === 'string' && record.link.trim() ? record.link.trim() : '';
-    if (!link) continue;
-    hits.push({
-      title: typeof record.title === 'string' ? record.title : undefined,
-      link,
-      media: typeof record.media === 'string' ? record.media : undefined,
-      publish_date: typeof record.publish_date === 'string' ? record.publish_date : undefined,
-      content: typeof record.content === 'string' ? record.content : undefined,
-      refer: typeof record.refer === 'string' ? record.refer : undefined
-    });
-  }
-  return hits;
-}
-function limitHits(hits: WebSearchItem[]): WebSearchItem[] {
-  if (!hits.length) return [];
-  const filtered = hits.slice(0, 15);
-  if (filtered.length >= 5) {
-    return filtered;
-  }
-  return filtered;
-}
-function formatHitsSummary(hits: WebSearchItem[]): string {
-  if (!hits.length) {
-    return '';
-  }
-  const segments: string[] = [];
-  hits.forEach((hit, index) => {
-    const idx = hit.refer && hit.refer.trim() ? hit.refer.trim() : String(index + 1);
-    const headerParts: string[] = [];
-    if (hit.title) headerParts.push(hit.title);
-    if (hit.media) headerParts.push(hit.media);
-    if (hit.publish_date) headerParts.push(hit.publish_date);
-    const header = headerParts.length ? headerParts.join(' · ') : '搜索结果';
-    const details = [hit.content, hit.link].filter(Boolean).join('\n');
-    segments.push(`【${idx}】${header}\n${details}`);
-  });
-  return segments.join('\n\n');
-}
-function getArray(value: unknown): JsonValue[] {
-  return Array.isArray(value) ? (value as JsonValue[]) : [];
-}
-function sanitizeBackendError(message: string): string {
-  const lowered = message.toLowerCase();
-  if (lowered.includes('contentfilter')) {
-    return '搜索请求被后端暂时拒绝';
-  }
-  if (lowered.includes('instructions are not valid')) {
-    return '搜索指令格式未被后端接受';
-  }
-  return message;
-}
-function buildWebSearchSystemPrompt(targetCount: number): string {
-  const normalizedTarget = Math.max(5, Math.min(15, targetCount));
-  const instructions = [
-    'You are an up-to-date web search engine that aggregates public internet results.',
-    `Return between 5 and 15 high-quality search results (aim for about ${normalizedTarget} when available).`,
-    'Each result must include: title, source/media, publish date if available, a concise summary (<=200 characters), and a direct URL that users can click for verification.',
-    'Prefer de-duplicated sources and include diverse outlets. If fewer than 5 results exist, return what you can find and explain the limitation.',
-    'Only mention that the query was blocked when the backend explicitly rejects it, and encourage the user to adjust their keywords before retrying.',
-    'Structure the answer so downstream systems can extract each result cleanly.'
-  ];
-  return instructions.join('\n');
 }
