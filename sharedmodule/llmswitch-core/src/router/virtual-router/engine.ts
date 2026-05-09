@@ -25,7 +25,7 @@ import {
   VIRTUAL_ROUTER_ERROR_PREFIX
 } from './engine-selection/native-router-hotpath-loader.js';
 import { ProviderRegistry } from './provider-registry.js';
-import { loadRoutingInstructionStateSync } from './sticky-session-store.js';
+import { loadRoutingInstructionStateSync, saveRoutingInstructionStateSync } from './sticky-session-store.js';
 import { mergeStopMessageFromPersisted } from './stop-message-state-sync.js';
 import { resolveStopMessageScope } from './engine/routing-state/store.js';
 import type { RoutingInstructionState } from './routing-instructions.js';
@@ -147,13 +147,22 @@ export class VirtualRouterEngine {
   }
 
   getStopMessageState(metadata: RouterMetadataInput): StopMessageStateSnapshot | null {
+    const scope = resolveStopMessageScope(metadata);
+    if (!isTmuxScopedStopMessageState(scope)) {
+      pruneLegacySessionScopedStopAndPreCommandState(metadata);
+      return null;
+    }
     const raw = this.nativeProxy.getStopMessageState(JSON.stringify(metadata));
     const snapshot = JSON.parse(raw) as StopMessageStateSnapshot | null;
-    const scope = resolveStopMessageScope(metadata);
     return mergeStopMessageSnapshotWithPersisted(snapshot, scope);
   }
 
   getPreCommandState(metadata: RouterMetadataInput): PreCommandStateSnapshot | null {
+    const scope = resolveStopMessageScope(metadata);
+    if (!isTmuxScopedStopMessageState(scope)) {
+      pruneLegacySessionScopedStopAndPreCommandState(metadata);
+      return null;
+    }
     const raw = this.nativeProxy.getPreCommandState(JSON.stringify(metadata));
     return JSON.parse(raw) as PreCommandStateSnapshot | null;
   }
@@ -287,6 +296,62 @@ function injectRuntimeNowMs(metadata: RouterMetadataInput): RouterMetadataInput 
     } as RouterMetadataInput;
   }
   return { ...metadata, __rt: runtimeOverrides } as RouterMetadataInput;
+}
+
+function shouldPruneLegacySessionScopedState(metadata: RouterMetadataInput): boolean {
+  return !resolveStopMessageScope(metadata) && typeof metadata.sessionId === 'string' && metadata.sessionId.trim().length > 0;
+}
+
+function isTmuxScopedStopMessageState(scope: string | undefined): boolean {
+  return typeof scope === 'string' && scope.startsWith('tmux:');
+}
+
+function pruneLegacySessionScopedStopAndPreCommandState(metadata: RouterMetadataInput): void {
+  const sessionId = typeof metadata.sessionId === 'string' ? metadata.sessionId.trim() : '';
+  if (!sessionId) {
+    return;
+  }
+  const legacyKey = `session:${sessionId}`;
+  let state: RoutingInstructionState | null = null;
+  try {
+    state = loadRoutingInstructionStateSync(legacyKey) as RoutingInstructionState | null;
+  } catch {
+    return;
+  }
+  if (!state) {
+    return;
+  }
+  state.stopMessageSource = undefined;
+  state.stopMessageText = undefined;
+  state.stopMessageMaxRepeats = undefined;
+  state.stopMessageUsed = undefined;
+  state.stopMessageUpdatedAt = undefined;
+  state.stopMessageLastUsedAt = undefined;
+  state.stopMessageStageMode = undefined;
+  state.stopMessageAiMode = undefined;
+  state.stopMessageAiSeedPrompt = undefined;
+  state.stopMessageAiHistory = undefined;
+  state.preCommandSource = undefined;
+  state.preCommandScriptPath = undefined;
+  state.preCommandUpdatedAt = undefined;
+
+  const hasOtherRoutingState =
+    Boolean(state.forcedTarget) ||
+    Boolean(state.stickyTarget) ||
+    Boolean(state.preferTarget) ||
+    state.allowedProviders.size > 0 ||
+    state.disabledProviders.size > 0 ||
+    state.disabledKeys.size > 0 ||
+    state.disabledModels.size > 0 ||
+    Boolean(state.reasoningStopMode && state.reasoningStopMode.trim()) ||
+    state.reasoningStopArmed === true ||
+    Boolean(state.reasoningStopSummary && state.reasoningStopSummary.trim()) ||
+    (typeof state.reasoningStopUpdatedAt === 'number' && Number.isFinite(state.reasoningStopUpdatedAt)) ||
+    (typeof state.reasoningStopFailCount === 'number' && Number.isFinite(state.reasoningStopFailCount)) ||
+    (typeof state.reasoningStopGuardTriggerCount === 'number' && Number.isFinite(state.reasoningStopGuardTriggerCount)) ||
+    (typeof state.reasoningStopGuardTriggerAt === 'number' && Number.isFinite(state.reasoningStopGuardTriggerAt));
+
+  saveRoutingInstructionStateSync(legacyKey, hasOtherRoutingState ? state : null);
 }
 
 

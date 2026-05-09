@@ -9,22 +9,7 @@ function normalizeErrorCode(value: unknown): string | null {
 }
 
 export function canonicalizeProviderKey(providerKey: string): string {
-  const key = typeof providerKey === 'string' ? providerKey.trim() : '';
-  if (!key) {
-    return '';
-  }
-  const parts = key.split('.');
-  if (parts.length < 3 || parts[0].toLowerCase() !== 'antigravity') {
-    return key;
-  }
-
-  const alias = parts[1] ?? '';
-  const legacyMatch = /^(?:\d+)-(.+)$/.exec(alias);
-  if (!legacyMatch?.[1]) {
-    return key;
-  }
-
-  return ['antigravity', legacyMatch[1], ...parts.slice(2)].join('.');
+  return typeof providerKey === 'string' ? providerKey.trim() : '';
 }
 
 export function mergeQuotaStates(providerKey: string, states: QuotaState[]): QuotaState {

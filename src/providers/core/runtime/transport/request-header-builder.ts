@@ -18,7 +18,6 @@ export interface RequestHeaderBuildContext {
   familyProfile?: ProviderFamilyProfile;
   defaultUserAgent: string;
   isGeminiFamily: boolean;
-  isAntigravity: boolean;
   codexUaMode: boolean;
 }
 
@@ -252,7 +251,7 @@ export class RequestHeaderBuilder {
       }
     }
 
-    if (!context.isAntigravity && !isOpenCodeZen && context.normalizedClientHeaders) {
+    if (!isOpenCodeZen && context.normalizedClientHeaders) {
       const conversationId = HeaderUtils.findHeaderValue(context.normalizedClientHeaders, 'conversation_id');
       if (conversationId) {
         HeaderUtils.assignHeader(finalHeaders, 'conversation_id', conversationId);
@@ -263,7 +262,7 @@ export class RequestHeaderBuilder {
       }
     }
 
-    if (!context.isAntigravity && !isOpenCodeZen && context.inboundMetadata && typeof context.inboundMetadata === 'object') {
+    if (!isOpenCodeZen && context.inboundMetadata && typeof context.inboundMetadata === 'object') {
       const meta = context.inboundMetadata as Record<string, unknown>;
       const metaSessionId =
         typeof meta.sessionId === 'string' && meta.sessionId.trim() ? meta.sessionId.trim() : '';
@@ -279,11 +278,11 @@ export class RequestHeaderBuilder {
       }
     }
 
-    if (!context.isAntigravity && !isOpenCodeZen && context.codexUaMode) {
+    if (!isOpenCodeZen && context.codexUaMode) {
       SessionHeaderUtils.ensureCodexSessionHeaders(finalHeaders, context.runtimeMetadata);
     }
 
-    if (context.isAntigravity || isOpenCodeZen) {
+    if (isOpenCodeZen) {
       HeaderUtils.deleteHeader(finalHeaders, 'session_id');
       HeaderUtils.deleteHeader(finalHeaders, 'conversation_id');
       HeaderUtils.deleteHeader(finalHeaders, 'originator');

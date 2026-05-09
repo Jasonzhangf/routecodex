@@ -628,6 +628,9 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
     )
   };
   for (const key of RESPONSES_REQUEST_PARAMETER_KEYS) {
+    if (key === 'temperature' || key === 'top_p') {
+      continue;
+    }
     if (out[key] !== undefined || retainedParameters[key] === undefined) {
       continue;
     }

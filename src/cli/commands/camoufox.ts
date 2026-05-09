@@ -69,15 +69,13 @@ function resolveTokenHintFromFilename(fileName: string): { provider: string; ali
   if (seq) {
     const providerPrefix = String(seq[1] || '').trim().toLowerCase();
     const alias = String(seq[3] || 'default').trim() || 'default';
-    const provider = providerPrefix === 'gemini' ? 'gemini-cli' : providerPrefix;
-    return { provider, alias };
+    return { provider: providerPrefix, alias };
   }
   // Fallback: <provider>-oauth.json (alias defaults to "default")
   const plain = name.match(/^(.+)-oauth\.json$/i);
   if (plain) {
     const providerPrefix = String(plain[1] || '').trim().toLowerCase();
-    const provider = providerPrefix === 'gemini' ? 'gemini-cli' : providerPrefix;
-    return { provider, alias: 'default' };
+    return { provider: providerPrefix, alias: 'default' };
   }
   return null;
 }
@@ -139,7 +137,7 @@ export function createCamoufoxCommand(
     .description('Launch Camoufox using the fingerprint+profile derived from an OAuth token file (养号/verify)')
     .argument(
       '<authfile>',
-      'Token selector: file basename or full path (e.g. "antigravity-oauth-3-alias.json" or "~/.rcc/auth/antigravity-oauth-3-alias.json")'
+      'Token selector: file basename or full path (e.g. "gemini-oauth-3-alias.json" or "~/.rcc/auth/gemini-oauth-3-alias.json")'
     )
     .option('--url <url>', 'Initial URL to open', 'https://accounts.google.com/')
     .action(async (authfile: string, options: { url?: string }) => {
@@ -153,7 +151,7 @@ export function createCamoufoxCommand(
       });
       if (!token) {
         deps.error(`✗ Token file not found or unrecognized: ${authfile}`);
-        deps.error('  Expected name: <provider>-oauth-<seq>-<alias>.json (e.g. antigravity-oauth-3-antonsoltan.json)');
+        deps.error('  Expected name: <provider>-oauth-<seq>-<alias>.json (e.g. gemini-oauth-3-demo.json)');
         deps.exit(1);
       }
 

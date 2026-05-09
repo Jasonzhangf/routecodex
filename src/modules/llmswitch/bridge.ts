@@ -41,18 +41,6 @@ export {
   type SnapshotRecorder
 } from './bridge/snapshot-recorder.js';
 export { convertProviderResponse } from './bridge/response-converter.js';
-export {
-  warmupAntigravitySessionSignatureModule,
-  extractAntigravityGeminiSessionId,
-  cacheAntigravitySessionSignature,
-  getAntigravityLatestSignatureSessionIdForAlias,
-  lookupAntigravitySessionSignatureEntry,
-  invalidateAntigravitySessionSignature,
-  clearAntigravitySessionAliasPins,
-  resetAntigravitySessionSignatureCachesForTests,
-  configureAntigravitySessionSignaturePersistence,
-  flushAntigravitySessionSignaturePersistenceSync
-} from './bridge/antigravity-signature.js';
 
 // Newly factored bridge modules.
 export { createCoreQuotaManager } from './bridge/quota-manager.js';

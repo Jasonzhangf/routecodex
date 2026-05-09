@@ -18,27 +18,6 @@ export function resolveFinishReason(response: Record<string, unknown>, toolCalls
   return resolveFinishReasonWithNative(response, toolCalls);
 }
 
-function stripInternalContinuationRequestId(chat: Record<string, unknown>): void {
-  const semantics =
-    chat?.semantics && typeof chat.semantics === 'object' && !Array.isArray(chat.semantics)
-      ? (chat.semantics as Record<string, unknown>)
-      : undefined;
-  const continuation =
-    semantics?.continuation && typeof semantics.continuation === 'object' && !Array.isArray(semantics.continuation)
-      ? (semantics.continuation as Record<string, unknown>)
-      : undefined;
-  const resumeFrom =
-    continuation?.resumeFrom && typeof continuation.resumeFrom === 'object' && !Array.isArray(continuation.resumeFrom)
-      ? (continuation.resumeFrom as Record<string, unknown>)
-      : undefined;
-  if (!resumeFrom) {
-    return;
-  }
-  if (typeof resumeFrom.requestId === 'string') {
-    delete resumeFrom.requestId;
-  }
-}
-
 function unwrapResponsesResponse(payload: Record<string, unknown>): Record<string, unknown> | undefined {
   if (!payload || typeof payload !== 'object') return undefined;
   if (typeof (payload as any).object === 'string' && (payload as any).object === 'response') {
@@ -118,8 +97,6 @@ export function buildChatResponseFromResponses(payload: unknown): Record<string,
   if (!chat || typeof chat !== 'object' || Array.isArray(chat)) {
     return payload;
   }
-  stripInternalContinuationRequestId(chat);
-
   const choices = Array.isArray((chat as any).choices) ? (chat as any).choices : [];
   const primary = choices[0] && typeof choices[0] === 'object' ? choices[0] : undefined;
   const message = primary && typeof (primary as any).message === 'object'

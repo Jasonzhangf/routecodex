@@ -5,7 +5,6 @@
  */
 
 export {
-  isGeminiCliFamily,
   resolveTokenFilePath
 } from './token-file-resolver.js';
 

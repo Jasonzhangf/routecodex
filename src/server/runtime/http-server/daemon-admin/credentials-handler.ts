@@ -137,8 +137,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
         return;
       }
 
-      const authType: OAuthAuthType =
-        provider === 'gemini-cli' ? 'gemini-cli-oauth' : (`${provider}-oauth` as OAuthAuthType);
+      const authType: OAuthAuthType = `${provider}-oauth` as OAuthAuthType;
       const auth: OAuthAuth = {
         type: authType,
         tokenFile: alias
@@ -234,8 +233,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
       return;
     }
     try {
-      const type: OAuthAuthType =
-        provider === 'gemini-cli' ? 'gemini-cli-oauth' : (`${provider}-oauth` as OAuthAuthType);
+      const type: OAuthAuthType = `${provider}-oauth` as OAuthAuthType;
       const auth: OAuthAuth = { type, tokenFile: alias };
       // Best effort: allow UI-configured browser selection without requiring restart.
       const browserHint = String(process.env.ROUTECODEX_OAUTH_BROWSER || '').trim();

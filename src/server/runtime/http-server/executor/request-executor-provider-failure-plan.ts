@@ -54,10 +54,6 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
   promptTooLong?: boolean;
   contextOverflowRetries?: number;
   maxContextOverflowRetries?: number;
-  isVerify?: boolean;
-  isReauth?: boolean;
-  allowAntigravityRecovery?: boolean;
-  antigravityRetrySignal?: ProviderRetryExecutionPlan['antigravityRetrySignal'];
   status?: number;
   forceExcludeCurrentProviderOnRetry?: boolean;
   abortSignal?: AbortSignal;
@@ -95,10 +91,6 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     promptTooLong: args.promptTooLong,
     contextOverflowRetries: args.contextOverflowRetries,
     maxContextOverflowRetries: args.maxContextOverflowRetries,
-    isVerify: args.isVerify,
-    isReauth: args.isReauth,
-    allowAntigravityRecovery: args.allowAntigravityRecovery,
-    antigravityRetrySignal: args.antigravityRetrySignal,
     status: args.status,
     forceExcludeCurrentProviderOnRetry,
     abortSignal: args.abortSignal,

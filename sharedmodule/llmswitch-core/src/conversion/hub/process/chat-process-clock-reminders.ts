@@ -6,10 +6,7 @@ import {
 } from '../../../servertool/clock/task-store.js';
 import { clearClockTasks } from '../../../servertool/clock/tasks.js';
 import { logClock } from '../../../servertool/clock/log.js';
-import {
-  resolveClockSessionScope,
-  resolveClockSessionScopeAliases
-} from '../../../servertool/clock/session-scope.js';
+import { resolveClockSessionScope } from '../../../servertool/clock/session-scope.js';
 import { applyHubOperations, type HubOperation } from '../ops/operations.js';
 import type { StandardizedMessage, StandardizedRequest } from '../types/standardized.js';
 import { buildClockStandardToolsOperations } from './chat-process-clock-tools.js';
@@ -38,21 +35,6 @@ function resolveSessionIdForClock(metadata: Record<string, unknown>, request: St
       ? (request.metadata as Record<string, unknown>)
       : null;
   return resolveClockSessionScope(metadata, requestMetadata);
-}
-
-function resolveSessionScopesForClock(metadata: Record<string, unknown>, request: StandardizedRequest): string[] {
-  const requestMetadata =
-    request.metadata && typeof request.metadata === 'object' && !Array.isArray(request.metadata)
-      ? (request.metadata as Record<string, unknown>)
-      : null;
-  return resolveClockSessionScopeAliases(metadata, requestMetadata);
-}
-
-async function clearClockScopes(sessionScopes: string[], clockConfig: NonNullable<ReturnType<typeof resolveClockConfig>>): Promise<void> {
-  if (sessionScopes.length < 1) {
-    return;
-  }
-  await Promise.allSettled(sessionScopes.map((scope) => clearClockTasks(scope, clockConfig)));
 }
 
 export async function maybeInjectClockRemindersAndApplyDirectives(
@@ -88,16 +70,15 @@ export async function maybeInjectClockRemindersAndApplyDirectives(
   }
 
   const sessionId = resolveSessionIdForClock(metadata, requestAfterHeartbeat);
-  const sessionScopes = resolveSessionScopesForClock(metadata, requestAfterHeartbeat);
   const messages = Array.isArray(requestAfterHeartbeat.messages) ? requestAfterHeartbeat.messages : [];
   const lastUserIndex = findLastUserMessageIndex(messages);
   const manualClear = lastUserIndex >= 0 && messages[lastUserIndex]
     ? stripClockClearDirectiveFromContent(messages[lastUserIndex].content)
     : { hadClear: false, next: undefined };
-  if (manualClear.hadClear && sessionScopes.length) {
+  if (manualClear.hadClear && sessionId) {
     try {
-      await clearClockScopes(sessionScopes, clockConfig);
-      logClock('cleared', { sessionId, sessionScopes, source: 'manual_marker' });
+      await clearClockTasks(sessionId, clockConfig);
+      logClock('cleared', { sessionId, source: 'manual_marker' });
     } catch {
       // best-effort: user directive should not crash request
     }
@@ -119,10 +100,10 @@ export async function maybeInjectClockRemindersAndApplyDirectives(
       : extracted.baseMessages;
 
   if (hadClear) {
-    if (extracted.hadClear && !manualClear.hadClear && sessionScopes.length) {
+    if (extracted.hadClear && !manualClear.hadClear && sessionId) {
       try {
-        await clearClockScopes(sessionScopes, clockConfig);
-        logClock('cleared', { sessionId, sessionScopes, source: 'native_extract' });
+        await clearClockTasks(sessionId, clockConfig);
+        logClock('cleared', { sessionId, source: 'native_extract' });
       } catch {
         // best-effort: user directive should not crash request
       }

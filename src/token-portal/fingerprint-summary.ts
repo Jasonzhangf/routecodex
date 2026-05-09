@@ -1,9 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { resolveRccCamoufoxFingerprintDir } from '../config/user-data-paths.js';
-
 import { getCamoufoxProfileDir } from '../providers/core/config/camoufox-launcher.js';
-import { inferAntigravityUaSuffixFromFingerprint } from '../providers/auth/antigravity-fingerprint.js';
 
 export type TokenPortalFingerprintSummary = {
   profileId: string;
@@ -20,6 +18,40 @@ function getFingerprintRoot(): string {
 
 function getFingerprintPath(profileId: string): string {
   return path.join(getFingerprintRoot(), `${profileId}.json`);
+}
+
+function inferUaSuffixFromFingerprint(input: {
+  navigatorPlatform?: string;
+  navigatorOscpu?: string;
+  navigatorUserAgent?: string;
+}): string | undefined {
+  const platform = String(input.navigatorPlatform || '').trim().toLowerCase();
+  const oscpu = String(input.navigatorOscpu || '').trim().toLowerCase();
+  const ua = String(input.navigatorUserAgent || '').trim().toLowerCase();
+  const haystack = `${platform} ${oscpu} ${ua}`;
+
+  let os = '';
+  if (haystack.includes('win')) {
+    os = 'windows';
+  } else if (haystack.includes('mac') || haystack.includes('darwin')) {
+    os = 'macos';
+  } else if (haystack.includes('linux')) {
+    os = 'linux';
+  }
+
+  let arch = '';
+  if (haystack.includes('aarch64') || haystack.includes('arm64')) {
+    arch = 'arm64';
+  } else if (haystack.includes('x86_64') || haystack.includes('win64') || haystack.includes('x64') || haystack.includes('amd64')) {
+    arch = 'x64';
+  } else if (haystack.includes('x86') || haystack.includes('i686') || haystack.includes('i386')) {
+    arch = 'x86';
+  }
+
+  if (!os && !arch) {
+    return undefined;
+  }
+  return [os || 'unknown', arch || 'unknown'].join('/');
 }
 
 export async function loadTokenPortalFingerprintSummary(provider: string, alias: string): Promise<TokenPortalFingerprintSummary | null> {
@@ -81,7 +113,7 @@ export async function loadTokenPortalFingerprintSummary(provider: string, alias:
     ? String(camouConfig['navigator.userAgent'])
     : undefined;
 
-  const suffix = inferAntigravityUaSuffixFromFingerprint({
+  const suffix = inferUaSuffixFromFingerprint({
     navigatorPlatform,
     navigatorOscpu,
     navigatorUserAgent

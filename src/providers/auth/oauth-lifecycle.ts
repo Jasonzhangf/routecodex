@@ -11,16 +11,9 @@ import os from 'os';
 import { spawnSync } from 'node:child_process';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { fetchQwenUserInfo, mergeQwenTokenData, validateQwenAccessToken } from './qwen-userinfo-helper.js';
-import {
-  fetchGeminiCLIUserInfo,
-  fetchGeminiCLIProjects,
-  mergeGeminiCLITokenData,
-  getDefaultProjectId
-} from './gemini-cli-userinfo-helper.js';
 import { parseTokenSequenceFromPath } from './token-scanner/index.js';
 import { logOAuthDebug } from './oauth-logger.js';
 import { formatOAuthErrorMessage } from './oauth-error-message.js';
-import { fetchAntigravityProjectId } from './antigravity-userinfo-helper.js';
 import { HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { withOAuthRepairEnv } from './oauth-repair-env.js';
 import {
@@ -31,7 +24,6 @@ import {
 } from './oauth-repair-cooldown.js';
 import { openAuthInCamoufox } from '../core/config/camoufox-launcher.js';
 import {
-  isGeminiCliFamily,
   type ExtendedOAuthAuth,
   resolveTokenFilePath,
   resolveCamoufoxAliasForAuth
@@ -64,7 +56,6 @@ import {
   evaluateTokenState
 } from './oauth-lifecycle/token-helpers.js';
 import {
-  normalizeGeminiCliAccountToken,
   sanitizeToken,
   readTokenFromFile,
   backupTokenFile,
@@ -88,7 +79,6 @@ import {
 import {
   buildEndpointOverrides,
   buildClientOverrides,
-  ensureGeminiCLIServicesEnabled,
   buildHeaderOverrides,
   resolveTokenPortalBaseUrl,
   buildTokenPortalConfig,
@@ -96,7 +86,6 @@ import {
 } from './oauth-lifecycle/token-overrides-builder.js';
 import { resolveTokenAliasFromPath } from './oauth-lifecycle/path-resolver.js';
 import {
-  wrapGeminiCliTokenForStorage,
   prepareTokenForStorage,
   logTokenSnapshot,
 } from './oauth-lifecycle/token-preparation.js';
@@ -274,9 +263,6 @@ function inferProviderTypeFromTokenFilePath(
   }
   if (base.startsWith('gemini-')) {
     return 'gemini';
-  }
-  if (base.startsWith('antigravity-')) {
-    return 'antigravity';
   }
   return '';
 }
@@ -552,98 +538,9 @@ async function maybeEnrichToken(
       return tokenData;
     }
   }
-  if (providerType === 'antigravity') {
-    const accessToken = extractAccessToken(sanitizeToken(tokenData) ?? null);
-    if (!accessToken) {
-      logOAuthDebug('[OAuth] Antigravity: no access_token found in auth result, skipping metadata fetch');
-      return tokenData;
-    }
-    try {
-      const userInfo = await fetchGeminiCLIUserInfo(accessToken);
-      const projectId = await fetchAntigravityProjectId(accessToken, undefined, { tokenFilePath });
-      const projects = projectId ? [{ projectId }] : [];
-      const merged = mergeGeminiCLITokenData(tokenData, userInfo, projects) as unknown as UnknownObject;
-      if (projectId) {
-        merged.project_id = projectId;
-      }
-      return merged;
-    } catch (error) {
-      const msg = formatOAuthErrorMessage(error);
-      console.error(`[OAuth] Antigravity: failed to fetch metadata - ${msg}`);
-      const normalized = msg.toLowerCase();
-      const isAuthError =
-        normalized.includes('401') ||
-        normalized.includes('unauthorized') ||
-        normalized.includes('invalid_grant') ||
-        normalized.includes('invalid_token') ||
-        normalized.includes('permission denied');
-      if (isAuthError) {
-        throw error instanceof Error ? error : new Error(msg);
-      }
-    }
-  } else if (isGeminiCliFamily(providerType)) {
-    const label = 'Gemini CLI';
-    const accessToken = extractAccessToken(sanitizeToken(tokenData) ?? null);
-    if (!accessToken) {
-      logOAuthDebug(`[OAuth] ${label}: no access_token found in auth result, skipping UserInfo fetch`);
-      return tokenData;
-    }
-
-    try {
-      const userInfo = await fetchGeminiCLIUserInfo(accessToken);
-
-      // 项目信息是可选增强：失败时不应阻塞整个 provider 初始化。
-      let projects: ReturnType<typeof fetchGeminiCLIProjects> extends Promise<infer P>
-        ? P
-        : unknown[] = [] as unknown as ReturnType<typeof fetchGeminiCLIProjects> extends Promise<infer P>
-        ? P
-        : unknown[];
-      try {
-        projects = await fetchGeminiCLIProjects(accessToken);
-      } catch (projectsError) {
-        const msg = formatOAuthErrorMessage(projectsError);
-        console.error(`[OAuth] ${label}: failed to fetch Projects - ${msg}`);
-        projects = [];
-      }
-
-      logOAuthDebug(`[OAuth] ${label}: fetched UserInfo for ${userInfo.email} and ${projects.length} projects`);
-
-      const merged = mergeGeminiCLITokenData(tokenData, userInfo, projects) as unknown as UnknownObject;
-      const projectId = getDefaultProjectId(merged);
-
-      if (projectId) {
-        try {
-          await ensureGeminiCLIServicesEnabled(accessToken, projectId);
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          logOAuthDebug(`[OAuth] ${label}: service enablement failed for project ${projectId} - ${msg}`);
-          // 服务启用失败不再视为致命错误，后续真实调用时再由 Virtual Router provider-runtime-ingress 处理。
-        }
-      }
-      return merged;
-    } catch (error) {
-      const msg = formatOAuthErrorMessage(error);
-      console.error(`[OAuth] ${label}: failed to fetch UserInfo - ${msg}`);
-
-      // 将明确的 401/invalid token 视为凭证失效，由调用方决定是否触发重新授权。
-      const normalized = msg.toLowerCase();
-      const isAuthError =
-        normalized.includes('401') ||
-        normalized.includes('unauthorized') ||
-        normalized.includes('invalid_grant') ||
-        normalized.includes('invalid_token') ||
-        normalized.includes('permission denied');
-
-      if (isAuthError) {
-        throw error instanceof Error ? error : new Error(msg);
-      }
-
-      // 其余错误仅记录日志，不再阻止 provider 初始化，回退到未 enrich 的 token。
-      return tokenData;
-    }
-  }
   return tokenData;
 }
+
 
 function logOAuthSetup(
   providerType: string,
@@ -692,9 +589,7 @@ function resolveOAuthProfileId(providerType: string, tokenFilePath: string): str
   const alias = String(parsed?.alias || 'default').trim().toLowerCase();
   const normalizedAlias = alias.replace(/[^a-z0-9._-]+/gi, '-');
   const normalizedProvider = String(providerType || '').trim().toLowerCase();
-  const providerFamily = normalizedProvider === 'gemini-cli' || normalizedProvider === 'antigravity'
-    ? 'gemini'
-    : normalizedProvider;
+  const providerFamily = normalizedProvider;
   const base = providerFamily ? `${providerFamily}.${normalizedAlias || 'default'}` : (normalizedAlias || 'default');
   const profile = `rc-${base}`;
   return profile.length > 64 ? profile.slice(0, 64) : profile;
@@ -873,38 +768,6 @@ export async function ensureValidOAuthToken(
         console.error(`[OAuth] Qwen: failed to enrich existing token with api_key - ${msg}`);
       }
     }
-
-    // Gemini CLI family: if existing token lacks project metadata, try to enrich it without
-    // forcing a full OAuth flow. Use current access_token to fetch userinfo/projects and write back.
-    if (isGeminiCliFamily(providerType) && token) {
-      try {
-        const hasProjectMetadata = providerType === 'antigravity'
-          ? hasNonEmptyString(resolveProjectId(token as UnknownObject))
-          : Boolean(getDefaultProjectId(token as UnknownObject));
-        if (!hasProjectMetadata) {
-          const enriched = await maybeEnrichToken(providerType, token as UnknownObject);
-          if (enriched && typeof strategy.saveToken === 'function') {
-            const prepared = await prepareTokenForStorage(providerType, tokenFilePath, enriched);
-            await strategy.saveToken(prepared);
-            token = sanitizeToken(enriched) ?? (enriched as StoredOAuthToken);
-          }
-        }
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        console.error(
-          `[OAuth] ${providerType}: failed to enrich existing token with project metadata - ${msg}`
-        );
-        // 若明确是 401 / invalid token 类错误，将 token 视为无效，后续强制走重新授权流程。
-        const lower = msg.toLowerCase();
-        const authError =
-          /invalid[_-]?token|invalid[_-]?grant|unauthenticated|unauthorized/.test(lower) ||
-          lower.includes('http 401');
-        if (authError && forceReauth) {
-          token = null;
-        }
-      }
-    }
-
     logTokenSnapshot(providerType, token, endpoints);
     const tokenState = evaluateTokenState(token, providerType);
     const noRefresh = shouldHonorNoRefresh(providerType, token);
@@ -1216,7 +1079,7 @@ export async function handleUpstreamInvalidOAuthToken(
         forceReacquireIfRefreshFails: true,
         openBrowser: true,
         // 此时强制跳过节流并允许走完整 OAuth 流程。
-        forceReauthorize: pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity' || pt === 'qwen'
+        forceReauthorize: pt === 'qwen'
       };
       void withOAuthRepairEnv(providerType, async () => {
         await runInteractiveRepairWithAutoFallback({
@@ -1237,7 +1100,7 @@ export async function handleUpstreamInvalidOAuthToken(
       forceReacquireIfRefreshFails: true,
       openBrowser: true,
       // 此时强制跳过节流并允许走完整 OAuth 流程。
-      forceReauthorize: pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity' || pt === 'qwen'
+      forceReauthorize: pt === 'qwen'
     };
     await withOAuthRepairEnv(providerType, async () => {
       await runInteractiveRepairWithAutoFallback({
@@ -1278,29 +1141,8 @@ export function shouldTriggerInteractiveOAuthRepair(providerType: string, upstre
     /invalid[_-]?token|invalid[_-]?grant|unauthenticated|unauthorized|token has expired|access token expired/.test(
       lower
     );
-
-
-  // 对于 gemini / gemini-cli / antigravity，排除纯服务开关类错误，
-  // 但如果明确提示缺少 project_id 或需要重新 OAuth，则视为令牌失效。
-  if (pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity') {
-    if (/service_disabled/.test(lower) || lower.includes('has not been used in project')) {
-      looksInvalid = false;
-    }
-    if (
-      lower.includes('project_id not found in token') ||
-      lower.includes('please authenticate with google oauth first')
-    ) {
-      looksInvalid = true;
-    }
-    // Antigravity/Gemini may return 403 "verify your account" / validation_required.
-    // This is not a token-expired case, but it still requires an interactive OAuth/browser flow
-    // to unblock the account. Treat it as "needs interactive reauth".
-    if (
-      statusCode === 403 &&
-      isGoogleAccountVerificationRequiredMessage(lower)
-    ) {
-      looksInvalid = true;
-    }
+  if (pt === 'qwen' && statusCode === 403 && isGoogleAccountVerificationRequiredMessage(lower)) {
+    looksInvalid = true;
   }
 
   return looksInvalid;

@@ -1,12 +1,10 @@
 import type { PipelineExecutionInput } from '../../../handlers/types.js';
 import type { HubPipelineResult } from '../executor-pipeline.js';
 import type { RetryPayloadSeed } from './retry-payload-snapshot.js';
-import type { AntigravityRetrySignal } from './request-retry-helpers.js';
 import { getClientConnectionAbortSignal } from '../../../utils/client-connection-state.js';
 import { registerRequestLogContext } from '../../../utils/request-log-color.js';
 import { cloneClientHeaders, decorateMetadataForAttempt } from '../executor-metadata.js';
 import { mergeMetadataPreservingDefined } from './request-executor-core-utils.js';
-import { injectAntigravityRetrySignal } from './request-retry-helpers.js';
 import { restoreRequestPayloadFromRetrySeed } from './retry-payload-snapshot.js';
 
 export type PreparedRequestExecutorAttemptState = {
@@ -25,7 +23,6 @@ export function prepareRequestExecutorAttemptState(args: {
   inboundClientHeaders: Record<string, string> | undefined;
   clientRequestId: string;
   forcedRouteHint?: string;
-  antigravityRetrySignal: AntigravityRetrySignal | null;
   throwIfClientAbortSignalAborted: (abortSignal: AbortSignal | undefined) => void;
 }): PreparedRequestExecutorAttemptState {
   args.input.requestId = args.providerRequestId;
@@ -76,7 +73,6 @@ export function prepareRequestExecutorAttemptState(args: {
     metadataForAttempt.clientHeaders = clientHeadersForAttempt;
   }
   metadataForAttempt.clientRequestId = args.clientRequestId;
-  injectAntigravityRetrySignal(metadataForAttempt, args.antigravityRetrySignal);
 
   return {
     metadataForAttempt,

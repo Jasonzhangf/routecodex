@@ -70,6 +70,8 @@ export async function buildResponsesFormatEnvelopeFromChat(
     forceLog: true
   });
   const responses = responsesResult.request as JsonObject;
+  delete (responses as Record<string, unknown>).temperature;
+  delete (responses as Record<string, unknown>).top_p;
   if (mergedParameters && mergedParameters.stream !== undefined) {
     (responses as ResponsesPayload).stream = mergedParameters.stream as JsonValue;
   }
@@ -88,7 +90,5 @@ export async function buildResponsesFormatEnvelopeFromChat(
     }
   };
 
-  // Sampling knobs should remain intact for OpenAI Responses protocol.
-  // Provider-specific removal belongs in compatibility profiles, not here.
   return result;
 }

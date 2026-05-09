@@ -121,12 +121,6 @@ const REMOVED_CAMOUFOX_AUTO_MODE = new Set(['qwen']);
 
 function resolveDefaultCamoufoxAutoMode(provider?: string | null): string {
   const normalized = String(provider || '').trim().toLowerCase();
-  if (normalized === 'antigravity') {
-    return 'antigravity';
-  }
-  if (normalized === 'gemini-cli') {
-    return 'gemini';
-  }
   return '';
 }
 

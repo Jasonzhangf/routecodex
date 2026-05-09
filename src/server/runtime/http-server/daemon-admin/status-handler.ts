@@ -234,7 +234,7 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
       if (typeof mod.reset === 'function') {
         const result = await mod.reset({ persist: true });
         // Special-case: resetting provider-quota should immediately trigger a quota refresh
-        // so quota-aware providers (e.g. antigravity) are re-fetched instead of staying stale.
+        // so quota-aware providers are re-fetched instead of staying stale.
         if (id === 'provider-quota') {
           try {
             const quotaMod = daemon.getModule('quota') as unknown as { refreshNow?: () => Promise<unknown> } | undefined;

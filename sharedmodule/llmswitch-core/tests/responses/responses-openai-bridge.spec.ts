@@ -737,7 +737,7 @@ describe('responses-openai-bridge history seed normalization', () => {
     expect(result.request.include).toEqual(['ctx-include']);
     expect(result.request.store).toBe(false);
     expect(result.request.tool_choice).toBe('required');
-    expect(result.request.parallel_tool_calls).toBe(true);
+    expect(result.request.parallel_tool_calls).toBe(false);
     expect(result.request.response_format).toEqual({ type: 'ctx-format' });
     expect(result.request.service_tier).toBe('priority');
     expect(result.request.truncation).toBe('auto');

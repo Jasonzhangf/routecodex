@@ -5,7 +5,6 @@
  */
 
 export {
-  isGeminiCliFamily,
   type ExtendedOAuthAuth,
   resolveTokenFilePath,
   resolveCamoufoxAliasForAuth,

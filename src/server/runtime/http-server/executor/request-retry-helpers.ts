@@ -1,26 +1,10 @@
 import { getSessionClientRegistry } from '../session-client-registry.js';
 import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.js';
 import { extractStatusCodeFromError } from './utils.js';
-import {
-  extractRetryErrorSignature,
-  injectAntigravityRetrySignal,
-  isAntigravityProviderKey,
-  isAntigravityReauthRequired403,
-  isGoogleAccountVerificationRequiredError,
-  shouldRotateAntigravityAliasOnRetry
-} from './antigravity-detector.js';
 
 export {
-  extractRetryErrorSignature,
-  injectAntigravityRetrySignal,
-  isAntigravityProviderKey,
-  isAntigravityReauthRequired403,
-  isGoogleAccountVerificationRequiredError,
-  shouldRotateAntigravityAliasOnRetry,
   extractStatusCodeFromError
 };
-
-const DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS = 20;
 
 const RATE_LIMIT_ERROR_CODE_HINTS = [
   '429',
@@ -47,13 +31,6 @@ const RATE_LIMIT_MESSAGE_HINTS = [
 ];
 
 
-export type AntigravityRetrySignal = {
-  signature: string;
-  consecutive: number;
-  avoidAllOnRetry?: boolean;
-};
-
-
 function logRequestRetryNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   logExecutorRuntimeNonBlockingWarning({
     namespace: 'request-retry',
@@ -64,17 +41,6 @@ function logRequestRetryNonBlockingError(stage: string, error: unknown, details?
       ? `${stage}:${String(details.conversationSessionId)}:${String(details.tmuxSessionId)}`
       : undefined
   });
-}
-
-export function resolveAntigravityMaxProviderAttempts(): number {
-  const raw = String(
-    process.env.ROUTECODEX_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS || process.env.RCC_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS || ''
-  )
-    .trim()
-    .toLowerCase();
-  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  const candidate = Number.isFinite(parsed) ? parsed : DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS;
-  return Math.max(1, Math.min(60, candidate));
 }
 
 function coerceErrorCode(value: unknown): string {

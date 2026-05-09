@@ -11,6 +11,7 @@ import { registerServerToolHandler } from '../registry.js';
 import { cloneJson } from '../server-side-tools.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
 import { extractCapturedChatSeed } from './followup-request-builder.js';
+import { resolveServertoolLoopScopeKey } from '../state-scope.js';
 
 const FLOW_ID = 'recursive_detection_guard';
 const CONSECUTIVE_TRIGGER_COUNT = 10;
@@ -73,29 +74,7 @@ function shouldSkipFollowup(adapterContext: unknown): boolean {
 }
 
 function resolveSessionKey(adapterContext: unknown): string {
-  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
-    return 'default';
-  }
-  const record = adapterContext as Record<string, unknown>;
-  const sessionId =
-    typeof record.sessionId === 'string'
-      ? record.sessionId.trim()
-      : (typeof record.session_id === 'string' ? record.session_id.trim() : '');
-  const conversationId =
-    typeof record.conversationId === 'string'
-      ? record.conversationId.trim()
-      : (typeof record.conversation_id === 'string' ? record.conversation_id.trim() : '');
-  const requestId = typeof record.requestId === 'string' ? record.requestId.trim() : '';
-  if (sessionId) {
-    return `session:${sessionId}`;
-  }
-  if (conversationId) {
-    return `conversation:${conversationId}`;
-  }
-  if (requestId) {
-    return `request:${requestId}`;
-  }
-  return 'default';
+  return resolveServertoolLoopScopeKey(adapterContext) || 'default';
 }
 
 function normalizeToolName(name: string): string {

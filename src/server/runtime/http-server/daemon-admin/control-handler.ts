@@ -22,7 +22,7 @@ import {
   readServerToolStatsSnapshot,
   setServerToolEnabled
 } from '../servertool-admin-state.js';
-import { resolveRccPath, resolveRccSessionsDir } from '../../../../config/user-data-paths.js';
+import { resolveRccSessionsDir } from '../../../../config/user-data-paths.js';
 import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
 
 type ControlServerInfo = {
@@ -44,14 +44,12 @@ type ControlSnapshot = {
   };
   quota?: {
     providers?: unknown[];
-    antigravitySnapshot?: unknown;
     updatedAtMs: number;
   };
   routing?: {
     virtualRouterConfig?: unknown;
     policy?: unknown;
     policyHash?: string | null;
-    antigravityAliasLeases?: unknown;
   };
   stats?: unknown;
   llmsStats?: unknown;
@@ -287,7 +285,6 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
 
     const quotaMod = getQuotaModule(options);
     let quotaProviders: unknown[] | undefined = undefined;
-    let antigravitySnapshot: unknown = undefined;
     try {
       const adminSnapshot = typeof quotaMod?.getAdminSnapshot === 'function' ? quotaMod.getAdminSnapshot() : null;
       if (adminSnapshot && typeof adminSnapshot === 'object') {
@@ -308,12 +305,6 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
       logControlNonBlockingError('snapshot.quotaAdminSnapshot', error);
       quotaProviders = undefined;
     }
-    try {
-      antigravitySnapshot = typeof quotaMod?.getRawSnapshot === 'function' ? quotaMod.getRawSnapshot() : undefined;
-    } catch (error) {
-      logControlNonBlockingError('snapshot.antigravityRawSnapshot', error);
-      antigravitySnapshot = undefined;
-    }
 
     let vrConfig: unknown = null;
     try {
@@ -327,18 +318,6 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
     const configPath = typeof options.getConfigPath === 'function' ? options.getConfigPath() : null;
     const { policy, policyHash } = await loadPolicyFromConfigPath(configPath);
 
-    let antigravityAliasLeases: unknown = null;
-    try {
-      const leasePath = resolveRccPath('state', 'antigravity-alias-leases.json');
-      if (fs.existsSync(leasePath)) {
-        const raw = fs.readFileSync(leasePath, 'utf8');
-        antigravityAliasLeases = raw && raw.trim() ? JSON.parse(raw) : null;
-      }
-    } catch (error) {
-      logControlNonBlockingError('snapshot.antigravityAliasLeases', error);
-      antigravityAliasLeases = null;
-    }
-
     const snapshot: ControlSnapshot = {
       nowMs,
       controlServer: { serverId: options.getServerId() },
@@ -349,15 +328,13 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
       },
       quota: {
         providers: quotaProviders,
-        antigravitySnapshot,
         updatedAtMs: nowMs,
         ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
       },
       routing: {
         virtualRouterConfig: vrConfig,
         policy,
-        policyHash,
-        antigravityAliasLeases
+        policyHash
       },
       stats: typeof options.getStatsSnapshot === 'function' ? options.getStatsSnapshot() : undefined,
       llmsStats: llmsBridge.getLlmsStatsSnapshot?.() ?? undefined,

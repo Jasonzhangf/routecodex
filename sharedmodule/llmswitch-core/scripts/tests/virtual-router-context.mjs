@@ -48,10 +48,10 @@ async function main() {
   const degradedResult = engine.route(longRequest, fallbackMeta);
   assert.equal(
     degradedResult.decision.providerKey,
-    FALLBACK_KEY,
-    '[context] single-provider pool is never emptied by health/cooldown'
+    SMALL_KEY,
+    '[context] cooled-down longcontext singleton should fall back to default route'
   );
-  assert.equal(degradedResult.decision.routeName, 'longcontext');
+  assert.equal(degradedResult.decision.routeName, 'default');
 
   console.log('[virtual-router-context] tests passed');
 }

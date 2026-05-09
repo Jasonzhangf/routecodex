@@ -1,6 +1,5 @@
 import type { ProviderFamilyLookupInput, ProviderFamilyProfile } from './profile-contracts.js';
 import { resolveProviderFamilyFromDirectory } from './provider-directory.js';
-import { antigravityFamilyProfile } from './families/antigravity-profile.js';
 import { anthropicFamilyProfile } from './families/anthropic-profile.js';
 import { deepseekFamilyProfile } from './families/deepseek-profile.js';
 import { glmFamilyProfile } from './families/glm-profile.js';
@@ -12,8 +11,7 @@ const FAMILY_PROFILES = new Map<string, ProviderFamilyProfile>([
   ['anthropic', anthropicFamilyProfile],
   ['deepseek', deepseekFamilyProfile],
   ['glm', glmFamilyProfile],
-  ['qwen', qwenFamilyProfile],
-  ['antigravity', antigravityFamilyProfile]
+  ['qwen', qwenFamilyProfile]
 ]);
 
 function normalizeToken(value?: string): string | undefined {

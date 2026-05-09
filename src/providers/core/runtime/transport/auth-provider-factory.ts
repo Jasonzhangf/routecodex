@@ -95,10 +95,7 @@ export class AuthProviderFactory {
 
   private createOAuthAuthProvider(auth: OAuthAuthExtended): IAuthProvider {
     const resolvedOAuthProviderId = this.ensureOAuthProviderId(auth);
-    const serviceProfileKey =
-      this.context.moduleType === 'gemini-cli-http-provider'
-        ? 'gemini-cli'
-        : (resolvedOAuthProviderId ?? this.context.providerType);
+    const serviceProfileKey = resolvedOAuthProviderId ?? this.context.providerType;
 
     const familyProfile = getProviderFamilyProfile({
       providerId: this.context.config.config.providerId,
@@ -123,7 +120,7 @@ export class AuthProviderFactory {
         ? profileTokenFileMode
         : (
             resolvedOAuthProviderId === 'qwen' ||
-            this.context.moduleType === 'gemini-cli-http-provider'
+            resolvedOAuthProviderId === 'gemini'
           )) &&
       !auth.clientId &&
       !auth.tokenUrl &&

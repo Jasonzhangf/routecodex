@@ -8,7 +8,7 @@
 import type { DeepSeekProviderRuntimeOptions } from '../core/contracts/deepseek-provider-contract.js';
 import type { ProviderConcurrencyConfig, ProviderRpmConfig } from '../core/api/provider-types.js';
 
-export type ProviderProtocol = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'gemini-cli';
+export type ProviderProtocol = 'openai' | 'responses' | 'anthropic' | 'gemini';
 
 export type ProviderTransportBackend = 'native-http' | 'vercel-ai-sdk' | 'openai-sdk';
 

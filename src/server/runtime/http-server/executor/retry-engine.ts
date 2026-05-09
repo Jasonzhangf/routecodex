@@ -10,7 +10,6 @@ import {
   shouldRetryProviderError,
   waitBeforeRetry
 } from '../executor-provider.js';
-import { resolveAntigravityMaxProviderAttempts } from './request-retry-helpers.js';
 
 // Re-export for backward compatibility
 export {
@@ -81,5 +80,3 @@ export function resolveMaxProviderAttempts(): number {
   const candidate = Number.isFinite(parsed) ? parsed : DEFAULT_MAX_PROVIDER_ATTEMPTS;
   return Math.max(1, Math.min(20, candidate));
 }
-
-export { resolveAntigravityMaxProviderAttempts };

@@ -120,7 +120,7 @@ export class HttpRequestExecutor {
         (context as unknown as { providerType?: unknown }).providerType ||
         ''
     ).toLowerCase();
-    const isAntigravity = providerHint.includes('antigravity');
+    void providerHint;
     const wantsSse = this.deps.wantsUpstreamSse(processedRequest, context);
     const defaultEndpoint = this.deps.getEffectiveEndpoint();
     const endpoint = this.deps.resolveRequestEndpoint(processedRequest, defaultEndpoint);
@@ -132,13 +132,7 @@ export class HttpRequestExecutor {
     const candidateBases = this.deps.getBaseUrlCandidates?.(context);
     const baseList =
       candidateBases && candidateBases.length
-        ? (isAntigravity
-            ? [
-                ...candidateBases,
-                // Keep configured primary as the last fallback for antigravity (Sandbox/Daily-first).
-                ...(candidateBases.includes(baseUrlPrimary) ? [] : [baseUrlPrimary])
-              ]
-            : [baseUrlPrimary, ...candidateBases])
+        ? [baseUrlPrimary, ...candidateBases]
         : [baseUrlPrimary];
     const targets = Array.from(
       new Set(
@@ -381,31 +375,7 @@ export class HttpRequestExecutor {
     const providerHint = String(
       ctx.providerKey || ctx.providerId || ctx.providerFamily || ctx.providerType || ''
     ).toLowerCase();
-    const isAntigravity = providerHint.includes('antigravity');
-
-    // If upstream explicitly reports a context error, do NOT fallback to a different base.
-    try {
-      const headersFromTop =
-        err && typeof err.headers === 'object' && err.headers !== null ? (err.headers as Record<string, unknown>) : undefined;
-      const headersFromDetails = (() => {
-        const details = err && typeof err.details === 'object' && err.details !== null ? (err.details as any) : undefined;
-        const resp = details && typeof details.response === 'object' && details.response !== null ? details.response : undefined;
-        const headers = resp && typeof resp.headers === 'object' && resp.headers !== null ? resp.headers : undefined;
-        return headers as Record<string, unknown> | undefined;
-      })();
-      const headers = headersFromTop || headersFromDetails;
-      const key = headers ? Object.keys(headers).find((k) => k.toLowerCase() === 'x-antigravity-context-error') : undefined;
-      const value = key ? String(headers?.[key] ?? '').trim() : '';
-      if (value) {
-        return false;
-      }
-    } catch (headerInspectError) {
-      logHttpRequestExecutorNonBlockingError('shouldTryNextTarget.inspectHeaders', headerInspectError, {
-        requestId: context.requestId,
-        providerKey: context.providerKey,
-        providerId: context.providerId
-      });
-    }
+    void providerHint;
 
     if (typeof err?.type === 'string' && err.type === 'network') {
       return true;
@@ -415,9 +385,6 @@ export class HttpRequestExecutor {
       return true;
     }
     if (typeof statusCode === 'number') {
-      // Antigravity: prefer switching baseUrl before switching alias on rate-limit or client-side errors.
-      if (isAntigravity && statusCode === 429) return true;
-      if (isAntigravity && statusCode === 400) return true;
       if (statusCode === 403) return true;
       if (statusCode >= 500) return true;
     }

@@ -19,13 +19,9 @@ import {
 import { isModelCapacityExhausted429, ProviderModelBackoffTracker } from './provider-quota-daemon.model-backoff.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import {
-  extractAntigravityAlias,
   extractProviderKey,
   isAkBlocked434,
-  isAntigravityReauthRequired403,
-  isFatalForQuota,
-  listAntigravityProviderKeysByAlias,
-  parseAntigravityGoogleAccountVerification
+  isFatalForQuota
 } from './provider-quota-daemon.error-helpers.js';
 
 
@@ -164,114 +160,6 @@ export async function handleProviderQuotaErrorEvent(
     }
   }
 
-  // Antigravity: Google account risk verification required ("signin/continue").
-  // This is NOT "token expired" (reauth) and not quota. It requires human interaction in browser.
-  // Scope: current providerKey only (no alias fan-out).
-  if (providerKey.toLowerCase().startsWith('antigravity.')) {
-    const verification = parseAntigravityGoogleAccountVerification(event);
-    if (verification) {
-      const prevState =
-        ctx.quotaStates.get(providerKey) ?? createInitialQuotaState(providerKey, ctx.staticConfigs.get(providerKey), nowMs);
-      const nextState: QuotaState = {
-        ...prevState,
-        inPool: false,
-        reason: 'authVerify',
-        authIssue: {
-          kind: 'google_account_verification',
-          url: verification.url,
-          message: verification.message
-        },
-        cooldownUntil: null,
-        blacklistUntil: null,
-        lastErrorSeries: 'EFATAL',
-        lastErrorCode: typeof event.code === 'string' && event.code.trim() ? event.code.trim() : 'HTTP_403',
-        lastErrorAtMs: nowMs,
-        consecutiveErrorCount:
-          typeof prevState.consecutiveErrorCount === 'number' && prevState.consecutiveErrorCount > 0
-            ? prevState.consecutiveErrorCount + 1
-            : 1
-      };
-      ctx.quotaStates.set(providerKey, nextState);
-      ctx.schedulePersist(nowMs);
-
-      const tsIso = new Date(nowMs).toISOString();
-      try {
-        await appendProviderErrorEvent({
-          ts: tsIso,
-          providerKey,
-          code: typeof event.code === 'string' ? event.code : undefined,
-          httpStatus: typeof event.status === 'number' ? event.status : undefined,
-          message: event.message,
-          details: {
-            stage: event.stage,
-            routeName: (event.runtime as { routeName?: string }).routeName,
-            entryEndpoint: (event.runtime as { entryEndpoint?: string }).entryEndpoint,
-            authIssue: { kind: 'google_account_verification', url: verification.url }
-          }
-        });
-      } catch (appendError) {
-        logProviderQuotaDaemonEventNonBlockingError('antigravity_verify.appendProviderErrorEvent', appendError, {
-          providerKey
-        });
-      }
-      return;
-    }
-
-    // Antigravity: OAuth missing/expired (reauth required).
-    // Scope: alias-wide fan-out, so the router rotates away from the broken token set.
-    if (typeof event.status === 'number' && event.status === 403 && isAntigravityReauthRequired403(event)) {
-      const cooldownUntil = nowMs + 30 * 60_000;
-      const alias = extractAntigravityAlias(providerKey);
-      const aliasKeys = alias ? listAntigravityProviderKeysByAlias(ctx, alias) : [];
-      const targetKeys = aliasKeys.length > 0 ? aliasKeys : [providerKey];
-      const errorCode = typeof event.code === 'string' && event.code.trim() ? event.code.trim() : 'HTTP_403';
-
-      for (const targetKey of targetKeys) {
-        const prevState =
-          ctx.quotaStates.get(targetKey) ?? createInitialQuotaState(targetKey, ctx.staticConfigs.get(targetKey), nowMs);
-        const nextState: QuotaState = {
-          ...prevState,
-          inPool: false,
-          reason: 'cooldown',
-          authIssue: null,
-          cooldownUntil,
-          blacklistUntil: null,
-          lastErrorSeries: 'EFATAL',
-          lastErrorCode: errorCode,
-          lastErrorAtMs: nowMs,
-          consecutiveErrorCount:
-            typeof prevState.consecutiveErrorCount === 'number' && prevState.consecutiveErrorCount > 0
-              ? prevState.consecutiveErrorCount + 1
-              : 1
-        };
-        ctx.quotaStates.set(targetKey, nextState);
-      }
-      ctx.schedulePersist(nowMs);
-
-      const tsIso = new Date(nowMs).toISOString();
-      try {
-        await appendProviderErrorEvent({
-          ts: tsIso,
-          providerKey,
-          code: typeof event.code === 'string' ? event.code : undefined,
-          httpStatus: typeof event.status === 'number' ? event.status : undefined,
-          message: event.message,
-          details: {
-            stage: event.stage,
-            routeName: (event.runtime as { routeName?: string }).routeName,
-            entryEndpoint: (event.runtime as { entryEndpoint?: string }).entryEndpoint,
-            authIssue: { kind: 'oauth_reauth_required', cooldownUntil }
-          }
-        });
-      } catch (appendError) {
-        logProviderQuotaDaemonEventNonBlockingError('antigravity_reauth.appendProviderErrorEvent', appendError, {
-          providerKey
-        });
-      }
-      return;
-    }
-  }
-
   // Upstream capacity exhaustion is not quota depletion. Cool down the entire model series immediately
   // so the router can try other models/providers instead of hammering 429s.
   if (isModelCapacityExhausted429(event)) {
@@ -330,21 +218,9 @@ export async function handleProviderQuotaErrorEvent(
   if (code === 'QUOTA_RECOVERY') {
     const withinBlacklist =
       previous.blacklistUntil !== null && nowMs < previous.blacklistUntil;
-    // QUOTA_RECOVERY should only flip providers that are waiting on an explicit quota snapshot:
-    // - previously quota-depleted, or
-    // - antigravity oauth "untracked" initial state (cooldown with no timers / no error series).
-    //
-    // It must NOT override active cooldown windows caused by real upstream failures
-    // (e.g. MODEL_CAPACITY_EXHAUSTED short backoff), otherwise the pool will keep hammering 429s.
-	    const isUntrackedAntigravityOauthGate =
-	      previous.reason === 'cooldown' &&
-	      previous.cooldownUntil === null &&
-	      previous.blacklistUntil === null &&
-	      previous.lastErrorSeries === null &&
-	      previous.lastErrorCode === null &&
-	      previous.lastErrorAtMs === null &&
-	      previous.consecutiveErrorCount === 0;
-    const canRecover = previous.reason === 'quotaDepleted' || isUntrackedAntigravityOauthGate;
+    // QUOTA_RECOVERY only flips providers that are waiting on an explicit quota snapshot,
+    // and must not override active cooldown windows caused by real upstream failures.
+    const canRecover = previous.reason === 'quotaDepleted';
     if (canRecover && !withinBlacklist) {
       const nextState: QuotaState = {
         ...previous,
@@ -400,7 +276,7 @@ export async function handleProviderQuotaErrorEvent(
     }
     const runtime = event.runtime as { providerId?: unknown; providerProtocol?: unknown } | undefined;
     const providerIdRaw = runtime && typeof runtime.providerId === 'string' ? runtime.providerId.trim().toLowerCase() : '';
-    const isQuotaProvider = providerIdRaw === 'antigravity' || providerIdRaw === 'gemini-cli';
+    const isQuotaProvider = providerIdRaw === 'gemini';
     if (isQuotaProvider) {
       const ttl = parseQuotaResetDelayMs(event);
       if (ttl && ttl > 0) {

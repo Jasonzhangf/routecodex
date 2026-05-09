@@ -1,9 +1,9 @@
 import type { JsonObject } from '../../../conversion/hub/types/json.js';
 import { readRuntimeMetadata } from '../../../conversion/runtime-metadata.js';
 import {
-  resolveContinuationRequestChainKey as resolveRouterContinuationRequestChainKey,
-  resolveLegacyResponsesRequestChainKey
-} from '../../../router/virtual-router/engine/routing-state/keys.js';
+  resolveStopMessageSessionScopeWithNative,
+  resolveServertoolStickyKeyWithNative
+} from '../../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 import type { RoutingInstructionState } from '../../../router/virtual-router/routing-instructions.js';
 import {
   saveRoutingInstructionStateSync
@@ -25,35 +25,7 @@ export function resolveStickyKey(
   },
   runtimeMetadata?: unknown
 ): string | undefined {
-  const requestChainStickyKey = resolveContinuationRequestChainKey(record, runtimeMetadata);
-  if (requestChainStickyKey) {
-    return requestChainStickyKey;
-  }
-  const providerProtocol = toNonEmptyText(record.providerProtocol).toLowerCase();
-  if (providerProtocol === 'openai-responses') {
-    const previousRequestId = resolveResponsesPreviousRequestId(record, runtimeMetadata);
-    if (previousRequestId) {
-      return previousRequestId;
-    }
-  }
-  const injectScope = resolveStopMessageInjectScope(record, runtimeMetadata);
-  if (injectScope) {
-    return injectScope;
-  }
-
-  const sessionId = readSessionScopeValue(record, runtimeMetadata, 'sessionId');
-  if (sessionId) {
-    return `session:${sessionId}`;
-  }
-  const conversationId = readSessionScopeValue(record, runtimeMetadata, 'conversationId');
-  if (conversationId) {
-    return `conversation:${conversationId}`;
-  }
-  const requestId = readSessionScopeValue(record, runtimeMetadata, 'requestId');
-  if (requestId) {
-    return requestId;
-  }
-  return undefined;
+  return resolveServertoolStickyKeyWithNative(buildServertoolRoutingMetadata(record, runtimeMetadata)) || undefined;
 }
 
 export function persistStopMessageState(stickyKey: string | undefined, state: RoutingInstructionState): void {
@@ -85,39 +57,7 @@ export function resolveStopMessageSessionScope(
   },
   runtimeMetadata?: unknown
 ): string | undefined {
-  const runtime = asRecord(runtimeMetadata);
-  const runtimeInjectScope = toNonEmptyText(runtime?.stopMessageClientInjectSessionScope);
-  if (
-    runtimeInjectScope &&
-    (
-      runtimeInjectScope.startsWith('tmux:')
-      || runtimeInjectScope.startsWith('session:')
-      || runtimeInjectScope.startsWith('conversation:')
-    )
-  ) {
-    return runtimeInjectScope;
-  }
-
-  const directTmuxSessionId =
-    toNonEmptyText(record.clientTmuxSessionId) ||
-    toNonEmptyText(record.client_tmux_session_id) ||
-    toNonEmptyText(record.tmuxSessionId) ||
-    toNonEmptyText(record.tmux_session_id);
-  if (directTmuxSessionId) {
-    return `tmux:${directTmuxSessionId}`;
-  }
-
-  const directSessionId = toNonEmptyText(record.sessionId);
-  if (directSessionId) {
-    return `session:${directSessionId}`;
-  }
-
-  const directConversationId = toNonEmptyText(record.conversationId);
-  if (directConversationId) {
-    return `conversation:${directConversationId}`;
-  }
-
-  return undefined;
+  return resolveStopMessageSessionScopeWithNative(buildServertoolRoutingMetadata(record, runtimeMetadata)) || undefined;
 }
 
 export function resolveRuntimeStopMessageState(runtimeMetadata: unknown): {
@@ -149,99 +89,20 @@ export function readRuntimeStopMessageStageMode(runtimeMetadata: unknown): 'on' 
   return undefined;
 }
 
-function resolveStopMessageInjectScope(
+function buildServertoolRoutingMetadata(
   record: {
     metadata?: unknown;
     [key: string]: unknown;
   },
   runtimeMetadata?: unknown
-): string | undefined {
-  const runtime = asRecord(runtimeMetadata);
-  const runtimeInjectScope = toNonEmptyText(runtime?.stopMessageClientInjectSessionScope);
-  if (
-    runtimeInjectScope &&
-    (
-      runtimeInjectScope.startsWith('tmux:')
-      || runtimeInjectScope.startsWith('session:')
-      || runtimeInjectScope.startsWith('conversation:')
-    )
-  ) {
-    return runtimeInjectScope;
-  }
-
-  const tmuxSessionId =
-    readSessionScopeValue(record, runtimeMetadata, 'clientTmuxSessionId') ||
-    readSessionScopeValue(record, runtimeMetadata, 'client_tmux_session_id') ||
-    readSessionScopeValue(record, runtimeMetadata, 'tmuxSessionId') ||
-    readSessionScopeValue(record, runtimeMetadata, 'tmux_session_id');
-  if (tmuxSessionId) {
-    return `tmux:${tmuxSessionId}`;
-  }
-  const sessionId = readSessionScopeValue(record, runtimeMetadata, 'sessionId');
-  if (sessionId) {
-    return `session:${sessionId}`;
-  }
-  const conversationId = readSessionScopeValue(record, runtimeMetadata, 'conversationId');
-  if (conversationId) {
-    return `conversation:${conversationId}`;
-  }
-  return undefined;
-}
-
-function resolveResponsesPreviousRequestId(
-  record: {
-    responsesResume?: unknown;
-    metadata?: unknown;
-  },
-  runtimeMetadata?: unknown
-): string {
-  const direct = readPreviousRequestId(record.responsesResume);
-  if (direct) {
-    return direct;
-  }
+): Record<string, unknown> {
   const metadata = asRecord(record.metadata);
-  const fromMetadata = readPreviousRequestId(metadata?.responsesResume);
-  if (fromMetadata) {
-    return fromMetadata;
-  }
   const runtime = asRecord(runtimeMetadata);
-  const fromRuntime = readPreviousRequestId(runtime?.responsesResume);
-  if (fromRuntime) {
-    return fromRuntime;
-  }
-  return '';
-}
-
-function resolveContinuationRequestChainKey(
-  record: {
-    continuation?: unknown;
-    metadata?: unknown;
-  },
-  runtimeMetadata?: unknown
-): string {
-  const direct = readContinuationRequestChainKey(record.continuation);
-  if (direct) {
-    return direct;
-  }
-  const metadata = asRecord(record.metadata);
-  const fromMetadata = readContinuationRequestChainKey(metadata?.continuation);
-  if (fromMetadata) {
-    return fromMetadata;
-  }
-  const runtime = asRecord(runtimeMetadata);
-  const fromRuntime = readContinuationRequestChainKey(runtime?.continuation);
-  if (fromRuntime) {
-    return fromRuntime;
-  }
-  return '';
-}
-
-function readContinuationRequestChainKey(value: unknown): string {
-  return resolveRouterContinuationRequestChainKey(value) ?? '';
-}
-
-function readPreviousRequestId(value: unknown): string {
-  return resolveLegacyResponsesRequestChainKey(value) ?? '';
+  return {
+    ...(metadata ?? {}),
+    ...(runtime ?? {}),
+    ...record
+  };
 }
 
 export function resolveBdWorkingDirectoryForRecord(

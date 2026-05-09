@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { selectProviderImpl } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection.js';
+import { selectProviderImpl } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-pools/index.js';
 import { RouteLoadBalancer } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/load-balancer.js';
 
 describe('virtual-router search route routing', () => {

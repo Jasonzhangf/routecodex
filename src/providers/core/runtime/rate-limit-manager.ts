@@ -36,7 +36,7 @@ export class RateLimitBackoffManager {
 
   /**
    * 根据外部传入的冷却时间（例如上游返回的 quotaResetDelay）直接对整个系列做一次性降温。
-   * 这用于 Gemini / Gemini CLI / antigravity 这类按模型系列限流的场景，
+   * 这用于 Gemini 这类按模型系列限流的场景，
    * 避免在明确知道冷却窗口后仍然多次命中真实 429。
    */
   applySeriesCooldown(providerKey?: string, model?: string, cooldownMs?: number): void {

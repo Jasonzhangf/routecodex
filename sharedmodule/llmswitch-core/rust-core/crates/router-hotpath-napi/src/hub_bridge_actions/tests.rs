@@ -833,7 +833,7 @@ fn reasoning_prepare_responses_request_envelope_prefers_ctx_over_metadata_and_de
     );
     assert_eq!(
         request.get("parallel_tool_calls").and_then(Value::as_bool),
-        Some(true)
+        Some(false)
     );
     assert_eq!(
         request
@@ -866,6 +866,70 @@ fn reasoning_prepare_responses_request_envelope_prefers_ctx_over_metadata_and_de
             .and_then(|row| row.get("ctx"))
             .and_then(Value::as_bool),
         Some(true)
+    );
+}
+
+#[test]
+fn reasoning_prepare_responses_request_envelope_keeps_chat_tool_controls_as_single_source() {
+    let output = prepare_responses_request_envelope(PrepareResponsesRequestEnvelopeInput {
+        request: json!({}),
+        context_system_instruction: None,
+        extra_system_instruction: None,
+        metadata_system_instruction: None,
+        combined_system_instruction: None,
+        reasoning_instruction_segments: None,
+        context_parameters: Some(json!({
+            "tool_choice": "none",
+            "parallel_tool_calls": false,
+            "response_format": { "type": "ctx-params-format" }
+        })),
+        chat_parameters: Some(json!({
+            "tool_choice": "required",
+            "parallel_tool_calls": true,
+            "response_format": { "type": "chat-params-format" }
+        })),
+        metadata_parameters: Some(json!({
+            "tool_choice": "auto",
+            "parallel_tool_calls": false
+        })),
+        context_stream: None,
+        metadata_stream: None,
+        chat_stream: None,
+        chat_parameters_stream: None,
+        context_include: None,
+        metadata_include: None,
+        context_store: None,
+        metadata_store: None,
+        strip_host_fields: Some(false),
+        context_tool_choice: Some(json!("auto")),
+        metadata_tool_choice: Some(json!("none")),
+        context_parallel_tool_calls: Some(json!(false)),
+        metadata_parallel_tool_calls: Some(json!(false)),
+        context_response_format: Some(json!({ "type": "ctx-format" })),
+        metadata_response_format: Some(json!({ "type": "meta-format" })),
+        context_service_tier: None,
+        metadata_service_tier: None,
+        context_truncation: None,
+        metadata_truncation: None,
+        context_metadata: None,
+        metadata_metadata: None,
+    });
+    let request = output.request.as_object().cloned().unwrap();
+    assert_eq!(
+        request.get("tool_choice").and_then(Value::as_str),
+        Some("required")
+    );
+    assert_eq!(
+        request.get("parallel_tool_calls").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        request
+            .get("response_format")
+            .and_then(Value::as_object)
+            .and_then(|row| row.get("type"))
+            .and_then(Value::as_str),
+        Some("ctx-format")
     );
 }
 

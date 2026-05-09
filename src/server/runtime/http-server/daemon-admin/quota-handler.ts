@@ -5,10 +5,8 @@ import { x7eGate, getGateState } from './routecodex-x7e-gate.js';
 import type { ManagerModule } from '../../../../manager/types.js';
 import type { QuotaManagerModule, QuotaRecord, QuotaManagerAdapter } from '../../../../manager/modules/quota/index.js';
 import type { ProviderQuotaDaemonModule } from '../../../../manager/modules/quota/index.js';
-import { loadTokenPortalFingerprintSummary } from '../../../../token-portal/fingerprint-summary.js';
-import { findGoogleAccountVerificationIssue } from '../../../../token-daemon/quota-auth-issue.js';
 import { createQuotaManagerAdapter } from '../../../../manager/modules/quota/quota-adapter.js';
-import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
+import { formatUnknownError } from '../../../../utils/common-utils.js';
 
 const QUOTA_HANDLER_NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const quotaHandlerNonBlockingLogState = new Map<string, number>();
@@ -93,41 +91,6 @@ function getQuotaRawSnapshot(options: DaemonAdminRouteOptions): Record<string, Q
     logQuotaHandlerNonBlockingError('getQuotaRawSnapshot', error);
     return {};
   }
-}
-
-
-function normalizeGoogleVerifyUrl(rawUrl: unknown): string | null {
-  if (typeof rawUrl !== 'string') {
-    return null;
-  }
-  const normalized = rawUrl.trim().replace(/[\"']+$/g, '').replace(/[),.]+$/g, '');
-  return normalized || null;
-}
-
-function rankGoogleVerifyUrl(url: string | null): number {
-  if (!url) {
-    return 0;
-  }
-  const lowered = url.toLowerCase();
-  if (lowered.includes('accounts.google.com/signin/continue')) {
-    return 3;
-  }
-  if (lowered.includes('accounts.google.com/')) {
-    return 2;
-  }
-  if (lowered.includes('support.google.com/accounts?p=al_alert')) {
-    return 1;
-  }
-  return 0;
-}
-
-function pickBetterGoogleVerifyUrl(currentUrl: unknown, recoveredUrl: string | null): string | null {
-  const current = normalizeGoogleVerifyUrl(currentUrl);
-  const recovered = normalizeGoogleVerifyUrl(recoveredUrl);
-  if (!recovered) {
-    return current;
-  }
-  return rankGoogleVerifyUrl(recovered) > rankGoogleVerifyUrl(current) ? recovered : current;
 }
 
 function getProviderQuotaModule(options: DaemonAdminRouteOptions): ProviderQuotaDaemonModule | null {
@@ -215,82 +178,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
         };
       });
 
-      // Enrich Antigravity providers with camoufox fingerprint info (per alias).
-      const aliases = new Set<string>();
-      const verifyAliases = new Set<string>();
-      for (const p of entries) {
-        const key = typeof p.providerKey === 'string' ? p.providerKey : '';
-        if (!key.toLowerCase().startsWith('antigravity.')) {
-          continue;
-        }
-        const parts = key.split('.');
-        const alias = parts.length >= 2 ? String(parts[1] || '').trim().toLowerCase() : '';
-        if (!alias) {
-          continue;
-        }
-        aliases.add(alias);
-
-        if (isRecord(p.authIssue) && String(p.authIssue.kind || '') === 'google_account_verification') {
-          verifyAliases.add(alias);
-        }
-      }
-
-      const fpByAlias = new Map<string, Awaited<ReturnType<typeof loadTokenPortalFingerprintSummary>> | null>();
-      const verifyUrlByAlias = new Map<string, string | null>();
-      await Promise.allSettled([
-        ...Array.from(aliases).map(async (alias) => {
-          try {
-            const fp = await loadTokenPortalFingerprintSummary('antigravity', alias);
-            fpByAlias.set(alias, fp);
-          } catch (error: unknown) {
-            logQuotaHandlerNonBlockingError('loadTokenPortalFingerprintSummary', error, { alias });
-            fpByAlias.set(alias, null);
-          }
-        }),
-        ...Array.from(verifyAliases).map(async (alias) => {
-          try {
-            const issue = await findGoogleAccountVerificationIssue('antigravity', alias);
-            verifyUrlByAlias.set(alias, normalizeGoogleVerifyUrl(issue?.url ?? null));
-          } catch (error: unknown) {
-            logQuotaHandlerNonBlockingError('findGoogleAccountVerificationIssue', error, { alias });
-            verifyUrlByAlias.set(alias, null);
-          }
-        })
-      ]);
-
-      const providers = entries.map((p) => {
-        const key = typeof p.providerKey === 'string' ? p.providerKey : '';
-        if (!key.toLowerCase().startsWith('antigravity.')) {
-          return p;
-        }
-        const parts = key.split('.');
-        const alias = parts.length >= 2 ? String(parts[1] || '').trim().toLowerCase() : '';
-        const fp = alias ? fpByAlias.get(alias) : null;
-
-        let authIssue = p.authIssue;
-        if (alias && isRecord(authIssue) && String(authIssue.kind || '') === 'google_account_verification') {
-          const betterUrl = pickBetterGoogleVerifyUrl(authIssue.url, verifyUrlByAlias.get(alias) ?? null);
-          if (betterUrl && betterUrl !== authIssue.url) {
-            authIssue = {
-              ...authIssue,
-              url: betterUrl
-            };
-          }
-        }
-
-        return {
-          ...p,
-          authIssue,
-          fpAlias: alias || null,
-          fpProfileId: fp?.profileId || null,
-          fpSuffix: fp?.suffix || null,
-          fpOs: fp?.os || null,
-          fpArch: fp?.arch || null,
-          fpPlatform: fp?.navigatorPlatform || null,
-          fpOscpu: fp?.navigatorOscpu || null
-        };
-      });
-      res.status(200).json({ updatedAt: Date.now(), providers, ...(unifiedDto ? { schema: 'v2' } : {}) });
+      res.status(200).json({ updatedAt: Date.now(), providers: entries, ...(unifiedDto ? { schema: 'v2' } : {}) });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message, code: 'internal_error' } });
@@ -310,53 +198,8 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       return;
     }
     try {
-      let keys: string[] = [providerKey];
-      // Antigravity verification/reauth states are per-alias across many models.
-      // Operator "reset" should reset the whole alias so the pool can re-converge quickly.
-      if (providerKey.toLowerCase().startsWith('antigravity.')) {
-        const parts = providerKey.split('.');
-        const alias = parts.length >= 2 ? String(parts[1] || '').trim().toLowerCase() : '';
-        const snapshot = mod.getAdminSnapshot();
-        if (alias && snapshot && typeof snapshot === 'object') {
-          const prefix = `antigravity.${alias}.`;
-          const expanded = Object.keys(snapshot).filter((k) => String(k || '').trim().toLowerCase().startsWith(prefix));
-          if (expanded.length > 0) {
-            keys = expanded;
-          }
-        }
-      }
-
-      let result: unknown = null;
-      for (const key of keys) {
-        result = await mod.resetProvider(key);
-      }
-      // If this provider supports external quota refresh (e.g. antigravity), force-refresh immediately
-      // so the virtual-router pool state can converge without waiting for the periodic timer.
-      let quotaRefresh: unknown = null;
-      if (providerKey.toLowerCase().startsWith('antigravity.')) {
-        try {
-          const quotaModule = getQuotaRefreshModule(options) as unknown as { refreshNow?: () => Promise<unknown> } | null;
-          if (quotaModule && typeof quotaModule.refreshNow === 'function') {
-            quotaRefresh = await quotaModule.refreshNow();
-          }
-        } catch {
-          quotaRefresh = null;
-        }
-      }
-      res.status(200).json({
-        ok: true,
-        providerKey,
-        action: 'reset',
-        result,
-        ...(keys.length > 1 || quotaRefresh
-          ? {
-              meta: {
-                ...(keys.length > 1 ? { resetKeys: keys.length } : {}),
-                ...(quotaRefresh ? { quotaRefresh } : {})
-              }
-            }
-          : {})
-      });
+      const result = await mod.resetProvider(providerKey);
+      res.status(200).json({ ok: true, providerKey, action: 'reset', result });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message, code: 'quota_provider_reset_failed' } });
@@ -376,24 +219,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       return;
     }
     try {
-      let keys: string[] = [providerKey];
-      if (providerKey.toLowerCase().startsWith('antigravity.')) {
-        const parts = providerKey.split('.');
-        const alias = parts.length >= 2 ? String(parts[1] || '').trim().toLowerCase() : '';
-        const snapshot = mod.getAdminSnapshot();
-        if (alias && snapshot && typeof snapshot === 'object') {
-          const prefix = `antigravity.${alias}.`;
-          const expanded = Object.keys(snapshot).filter((k) => String(k || '').trim().toLowerCase().startsWith(prefix));
-          if (expanded.length > 0) {
-            keys = expanded;
-          }
-        }
-      }
-
-      let result: unknown = null;
-      for (const key of keys) {
-        result = await mod.recoverProvider(key);
-      }
+      const result = await mod.recoverProvider(providerKey);
       res.status(200).json({ ok: true, providerKey, action: 'recover', result });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -439,42 +265,15 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
 
   app.get('/quota/runtime', (req: Request, res: Response) => {
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
-    const runtimeKey = typeof req.query.runtimeKey === 'string' ? req.query.runtimeKey : undefined;
-    const providerKey = typeof req.query.providerKey === 'string' ? req.query.providerKey : undefined;
     try {
       const snapshot: Record<string, QuotaRecord> = getQuotaRawSnapshot(options);
-      // 当前仅针对 antigravity 语义；snapshot 键格式为 "antigravity://alias/modelId"
-      const items: Array<{
-        key: string;
-        alias: string | null;
-        modelId: string | null;
-        remainingFraction: number | null;
-        resetAt?: number;
-        fetchedAt: number;
-      }> = [];
-      for (const [key, record] of Object.entries(snapshot)) {
-        const parsed = parseAntigravityKey(key);
-        if (!parsed) {
-          continue;
-        }
-        if (runtimeKey && !runtimeKey.includes(parsed.alias)) {
-          continue;
-        }
-        if (providerKey && !providerKey.includes(parsed.alias)) {
-          continue;
-        }
-        items.push({
-          key,
-          alias: parsed.alias,
-          modelId: parsed.modelId,
-          remainingFraction: record.remainingFraction,
-          resetAt: record.resetAt,
-          fetchedAt: record.fetchedAt
-        });
-      }
+      const items = Object.entries(snapshot).map(([key, record]) => ({
+        key,
+        remainingFraction: record.remainingFraction,
+        resetAt: record.resetAt,
+        fetchedAt: record.fetchedAt
+      }));
       res.status(200).json({
-        runtimeKey: runtimeKey ?? null,
-        providerKey: providerKey ?? null,
         items
       });
     } catch (error: unknown) {
@@ -505,23 +304,4 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       }
     });
   });
-}
-
-function parseAntigravityKey(key: string): { alias: string; modelId: string } | null {
-  // 形如 "antigravity://alias/modelId"
-  const prefix = 'antigravity://';
-  if (!key.startsWith(prefix)) {
-    return null;
-  }
-  const rest = key.slice(prefix.length);
-  const idx = rest.indexOf('/');
-  if (idx <= 0) {
-    return null;
-  }
-  const alias = rest.slice(0, idx);
-  const modelId = rest.slice(idx + 1);
-  if (!alias || !modelId) {
-    return null;
-  }
-  return { alias, modelId };
 }

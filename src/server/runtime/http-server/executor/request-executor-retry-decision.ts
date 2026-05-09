@@ -4,12 +4,6 @@ import {
   resolveProviderFailureRetryEligibility
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
-  extractRetryErrorSignature,
-  isAntigravityProviderKey,
-  shouldRotateAntigravityAliasOnRetry,
-  type AntigravityRetrySignal
-} from './request-retry-helpers.js';
-import {
   readString,
   normalizeCodeKey,
   normalizeRuntimeKey
@@ -134,21 +128,15 @@ export function resolveProviderRetryExclusionPlan(args: {
   error: unknown;
   classification?: RequestExecutorProviderErrorClassification;
   promptTooLong: boolean;
-  isVerify: boolean;
-  isReauth: boolean;
-  antigravityRetrySignal: AntigravityRetrySignal | null;
   routePool?: string[];
   excludedProviderKeys: Set<string>;
 }): ProviderRetryExclusionPlan {
   const providerKey = readString(args.providerKey);
-  let nextAntigravityRetrySignal = args.antigravityRetrySignal;
   if (!providerKey) {
     return {
-      excludedCurrentProvider: false,
-      antigravityRetrySignal: nextAntigravityRetrySignal
+      excludedCurrentProvider: false
     };
   }
-  const isAntigravity = isAntigravityProviderKey(providerKey);
   const is429 = args.status === 429;
   const exclusionDecision = resolveProviderFailureExclusionDecision({
     promptTooLong: args.promptTooLong,
@@ -160,46 +148,18 @@ export function resolveProviderRetryExclusionPlan(args: {
       routePool: args.routePool,
       excludedProviderKeys: args.excludedProviderKeys
     }),
-    isAntigravity,
-    is429,
-    isVerify: args.isVerify,
-    isReauth: args.isReauth,
-    shouldRotateAntigravityAlias: shouldRotateAntigravityAliasOnRetry(args.error)
+    is429
   });
-  if (exclusionDecision.excludeCurrentProvider && isAntigravity && (args.isVerify || is429)) {
-    const excludedCurrentProvider = applyRetryExclusionForCurrentProvider({
-      providerKey,
-      excludedProviderKeys: args.excludedProviderKeys
-    });
-    nextAntigravityRetrySignal = nextAntigravityRetrySignal
-      ? { ...nextAntigravityRetrySignal, avoidAllOnRetry: true }
-      : { signature: extractRetryErrorSignature(args.error), consecutive: 1, avoidAllOnRetry: true };
-    return {
-      excludedCurrentProvider,
-      antigravityRetrySignal: nextAntigravityRetrySignal
-    };
-  }
-  if (exclusionDecision.excludeCurrentProvider && isAntigravity && args.isReauth) {
-    return {
-      excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
-        providerKey,
-        excludedProviderKeys: args.excludedProviderKeys
-      }),
-      antigravityRetrySignal: nextAntigravityRetrySignal
-    };
-  }
   if (exclusionDecision.excludeCurrentProvider) {
     return {
       excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
         providerKey,
         excludedProviderKeys: args.excludedProviderKeys
-      }),
-      antigravityRetrySignal: nextAntigravityRetrySignal
+      })
     };
   }
   return {
-    excludedCurrentProvider: false,
-    antigravityRetrySignal: nextAntigravityRetrySignal
+    excludedCurrentProvider: false
   };
 }
 
@@ -268,14 +228,7 @@ export function resolveProviderRetryEligibilityPlan(args: {
   promptTooLong?: boolean;
   contextOverflowRetries?: number;
   maxContextOverflowRetries?: number;
-  isVerify?: boolean;
-  isReauth?: boolean;
-  allowAntigravityRecovery?: boolean;
 }): ProviderRetryEligibilityPlan {
-  const antigravityRecoveryEligible =
-    args.allowAntigravityRecovery
-    && isAntigravityProviderKey(args.providerKey)
-    && (args.isVerify || args.isReauth);
   const hostResponseContractRetryEligible =
     args.stage === 'host.response_contract'
     && (args.error as { retryable?: unknown } | undefined)?.retryable === true;
@@ -296,7 +249,7 @@ export function resolveProviderRetryEligibilityPlan(args: {
     promptTooLong: args.promptTooLong,
     contextOverflowRetries: args.contextOverflowRetries,
     maxContextOverflowRetries: args.maxContextOverflowRetries ?? MAX_CONTEXT_OVERFLOW_RETRIES,
-    allowNonPolicyRetry: antigravityRecoveryEligible || hostResponseContractRetryEligible,
+    allowNonPolicyRetry: hostResponseContractRetryEligible,
     stageOutsideProviderFailurePolicy:
       args.stage === 'host.stopless_contract'
   });

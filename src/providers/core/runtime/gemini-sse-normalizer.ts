@@ -1,7 +1,6 @@
 import { Transform } from 'node:stream';
 import type { TransformCallback } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
-import { cacheAntigravitySessionSignature } from '../../../modules/llmswitch/bridge.js';
 
 export class GeminiSseNormalizer extends Transform {
   private decoder: StringDecoder;
@@ -11,20 +10,10 @@ export class GeminiSseNormalizer extends Transform {
   private chunkCounter = 0;
   private processedEventCounter = 0;
   private capturedEvents: any[] = [];
-  private antigravitySessionId: string | null = null;
-  private antigravityAliasKey: string | null = null;
-  private enableAntigravitySignatureCache = false;
 
-  constructor(options?: { sessionId?: string; aliasKey?: string; enableAntigravitySignatureCache?: boolean }) {
+  constructor(_options?: { sessionId?: string; aliasKey?: string; enableAntigravitySignatureCache?: boolean }) {
     super();
     this.decoder = new StringDecoder('utf8');
-    this.antigravitySessionId = typeof options?.sessionId === 'string' && options.sessionId.trim().length
-      ? options.sessionId.trim()
-      : null;
-    this.antigravityAliasKey = typeof options?.aliasKey === 'string' && options.aliasKey.trim().length
-      ? options.aliasKey.trim()
-      : null;
-    this.enableAntigravitySignatureCache = !!options?.enableAntigravitySignatureCache;
   }
 
   override _transform(chunk: unknown, _encoding: BufferEncoding, callback: TransformCallback): void {
@@ -56,13 +45,11 @@ export class GeminiSseNormalizer extends Transform {
   }
 
   private processBuffered(flush = false): void {
-    let eventsFound = 0;
     while (true) {
       const separatorIndex = this.buffer.indexOf('\n\n');
       if (separatorIndex === -1) {
         break;
       }
-      eventsFound++;
       const rawEvent = this.buffer.slice(0, separatorIndex);
       this.buffer = this.buffer.slice(separatorIndex + 2);
       this.processEvent(rawEvent);
@@ -100,7 +87,7 @@ export class GeminiSseNormalizer extends Transform {
       }
       this.emitCandidateParts(response as Record<string, unknown>);
     } catch {
-      // ignore parse errors; upstream stream snapshots (if enabled) are used for debugging
+      // ignore parse errors
     }
   }
 
@@ -118,21 +105,9 @@ export class GeminiSseNormalizer extends Transform {
       const parts = Array.isArray(partsRaw) ? (partsRaw as Record<string, unknown>[]) : [];
 
       for (const part of parts) {
-        if (!part || typeof part !== 'object') {continue;}
-        if (this.enableAntigravitySignatureCache && this.antigravitySessionId) {
-          const sig =
-            typeof (part as { thoughtSignature?: unknown }).thoughtSignature === 'string'
-              ? String((part as { thoughtSignature?: unknown }).thoughtSignature)
-              : typeof (part as { thought_signature?: unknown }).thought_signature === 'string'
-                ? String((part as { thought_signature?: unknown }).thought_signature)
-                : '';
-          if (sig) {
-            const aliasKey =
-              this.antigravityAliasKey && this.antigravityAliasKey.trim().length ? this.antigravityAliasKey.trim() : 'antigravity.unknown';
-            cacheAntigravitySessionSignature(aliasKey, this.antigravitySessionId, sig, 1);
-          }
+        if (!part || typeof part !== 'object') {
+          continue;
         }
-
         this.pushEvent('gemini.data', {
           candidateIndex: index,
           role,

@@ -1,7 +1,7 @@
 import type { ProviderContext, ProviderRuntimeProfile } from '../api/provider-types.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 
-const SERIES_COOLDOWN_PROVIDER_IDS = new Set(['antigravity', 'gemini-cli']);
+const SERIES_COOLDOWN_PROVIDER_IDS = new Set(['gemini']);
 const SERIES_COOLDOWN_MAX_MS = 3 * 60 * 60_000;
 
 type ModelSeriesName = 'claude' | 'gemini-pro' | 'gemini-flash' | 'default';

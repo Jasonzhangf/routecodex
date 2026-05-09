@@ -268,13 +268,6 @@ try {
   logCliNonBlocking('load_optional_command_provider_update', error);
 }
 
-// Camoufox fingerprint debug command (optional)
-try {
-  const { createCamoufoxFpCommand } = await import('./commands/camoufox-fp.js');
-  program.addCommand(createCamoufoxFpCommand());
-} catch (error) {
-  logCliNonBlocking('load_optional_command_camoufox_fp', error);
-}
 
 // Camoufox fingerprint backfill command (optional)
 try {
@@ -292,13 +285,6 @@ try {
   logCliNonBlocking('load_optional_command_token_daemon', error);
 }
 
-// Quota status command - inspect daemon-managed quota snapshot
-try {
-  const { createQuotaStatusCommand } = await import('./commands/quota-status.js');
-  program.addCommand(createQuotaStatusCommand());
-} catch (error) {
-  logCliNonBlocking('load_optional_command_quota_status', error);
-}
 
 // Quota daemon command - offline replay/once maintenance for provider-quota snapshot
 try {

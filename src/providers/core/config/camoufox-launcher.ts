@@ -213,13 +213,6 @@ export function applyGoogleLocaleHint(rawUrl: string): string {
 
 function getProviderFamily(provider?: string | null): string {
   const rawProvider = provider && provider.trim() ? provider.trim().toLowerCase() : '';
-
-  // Gemini CLI 家族（gemini-cli / antigravity）共享同一组账号指纹：
-  // 同一个 alias（例如 geetasamodgeetasamoda）在 gemini-cli 和 antigravity 下使用同一个 profile。
-  if (rawProvider === 'gemini-cli' || rawProvider === 'antigravity') {
-    return 'gemini';
-  }
-
   return rawProvider;
 }
 
@@ -321,9 +314,6 @@ const REMOVED_CAMOUFOX_AUTO_MODE = new Set(['qwen']);
 
 function resolveDefaultCamoufoxAutoMode(provider?: string | null): string {
   const family = getProviderFamily(provider);
-  if (family === 'antigravity') {
-    return 'antigravity';
-  }
   if (family === 'gemini') {
     return 'gemini';
   }
@@ -922,7 +912,7 @@ async function waitForOAuthRelatedPage(options: {
       if (provider === 'qwen' && (isQwenAuthorizeUrl(activeUrl) || isQwenLoginUrl(activeUrl) || isGoogleAuthUrl(activeUrl))) {
         return activeUrl;
       }
-      if ((provider === 'gemini-cli' || provider === 'antigravity') && isGoogleAuthUrl(activeUrl)) {
+      if (provider === 'gemini' && isGoogleAuthUrl(activeUrl)) {
         return activeUrl;
       }
     }
@@ -1081,11 +1071,11 @@ async function maybeAdvanceGoogleAuth(options: {
   actionContext: CamoActionContext;
 }): Promise<boolean> {
   const provider = String(options.provider || '').trim().toLowerCase();
-  if (provider !== 'gemini-cli' && provider !== 'antigravity' && provider !== 'qwen') {
+  if (provider !== 'gemini' && provider !== 'qwen') {
     return true;
   }
   const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
-  const autoModeEnabled = autoMode === 'gemini' || autoMode === 'antigravity' || autoMode === 'qwen';
+  const autoModeEnabled = autoMode === 'gemini' || autoMode === 'qwen';
   if (!autoModeEnabled) {
     return true;
   }
@@ -1176,7 +1166,7 @@ async function maybeAdvanceGoogleAuth(options: {
     logOAuthDebug(`[OAuth] camo-cli google sign-in step skipped (active page is non-google): ${signInUrl || 'n/a'}`);
     return true;
   }
-  const strictRequired = provider === 'gemini-cli' || provider === 'antigravity';
+  const strictRequired = provider === 'gemini';
   const signInSettleMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_SETTLE_MS, strictRequired ? 16_000 : 8_000);
   const signInPollMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_POLL_MS, 400);
   const signInProbe = await waitForGoogleSignInPrompt({

@@ -493,7 +493,6 @@ export class HttpTransportProvider extends BaseProvider {
 
   protected async buildRequestHeaders(): Promise<Record<string, string>> {
     const runtimeMetadata = this.getCurrentRuntimeMetadata();
-    const isAntigravity = this.isAntigravityTransportRuntime(runtimeMetadata);
     const runtimeHeaders = this.getRuntimeProfile()?.headers || {};
     const isGeminiFamily = this.isGeminiFamilyTransport();
     return buildProviderRequestHeaders({
@@ -505,13 +504,8 @@ export class HttpTransportProvider extends BaseProvider {
       runtimeHeaders,
       familyProfile: this.resolveFamilyProfile(runtimeMetadata),
       isGeminiFamily,
-      isAntigravity,
       providerType: this.providerType
     });
-  }
-
-  private isAntigravityTransportRuntime(runtimeMetadata?: ProviderRuntimeMetadata): boolean {
-    return this.getRuntimeDetector().isAntigravity(runtimeMetadata);
   }
 
   protected getEffectiveBaseUrl(): string {

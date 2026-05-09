@@ -1,42 +1,27 @@
 /**
  * Path Resolver
- *
- * Token file path resolution utilities.
  */
 
 import fsSync from 'fs';
 import path from 'path';
-import os from 'os';
 import {
   resolveRccAuthDir,
   resolveRccAuthDirForRead,
   resolveRccTokensDir
 } from '../../../config/user-data-paths.js';
-
-const GEMINI_CLI_PROVIDER_IDS = new Set(['gemini-cli', 'antigravity']);
-
-export function isGeminiCliFamily(providerType: string): boolean {
-  return GEMINI_CLI_PROVIDER_IDS.has(providerType.toLowerCase());
-}
-
 import { expandHome } from '../../../utils/common-utils.js';
 export { expandHome };
+import type { OAuthAuth } from '../../core/api/provider-config.js';
 
 export function defaultTokenFile(providerType: string): string {
   if (providerType === 'qwen') {
     return path.join(resolveRccAuthDir(), 'qwen-oauth-1-default.json');
   }
-  if (isGeminiCliFamily(providerType)) {
-    const file = providerType.toLowerCase() === 'antigravity'
-      ? 'antigravity-oauth.json'
-      : 'gemini-oauth.json';
-    return path.join(resolveRccAuthDir(), file);
+  if (providerType === 'deepseek-account') {
+    return path.join(resolveRccAuthDir(), 'deepseek-account-oauth-1-default.json');
   }
   return path.join(resolveRccTokensDir(), `${providerType}-default.json`);
 }
-
-
-import type { OAuthAuth } from '../../core/api/provider-config.js';
 
 export type ExtendedOAuthAuth = OAuthAuth & {
   tokenFile?: string;
@@ -71,20 +56,7 @@ export function resolveTokenFilePath(auth: ExtendedOAuthAuth, providerType: stri
       return directStemPath;
     }
   } catch {
-    // ignore and continue with alias resolution
-  }
-
-  const pt = providerType.toLowerCase();
-  if (pt === 'qwen' && alias === 'default') {
-    const pinned = path.join(authDir, 'qwen-oauth-1-default.json');
-    try {
-      if (fsSync.existsSync(pinned)) {
-        auth.tokenFile = pinned;
-        return pinned;
-      }
-    } catch {
-      // ignore and fall back to scanning
-    }
+    // ignore
   }
 
   let existingPath: string | null = null;
@@ -101,7 +73,7 @@ export function resolveTokenFilePath(auth: ExtendedOAuthAuth, providerType: stri
       if (!Number.isFinite(seq) || seq <= 0) {
         continue;
       }
-      const entryAlias = (match[2] || 'default');
+      const entryAlias = match[2] || 'default';
       if (entryAlias === alias && seq >= bestSeqForAlias) {
         bestSeqForAlias = seq;
         existingPath = path.join(authDir, entry);
@@ -111,7 +83,7 @@ export function resolveTokenFilePath(auth: ExtendedOAuthAuth, providerType: stri
       }
     }
   } catch {
-    // ignore directory errors; treat as no existing tokens
+    // ignore
   }
 
   if (existingPath) {
@@ -119,7 +91,7 @@ export function resolveTokenFilePath(auth: ExtendedOAuthAuth, providerType: stri
     return existingPath;
   }
 
-  const nextSeq = (pt === 'qwen' && alias === 'default') ? 1 : (maxSeq + 1);
+  const nextSeq = alias === 'default' ? 1 : maxSeq + 1;
   const fileName = `${providerType}-oauth-${nextSeq}-${alias}.json`;
   const fullPath = path.join(authDir, fileName);
   auth.tokenFile = fullPath;
@@ -135,8 +107,8 @@ export function resolveCamoufoxAliasForAuth(providerType: string, auth: Extended
   const pt = String(providerType || '').trim().toLowerCase();
   if (base && pt) {
     const re = new RegExp(`^${pt}-oauth-\\d+(?:-(.+))?\\.json$`, 'i');
-    const m = base.match(re);
-    const alias = m && m[1] ? String(m[1]).trim() : '';
+    const match = base.match(re);
+    const alias = match && match[1] ? String(match[1]).trim() : '';
     if (alias) {
       return alias;
     }
@@ -149,9 +121,9 @@ export function resolveTokenAliasFromPath(tokenFilePath: string): string | undef
     return undefined;
   }
   const base = path.basename(tokenFilePath);
-  const ptMatch = base.match(/^(?:qwen|gemini|anthropic|deepseek|openai)-oauth-\d+(?:-(.+))?\.json$/i);
-  if (ptMatch && ptMatch[1]) {
-    return ptMatch[1].trim();
+  const match = base.match(/^[a-z0-9_.-]+-oauth-\d+(?:-(.+))?\.json$/i);
+  if (match && match[1]) {
+    return match[1].trim();
   }
   return undefined;
 }

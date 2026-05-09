@@ -22,7 +22,6 @@ import {
 } from '../providers/core/config/camoufox-launcher.js';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
 import { buildVirtualRouterInputFromUserConfig } from '../config/virtual-router-types.js';
-import { ensureAntigravityTokenProjectMetadata } from '../providers/auth/antigravity-userinfo-helper.js';
 import { DEFAULT_TOKEN_DAEMON } from '../constants/index.js';
 import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 
@@ -37,7 +36,6 @@ const DEBUG_ENABLED = DEBUG_FLAG === '1' || DEBUG_FLAG === 'true';
 const LOG_FLAG = String(process.env.ROUTECODEX_TOKEN_DAEMON_LOG || '').trim().toLowerCase();
 const LOG_ENABLED = LOG_FLAG === '1' || LOG_FLAG === 'true';
 
-const GEMINI_PROVIDER_IDS = new Set(['gemini-cli', 'antigravity']);
 const USER_TIMEOUT_PATTERNS = [
   'device authorization timed out',
   'authorization timed out',
@@ -190,7 +188,6 @@ export class TokenDaemon {
   private readonly configPath?: string;
   private timer: NodeJS.Timeout | null = null;
   private lastRefreshAttempt: Map<string, number> = new Map();
-  private antigravityMetadataEnsureTimestamps: Map<string, number> = new Map();
   private sessionStatsByProvider: Map<OAuthProviderId, {
     autoAttempts: number;
     autoSuccesses: number;
@@ -295,12 +292,6 @@ export class TokenDaemon {
         this.logDebug(
           `[daemon] evaluate token provider=${token.provider} alias=${token.alias} expires=${token.state.expiresAt ?? 'unknown'} remainingMs=${token.state.msUntilExpiry ?? 'unknown'} refreshToken=${token.state.hasRefreshToken}`
         );
-        if (token.provider === 'antigravity') {
-          await this.ensureAntigravityTokenMetadata(token).catch((error) => {
-            const msg = error instanceof Error ? error.message : String(error);
-            this.logDebug(`[daemon] antigravity metadata ensure failed for ${token.filePath}: ${msg}`);
-          });
-        }
         const key = buildTokenKey(token);
         const { state } = token;
         const expires = state.expiresAt;
@@ -407,13 +398,7 @@ export class TokenDaemon {
     );
 
     try {
-      if (providerType === 'antigravity') {
-        await (this as any).runAntigravityAutoAuthorization(token);
-      } else if (providerType === 'gemini-cli') {
-        await (this as any).runGeminiCliAutoAuthorization(token);
-      } else {
-        await (this as any).ensureTokenWithOverrides(token);
-      }
+      await (this as any).ensureTokenWithOverrides(token);
 
       if (LOG_ENABLED) {
         console.log(
@@ -425,10 +410,6 @@ export class TokenDaemon {
       const tokenMtimeAfter = await getTokenFileMtime(token.filePath);
       await this.recordHistoryEvent(token, 'success', startedAt, {
         tokenFileMtime: tokenMtimeAfter
-      });
-      await this.ensureAntigravityTokenMetadata(token, { force: true }).catch((error) => {
-        const msg = error instanceof Error ? error.message : String(error);
-        this.logDebug(`[daemon] antigravity metadata ensure (post-refresh) failed for ${token.filePath}: ${msg}`);
       });
     } catch (error) {
       const failureInfo = (this as any).classifyRefreshFailure(error);
@@ -479,50 +460,6 @@ export class TokenDaemon {
     }
   }
 
-  private async runAntigravityAutoAuthorization(token: TokenDescriptor): Promise<void> {
-    try {
-      await this.ensureTokenWithOverrides(token, {
-        useCamoufox: true,
-        autoMode: 'antigravity',
-        devMode: false
-      });
-      return;
-    } catch (autoError) {
-      const message = autoError instanceof Error ? autoError.message : String(autoError);
-      console.warn(
-        chalk.yellow('!'),
-        `Camoufox auto OAuth failed for antigravity (${token.displayName}): ${message}. Falling back to manual mode.`
-      );
-    }
-    await this.ensureTokenWithOverrides(token, {
-      useCamoufox: true,
-      autoMode: null,
-      devMode: true
-    });
-  }
-
-  private async runGeminiCliAutoAuthorization(token: TokenDescriptor): Promise<void> {
-    try {
-      await this.ensureTokenWithOverrides(token, {
-        useCamoufox: true,
-        autoMode: 'gemini',
-        devMode: false
-      });
-      return;
-    } catch (autoError) {
-      const message = autoError instanceof Error ? autoError.message : String(autoError);
-      console.warn(
-        chalk.yellow('!'),
-        `Camoufox auto OAuth failed for gemini-cli (${token.displayName}): ${message}. Falling back to manual mode.`
-      );
-    }
-    await this.ensureTokenWithOverrides(token, {
-      useCamoufox: true,
-      autoMode: null,
-      devMode: true
-    });
-  }
-
   private async runQwenAutoAuthorization(token: TokenDescriptor): Promise<void> {
     try {
       await this.ensureTokenWithOverrides(token, {
@@ -549,7 +486,7 @@ export class TokenDaemon {
     const rawType = `${providerType}-oauth`;
     const wantsInteractive = Boolean(camoufoxOptions?.useCamoufox);
     // IMPORTANT: Token daemon must not pop interactive OAuth during background refresh.
-    // Only explicit auto-authorization flows (qwen/gemini-cli/antigravity) opt into interactive mode via Camoufox.
+    // Only explicit auto-authorization flows opt into interactive mode via Camoufox.
     const runner = () =>
       ensureValidOAuthToken(
         providerType,
@@ -692,34 +629,6 @@ export class TokenDaemon {
     }
 
     return null;
-  }
-
-  private async ensureAntigravityTokenMetadata(
-    token: TokenDescriptor,
-    options?: { force?: boolean }
-  ): Promise<void> {
-    if (token.provider !== 'antigravity') {
-      return;
-    }
-    const filePath = token.filePath;
-    if (!filePath) {
-      return;
-    }
-    const now = Date.now();
-    const force = options?.force === true;
-    if (!force) {
-      const last = this.antigravityMetadataEnsureTimestamps.get(filePath) || 0;
-      if (now - last < DEFAULT_TOKEN_DAEMON.ANTIGRAVITY_METADATA_ENSURE_INTERVAL_MS) {
-        return;
-      }
-    }
-    const ensured = await ensureAntigravityTokenProjectMetadata(filePath);
-    if (ensured) {
-      this.antigravityMetadataEnsureTimestamps.set(filePath, now);
-    } else if (!force) {
-      // allow retry soon if ensure failed
-      this.antigravityMetadataEnsureTimestamps.delete(filePath);
-    }
   }
 
   private logDebug(message: string): void {
@@ -959,10 +868,6 @@ async function maybeMarkTokenFileNoRefresh(filePath: string): Promise<void> {
 function defaultTokenFilePath(provider: OAuthProviderId): string {
   if (provider === 'qwen') {
     return path.join(resolveRccAuthDir(), 'qwen-oauth-1-default.json');
-  }
-  if (GEMINI_PROVIDER_IDS.has(provider)) {
-    const file = provider === 'antigravity' ? 'antigravity-oauth.json' : 'gemini-oauth.json';
-    return path.join(resolveRccAuthDir(), file);
   }
   if (provider === 'deepseek-account') {
     return path.join(resolveRccAuthDir(), 'deepseek-account-default.json');

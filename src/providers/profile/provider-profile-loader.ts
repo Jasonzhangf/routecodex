@@ -69,9 +69,6 @@ function resolveProtocol(id: string, raw: UnknownRecord, moduleType?: string): P
   if (protocolAliases.gemini.has(normalized)) {
     return 'gemini';
   }
-  if (protocolAliases['gemini-cli'].has(normalized)) {
-    return 'gemini-cli';
-  }
   throw new Error(`[provider-profiles] Provider "${id}" has unsupported type "${rawType}".`);
 }
 
@@ -90,8 +87,7 @@ const protocolAliases = {
   ]),
   responses: new Set(['responses', 'openai-responses', 'responses-http']),
   anthropic: new Set(['anthropic', 'anthropic-http', 'claude', 'mimoweb', 'mimoweb-http']),
-  gemini: new Set(['gemini', 'gemini2', 'gemini-chat', 'gemini-http']),
-  'gemini-cli': new Set(['gemini-cli', 'gemini-cli-chat', 'gemini-cli-http'])
+  gemini: new Set(['gemini', 'gemini2', 'gemini-chat', 'gemini-http'])
 };
 
 function sanitizeType(value?: string): string | undefined {

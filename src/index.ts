@@ -810,23 +810,6 @@ class RouteCodexApp {
 
       console.log(`ℹ RouteCodex version: ${buildInfo.version} (${buildInfo.mode} build)`);
 
-      // Persist Antigravity thoughtSignature across restarts (default ON).
-      // This is required to avoid cold-start tool-call failures after server restarts.
-      try {
-        const { warmupAntigravitySessionSignatureModule, configureAntigravitySessionSignaturePersistence } =
-          await import('./modules/llmswitch/bridge.js');
-        const stateDir = resolveRccPath('state');
-        try {
-          fsSync.mkdirSync(stateDir, { recursive: true });
-        } catch (error) {
-          logNonBlockingError('mkdir_state_dir_for_antigravity_signature', error);
-        }
-        await warmupAntigravitySessionSignatureModule();
-        configureAntigravitySessionSignaturePersistence({ stateDir });
-      } catch (error) {
-        logNonBlockingError('configure_antigravity_signature_persistence', error);
-      }
-
       // 3. 初始化服务器（仅使用 V2 动态流水线架构）
       // Resolve host/port from merged config for V2 constructor
       let bindHost = readRecordString(getNestedRecord(userConfigRecord, ['httpserver']), 'host')
@@ -1017,12 +1000,6 @@ class RouteCodexApp {
           await this.httpServer.stop();
         }
 
-        try {
-          const { flushAntigravitySessionSignaturePersistenceSync } = await import('./modules/llmswitch/bridge.js');
-          flushAntigravitySessionSignaturePersistenceSync();
-        } catch (error) {
-          logNonBlockingError('flush_antigravity_signature_persistence', error);
-        }
 
         this._isRunning = false;
         console.log('✅ RouteCodex server stopped successfully');

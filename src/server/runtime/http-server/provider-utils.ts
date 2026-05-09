@@ -1,13 +1,12 @@
 import type { ProviderProtocol } from './types.js';
 
-type CanonicalProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'gemini-cli' | 'mock';
+type CanonicalProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'mock';
 
 const CANONICAL_PROVIDER_TYPES = new Set<CanonicalProviderType>([
   'openai',
   'responses',
   'anthropic',
   'gemini',
-  'gemini-cli',
   'mock'
 ]);
 const FAMILY_TO_CANONICAL: Record<string, CanonicalProviderType> = {
@@ -22,7 +21,6 @@ const FAMILY_TO_CANONICAL: Record<string, CanonicalProviderType> = {
   anthropic: 'anthropic',
   claude: 'anthropic',
   gemini: 'gemini',
-  'gemini-cli': 'gemini-cli',
   mock: 'mock'
 };
 
@@ -75,9 +73,6 @@ export function mapProviderModule(providerType: string): string {
   if (normalized === 'gemini') {
     return 'gemini-http-provider';
   }
-  if (normalized === 'gemini-cli') {
-    return 'gemini-cli-http-provider';
-  }
   if (normalized === 'deepseek') {
     return 'deepseek-http-provider';
   }
@@ -101,9 +96,6 @@ export function mapProviderProtocol(providerType?: string): ProviderProtocol {
   if (normalized === 'gemini') {
     return 'gemini-chat';
   }
-  if (normalized === 'gemini-cli') {
-    return 'gemini-chat';
-  }
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'lmstudio' || normalized === 'deepseek') {
     return 'openai-chat';
   }
@@ -123,9 +115,6 @@ export function defaultEndpointForProvider(providerType?: string): string {
   }
   if (normalized === 'gemini') {
     return '/v1beta/models';
-  }
-  if (normalized === 'gemini-cli') {
-    return '/v1internal:generateContent';
   }
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'lmstudio' || normalized === 'deepseek') {
     return '/v1/chat/completions';

@@ -888,6 +888,7 @@ export class ResponsesResponseBuilder {
     if (responsePayload.metadata) {
       (nextResponse as any).metadata = responsePayload.metadata;
     }
+    this.applyDerivedTopLevelOutputText(nextResponse);
     this.response = nextResponse;
     this.state = 'completed';
   }
@@ -904,6 +905,7 @@ export class ResponsesResponseBuilder {
       output: this.buildOutputItems(),
       usage: usage ?? this.response.usage
     };
+    this.applyDerivedTopLevelOutputText(this.response as ResponsesResponse);
     this.state = 'completed';
   }
   /**
@@ -937,6 +939,7 @@ export class ResponsesResponseBuilder {
     } catch {
       (this.response as any).output = this.buildOutputItems();
     }
+    this.applyDerivedTopLevelOutputText(this.response as ResponsesResponse);
     this.state = 'completed';
   }
   private buildTerminalResponseError(params: {
@@ -1012,6 +1015,7 @@ export class ResponsesResponseBuilder {
       output: Array.isArray(payload?.output) && payload.output.length ? payload.output : this.buildOutputItems(),
       usage: payload?.usage ?? this.response.usage
     };
+    this.applyDerivedTopLevelOutputText(this.response as ResponsesResponse);
     this.error = this.buildTerminalResponseError({
       payload,
       fallbackCode: 'response_failed',
@@ -1030,6 +1034,7 @@ export class ResponsesResponseBuilder {
       output: Array.isArray(payload?.output) && payload.output.length ? payload.output : this.buildOutputItems(),
       usage: payload?.usage ?? this.response.usage
     };
+    this.applyDerivedTopLevelOutputText(this.response as ResponsesResponse);
     this.error = this.buildTerminalResponseError({
       payload,
       fallbackCode: 'response_incomplete',
@@ -1146,6 +1151,35 @@ export class ResponsesResponseBuilder {
     }
     return item;
   }
+
+  private deriveTopLevelOutputText(output: ResponsesOutputItem[] | undefined): string | undefined {
+    if (!Array.isArray(output) || output.length === 0) {
+      return undefined;
+    }
+    const chunks: string[] = [];
+    for (const item of output) {
+      if (!item || item.type !== 'message' || !Array.isArray(item.content)) {
+        continue;
+      }
+      for (const part of item.content) {
+        if (!part || part.type !== 'output_text' || typeof (part as { text?: unknown }).text !== 'string') {
+          continue;
+        }
+        chunks.push((part as { text: string }).text);
+      }
+    }
+    const merged = chunks.join('');
+    return merged.length ? merged : undefined;
+  }
+
+  private applyDerivedTopLevelOutputText(response: ResponsesResponse): void {
+    const outputText = this.deriveTopLevelOutputText(response.output);
+    if (typeof outputText === 'string') {
+      (response as ResponsesResponse & { output_text?: string }).output_text = outputText;
+      return;
+    }
+    delete (response as ResponsesResponse & { output_text?: string }).output_text;
+  }
   /**
    * 获取构建结果
    */
@@ -1167,6 +1201,7 @@ export class ResponsesResponseBuilder {
       } catch {
         (this.response as any).output = this.buildOutputItems();
       }
+      this.applyDerivedTopLevelOutputText(this.response as ResponsesResponse);
       return { success: true, response: this.response as ResponsesResponse };
     }
     const salvagedOutput = this.buildOutputItems();
@@ -1177,6 +1212,7 @@ export class ResponsesResponseBuilder {
         status: 'completed',
         output: salvagedOutput
       } as ResponsesResponse;
+      this.applyDerivedTopLevelOutputText(response);
       this.response = response;
       return { success: true, response };
     }

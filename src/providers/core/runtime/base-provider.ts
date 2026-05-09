@@ -446,12 +446,8 @@ export abstract class BaseProvider implements IProviderV2 {
     const runtimeProfile = this.getRuntimeProfile();
     const providerIdRaw = runtimeProfile?.providerId || this.config.config.providerId;
     const providerId = typeof providerIdRaw === 'string' ? providerIdRaw.trim().toLowerCase() : '';
-    // 对 Gemini CLI 系列（gemini-cli / antigravity）按「providerKey+model」粒度计数，
-    // 避免同一模型系列下所有 alias 被一次 429 牵连。
-    if ((providerId === 'antigravity' ||
-      providerId === 'gemini-cli' ||
-      providerId.startsWith('antigravity.') ||
-      providerId.startsWith('gemini-cli.')) && model) {
+    // 对 Gemini 按「providerKey+model」粒度计数，避免不同模型间共享 429 计数。
+    if ((providerId === 'gemini' || providerId.startsWith('gemini.')) && model) {
       return `${providerKey}::${model}`;
     }
     return providerKey;

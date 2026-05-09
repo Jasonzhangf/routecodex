@@ -17,11 +17,11 @@ async function main() {
 
   const nativeParsed = hotpath.analyzeProviderKey('iflow.3-138.kimi-k2.5');
   assert.equal(nativeParsed.providerId, 'iflow');
-  assert.equal(nativeParsed.alias, '138');
+  assert.equal(nativeParsed.alias, '3-138');
   assert.equal(nativeParsed.source, 'native');
 
   const aliasWithPrefix = keyParsing.extractKeyAlias('openai.3-main.gpt-5.2');
-  assert.equal(aliasWithPrefix, 'main');
+  assert.equal(aliasWithPrefix, '3-main');
   assert.equal(keyParsing.extractProviderId('openai.3-main.gpt-5.2'), 'openai');
   assert.equal(keyParsing.extractKeyIndex('tabglm.12'), 12);
   assert.equal(keyParsing.extractKeyIndex('tabglm.12.extra'), undefined);
@@ -42,7 +42,7 @@ async function main() {
 
   // engine/provider-key/parse.ts now reuses engine-selection/key-parsing.ts
   assert.equal(engineParse.extractProviderId('openai.3-main.gpt-5.2'), 'openai');
-  assert.equal(engineParse.extractKeyAlias('openai.3-main.gpt-5.2'), 'main');
+  assert.equal(engineParse.extractKeyAlias('openai.3-main.gpt-5.2'), '3-main');
   assert.equal(engineParse.extractKeyIndex('tabglm.12'), 12);
 
   console.log('✅ virtual-router-provider-key-native passed');

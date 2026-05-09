@@ -1,42 +1,5 @@
-import { homedir } from 'node:os';
-
 import type { ManagerContext, ManagerModule } from '../../types.js';
-import type { AntigravityQuotaSnapshot } from '../../../providers/core/runtime/antigravity-quota-client.js';
-import * as llmsBridge from '../../../modules/llmswitch/bridge.js';
-import type { StaticQuotaConfig } from '../../../modules/llmswitch/bridge.js';
-import {
-  assertCoreQuotaManagerApis,
-  type CoreQuotaManager
-} from './antigravity-quota-core.js';
-import {
-  buildAntigravitySnapshotKey,
-  computeResetAt,
-  extractAntigravityAlias,
-  isAntigravityModelProtected,
-  parseAntigravityProviderKey,
-  parseAntigravitySnapshotKey,
-  readProtectedModelsFromTokenFile
-} from './antigravity-quota-helpers.js';
-import {
-  createQuotaStore,
-  loadAntigravitySnapshotFromDisk,
-  saveAntigravitySnapshotToDisk,
-  type QuotaRecordLike,
-  type QuotaStorePersistenceStatus
-} from './antigravity-quota-persistence.js';
-import {
-  applyAntigravityQuotaToCore,
-  refreshAllAntigravityQuotas,
-  syncAntigravityTokensFromDisk,
-  type AntigravityTokenRegistration
-} from './antigravity-quota-sync.js';
-import {
-  getSnapshotRecordByAliasAndModel,
-  handleQuotaPersistenceIssue,
-  reconcileProtectedStates,
-  scheduleNextRefresh as scheduleNextQuotaRefresh,
-  subscribeToProviderIngress as subscribeQuotaProviderIngress
-} from './antigravity-quota-runtime.js';
+import { ProviderQuotaDaemonModule } from './provider-quota-daemon.js';
 
 export interface QuotaRecord {
   remainingFraction: number | null;
@@ -51,603 +14,72 @@ type RoutingProviderScope = {
   oauthProviderIds?: string[];
 };
 
-const ANTIGRAVITY_PROTECTED_REASON = 'protected';
-
-function logQuotaManagerNonBlockingError(operation: string, error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error);
-  console.warn(`[quota-manager] ${operation} failed (non-blocking): ${message}`);
-}
-
 export class QuotaManagerModule implements ManagerModule {
   readonly id = 'quota';
-  private snapshot: Record<string, QuotaRecord> = {};
-  private antigravityTokens: Map<string, AntigravityTokenRegistration> = new Map();
-  private antigravityProtectedModels: Map<string, Set<string>> = new Map();
-  private registeredProviderKeys: Set<string> = new Set();
-  private refreshTimer: NodeJS.Timeout | null = null;
-  private quotaRoutingEnabled = true;
-  private refreshFailures = 0;
-  private refreshDisabled = false;
-  private providerErrorUnsub: (() => void) | null = null;
-  private providerSuccessUnsub: (() => void) | null = null;
-  private quotaStorePersistenceStatus: QuotaStorePersistenceStatus = 'unknown';
-  private quotaStoreLastUnbindReason: string | null = null;
-  private coreQuotaManager: CoreQuotaManager | null = null;
-  private quotaStorePath: string | null = null;
-  private started = false;
-  private routingScopeResolved = false;
-  private routedProviderKeys: Set<string> = new Set();
-  private routedOAuthProviderKeys: Set<string> = new Set();
-  private resolveHomeDir(): string {
-    const envHome = typeof process.env.HOME === 'string' ? process.env.HOME.trim() : '';
-    if (envHome) {
-      return envHome;
-    }
-    return homedir();
-  }
+  private readonly delegate = new ProviderQuotaDaemonModule();
+
   async init(context: ManagerContext): Promise<void> {
-    this.snapshot = loadAntigravitySnapshotFromDisk(() => this.resolveHomeDir()) as Record<string, QuotaRecord>;
-    this.quotaRoutingEnabled = context.quotaRoutingEnabled !== false;
-    try {
-      await this.syncAntigravityTokensFromDisk();
-    } catch (error) {
-      logQuotaManagerNonBlockingError('init.syncAntigravityTokensFromDisk', error);
-    }
-    if (!this.quotaRoutingEnabled) {
-      this.coreQuotaManager = null;
-      return;
-    }
-    const store = createQuotaStore({
-      resolveHomeDir: () => this.resolveHomeDir(),
-      onStorePath: (filePath: string) => {
-        this.quotaStorePath = filePath;
-      },
-      onStatus: (status: QuotaStorePersistenceStatus) => {
-        this.quotaStorePersistenceStatus = status;
-        if (status === 'loaded') {
-          this.quotaStoreLastUnbindReason = null;
-        }
-      },
-      onSessionUnbindIssue: (reason: string) => {
-        this.handleSessionUnbindForQuotaPersistenceIssue(reason);
-      }
-    });
-    this.coreQuotaManager = (await llmsBridge.createCoreQuotaManager({ store })) as any;
-    assertCoreQuotaManagerApis(this.coreQuotaManager as any);
-    if (this.coreQuotaManager && typeof this.coreQuotaManager.hydrateFromStore === 'function') {
-      await this.coreQuotaManager.hydrateFromStore().catch((error) => {
-        logQuotaManagerNonBlockingError('init.hydrateFromStore', error);
-      });
-    }
-    if (this.quotaStorePersistenceStatus === 'missing' || this.quotaStorePersistenceStatus === 'load_error') {
-      this.handleSessionUnbindForQuotaPersistenceIssue(`quota_store_${this.quotaStorePersistenceStatus}`);
-    }
-    try {
-      const nowMs = Date.now();
-      for (const [key, record] of Object.entries(this.snapshot)) {
-        const parsed = parseAntigravitySnapshotKey(key);
-        if (!parsed) {
-          continue;
-        }
-        applyAntigravityQuotaToCore({
-          coreQuotaManager: this.coreQuotaManager,
-          providerKey: `antigravity.${parsed.alias}.${parsed.modelId}`,
-          record,
-          nowMs,
-          protectedReason: ANTIGRAVITY_PROTECTED_REASON,
-          isProviderProtected: (providerKey: string) => this.isAntigravityProviderProtected(providerKey)
-        });
-      }
-      this.reconcileProtectedStatesForRegisteredProviders();
-    } catch (error) {
-      logQuotaManagerNonBlockingError('init.applySnapshotToCore', error);
-    }
+    await this.delegate.init(context);
   }
-  start(): Promise<void> | void {
-    this.started = true;
-    if (!this.quotaRoutingEnabled) {
-      return;
-    }
-    if (!this.routingScopeResolved) {
-      return;
-    }
-    if (this.routedProviderKeys.size > 0 && (!this.providerErrorUnsub || !this.providerSuccessUnsub)) {
-      try {
-        void this.subscribeToProviderIngress();
-      } catch (error) {
-        logQuotaManagerNonBlockingError('start.subscribeToProviderIngress', error);
-      }
-    }
-    if (this.routedOAuthProviderKeys.size === 0) {
-      console.log('[quota-manager] skip background refresh: no routed oauth providers');
-      return;
-    }
-    const refreshPromise = this.refreshAllAntigravityQuotas()
-      .then((result) => {
-        if (result.attempted > 0 && result.successCount === 0) {
-          this.refreshFailures = 1;
-        } else if (result.successCount > 0) {
-          this.refreshFailures = 0;
-        }
-      })
-      .catch((error) => {
-        logQuotaManagerNonBlockingError('start.refreshAllAntigravityQuotas', error);
-      });
-    void this.scheduleNextRefresh().catch((error) => {
-      logQuotaManagerNonBlockingError('start.scheduleNextRefresh', error);
-    });
-    if (process.env.JEST_WORKER_ID || process.env.NODE_ENV === 'test') {
-      return refreshPromise;
-    }
+
+  async start(): Promise<void> {
+    await this.delegate.start();
+  }
+
+  async stop(): Promise<void> {
+    await this.delegate.stop();
+  }
+
+  async updateRoutingScope(_scope?: RoutingProviderScope): Promise<void> {
     return;
   }
-  async stop(): Promise<void> {
-    this.started = false;
-    if (this.refreshTimer) {
-      clearTimeout(this.refreshTimer);
-      this.refreshTimer = null;
-    }
-    if (this.providerErrorUnsub) {
-      try {
-        this.providerErrorUnsub();
-      } catch (error) {
-        logQuotaManagerNonBlockingError('stop.providerErrorUnsub', error);
-      }
-      this.providerErrorUnsub = null;
-    }
-    if (this.providerSuccessUnsub) {
-      try {
-        this.providerSuccessUnsub();
-      } catch (error) {
-        logQuotaManagerNonBlockingError('stop.providerSuccessUnsub', error);
-      }
-      this.providerSuccessUnsub = null;
-    }
-    try {
-      if (this.coreQuotaManager && typeof this.coreQuotaManager.persistNow === 'function') {
-        await this.coreQuotaManager.persistNow();
-      }
-    } catch (error) {
-      logQuotaManagerNonBlockingError('stop.persistNow', error);
-    }
-    void this.saveSnapshotToDisk().catch((error) => {
-      logQuotaManagerNonBlockingError('stop.saveSnapshotToDisk', error);
-    });
-  }
-  async updateRoutingScope(scope?: RoutingProviderScope): Promise<void> {
-    this.routingScopeResolved = true;
-    this.routedProviderKeys = normalizeScopeSet(scope?.providerKeys);
-    this.routedOAuthProviderKeys = normalizeScopeSet(scope?.oauthProviderKeys);
-    this.pruneRegisteredProvidersToRoutingScope();
 
-    if (!this.started) {
-      return;
-    }
-    if (!this.quotaRoutingEnabled || this.routedProviderKeys.size === 0) {
-      if (this.refreshTimer) {
-        clearTimeout(this.refreshTimer);
-        this.refreshTimer = null;
-      }
-      if (this.providerErrorUnsub) {
-        try {
-          this.providerErrorUnsub();
-        } catch (error) {
-          logQuotaManagerNonBlockingError('updateRoutingScope.providerErrorUnsub', error);
-        }
-        this.providerErrorUnsub = null;
-      }
-      if (this.providerSuccessUnsub) {
-        try {
-          this.providerSuccessUnsub();
-        } catch (error) {
-          logQuotaManagerNonBlockingError('updateRoutingScope.providerSuccessUnsub', error);
-        }
-        this.providerSuccessUnsub = null;
-      }
-      return;
-    }
-    if (!this.providerErrorUnsub || !this.providerSuccessUnsub) {
-      try {
-        await this.subscribeToProviderIngress();
-      } catch (error) {
-        logQuotaManagerNonBlockingError('updateRoutingScope.subscribeToProviderIngress', error);
-      }
-    }
-    if (this.routedOAuthProviderKeys.size === 0) {
-      if (this.refreshTimer) {
-        clearTimeout(this.refreshTimer);
-        this.refreshTimer = null;
-      }
-      return;
-    }
-    try {
-      const result = await this.refreshAllAntigravityQuotas();
-      if (result.attempted > 0 && result.successCount === 0) {
-        this.refreshFailures = 1;
-      } else if (result.successCount > 0) {
-        this.refreshFailures = 0;
-      }
-    } catch (error) {
-      logQuotaManagerNonBlockingError('updateRoutingScope.refreshAllAntigravityQuotas', error);
-    }
-    if (!this.refreshTimer) {
-      try {
-        await this.scheduleNextRefresh();
-      } catch (error) {
-        logQuotaManagerNonBlockingError('updateRoutingScope.scheduleNextRefresh', error);
-      }
-    }
-  }
   async refreshNow(): Promise<{ refreshedAt: number; tokenCount: number; recordCount: number }> {
-    const refreshedAt = Date.now();
-    try {
-      const result = await this.refreshAllAntigravityQuotas();
-      if (result.successCount > 0) {
-        this.refreshFailures = 0;
-        this.refreshDisabled = false;
-      }
-    } catch (error) {
-      logQuotaManagerNonBlockingError('refreshNow.refreshAllAntigravityQuotas', error);
-    }
-    try {
-      void this.scheduleNextRefresh();
-    } catch (error) {
-      logQuotaManagerNonBlockingError('refreshNow.scheduleNextRefresh', error);
-    }
+    const snapshot = this.delegate.getAdminSnapshot();
     return {
-      refreshedAt,
-      tokenCount: this.antigravityTokens.size,
-      recordCount: Object.keys(this.snapshot).length
+      refreshedAt: Date.now(),
+      tokenCount: 0,
+      recordCount: Object.keys(snapshot).length
     };
   }
-  async reset(): Promise<{ refreshedAt: number; tokenCount: number; recordCount: number }> {
-    return await this.refreshNow();
-  }
-  registerAntigravityToken(alias: string, tokenFile: string, apiBase: string): void {
-    const cleanAlias = alias.trim();
-    const cleanToken = tokenFile.trim();
-    const cleanBase = apiBase.trim();
-    if (!cleanAlias || !cleanToken || !cleanBase) {
-      return;
-    }
-    this.antigravityTokens.set(cleanAlias, {
-      alias: cleanAlias,
-      tokenFile: cleanToken,
-      apiBase: cleanBase
-    });
-    void readProtectedModelsFromTokenFile(cleanToken)
-      .then((protectedModels) => {
-        if (protectedModels.size > 0) {
-          this.antigravityProtectedModels.set(cleanAlias, protectedModels);
-        } else {
-          this.antigravityProtectedModels.delete(cleanAlias);
-        }
-        this.reconcileProtectedStatesForRegisteredProviders();
-      })
-      .catch((error) => {
-        logQuotaManagerNonBlockingError(`registerAntigravityToken.readProtectedModels:${cleanAlias}`, error);
-      });
-  }
-  updateAntigravityQuota(alias: string, quota: AntigravityQuotaSnapshot): void {
-    const aliasId = alias.trim();
-    if (!aliasId) {
-      return;
-    }
-    const now = Date.now();
-    const next: Record<string, QuotaRecord> = { ...this.snapshot };
-    for (const [modelId, info] of Object.entries(quota.models)) {
-      const key = buildAntigravitySnapshotKey(aliasId, modelId);
-      const record: QuotaRecord = {
-        remainingFraction: Number.isFinite(info.remainingFraction) ? info.remainingFraction : null,
-        fetchedAt: quota.fetchedAt
-      };
-      const resetAt = computeResetAt(info.resetTimeRaw);
-      if (resetAt) {
-        record.resetAt = resetAt;
-      }
-      next[key] = record;
-      applyAntigravityQuotaToCore({
-        coreQuotaManager: this.coreQuotaManager,
-        providerKey: `antigravity.${aliasId}.${modelId}`,
-        record,
-        nowMs: now,
-        protectedReason: ANTIGRAVITY_PROTECTED_REASON,
-        isProviderProtected: (providerKey: string) => this.isAntigravityProviderProtected(providerKey)
-      });
-    }
-    this.snapshot = next;
-    void this.saveSnapshotToDisk().catch((error) => {
-      logQuotaManagerNonBlockingError('updateAntigravityQuota.saveSnapshotToDisk', error);
-    });
-  }
-  hasQuotaForAntigravity(providerKey: string, modelId?: string): boolean {
-    const alias = extractAntigravityAlias(providerKey);
-    if (!alias || !modelId) {
-      return true;
-    }
-    if (this.isAntigravityModelProtected(alias, modelId)) {
-      return false;
-    }
-    const key = buildAntigravitySnapshotKey(alias, modelId);
-    const record = this.snapshot[key];
-    if (!record) {
-      return false;
-    }
-    const now = Date.now();
-    if (record.resetAt && record.resetAt <= now) {
-      return false;
-    }
-    if (record.remainingFraction === null) {
-      return false;
-    }
-    return record.remainingFraction > 0;
-  }
+
   getRawSnapshot(): Record<string, QuotaRecord> {
-    return { ...this.snapshot };
+    return {};
   }
-  getQuotaView(): (providerKey: string) => unknown {
-    const mgr = this.coreQuotaManager;
-    if (!mgr || typeof mgr.getQuotaView !== 'function') {
-      return () => null;
-    }
-    try {
-      return mgr.getQuotaView();
-    } catch (error) {
-      logQuotaManagerNonBlockingError('getQuotaView', error);
-      return () => null;
-    }
-  }
-  getQuotaViewReadOnly(): (providerKey: string) => unknown {
-    return this.getQuotaView();
-  }
-  getAdminSnapshot(): Record<string, unknown> {
-    const mgr = this.coreQuotaManager;
-    const snap = mgr && typeof mgr.getSnapshot === 'function' ? (mgr.getSnapshot() as any) : null;
-    const providers =
-      snap && typeof snap === 'object' && snap.providers && typeof snap.providers === 'object'
-        ? (snap.providers as Record<string, unknown>)
-        : {};
-    return providers;
-  }
-  getCoreQuotaManager(): typeof this.coreQuotaManager | null {
-    return this.quotaRoutingEnabled ? (this.coreQuotaManager as typeof this.coreQuotaManager) : null;
-  }
-  registerProviderStaticConfig(
-    providerKey: string,
-    config: { authType?: string | null; priorityTier?: number | null; apikeyDailyResetTime?: string | null } = {}
-  ): void {
-    const key = typeof providerKey === 'string' ? providerKey.trim() : '';
-    if (!key) return;
-    if (this.routingScopeResolved && !this.routedProviderKeys.has(key.toLowerCase())) {
-      return;
-    }
-    const authType = typeof config.authType === 'string' ? config.authType.trim().toLowerCase() : '';
-    const priorityTier =
-      typeof config.priorityTier === 'number' && Number.isFinite(config.priorityTier)
-        ? Math.floor(config.priorityTier)
-        : undefined;
-    const apikeyDailyResetTime =
-      typeof config.apikeyDailyResetTime === 'string' && config.apikeyDailyResetTime.trim().length
-        ? config.apikeyDailyResetTime.trim()
-        : undefined;
-    const cfg: StaticQuotaConfig = {
-      ...(priorityTier !== undefined ? { priorityTier } : {}),
-      ...(authType === 'apikey' || authType === 'oauth' ? { authType: authType as any } : {}),
-      ...(apikeyDailyResetTime ? { apikeyDailyResetTime } : {})
-    };
-    this.registeredProviderKeys.add(key);
-    try {
-      this.coreQuotaManager?.registerProviderStaticConfig?.(key, cfg);
-      this.reconcileProtectedStatesForRegisteredProviders();
-    } catch (error) {
-      logQuotaManagerNonBlockingError(`registerProviderStaticConfig:${key}`, error);
-    }
-  }
-  async disableProvider(options: {
-    providerKey: string;
-    mode: 'cooldown' | 'blacklist';
-    durationMs: number;
-  }): Promise<unknown> {
-    const mgr = this.coreQuotaManager;
-    if (!mgr) {
-      throw new Error('core quota manager not available');
-    }
-    (mgr as any).disableProvider({ ...options });
-    await mgr.persistNow?.().catch((error) => {
-      logQuotaManagerNonBlockingError(`disableProvider.persistNow:${options.providerKey}`, error);
-    });
-    return { ok: true };
-  }
-  async recoverProvider(providerKey: string): Promise<unknown> {
-    const mgr = this.coreQuotaManager;
-    if (!mgr) {
-      throw new Error('core quota manager not available');
-    }
-    (mgr as any).recoverProvider(providerKey);
-    await mgr.persistNow?.().catch((error) => {
-      logQuotaManagerNonBlockingError(`recoverProvider.persistNow:${providerKey}`, error);
-    });
-    return { ok: true };
-  }
-  async resetProvider(providerKey: string): Promise<unknown> {
-    const mgr = this.coreQuotaManager;
-    if (!mgr) {
-      throw new Error('core quota manager not available');
-    }
-    (mgr as any).resetProvider(providerKey);
-    await mgr.persistNow?.().catch((error) => {
-      logQuotaManagerNonBlockingError(`resetProvider.persistNow:${providerKey}`, error);
-    });
-    return { ok: true };
-  }
-  private isAntigravityModelProtected(alias: string, modelId: string): boolean {
-    return isAntigravityModelProtected(this.antigravityProtectedModels, alias, modelId);
-  }
-  private isAntigravityProviderProtected(providerKey: string): boolean {
-    const parsed = parseAntigravityProviderKey(providerKey);
-    if (!parsed) {
-      return false;
-    }
-    return this.isAntigravityModelProtected(parsed.alias, parsed.modelId);
-  }
-  private resolveRegisteredAntigravityAliases(): Set<string> {
-    const allowed = new Set<string>();
-    for (const providerKey of this.registeredProviderKeys) {
-      const alias = extractAntigravityAlias(providerKey);
-      if (alias) {
-        allowed.add(alias);
-      }
-    }
-    return allowed;
-  }
-  private reconcileProtectedStatesForRegisteredProviders(): void {
-    reconcileProtectedStates({
-      coreQuotaManager: this.coreQuotaManager,
-      protectedReason: ANTIGRAVITY_PROTECTED_REASON,
-      registeredProviderKeys: this.registeredProviderKeys,
-      adminSnapshot: this.getAdminSnapshot(),
-      isModelProtected: (alias: string, modelId: string) => this.isAntigravityModelProtected(alias, modelId),
-      getSnapshotRecord: (alias: string, modelId: string) =>
-        getSnapshotRecordByAliasAndModel(this.snapshot, alias, modelId),
-      applyQuotaRecord: (providerKey: string, record: QuotaRecordLike) => {
-        applyAntigravityQuotaToCore({
-          coreQuotaManager: this.coreQuotaManager,
-          providerKey,
-          record,
-          nowMs: Date.now(),
-          protectedReason: ANTIGRAVITY_PROTECTED_REASON,
-          isProviderProtected: (key: string) => this.isAntigravityProviderProtected(key)
-        });
-      }
-    });
-  }
-  private async refreshAllAntigravityQuotas(): Promise<{ attempted: number; successCount: number; failureCount: number }> {
-    return await refreshAllAntigravityQuotas({
-      tokens: this.antigravityTokens,
-      allowedAliases: this.resolveRegisteredAntigravityAliases(),
-      syncTokensFromDisk: async () => {
-        await this.syncAntigravityTokensFromDisk();
-      },
-      updateAntigravityQuota: (alias: string, quota: AntigravityQuotaSnapshot) => {
-        this.updateAntigravityQuota(alias, quota);
-      }
-    });
-  }
-  private handleSessionUnbindForQuotaPersistenceIssue(reason: string): void {
-    this.quotaStoreLastUnbindReason = handleQuotaPersistenceIssue({
-      reason,
-      lastReason: this.quotaStoreLastUnbindReason,
-      quotaStorePath: this.quotaStorePath,
-      clearSessionAliasPins: () => llmsBridge.clearAntigravitySessionAliasPins?.({ hydrate: true })
-    });
-  }
-  private async subscribeToProviderIngress(): Promise<void> {
-    const { providerErrorUnsub, providerSuccessUnsub } = await subscribeQuotaProviderIngress({
-      bridge: llmsBridge,
-      coreQuotaManager: this.coreQuotaManager
-    });
-    this.providerErrorUnsub = providerErrorUnsub;
-    this.providerSuccessUnsub = providerSuccessUnsub;
-  }
-  private async scheduleNextRefresh(): Promise<void> {
-    this.refreshTimer = scheduleNextQuotaRefresh({
-      currentTimer: this.refreshTimer,
-      getRefreshDisabled: () => this.refreshDisabled,
-      getRefreshFailures: () => this.refreshFailures,
-      refreshAllAntigravityQuotas: () => this.refreshAllAntigravityQuotas(),
-      onRefreshFailuresChange: (nextFailures: number) => {
-        this.refreshFailures = nextFailures;
-      },
-      onRefreshDisabledChange: (nextDisabled: boolean) => {
-        this.refreshDisabled = nextDisabled;
-      },
-      onReschedule: () => {
-        void this.scheduleNextRefresh().catch((error) => {
-          logQuotaManagerNonBlockingError('scheduleNextRefresh.onReschedule', error);
-        });
-      }
-    });
-  }
-  private async syncAntigravityTokensFromDisk(): Promise<void> {
-    const result = await syncAntigravityTokensFromDisk({
-      currentTokens: this.antigravityTokens,
-      currentSnapshot: this.snapshot as Record<string, QuotaRecordLike>,
-      parseSnapshotKey: parseAntigravitySnapshotKey,
-      readProtectedModelsFromTokenFile
-    });
-    this.antigravityTokens = result.tokens;
-    this.antigravityProtectedModels = result.protectedModels;
-    this.snapshot = result.snapshot as Record<string, QuotaRecord>;
-    if (result.snapshotChanged) {
-      void this.saveSnapshotToDisk().catch((error) => {
-        logQuotaManagerNonBlockingError('syncAntigravityTokensFromDisk.saveSnapshotToDisk', error);
-      });
-    }
-    this.reconcileProtectedStatesForRegisteredProviders();
-  }
-  private async saveSnapshotToDisk(): Promise<void> {
-    await saveAntigravitySnapshotToDisk(
-      () => this.resolveHomeDir(),
-      this.snapshot as Record<string, QuotaRecordLike>
-    );
-  }
-  private pruneRegisteredProvidersToRoutingScope(): void {
-    if (this.routedProviderKeys.size === 0) {
-      this.registeredProviderKeys.clear();
-      this.antigravityTokens.clear();
-      this.antigravityProtectedModels.clear();
-      return;
-    }
-    const nextRegistered = new Set<string>();
-    for (const key of this.registeredProviderKeys) {
-      if (this.routedProviderKeys.has(key.toLowerCase())) {
-        nextRegistered.add(key);
-      }
-    }
-    this.registeredProviderKeys = nextRegistered;
 
-    const allowedAliases = this.resolveRegisteredAntigravityAliases();
-    const nextTokens = new Map<string, AntigravityTokenRegistration>();
-    for (const [alias, registration] of this.antigravityTokens.entries()) {
-      if (allowedAliases.has(alias)) {
-        nextTokens.set(alias, registration);
-      }
-    }
-    this.antigravityTokens = nextTokens;
-
-    const nextProtectedModels = new Map<string, Set<string>>();
-    for (const [alias, protectedModels] of this.antigravityProtectedModels.entries()) {
-      if (allowedAliases.has(alias)) {
-        nextProtectedModels.set(alias, protectedModels);
-      }
-    }
-    this.antigravityProtectedModels = nextProtectedModels;
-
-    const nextSnapshot: Record<string, QuotaRecord> = {};
-    for (const [snapshotKey, record] of Object.entries(this.snapshot)) {
-      const parsed = parseAntigravitySnapshotKey(snapshotKey);
-      if (!parsed || allowedAliases.has(parsed.alias)) {
-        nextSnapshot[snapshotKey] = record;
-      }
-    }
-    this.snapshot = nextSnapshot;
+  getCoreQuotaManager(): null {
+    return null;
   }
-}
 
-function normalizeScopeSet(values: string[] | undefined): Set<string> {
-  const out = new Set<string>();
-  if (!Array.isArray(values)) {
-    return out;
+  registerProviderStaticConfig(providerKey: string, config: { authType?: string | null; priorityTier?: number | null; apikeyDailyResetTime?: string | null } = {}): void {
+    this.delegate.registerProviderStaticConfig(providerKey, config);
   }
-  for (const value of values) {
-    if (typeof value !== 'string') {
-      continue;
-    }
-    const trimmed = value.trim().toLowerCase();
-    if (!trimmed) {
-      continue;
-    }
-    out.add(trimmed);
+
+  getQuotaView(): ReturnType<ProviderQuotaDaemonModule['getQuotaView']> {
+    return this.delegate.getQuotaView();
   }
-  return out;
+
+  getQuotaViewReadOnly(): ReturnType<ProviderQuotaDaemonModule['getQuotaViewReadOnly']> {
+    return this.delegate.getQuotaViewReadOnly();
+  }
+
+  getAdminSnapshot(): ReturnType<ProviderQuotaDaemonModule['getAdminSnapshot']> {
+    return this.delegate.getAdminSnapshot();
+  }
+
+  async persistNow(): Promise<void> {
+    return;
+  }
+
+  async resetProvider(providerKey: string): Promise<{ providerKey: string; state: unknown } | null> {
+    return await this.delegate.resetProvider(providerKey);
+  }
+
+  async recoverProvider(providerKey: string): Promise<{ providerKey: string; state: unknown } | null> {
+    return await this.delegate.recoverProvider(providerKey);
+  }
+
+  async disableProvider(options: { providerKey: string; mode: 'cooldown' | 'blacklist'; durationMs: number }): Promise<{ providerKey: string; state: unknown } | null> {
+    return await this.delegate.disableProvider(options);
+  }
 }

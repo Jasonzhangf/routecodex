@@ -195,22 +195,13 @@ function inferRuntimeOnlyBinding(
   authType: string
 ): ProviderCatalogSdkBinding | undefined {
   const runtimeOnlyAuths = new Set([
-    'antigravity-oauth',
-    'deepseek-account',
-    'gemini-cli-oauth'
+    'deepseek-account'
   ]);
   if (runtimeOnlyAuths.has(authType)) {
     return {
       family: 'custom-runtime',
       supported: false,
       notes: `Provider auth "${authType}" requires the existing RouteCodex runtime path.`
-    };
-  }
-  if (providerType === 'gemini-cli-http-provider' || providerType === 'gemini-cli') {
-    return {
-      family: 'custom-runtime',
-      supported: false,
-      notes: `Provider type "${providerType || providerId}" requires the existing RouteCodex runtime path.`
     };
   }
   return undefined;

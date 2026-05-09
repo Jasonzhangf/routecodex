@@ -1064,6 +1064,7 @@ describe('Responses协议转换器测试', () => {
       const messageOutput = reconstructedResponse.output.find(o => o.type === 'message');
       const originalMessage = originalResponse.output.find(o => o.type === 'message');
       expect(messageOutput?.content[0].text).toBe(originalMessage?.content[0].text);
+      expect((reconstructedResponse as any).output_text).toBe('This is a comprehensive response that includes multiple types of content.');
 
       // 验证工具调用
       const funcOutput = reconstructedResponse.output.find(o => o.type === 'function_call');
@@ -1120,6 +1121,7 @@ describe('Responses协议转换器测试', () => {
       const message = response.output.find(item => item.type === 'message');
       expect(message).toBeDefined();
       expect((message as any)?.content?.[0]?.text).toContain('partial response text');
+      expect((response as any).output_text).toContain('partial response text');
     });
 
     it('应该在缺少completed/done但function_call参数已完整时返回incomplete', async () => {

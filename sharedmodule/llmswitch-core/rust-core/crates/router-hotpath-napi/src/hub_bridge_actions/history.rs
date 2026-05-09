@@ -780,14 +780,29 @@ fn clone_non_empty_object(value: Option<&Value>) -> Option<Map<String, Value>> {
     Some(record)
 }
 
+fn strip_tool_control_fields(mut record: Map<String, Value>) -> Option<Map<String, Value>> {
+    record.remove("tool_choice");
+    record.remove("parallel_tool_calls");
+    if record.is_empty() {
+        return None;
+    }
+    Some(record)
+}
+
 fn merge_parameter_sources(
     context: Option<&Value>,
     chat: Option<&Value>,
     metadata: Option<&Value>,
 ) -> Option<Map<String, Value>> {
     let mut merged = Map::new();
-    for source in [metadata, chat, context] {
-        if let Some(record) = clone_non_empty_object(source) {
+    for (source, preserve_tool_controls) in [(metadata, false), (chat, true), (context, false)] {
+        if let Some(record) = clone_non_empty_object(source).and_then(|record| {
+            if preserve_tool_controls {
+                Some(record)
+            } else {
+                strip_tool_control_fields(record)
+            }
+        }) {
             for (key, value) in record {
                 merged.insert(key, value);
             }
@@ -926,27 +941,31 @@ pub(crate) fn prepare_responses_request_envelope(
         }
     }
 
-    upsert_direct_override(
-        &mut request,
-        "tool_choice",
-        input.metadata_tool_choice.as_ref(),
-    );
-    upsert_direct_override(
-        &mut request,
-        "tool_choice",
-        input.context_tool_choice.as_ref(),
-    );
+    if !request.contains_key("tool_choice") {
+        upsert_direct_override(
+            &mut request,
+            "tool_choice",
+            input.metadata_tool_choice.as_ref(),
+        );
+        upsert_direct_override(
+            &mut request,
+            "tool_choice",
+            input.context_tool_choice.as_ref(),
+        );
+    }
 
-    upsert_direct_override(
-        &mut request,
-        "parallel_tool_calls",
-        input.metadata_parallel_tool_calls.as_ref(),
-    );
-    upsert_direct_override(
-        &mut request,
-        "parallel_tool_calls",
-        input.context_parallel_tool_calls.as_ref(),
-    );
+    if !request.contains_key("parallel_tool_calls") {
+        upsert_direct_override(
+            &mut request,
+            "parallel_tool_calls",
+            input.metadata_parallel_tool_calls.as_ref(),
+        );
+        upsert_direct_override(
+            &mut request,
+            "parallel_tool_calls",
+            input.context_parallel_tool_calls.as_ref(),
+        );
+    }
 
     upsert_direct_override(
         &mut request,

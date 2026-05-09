@@ -204,13 +204,7 @@ export async function processSuccessfulProviderResponse(args: {
       convertedStatus === 408 ||
       convertedStatus === 425 ||
       convertedStatus >= 500);
-  const isGeminiCompatFailure =
-    typeof convertedStatus === 'number' &&
-    convertedStatus >= 400 &&
-    (args.providerKey.startsWith('gemini-cli.') || args.providerKey.includes('antigravity')) &&
-    args.providerProtocol === 'gemini-chat';
-
-  if (isGlobalRetryableStatus || isGeminiCompatFailure) {
+  if (isGlobalRetryableStatus) {
     throwProviderHttpError(args.converted);
   }
 

@@ -46,18 +46,10 @@ import {
   mergeUsageMetrics
 } from './executor/usage-aggregator.js';
 import {
-  type AntigravityRetrySignal,
   bindSessionConversationSession,
-  extractRetryErrorSignature,
   extractStatusCodeFromError,
-  injectAntigravityRetrySignal,
-  isAntigravityProviderKey,
-  isAntigravityReauthRequired403,
-  isGoogleAccountVerificationRequiredError,
   isSseDecodeRetryableNetworkError,
-  isSseDecodeRateLimitError,
-  resolveAntigravityMaxProviderAttempts,
-  shouldRotateAntigravityAliasOnRetry
+  isSseDecodeRateLimitError
 } from './executor/request-retry-helpers.js';
 import {
   extractProviderModel,
@@ -225,7 +217,6 @@ export interface RequestExecutor {
 
 type RequestExecutorFailureState = {
   lastError: unknown;
-  antigravityRetrySignal: AntigravityRetrySignal | null;
   blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
   allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
   forcedRouteHint?: string;
@@ -253,7 +244,6 @@ function applySendFailureState(
   state: RequestExecutorFailureState,
   failure: {
     lastError: unknown;
-    antigravityRetrySignal: AntigravityRetrySignal | null;
     blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
     allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
     forcedRouteHint?: string;
@@ -264,7 +254,6 @@ function applySendFailureState(
   return {
     ...state,
     lastError: failure.lastError,
-    antigravityRetrySignal: failure.antigravityRetrySignal,
     blockingRecoverableRouteHoldState: failure.blockingRecoverableRouteHoldState,
     allowBlockingRecoverableRetryBeyondAttemptBudget: failure.allowBlockingRecoverableRetryBeyondAttemptBudget,
     forcedRouteHint: failure.forcedRouteHint,
@@ -395,7 +384,6 @@ export class HubRequestExecutor implements RequestExecutor {
         let allowBlockingRecoverableRetryBeyondAttemptBudget = false;
         let lastError: unknown;
         let initialRoutePool: string[] | null = null;
-        let antigravityRetrySignal: AntigravityRetrySignal | null = null;
         let poolCooldownWaitBudgetMs = 60 * 1000;
         let forcedRouteHint: string | undefined;
         let contextOverflowRetries = 0;
@@ -421,7 +409,6 @@ export class HubRequestExecutor implements RequestExecutor {
           inboundClientHeaders,
           clientRequestId,
           forcedRouteHint,
-          antigravityRetrySignal,
           throwIfClientAbortSignalAborted
         });
         const hubStartedAtMs = Date.now();
@@ -612,7 +599,6 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           const failureState = applyResolveFailureState({
             lastError,
-            antigravityRetrySignal,
             blockingRecoverableRouteHoldState,
             allowBlockingRecoverableRetryBeyondAttemptBudget,
             forcedRouteHint,
@@ -1097,14 +1083,12 @@ export class HubRequestExecutor implements RequestExecutor {
             forcedRouteHint,
             contextOverflowRetries,
             maxContextOverflowRetries: MAX_CONTEXT_OVERFLOW_RETRIES,
-            antigravityRetrySignal,
             abortSignal: clientAbortSignal,
             logNonBlockingError: logRequestExecutorNonBlockingError,
             extractRetryErrorSnapshot
           });
           const failureState = applySendFailureState({
             lastError,
-            antigravityRetrySignal,
             blockingRecoverableRouteHoldState,
             allowBlockingRecoverableRetryBeyondAttemptBudget,
             forcedRouteHint,
@@ -1112,7 +1096,6 @@ export class HubRequestExecutor implements RequestExecutor {
             cumulativeExternalLatencyMs
           } satisfies RequestExecutorFailureState, sendFailure);
           lastError = failureState.lastError;
-          antigravityRetrySignal = failureState.antigravityRetrySignal;
           blockingRecoverableRouteHoldState = failureState.blockingRecoverableRouteHoldState;
           allowBlockingRecoverableRetryBeyondAttemptBudget =
             failureState.allowBlockingRecoverableRetryBeyondAttemptBudget;

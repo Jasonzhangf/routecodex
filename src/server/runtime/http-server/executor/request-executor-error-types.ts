@@ -1,6 +1,5 @@
 import type { ModuleDependencies } from '../../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { ProviderFailureClassification } from '../../../../providers/core/runtime/provider-failure-policy.js';
-import type { AntigravityRetrySignal } from './request-retry-helpers.js';
 
 export type RetryErrorSnapshot = {
   statusCode?: number;
@@ -40,7 +39,6 @@ export type ProviderRetrySwitchPlan = {
 
 export type ProviderRetryExclusionPlan = {
   excludedCurrentProvider: boolean;
-  antigravityRetrySignal: AntigravityRetrySignal | null;
 };
 
 export type ProviderRetryEligibilityPlan = {
@@ -57,7 +55,6 @@ export type ProviderRetryExecutionPlan = {
   recoverableBackoffMs: number;
   backoffScope?: ProviderRetryBackoffScope;
   retrySwitchPlan?: ProviderRetrySwitchPlan;
-  antigravityRetrySignal: AntigravityRetrySignal | null;
 };
 
 export type ProviderRetryTelemetryPlan = {
@@ -132,4 +129,3 @@ export type ReportRequestExecutorProviderErrorArgs = {
   stageHint?: RequestExecutorProviderErrorStage;
   extraDetails?: Record<string, unknown>;
 };
-

@@ -1,4 +1,4 @@
-import { selectProviderImpl } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection.js';
+import { selectProviderImpl } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-pools/index.js';
 import { RouteLoadBalancer } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/load-balancer.js';
 import { VirtualRouterErrorCode } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
 
@@ -25,6 +25,7 @@ describe('virtual-router quotaView routing', () => {
         auth: { type: 'apiKey', value: 'test-key' },
         outboundProfile: 'default'
       }),
+      hasCapability: () => false,
       listProviderKeys: (providerId?: string) => {
         if (providerId === 'mock.providerA') return [providerA];
         if (providerId === 'mock.providerB') return [providerB];
@@ -334,6 +335,7 @@ describe('virtual-router quotaView routing', () => {
         auth: { type: 'apiKey', value: 'test-key' },
         outboundProfile: 'default'
       }),
+      hasCapability: () => false,
       listProviderKeys: () => [providerA, providerB],
       resolveRuntimeKeyByAlias: () => null,
       resolveRuntimeKeyByIndex: () => null

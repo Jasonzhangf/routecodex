@@ -18,18 +18,6 @@ export {
 
 export { createSnapshotRecorder, resetSnapshotRecorderErrorsampleStateForTests, type SnapshotRecorder } from './snapshot-recorder.js';
 export { convertProviderResponse } from './response-converter.js';
-export {
-  warmupAntigravitySessionSignatureModule,
-  extractAntigravityGeminiSessionId,
-  cacheAntigravitySessionSignature,
-  getAntigravityLatestSignatureSessionIdForAlias,
-  lookupAntigravitySessionSignatureEntry,
-  invalidateAntigravitySessionSignature,
-  clearAntigravitySessionAliasPins,
-  resetAntigravitySessionSignatureCachesForTests,
-  configureAntigravitySessionSignaturePersistence,
-  flushAntigravitySessionSignaturePersistenceSync
-} from './antigravity-signature.js';
 export { createCoreQuotaManager } from './quota-manager.js';
 export {
   writeSnapshotViaHooks,

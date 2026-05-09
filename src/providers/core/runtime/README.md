@@ -9,7 +9,7 @@ Provider core runtime module contains the actual HTTP transport implementations 
 ├── responses-http- provider. ts  # OpenAI Responses protocol handler
 ├── anthropic-http- provider. ts  # Anthropic Messages protocol handler
 ├── gemini-http- provider. ts   # Google Gemini API handler
-├── gemini-cli-http- provider. ts  # Google Gemini CLI handler
+├── gemini-http-provider.ts        # Gemini handler
 ├── openai-http- provider. ts   # OpenAI legacy protocol handler
 ├── http-request-executor. ts   # HTTP request execution and retry logic
 ├── provider-factory. ts        # Factory for creating provider instances
@@ -22,7 +22,7 @@ Base class providing:- Common request/response handling- Error classification
 | OpenAI Responses | openai-responses | responses-http-provider. ts |
 | Anthropic Messages | anthropic-messages | anthropic-http- provider.ts |
 | Google Gemini | google-gemini | gemini-http-provider. ts |
-| Google Gemini CLI | google- gemini-cli | gemini-cli-http- provider.ts |
+| Google Gemini | gemini | gemini-http-provider.ts |
 ### ProviderFactoryCreates appropriate provider instances based on:- `providerType` from configuration
 - `protocol` field for protocol selection- Runtime metadata injection## Usage```typescriptimport { ChatHttpProvider } from './chat-http-provider. js';const provider = new ChatHttpProvider(config, metadata);const response = await provider.execute(request);```## Do / Don't
 **Do**

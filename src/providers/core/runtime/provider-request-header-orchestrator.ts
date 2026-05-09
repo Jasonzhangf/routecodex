@@ -48,7 +48,6 @@ export async function buildProviderRequestHeaders(options: {
   runtimeHeaders?: Record<string, string>;
   familyProfile?: ProviderFamilyProfile;
   isGeminiFamily: boolean;
-  isAntigravity: boolean;
   providerType: string;
 }): Promise<Record<string, string>> {
   const {
@@ -60,7 +59,6 @@ export async function buildProviderRequestHeaders(options: {
     runtimeHeaders = {},
     familyProfile,
     isGeminiFamily,
-    isAntigravity,
     providerType
   } = options;
 
@@ -74,7 +72,7 @@ export async function buildProviderRequestHeaders(options: {
     }
   }
   const codexUaMode = isCodexUaMode({ runtime: runtimeMetadata, providerType });
-  if (codexUaMode && !isAntigravity) {
+  if (codexUaMode) {
     SessionHeaderUtils.ensureCodexSessionMetadata(runtimeMetadata);
   }
   const inboundMetadata = runtimeMetadata?.metadata;
@@ -91,7 +89,7 @@ export async function buildProviderRequestHeaders(options: {
 
   const serviceHeaders = serviceProfile.headers || {};
   const overrideHeaders = config.overrides?.headers || {};
-  if (isGeminiFamily && !isAntigravity) {
+  if (isGeminiFamily) {
     RequestHeaderBuilder.buildGeminiDefaultHeaders(baseHeaders, runtimeMetadata);
   }
 
@@ -135,7 +133,6 @@ export async function buildProviderRequestHeaders(options: {
     familyProfile,
     defaultUserAgent: DEFAULT_PROVIDER.USER_AGENT,
     isGeminiFamily,
-    isAntigravity,
     codexUaMode
   });
 }

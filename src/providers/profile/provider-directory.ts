@@ -5,12 +5,10 @@ const KNOWN_FAMILIES = new Set([
   'responses',
   'anthropic',
   'gemini',
-  'gemini-cli',
   'deepseek',
   'qwen',
   'glm',
   'lmstudio',
-  'antigravity',
   'mock'
 ]);
 

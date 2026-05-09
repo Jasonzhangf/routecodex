@@ -1,5 +1,8 @@
 import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
-import { resolveStopMessageSessionScopeWithNative } from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+import {
+  resolveStopMessageSessionScopeWithNative,
+  resolveServertoolStickyKeyWithNative
+} from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -24,4 +27,12 @@ export function resolveServertoolPersistentScopeKey(adapterContext: unknown): st
     return undefined;
   }
   return resolveStopMessageSessionScopeWithNative(buildServertoolScopeMetadata(record)) || undefined;
+}
+
+export function resolveServertoolLoopScopeKey(adapterContext: unknown): string | undefined {
+  const record = asRecord(adapterContext);
+  if (!record) {
+    return undefined;
+  }
+  return resolveServertoolStickyKeyWithNative(buildServertoolScopeMetadata(record)) || undefined;
 }

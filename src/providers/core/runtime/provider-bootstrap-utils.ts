@@ -27,10 +27,7 @@ export function createTransportAuthProvider(options: {
       ? AuthModeUtils.ensureOAuthProviderId(auth as unknown as OAuthAuthExtended, extensions)
       : undefined;
 
-  const serviceProfileKey =
-    moduleType === 'gemini-cli-http-provider'
-      ? 'gemini-cli'
-      : (resolvedOAuthProviderId ?? providerType);
+  const serviceProfileKey = resolvedOAuthProviderId ?? providerType;
 
   const validation = ServiceProfileValidator.validateServiceProfile(
     serviceProfileKey,

@@ -41,12 +41,6 @@ export async function scanProviderTokenFiles(provider: string): Promise<TokenFil
     const entries = await fs.readdir(authDir);
     const matches: TokenFileMatch[] = [];
     const normalizedProvider = provider.toLowerCase();
-    const acceptedPrefixes: string[] = [normalizedProvider];
-    // Backwards compatibility: Gemini CLI historically使用 "gemini-oauth-*-<alias>.json" 命名，
-    // 但运行时 provider id 为 "gemini-cli"。这里同时接受两种前缀，避免 token 无法被发现。
-    if (normalizedProvider === 'gemini-cli') {
-      acceptedPrefixes.push('gemini');
-    }
 
     for (const entry of entries) {
       if (!entry.endsWith('.json')) {
@@ -64,7 +58,7 @@ export async function scanProviderTokenFiles(provider: string): Promise<TokenFil
       }
 
       const [, providerPrefix, sequenceStr, alias] = match;
-      if (!acceptedPrefixes.includes(providerPrefix.toLowerCase())) {
+      if (providerPrefix.toLowerCase() !== normalizedProvider) {
         continue;
       }
 

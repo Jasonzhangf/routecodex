@@ -1,7 +1,4 @@
 import {
-  type AntigravityRetrySignal
-} from './request-retry-helpers.js';
-import {
   isHostRequestExecutorErrorStage,
   resolveRequestExecutorProviderErrorClassification,
 } from './request-executor-provider-failure.js';
@@ -46,10 +43,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
   promptTooLong?: boolean;
   contextOverflowRetries?: number;
   maxContextOverflowRetries?: number;
-  isVerify?: boolean;
-  isReauth?: boolean;
-  allowAntigravityRecovery?: boolean;
-  antigravityRetrySignal?: AntigravityRetrySignal | null;
   status?: number;
   forceExcludeCurrentProviderOnRetry?: boolean;
   abortSignal?: AbortSignal;
@@ -71,10 +64,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     providerKey: args.providerKey,
     promptTooLong: args.promptTooLong,
     contextOverflowRetries: args.contextOverflowRetries,
-    maxContextOverflowRetries: args.maxContextOverflowRetries,
-    isVerify: args.isVerify,
-    isReauth: args.isReauth,
-    allowAntigravityRecovery: args.allowAntigravityRecovery
+    maxContextOverflowRetries: args.maxContextOverflowRetries
   });
   args.recordAttempt({ error: true });
   if (!eligibilityPlan.shouldRetry) {
@@ -84,8 +74,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       excludedCurrentProvider: false,
       holdOnLastAvailable429: false,
       retryBackoffMs: 0,
-      recoverableBackoffMs: 0,
-      antigravityRetrySignal: args.antigravityRetrySignal ?? null
+      recoverableBackoffMs: 0
     };
   }
   const exclusionPlan = hostContractFailure
@@ -95,16 +84,14 @@ export async function resolveProviderRetryExecutionPlan(args: {
           providerKey: args.providerKey,
           excludedProviderKeys: args.excludedProviderKeys
         })
-        : false,
-      antigravityRetrySignal: args.antigravityRetrySignal ?? null
+        : false
     }
     : args.forceExcludeCurrentProviderOnRetry
       ? {
         excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
           providerKey: args.providerKey,
           excludedProviderKeys: args.excludedProviderKeys
-        }),
-        antigravityRetrySignal: args.antigravityRetrySignal ?? null
+        })
       }
       : resolveProviderRetryExclusionPlan({
         providerKey: args.providerKey,
@@ -112,9 +99,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
         error: args.error,
         classification,
         promptTooLong: Boolean(args.promptTooLong),
-        isVerify: Boolean(args.isVerify),
-        isReauth: Boolean(args.isReauth),
-        antigravityRetrySignal: args.antigravityRetrySignal ?? null,
         routePool: args.routePool,
         excludedProviderKeys: args.excludedProviderKeys
       });
@@ -135,8 +119,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       excludedCurrentProvider: false,
       holdOnLastAvailable429,
       retryBackoffMs: 0,
-      recoverableBackoffMs: 0,
-      antigravityRetrySignal: exclusionPlan.antigravityRetrySignal
+      recoverableBackoffMs: 0
     };
   }
   const retryBackoffPlan = await resolveProviderRetryBackoffPlan({
@@ -177,8 +160,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       excludedCurrentProvider: exclusionPlan.excludedCurrentProvider,
       holdOnLastAvailable429,
       retryBackoffMs: 0,
-      recoverableBackoffMs: 0,
-      antigravityRetrySignal: exclusionPlan.antigravityRetrySignal
+      recoverableBackoffMs: 0
     };
   }
   return {
@@ -189,7 +171,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
     retryBackoffMs: retryBackoffPlan.retryBackoffMs,
     recoverableBackoffMs: retryBackoffPlan.recoverableBackoffMs,
     backoffScope: retryBackoffPlan.backoffScope,
-    retrySwitchPlan,
-    antigravityRetrySignal: exclusionPlan.antigravityRetrySignal
+    retrySwitchPlan
   };
 }

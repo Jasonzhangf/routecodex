@@ -27,10 +27,7 @@ import {
   type RefreshOutcome
 } from './history-store.js';
 import { ensureLocalTokenPortalEnv, shutdownLocalTokenPortalEnv } from '../token-portal/local-token-portal.js';
-import { isCamoufoxAvailable, openAuthInCamoufox } from '../providers/core/config/camoufox-launcher.js';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
-import { withOAuthRepairEnv } from '../providers/auth/oauth-repair-env.js';
-import { findGoogleAccountVerificationIssue } from './quota-auth-issue.js';
 import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 
 export { TokenDaemon };
@@ -433,90 +430,6 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
   const force = Boolean(options?.force);
   const interactionMode = options?.mode === 'auto' ? 'auto' : 'manual';
   const noAutoFallback = options?.noAutoFallback === true;
-  let quotaVerifyWarned = false;
-
-  const maybeOpenQuotaVerifyUrl = async (url: string): Promise<void> => {
-    const shouldAutoOpen =
-      String(process.env.ROUTECODEX_OAUTH_AUTO_OPEN_VERIFY || '').trim() === '1' ||
-      String(process.env.RCC_OAUTH_AUTO_OPEN_VERIFY || '').trim() === '1' ||
-      // If user asked for --headful, the command wrapper sets this env var.
-      String(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '').trim() === '1';
-
-    if (!process.stdin.isTTY && !shouldAutoOpen) {
-      return;
-    }
-
-    if (!isCamoufoxAvailable()) {
-      console.warn(
-        chalk.yellow('⚠'),
-        'camo CLI is required to open the verification URL. Install/enable `camo` first.'
-      );
-      return;
-    }
-
-    let proceed = shouldAutoOpen;
-    if (!proceed) {
-      proceed = await askYesNo('Open verification URL in camo browser now? (Y/n) ', true);
-    }
-    if (!proceed) {
-      return;
-    }
-
-    try {
-      const prevOpenOnly = process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
-      process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = '1';
-      try {
-        await withOAuthRepairEnv(token.provider, async () => {
-          const ok = await openAuthInCamoufox({
-            url,
-            provider: token.provider,
-            alias: token.alias || 'default'
-          });
-          if (ok) {
-            console.log(chalk.blue('ℹ'), 'Opened verification URL in camo browser.');
-          }
-        });
-      } finally {
-        if (prevOpenOnly === undefined) {
-          delete process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
-        } else {
-          process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = prevOpenOnly;
-        }
-      }
-    } catch (openUrlError) {
-      logTokenDaemonNonBlockingError('interactiveRefresh.maybeOpenQuotaVerifyUrl', openUrlError, {
-        provider: token.provider,
-        alias: token.alias || 'default'
-      });
-    }
-  };
-
-  const warnIfQuotaVerifyRequired = async (): Promise<void> => {
-    try {
-      const issue = await findGoogleAccountVerificationIssue(token.provider, token.alias || 'default');
-      if (!issue) {
-        return;
-      }
-      quotaVerifyWarned = true;
-      console.warn(
-        chalk.yellow('⚠'),
-        `Quota manager marks ${token.provider}.${token.alias || 'default'} as "verify required" (google_account_verification). ` +
-          `Token file may still be valid, but this alias is currently out of pool (inPool=${issue.inPool ?? 'unknown'} reason=${issue.reason ?? 'unknown'}).`
-      );
-      if (issue.url) {
-        console.warn(
-          chalk.yellow('⚠'),
-          `Verification URL (use daemon-admin "open" to launch Camoufox): ${issue.url}`
-        );
-        await maybeOpenQuotaVerifyUrl(issue.url);
-      }
-    } catch (quotaIssueError) {
-      logTokenDaemonNonBlockingError('interactiveRefresh.warnIfQuotaVerifyRequired', quotaIssueError, {
-        provider: token.provider,
-        alias: token.alias || 'default'
-      });
-    }
-  };
 
   if (!force) {
     // If the token is still valid and not close to expiry, avoid repeatedly forcing the user
@@ -526,7 +439,6 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
     const safeWindowMs = 10 * 60_000;
     if (status === 'valid' && (msLeft === null || msLeft > safeWindowMs)) {
       console.log(chalk.green('✓'), `Token is still valid; skip interactive OAuth (${label})`);
-      await warnIfQuotaVerifyRequired();
       // Still provide a hint when qwen token exists but user config has no qwen provider.
       if (token.provider === 'qwen') {
         try {
@@ -544,10 +456,6 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
       return;
     }
   }
-
-  // Even when token is expired/invalid, surface verification URL first so manual flow can
-  // complete the right browser step before OAuth re-authorize.
-  await warnIfQuotaVerifyRequired();
 
   console.log('');
   console.log(
@@ -649,9 +557,6 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
     const tokenMtimeAfter = await getTokenFileMtime(token.filePath);
     await recordManualHistory(token, 'success', startedAt, tokenMtimeAfter);
     console.log(chalk.green('✓'), '认证完成，Token 文件已更新');
-    if (!quotaVerifyWarned) {
-      await warnIfQuotaVerifyRequired();
-    }
   } catch (error) {
     await recordManualHistory(token, 'failure', startedAt, tokenMtimeBefore, error);
     throw error;
@@ -694,7 +599,7 @@ type OAuthValidateResult = {
 };
 
 function oauthAuthType(provider: string): string {
-  return provider === 'gemini-cli' ? 'gemini-cli-oauth' : `${provider}-oauth`;
+  return `${provider}-oauth`;
 }
 
 async function validateSingleToken(token: TokenDescriptor): Promise<OAuthValidateResult> {

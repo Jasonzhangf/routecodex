@@ -23,10 +23,10 @@ function setEnvScoped(next: Record<string, string | undefined>): () => void {
 
 export async function withOAuthRepairEnv<T>(providerType: string, fn: () => Promise<T>): Promise<T> {
   const pt = providerType.toLowerCase();
-  if (pt === 'antigravity') {
+  if (pt === 'qwen') {
     const restore = setEnvScoped({
       ROUTECODEX_OAUTH_BROWSER: 'camoufox',
-      ROUTECODEX_CAMOUFOX_AUTO_MODE: 'antigravity',
+      ROUTECODEX_CAMOUFOX_AUTO_MODE: 'qwen',
       ROUTECODEX_OAUTH_AUTO_CONFIRM: '1'
     });
     try {
@@ -35,17 +35,5 @@ export async function withOAuthRepairEnv<T>(providerType: string, fn: () => Prom
       restore();
     }
   }
-  if (pt === 'gemini' || pt === 'gemini-cli') {
-    const restore = setEnvScoped({
-      ROUTECODEX_OAUTH_BROWSER: 'camoufox',
-      ROUTECODEX_CAMOUFOX_AUTO_MODE: 'gemini',
-      ROUTECODEX_OAUTH_AUTO_CONFIRM: '1'
-    });
-    try {
-      return await fn();
-    } finally {
-      restore();
-    }
-  }
-  return fn();
+  return await fn();
 }

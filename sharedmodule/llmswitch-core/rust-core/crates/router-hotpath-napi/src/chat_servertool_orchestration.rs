@@ -9,7 +9,9 @@ use crate::chat_web_search_intent::analyze_chat_web_search_intent;
 use crate::hub_bridge_actions::utils::{
     can_servertool_own_tool_call_id, is_synthetic_routecodex_tool_call_id,
 };
-use crate::virtual_router_engine::routing::resolve_sticky_key;
+use crate::virtual_router_engine::routing::{
+    resolve_session_scope, resolve_sticky_key, resolve_stop_message_scope,
+};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1184,6 +1186,26 @@ fn resolve_has_active_stop_message_for_continue_execution(
 
 fn resolve_stop_message_session_scope(metadata: &Value) -> Option<String> {
     let row = metadata.as_object()?;
+    if let Some(tmux_session_id) = row.get("clientTmuxSessionId").and_then(|v| v.as_str()) {
+        if !tmux_session_id.is_empty() {
+            return Some(format!("tmux:{tmux_session_id}"));
+        }
+    }
+    if let Some(tmux_session_id) = row.get("client_tmux_session_id").and_then(|v| v.as_str()) {
+        if !tmux_session_id.is_empty() {
+            return Some(format!("tmux:{tmux_session_id}"));
+        }
+    }
+    if let Some(tmux_session_id) = row.get("tmuxSessionId").and_then(|v| v.as_str()) {
+        if !tmux_session_id.is_empty() {
+            return Some(format!("tmux:{tmux_session_id}"));
+        }
+    }
+    if let Some(tmux_session_id) = row.get("tmux_session_id").and_then(|v| v.as_str()) {
+        if !tmux_session_id.is_empty() {
+            return Some(format!("tmux:{tmux_session_id}"));
+        }
+    }
     if let Some(session_id) = row.get("sessionId").and_then(|v| v.as_str()) {
         if !session_id.is_empty() {
             return Some(format!("session:{session_id}"));
@@ -1195,6 +1217,24 @@ fn resolve_stop_message_session_scope(metadata: &Value) -> Option<String> {
         }
     }
     None
+}
+
+fn resolve_servertool_sticky_key(metadata: &Value) -> String {
+    if let Some(scope) = resolve_stop_message_scope(metadata) {
+        return scope;
+    }
+    let generic = resolve_sticky_key(metadata);
+    if let Some(session_scope) = resolve_session_scope(metadata) {
+        let request_id = metadata
+            .get("requestId")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
+        if request_id.is_some() && generic == request_id.unwrap() {
+            return session_scope;
+        }
+    }
+    generic
 }
 
 fn read_runtime_metadata_bool(runtime_metadata: &Value, key: &str) -> bool {
@@ -1693,7 +1733,7 @@ pub fn resolve_stop_message_session_scope_json(metadata_json: String) -> NapiRes
 pub fn resolve_servertool_sticky_key_json(metadata_json: String) -> NapiResult<String> {
     let metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = resolve_sticky_key(&metadata);
+    let output = resolve_servertool_sticky_key(&metadata);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

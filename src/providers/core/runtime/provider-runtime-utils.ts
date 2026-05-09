@@ -8,9 +8,6 @@ export function resolveProviderProfileKey(options: {
   providerId?: string;
 }): string {
   const { moduleType, providerType, providerId } = options;
-  if (moduleType === 'gemini-cli-http-provider') {
-    return 'gemini-cli';
-  }
   const direct = typeof providerId === 'string' && providerId.trim()
     ? providerId.trim().toLowerCase()
     : '';

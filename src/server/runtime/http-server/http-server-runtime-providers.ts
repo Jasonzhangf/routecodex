@@ -6,12 +6,6 @@ import type { ProviderHandle, ProviderProtocol, VirtualRouterArtifacts } from '.
 import { ProviderFactory } from '../../../providers/core/runtime/provider-factory.js';
 import { mapProviderProtocol, normalizeProviderType, resolveProviderIdentity } from './provider-utils.js';
 import { resolveLegacyRouteCodexUserDir, resolveRccAuthDirForRead } from '../../../config/user-data-paths.js';
-import {
-  buildAntigravityAliasMap,
-  filterAntigravityAliasMapByProviderKeys,
-  startAntigravityPreload,
-  startAntigravityWarmup
-} from './antigravity-startup-tasks.js';
 import { resolveProviderRoutingScope } from './provider-routing-scope.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 
@@ -160,20 +154,6 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
     routedProviderKeys,
     isInRoutingScope
   } = resolveProviderRoutingScope(server.routingProviderScope as { providerKeys?: unknown[] } | undefined);
-  const antigravityAliasMap = filterAntigravityAliasMapByProviderKeys(
-    buildAntigravityAliasMap(runtimeMap as Record<string, unknown>),
-    routedProviderKeys,
-    { scopeApplied: hasRoutingProviderScope }
-  );
-
-  try {
-    startAntigravityPreload(Array.from(antigravityAliasMap.keys()));
-  } catch (error) {
-    logRuntimeProvidersNonBlockingError('antigravity.preload', error, {
-      aliasCount: antigravityAliasMap.size
-    });
-  }
-
   const quotaModule = server.managerDaemon?.getModule('quota') as
     | {
         registerProviderStaticConfig?: (
@@ -183,8 +163,6 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
         disableProvider?: (options: { providerKey: string; mode: 'cooldown' | 'blacklist'; durationMs: number }) => Promise<unknown>;
       }
     | undefined;
-
-  startAntigravityWarmup(antigravityAliasMap, quotaModule);
 
   const runtimeKeyAuthType = new Map<string, string | null>();
   const apikeyDailyResetTime = (() => {

@@ -1,13 +1,12 @@
 import type { ProviderType } from '../api/provider-types.js';
 
-export type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat' | 'gemini-cli-chat';
+export type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 
 const TYPE_TO_PROTOCOL: Record<ProviderType, ProviderProtocol> = {
   openai: 'openai-chat',
   responses: 'openai-responses',
   anthropic: 'anthropic-messages',
   gemini: 'gemini-chat',
-  'gemini-cli': 'gemini-chat',
   mimoweb: 'anthropic-messages',
   mock: 'openai-chat'
 };
@@ -26,7 +25,6 @@ export function isProviderType(value: string): value is ProviderType {
     || value === 'responses'
     || value === 'anthropic'
     || value === 'gemini'
-    || value === 'gemini-cli'
     || value === 'mimoweb'
     || value === 'mock';
 }
@@ -42,10 +40,6 @@ export function normalizeProviderType(value?: string): ProviderType {
  if (normalized in LEGACY_FAMILY_TO_TYPE) {
    return LEGACY_FAMILY_TO_TYPE[normalized as keyof typeof LEGACY_FAMILY_TO_TYPE];
  }
-  // gemini-cli 归入 gemini 协议族，仅保留 provider 模块差异
-  if (normalized === 'gemini-cli') {
-    return 'gemini';
-  }
   return 'openai';
 }
 

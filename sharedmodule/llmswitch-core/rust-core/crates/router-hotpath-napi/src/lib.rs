@@ -101,6 +101,7 @@ mod virtual_router_provider_key;
 mod virtual_router_stop_message_actions;
 mod virtual_router_stop_message_instruction;
 mod virtual_router_stop_message_state_codec;
+use crate::virtual_router_engine::routing::resolve_sticky_key as resolve_virtual_router_sticky_key;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct QuotaBucketInputEntry {
@@ -240,6 +241,14 @@ fn compute_quota_buckets(entries: Vec<QuotaBucketInputEntry>, now_ms: f64) -> Qu
         priorities,
         buckets: tiers,
     }
+}
+
+#[napi]
+pub fn resolve_virtual_router_sticky_key_json(metadata_json: String) -> NapiResult<String> {
+    let metadata: Value = serde_json::from_str(&metadata_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = resolve_virtual_router_sticky_key(&metadata);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 fn split_antigravity_targets(targets: Vec<String>) -> AntigravitySplitOutput {

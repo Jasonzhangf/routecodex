@@ -15,8 +15,6 @@ src/client/
 │   └── responses-protocol-client.ts
 ├── gemini/                    # Gemini API protocol client
 │   └── gemini-protocol-client.ts
-└── gemini-cli/                # Gemini CLI protocol client
-    └── gemini-cli-protocol-client.ts
 ```
 
 ## Core Interface
@@ -40,7 +38,6 @@ export interface HttpProtocolClient<Payload> {
 | Anthropic  | `anthropic/` | anthropic- messages |
 | OpenAI Responses | `responses/` | openai- responses |
 | Gemini     | `gemini/`  | google-gemini        |
-| Gemini CLI | `gemini-cli/` | google- gemini-cli |
 
 ## Usage
 

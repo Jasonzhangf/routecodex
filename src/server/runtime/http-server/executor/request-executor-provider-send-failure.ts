@@ -9,12 +9,7 @@ import {
   resolveRequestExecutorProviderFailurePlan
 } from './request-executor-provider-failure-plan.js';
 import {
-  extractRetryErrorSignature,
   extractStatusCodeFromError,
-  isAntigravityProviderKey,
-  isAntigravityReauthRequired403,
-  isGoogleAccountVerificationRequiredError,
-  type AntigravityRetrySignal
 } from './request-retry-helpers.js';
 import { isPromptTooLongError } from './retry-engine.js';
 import { shouldApplyProviderTransportBackoff } from './request-executor-provider-failure.js';
@@ -80,7 +75,6 @@ type RequestExecutorProviderSendFailureArgs = {
   forcedRouteHint?: string;
   contextOverflowRetries: number;
   maxContextOverflowRetries: number;
-  antigravityRetrySignal: AntigravityRetrySignal | null;
   abortSignal?: AbortSignal;
   logNonBlockingError: (stage: string, error: unknown, details?: Record<string, unknown>) => void;
   extractRetryErrorSnapshot: (error: unknown) => RetryErrorSnapshot;
@@ -88,7 +82,6 @@ type RequestExecutorProviderSendFailureArgs = {
 
 export type RequestExecutorProviderSendFailureResult = {
   lastError: unknown;
-  antigravityRetrySignal: AntigravityRetrySignal | null;
   blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
   allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
   forcedRouteHint?: string;
@@ -225,18 +218,6 @@ export async function processProviderSendFailure(
     });
   }
 
-  const nextAntigravityRetrySignal = isAntigravityProviderKey(args.providerKey)
-    ? (() => {
-      const signature = extractRetryErrorSignature(args.error);
-      const consecutive =
-        args.antigravityRetrySignal && args.antigravityRetrySignal.signature === signature
-          ? args.antigravityRetrySignal.consecutive + 1
-          : 1;
-      return { signature, consecutive } satisfies AntigravityRetrySignal;
-    })()
-    : null;
-  const isVerify = status === 403 && isGoogleAccountVerificationRequiredError(args.error);
-  const isReauth = status === 403 && isAntigravityReauthRequired403(args.error);
   const promptTooLong = isPromptTooLongError(args.error);
   const forcedRouteHint = promptTooLong && args.forcedRouteHint !== 'longcontext'
     ? 'longcontext'
@@ -272,10 +253,6 @@ export async function processProviderSendFailure(
     promptTooLong,
     contextOverflowRetries,
     maxContextOverflowRetries: args.maxContextOverflowRetries,
-    isVerify,
-    isReauth,
-    allowAntigravityRecovery: true,
-    antigravityRetrySignal: nextAntigravityRetrySignal,
     status,
     abortSignal: args.abortSignal,
     logNonBlockingError: args.logNonBlockingError
@@ -310,7 +287,6 @@ export async function processProviderSendFailure(
 
   return {
     lastError: args.error,
-    antigravityRetrySignal: retryExecutionPlan.antigravityRetrySignal,
     blockingRecoverableRouteHoldState,
     allowBlockingRecoverableRetryBeyondAttemptBudget,
     forcedRouteHint,

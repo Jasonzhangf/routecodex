@@ -352,18 +352,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       return;
     }
 
-    const initialBase = createInitialQuotaState(key, staticConfig, nowMs);
-    const shouldGateAntigravityOauth =
-      authType === 'oauth' && key.toLowerCase().startsWith('antigravity.');
-    const initial: QuotaState = shouldGateAntigravityOauth
-      ? {
-          ...initialBase,
-          // Antigravity OAuth providers must remain out of pool until quota recovery arrives.
-          // This avoids selecting accounts that are not yet verified as usable.
-          inPool: false,
-          reason: 'cooldown'
-        }
-      : initialBase;
+    const initial = createInitialQuotaState(key, staticConfig, nowMs);
     this.quotaStates.set(key, initial);
 
     this.schedulePersist(nowMs);

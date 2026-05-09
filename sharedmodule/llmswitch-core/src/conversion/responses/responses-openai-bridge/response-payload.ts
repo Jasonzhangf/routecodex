@@ -234,6 +234,15 @@ export function buildResponsesPayloadFromChat(payload: unknown, context?: Respon
       out.store = contextStore;
     }
   }
+  if (
+    out.metadata === undefined &&
+    sourceForRetention &&
+    typeof sourceForRetention.metadata === 'object' &&
+    sourceForRetention.metadata &&
+    !Array.isArray(sourceForRetention.metadata)
+  ) {
+    out.metadata = sourceForRetention.metadata;
+  }
   normalizeResponsesToolCallArgumentsForClient(out, context);
   if ((out as any).metadata) {
     stripInternalToolingMetadata((out as any).metadata);

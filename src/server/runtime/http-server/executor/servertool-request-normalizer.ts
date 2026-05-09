@@ -1,5 +1,7 @@
 import { syncReasoningStopModeFromRequest } from '../../../../modules/llmswitch/bridge.js';
 
+const STOPLESS_DIRECTIVE_PATTERN = /<\*\*stopless:(on|off|endless)\*\*>/i;
+
 function readSessionLikeToken(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -13,6 +15,25 @@ function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
     return undefined;
   }
   return value as Record<string, unknown>;
+}
+
+function extractStoplessDirectiveModeFromPayload(payload: unknown): 'on' | 'off' | 'endless' | undefined {
+  if (!payload) {
+    return undefined;
+  }
+  const raw =
+    typeof payload === 'string'
+      ? payload
+      : (() => {
+          try {
+            return JSON.stringify(payload);
+          } catch {
+            return '';
+          }
+        })();
+  const match = STOPLESS_DIRECTIVE_PATTERN.exec(raw);
+  const mode = match?.[1]?.trim().toLowerCase();
+  return mode === 'on' || mode === 'off' || mode === 'endless' ? mode : undefined;
 }
 
 export function backfillAdapterContextSessionIdentifiersFromOriginalRequest(
@@ -61,7 +82,10 @@ export function seedReasoningStopStateFromCapturedRequest(
   onError?: (error: unknown) => void
 ): void {
   try {
-    syncReasoningStopModeFromRequest(baseContext);
+    syncReasoningStopModeFromRequest(
+      baseContext,
+      extractStoplessDirectiveModeFromPayload(baseContext.capturedChatRequest)
+    );
   } catch (error) {
     onError?.(error);
     throw error;
