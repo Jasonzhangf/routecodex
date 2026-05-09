@@ -6,13 +6,6 @@ import {
 
 export type AliasQueueStore = Map<string, string[]>;
 
-// Default provider-level strategy table.
-// This is a data-only default; callers can override via `loadBalancing.aliasSelection.providers`.
-export const DEFAULT_PROVIDER_ALIAS_SELECTION: Record<string, AliasSelectionStrategy> = {
-  // Antigravity: upstream gateway may reject rapid cross-key switching; stick to one alias until error.
-  antigravity: 'sticky-queue'
-};
-
 export function resolveAliasSelectionStrategy(
   providerId: string,
   cfg: AliasSelectionConfig | undefined

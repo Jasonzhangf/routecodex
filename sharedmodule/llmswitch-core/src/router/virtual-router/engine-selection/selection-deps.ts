@@ -15,21 +15,6 @@ export type SelectionDeps = {
   resolveStickyKey: (metadata: RouterMetadataInput) => string | undefined;
   quotaView?: ProviderQuotaView;
   aliasQueueStore?: Map<string, string[]>;
-  /**
-   * Antigravity alias session lease (session isolation) store.
-   * Key: runtimeKey (providerId.keyAlias), e.g. "antigravity.aliasA".
-   */
-  antigravityAliasLeaseStore?: Map<string, { sessionKey: string; lastSeenAt: number }>;
-  /**
-   * Session → runtimeKey mapping for Antigravity alias leases.
-   * Key: session scope key, e.g. "session:abc" / "conversation:xyz".
-   * Value: runtimeKey (providerId.keyAlias)
-   */
-  antigravitySessionAliasStore?: Map<string, string>;
-  /**
-   * Cooldown window (ms) before an Antigravity alias can be reused by a different session.
-   */
-  antigravityAliasReuseCooldownMs?: number;
 };
 
 export type TrySelectFromTierOptions = {

@@ -2,7 +2,7 @@ import { isJsonObject, type JsonObject, type JsonValue } from '../../types/json.
 import {
   GEMINI_FLASH_DEFAULT_THINKING_BUDGET,
   type GeminiPayload
-} from './gemini-antigravity-request.js';
+} from './gemini-request-utils.js';
 
 export const GENERATION_CONFIG_KEYS: Array<{ source: string; target: string }> = [
   { source: 'temperature', target: 'temperature' },
@@ -107,7 +107,7 @@ export function buildGenerationConfigFromParameters(parameters: JsonObject): Jso
   return config;
 }
 
-export function applyAntigravityThinkingConfig(requestPayload: GeminiPayload, mappedLower: string): void {
+export function applyGeminiThinkingConfig(requestPayload: GeminiPayload, mappedLower: string): void {
   const isFlashModel = mappedLower.includes('flash');
   const isFlash3Model = mappedLower.includes('gemini-3') && isFlashModel;
   const isImageModel = requestPayload.requestType === 'image_gen' || mappedLower.includes('image');

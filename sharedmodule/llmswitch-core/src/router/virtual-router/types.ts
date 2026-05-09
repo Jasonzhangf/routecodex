@@ -273,13 +273,6 @@ export interface AliasSelectionConfig {
    * Default: 300000 (5 minutes).
    */
   sessionLeaseCooldownMs?: number;
-  /**
-   * Antigravity multi-alias session binding policy.
-   * - "lease" (default): prefer the session's last used alias, but can rotate to another alias when needed.
-   * - "strict": once a session binds to an alias, it will not switch to another alias; on failure it must
-   *   fall back to other providers/routes rather than trying a different Antigravity alias.
-   */
-  antigravitySessionBinding?: "lease" | "strict";
 }
 
 export interface ContextWeightedLoadBalancingConfig {

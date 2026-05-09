@@ -5,7 +5,7 @@ import type {
 } from '../../types/chat-envelope.js';
 import type { FormatEnvelope } from '../../types/format-envelope.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../pipeline/hub-stage-timing.js';
-import type { GeminiPayload } from './gemini-antigravity-request.js';
+import type { GeminiPayload } from './gemini-request-utils.js';
 import { buildGeminiChatEnvelopeFromGeminiPayload } from './gemini-mapper-to-chat.js';
 import { buildGeminiRequestFromChat } from './gemini-mapper-from-chat.js';
 

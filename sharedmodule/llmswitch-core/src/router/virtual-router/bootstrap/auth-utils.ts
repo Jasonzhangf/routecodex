@@ -13,7 +13,7 @@ export interface ProviderAuthEntry {
 
 type AuthFieldDefaults = Partial<ProviderAuthConfig>;
 
-const MULTI_TOKEN_OAUTH_PROVIDERS = new Set<string>(['qwen', 'gemini-cli', 'antigravity']);
+const MULTI_TOKEN_OAUTH_PROVIDERS = new Set<string>(['qwen']);
 
 interface AuthTypeInfo {
   type: ProviderAuthConfig['type'];

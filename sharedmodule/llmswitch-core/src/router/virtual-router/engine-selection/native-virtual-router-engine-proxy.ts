@@ -14,7 +14,6 @@ export interface NativeVirtualRouterEngineProxy {
   handleProviderError(eventJson: string): void;
   handleProviderSuccess(eventJson: string): void;
   getStatus(): string;
-  readonly antigravitySessionAliasStore: unknown;
 }
 
 type ProxyConstructor = new (engine?: object) => NativeVirtualRouterEngineProxy;

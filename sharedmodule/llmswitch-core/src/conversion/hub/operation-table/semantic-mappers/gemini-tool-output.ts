@@ -87,7 +87,7 @@ export function convertToolMessageToOutput(message: JsonObject, allowedIds?: Set
   };
 }
 
-export function sanitizeAntigravityToolCallId(raw: string): string {
+export function sanitizeGeminiToolCallId(raw: string): string {
   const trimmed = typeof raw === 'string' ? raw.trim() : '';
   if (!trimmed) {
     return trimmed;
@@ -157,7 +157,7 @@ export function buildFunctionResponseEntry(output: ChatToolOutput, options?: { i
     }
   };
   if (includeCallId) {
-    (part.functionResponse as JsonObject).id = sanitizeAntigravityToolCallId(output.tool_call_id);
+    (part.functionResponse as JsonObject).id = sanitizeGeminiToolCallId(output.tool_call_id);
   }
   return { role: 'user', parts: [part] };
 }

@@ -60,10 +60,6 @@ export class VirtualRouterEngine {
     }
   }
 
-  get antigravitySessionAliasStore(): Map<string, string> {
-    return this.nativeProxy.antigravitySessionAliasStore as unknown as Map<string, string>;
-  }
-
   get routingInstructionState(): Map<string, unknown> {
     return this.routingInstructionStateStore;
   }

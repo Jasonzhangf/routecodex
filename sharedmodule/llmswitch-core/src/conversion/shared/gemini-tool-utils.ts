@@ -23,12 +23,12 @@ export function prepareGeminiToolsForBridge(
 
 export function buildGeminiToolsFromBridge(
   defs: BridgeToolDefinition[] | undefined,
-  options?: { mode?: 'antigravity' | 'default' }
+  options?: { mode?: 'default' }
 ): JsonObject[] | undefined {
   if (!defs || !defs.length) {
     return undefined;
   }
-  const mode = options?.mode === 'antigravity' ? 'antigravity' : 'default';
+  const mode = options?.mode === 'default' ? 'default' : 'default';
   const out = buildGeminiToolsFromBridgeWithNative(defs as unknown, mode) as JsonObject[] | undefined;
   return out && out.length ? out : undefined;
 }

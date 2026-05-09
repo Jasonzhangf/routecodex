@@ -59,7 +59,6 @@ export function selectProviderKeyWithQuotaBuckets(opts: {
   isAvailable: (key: string) => boolean;
   selectFirstAvailable: (keys: string[]) => string | null;
   applyAliasStickyQueuePinning: (candidates: string[]) => string[];
-  preferAntigravityAliasesOnRetry: (candidates: string[]) => string[];
 }): string | null {
   const {
     routeName,
@@ -80,8 +79,7 @@ export function selectProviderKeyWithQuotaBuckets(opts: {
     quotaView,
     isAvailable,
     selectFirstAvailable,
-    applyAliasStickyQueuePinning,
-    preferAntigravityAliasesOnRetry
+    applyAliasStickyQueuePinning
   } = opts;
 
   const bucketInputs: QuotaBucketInputEntry[] = candidates.map((key, order) => {
@@ -110,10 +108,6 @@ export function selectProviderKeyWithQuotaBuckets(opts: {
     let bucketCandidates = bucket.map((item) => item.key);
     if (bucketCandidates.length === 1) {
       return bucketCandidates[0] ?? null;
-    }
-
-    if (isRecoveryAttempt) {
-      bucketCandidates = preferAntigravityAliasesOnRetry(bucketCandidates);
     }
 
     bucketCandidates = applyAliasStickyQueuePinning(bucketCandidates);

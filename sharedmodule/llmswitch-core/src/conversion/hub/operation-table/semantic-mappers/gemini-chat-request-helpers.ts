@@ -3,7 +3,7 @@ import { isJsonObject, jsonClone, type JsonObject, type JsonValue } from '../../
 import type { BridgeToolDefinition } from '../../../types/bridge-message-types.js';
 import { sanitizeReasoningTaggedText } from '../../../shared/reasoning-utils.js';
 import { GENERATION_CONFIG_KEYS } from './gemini-thinking-config.js';
-import type { GeminiPayload } from './gemini-antigravity-request.js';
+import type { GeminiPayload } from './gemini-request-utils.js';
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);

@@ -1,6 +1,5 @@
 import type { ChatEnvelope } from '../../types/chat-envelope.js';
 import { isJsonObject, jsonClone, type JsonObject, type JsonValue } from '../../types/json.js';
-import { ANTIGRAVITY_SYSTEM_INSTRUCTION } from './gemini-antigravity-request.js';
 
 export function ensureSystemSemantics(chat: ChatEnvelope): JsonObject {
   if (!chat.semantics || typeof chat.semantics !== 'object') {
@@ -49,73 +48,32 @@ export function collectSystemSegments(systemInstruction: JsonValue | undefined):
 
 export function applyGeminiRequestSystemInstruction(args: {
   request: Record<string, unknown>;
-  isAntigravityProvider: boolean;
   semanticsSystemInstruction?: JsonValue;
   protocolStateSystemInstruction?: JsonValue;
   systemTextBlocksFromSemantics?: string[];
 }): void {
   const {
     request,
-    isAntigravityProvider,
     semanticsSystemInstruction,
     protocolStateSystemInstruction,
     systemTextBlocksFromSemantics
   } = args;
 
-  if (!isAntigravityProvider && semanticsSystemInstruction !== undefined) {
+  if (semanticsSystemInstruction !== undefined) {
     request.systemInstruction = jsonClone(semanticsSystemInstruction);
     return;
   }
-  if (!isAntigravityProvider && protocolStateSystemInstruction !== undefined) {
+  if (protocolStateSystemInstruction !== undefined) {
     request.systemInstruction = jsonClone(protocolStateSystemInstruction);
     return;
   }
-  if (!isAntigravityProvider) {
-    const fallbackSystemInstructions = systemTextBlocksFromSemantics;
-    if (fallbackSystemInstructions && fallbackSystemInstructions.length) {
-      const sysBlocks = fallbackSystemInstructions
-        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-        .map((value) => ({ text: value }));
-      if (sysBlocks.length) {
-        request.systemInstruction = { role: 'system', parts: sysBlocks };
-      }
-    }
-    return;
-  }
-
-  const extraSegments: string[] = [];
-  const seen = new Set<string>();
-  const pushSegment = (value: string): void => {
-    const trimmed = typeof value === 'string' ? value.trim() : '';
-    if (!trimmed) return;
-    if (seen.has(trimmed)) return;
-    seen.add(trimmed);
-    extraSegments.push(trimmed);
-  };
-
-  for (const seg of collectSystemSegments(semanticsSystemInstruction)) {
-    pushSegment(seg);
-  }
-  for (const seg of collectSystemSegments(protocolStateSystemInstruction)) {
-    pushSegment(seg);
-  }
-  for (const seg of systemTextBlocksFromSemantics || []) {
-    if (typeof seg === 'string') {
-      pushSegment(seg);
+  const fallbackSystemInstructions = systemTextBlocksFromSemantics;
+  if (fallbackSystemInstructions && fallbackSystemInstructions.length) {
+    const sysBlocks = fallbackSystemInstructions
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .map((value) => ({ text: value }));
+    if (sysBlocks.length) {
+      request.systemInstruction = { role: 'system', parts: sysBlocks };
     }
   }
-
-  if (extraSegments.length > 0) {
-    const [first, ...rest] = extraSegments;
-    request.systemInstruction = {
-      role: 'user',
-      parts: [{ text: `${ANTIGRAVITY_SYSTEM_INSTRUCTION}\n\n${first}` }, ...rest.map((text) => ({ text }))]
-    };
-    return;
-  }
-
-  request.systemInstruction = {
-    role: 'user',
-    parts: [{ text: ANTIGRAVITY_SYSTEM_INSTRUCTION }]
-  };
 }

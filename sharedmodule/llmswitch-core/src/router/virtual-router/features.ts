@@ -10,7 +10,6 @@ import {
   extractMessageText,
   getLatestMessageRole,
 } from './message-utils.js';
-import { extractAntigravityGeminiSessionIdWithNative } from './engine-selection/native-router-hotpath.js';
 import {
   chooseHigherPriorityToolCategory,
   classifyToolCallForReport,
@@ -257,20 +256,6 @@ export function buildRoutingFeatures(
   request: StandardizedRequest | ProcessedRequest,
   metadata: RouterMetadataInput
 ): RoutingFeatures {
-  const antigravitySessionId = (() => {
-    try {
-      const messages = Array.isArray(request.messages) ? request.messages : [];
-      const contents = messages.map((msg) => {
-        const role = msg?.role === 'user' ? 'user' : 'assistant';
-        const text = msg ? extractMessageText(msg) : '';
-        return { role, parts: [{ text }] };
-      });
-      return extractAntigravityGeminiSessionIdWithNative({ contents });
-    } catch {
-      return undefined;
-    }
-  })();
-
   const messageTurnState = getMessageTurnState(request.messages);
   const responsesTurnState = getResponsesContextTurnState(request);
   const currentUserFromMessages = messageTurnState.latestRole === 'user';
@@ -348,9 +333,6 @@ export function buildRoutingFeatures(
     lastAssistantToolSnippet: lastAssistantTool?.commandSnippet,
     lastAssistantToolLabel,
     latestMessageFromUser: latestMessageRole === 'user',
-    metadata: {
-      ...metadata,
-      ...(antigravitySessionId ? { antigravitySessionId } : {})
-    }
+    metadata
   };
 }

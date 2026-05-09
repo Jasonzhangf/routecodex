@@ -130,57 +130,6 @@ function applyAliasStickyQueuePinning(opts: {
   });
 }
 
-function preferAntigravityAliasesOnRetry(opts: {
-  candidates: string[];
-  excludedKeys: Set<string>;
-  deps: SelectionDeps;
-}): string[] {
-  const { candidates, excludedKeys, deps } = opts;
-  if (!Array.isArray(candidates) || candidates.length < 2) {
-    return candidates;
-  }
-  if (!excludedKeys || excludedKeys.size === 0) {
-    return candidates;
-  }
-  // Only apply this stronger retry preference for Antigravity.
-  const strategy = resolveAliasSelectionStrategy('antigravity', deps.loadBalancer.getPolicy().aliasSelection);
-  if (strategy !== 'sticky-queue') {
-    return candidates;
-  }
-
-  const excludedModels = new Set<string>();
-  for (const ex of excludedKeys) {
-    if (!ex || typeof ex !== 'string') continue;
-    if ((extractProviderId(ex) ?? '') !== 'antigravity') continue;
-    try {
-      const modelId = getProviderModelId(ex, deps.providerRegistry) ?? '';
-      if (modelId) {
-        excludedModels.add(modelId);
-      }
-    } catch {
-      // ignore unknown model ids
-    }
-  }
-  if (excludedModels.size === 0) {
-    return candidates;
-  }
-
-  const preferred = candidates.filter((key) => {
-    if (!key || typeof key !== 'string') return false;
-    if ((extractProviderId(key) ?? '') !== 'antigravity') return false;
-    try {
-      const modelId = getProviderModelId(key, deps.providerRegistry) ?? '';
-      return modelId && excludedModels.has(modelId);
-    } catch {
-      return false;
-    }
-  });
-
-  // If we still have any Antigravity candidates for the failing model, keep retrying within Antigravity
-  // (rotate aliases) before falling back to other pool targets.
-  return preferred.length > 0 ? preferred : candidates;
-}
-
 export function selectProviderKeyFromCandidatePool(opts: {
   routeName: string;
   tier: RoutePoolTier;
@@ -268,15 +217,10 @@ export function selectProviderKeyFromCandidatePool(opts: {
       return selectableCandidates[0] ?? null;
     }
 
-    const retryPreferredCandidates =
-      isRecoveryAttempt
-        ? preferAntigravityAliasesOnRetry({ candidates: selectableCandidates, excludedKeys, deps })
-        : selectableCandidates;
-
     // Alias-level selection strategy (config-driven).
     // Apply sticky-queue pinning per provider/model group (candidates can be mixed providers).
     const pinnedCandidates = applyAliasStickyQueuePinning({
-      candidates: retryPreferredCandidates,
+      candidates: selectableCandidates,
       orderedTargets: tier.targets,
       deps,
       excludedKeys
@@ -427,12 +371,6 @@ export function selectProviderKeyFromCandidatePool(opts: {
         orderedTargets: tier.targets,
         deps,
         excludedKeys
-      }),
-    preferAntigravityAliasesOnRetry: (quotaCandidates) =>
-      preferAntigravityAliasesOnRetry({
-        candidates: quotaCandidates,
-        excludedKeys,
-        deps
       })
   });
 }

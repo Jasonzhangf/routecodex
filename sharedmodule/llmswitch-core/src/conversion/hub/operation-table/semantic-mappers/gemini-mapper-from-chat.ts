@@ -5,20 +5,19 @@ import { flattenChatToolsForFunctionCalling, mapChatToolsToBridge } from '../../
 import { buildGeminiToolsFromBridge } from '../../../shared/gemini-tool-utils.js';
 import { getProtocolState } from '../../../protocol-state.js';
 import {
-  ANTIGRAVITY_DEFAULT_SAFETY_SETTINGS,
   deepCleanUndefined,
   injectGoogleSearchTool,
   pruneSearchFunctionDeclarations,
-  resolveAntigravityRequestConfig,
+  resolveGeminiRequestConfig,
   stripOnlineSuffix,
   type GeminiPayload
-} from './gemini-antigravity-request.js';
+} from './gemini-request-utils.js';
 import {
   applyGeminiRequestSystemInstruction,
   readSystemTextBlocksFromSemantics
 } from './gemini-system-semantics.js';
 import {
-  applyAntigravityThinkingConfig,
+  applyGeminiThinkingConfig,
   buildGenerationConfigFromParameters
 } from './gemini-thinking-config.js';
 import {
@@ -31,7 +30,7 @@ import {
   cloneAsJsonValue,
   convertToolMessageToOutput,
   normalizeToolContent,
-  sanitizeAntigravityToolCallId,
+  sanitizeGeminiToolCallId,
   synthesizeToolOutputsFromMessages
 } from './gemini-tool-output.js';
 import {
@@ -50,7 +49,6 @@ import {
   recordGeminiResponsesDroppedParameters,
 } from './gemini-mapper-config.js';
 import { applyClaudeThinkingToolSchemaCompatWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
-import { extractAntigravityGeminiSessionIdWithNative } from '../../../../router/virtual-router/engine-selection/native-router-hotpath.js';
 
 export function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnvelope['metadata'] | undefined): Record<string, unknown> {
   const contents: JsonObject[] = [];
@@ -63,8 +61,6 @@ export function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnv
   const isAnthropicEntry = entryEndpoint === '/v1/messages';
   const normalizedProviderId =
     typeof rawProviderId === 'string' ? rawProviderId.toLowerCase() : '';
-  const providerIdPrefix = normalizedProviderId.split('.')[0];
-  const isAntigravityProvider = providerIdPrefix === 'antigravity';
   const parameters = chat.parameters && typeof chat.parameters === 'object' ? (chat.parameters as Record<string, unknown>) : {};
   const responsesOrigin = isResponsesOrigin(chat);
   if (Object.prototype.hasOwnProperty.call(parameters, 'response_format')) {
@@ -75,19 +71,9 @@ export function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnv
     });
   }
   recordGeminiResponsesDroppedParameters(chat, parameters, responsesOrigin);
-  const keepReasoning =
-    Boolean((parameters as { keep_thinking?: unknown }).keep_thinking) ||
-    Boolean((parameters as { keep_reasoning?: unknown }).keep_reasoning);
-  const stripReasoningTags =
-    isAntigravityProvider &&
-    typeof (parameters as any).model === 'string' &&
-    String((parameters as any).model).startsWith('claude-') &&
-    !keepReasoning;
-
-  const includeToolCallIds = providerIdPrefix === 'antigravity';
-  const allowFunctionCallingProtocol =
-    providerIdPrefix !== 'gemini-cli' || (Array.isArray(chat.tools) && chat.tools.length > 0);
-  const omitFunctionCallPartsForCli = !allowFunctionCallingProtocol;
+  const stripReasoningTags = false;
+  const includeToolCallIds = false;
+  const allowFunctionCallingProtocol = true;
   const semanticsNode = readGeminiSemantics(chat);
   const systemTextBlocksFromSemantics = readSystemTextBlocksFromSemantics(chat);
 
@@ -145,9 +131,6 @@ export function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnv
       : [];
     for (const tc of toolCalls) {
       if (!tc || typeof tc !== 'object') continue;
-      if (omitFunctionCallPartsForCli) {
-        continue;
-      }
       const fn = (tc as any).function || {};
       const name = mapToolNameForGemini(typeof fn.name === 'string' ? fn.name : undefined);
       if (!name) continue;
@@ -172,7 +155,7 @@ export function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnv
       const functionCall: JsonObject = { name, args: argsJson };
       const part: JsonObject = { functionCall };
       if (includeToolCallIds && typeof (tc as any).id === 'string' && (tc as any).id.trim().length) {
-        (part.functionCall as JsonObject).id = sanitizeAntigravityToolCallId(String((tc as any).id));
+        (part.functionCall as JsonObject).id = sanitizeGeminiToolCallId(String((tc as any).id));
       }
       (entry.parts as JsonObject[]).push(part);
     }
@@ -214,15 +197,12 @@ export function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnv
   const geminiState = getProtocolState(metadata, 'gemini');
   applyGeminiRequestSystemInstruction({
     request,
-    isAntigravityProvider,
     semanticsSystemInstruction: semanticsNode?.systemInstruction as JsonValue | undefined,
     protocolStateSystemInstruction: geminiState?.systemInstruction as JsonValue | undefined,
     systemTextBlocksFromSemantics
   });
   if (allowFunctionCallingProtocol && flattenedChatTools && flattenedChatTools.length) {
-    const geminiTools = buildGeminiToolsFromBridge(bridgeDefs, {
-      mode: isAntigravityProvider ? 'antigravity' : 'default'
-    });
+    const geminiTools = buildGeminiToolsFromBridge(bridgeDefs);
     if (geminiTools) {
       request.tools = geminiTools;
     }
@@ -246,22 +226,16 @@ export function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnv
   if (Object.keys(generationConfig).length) {
     request.generationConfig = generationConfig;
   }
-  if (!isAntigravityProvider && semanticsNode?.safetySettings !== undefined) {
+  if (semanticsNode?.safetySettings !== undefined) {
     request.safetySettings = jsonClone(semanticsNode.safetySettings as JsonValue);
-  } else if (isAntigravityProvider) {
-    request.safetySettings = jsonClone(ANTIGRAVITY_DEFAULT_SAFETY_SETTINGS as unknown as JsonValue);
   }
-  if (isAntigravityProvider && isJsonObject(request.generationConfig as JsonValue)) {
-    (request.generationConfig as JsonObject).maxOutputTokens = 64000;
-    (request.generationConfig as JsonObject).topK = 64;
-  }
-  if (isAntigravityProvider && typeof request.model === 'string') {
+  if (typeof request.model === 'string') {
     const requestPayload = request as GeminiPayload;
     const original = requestPayload.model as string;
     const mapped = stripOnlineSuffix(original);
     const size = typeof chat.parameters?.size === 'string' ? String(chat.parameters.size) : undefined;
     const quality = typeof chat.parameters?.quality === 'string' ? String(chat.parameters.quality) : undefined;
-    const config = resolveAntigravityRequestConfig({
+    const config = resolveGeminiRequestConfig({
       originalModel: original,
       mappedModel: mapped,
       tools: requestPayload.tools,
@@ -289,7 +263,7 @@ export function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnv
     }
     deepCleanUndefined(requestPayload);
     const mappedLower = requestPayload.model.toLowerCase();
-    applyAntigravityThinkingConfig(requestPayload, mappedLower);
+    applyGeminiThinkingConfig(requestPayload, mappedLower);
   }
   if (chat.parameters?.tool_config && isJsonObject(chat.parameters.tool_config)) {
     request.toolConfig = jsonClone(chat.parameters.tool_config) as JsonObject;
@@ -330,14 +304,6 @@ export function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnv
       targetProtocol: 'gemini-chat',
       reason: 'preserved_via_metadata_passthrough'
     });
-  }
-
-  if (isAntigravityProvider) {
-    request.metadata = request.metadata ?? {};
-    const existing = (request.metadata as JsonObject).antigravitySessionId;
-    if (typeof existing !== 'string' || !existing.trim()) {
-      (request.metadata as JsonObject).antigravitySessionId = extractAntigravityGeminiSessionIdWithNative(request);
-    }
   }
 
   const compatRequest = applyClaudeThinkingToolSchemaCompatWithNative(request as JsonObject);

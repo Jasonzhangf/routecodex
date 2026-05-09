@@ -13,7 +13,7 @@ import {
   GEMINI_PASSTHROUGH_METADATA_PREFIX,
   GEMINI_PASSTHROUGH_PARAMETERS,
 } from './gemini-mapper-config.js';
-import type { GeminiPayload } from './gemini-antigravity-request.js';
+import type { GeminiPayload } from './gemini-request-utils.js';
 
 export function buildGeminiChatEnvelopeFromGeminiPayload(payload: GeminiPayload, ctx: AdapterContext): ChatEnvelope {
   const missing: MissingField[] = [];
