@@ -146,26 +146,6 @@ describe('provider-resolver: config-driven resolution', () => {
   // resolveDefaultCompatibilityProfileFromConfig — mirrors resolveCompatibilityProfile
   // =========================================================================
   describe('resolveDefaultCompatibilityProfileFromConfig', () => {
-    test('providerId "antigravity" → chat:gemini-cli', () => {
-      expect(resolveDefaultCompatibilityProfileFromConfig(config, 'antigravity', {})).toBe('chat:gemini-cli');
-    });
-
-    test('providerId "gemini-cli" → chat:gemini-cli', () => {
-      expect(resolveDefaultCompatibilityProfileFromConfig(config, 'gemini-cli', {})).toBe('chat:gemini-cli');
-    });
-
-    test('providerId case-insensitive "Antigravity" → chat:gemini-cli', () => {
-      expect(resolveDefaultCompatibilityProfileFromConfig(config, 'Antigravity', {})).toBe('chat:gemini-cli');
-    });
-
-    test('providerType contains "antigravity" → chat:gemini-cli', () => {
-      expect(resolveDefaultCompatibilityProfileFromConfig(config, 'some-provider', { type: 'antigravity-oauth' })).toBe('chat:gemini-cli');
-    });
-
-    test('providerType contains "gemini-cli" → chat:gemini-cli', () => {
-      expect(resolveDefaultCompatibilityProfileFromConfig(config, 'some-provider', { protocol: 'gemini-cli-proxy' })).toBe('chat:gemini-cli');
-    });
-
     test('default → compat:passthrough when no block matches', () => {
       expect(resolveDefaultCompatibilityProfileFromConfig(config, 'openai-provider', { type: 'openai' })).toBe('compat:passthrough');
     });

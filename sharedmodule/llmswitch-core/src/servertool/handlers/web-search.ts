@@ -293,11 +293,7 @@ function resolveEnvServerSideToolsEnabled(): boolean {
 }
 function isGeminiWebSearchEngine(engine: WebSearchEngineConfig): boolean {
   const key = engine.providerKey.toLowerCase();
-  return (
-    key.startsWith('gemini-cli.') ||
-    key.startsWith('antigravity.') ||
-    key.startsWith('gemini.')
-  );
+  return key.startsWith('gemini.');
 }
 function isQwenWebSearchEngine(engine: WebSearchEngineConfig): boolean {
   const key = engine.providerKey.toLowerCase();

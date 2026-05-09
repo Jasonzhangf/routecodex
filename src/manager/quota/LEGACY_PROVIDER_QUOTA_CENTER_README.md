@@ -8,7 +8,7 @@
 
 在 X7E Phase 1 之前，`provider-quota-center.ts` 是 quota 状态机的主要实现，被以下模块直接使用：
 - `provider-quota-daemon.ts` (Legacy daemon)
-- `antigravity-quota-manager.ts` (QuotaManagerModule)
+- `quota-manager.ts` (QuotaManagerModule)
 
 ### 当前状态
 

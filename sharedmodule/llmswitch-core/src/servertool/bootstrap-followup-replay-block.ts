@@ -26,7 +26,7 @@ export function createBootstrapPreflightFailedError(args: {
     typeof args.code === 'string' && args.code.trim()
       ? args.code.trim()
       : (typeof args.status === 'number' ? `HTTP_${args.status}` : 'SERVERTOOL_FOLLOWUP_FAILED');
-  const wrapped = new ProviderProtocolError('[servertool] antigravity bootstrap preflight failed', {
+  const wrapped = new ProviderProtocolError('[servertool] bootstrap preflight failed', {
     code: 'SERVERTOOL_FOLLOWUP_FAILED',
     category: 'EXTERNAL_ERROR',
     details: {
