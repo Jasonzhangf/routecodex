@@ -8,17 +8,6 @@ import { extractKeyAlias, extractKeyIndex, extractProviderId, getProviderModelId
 import { providerSupportsMultimodalRequest } from './multimodal-capability.js';
 import type { SelectionDeps, TrySelectFromTierOptions, SelectionResult } from './selection-deps.js';
 import { selectProviderKeyFromCandidatePool } from './tier-selection-select.js';
-import {
-  applyAntigravityAliasSessionLeases,
-  extractLeaseRuntimeKey,
-  isAntigravityGeminiModelKey,
-} from './tier-selection-antigravity-session-lease.js';
-import {
-  extractNonAntigravityTargets,
-  preferNonAntigravityWhenPossible,
-  shouldAvoidAllAntigravityOnRetry,
-  shouldAvoidAntigravityAfterRepeatedError
-} from './tier-selection-antigravity-target-split.js';
 
 export function trySelectFromTier(
   routeName: string,
@@ -31,7 +20,6 @@ export function trySelectFromTier(
 ): SelectionResult {
   const { disabledProviders, disabledKeysMap, allowedProviders, disabledModels, requiredProviderKeys } = options;
   let targets = Array.isArray(tier.targets) ? tier.targets : [];
-  let preLeaseTargets: string[] | null = null;
 
   const excludedRaw: string[] = Array.isArray((features.metadata as any)?.excludedProviderKeys)
     ? ((features.metadata as any).excludedProviderKeys as unknown[])
@@ -47,12 +35,6 @@ export function trySelectFromTier(
     targets = targets.filter((key) => !excludedKeys.has(key));
   }
   const isRecoveryAttempt = excludedKeys.size > 0;
-
-  // Antigravity safety: for certain retry signals (e.g. account verification required),
-  // avoid hitting *any* Antigravity alias on retries to prevent cross-account risk cascades.
-  if (isRecoveryAttempt && shouldAvoidAllAntigravityOnRetry(features.metadata)) {
-    targets = targets.filter((key) => (extractProviderId(key) ?? '') !== 'antigravity');
-  }
 
   const singleCandidateFallback = targets.length === 1 ? targets[0] : undefined;
 
@@ -126,26 +108,6 @@ export function trySelectFromTier(
     targets = targets.filter((key) => requiredProviderKeys.has(key));
   }
 
-  // Antigravity session isolation:
-  // - One alias (auth key) must not be shared across different sessions within the cooldown window,
-  //   otherwise upstream may respond with 429 due to cross-session contamination.
-  // - If the current session already has a leased alias, pin it when possible.
-  preLeaseTargets = targets;
-  const leaseResult = applyAntigravityAliasSessionLeases(targets, deps, features.metadata);
-  targets = leaseResult.targets;
-  // Default route must not fail purely due to Antigravity alias leasing.
-  // If *all* candidates are blocked by lease, fall back to the pre-lease pool and let upstream decide.
-  if (
-    !targets.length &&
-    routeName === DEFAULT_ROUTE &&
-    preLeaseTargets &&
-    preLeaseTargets.length > 0 &&
-    leaseResult.blocked > 0 &&
-    !leaseResult.pinnedStrict
-  ) {
-    targets = preLeaseTargets;
-  }
-
   const serverToolRequired = (features.metadata as any)?.serverToolRequired === true;
   if (serverToolRequired) {
     const filtered: string[] = [];
@@ -194,11 +156,7 @@ export function trySelectFromTier(
   }
 
   if (!targets.length) {
-    const leaseHint =
-      leaseResult.blocked > 0
-        ? `${routeName}:${tier.id}:antigravity_alias_session_busy(${leaseResult.blocked})`
-        : `${routeName}:${tier.id}:empty`;
-    return { providerKey: null, poolTargets: [], tierId: tier.id, failureHint: leaseHint };
+    return { providerKey: null, poolTargets: [], tierId: tier.id, failureHint: `${routeName}:${tier.id}:empty` };
   }
   const contextResult = deps.contextAdvisor.classify(
     targets,
@@ -213,12 +171,7 @@ export function trySelectFromTier(
   if (!hardLimit && routeName === DEFAULT_ROUTE && contextResult.overflow.length > 0) {
     prioritizedPools = [...prioritizedPools, contextResult.overflow];
   }
-  const avoidAntigravityOnRetry = isRecoveryAttempt && shouldAvoidAntigravityAfterRepeatedError(features.metadata);
-  const nonAntigravityTargets = avoidAntigravityOnRetry ? extractNonAntigravityTargets(targets) : [];
-  const poolsToTry =
-    avoidAntigravityOnRetry && nonAntigravityTargets.length > 0
-      ? [nonAntigravityTargets, ...prioritizedPools]
-      : prioritizedPools;
+  const poolsToTry = prioritizedPools;
 
   const quotaView = deps.quotaView;
   const now = quotaView ? Date.now() : 0;
@@ -229,41 +182,11 @@ export function trySelectFromTier(
 
   for (const candidatePool of poolsToTry) {
     const isSafePool = candidatePool === contextResult.safe;
-    const candidatesForSelect = avoidAntigravityOnRetry
-      ? preferNonAntigravityWhenPossible(candidatePool)
-      : candidatePool;
-    if (leaseResult.preferredRuntimeKey && !leaseResult.pinnedStrict) {
-      const preferredCandidates = candidatesForSelect.filter(
-        (key) => isAntigravityGeminiModelKey(key, deps) && extractLeaseRuntimeKey(key, deps) === leaseResult.preferredRuntimeKey
-      );
-      if (preferredCandidates.length > 0) {
-        const preferredProviderKey = selectProviderKeyFromCandidatePool({
-          routeName,
-          tier,
-          stickyKey,
-          candidates: preferredCandidates,
-          isSafePool,
-          deps,
-          options,
-          contextResult,
-          warnRatio,
-          excludedKeys,
-          isRecoveryAttempt,
-          now,
-          nowForWeights,
-          healthWeightedCfg,
-          contextWeightedCfg
-        });
-        if (preferredProviderKey) {
-          return { providerKey: preferredProviderKey, poolTargets: tier.targets, tierId: tier.id };
-        }
-      }
-    }
     const providerKey = selectProviderKeyFromCandidatePool({
       routeName,
       tier,
       stickyKey,
-      candidates: candidatesForSelect,
+      candidates: candidatePool,
       isSafePool,
       deps,
       options,
