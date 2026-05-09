@@ -10,5 +10,5 @@ export declare function prepareGeminiToolsForBridgeWithNative(rawTools: unknown,
     defs?: Array<Record<string, unknown>>;
     missing: Array<Record<string, unknown>>;
 };
-export declare function buildGeminiToolsFromBridgeWithNative(defs: unknown, mode?: 'antigravity' | 'default'): Array<Record<string, unknown>> | undefined;
+export declare function buildGeminiToolsFromBridgeWithNative(defs: unknown, mode?: 'default'): Array<Record<string, unknown>> | undefined;
 export declare function injectMcpToolsForResponsesWithNative(tools: unknown[] | undefined, discoveredServers: string[]): unknown[];

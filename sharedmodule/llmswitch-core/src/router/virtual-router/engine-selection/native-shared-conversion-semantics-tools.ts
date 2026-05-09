@@ -197,7 +197,7 @@ export function prepareGeminiToolsForBridgeWithNative(
 
 export function buildGeminiToolsFromBridgeWithNative(
   defs: unknown,
-  mode: 'antigravity' | 'default' = 'default'
+  mode: 'default' = 'default'
 ): Array<Record<string, unknown>> | undefined {
   const capability = 'buildGeminiToolsFromBridgeJson';
   const fail = (reason?: string) => failNativeRequired<Array<Record<string, unknown>> | undefined>(capability, reason);

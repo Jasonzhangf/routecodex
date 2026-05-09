@@ -188,7 +188,7 @@ export function extendRouteCandidatesForState(
   state: { allowedProviders?: Set<string> },
   routing: Record<string, RoutePoolTier[]>
 ): string[] {
-  // When provider allowlists are active (e.g. "<**!antigravity**>"),
+  // When provider allowlists are active,
   // only look at the default pool. This keeps sticky semantics scoped
   // to default routing, as required by RouteCodex.
   if (!state.allowedProviders || state.allowedProviders.size === 0) {

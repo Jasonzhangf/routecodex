@@ -49,7 +49,7 @@ export function resolveOutboundProfileFromConfig(
 
 /**
  * Resolve default compatibility profile from provider ID and config.
- * Replaces hardcoded antigravity/gemini-cli if-chain in resolveCompatibilityProfile.
+ * Replaces hardcoded provider-specific if-chain in resolveCompatibilityProfile.
  * Only handles the DEFAULT resolution — explicit compatibilityProfile from provider config takes precedence.
  */
 export function resolveDefaultCompatibilityProfileFromConfig(

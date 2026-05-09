@@ -229,7 +229,7 @@ function resolveCompatibilityProfile(providerId: string, provider: Record<string
       VirtualRouterErrorCode.CONFIG_ERROR
     );
   }
-  // Config-driven default resolution (replaces hardcoded antigravity/gemini-cli if-chain)
+  // Config-driven default resolution (replaces hardcoded provider-specific if-chain)
   return resolveDefaultCompatibilityProfileFromConfig(resolutionConfig, providerId, provider);
 }
 

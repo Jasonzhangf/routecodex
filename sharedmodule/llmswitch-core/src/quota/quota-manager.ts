@@ -15,12 +15,6 @@ function readEnvDurationMs(envKey: string, fallbackMs: number): number {
   return Math.floor(n);
 }
 
-const ANTIGRAVITY_AUTH_VERIFY_BAN_MS = readEnvDurationMs('ROUTECODEX_ANTIGRAVITY_AUTH_VERIFY_BAN', 24 * 60 * 60_000);
-const ANTIGRAVITY_THOUGHT_SIGNATURE_MISSING_COOLDOWN_MS = readEnvDurationMs(
-  'ROUTECODEX_ANTIGRAVITY_THOUGHT_SIGNATURE_MISSING_COOLDOWN',
-  5 * 60_000
-);
-
 function logQuotaManagerWarning(operation: string, error: unknown): void {
   const reason = error instanceof Error ? error.message : String(error);
   console.warn(`[llmswitch-core/quota-manager] ${operation} failed (non-blocking): ${reason}`);
@@ -126,57 +120,6 @@ function collectUpstreamErrorSources(ev: ProviderErrorEvent): string[] {
     }
   }
   return sources;
-}
-
-function isAntigravityProviderKey(providerKey: string): boolean {
-  return providerKey.toLowerCase().startsWith('antigravity.');
-}
-
-function isGoogleAccountVerificationRequired(ev: ProviderErrorEvent, sources: string[]): boolean {
-  if (!sources.length) {
-    sources = collectUpstreamErrorSources(ev);
-  }
-  const lowered = sources.join(' | ').toLowerCase();
-  return (
-    lowered.includes('verify your account') ||
-    lowered.includes('validation_required') ||
-    lowered.includes('validation required') ||
-    lowered.includes('validation_url') ||
-    lowered.includes('validation url') ||
-    lowered.includes('accounts.google.com/signin/continue') ||
-    lowered.includes('support.google.com/accounts?p=al_alert')
-  );
-}
-
-function isThoughtSignatureMissing(ev: ProviderErrorEvent, sources: string[]): boolean {
-  const code = typeof ev.code === 'string' ? ev.code.trim().toLowerCase() : '';
-  if (code.includes('thought') && code.includes('signature')) {
-    return true;
-  }
-  if (!sources.length) {
-    sources = collectUpstreamErrorSources(ev);
-  }
-  for (const source of sources) {
-    const lowered = source.toLowerCase();
-    const mentionsSignature =
-      lowered.includes('thoughtsignature') ||
-      lowered.includes('thought signature') ||
-      lowered.includes('reasoning_signature') ||
-      lowered.includes('reasoning signature');
-    if (!mentionsSignature) continue;
-    if (
-      lowered.includes('missing') ||
-      lowered.includes('required') ||
-      lowered.includes('invalid') ||
-      lowered.includes('not provided') ||
-      lowered.includes('签名') ||
-      lowered.includes('缺少') ||
-      lowered.includes('无效')
-    ) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function extractFirstUrl(sources: string[]): string | null {
@@ -297,51 +240,6 @@ export class QuotaManager {
     const details = ev.details && typeof ev.details === 'object' ? (ev.details as Record<string, unknown>) : undefined;
 
     const state = this.ensureProvider(providerKey);
-
-    // Antigravity account-scope auth verification required: isolate to current providerKey only.
-    if (isAntigravityProviderKey(providerKey)) {
-      const sources = collectUpstreamErrorSources(ev);
-      if (isGoogleAccountVerificationRequired(ev, sources)) {
-        const url = extractFirstUrl(sources);
-        const banUntil = nowMs + ANTIGRAVITY_AUTH_VERIFY_BAN_MS;
-        const next: QuotaState = {
-          ...state,
-          inPool: false,
-          reason: 'authVerify',
-          authIssue: {
-            kind: 'google_account_verification',
-            ...(url ? { url } : {}),
-            message: 'account verification required'
-          },
-          blacklistUntil: Math.max(state.blacklistUntil ?? 0, banUntil) || banUntil,
-          cooldownUntil: null,
-          lastErrorAtMs: nowMs,
-          lastErrorCode: code || 'AUTH_VERIFY',
-          lastErrorSeries: 'EFATAL',
-          consecutiveErrorCount: 0
-        };
-        this.states.set(providerKey, tickQuotaStateTime(next, nowMs));
-        this.markDirty();
-        return;
-      }
-      // Thought signature missing: cooldown current providerKey only.
-      if (isThoughtSignatureMissing(ev, sources)) {
-        const freezeUntil = nowMs + ANTIGRAVITY_THOUGHT_SIGNATURE_MISSING_COOLDOWN_MS;
-        const next: QuotaState = {
-          ...state,
-          inPool: false,
-          reason: 'cooldown',
-          cooldownUntil: Math.max(state.cooldownUntil ?? 0, freezeUntil) || freezeUntil,
-          lastErrorAtMs: nowMs,
-          lastErrorCode: code || 'SIGNATURE_MISSING',
-          lastErrorSeries: 'EOTHER',
-          consecutiveErrorCount: 0
-        };
-        this.states.set(providerKey, tickQuotaStateTime(next, nowMs));
-        this.markDirty();
-        return;
-      }
-    }
 
     // HTTP 402: treat as quota depleted -> blacklist until reset.
     if (status === 402 || code.toUpperCase() === 'HTTP_402') {

@@ -264,7 +264,7 @@ export interface AliasSelectionConfig {
    */
   defaultStrategy?: AliasSelectionStrategy;
   /**
-   * Per-provider overrides keyed by providerId (e.g. "antigravity").
+   * Per-provider overrides keyed by providerId.
    */
   providers?: Record<string, AliasSelectionStrategy>;
   /**
@@ -448,11 +448,6 @@ export interface RouterMetadataInput {
   providerProtocol?: string;
   stage?: "inbound" | "outbound" | "response";
   routeHint?: string;
-  /**
-   * Antigravity-Manager alignment: stable sessionId derived from the first user message text.
-   * Used for Antigravity alias/session binding and thoughtSignature persistence.
-   */
-  antigravitySessionId?: string;
   /**
    * Indicates that current routing decision is for a request which
    * expects server-side tools orchestration (e.g. web_search).

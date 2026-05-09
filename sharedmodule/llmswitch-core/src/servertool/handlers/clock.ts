@@ -376,13 +376,6 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
         const patched = injectClockToolOutput(ctx.base, toolCall, payload);
         const seed = extractCapturedChatSeed((ctx.adapterContext as any)?.capturedChatRequest);
         const canFollowup = Boolean(seed);
-        const bootstrapActive = (rt as any)?.antigravityThoughtSignatureBootstrap === true;
-        const forcedProviderKey =
-          bootstrapActive &&
-          typeof (ctx.adapterContext as any).providerKey === 'string' &&
-          String((ctx.adapterContext as any).providerKey).trim()
-            ? String((ctx.adapterContext as any).providerKey).trim()
-            : '';
         return {
           chatResponse: patched,
           execution: {
@@ -392,47 +385,12 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
                 followup: {
                   requestIdSuffix: ':clock_followup',
                   entryEndpoint: ctx.entryEndpoint,
-                  ...(bootstrapActive && seed
-                    ? {
-                      payload: (() => {
-                        const messages = Array.isArray(seed.messages) ? (cloneJson(seed.messages) as JsonObject[]) : [];
-                        const assistant = extractAssistantMessageFromChatLike(ctx.base);
-                        if (assistant) {
-                          messages.push(assistant);
-                        }
-                        messages.push(...buildToolMessagesFromToolOutputs(patched));
-                        const params: Record<string, unknown> =
-                          seed.parameters && typeof seed.parameters === 'object' && !Array.isArray(seed.parameters)
-                            ? { ...(seed.parameters as Record<string, unknown>) }
-                            : {};
-                        // Bootstrap-only: the first hop forces tool_config=clock; the second hop must clear it
-                        // so the model can either answer or call other tools normally.
-                        delete (params as any).tool_config;
-                        return {
-                          ...(seed.model ? { model: seed.model } : {}),
-                          messages,
-                          ...(Array.isArray(seed.tools) ? { tools: cloneJson(seed.tools) as JsonObject[] } : {}),
-                          ...(Object.keys(params).length ? { parameters: params } : {})
-                        } as JsonObject;
-                      })(),
-                      metadata: (() => {
-                        const meta: JsonObject = {};
-                        if (forcedProviderKey) {
-                          (meta as any).__shadowCompareForcedProviderKey = forcedProviderKey;
-                        }
-                        const runtime = ensureRuntimeMetadata(meta as unknown as Record<string, unknown>);
-                        (runtime as any).antigravityThoughtSignatureBootstrapAttempted = true;
-                        return meta;
-                      })()
-                    }
-                    : {
-                      injection: {
-                        ops: [
-                          { op: 'append_assistant_message', required: true },
-                          { op: 'append_tool_messages_from_tool_outputs', required: true }
-                        ]
-                      }
-                    })
+                  injection: {
+                    ops: [
+                      { op: 'append_assistant_message', required: true },
+                      { op: 'append_tool_messages_from_tool_outputs', required: true }
+                    ]
+                  }
                 }
               }
               : {})
