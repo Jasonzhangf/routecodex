@@ -19,6 +19,15 @@ const repoRoot = path.resolve(__dirname, '..');
 const REG_ROOT = path.join(repoRoot, 'samples', 'ci-goldens', '_regressions', 'apply_patch');
 const coreLoaderPath = path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'core-loader.js');
 const coreLoaderUrl = pathToFileURL(coreLoaderPath).href;
+const sourceToolRegistryPath = path.join(
+  repoRoot,
+  'sharedmodule',
+  'llmswitch-core',
+  'src',
+  'tools',
+  'tool-registry.js'
+);
+const sourceToolRegistryUrl = pathToFileURL(sourceToolRegistryPath).href;
 
 async function fileExists(p) {
   try {
@@ -48,12 +57,25 @@ async function* walkJsonFiles(root) {
 }
 
 async function loadValidator() {
-  if (!(await fileExists(coreLoaderPath))) {
-    throw new Error(`core-loader missing at ${coreLoaderPath} (run npm run build:dev first)`);
+  if (await fileExists(coreLoaderPath)) {
+    try {
+      const { importCoreModule } = await import(coreLoaderUrl);
+      const { validateToolCall } = await importCoreModule('tools/tool-registry');
+      return { validateToolCall, source: 'dist-core-loader' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+      console.warn(
+        `[verify:apply-patch-regressions] dist core-loader unavailable, fallback to source validator: ${message}`
+      );
+    }
   }
-  const { importCoreModule } = await import(coreLoaderUrl);
-  const { validateToolCall } = await importCoreModule('tools/tool-registry');
-  return { validateToolCall };
+  if (!(await fileExists(sourceToolRegistryPath))) {
+    throw new Error(
+      `tool-registry missing at both dist and source paths: ${coreLoaderPath} :: ${sourceToolRegistryPath}`
+    );
+  }
+  const { validateToolCall } = await import(sourceToolRegistryUrl);
+  return { validateToolCall, source: 'source-tool-registry' };
 }
 
 async function main() {
@@ -62,7 +84,7 @@ async function main() {
     return;
   }
 
-  const { validateToolCall } = await loadValidator();
+  const { validateToolCall, source } = await loadValidator();
 
   let total = 0;
   let fixed = 0;
@@ -87,6 +109,18 @@ async function main() {
     }
 
     const res = validateToolCall('apply_patch', args);
+    if (expected === 'fixed_by_compat') {
+      if (res?.ok) {
+        fixed += 1;
+        continue;
+      }
+      mismatches.push({
+        filePath,
+        reason: `expected_fixed_by_compat actual=${(res && res.reason) || 'unknown'}`
+      });
+      continue;
+    }
+
     if (res?.ok) {
       fixed += 1;
       continue;
@@ -99,7 +133,7 @@ async function main() {
   }
 
   console.log(
-    `[verify:apply-patch-regressions] total=${total} fixed=${fixed} stillFailing=${stillFailing} mismatches=${mismatches.length}`
+    `[verify:apply-patch-regressions] source=${source} total=${total} fixed=${fixed} stillFailing=${stillFailing} mismatches=${mismatches.length}`
   );
   if (mismatches.length) {
     console.error('[verify:apply-patch-regressions] ❌ mismatches:');
@@ -116,4 +150,3 @@ main().catch((error) => {
   console.error('[verify:apply-patch-regressions] failed:', error?.stack || error?.message || String(error ?? 'unknown'));
   process.exit(2);
 });
-

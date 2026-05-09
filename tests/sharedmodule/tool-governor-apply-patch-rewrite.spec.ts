@@ -151,4 +151,39 @@ describe('tool governor apply_patch rewrite', () => {
     const patchOrInput = String(args.patch || args.input || '');
     expect(patchOrInput).toContain('__rcc_apply_patch_validation_error__/reason-empty-add-file-block');
   });
+
+  it('does not rewrite noncanonical shell wrapper with extra commands into apply_patch payload', () => {
+    const response: any = {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_bad_shell',
+                type: 'function',
+                function: {
+                  name: 'apply_patch',
+                  arguments: `bash -lc "echo hi && apply_patch <<'PATCH'
+*** Begin Patch
+*** Add File: src/nope.ts
++console.log('nope');
+*** End Patch
+PATCH"`
+                }
+              }
+            ]
+          },
+          finish_reason: 'tool_calls'
+        }
+      ]
+    };
+
+    const out: any = normalizeApplyPatchToolCallsOnResponse(response);
+    const fn = out.choices?.[0]?.message?.tool_calls?.[0]?.function;
+    const args = JSON.parse(String(fn?.arguments || '{}')) as Record<string, unknown>;
+    const patchOrInput = String(args.patch || args.input || '');
+    expect(patchOrInput).toContain('__rcc_apply_patch_validation_error__/reason-missing-changes');
+  });
 });

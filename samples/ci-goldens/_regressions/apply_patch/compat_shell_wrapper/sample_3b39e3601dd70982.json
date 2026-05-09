@@ -1,0 +1,9 @@
+{
+  "id": "sample_3b39e3601dd70982",
+  "timestamp": "2026-05-09T00:00:00.000Z",
+  "errorType": "fixed_by_compat",
+  "originalArgs": "bash -lc \"apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/codex-shell.ts\n+export const codexShell = true;\n*** End Patch\nPATCH\"",
+  "normalizedArgs": "bash -lc \"apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/codex-shell.ts\n+export const codexShell = true;\n*** End Patch\nPATCH\"",
+  "validationError": "fixed_by_compat",
+  "source": "goal-apply-patch-compat-regression"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "sample_c86b469fa089c56f",
+  "timestamp": "2026-05-09T00:00:00.000Z",
+  "errorType": "fixed_by_compat",
+  "originalArgs": "bash -lc \"cd packages/core && apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: src/lib.ts\n@@\n-old\n+new\n*** End Patch\nPATCH\"",
+  "normalizedArgs": "bash -lc \"cd packages/core && apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: src/lib.ts\n@@\n-old\n+new\n*** End Patch\nPATCH\"",
+  "validationError": "fixed_by_compat",
+  "source": "goal-apply-patch-compat-regression"
+}

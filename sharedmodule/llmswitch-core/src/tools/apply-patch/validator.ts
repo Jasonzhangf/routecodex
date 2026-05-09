@@ -41,7 +41,38 @@ function normalizeApplyPatchArgsWithNative(rawArgs: string): string | undefined 
   }
 }
 
-function inferFailureReasonFromPatch(normalizedPatch: string | undefined): string {
+function looksLikeNonCanonicalShellApplyPatchAttempt(rawArgs: string): boolean {
+  if (typeof rawArgs !== 'string') {
+    return false;
+  }
+  const trimmed = rawArgs.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    return false;
+  }
+  const normalized = trimmed.replace(/\\r\\n/g, '\n');
+  const lower = normalized.toLowerCase();
+  if (
+    lower.startsWith('bash -lc ') ||
+    lower.startsWith('bash -c ') ||
+    lower.startsWith('zsh -lc ') ||
+    lower.startsWith('zsh -c ') ||
+    lower.startsWith('sh -lc ') ||
+    lower.startsWith('sh -c ')
+  ) {
+    return normalized.includes('apply_patch <<') && !/^((bash|zsh|sh)\s+-l?c\s+["']?(cd [^&\n]+ && )?apply_patch <<)/.test(trimmed);
+  }
+  const idx = normalized.indexOf('apply_patch <<');
+  if (idx <= 0) {
+    return false;
+  }
+  const prefix = normalized.slice(0, idx).trim();
+  return prefix.length > 0;
+}
+
+function detectInvalidPatchReason(normalizedPatch: string | undefined): string | undefined {
   const patch = typeof normalizedPatch === 'string' ? normalizedPatch : '';
   if (!patch.trim()) {
     return 'missing_changes';
@@ -51,8 +82,11 @@ function inferFailureReasonFromPatch(normalizedPatch: string | undefined): strin
     || /^\*\*\* Delete File:\s*\/dev\/null\s*$/m.test(patch)) {
     return 'invalid_patch_path';
   }
-  if (/^\*\*\* Add File:/m.test(patch) && !/^\+/m.test(patch)) {
+  if (/^\*\*\* Add File:/m.test(patch) && !/^\+(?!\+\+)(?:.|$)/m.test(patch)) {
     return 'empty_add_file_block';
+  }
+  if (/^\*\*\* Update File:/m.test(patch) && /^\s*---\s*$/m.test(patch)) {
+    return 'unsupported_patch_format';
   }
   if (/^\*\*\* Update File:/m.test(patch) && !/^\@\@/m.test(patch) && !/^\*\*\* Move to:/m.test(patch)) {
     return 'unsupported_patch_format';
@@ -60,7 +94,11 @@ function inferFailureReasonFromPatch(normalizedPatch: string | undefined): strin
   if (/^\@\@/m.test(patch) && !/^[ +-]/m.test(patch)) {
     return 'empty_update_hunk';
   }
-  return 'unsupported_patch_format';
+  return undefined;
+}
+
+function inferFailureReasonFromPatch(normalizedPatch: string | undefined): string {
+  return detectInvalidPatchReason(normalizedPatch) ?? 'unsupported_patch_format';
 }
 
 function hasUnsafeMixedSyntaxInsideAddFile(normalizedPatch: string | undefined): boolean {
@@ -93,6 +131,10 @@ function hasUnsafeMixedSyntaxInsideAddFile(normalizedPatch: string | undefined):
 }
 
 export function validateApplyPatchArgs(argsString: string, rawArgs: unknown): ApplyPatchValidationResult {
+  if (looksLikeNonCanonicalShellApplyPatchAttempt(argsString)) {
+    return { ok: false, reason: 'missing_changes', message: '结构完整但无内容' };
+  }
+
   const nativeNormalizedArgs = normalizeApplyPatchArgsWithNative(
     typeof argsString === 'string' && argsString.trim().length > 0
       ? argsString
@@ -134,8 +176,14 @@ export function validateApplyPatchArgs(argsString: string, rawArgs: unknown): Ap
     normalizedPatch = normalizeApplyPatchText(normalizedPatch);
   }
 
-  if (!normalizedPatch || !looksLikePatch(normalizedPatch)) {
-    const reason = inferFailureReasonFromPatch(normalizedPatch);
+  const structuralReason = detectInvalidPatchReason(normalizedPatch);
+  const shouldReject =
+    !normalizedPatch ||
+    !looksLikePatch(normalizedPatch) ||
+    structuralReason !== undefined;
+
+  if (shouldReject) {
+    const reason = structuralReason ?? inferFailureReasonFromPatch(normalizedPatch);
     let message: string | undefined;
     if (reason === 'missing_changes') {
       message = '结构完整但无内容';

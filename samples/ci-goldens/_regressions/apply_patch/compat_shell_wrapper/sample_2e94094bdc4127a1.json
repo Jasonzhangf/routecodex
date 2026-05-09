@@ -1,0 +1,9 @@
+{
+  "id": "sample_2e94094bdc4127a1",
+  "timestamp": "2026-05-09T00:00:00.000Z",
+  "errorType": "fixed_by_compat",
+  "originalArgs": "{\"cmd\": \"apply_patch << 'PATCH'\\n*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts\\n@@\\n-old\\n+new\\n*** End Patch\\nPATCH\", \"workdir\": \"/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core\", \"shell\": \"/bin/zsh\"}",
+  "normalizedArgs": "{\"cmd\": \"apply_patch << 'PATCH'\\n*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts\\n@@\\n-old\\n+new\\n*** End Patch\\nPATCH\", \"workdir\": \"/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core\", \"shell\": \"/bin/zsh\"}",
+  "validationError": "fixed_by_compat",
+  "source": "goal-apply-patch-compat-regression"
+}

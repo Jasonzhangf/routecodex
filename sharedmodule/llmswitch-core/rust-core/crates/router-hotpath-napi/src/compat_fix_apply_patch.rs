@@ -75,6 +75,514 @@ fn strip_apply_patch_command_prefix(raw: &str) -> String {
     stripped.to_string()
 }
 
+fn is_relative_shell_cd_path(path: &str) -> bool {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.starts_with('/')
+        || trimmed.starts_with('\\')
+        || trimmed.starts_with('~')
+        || trimmed.contains('$')
+        || trimmed.contains('`')
+        || trimmed.contains(';')
+        || trimmed.contains('|')
+        || trimmed.contains('<')
+        || trimmed.contains('>')
+        || trimmed.contains('&')
+        || trimmed.contains('(')
+        || trimmed.contains(')')
+        || trimmed.contains('{')
+        || trimmed.contains('}')
+        || trimmed.contains('[')
+        || trimmed.contains(']')
+        || trimmed.contains('*')
+        || trimmed.contains('?')
+        || trimmed.contains('\t')
+        || trimmed.contains('\n')
+        || trimmed.contains('\r')
+        || trimmed.contains(' ')
+    {
+        return false;
+    }
+    let bytes = trimmed.as_bytes();
+    if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+        return false;
+    }
+    !trimmed
+        .split('/')
+        .chain(trimmed.split('\\'))
+        .any(|segment| segment == "..")
+}
+
+fn normalize_relative_patch_path(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.starts_with('/')
+        || trimmed.starts_with('\\')
+        || trimmed.starts_with('~')
+        || trimmed.contains('\n')
+        || trimmed.contains('\r')
+    {
+        return None;
+    }
+    let bytes = trimmed.as_bytes();
+    if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+        return None;
+    }
+    let mut out: Vec<&str> = Vec::new();
+    for segment in trimmed.split('/') {
+        for part in segment.split('\\') {
+            let normalized = part.trim();
+            if normalized.is_empty() || normalized == "." {
+                continue;
+            }
+            if normalized == ".." {
+                return None;
+            }
+            out.push(normalized);
+        }
+    }
+    if out.is_empty() {
+        return None;
+    }
+    Some(out.join("/"))
+}
+
+fn rebase_patch_headers_with_relative_workdir(patch_text: &str, workdir: &str) -> Option<String> {
+    let base = normalize_relative_patch_path(workdir)?;
+    let mut out: Vec<String> = Vec::new();
+    for line in patch_text.split('\n') {
+        let trimmed = line.trim();
+        if let Some(path) = trimmed.strip_prefix("*** Add File:") {
+            let rel = normalize_relative_patch_path(path)?;
+            out.push(format!("*** Add File: {}/{}", base, rel));
+            continue;
+        }
+        if let Some(path) = trimmed.strip_prefix("*** Update File:") {
+            let rel = normalize_relative_patch_path(path)?;
+            out.push(format!("*** Update File: {}/{}", base, rel));
+            continue;
+        }
+        if let Some(path) = trimmed.strip_prefix("*** Delete File:") {
+            let rel = normalize_relative_patch_path(path)?;
+            out.push(format!("*** Delete File: {}/{}", base, rel));
+            continue;
+        }
+        if let Some(path) = trimmed.strip_prefix("*** Move to:") {
+            let rel = normalize_relative_patch_path(path)?;
+            out.push(format!("*** Move to: {}/{}", base, rel));
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    Some(out.join("\n"))
+}
+
+fn normalize_absolute_patch_path(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty()
+        || trimmed.contains('\n')
+        || trimmed.contains('\r')
+        || trimmed.starts_with('~')
+    {
+        return None;
+    }
+
+    let normalized = trimmed.replace('\\', "/");
+    let bytes = normalized.as_bytes();
+    let is_unix_abs = normalized.starts_with('/');
+    let is_windows_abs =
+        bytes.len() >= 3 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() && bytes[2] == b'/';
+    if !is_unix_abs && !is_windows_abs {
+        return None;
+    }
+
+    let mut prefix = String::new();
+    let tail = if is_windows_abs {
+        prefix.push((bytes[0] as char).to_ascii_uppercase());
+        prefix.push(':');
+        &normalized[2..]
+    } else {
+        prefix.push('/');
+        &normalized[1..]
+    };
+
+    let mut segments: Vec<&str> = Vec::new();
+    for segment in tail.split('/') {
+        let normalized_segment = segment.trim();
+        if normalized_segment.is_empty() || normalized_segment == "." {
+            continue;
+        }
+        if normalized_segment == ".." {
+            return None;
+        }
+        segments.push(normalized_segment);
+    }
+
+    if is_unix_abs {
+        if segments.is_empty() {
+            return Some("/".to_string());
+        }
+        return Some(format!("/{}", segments.join("/")));
+    }
+
+    if segments.is_empty() {
+        return Some(format!("{}/", prefix));
+    }
+    Some(format!("{}/{}", prefix, segments.join("/")))
+}
+
+fn relativize_absolute_patch_path_against_workdir(path: &str, workdir: &str) -> Option<String> {
+    let normalized_path = normalize_absolute_patch_path(path)?;
+    let normalized_workdir = normalize_absolute_patch_path(workdir)?;
+    if normalized_path == normalized_workdir {
+        return None;
+    }
+
+    let boundary = if normalized_workdir == "/" || normalized_workdir.ends_with('/') {
+        normalized_workdir.clone()
+    } else {
+        format!("{}/", normalized_workdir)
+    };
+    let rel = normalized_path.strip_prefix(&boundary)?;
+    normalize_relative_patch_path(rel)
+}
+
+fn rewrite_patch_headers_with_absolute_workdir(patch_text: &str, workdir: &str) -> Option<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in patch_text.split('\n') {
+        let trimmed = line.trim();
+        if let Some(path) = trimmed.strip_prefix("*** Add File:") {
+            let rel = normalize_relative_patch_path(path)
+                .or_else(|| relativize_absolute_patch_path_against_workdir(path, workdir))?;
+            out.push(format!("*** Add File: {}", rel));
+            continue;
+        }
+        if let Some(path) = trimmed.strip_prefix("*** Update File:") {
+            let rel = normalize_relative_patch_path(path)
+                .or_else(|| relativize_absolute_patch_path_against_workdir(path, workdir))?;
+            out.push(format!("*** Update File: {}", rel));
+            continue;
+        }
+        if let Some(path) = trimmed.strip_prefix("*** Delete File:") {
+            let rel = normalize_relative_patch_path(path)
+                .or_else(|| relativize_absolute_patch_path_against_workdir(path, workdir))?;
+            out.push(format!("*** Delete File: {}", rel));
+            continue;
+        }
+        if let Some(path) = trimmed.strip_prefix("*** Move to:") {
+            let rel = normalize_relative_patch_path(path)
+                .or_else(|| relativize_absolute_patch_path_against_workdir(path, workdir))?;
+            out.push(format!("*** Move to: {}", rel));
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    Some(out.join("\n"))
+}
+
+fn rewrite_patch_headers_for_workdir(patch_text: &str, workdir: &str) -> Option<String> {
+    if normalize_relative_patch_path(workdir).is_some() {
+        return rebase_patch_headers_with_relative_workdir(patch_text, workdir);
+    }
+    if normalize_absolute_patch_path(workdir).is_some() {
+        return rewrite_patch_headers_with_absolute_workdir(patch_text, workdir);
+    }
+    None
+}
+
+fn parse_outer_shell_wrapper(raw: &str) -> Option<&str> {
+    for prefix in [
+        "bash -lc ",
+        "bash -c ",
+        "zsh -lc ",
+        "zsh -c ",
+        "sh -lc ",
+        "sh -c ",
+    ] {
+        let Some(rest) = raw.strip_prefix(prefix) else {
+            continue;
+        };
+        let rest = rest.trim();
+        if rest.is_empty() {
+            return None;
+        }
+        if let Some(inner) = rest.strip_prefix('"') {
+            let mut escaped = false;
+            for (idx, ch) in inner.char_indices() {
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+                if ch == '\\' {
+                    escaped = true;
+                    continue;
+                }
+                if ch == '"' {
+                    let tail = inner[idx + ch.len_utf8()..].trim();
+                    if tail.is_empty() {
+                        return Some(&inner[..idx]);
+                    }
+                    return None;
+                }
+            }
+            return None;
+        }
+        if let Some(inner) = rest.strip_prefix('\'') {
+            if let Some(end) = inner.find('\'') {
+                let tail = inner[end + 1..].trim();
+                if tail.is_empty() {
+                    return Some(&inner[..end]);
+                }
+                return None;
+            }
+            return None;
+        }
+        return Some(rest);
+    }
+    None
+}
+
+fn extract_exact_apply_patch_from_shell_script(script: &str) -> Option<String> {
+    let normalized = script.replace("\r\n", "\n");
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if !trimmed.starts_with("apply_patch") && !trimmed.starts_with("cd ") {
+        return None;
+    }
+
+    let (rest, workdir) = if let Some(after_cd) = trimmed.strip_prefix("cd ") {
+        let and_idx = after_cd.find("&&")?;
+        let path = after_cd[..and_idx].trim();
+        if !is_relative_shell_cd_path(path) {
+            return None;
+        }
+        let rest = after_cd[and_idx + 2..].trim_start();
+        if !rest.starts_with("apply_patch") {
+            return None;
+        }
+        (rest, Some(path.to_string()))
+    } else {
+        (trimmed, None)
+    };
+
+    let after_cmd = rest.strip_prefix("apply_patch")?.trim_start();
+    let after_redirect = after_cmd.strip_prefix("<<")?.trim_start();
+    let (delimiter, body) = if let Some(rest) = after_redirect.strip_prefix('\'') {
+        let end = rest.find('\'')?;
+        let token = &rest[..end];
+        if token.is_empty() {
+            return None;
+        }
+        let remainder = &rest[end + 1..];
+        let body = remainder.strip_prefix('\n')?;
+        (token.to_string(), body)
+    } else if let Some(rest) = after_redirect.strip_prefix('"') {
+        let end = rest.find('"')?;
+        let token = &rest[..end];
+        if token.is_empty() {
+            return None;
+        }
+        let remainder = &rest[end + 1..];
+        let body = remainder.strip_prefix('\n')?;
+        (token.to_string(), body)
+    } else {
+        let newline_idx = after_redirect.find('\n')?;
+        let token = after_redirect[..newline_idx].trim();
+        if token.is_empty()
+            || !token
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            return None;
+        }
+        (token.to_string(), &after_redirect[newline_idx + 1..])
+    };
+
+    let lines: Vec<&str> = body.split('\n').collect();
+    let end_idx = lines.iter().rposition(|line| line.trim() == delimiter)?;
+    if lines[end_idx + 1..].iter().any(|line| !line.trim().is_empty()) {
+        return None;
+    }
+    let patch_body = lines[..end_idx].join("\n").trim().to_string();
+    if patch_body.is_empty() {
+        return None;
+    }
+    if !looks_like_patch_body_after_apply_patch_prefix(&patch_body)
+        && find_first_patch_marker(&patch_body).is_none()
+    {
+        return None;
+    }
+    if let Some(workdir) = workdir {
+        return rebase_patch_headers_with_relative_workdir(&patch_body, &workdir);
+    }
+    Some(patch_body)
+}
+
+fn extract_exact_apply_patch_from_shell_wrapper(raw: &str) -> Option<String> {
+    let normalized = decode_escaped_newlines_if_needed(raw).replace("\r\n", "\n");
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(script) = parse_outer_shell_wrapper(trimmed) {
+        return extract_exact_apply_patch_from_shell_script(script);
+    }
+    extract_exact_apply_patch_from_shell_script(trimmed)
+}
+
+fn looks_like_noncanonical_shell_apply_patch_attempt(raw: &str) -> bool {
+    let normalized = decode_escaped_newlines_if_needed(raw).replace("\r\n", "\n");
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        return false;
+    }
+    let apply_patch_idx = trimmed.find("apply_patch <<");
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("bash -lc ")
+        || lower.starts_with("bash -c ")
+        || lower.starts_with("zsh -lc ")
+        || lower.starts_with("zsh -c ")
+        || lower.starts_with("sh -lc ")
+        || lower.starts_with("sh -c ")
+    {
+        return trimmed.contains("apply_patch <<");
+    }
+    if let Some(idx) = apply_patch_idx {
+        let prefix = trimmed[..idx].trim();
+        if !prefix.is_empty() && !prefix.eq("cd") {
+            return true;
+        }
+    }
+    (trimmed.starts_with("apply_patch") || trimmed.starts_with("cd "))
+        && trimmed.contains("apply_patch <<")
+}
+
+fn decode_json_quoted_field_escapes(raw: &str) -> String {
+    raw.replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\r", "\n")
+        .replace("\\t", "\t")
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")
+}
+
+fn extract_broken_json_quoted_value(raw: &str, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        let pattern = format!("\"{}\"", key);
+        let Some(start) = raw.find(&pattern) else {
+            continue;
+        };
+        let mut cursor = start + pattern.len();
+        while let Some(ch) = raw[cursor..].chars().next() {
+            if ch.is_whitespace() {
+                cursor += ch.len_utf8();
+                continue;
+            }
+            if ch != ':' {
+                break;
+            }
+            cursor += ch.len_utf8();
+            while let Some(space) = raw[cursor..].chars().next() {
+                if space.is_whitespace() {
+                    cursor += space.len_utf8();
+                    continue;
+                }
+                if space != '"' {
+                    break;
+                }
+                cursor += 1;
+                let mut escaped = false;
+                let mut out = String::new();
+                for ch in raw[cursor..].chars() {
+                    if escaped {
+                        out.push('\\');
+                        out.push(ch);
+                        escaped = false;
+                        cursor += ch.len_utf8();
+                        continue;
+                    }
+                    if ch == '\\' {
+                        escaped = true;
+                        cursor += 1;
+                        continue;
+                    }
+                    if ch == '"' {
+                        return Some(decode_json_quoted_field_escapes(&out));
+                    }
+                    out.push(ch);
+                    cursor += ch.len_utf8();
+                }
+                return Some(decode_json_quoted_field_escapes(&out));
+            }
+            break;
+        }
+    }
+    None
+}
+
+fn extract_simple_broken_json_string_field(raw: &str, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        let pattern = format!(r#""{}"\s*:\s*"([^"]*)""#, regex::escape(key));
+        let re = Regex::new(&pattern).ok()?;
+        let Some(captures) = re.captures(raw) else {
+            continue;
+        };
+        let value = captures.get(1)?.as_str();
+        let decoded = decode_json_quoted_field_escapes(value);
+        if !decoded.trim().is_empty() {
+            return Some(decoded);
+        }
+    }
+    None
+}
+
+fn extract_broken_json_workdir(raw: &str) -> Option<String> {
+    extract_broken_json_quoted_value(raw, &["workdir", "cwd", "workDir"])
+        .or_else(|| extract_simple_broken_json_string_field(raw, &["workdir", "cwd", "workDir"]))
+}
+
+fn extract_patch_text_from_broken_json_wrapper(raw: &str) -> Option<String> {
+    let command = extract_broken_json_quoted_value(raw, &["cmd", "command"])?;
+    if looks_like_noncanonical_shell_apply_patch_attempt(&command)
+        && extract_exact_apply_patch_from_shell_wrapper(&command).is_none()
+    {
+        return None;
+    }
+    let patch_text = extract_exact_apply_patch_from_shell_wrapper(&command).or_else(|| {
+        let trimmed = command.trim();
+        let rest = if trimmed.starts_with("apply_patch") {
+            trimmed
+        } else {
+            return None;
+        };
+        Some(rest.to_string())
+    })?;
+    let workdir = extract_broken_json_workdir(raw);
+    if let Some(workdir) = workdir {
+        if let Some(rewritten) = rewrite_patch_headers_for_workdir(&patch_text, &workdir) {
+            return Some(rewritten);
+        }
+        let normalized_patch = normalize_apply_patch_text(&patch_text);
+        if normalized_patch != patch_text {
+            if let Some(rewritten) = rewrite_patch_headers_for_workdir(&normalized_patch, &workdir)
+            {
+                return Some(rewritten);
+            }
+        }
+        return Some(patch_text);
+    }
+    Some(patch_text)
+}
+
 fn has_unified_like_header(text: &str) -> bool {
     text.lines().any(|line| {
         let trimmed = line.trim_start();
@@ -716,14 +1224,77 @@ fn extract_patch_text_from_argument(raw: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
+    if let Some(shell_patch) = extract_exact_apply_patch_from_shell_wrapper(trimmed) {
+        return Some(shell_patch);
+    }
+    if looks_like_noncanonical_shell_apply_patch_attempt(trimmed) {
+        return None;
+    }
     if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
         return extract_patch_text_from_value(&parsed);
+    }
+    if trimmed.starts_with('{') {
+        if let Some(broken_wrapper_patch) = extract_patch_text_from_broken_json_wrapper(trimmed) {
+            return Some(broken_wrapper_patch);
+        }
     }
     Some(trimmed.to_string())
 }
 
 fn extract_patch_text_from_value(value: &Value) -> Option<String> {
+    fn extract_patch_text_from_command_value(value: &Value) -> Option<String> {
+        match value {
+            Value::String(raw) => extract_exact_apply_patch_from_shell_wrapper(raw)
+                .or_else(|| {
+                    let trimmed = raw.trim();
+                    if trimmed.starts_with("apply_patch") {
+                        Some(trimmed.to_string())
+                    } else {
+                        None
+                    }
+                }),
+            Value::Array(items) => {
+                let tokens: Vec<String> = items
+                    .iter()
+                    .map(|entry| entry.as_str().map(|v| v.to_string()))
+                    .collect::<Option<Vec<String>>>()?;
+                if tokens.len() >= 2 {
+                    let command_token = tokens[0].trim().to_ascii_lowercase();
+                    if command_token == "apply_patch" || command_token == "applypatch" {
+                        let patch_text = tokens[1..].join("\n").trim().to_string();
+                        if !patch_text.is_empty() {
+                            return Some(patch_text);
+                        }
+                    }
+                }
+                if tokens.len() == 3 {
+                    let shell = tokens[0].trim().to_ascii_lowercase();
+                    let flag = tokens[1].trim().to_ascii_lowercase();
+                    if matches!(shell.as_str(), "bash" | "zsh" | "sh")
+                        && matches!(flag.as_str(), "-lc" | "-c")
+                    {
+                        return extract_exact_apply_patch_from_shell_script(&tokens[2]);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn extract_patch_text_from_command_value_with_workdir(
+        value: &Value,
+        workdir: Option<&str>,
+    ) -> Option<String> {
+        let patch = extract_patch_text_from_command_value(value)?;
+        if let Some(workdir) = workdir {
+            return rewrite_patch_headers_for_workdir(&patch, workdir);
+        }
+        Some(patch)
+    }
+
     fn extract_patch_text_from_object(obj: &Map<String, Value>) -> Option<String> {
+        let workdir = read_trimmed_string(obj.get("workdir"));
         obj.get("patch")
             .and_then(extract_patch_text_from_value)
             .or_else(|| obj.get("input").and_then(extract_patch_text_from_value))
@@ -732,12 +1303,32 @@ fn extract_patch_text_from_value(value: &Value) -> Option<String> {
                     .and_then(extract_patch_text_from_value)
             })
             .or_else(|| obj.get("arguments").and_then(extract_patch_text_from_value))
+            .or_else(|| {
+                obj.get("command").and_then(|value| {
+                    extract_patch_text_from_command_value_with_workdir(
+                        value,
+                        workdir.as_deref(),
+                    )
+                })
+            })
+            .or_else(|| {
+                obj.get("cmd").and_then(|value| {
+                    extract_patch_text_from_command_value_with_workdir(
+                        value,
+                        workdir.as_deref(),
+                    )
+                })
+            })
+            .or_else(|| obj.get("result").and_then(extract_patch_text_from_value))
+            .or_else(|| obj.get("payload").and_then(extract_patch_text_from_value))
+            .or_else(|| obj.get("data").and_then(extract_patch_text_from_value))
     }
 
     match value {
         Value::String(raw) => extract_patch_text_from_argument(raw),
         Value::Object(obj) => extract_patch_text_from_object(obj),
-        Value::Array(items) => items.iter().find_map(extract_patch_text_from_value),
+        Value::Array(items) => extract_patch_text_from_command_value(value)
+            .or_else(|| items.iter().find_map(extract_patch_text_from_value)),
         _ => None,
     }
 }
@@ -883,8 +1474,88 @@ pub fn fix_apply_patch_tool_calls_json(payload_json: String) -> NapiResult<Strin
 
 #[cfg(test)]
 mod tests {
-    use super::fix_apply_patch_tool_calls_json;
+    use super::{
+        extract_broken_json_workdir, extract_patch_text_from_broken_json_wrapper,
+        fix_apply_patch_tool_calls_json, normalize_apply_patch_tool_arguments_from_value,
+        rewrite_patch_headers_for_workdir,
+    };
     use serde_json::{json, Value};
+
+    #[test]
+    fn extracts_workdir_from_broken_json_wrapper_string() {
+        let raw = "{\"cmd\":\"apply_patch << 'PATCH'\n*** Begin Patch\n*** Update File: /Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts\n@@\n-old\n+new\n*** End Patch\nPATCH\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core\",\"shell\":\"/bin/zsh\"}";
+        assert_eq!(
+            extract_broken_json_workdir(raw).as_deref(),
+            Some("/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core")
+        );
+    }
+
+    #[test]
+    fn rewrites_absolute_patch_headers_against_absolute_workdir() {
+        let patch = "*** Begin Patch\n*** Update File: /Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts\n@@\n-old\n+new\n*** End Patch";
+        let rewritten = rewrite_patch_headers_for_workdir(
+            patch,
+            "/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core",
+        )
+        .expect("rewritten patch");
+        assert!(
+            rewritten.contains("*** Update File: src/router/virtual-router/bootstrap.ts"),
+            "rewritten={}",
+            rewritten.replace('\n', "\\n")
+        );
+        assert!(!rewritten.contains(
+            "/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts"
+        ));
+    }
+
+    #[test]
+    fn salvages_broken_json_wrapper_patch_text_directly() {
+        let raw = "{\"cmd\":\"apply_patch << 'PATCH'\n*** Begin Patch\n*** Update File: /Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts\n@@\n-old\n+new\n*** End Patch\nPATCH\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core\",\"shell\":\"/bin/zsh\"}";
+        let patch = extract_patch_text_from_broken_json_wrapper(raw).expect("salvaged patch");
+        assert!(
+            patch.contains("*** Update File: src/router/virtual-router/bootstrap.ts"),
+            "patch={}",
+            patch.replace('\n', "\\n")
+        );
+        assert!(!patch.contains(
+            "/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts"
+        ));
+    }
+
+    #[test]
+    fn normalizes_broken_json_wrapper_string_value_to_relative_patch() {
+        let raw = Value::String("{\"cmd\":\"apply_patch << 'PATCH'\n*** Begin Patch\n*** Update File: /Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts\n@@\n-old\n+new\n*** End Patch\nPATCH\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core\",\"shell\":\"/bin/zsh\"}".to_string());
+        let normalized =
+            normalize_apply_patch_tool_arguments_from_value(&raw).expect("normalized args");
+        let parsed: Value = serde_json::from_str(&normalized).expect("parse normalized");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert!(
+            patch.contains("*** Update File: src/router/virtual-router/bootstrap.ts"),
+            "patch={}",
+            patch.replace('\n', "\\n")
+        );
+        assert!(!patch.contains(
+            "/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts"
+        ));
+    }
+
+    #[test]
+    fn rewrite_round_trip_on_json_parsed_object_cmd_and_workdir() {
+        let value = serde_json::json!({
+            "cmd": "apply_patch << 'PATCH'\n*** Begin Patch\n*** Update File: /Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts\n@@\n-old\n+new\n*** End Patch\nPATCH",
+            "workdir": "/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core",
+            "shell": "/bin/zsh"
+        });
+        let normalized =
+            normalize_apply_patch_tool_arguments_from_value(&value).expect("normalized args");
+        let parsed: Value = serde_json::from_str(&normalized).expect("parse normalized");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert!(
+            patch.contains("*** Update File: src/router/virtual-router/bootstrap.ts"),
+            "patch={}",
+            patch.replace('\n', "\\n")
+        );
+    }
 
     #[test]
     fn fixes_apply_patch_tool_arguments_and_marks_tool_call() {
@@ -967,7 +1638,7 @@ mod tests {
     }
 
     #[test]
-    fn does_not_guess_patch_from_nested_command_wrapper_payload() {
+    fn repairs_nested_command_wrapper_payload_when_patch_shape_is_complete() {
         let payload = json!({
           "messages": [{
             "role": "assistant",
@@ -986,11 +1657,14 @@ mod tests {
         let args = output["messages"][0]["tool_calls"][0]["function"]["arguments"]
             .as_str()
             .expect("arguments");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert!(patch.contains("*** Add File: src/new.ts"));
+        assert!(patch.contains("+console.log('x');"));
         assert_eq!(
-            args,
-            "{\"ok\":true,\"result\":{\"command\":\"apply_patch *** Begin Patch\\n*** Add File: src/new.ts\\nconsole.log('x');\\n*** End Patch\"}}"
+            output["messages"][0]["tool_calls"][0]["_fixed_apply_patch"],
+            Value::Bool(true)
         );
-        assert!(output["messages"][0]["tool_calls"][0]["_fixed_apply_patch"].is_null());
     }
 
     #[test]
@@ -1010,7 +1684,7 @@ mod tests {
     }
 
     #[test]
-    fn does_not_guess_patch_from_command_field_only_input_items() {
+    fn repairs_command_field_only_input_items_when_patch_shape_is_complete() {
         let payload = json!({
           "input": [{
             "type": "function_call",
@@ -1022,13 +1696,16 @@ mod tests {
         });
         let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
         let output: Value = serde_json::from_str(&raw).expect("parse output");
-        assert_eq!(
-            output["input"][0]["arguments"],
-            json!({
-              "command": "apply_patch *** Begin Patch\n*** Add File: src/input-only.ts\nconsole.log('ok');\n*** End Patch"
-            })
+        let args = output["input"][0]["arguments"].as_str().expect("arguments");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert!(
+            patch.contains("*** Add File: src/input-only.ts"),
+            "patch={}",
+            patch.replace('\n', "\\n")
         );
-        assert!(output["input"][0]["_fixed_apply_patch"].is_null());
+        assert!(patch.contains("+console.log('ok');"));
+        assert_eq!(output["input"][0]["_fixed_apply_patch"], Value::Bool(true));
     }
 
     #[test]
@@ -1136,6 +1813,212 @@ mod tests {
         assert!(!patch.contains("--- a/HEARTBEAT.md"));
         assert!(patch.contains("@@ -1 +1 @@"));
         assert!(patch.ends_with("*** End Patch"));
+    }
+
+    #[test]
+    fn normalizes_exact_bash_lc_heredoc_wrapper_to_apply_patch() {
+        let payload = json!({
+          "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+              "type": "function",
+              "function": {
+                "name": "apply_patch",
+                "arguments": r#"bash -lc "apply_patch <<'PATCH'
+*** Begin Patch
+*** Add File: src/shell-wrapper.ts
++console.log('wrapped');
+*** End Patch
+PATCH""#
+              }
+            }]
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        let args = output["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert!(patch.contains("*** Add File: src/shell-wrapper.ts"));
+        assert!(patch.contains("+console.log('wrapped');"));
+        assert_eq!(
+            output["messages"][0]["tool_calls"][0]["_fixed_apply_patch"],
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn normalizes_shell_wrapper_when_heredoc_operator_has_spacing_before_token() {
+        let payload = json!({
+          "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+              "type": "function",
+              "function": {
+                "name": "apply_patch",
+                "arguments": r#"apply_patch << 'PATCH'
+*** Begin Patch
+*** Add File: src/spaced-token.ts
++console.log('spaced');
+*** End Patch
+PATCH"#
+              }
+            }]
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        let args = output["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert!(patch.contains("*** Add File: src/spaced-token.ts"));
+        assert!(patch.contains("+console.log('spaced');"));
+        assert_eq!(
+            output["messages"][0]["tool_calls"][0]["_fixed_apply_patch"],
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn rebases_patch_headers_for_exact_cd_and_apply_patch_shell_wrapper() {
+        let payload = json!({
+          "input": [{
+            "type": "function_call",
+            "name": "apply_patch",
+            "arguments": {
+              "command": ["bash", "-lc", "cd packages/core && apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: src/lib.rs\n@@\n-old\n+new\n*** End Patch\nPATCH"]
+            }
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        let args = output["input"][0]["arguments"].as_str().expect("arguments");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert!(patch.contains("*** Update File: packages/core/src/lib.rs"));
+        assert!(!patch.contains("*** Update File: src/lib.rs"));
+        assert_eq!(output["input"][0]["_fixed_apply_patch"], Value::Bool(true));
+    }
+
+    #[test]
+    fn relativizes_absolute_patch_headers_using_explicit_workdir_on_command_wrapper() {
+        let payload = json!({
+          "input": [{
+            "type": "function_call",
+            "name": "apply_patch",
+            "arguments": {
+              "cmd": "apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: /Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts\n@@\n-old\n+new\n*** End Patch\nPATCH",
+              "workdir": "/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core"
+            }
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        let args = output["input"][0]["arguments"].as_str().expect("arguments");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        eprintln!("BROKEN_WRAPPER_PATCH={}", patch.replace('\n', "\\n"));
+        assert!(
+            patch.contains("*** Update File: src/router/virtual-router/bootstrap.ts"),
+            "patch={}",
+            patch.replace('\n', "\\n")
+        );
+        assert!(!patch.contains("/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts"));
+        assert_eq!(output["input"][0]["_fixed_apply_patch"], Value::Bool(true));
+    }
+
+    #[test]
+    fn salvages_broken_json_wrapper_with_cmd_and_workdir_fields() {
+        let payload = json!({
+          "input": [{
+            "type": "function_call",
+            "name": "apply_patch",
+            "arguments": "{\"cmd\":\"apply_patch << 'PATCH'\n*** Begin Patch\n*** Update File: /Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts\n@@\n-old\n+new\n*** End Patch\nPATCH\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core\",\"shell\":\"/bin/zsh\"}"
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        let args = output["input"][0]["arguments"].as_str().expect("arguments");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        eprintln!("BROKEN_JSON_WRAPPER_PATCH={}", patch.replace('\n', "\\n"));
+        assert!(
+            patch.contains("*** Update File: src/router/virtual-router/bootstrap.ts"),
+            "patch={}",
+            patch.replace('\n', "\\n")
+        );
+        assert!(!patch.contains("/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts"));
+        assert_eq!(output["input"][0]["_fixed_apply_patch"], Value::Bool(true));
+    }
+
+    #[test]
+    fn does_not_guess_from_shell_wrapper_with_extra_commands() {
+        let payload = json!({
+          "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+              "type": "function",
+              "function": {
+                "name": "apply_patch",
+                "arguments": r#"bash -lc "echo hi && apply_patch <<'PATCH'
+*** Begin Patch
+*** Add File: src/nope.ts
++console.log('nope');
+*** End Patch
+PATCH""#
+              }
+            }]
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        assert_eq!(
+            output["messages"][0]["tool_calls"][0]["function"]["arguments"],
+            Value::String(String::from(r#"bash -lc "echo hi && apply_patch <<'PATCH'
+*** Begin Patch
+*** Add File: src/nope.ts
++console.log('nope');
+*** End Patch
+PATCH""#))
+        );
+        assert!(output["messages"][0]["tool_calls"][0]["_fixed_apply_patch"].is_null());
+    }
+
+    #[test]
+    fn does_not_guess_from_direct_shell_style_apply_patch_with_extra_commands() {
+        let payload = json!({
+          "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+              "type": "function",
+              "function": {
+                "name": "apply_patch",
+                "arguments": r#"echo hi && apply_patch <<'PATCH'
+*** Begin Patch
+*** Add File: src/nope-direct.ts
++console.log('nope');
+*** End Patch
+PATCH"#
+              }
+            }]
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        assert_eq!(
+            output["messages"][0]["tool_calls"][0]["function"]["arguments"],
+            Value::String(String::from(r#"echo hi && apply_patch <<'PATCH'
+*** Begin Patch
+*** Add File: src/nope-direct.ts
++console.log('nope');
+*** End Patch
+PATCH"#))
+        );
+        assert!(output["messages"][0]["tool_calls"][0]["_fixed_apply_patch"].is_null());
     }
 
     #[test]

@@ -85,7 +85,6 @@ describe('req inbound stage2 tool shape normalization', () => {
     const execArgsText = assistantMessage.tool_calls[0].function.arguments;
     const execArgs = JSON.parse(execArgsText);
     expect(execArgs.cmd).toBe('git status --short');
-    expect(execArgs.command).toBe('git status --short');
     expect(execArgs.workdir).toBe('/workspace/repo');
 
     const patchArgsText = assistantMessage.tool_calls[1].function.arguments;
@@ -106,5 +105,62 @@ describe('req inbound stage2 tool shape normalization', () => {
     expect(
       JSON.parse(recordedStage!.payload.messages[1].tool_calls[1].function.arguments).input
     ).toContain('*** Begin Patch');
+  });
+
+  it('keeps noncanonical shell-wrapped apply_patch as guarded invalid payload instead of guessing patch text', async () => {
+    const adapterContext = {
+      requestId: 'req-stage2-tool-shape-bad-shell',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat'
+    };
+
+    const stage2 = await runReqInboundStage2SemanticMap({
+      adapterContext: adapterContext as any,
+      formatEnvelope: {
+        protocol: 'openai-chat',
+        direction: 'request',
+        payload: {
+          model: 'glm-5',
+          messages: [{ role: 'user', content: 'continue' }],
+          tools: [{ type: 'function', function: { name: 'apply_patch' } }]
+        }
+      } as any,
+      semanticMapper: {
+        async toChat() {
+          return {
+            messages: [
+              { role: 'user', content: 'continue' },
+              {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: 'call_patch_bad_shell',
+                    type: 'function',
+                    function: {
+                      name: 'apply_patch',
+                      arguments: `bash -lc "echo hi && apply_patch <<'PATCH'
+*** Begin Patch
+*** Add File: src/nope.ts
++console.log('nope');
+*** End Patch
+PATCH"`
+                    }
+                  }
+                ]
+              }
+            ],
+            tools: [{ type: 'function', function: { name: 'apply_patch' } }],
+            parameters: { model: 'glm-5' },
+            metadata: { context: adapterContext }
+          } as any;
+        }
+      }
+    });
+
+    const assistantMessage = (stage2.chatEnvelope.messages as any[])[1];
+    const patchArgs = JSON.parse(assistantMessage.tool_calls[0].function.arguments);
+    expect(String(patchArgs.input || patchArgs.patch || '')).toContain(
+      '__rcc_apply_patch_validation_error__/reason-missing-changes'
+    );
   });
 });

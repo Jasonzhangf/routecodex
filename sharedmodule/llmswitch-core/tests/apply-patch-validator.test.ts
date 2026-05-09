@@ -19,6 +19,90 @@ describe('apply_patch validator (shape fixes)', () => {
     expect(normalized.input).toContain('*** Begin Patch');
   });
 
+  test('accepts exact Codex bash heredoc wrapper and normalizes to canonical patch', () => {
+    const raw = `bash -lc "apply_patch <<'PATCH'
+*** Begin Patch
+*** Add File: src/codex-shell.ts
++export const codexShell = true;
+*** End Patch
+PATCH"`;
+
+    const res = validateToolCall('apply_patch', raw);
+    expect(res.ok).toBe(true);
+    const normalized = JSON.parse(res.normalizedArgs as string);
+    expect(normalized.patch).toContain('*** Add File: src/codex-shell.ts');
+    expect(normalized.patch).toContain('+export const codexShell = true;');
+    expect(normalized.patch).not.toContain('bash -lc');
+  });
+
+  test('accepts exact Codex cd+apply_patch shell wrapper and rebases to canonical relative path', () => {
+    const raw = `bash -lc "cd packages/core && apply_patch <<'PATCH'
+*** Begin Patch
+*** Update File: src/lib.ts
+@@
+-old
++new
+*** End Patch
+PATCH"`;
+
+    const res = validateToolCall('apply_patch', raw);
+    expect(res.ok).toBe(true);
+    const normalized = JSON.parse(res.normalizedArgs as string);
+    expect(normalized.patch).toContain('*** Update File: packages/core/src/lib.ts');
+    expect(normalized.patch).not.toContain('*** Update File: src/lib.ts');
+  });
+
+  test('rejects noncanonical shell wrapper with extra commands before apply_patch', () => {
+    const raw = `bash -lc "echo hi && apply_patch <<'PATCH'
+*** Begin Patch
+*** Add File: src/nope.ts
++console.log('nope');
+*** End Patch
+PATCH"`;
+
+    const res = validateToolCall('apply_patch', raw);
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('missing_changes');
+  });
+
+  test('accepts provider cmd wrapper with explicit workdir and relativizes absolute patch headers', () => {
+    const raw = JSON.stringify({
+      cmd: `apply_patch << 'PATCH'
+*** Begin Patch
+*** Update File: /Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts
+@@
+-old
++new
+*** End Patch
+PATCH`,
+      workdir: '/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core',
+      shell: '/bin/zsh'
+    });
+
+    const res = validateToolCall('apply_patch', raw);
+    expect(res.ok).toBe(true);
+    const normalized = JSON.parse(res.normalizedArgs as string);
+    expect(normalized.patch).toContain('*** Update File: src/router/virtual-router/bootstrap.ts');
+    expect(normalized.patch).not.toContain('/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts');
+  });
+
+  test('keeps structured legacy edit envelopes without @@ hunks as explicit unsupported_patch_format', () => {
+    const raw = JSON.stringify({
+      file: 'packages/card-engine/package.json',
+      changes: [
+        {
+          kind: 'insert_after',
+          target: '    "@novelmobile/domain-models": "workspace:*",',
+          lines: '    "@novelmobile/llm-client": "workspace:*",'
+        }
+      ]
+    });
+
+    const res = validateToolCall('apply_patch', raw);
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('unsupported_patch_format');
+  });
+
   test('accepts JSON payload with patch + input (idempotent)', () => {
     const patch = `*** Begin Patch
 *** Update File: a.txt

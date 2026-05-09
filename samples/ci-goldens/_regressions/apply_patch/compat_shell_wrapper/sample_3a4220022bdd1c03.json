@@ -1,0 +1,9 @@
+{
+  "id": "sample_3a4220022bdd1c03",
+  "timestamp": "2026-05-09T00:00:00.000Z",
+  "errorType": "missing_changes",
+  "originalArgs": "bash -lc \"echo hi && apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/nope.ts\n+console.log('nope');\n*** End Patch\nPATCH\"",
+  "normalizedArgs": "bash -lc \"echo hi && apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/nope.ts\n+console.log('nope');\n*** End Patch\nPATCH\"",
+  "validationError": "missing_changes",
+  "source": "goal-apply-patch-compat-regression"
+}

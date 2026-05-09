@@ -1480,3 +1480,6 @@ Tags: servertool, unified-skeleton, followup, host-shell, single-source-of-truth
 - 2026-04-16: `request-executor` 外层错误出口也要做 host 壳层单点化：`runtime_resolve` / `provider.send` 不能各自手拼 `reportProviderError -> resolveProviderRetryExecutionPlan -> buildProviderRetryTelemetryPlan`。当前已抽出 `resolveRequestExecutorProviderFailurePlan(...)` 和 `emitRequestExecutorProviderRetryTelemetry(...)`；可复用结论：当 followup / http / sse 的 stage marker 已前移后，外层只保留一个 failure orchestrator，避免同一错误在不同 catch 里重新分叉。
 
 Tags: request-executor, provider-failure, retry-telemetry, host-shell, single-source-of-truth, provider-followup, provider-http, provider-sse
+- 2026-05-09: apply_patch shell-wrapper compatibility now follows a stricter “shape-repair-only if information is sufficient” rule. 可复用规则：exact `bash|zsh|sh -lc|-c apply_patch <<PATCH`、`cd rel && apply_patch <<PATCH`、以及显式 `cmd/command + workdir + patch body`/nested result-payload-data wrapper，应统一在 Rust `compat_fix_apply_patch.rs` 真源做回收并归一成 canonical apply_patch；但凡需要解释额外 shell 命令、猜工具名、补 hunk 或补文件语义，必须 fail-fast 为显式 invalid/unsupported。验证：Rust compat 32 tests 通过，direct sample check 命中 Codex shell/cd 与 provider broken wrapper 正样本，regression verifier `mismatches=0`。
+
+Tags: apply-patch, shell-wrapper, shape-repair-only, workdir-relativization, rust-ssot, regression-verifier, 2026-05-09
