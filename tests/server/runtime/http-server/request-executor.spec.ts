@@ -562,6 +562,39 @@ describe('HubRequestExecutor failover', () => {
       marker: 'responses_missing_required_tool_call'
     });
 
+    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+      status: 'completed',
+      output_text: '',
+      output: [
+        {
+          type: 'reasoning',
+          summary: [
+            {
+              type: 'summary_text',
+              text: 'I have all the information I need. Let me create the hook file now.'
+            }
+          ]
+        }
+      ]
+    }, {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      },
+      messages: [
+        {
+          role: 'user',
+          content: '继续执行'
+        }
+      ]
+    })).toMatchObject({
+      marker: 'responses_missing_required_tool_call'
+    });
+
 
     expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       status: 'completed',
