@@ -13,7 +13,7 @@ import { isStopEligibleForServerTool } from '../stop-gateway-context.js';
 import { attachStopMessageCompareContext, type StopMessageCompareContext } from '../stop-message-compare-context.js';
 import {
   extractStopMessageAutoResponseSnapshot,
-  renderStopMessageAutoFollowupViaAi,
+  renderStopMessageAutoFollowupViaAiAsync,
   resolveStopMessageAiApprovedMarker,
   resolveStopMessageAiDoneMarker,
   type StopMessageAiFollowupHistoryEntry
@@ -494,7 +494,7 @@ const handler: ServerToolHandler = async (
     let followupText = '';
 
     if (aiMode === 'on') {
-      const aiFollowupText = renderStopMessageAutoFollowupViaAi({
+      const aiFollowupText = await renderStopMessageAutoFollowupViaAiAsync({
         baseStopMessageText: text,
         candidateFollowupText: fallbackCandidateFollowupText,
         responseSnapshot: autoResponseSnapshot,
