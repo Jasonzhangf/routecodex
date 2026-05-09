@@ -200,16 +200,6 @@ export function applyGeminiWebSearchRequestCompatWithNative(
   ]);
 }
 
-export function prepareAntigravityThoughtSignatureForGeminiRequestWithNative(
-  payload: Record<string, unknown>,
-  adapterContext?: Record<string, unknown>,
-): Record<string, unknown> {
-  return invokeRecordCapability(
-    'prepareAntigravityThoughtSignatureForGeminiRequestJson',
-    [payload, adapterContext ?? {}],
-  );
-}
-
 export function applyLmstudioResponsesInputStringifyWithNative(
   payload: Record<string, unknown>,
   adapterContext?: Record<string, unknown>,

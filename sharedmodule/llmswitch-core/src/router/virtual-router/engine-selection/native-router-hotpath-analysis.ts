@@ -35,28 +35,6 @@ export type ProviderKeyParsePayload = {
   keyIndex?: number;
 };
 
-export type AntigravitySessionIdPayload = {
-  sessionId: string;
-};
-
-export type AntigravityPinnedAliasLookupPayload = {
-  alias?: string;
-};
-
-export type AntigravityPinnedAliasUnpinPayload = {
-  changed: boolean;
-};
-
-export type AntigravityCacheSignaturePayload = {
-  ok: boolean;
-};
-
-export type AntigravityRequestSessionMetaPayload = {
-  aliasKey?: string;
-  sessionId?: string;
-  messageCount?: number;
-};
-
 export type ServertoolResponseStageToolCallPayload = {
   id: string;
   name: string;
@@ -298,102 +276,6 @@ export function parseProviderKeyPayload(raw: string): ProviderKeyParsePayload | 
     providerId,
     alias,
     ...(keyIndex !== undefined ? { keyIndex } : {})
-  };
-}
-
-export function parseAntigravitySessionIdPayload(raw: string): AntigravitySessionIdPayload | null {
-  const parsed = parseJson('parseAntigravitySessionIdPayload', raw);
-  if (parsed === JSON_PARSE_FAILED || typeof parsed !== 'string') {
-    return null;
-  }
-  const sessionId = parsed.trim();
-  if (!sessionId) {
-    return null;
-  }
-  return { sessionId };
-}
-
-export function parseAntigravityPinnedAliasLookupPayload(raw: string): AntigravityPinnedAliasLookupPayload | null {
-  const parsed = parseJson('parseAntigravityPinnedAliasLookupPayload', raw) as
-    | { alias?: unknown }
-    | null
-    | typeof JSON_PARSE_FAILED;
-  if (parsed === JSON_PARSE_FAILED) {
-    return null;
-  }
-  if (parsed === null) {
-    return {};
-  }
-  if (!parsed || typeof parsed !== 'object') {
-    return null;
-  }
-  if (parsed.alias === undefined || parsed.alias === null) {
-    return {};
-  }
-  if (typeof parsed.alias !== 'string') {
-    return null;
-  }
-  const alias = parsed.alias.trim();
-  if (!alias) {
-    return {};
-  }
-  return { alias };
-}
-
-export function parseAntigravityPinnedAliasUnpinPayload(raw: string): AntigravityPinnedAliasUnpinPayload | null {
-  const parsed = parseJson('parseAntigravityPinnedAliasUnpinPayload', raw) as
-    | { changed?: unknown }
-    | typeof JSON_PARSE_FAILED;
-  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed.changed !== 'boolean') {
-    return null;
-  }
-  return { changed: parsed.changed };
-}
-
-export function parseAntigravityCacheSignaturePayload(raw: string): AntigravityCacheSignaturePayload | null {
-  const parsed = parseJson('parseAntigravityCacheSignaturePayload', raw) as
-    | { ok?: unknown }
-    | typeof JSON_PARSE_FAILED;
-  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed.ok !== 'boolean') {
-    return null;
-  }
-  return { ok: parsed.ok };
-}
-
-export function parseAntigravityRequestSessionMetaPayload(raw: string): AntigravityRequestSessionMetaPayload | null {
-  const parsed = parseJson('parseAntigravityRequestSessionMetaPayload', raw) as
-    | {
-        aliasKey?: unknown;
-        sessionId?: unknown;
-        messageCount?: unknown;
-      }
-    | null
-    | typeof JSON_PARSE_FAILED;
-  if (parsed === JSON_PARSE_FAILED) {
-    return null;
-  }
-  if (parsed === null) {
-    return {};
-  }
-  if (!parsed || typeof parsed !== 'object') {
-    return null;
-  }
-  const aliasKey =
-    typeof parsed.aliasKey === 'string' && parsed.aliasKey.trim().length
-      ? parsed.aliasKey.trim()
-      : undefined;
-  const sessionId =
-    typeof parsed.sessionId === 'string' && parsed.sessionId.trim().length
-      ? parsed.sessionId.trim()
-      : undefined;
-  const messageCount =
-    typeof parsed.messageCount === 'number' && Number.isFinite(parsed.messageCount) && parsed.messageCount > 0
-      ? Math.floor(parsed.messageCount)
-      : undefined;
-  return {
-    ...(aliasKey ? { aliasKey } : {}),
-    ...(sessionId ? { sessionId } : {}),
-    ...(messageCount !== undefined ? { messageCount } : {})
   };
 }
 

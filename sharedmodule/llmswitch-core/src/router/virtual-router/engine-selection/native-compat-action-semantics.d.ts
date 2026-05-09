@@ -15,7 +15,6 @@ export declare function normalizeToolCallIdsWithNative(payload: Record<string, u
 export declare function enforceLmstudioResponsesFcToolCallIdsWithNative(payload: Record<string, unknown>): Record<string, unknown>;
 export declare function applyAnthropicClaudeCodeUserIdWithNative(payload: Record<string, unknown>, adapterContext?: Record<string, unknown>): Record<string, unknown>;
 export declare function applyGeminiWebSearchRequestCompatWithNative(payload: Record<string, unknown>, adapterContext?: Record<string, unknown>): Record<string, unknown>;
-export declare function prepareAntigravityThoughtSignatureForGeminiRequestWithNative(payload: Record<string, unknown>, adapterContext?: Record<string, unknown>): Record<string, unknown>;
 export declare function applyIflowToolTextFallbackWithNative(payload: Record<string, unknown>, adapterContext?: Record<string, unknown>, models?: string[]): Record<string, unknown>;
 export declare function applyLmstudioResponsesInputStringifyWithNative(payload: Record<string, unknown>, adapterContext?: Record<string, unknown>): Record<string, unknown>;
 export declare function applyToolTextRequestGuidanceWithNative(payload: Record<string, unknown>, config?: Record<string, unknown>): Record<string, unknown>;

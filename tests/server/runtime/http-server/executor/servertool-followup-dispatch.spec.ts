@@ -427,6 +427,38 @@ describe('servertool followup dispatch helper', () => {
     });
   });
 
+
+  it('reenter path fails fast when nested execute never resolves', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(
+      async () => await new Promise(() => {
+        // never resolve
+      })
+    );
+
+    process.env.ROUTECODEX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS = '20';
+    try {
+      const { executeServerToolReenterPipeline } = await import(
+        '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+      );
+
+      await expect(executeServerToolReenterPipeline({
+        entryEndpoint: '/v1/responses',
+        fallbackEntryEndpoint: '/v1/responses',
+        requestId: 'req_followup_dispatch_timeout',
+        body: { input: 'continue' },
+        executeNested
+      })).rejects.toMatchObject({
+        code: 'SERVERTOOL_TIMEOUT',
+        upstreamCode: 'servertool_followup_timeout',
+        status: 504,
+        requestExecutorProviderErrorStage: 'provider.followup'
+      });
+    } finally {
+      delete process.env.ROUTECODEX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS;
+    }
+  });
+
   it('reenter path throws when nested pipeline returns HTTP status without explicit error object', async () => {
     mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
     const executeNested = jest.fn(async () => ({

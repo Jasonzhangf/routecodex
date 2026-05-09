@@ -1,9 +1,4 @@
 import {
-  parseAntigravityPinnedAliasLookupPayload,
-  parseAntigravityPinnedAliasUnpinPayload,
-  parseAntigravityCacheSignaturePayload,
-  parseAntigravityRequestSessionMetaPayload,
-  parseAntigravitySessionIdPayload,
   parseClockClearDirectivePayload,
   parseChatProcessMediaAnalysisPayload,
   parseChatProcessMediaStripPayload,
@@ -27,27 +22,6 @@ export {
   type QuotaBucketInputEntry,
   type QuotaBucketResult
 } from './native-router-hotpath-quota-buckets.js';
-
-type AntigravitySplitPayload = {
-  nonAntigravity: string[];
-  hasAntigravity: boolean;
-};
-
-function parseAntigravitySplitPayload(raw: string): AntigravitySplitPayload | null {
-  try {
-    const parsed = JSON.parse(raw) as AntigravitySplitPayload;
-    if (!parsed || !Array.isArray(parsed.nonAntigravity) || typeof parsed.hasAntigravity !== 'boolean') {
-      return null;
-    }
-    const nonAntigravity = parsed.nonAntigravity.filter((value): value is string => typeof value === 'string');
-    return {
-      nonAntigravity,
-      hasAntigravity: parsed.hasAntigravity
-    };
-  } catch {
-    return null;
-  }
-}
 
 function toErrorReason(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? 'unknown');
@@ -86,18 +60,6 @@ function callNativeJson<T>(
     throw makeNativeRequiredError(capability, 'invalid payload');
   }
   return parsed;
-}
-
-export function splitAntigravityTargets(
-  targets: string[]
-): { nonAntigravity: string[]; hasAntigravity: boolean; source: 'native' } {
-  const parsed = callNativeJson(
-    'splitAntigravityTargetsJson',
-    'splitAntigravityTargetsJson',
-    [JSON.stringify(targets)],
-    parseAntigravitySplitPayload
-  );
-  return { ...parsed, source: 'native' };
 }
 
 export function analyzePendingToolSync(
@@ -187,82 +149,6 @@ export function analyzeProviderKey(providerKey: string): {
     parseProviderKeyPayload
   );
   return { ...parsed, source: 'native' };
-}
-
-export function extractAntigravityGeminiSessionIdWithNative(payload: unknown): string {
-  const parsed = callNativeJson(
-    'extractAntigravityGeminiSessionIdJson',
-    'extractAntigravityGeminiSessionIdJson',
-    [JSON.stringify(payload ?? null)],
-    parseAntigravitySessionIdPayload
-  );
-  return parsed.sessionId;
-}
-
-export function lookupAntigravityPinnedAliasForSessionIdWithNative(
-  sessionId: string,
-  options?: { hydrate?: boolean }
-): string | undefined {
-  const parsed = callNativeJson(
-    'lookupAntigravityPinnedAliasForSessionIdJson',
-    'lookupAntigravityPinnedAliasForSessionIdJson',
-    [JSON.stringify({ sessionId: String(sessionId || ''), hydrate: options?.hydrate !== false })],
-    parseAntigravityPinnedAliasLookupPayload
-  );
-  return parsed.alias;
-}
-
-export function unpinAntigravitySessionAliasForSessionIdWithNative(sessionId: string): boolean {
-  const parsed = callNativeJson(
-    'unpinAntigravitySessionAliasForSessionIdJson',
-    'unpinAntigravitySessionAliasForSessionIdJson',
-    [JSON.stringify({ sessionId: String(sessionId || '') })],
-    parseAntigravityPinnedAliasUnpinPayload
-  );
-  return parsed.changed;
-}
-
-export function cacheAntigravitySessionSignatureWithNative(input: {
-  aliasKey: string;
-  sessionId: string;
-  signature: string;
-  messageCount?: number;
-}): boolean {
-  const parsed = callNativeJson(
-    'cacheAntigravitySessionSignatureJson',
-    'cacheAntigravitySessionSignatureJson',
-    [JSON.stringify({
-      aliasKey: String(input.aliasKey || ''),
-      sessionId: String(input.sessionId || ''),
-      signature: String(input.signature || ''),
-      messageCount: typeof input.messageCount === 'number' ? Math.floor(input.messageCount) : undefined
-    })],
-    parseAntigravityCacheSignaturePayload
-  );
-  return parsed.ok;
-}
-
-export function getAntigravityRequestSessionMetaWithNative(requestId: string): {
-  aliasKey?: string;
-  sessionId?: string;
-  messageCount?: number;
-} {
-  return callNativeJson(
-    'getAntigravityRequestSessionMetaJson',
-    'getAntigravityRequestSessionMetaJson',
-    [JSON.stringify({ requestId: String(requestId || '') })],
-    parseAntigravityRequestSessionMetaPayload
-  );
-}
-
-export function resetAntigravitySignatureCachesWithNative(): boolean {
-  const parsed = callNativeJson(
-    'resetAntigravitySignatureCachesJson',
-    'resetAntigravitySignatureCachesJson',
-    ['{}'],
-    parseAntigravityCacheSignaturePayload
-  );
-  return parsed.ok;
 }
 
 export function loadNativeRouterHotpathBindingForInternalUse(): unknown {

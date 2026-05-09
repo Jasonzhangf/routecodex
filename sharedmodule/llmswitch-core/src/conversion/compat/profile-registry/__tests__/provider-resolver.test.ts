@@ -79,8 +79,8 @@ describe('provider-resolver: config-driven resolution', () => {
     });
 
     test('combined raw|id lexicon matches keyword in either', () => {
-      // raw is empty, id has 'gemini-cli' → should match 'gemini'
-      expect(detectProviderTypeFromConfig(config, { id: 'gemini-cli' })).toBe('gemini');
+      // raw is empty, id has 'gemini' → should match 'gemini'
+      expect(detectProviderTypeFromConfig(config, { id: 'gemini' })).toBe('gemini');
     });
 
     test('returns raw when no keyword matches', () => {
