@@ -1,13 +1,63 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { jest } from '@jest/globals';
-import { loadRoutingInstructionStateSync } from '../../../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
+import {
+  loadRoutingInstructionStateSync,
+  saveRoutingInstructionStateSync
+} from '../../../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-executor-response-stopless-sessions');
 
+function createEmptyRoutingInstructionState() {
+  return {
+    forcedTarget: undefined,
+    stickyTarget: undefined,
+    preferTarget: undefined,
+    allowedProviders: new Set<string>(),
+    disabledProviders: new Set<string>(),
+    disabledKeys: new Map<string, Set<string | number>>(),
+    disabledModels: new Map<string, Set<string>>(),
+    stopMessageSource: undefined,
+    stopMessageText: undefined,
+    stopMessageMaxRepeats: undefined,
+    stopMessageUsed: undefined,
+    stopMessageUpdatedAt: undefined,
+    stopMessageLastUsedAt: undefined,
+    stopMessageStageMode: undefined,
+    stopMessageAiMode: undefined,
+    stopMessageAiSeedPrompt: undefined,
+    stopMessageAiHistory: undefined,
+    reasoningStopMode: undefined,
+    reasoningStopArmed: undefined,
+    reasoningStopSummary: undefined,
+    reasoningStopUpdatedAt: undefined,
+    preCommandSource: undefined,
+    preCommandScriptPath: undefined,
+    preCommandUpdatedAt: undefined
+  };
+}
+
+function persistReasoningStopMode(sessionId: string, mode: 'on' | 'off' | 'endless'): void {
+  const stickyKey = `session:${sessionId}`;
+  const existing = loadRoutingInstructionStateSync(stickyKey);
+  const next = existing ?? createEmptyRoutingInstructionState();
+  next.reasoningStopMode = mode;
+  if (mode === 'off') {
+    next.reasoningStopArmed = undefined;
+    next.reasoningStopSummary = undefined;
+    next.reasoningStopUpdatedAt = undefined;
+  }
+  saveRoutingInstructionStateSync(stickyKey, next as any);
+}
+
 const mockSyncReasoningStopModeFromRequest = jest.fn((baseContext: Record<string, unknown>) => {
-  baseContext.reasoningStopMode = 'on';
-  return 'on';
+  const mode = 'off';
+  baseContext.reasoningStopMode = mode;
+  const sessionId = typeof baseContext.sessionId === 'string' ? baseContext.sessionId.trim() : '';
+  if (sessionId) {
+    persistReasoningStopMode(sessionId, mode);
+  }
+  return mode;
 });
 
 const mockConvertProviderResponse = jest.fn();
@@ -32,11 +82,29 @@ describe('executor-response stopless direct-model regression', () => {
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
     mockSyncReasoningStopModeFromRequest.mockClear();
+    mockSyncReasoningStopModeFromRequest.mockImplementation((baseContext: Record<string, unknown>) => {
+      const mode = 'off';
+      baseContext.reasoningStopMode = mode;
+      const sessionId = typeof baseContext.sessionId === 'string' ? baseContext.sessionId.trim() : '';
+      if (sessionId) {
+        persistReasoningStopMode(sessionId, mode);
+      }
+      return mode;
+    });
     fs.rmSync(SESSION_DIR, { recursive: true, force: true });
     fs.mkdirSync(SESSION_DIR, { recursive: true });
   });
 
   test('backfills session scope from original responses request and triggers stopless followup', async () => {
+    mockSyncReasoningStopModeFromRequest.mockImplementationOnce((baseContext: Record<string, unknown>) => {
+      const mode = 'on';
+      baseContext.reasoningStopMode = mode;
+      const sessionId = typeof baseContext.sessionId === 'string' ? baseContext.sessionId.trim() : '';
+      if (sessionId) {
+        persistReasoningStopMode(sessionId, mode);
+      }
+      return mode;
+    });
     mockConvertProviderResponse.mockImplementation(async ({ reenterPipeline }) => {
       const followup = await reenterPipeline({
         entryEndpoint: '/v1/responses',
@@ -152,29 +220,22 @@ describe('executor-response stopless direct-model regression', () => {
     expect((result.body as any)?.output_text).toBe('继续执行中');
   });
 
-  test('defaults stopless to on for session-bound responses request without directive', async () => {
-    mockConvertProviderResponse.mockImplementation(async ({ reenterPipeline }) => {
-      const followup = await reenterPipeline({
-        entryEndpoint: '/v1/responses',
-        requestId: 'req_executor_response_stopless_default:reasoning_stop_guard',
+  test('defaults stopless to off for session-bound responses request without directive', async () => {
+    mockConvertProviderResponse.mockImplementation(async () => {
+      return {
         body: {
-          model: 'qwenchat.qwen3.6-plus',
-          input: [
+          id: 'resp_executor_response_stopless_default_passthrough',
+          object: 'chat.completion',
+          choices: [
             {
-              role: 'user',
-              content: [{ type: 'input_text', text: '继续执行' }]
+              index: 0,
+              finish_reason: 'stop',
+              message: {
+                role: 'assistant',
+                content: '阶段完成'
+              }
             }
           ]
-        },
-        metadata: {
-          __rt: { serverToolFollowup: true }
-        }
-      });
-      return {
-        body: (followup as { body?: Record<string, unknown> }).body ?? {
-          id: 'resp_executor_response_stopless_default_followup',
-          object: 'response',
-          output_text: '继续执行中'
         }
       };
     });
@@ -262,9 +323,9 @@ describe('executor-response stopless direct-model regression', () => {
       }
     );
 
-    expect(nestedCalls.length).toBeGreaterThan(0);
-    expect(String(nestedCalls[0]?.requestId || '')).toContain(':reasoning_stop_guard');
-    expect((result.body as any)?.output_text).toBe('继续执行中');
+    expect(loadRoutingInstructionStateSync(`session:${sessionId}`)?.reasoningStopMode).toBe('off');
+    expect(nestedCalls.length).toBe(0);
+    expect((result.body as any)?.choices?.[0]?.message?.content).toBe('阶段完成');
   });
 
 });

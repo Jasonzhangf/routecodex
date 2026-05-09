@@ -19,6 +19,13 @@ const ROUTING_POLICY_OPTIONAL_KEYS = [
   'session'
 ] as const;
 
+const REASONING_STOP_MODE_ENV_KEYS = [
+  'ROUTECODEX_REASONING_STOP_MODE',
+  'RCC_REASONING_STOP_MODE'
+] as const;
+
+type ReasoningStopMode = 'on' | 'off' | 'endless';
+
 export interface LoadedRouteCodexConfig {
   configPath: string;
   userConfig: UnknownRecord;
@@ -34,6 +41,7 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
   validateV2ConfigSources(userConfig);
 
   materializeActiveRoutingPolicyGroup(userConfig);
+  projectReasoningStopModeFromConfig(userConfig);
   const vrBase = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : {};
   const v2Input = await buildVirtualRouterInputV2(userConfig);
   userConfig.virtualrouter = {
@@ -183,5 +191,29 @@ function materializeActiveRoutingPolicyGroup(userConfig: UnknownRecord): void {
       continue;
     }
     delete vr[key];
+  }
+}
+
+function normalizeReasoningStopMode(value: unknown): ReasoningStopMode | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'on' || normalized === 'off' || normalized === 'endless') {
+    return normalized;
+  }
+  return undefined;
+}
+
+function resolveReasoningStopModeFromConfig(userConfig: UnknownRecord): ReasoningStopMode {
+  const vr = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : null;
+  const session = vr && isRecord(vr.session) ? (vr.session as UnknownRecord) : null;
+  return normalizeReasoningStopMode(session?.reasoningStopMode) ?? 'off';
+}
+
+function projectReasoningStopModeFromConfig(userConfig: UnknownRecord): void {
+  const mode = resolveReasoningStopModeFromConfig(userConfig);
+  for (const key of REASONING_STOP_MODE_ENV_KEYS) {
+    process.env[key] = mode;
   }
 }

@@ -112,7 +112,7 @@ export function saveRoutingInstructionStateSync(key: string, state: unknown | nu
 
 export function syncReasoningStopModeFromRequest(
   adapterContext: unknown,
-  fallbackMode: 'on' | 'off' | 'endless' = 'off'
+  fallbackMode?: 'on' | 'off' | 'endless'
 ): 'on' | 'off' | 'endless' {
   try {
     return syncReasoningStopModeFromRequestFromCore(adapterContext, fallbackMode);

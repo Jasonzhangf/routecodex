@@ -53,4 +53,24 @@ describe('sticky session store paths', () => {
     expect(fs.existsSync(path.join(tempRoot, 'sessions', 'session-test-session.json'))).toBe(false);
     expect(fs.existsSync(path.join(tempRoot, 'sessions', 'conversation-test-conv.json'))).toBe(false);
   });
+
+  test('uses ROUTECODEX_SESSION_DIR override for routing scope too', () => {
+    const overrideDir = path.join(tempRoot, 'override-sessions');
+    process.env.ROUTECODEX_SESSION_DIR = overrideDir;
+    const state = {
+      allowedProviders: new Set<string>(),
+      disabledProviders: new Set<string>(),
+      disabledKeys: new Map<string, number>(),
+      disabledModels: new Map<string, number>(),
+      reasoningStopMode: 'off'
+    } as any;
+
+    saveRoutingInstructionStateSync('session:override-routing', state);
+    saveRoutingInstructionStateSync('conversation:override-routing', state);
+
+    expect(fs.existsSync(path.join(overrideDir, 'session-override-routing.json'))).toBe(true);
+    expect(fs.existsSync(path.join(overrideDir, 'conversation-override-routing.json'))).toBe(true);
+    expect(fs.existsSync(path.join(tempRoot, 'state', 'routing', 'session-override-routing.json'))).toBe(false);
+    expect(fs.existsSync(path.join(tempRoot, 'state', 'routing', 'conversation-override-routing.json'))).toBe(false);
+  });
 });

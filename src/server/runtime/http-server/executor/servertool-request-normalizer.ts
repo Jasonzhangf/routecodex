@@ -61,7 +61,7 @@ export function seedReasoningStopStateFromCapturedRequest(
   onError?: (error: unknown) => void
 ): void {
   try {
-    syncReasoningStopModeFromRequest(baseContext, 'on');
+    syncReasoningStopModeFromRequest(baseContext);
   } catch (error) {
     onError?.(error);
     throw error;

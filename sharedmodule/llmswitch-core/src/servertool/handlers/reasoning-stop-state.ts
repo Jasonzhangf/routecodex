@@ -20,8 +20,12 @@ import {
 } from './reasoning-stop-stopless-directive.js';
 
 const REASONING_STOP_SUMMARY_MAX_CHARS = 4000;
+const REASONING_STOP_MODE_ENV_KEYS = [
+  'ROUTECODEX_REASONING_STOP_MODE',
+  'RCC_REASONING_STOP_MODE'
+] as const;
 
-export const DEFAULT_REASONING_STOP_MODE: ReasoningStopMode = 'on';
+export const DEFAULT_REASONING_STOP_MODE: ReasoningStopMode = 'off';
 export type { ReasoningStopReason } from './reasoning-stop-schema.js';
 export type { ReasoningStopMode } from './reasoning-stop-stopless-directive.js';
 
@@ -147,43 +151,53 @@ function isStateEmpty(state: RoutingInstructionState): boolean {
   );
 }
 
+export function resolveConfiguredReasoningStopModeDefault(): ReasoningStopMode {
+  for (const key of REASONING_STOP_MODE_ENV_KEYS) {
+    const normalized = normalizeReasoningStopMode(process.env[key]);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return DEFAULT_REASONING_STOP_MODE;
+}
+
 
 export function readReasoningStopMode(
   adapterContext: unknown,
-  fallbackMode: ReasoningStopMode = DEFAULT_REASONING_STOP_MODE
+  fallbackMode?: ReasoningStopMode
 ): ReasoningStopMode {
+  const resolvedFallback = normalizeReasoningStopMode(fallbackMode) ?? resolveConfiguredReasoningStopModeDefault();
   const stickyKey = resolveStickyKey(adapterContext);
   if (!stickyKey) {
-    return fallbackMode;
+    return resolvedFallback;
   }
   let state: RoutingInstructionState | null = null;
   state = loadRoutingInstructionStateSync(stickyKey);
-  return normalizeReasoningStopMode(state?.reasoningStopMode) ?? fallbackMode;
+  return normalizeReasoningStopMode(state?.reasoningStopMode) ?? resolvedFallback;
 }
 
 export function syncReasoningStopModeFromRequest(
   adapterContext: unknown,
-  fallbackMode: ReasoningStopMode = DEFAULT_REASONING_STOP_MODE
+  fallbackMode?: ReasoningStopMode
 ): ReasoningStopMode {
+  const resolvedFallback = normalizeReasoningStopMode(fallbackMode) ?? resolveConfiguredReasoningStopModeDefault();
   const stickyKey = resolveStickyKey(adapterContext);
   const directiveMode = extractStoplessDirectiveModeFromAdapterContext(adapterContext);
   if (!stickyKey) {
     // stopless switch is strictly session-bound. If we cannot bind a session scope,
     // the directive must be ignored.
-    return fallbackMode;
+    return resolvedFallback;
   }
 
   let state: RoutingInstructionState | null = null;
   state = loadRoutingInstructionStateSync(stickyKey);
 
-  const persistedMode = normalizeReasoningStopMode(state?.reasoningStopMode) ?? fallbackMode;
   if (!directiveMode) {
-    if (!normalizeReasoningStopMode(state?.reasoningStopMode)) {
-      const next = state ?? createEmptyRoutingInstructionState();
-      next.reasoningStopMode = persistedMode;
-      saveRoutingInstructionStateSync(stickyKey, next);
+    const persistedMode = normalizeReasoningStopMode(state?.reasoningStopMode);
+    if (persistedMode) {
+      return persistedMode;
     }
-    return persistedMode;
+    return resolvedFallback;
   }
 
   const next = state ?? createEmptyRoutingInstructionState();

@@ -104,7 +104,7 @@ function resolveDefaultSessionDir(scope: 'tmux' | 'routing'): string | null {
 function resolveSessionDir(scope: 'tmux' | 'routing'): string | null {
   try {
     const override = process.env.ROUTECODEX_SESSION_DIR;
-    if (scope === 'tmux' && override && override.trim()) {
+    if (override && override.trim()) {
       return path.resolve(override.trim());
     }
     return resolveDefaultSessionDir(scope);

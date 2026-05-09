@@ -8,13 +8,18 @@ async function mkTmp(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-type EnvSnapshot = Record<'RCC_HOME' | 'ROUTECODEX_USER_DIR' | 'ROUTECODEX_HOME', string | undefined>;
+type EnvSnapshot = Record<
+  'RCC_HOME' | 'ROUTECODEX_USER_DIR' | 'ROUTECODEX_HOME' | 'ROUTECODEX_REASONING_STOP_MODE' | 'RCC_REASONING_STOP_MODE',
+  string | undefined
+>;
 
 function takeEnv(): EnvSnapshot {
   return {
     RCC_HOME: process.env.RCC_HOME,
     ROUTECODEX_USER_DIR: process.env.ROUTECODEX_USER_DIR,
-    ROUTECODEX_HOME: process.env.ROUTECODEX_HOME
+    ROUTECODEX_HOME: process.env.ROUTECODEX_HOME,
+    ROUTECODEX_REASONING_STOP_MODE: process.env.ROUTECODEX_REASONING_STOP_MODE,
+    RCC_REASONING_STOP_MODE: process.env.RCC_REASONING_STOP_MODE
   };
 }
 
@@ -97,9 +102,48 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
     const after = await fs.readFile(configPath, 'utf8');
 
     expect(after).toBe(before);
+    expect(process.env.ROUTECODEX_REASONING_STOP_MODE).toBe('off');
+    expect(process.env.RCC_REASONING_STOP_MODE).toBe('off');
     expect(loaded.userConfig.virtualrouter).toBeTruthy();
     expect((loaded.userConfig.virtualrouter as any).routing.multimodal).toBeUndefined();
     expect((loaded.userConfig.virtualrouter as any).routing.web_search).toBeUndefined();
+  });
+
+  it('projects configured reasoning stop mode from active policy session config', async () => {
+    const root = await mkTmp('routecodex-v2-stopless-');
+    process.env.RCC_HOME = root;
+    process.env.ROUTECODEX_USER_DIR = root;
+    process.env.ROUTECODEX_HOME = root;
+    await writeProviderConfig(root);
+
+    const configPath = path.join(root, 'config.json');
+    await fs.writeFile(
+      configPath,
+      `${JSON.stringify({
+        version: '2.0.0',
+        virtualrouterMode: 'v2',
+        httpserver: { host: '127.0.0.1', port: 5555 },
+        virtualrouter: {
+          activeRoutingPolicyGroup: 'default',
+          routingPolicyGroups: {
+            default: {
+              routing: {
+                default: [{ id: 'default-primary', targets: ['ali-coding-plan.glm-5'] }]
+              },
+              session: {
+                reasoningStopMode: 'on'
+              }
+            }
+          }
+        }
+      }, null, 2)}\n`,
+      'utf8'
+    );
+
+    await loadRouteCodexConfig(configPath);
+
+    expect(process.env.ROUTECODEX_REASONING_STOP_MODE).toBe('on');
+    expect(process.env.RCC_REASONING_STOP_MODE).toBe('on');
   });
 
   it('rejects legacy v1 fields instead of silently sanitizing them', async () => {

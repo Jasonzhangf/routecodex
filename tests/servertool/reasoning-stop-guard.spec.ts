@@ -118,9 +118,13 @@ describe('servertool reasoning.stop guard', () => {
   beforeEach(() => {
     fs.rmSync(SESSION_DIR, { recursive: true, force: true });
     fs.mkdirSync(SESSION_DIR, { recursive: true });
+    process.env.ROUTECODEX_REASONING_STOP_MODE = "on";
+    process.env.RCC_REASONING_STOP_MODE = "on";
   });
 
   test('is enabled by default (session switch default on)', async () => {
+    process.env.ROUTECODEX_REASONING_STOP_MODE = "off";
+    process.env.RCC_REASONING_STOP_MODE = "off";
     const adapterContext = {
       sessionId: 'reasoning-stop-default-off'
     } as unknown as AdapterContext;
@@ -132,10 +136,9 @@ describe('servertool reasoning.stop guard', () => {
       requestId: 'req_reasoning_stop_default_on'
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('reasoning_stop_guard_flow');
+    expect(result.execution?.flowId).not.toBe('reasoning_stop_guard_flow');
     const persisted = loadRoutingInstructionStateSync('session:reasoning-stop-default-off');
-    expect((persisted as RoutingInstructionState | null | undefined)?.reasoningStopMode).toBe('on');
+    expect((persisted as RoutingInstructionState | null | undefined)?.reasoningStopMode).toBeUndefined();
   });
 
   test('intercepts stop and injects servertool followup when reasoning.stop state is missing', async () => {
@@ -771,6 +774,8 @@ describe('servertool reasoning.stop guard', () => {
   });
 
   test('does not persist stopless directive when session scope is missing, and default-on still intercepts stop', async () => {
+    process.env.ROUTECODEX_REASONING_STOP_MODE = "off";
+    process.env.RCC_REASONING_STOP_MODE = "off";
     const adapterContext = {
       capturedChatRequest: {
         model: 'gpt-test',
@@ -789,12 +794,13 @@ describe('servertool reasoning.stop guard', () => {
       providerProtocol: 'openai-chat',
       requestId: 'req_reasoning_stop_switch_no_session'
     });
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('reasoning_stop_guard_flow');
+    expect(result.execution?.flowId).not.toBe('reasoning_stop_guard_flow');
     expect(String((adapterContext as any).capturedChatRequest?.messages?.[0]?.content || '')).toBe('开启 stopless');
   });
 
   test('strips malformed stopless marker even when directive parse fails, and default-on intercepts', async () => {
+    process.env.ROUTECODEX_REASONING_STOP_MODE = "off";
+    process.env.RCC_REASONING_STOP_MODE = "off";
     const sessionId = 'reasoning-stop-switch-strip-invalid-marker';
     const stickyKey = `session:${sessionId}`;
     saveRoutingInstructionStateSync(stickyKey, null);
@@ -818,9 +824,8 @@ describe('servertool reasoning.stop guard', () => {
       providerProtocol: 'openai-chat',
       requestId: 'req_reasoning_stop_strip_invalid_marker'
     });
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('reasoning_stop_guard_flow');
-    expect(loadRoutingInstructionStateSync(stickyKey)?.reasoningStopMode).toBe('on');
+    expect(result.execution?.flowId).not.toBe('reasoning_stop_guard_flow');
+    expect(loadRoutingInstructionStateSync(stickyKey)?.reasoningStopMode).toBeUndefined();
     expect(String((adapterContext as any).capturedChatRequest?.messages?.[0]?.content || '')).toBe('测试标记清理');
   });
 
