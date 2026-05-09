@@ -2,6 +2,35 @@ import { resolveBoolFromEnv } from './utils.js';
 import { resolveSessionAnsiColor } from '../../../../utils/session-log-color.js';
 import { getSessionClientRegistry } from '../session-client-registry.js';
 import { getTokenStatsSnapshot } from './token-stats-store.js';
+import {
+  formatMs,
+  formatWholeNumber,
+  formatTokens,
+  formatRatio,
+  formatPerSecond,
+  computeDecodeResidualMs,
+  computeCoreInternalMs,
+  normalizeLabel,
+  normalizeSessionId,
+  normalizeProjectPath,
+  normalizeFinishReason,
+  buildKey,
+  colorize,
+  formatRoutePool,
+  formatProvider,
+  shortSessionId,
+  shortRequestId,
+  trimPathForLog,
+  ANSI_RESET,
+  ANSI_DIM,
+  ANSI_BOLD,
+  ANSI_HEADER,
+  ANSI_VR,
+  ANSI_USAGE,
+  ANSI_SESSION,
+  ANSI_BAR,
+  ANSI_WHITE
+} from './log-rollup-format-blocks.js';
 
 type VirtualRouterHitRecord = {
   routeName?: string;
@@ -127,15 +156,6 @@ const DEFAULT_MAX_SESSION_EVENTS = 10;
 const DEFAULT_SESSION_TTL_MS = 300_000; // 5 minutes
 const DEFAULT_TOP_N = 20;
 const TOKEN_PROVIDER_TOP_N = 5;
-const ANSI_RESET = '\x1b[0m';
-const ANSI_DIM = '\x1b[90m';
-const ANSI_BOLD = '\x1b[1m';
-const ANSI_HEADER = '\x1b[38;5;252m';
-const ANSI_VR = '\x1b[38;5;208m';
-const ANSI_USAGE = '\x1b[38;5;39m';
-const ANSI_SESSION = '\x1b[38;5;141m';
-const ANSI_BAR = '\x1b[38;5;240m';
-const ANSI_WHITE = '\x1b[97m';
 let flushTimer: NodeJS.Timeout | undefined;
 let windowStartedAtMs = Date.now();
 let lastSessionTtlCleanAtMs = Date.now();
@@ -148,21 +168,7 @@ const sessionRollups = new Map<string, SessionRollupAgg>();
 const sessionRequestEvents = new Map<string, SessionRequestEvent[]>();
 let exitHookBound = false;
 
-function normalizeLabel(value: unknown, fallback: string): string {
-  if (typeof value !== 'string') {
-    return fallback;
-  }
-  const trimmed = value.trim();
-  return trimmed || fallback;
-}
 
-function normalizeSessionId(value: unknown): string {
-  if (typeof value !== 'string') {
-    return 'unknown';
-  }
-  const trimmed = value.trim();
-  return trimmed || 'unknown';
-}
 
 function resolveWindowMs(): number {
   const raw = process.env.ROUTECODEX_LOG_ROLLUP_WINDOW_MS ?? process.env.RCC_LOG_ROLLUP_WINDOW_MS;
@@ -224,9 +230,6 @@ function isRealtimeRollupEnabled(): boolean {
   );
 }
 
-function buildKey(routeName: string, poolId: string, providerKey: string, model: string): string {
-  return `${routeName}\u0000${poolId}\u0000${providerKey}\u0000${model}`;
-}
 
 function ensureStarted(): void {
   if (!isRollupEnabled()) {
@@ -295,109 +298,6 @@ function shouldDropBucket(map: Map<string, unknown>, key: string): boolean {
   return map.size >= resolveMaxBuckets();
 }
 
-function formatMs(value: number): string {
-  return `${Math.max(0, Math.round(value))}ms`;
-}
-
-function formatWholeNumber(value: number): string {
-  if (!Number.isFinite(value)) {
-    return '0';
-  }
-  return Math.round(Math.max(0, value)).toLocaleString('en-US');
-}
-
-function formatTokens(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '0';
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return String(Math.round(value));
-}
-
-function formatRatio(numerator: number, denominator: number): string {
-  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) {
-    return '0.0%';
-  }
-  return `${((numerator / denominator) * 100).toFixed(1)}%`;
-}
-
-function formatPerSecond(value: number, seconds: number): string {
-  if (!Number.isFinite(value) || !Number.isFinite(seconds) || seconds <= 0) {
-    return '0.00/s';
-  }
-  return `${(value / seconds).toFixed(2)}/s`;
-}
-
-function computeDecodeResidualMs(sseDecodeMs: number, codecDecodeMs: number): number {
-  return Math.max(0, codecDecodeMs - sseDecodeMs);
-}
-
-function computeCoreInternalMs(
-  internalLatencyMs: number,
-  trafficWaitMs: number,
-  clientInjectWaitMs: number,
-  sseDecodeMs: number,
-  codecDecodeMs: number
-): number {
-  return Math.max(
-    0,
-    internalLatencyMs
-      - trafficWaitMs
-      - clientInjectWaitMs
-      - computeDecodeResidualMs(sseDecodeMs, codecDecodeMs)
-  );
-}
-
-function colorize(text: string, color: string): string {
-  return `${color}${text}${ANSI_RESET}`;
-}
-
-function formatRoutePool(routeName: string, poolId: string): string {
-  return poolId !== '-' ? `${routeName}/${poolId}` : routeName;
-}
-
-function formatProvider(providerKey: string, model: string): string {
-  return model !== '-' ? `${providerKey}.${model}` : providerKey;
-}
-
-function normalizeProjectPath(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function normalizeFinishReason(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed.toLowerCase() : undefined;
-}
-
-function shortSessionId(value: string): string {
-  const normalized = normalizeSessionId(value);
-  if (normalized.length <= 22) {
-    return normalized;
-  }
-  return `${normalized.slice(0, 10)}…${normalized.slice(-8)}`;
-}
-
-function shortRequestId(value: string): string {
-  const normalized = normalizeLabel(value, 'unknown-request');
-  if (normalized.length <= 42) {
-    return normalized;
-  }
-  return `${normalized.slice(0, 20)}…${normalized.slice(-14)}`;
-}
-
-function trimPathForLog(value: string, maxLen = 96): string {
-  if (value.length <= maxLen) {
-    return value;
-  }
-  const keep = Math.max(8, Math.floor((maxLen - 1) / 2));
-  return `${value.slice(0, keep)}…${value.slice(-keep)}`;
-}
 
 function emitRealtimeSessionRequestLog(args: {
   sessionId: string;
