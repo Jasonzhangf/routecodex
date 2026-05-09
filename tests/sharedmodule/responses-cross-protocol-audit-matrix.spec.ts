@@ -113,7 +113,7 @@ describe('responses cross-protocol dropped/lossy audit matrix', () => {
       requestId: 'req-resp-gemini-out-audit-matrix',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'gemini-chat',
-      providerId: 'gemini-cli'
+      providerId: 'gemini'
     } as AdapterContext);
 
     const payload = outbound.payload as any;

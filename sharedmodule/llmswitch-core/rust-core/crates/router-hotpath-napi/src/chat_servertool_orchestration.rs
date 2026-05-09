@@ -1510,9 +1510,7 @@ fn resolve_chat_web_search_plan(
                 let id = read_trimmed_string(engine.get("id")).to_ascii_lowercase();
                 let provider_key =
                     read_trimmed_string(engine.get("providerKey")).to_ascii_lowercase();
-                if provider_key.starts_with("gemini-cli.")
-                    || provider_key.starts_with("antigravity.")
-                    || id.contains("google")
+                if id.contains("google")
                 {
                     return Some(*idx);
                 }
@@ -2809,7 +2807,6 @@ mod tests {
                 { "id": "stop_message_auto", "phase": "default", "priority": 40, "order": 3 },
                 { "id": "clock_auto", "phase": "post", "priority": 50, "order": 4 },
                 { "id": "recursive_detection_guard", "phase": "pre", "priority": 5, "order": 0 },
-                { "id": "antigravity_thought_signature_bootstrap", "phase": "default", "priority": 30, "order": 2 },
                 { "id": "reasoning_only_continue", "phase": "post", "priority": 200, "order": 5 }
             ],
             "optionalPrimaryHookOrder": ["clock_auto", "stop_message_auto"],
@@ -2828,7 +2825,6 @@ mod tests {
                 "recursive_detection_guard",
                 "clock_auto",
                 "stop_message_auto",
-                "antigravity_thought_signature_bootstrap",
                 "reasoning_only_continue"
             ]
         );

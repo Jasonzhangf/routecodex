@@ -57,13 +57,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                     "trigger": { "type": "auto", "canonicalName": "recursive_detection_guard", "phase": "pre", "priority": 5 },
                     "execution": { "mode": "auto_hook", "stripAfterExecute": true }
                 },
-                "antigravity_thought_signature_bootstrap": {
-                    "name": "antigravity_thought_signature_bootstrap",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "auto", "canonicalName": "antigravity_thought_signature_bootstrap", "phase": "default", "priority": 30 },
-                    "execution": { "mode": "auto_hook", "stripAfterExecute": true }
-                },
                 "clock_auto": {
                     "name": "clock_auto",
                     "enabled": true,
@@ -127,7 +120,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                         "stop_message_flow": "stop_message_auto",
                         "apply_patch_guard": "apply_patch_guard",
                         "exec_command_guard": "exec_command_guard",
-                        "antigravity_thought_signature_bootstrap": "antigravity_thought_signature_bootstrap",
                         "web_search_flow": "web_search",
                         "vision_flow": "vision_auto",
                         "clock_flow": "clock",
@@ -201,10 +193,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                             "continue_execution_flow": {
                                 "stickyProvider": true,
                                 "contextDecorationMode": "continue_execution_summary"
-                            },
-                            "antigravity_thought_signature_bootstrap": {
-                                "stickyProvider": true,
-                                "transparentReplayRequestSuffix": ":antigravity_ts_replay"
                             },
                             "reasoning_stop_flow": {
                                 "stickyProvider": true
@@ -312,20 +300,18 @@ mod tests {
 
     #[test]
     fn resolves_followup_flow_profile() {
-        let raw = resolve_servertool_followup_flow_profile_json(
-            "antigravity_thought_signature_bootstrap".to_string(),
-        )
-        .expect("profile json");
+        let raw = resolve_servertool_followup_flow_profile_json("clock_hold_flow".to_string())
+            .expect("profile json");
         let parsed: Value = serde_json::from_str(&raw).expect("parse profile");
         assert_eq!(
-            parsed.get("stickyProvider").and_then(|v| v.as_bool()),
+            parsed.get("clientInjectOnly").and_then(|v| v.as_bool()),
             Some(true)
         );
         assert_eq!(
             parsed
-                .get("transparentReplayRequestSuffix")
+                .get("clientInjectSource")
                 .and_then(|v| v.as_str()),
-            Some(":antigravity_ts_replay")
+            Some("servertool.clock")
         );
     }
 

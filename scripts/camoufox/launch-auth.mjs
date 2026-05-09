@@ -501,19 +501,6 @@ async function main() {
     return;
   }
 
-  if (autoMode && autoMode.trim().toLowerCase() === 'antigravity') {
-    try {
-      await runAutoFlowWithFallback('antigravity', { url, profileDir, profileId, camoufoxBinary, devMode });
-      process.exit(0);
-    } catch (error) {
-      console.error(
-        '[camoufox-launch-auth] Auto antigravity auth failed:',
-        error instanceof Error ? error.message : String(error)
-      );
-      process.exit(1);
-    }
-    return;
-  }
 
   if (autoMode && autoMode.trim().toLowerCase() === 'qwen') {
     try {
@@ -711,10 +698,6 @@ async function runAutoFlowWithFallback(kind, options) {
     }
     if (mode === 'gemini') {
       await runGeminiAutoFlow(options);
-      return;
-    }
-    if (mode === 'antigravity') {
-      await runAntigravityAutoFlow(options);
       return;
     }
     if (mode === 'qwen') {
@@ -1059,160 +1042,6 @@ async function runGeminiAutoFlow({ url, profileDir, camoufoxBinary, devMode }) {
     const callbackPage = await waitForCallback(context, activePage, timeoutMs);
     await callbackPage.waitForLoadState('load', { timeout: timeoutMs }).catch(() => {});
     console.log('[camoufox-launch-auth] OAuth callback detected, automation complete.');
-  } finally {
-    await shutdown();
-  }
-}
-
-async function runAntigravityAutoFlow({ url, profileDir, camoufoxBinary, devMode }) {
-  let firefox;
-  try {
-    ({ firefox } = await import('playwright-core'));
-  } catch (error) {
-    throw new Error(
-      `playwright-core is required for auto antigravity auth (${error instanceof Error ? error.message : String(error)})`
-    );
-  }
-
-  const timeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_GEMINI_TIMEOUT_MS || 300_000);
-  const portalButtonTimeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_PORTAL_BUTTON_TIMEOUT_MS || 300_000);
-  const portalPopupTimeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_PORTAL_POPUP_TIMEOUT_MS || 300_000);
-  const pageLoadTimeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_PAGE_LOAD_TIMEOUT_MS || 300_000);
-  const accountPreference = (process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT || '').trim();
-  cleanupExistingCamoufox(profileDir);
-  const context = await firefox.launchPersistentContext(profileDir, {
-    executablePath: camoufoxBinary,
-    headless: !devMode,
-    acceptDownloads: false,
-    firefoxUserPrefs: buildFirefoxUserPrefs()
-  });
-  let closing = false;
-  const shutdown = async () => {
-    if (closing) return;
-    closing = true;
-    await context.close().catch(() => {});
-  };
-  ['SIGTERM', 'SIGINT', 'SIGHUP'].forEach((signal) => {
-    process.on(signal, () => {
-      void shutdown().finally(() => process.exit(0));
-    });
-  });
-
-  let callbackObserved = false;
-  try {
-    const page = context.pages()[0] || (await context.newPage());
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
-
-    let authPage = page;
-    if (page.url().includes('token-auth')) {
-      console.log('[camoufox-launch-auth] Portal detected, auto-clicking continue button...');
-      const button = page.locator('#continue-btn');
-      await button.waitFor({ timeout: portalButtonTimeoutMs });
-      const popupPromise = context.waitForEvent('page', { timeout: portalPopupTimeoutMs }).catch(() => null);
-      const navPromise = page
-        .waitForURL((current) => typeof current === 'string' && !String(current).includes('token-auth'), {
-          timeout: portalPopupTimeoutMs
-        })
-        .catch(() => null);
-      try {
-        await button.click({ timeout: portalButtonTimeoutMs });
-      } catch {
-        await page.evaluate(() => {
-          const el = document.querySelector('#continue-btn');
-          if (!el) return;
-          const events = ['mouseenter', 'mouseover', 'mousemove', 'mousedown', 'mouseup', 'click'];
-          for (const type of events) {
-            el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
-          }
-        });
-      }
-      const popup = await popupPromise;
-      if (popup) {
-        authPage = popup;
-      } else {
-        await navPromise;
-        authPage = page;
-      }
-      await authPage.waitForLoadState('domcontentloaded', { timeout: pageLoadTimeoutMs }).catch(() => {});
-    }
-
-    console.log('[camoufox-launch-auth] Antigravity OAuth page loaded, waiting for account selector (<=120s)...');
-    const accountSelector = 'div.yAlK0b[jsname="bQIQze"]';
-    const accounts = authPage.locator(accountSelector);
-    await accounts.first().waitFor({ timeout: timeoutMs });
-    const totalAccounts = await accounts.count();
-    console.log(`[camoufox-launch-auth] Antigravity accounts detected: ${totalAccounts}`);
-
-    let targetAccount = accounts.first();
-    if (accountPreference) {
-      const preferred = accounts.filter({ hasText: accountPreference });
-      if (await preferred.count()) {
-        console.log(`[camoufox-launch-auth] Selecting account matching preference "${accountPreference}"`);
-        targetAccount = preferred.first();
-      } else {
-        console.warn(
-          `[camoufox-launch-auth] Preferred account text "${accountPreference}" not found; falling back to first account`
-        );
-      }
-    }
-
-    await targetAccount.scrollIntoViewIfNeeded().catch(() => {});
-    await targetAccount.hover({ force: true }).catch(() => {});
-    const handle = await targetAccount.elementHandle();
-    if (!handle) {
-      throw new Error('无法定位 Antigravity 账号元素用于点击');
-    }
-    const accountText = await targetAccount.innerText().catch(() => '');
-    console.log(
-      `[camoufox-launch-auth] Antigravity account element located (${accountText || 'unknown label'}), clicking...`
-    );
-    await authPage.evaluate((el) => {
-      const events = ['mouseenter', 'mouseover', 'mousemove', 'mousedown', 'mouseup', 'click'];
-      for (const type of events) {
-        el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
-      }
-    }, handle);
-
-    // Google confirmation screens vary by locale/font/text; click by container/role instead of innerText.
-    const confirmSelectors = [
-      // Common primary action container on Google OAuth screens.
-      'div.VfPpkd-RLmnJb',
-      // Common button class.
-      'button.VfPpkd-LgbsSe',
-      // Alternate shape (sometimes rendered as div role=button).
-      'div[role="button"].VfPpkd-LgbsSe'
-    ];
-    const confirmResult = await waitForAnyElementInPages(context, confirmSelectors, timeoutMs);
-    if (confirmResult) {
-      console.log(`[camoufox-launch-auth] Confirmation element detected (${confirmResult.selector}), clicking...`);
-      try {
-        await confirmResult.locator.first().click({ timeout: timeoutMs });
-      } catch {
-        await confirmResult.page.evaluate((sel) => {
-          const el = document.querySelector(sel);
-          if (!el) return;
-          const events = ['mouseenter', 'mouseover', 'mousemove', 'mousedown', 'mouseup', 'click'];
-          for (const type of events) {
-            el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
-          }
-        }, confirmResult.selector);
-      }
-      console.log('[camoufox-launch-auth] Antigravity confirmation acknowledged, waiting for callback...');
-    } else {
-      console.log('[camoufox-launch-auth] No Antigravity confirmation button detected within 120s, continuing...');
-    }
-
-    const activePage = confirmResult?.page || authPage;
-    const callbackPage = await waitForCallback(context, activePage, timeoutMs);
-    callbackObserved = true;
-    await callbackPage.waitForLoadState('load', { timeout: timeoutMs }).catch(() => {});
-    console.log('[camoufox-launch-auth] OAuth callback detected, automation complete.');
-  } catch (error) {
-    if (callbackObserved && isBrowserClosedError(error)) {
-      console.warn('[camoufox-launch-auth] Browser closed after callback; continuing.');
-      return;
-    }
-    throw error;
   } finally {
     await shutdown();
   }

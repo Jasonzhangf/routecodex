@@ -135,12 +135,6 @@ struct QuotaBucketOutputTier {
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AntigravitySplitOutput {
-    non_antigravity: Vec<String>,
-    has_antigravity: bool,
-}
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct PendingToolSyncOutput {
     ready: bool,
     insert_at: i64,
@@ -251,27 +245,6 @@ pub fn resolve_virtual_router_sticky_key_json(metadata_json: String) -> NapiResu
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-fn split_antigravity_targets(targets: Vec<String>) -> AntigravitySplitOutput {
-    let mut non_antigravity: Vec<String> = Vec::new();
-    let mut has_antigravity = false;
-    for target in targets {
-        let provider_id = target
-            .split('.')
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        if provider_id == "antigravity" {
-            has_antigravity = true;
-            continue;
-        }
-        non_antigravity.push(target);
-    }
-    AntigravitySplitOutput {
-        non_antigravity,
-        has_antigravity,
-    }
-}
 
 fn analyze_pending_tool_sync(
     messages: Vec<Value>,
@@ -397,13 +370,6 @@ pub fn compute_quota_buckets_json(entries_json: String, now_ms: f64) -> NapiResu
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-#[napi]
-pub fn split_antigravity_targets_json(targets_json: String) -> NapiResult<String> {
-    let parsed: Vec<String> =
-        serde_json::from_str(&targets_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = split_antigravity_targets(parsed);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
 
 #[napi]
 pub fn analyze_pending_tool_sync_json(
@@ -1076,17 +1042,6 @@ pub fn apply_gemini_web_search_request_compat_json(
     adapter_context_json: Option<String>,
 ) -> NapiResult<String> {
     req_outbound_stage3_compat::gemini::apply_gemini_web_search_request_compat_json(
-        payload_json,
-        adapter_context_json,
-    )
-}
-
-#[napi(js_name = "prepareAntigravityThoughtSignatureForGeminiRequestJson")]
-pub fn prepare_antigravity_thought_signature_for_gemini_request_json(
-    payload_json: String,
-    adapter_context_json: Option<String>,
-) -> NapiResult<String> {
-    req_outbound_stage3_compat::prepare_antigravity_signature_for_gemini_request_json(
         payload_json,
         adapter_context_json,
     )

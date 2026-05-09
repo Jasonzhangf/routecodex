@@ -164,7 +164,7 @@ describe('protocol mapping audit semantics canonicalization', () => {
       requestId: 'req-audit-canonical-gemini-out',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'gemini-chat',
-      providerId: 'gemini-cli'
+      providerId: 'gemini'
     } as AdapterContext);
 
     const dropped = findAuditEntry(chat, 'dropped', 'prompt_cache_key', 'gemini-chat');
@@ -219,7 +219,7 @@ describe('protocol mapping audit semantics canonicalization', () => {
       requestId: 'req-audit-canonical-gemini-preserved-out',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'gemini-chat',
-      providerId: 'gemini-cli'
+      providerId: 'gemini'
     } as AdapterContext);
 
     const preserved = findAuditEntry(chat, 'preserved', 'tool_choice', 'gemini-chat');
@@ -274,7 +274,7 @@ describe('protocol mapping audit semantics canonicalization', () => {
       requestId: 'req-audit-canonical-replay-without-legacy-out',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'gemini-chat',
-      providerId: 'gemini-cli'
+      providerId: 'gemini'
     } as AdapterContext);
 
     delete (chat.metadata as any).mappingAudit;
@@ -394,7 +394,7 @@ describe('protocol mapping audit semantics canonicalization', () => {
         requestId: 'req-audit-canonical-only-gemini-out',
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'gemini-chat',
-        providerId: 'gemini-cli'
+        providerId: 'gemini'
       } as AdapterContext);
 
       expect(

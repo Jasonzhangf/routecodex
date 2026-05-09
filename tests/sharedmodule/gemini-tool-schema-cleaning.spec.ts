@@ -1,8 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 import { buildGeminiToolsFromBridge } from '../../sharedmodule/llmswitch-core/src/conversion/shared/gemini-tool-utils.js';
 
-describe('Gemini tool schema cleaning (antigravity)', () => {
-  it('sanitizes functionDeclarations parameters for antigravity mode', () => {
+describe('Gemini tool schema cleaning (gemini)', () => {
+  it('sanitizes functionDeclarations parameters for gemini mode', () => {
     const tools = buildGeminiToolsFromBridge(
       [
         {
@@ -54,7 +54,7 @@ describe('Gemini tool schema cleaning (antigravity)', () => {
           }
         } as any
       ],
-      { mode: 'antigravity' }
+      { mode: 'gemini' }
     ) as Array<Record<string, any>>;
 
     expect(Array.isArray(tools)).toBe(true);

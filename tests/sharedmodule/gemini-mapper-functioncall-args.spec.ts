@@ -55,7 +55,7 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
       toolOutputs: [],
       metadata: {
         context: {
-          providerId: 'antigravity.jasonqueque.claude-sonnet-4-5'
+          providerId: 'gemini.jasonqueque.gemini-2.5-flash'
         }
       } as any
     };
@@ -192,7 +192,7 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
       toolOutputs: [],
       metadata: {
         context: {
-          providerId: 'antigravity.geetasamodgeetasamoda.gemini-3-pro-high',
+          providerId: 'gemini.geetasamodgeetasamoda.gemini-2.5-pro',
           entryEndpoint: '/v1/responses',
           providerProtocol: 'gemini-chat',
           requestId: 'req_test'

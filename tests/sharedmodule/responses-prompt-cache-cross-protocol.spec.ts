@@ -75,7 +75,7 @@ describe('responses prompt_cache_key cross protocol policy', () => {
       requestId: 'req-resp-gemini-out-pcache',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'gemini-chat',
-      providerId: 'gemini-cli'
+      providerId: 'gemini'
     } as AdapterContext);
 
     const payload = outbound.payload as any;

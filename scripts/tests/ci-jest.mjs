@@ -6,7 +6,6 @@ import process from 'node:process';
 // - Prefer pure unit tests / mock-provider tests (no external network).
 // - Expand coverage by adding more suites here (don’t run `jest --all` in CI).
 const routingInstructionTests = [
-  'tests/token-daemon/interactive-refresh.spec.ts',
   'tests/token-daemon/token-daemon.auto-refresh-noninteractive.spec.ts',
   'tests/commands/oauth-command.qwen-auto.spec.ts',
   'tests/server/runtime/request-executor.single-attempt.spec.ts',
@@ -14,13 +13,11 @@ const routingInstructionTests = [
   'tests/server/runtime/http-server/executor/usage-aggregator.spec.ts',
   'tests/providers/auth/tokenfile-auth.iflow.spec.ts',
   'tests/providers/core/runtime/gemini-http-provider.unit.test.ts',
-  'tests/providers/core/runtime/gemini-cli-http-provider.unit.test.ts',
   'tests/providers/core/runtime/deepseek-http-provider.unit.test.ts',
   'tests/providers/core/runtime/base-provider.spec.ts',
   'tests/providers/core/runtime/http-transport-provider.headers.test.ts',
   'tests/providers/core/runtime/protocol-http-providers.unit.test.ts',
   'tests/providers/core/runtime/provider-error-classifier.spec.ts',
-  'tests/providers/core/runtime/antigravity-quota-client.unit.test.ts',
   'tests/providers/core/utils/http-client.postStream.idle-timeout.spec.ts',
   'tests/providers/core/utils/snapshot-writer.sse-error-propagation.spec.ts',
   'tests/manager/quota/provider-quota-center.spec.ts',
@@ -33,7 +30,6 @@ const routingInstructionTests = [
   'tests/server/http-server/daemon-admin-provider-pool.e2e.spec.ts',
   'tests/server/http-server/apikey-auth.e2e.spec.ts',
   'tests/server/http-server/quota-view-injection.spec.ts',
-  'tests/server/http-server/quota-refresh-triggers.e2e.spec.ts',
   'tests/server/http-server/hub-policy-injection.spec.ts',
   'tests/server/http-server/session-header-injection.spec.ts',
   'tests/server/http-server/session-dir.spec.ts',

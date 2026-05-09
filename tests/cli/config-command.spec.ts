@@ -1161,7 +1161,7 @@ describe('cli init command', () => {
               provider: {
                 enabled: false,
                 auth: {
-                  type: 'gemini-cli-oauth',
+                  type: 'device-oauth',
                   entries: [
                     { alias: 'alice', tokenFile: '~/.routecodex/auth/gemini-oauth-1-alice.json' },
                     { alias: 'bob', tokenFile: '~/.routecodex/auth/gemini-oauth-2-bob.json' }

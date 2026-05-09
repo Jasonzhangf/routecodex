@@ -18,9 +18,6 @@ const EXPLICIT_VERIFY_CONFIG = String(
 ).trim();
 const DEFAULT_USER_CONFIG = `${process.env.HOME || ''}/.rcc/config.json`;
 const USE_USER_CONFIG = String(process.env.ROUTECODEX_VERIFY_USE_USER_CONFIG || '').trim() === '1';
-const GEMINI_CLI_CONFIG =
-  process.env.ROUTECODEX_VERIFY_GEMINI_CLI_CONFIG ||
-  `${process.env.HOME || ''}/.rcc/provider/gemini-cli/config.v1.json`;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_AGENTS_PATH = path.resolve(__dirname, '..', 'AGENTS.md');
@@ -109,8 +106,6 @@ async function main() {
     await runDaemonAdminSmokeCheck(authHeaders);
     await runConfigV2ProvidersSmokeCheck(authHeaders);
 
-    // 附加：Gemini CLI 配置健康性快速检查（仅尝试初始化，不做请求）
-    await runGeminiCliStartupCheck();
   } finally {
     shutdown();
     cleanupStaleServerPidFiles();
@@ -353,66 +348,6 @@ async function runConfigV2ProvidersSmokeCheck(authHeaders) {
     console.error('[verify:e2e-toolcall] Config V2 providers smoke 检查失败:', error);
     // 不将 Config V2 视图问题视为构建阻断条件，以免挡住主链路；仅提示。
   }
-}
-
-async function runGeminiCliStartupCheck() {
-  if (!GEMINI_CLI_CONFIG || !fs.existsSync(GEMINI_CLI_CONFIG)) {
-    return;
-  }
-
-  console.log('[verify:e2e-toolcall] 尝试启动 Gemini CLI 配置进行健康检查:', GEMINI_CLI_CONFIG);
-
-  return new Promise((resolve) => {
-    const env = {
-      ...process.env,
-      ROUTECODEX_CONFIG_PATH: GEMINI_CLI_CONFIG,
-      ROUTECODEX_PORT: '0',
-      ROUTECODEX_STAGE_LOG: '0',
-      // Avoid opening OAuth browser during build-time health checks.
-      ROUTECODEX_OAUTH_AUTO_OPEN: '0'
-    };
-    const child = spawn('node', ['dist/index.js'], {
-      env,
-      stdio: ['ignore', 'ignore', 'pipe']
-    });
-    // Prevent a stuck child process from keeping the verify task alive.
-    child.unref();
-
-    let stderr = '';
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    const timeout = setTimeout(() => {
-      try {
-        child.kill('SIGTERM');
-      } catch {
-        // ignore
-      }
-      const hardKill = setTimeout(() => {
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          // ignore
-        }
-      }, 1500);
-      hardKill.unref?.();
-      if (stderr) {
-        console.warn('[verify:e2e-toolcall] gemini-cli 启动日志(截断):', stderr.slice(0, 1000));
-      }
-      resolve();
-    }, 8000);
-
-    child.on('exit', (code) => {
-      clearTimeout(timeout);
-      if (code === 0) {
-        console.log('[verify:e2e-toolcall] gemini-cli 启动检查通过');
-      } else {
-        console.warn('[verify:e2e-toolcall] gemini-cli 启动检查失败(可在本地修复):', stderr.slice(0, 1000));
-      }
-      resolve();
-    });
-  });
 }
 
 main()

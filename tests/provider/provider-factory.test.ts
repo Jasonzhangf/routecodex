@@ -30,7 +30,6 @@ describe('ProviderFactory no fallback', () => {
     expect(resolveProviderModule('responses-http-provider')).toBe('responses-http-provider');
     expect(resolveProviderModule('anthropic-http-provider')).toBe('anthropic-http-provider');
     expect(resolveProviderModule('gemini-http-provider')).toBe('gemini-http-provider');
-    expect(resolveProviderModule('gemini-cli-http-provider')).toBe('gemini-cli-http-provider');
     expect(resolveProviderModule('deepseek-http-provider')).toBe('deepseek-http-provider');
     expect(resolveProviderModule('mimoweb')).toBe('mimoweb-provider');
     expect(resolveProviderModule('mimoweb-provider')).toBe('mimoweb-provider');

@@ -31,7 +31,7 @@ describe('cli camoufox command', () => {
     const program = new Command();
     const calls: any[] = [];
     const env: Record<string, string | undefined> = {
-      ROUTECODEX_CAMOUFOX_AUTO_MODE: 'antigravity',
+      ROUTECODEX_CAMOUFOX_AUTO_MODE: 'qwen',
       ROUTECODEX_CAMOUFOX_DEV_MODE: '1'
     };
     createCamoufoxCommand(program, {
@@ -44,7 +44,7 @@ describe('cli camoufox command', () => {
         isAbsolute: (p: string) => p.startsWith('/')
       },
       homedir: () => '/home/test',
-      findTokenBySelector: async () => ({ provider: 'antigravity', alias: 'antonsoltan', filePath: '/x.json' }),
+      findTokenBySelector: async () => ({ provider: 'qwen', alias: 'antonsoltan', filePath: '/x.json' }),
       openInCamoufox: async (opts) => {
         calls.push({ opts, env: { ...env } });
         return true;
@@ -56,16 +56,16 @@ describe('cli camoufox command', () => {
       }
     });
 
-    await program.parseAsync(['node', 'rcc', 'camoufox', 'antigravity-oauth-3-antonsoltan.json'], { from: 'node' });
+    await program.parseAsync(['node', 'rcc', 'camoufox', 'qwen-oauth-3-antonsoltan.json'], { from: 'node' });
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].opts.provider).toBe('antigravity');
+    expect(calls[0].opts.provider).toBe('qwen');
     expect(calls[0].opts.alias).toBe('antonsoltan');
     expect(calls[0].env.ROUTECODEX_CAMOUFOX_AUTO_MODE).toBeUndefined();
     expect(calls[0].env.ROUTECODEX_CAMOUFOX_DEV_MODE).toBeUndefined();
 
     // Restored after command completes.
-    expect(env.ROUTECODEX_CAMOUFOX_AUTO_MODE).toBe('antigravity');
+    expect(env.ROUTECODEX_CAMOUFOX_AUTO_MODE).toBe('qwen');
     expect(env.ROUTECODEX_CAMOUFOX_DEV_MODE).toBe('1');
   });
 
@@ -97,7 +97,7 @@ describe('cli camoufox command', () => {
       }
     });
 
-    await program.parseAsync(['node', 'rcc', 'camoufox', '/tmp/antigravity-oauth-3-antonsoltan.json'], { from: 'node' });
+    await program.parseAsync(['node', 'rcc', 'camoufox', '/tmp/qwen-oauth-3-antonsoltan.json'], { from: 'node' });
 
     expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('stage=selector_resolution');
     expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('operation=find_token_by_selector');

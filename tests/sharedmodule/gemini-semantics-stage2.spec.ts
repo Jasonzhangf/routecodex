@@ -11,7 +11,7 @@ const adapterContext: AdapterContext = {
   requestId: 'req-gemini-semantic-stage2',
   entryEndpoint: '/v1/models/gemini:generatecontent',
   providerProtocol: 'gemini-chat',
-  providerId: 'gemini-cli.test'
+  providerId: 'gemini.test'
 };
 
 function buildFormatPayload() {
