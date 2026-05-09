@@ -146,7 +146,7 @@ function installPageFetchMock() {
             consecutiveErrorCount: 0
           },
           {
-            providerKey: 'antigravity.work.gpt-4',
+            providerKey: 'tab.work.gpt-4',
             inPool: false,
             reason: 'authVerify',
             cooldownUntil: null,
@@ -267,7 +267,7 @@ function installPageFetchMock() {
       return json({
         records: [
           {
-            key: 'antigravity://work/gpt-4',
+            key: 'tab://work/gpt-4',
             remainingFraction: 0.42,
             resetAt: Date.now() + 3600_000,
             fetchedAt: Date.now()
@@ -297,7 +297,7 @@ function installPageFetchMock() {
       });
     }
 
-    if (path === '/daemon/session/tasks' && method === 'GET') {
+    if (path === '/daemon/clock/tasks' && method === 'GET') {
       return json({
         sessions: [
           {
@@ -362,7 +362,7 @@ describe('webui page-level coverage', () => {
     fireEvent.click(screen.getByText('Save'));
     await waitFor(() => expect(hasToast('OAuth settings saved.')).toBe(true));
     const providerSelect = oauthPanel.querySelectorAll('select')[1] as HTMLSelectElement;
-    fireEvent.change(providerSelect, { target: { value: 'antigravity' } });
+    fireEvent.change(providerSelect, { target: { value: 'tab' } });
     const aliasInput = oauthPanel.querySelector('input[style*="width: 180px"]') as HTMLInputElement;
     fireEvent.change(aliasInput, { target: { value: 'work' } });
     onToast.mockClear();
@@ -393,7 +393,7 @@ describe('webui page-level coverage', () => {
     fireEvent.click(within(quotaBulkRow).getByText('Offline'));
     await waitFor(() => expect(hasToast('disable applied.')).toBe(true));
     onToast.mockClear();
-    fireEvent.click(within(screen.getByText('Antigravity Quota Snapshot').closest('.panel') as HTMLElement).getByText('Refresh Upstream Snapshot'));
+    fireEvent.click(within(screen.getByText('Quota Snapshot').closest('.panel') as HTMLElement).getByText('Refresh Upstream Snapshot'));
     await waitFor(() => expect(hasToast('Quota snapshot refreshed.')).toBe(true));
     quotaView.unmount();
 

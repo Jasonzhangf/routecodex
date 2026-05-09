@@ -60,7 +60,7 @@ describe('webui integration flows (feature coverage)', () => {
         consecutiveErrorCount: 0
       },
       {
-        providerKey: 'antigravity.work.gpt-4',
+        providerKey: 'tab.work.gpt-4',
         inPool: false,
         reason: 'authVerify',
         cooldownUntil: null,
@@ -84,13 +84,13 @@ describe('webui integration flows (feature coverage)', () => {
         secretRef: 'oauth-qwen-default'
       },
       {
-        id: 'cred-antigravity',
+        id: 'cred-qwen-work',
         kind: 'oauth',
-        provider: 'antigravity',
+        provider: 'qwen',
         alias: 'work',
         status: 'expired',
         expiresInSec: -1,
-        secretRef: 'oauth-antigravity-work'
+        secretRef: 'oauth-qwen-work'
       }
     ]
   };
@@ -178,7 +178,7 @@ describe('webui integration flows (feature coverage)', () => {
         consecutiveErrorCount: 0
       },
       {
-        providerKey: 'antigravity.work.gpt-4',
+        providerKey: 'tab.work.gpt-4',
         inPool: false,
         reason: 'authVerify',
         cooldownUntil: null,
@@ -203,13 +203,13 @@ describe('webui integration flows (feature coverage)', () => {
         secretRef: 'oauth-qwen-default'
       },
       {
-        id: 'cred-antigravity',
+        id: 'cred-qwen-work',
         kind: 'oauth',
-        provider: 'antigravity',
+        provider: 'qwen',
         alias: 'work',
         status: 'expired',
         expiresInSec: -1,
-        secretRef: 'oauth-antigravity-work'
+        secretRef: 'oauth-qwen-work'
       }
     ];
     fault.quotaRefresh404 = false;
@@ -478,7 +478,7 @@ describe('webui integration flows (feature coverage)', () => {
           ok: true,
           records: [
             {
-              key: 'antigravity://work/gpt-4',
+              key: 'tab://work/gpt-4',
               remainingFraction: 0.42,
               resetAt: Date.now() + 3600_000,
               fetchedAt: Date.now()
@@ -687,7 +687,7 @@ describe('webui integration flows (feature coverage)', () => {
     fireEvent.click(within(oauthPanel).getByText('Auto Auth'));
     const oauthProviderSelect = oauthPanel.querySelectorAll('select')[1] as HTMLSelectElement;
     expect(oauthProviderSelect).toBeTruthy();
-    fireEvent.change(oauthProviderSelect, { target: { value: 'antigravity' } });
+    fireEvent.change(oauthProviderSelect, { target: { value: 'tab' } });
     const oauthAliasInput = oauthPanel.querySelector('input[style*="width: 180px"]') as HTMLInputElement;
     expect(oauthAliasInput).toBeTruthy();
     fireEvent.change(oauthAliasInput, { target: { value: 'work' } });
@@ -754,7 +754,7 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText(/reset applied\./)).toBeTruthy());
     hit('quota.provider_reset');
 
-    fireEvent.click(within(panelByTitle('Antigravity Quota Snapshot')).getByText('Refresh Upstream Snapshot'));
+    fireEvent.click(within(panelByTitle('Quota Snapshot')).getByText('Refresh Upstream Snapshot'));
     await waitFor(() => expect(screen.getByText(/Quota snapshot refreshed\./)).toBeTruthy());
     hit('quota.snapshot_refresh');
 
@@ -814,7 +814,7 @@ describe('webui integration flows (feature coverage)', () => {
         consecutiveErrorCount: 0
       },
       {
-        providerKey: 'antigravity.work.gpt-4',
+        providerKey: 'tab.work.gpt-4',
         inPool: false,
         reason: 'authVerify',
         cooldownUntil: null,
@@ -861,7 +861,7 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText('OAuth Workbench')).toBeTruthy());
     const oauthPanel = panelByTitle('OAuth Workbench');
     const providerSelect = oauthPanel.querySelectorAll('select')[1] as HTMLSelectElement;
-    fireEvent.change(providerSelect, { target: { value: 'antigravity' } });
+    fireEvent.change(providerSelect, { target: { value: 'tab' } });
     const aliasInput = oauthPanel.querySelector('input[style*="width: 180px"]') as HTMLInputElement;
     fireEvent.change(aliasInput, { target: { value: 'work' } });
     fireEvent.click(within(oauthPanel).getByText('Open Verify'));

@@ -186,19 +186,6 @@ async function main() {
   results.push(await run('matrix:gemini-finish-reason', 'scripts/tests/gemini-finish-reason.mjs'));
   // 1c.3.1) gemini outbound tool schema sanitization (oneOf/anyOf/allOf)
   results.push(await run('matrix:gemini-tool-schema-sanitize', 'scripts/tests/gemini-tool-schema-sanitize.mjs'));
-  // 1c.4) antigravity Claude-thinking outbound shape (Anthropic vs Responses)
-  results.push(await run('matrix:antigravity-claude-thinking', 'scripts/tests/antigravity-claude-thinking-shape.mjs'));
-  // 1c.4.1) antigravity: tool schema must be downlinked (functionDeclarations)
-  results.push(await run('matrix:antigravity-tools-downlink', 'scripts/tests/antigravity-tools-downlink.mjs'));
-  // 1c.4.1.1) antigravity: session-based thoughtSignature cache/inject (Gemini functionCall parts)
-  results.push(await run('matrix:antigravity-gemini-signature-cache', 'scripts/tests/antigravity-gemini-signature-cache.mjs'));
-  // 1c.4.1.2) antigravity: thoughtSignature prepare recovery (invalidate + retry hint)
-  results.push(
-    await run(
-      'matrix:antigravity-thought-signature-prepare-recovery',
-      'scripts/tests/antigravity-thought-signature-prepare-recovery.mjs'
-    )
-  );
   // 1c.4.2) web_search route: tools list must be cleaned regardless of route name ("web_search" vs "search")
   results.push(await run('matrix:web-search-route-tools-clean', 'scripts/tests/web-search-route-tools-clean.mjs'));
 	  // 1c.4.2.1) web_search backend handler smoke (providerInvoker + reenterPipeline)
@@ -220,12 +207,6 @@ async function main() {
       'scripts/tests/virtual-router-quota-health-restore.mjs'
     )
   );
-  // 1e.0.1) antigravity: after repeated identical errors, prefer non-antigravity fallbacks when possible
-  results.push(await run('matrix:virtual-router-antigravity-retry-fallback', 'scripts/tests/virtual-router-antigravity-retry-fallback.mjs'));
-  // 1e.0.2) antigravity: scope Google account verification errors to the failing runtimeKey (do not global-cooldown).
-  results.push(await run('matrix:virtual-router-antigravity-risk-scope', 'scripts/tests/virtual-router-antigravity-risk-scope.mjs'));
-  // 1e.0.3) antigravity: missing thoughtSignature should immediately freeze Gemini series (avoid request storms).
-  results.push(await run('matrix:virtual-router-antigravity-thought-signature-freeze', 'scripts/tests/virtual-router-antigravity-thought-signature-freeze.mjs'));
   // 1e.1) virtual-router direct provider.model selection (RR across keys)
   results.push(await run('matrix:virtual-router-direct-model', 'scripts/tests/virtual-router-direct-model.mjs'));
   // 1e.2) route classifier: local search tools must not be misrouted to web_search

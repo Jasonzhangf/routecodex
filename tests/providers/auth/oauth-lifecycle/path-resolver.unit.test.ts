@@ -3,7 +3,6 @@
  */
 
 import {
-  isGeminiCliFamily,
   expandHome,
   defaultTokenFile,
   resolveCamoufoxAliasForAuth,
@@ -21,26 +20,6 @@ describe('path-resolver', () => {
     process.env.HOME = originalHome;
   });
 
-  describe('isGeminiCliFamily', () => {
-    it('returns true for gemini-cli', () => {
-      expect(isGeminiCliFamily('gemini-cli')).toBe(true);
-    });
-
-    it('returns true for antigravity', () => {
-      expect(isGeminiCliFamily('antigravity')).toBe(true);
-    });
-
-    it('returns true for uppercase variants', () => {
-      expect(isGeminiCliFamily('GEMINI-CLI')).toBe(true);
-      expect(isGeminiCliFamily('ANTIGRAVITY')).toBe(true);
-    });
-
-    it('returns false for other providers', () => {
-      expect(isGeminiCliFamily('qwen')).toBe(false);
-      expect(isGeminiCliFamily('glm')).toBe(false);
-    });
-  });
-
   describe('expandHome', () => {
     it('expands ~/ prefix', () => {
       expect(expandHome('~/path/to/file')).toBe('/home/testuser/path/to/file');
@@ -53,23 +32,16 @@ describe('path-resolver', () => {
   });
 
   describe('defaultTokenFile', () => {
-    it('returns default path', () => {
-      expect(defaultTokenFile('glm')).toBe('/home/testuser/.rcc/auth/glm-oauth-1-default.json');
-    });
-
-    it('returns qwen default path', () => {
+    it('returns qwen default path under auth dir', () => {
       expect(defaultTokenFile('qwen')).toBe('/home/testuser/.rcc/auth/qwen-oauth-1-default.json');
     });
 
-    it('returns gemini-cli default path', () => {
-      expect(defaultTokenFile('gemini-cli')).toBe('/home/testuser/.rcc/auth/gemini-oauth.json');
+    it('returns deepseek-account default path under auth dir', () => {
+      expect(defaultTokenFile('deepseek-account')).toBe('/home/testuser/.rcc/auth/deepseek-account-oauth-1-default.json');
     });
 
-    it('returns antigravity default path', () => {
-      expect(defaultTokenFile('antigravity')).toBe('/home/testuser/.rcc/auth/antigravity-oauth.json');
-    });
-
-    it('returns generic default path for unknown providers', () => {
+    it('returns generic default path for other providers under tokens dir', () => {
+      expect(defaultTokenFile('glm')).toBe('/home/testuser/.rcc/tokens/glm-default.json');
       expect(defaultTokenFile('unknown')).toBe('/home/testuser/.rcc/tokens/unknown-default.json');
     });
   });

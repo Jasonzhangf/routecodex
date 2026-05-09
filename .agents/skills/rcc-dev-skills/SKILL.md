@@ -311,6 +311,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - health probe / guardian / restart 判断精华（2026-04-16）：`fetch/json/auth` 异常若统一塌缩成 `false/null/status=n/a`，调用方会把“网络错 / 401 / 响应非法 / 服务真离线”误判成同一种离线；正确做法是返回结构化 probe result（`kind + status + parseOk + bodySnippet`），并只在最外层决定是否 fallback。
 - 状态持久化 best-effort 精华（2026-04-16）：`cooldown` / `leader-lock` / `pending-tool-sync.clear` 这类“允许不中断主链”的状态写失败，也必须至少打一次节流日志并带 `operation + key/sessionId/providerKey + filepath`；否则线上只会看到重复 followup、冷却丢失、锁竞争异常，却没有第一现场。
 - 静默失败门禁精华（2026-04-16）：审计脚本不能只抓 `catch {}`；还要覆盖 `catch { return null/false }` 与 `.catch(() => null/false)`。固定证据入口：`scripts/ci/silent-failure-audit.mjs` + `tests/scripts/silent-failure-audit.spec.ts`。
+- followup/blocked 辅助链阻塞精华（2026-05-09）：凡是 `stop-message` / `blocked-report` / followup sidecar 中的 `spawnSync(...)` 如果不在主链唯一路径且无实调用点，必须直接物理删除；这类同步子进程即使包了 timeout，也会卡事件循环，表现成 client 不断、请求静默挂住。
 - 错误收口主链（2026-04-16）：排查 provider 执行期错误时，先确认主路径是否仍是 **`provider-error-reporter -> reportProviderErrorToRouterPolicy -> Virtual Router policy`**；如果又看到 `providerErrorCenter` + `RouteErrorHub` 双上报、或 HubPipeline 重新直接订阅 legacy center，优先判定为“第二中心回流”。
 - stopless 硬校验（2026-04-16）：若 `stopless=on/endless` 但响应已 `completed/stop` 且缺 `[app.finished:reasoning.stop]` finalized marker，Host `RequestExecutor` 必须抛 `STOPLESS_FINALIZATION_MISSING`；不要把这种“完成但未 finalize”的响应当成功，避免客户端静默停住。
 - provider-switch 退避边界（2026-04-16）：若 retry 已经决定 `exclude_and_reroute`，generic 401/403/非 blocking 错误的 backoff 也必须按 **provider 维度**计数，不能沿用全请求 `attempt` 指数增长；否则不同 provider 会被无端抬高 backoff，看起来像调度在“全局连坐”。

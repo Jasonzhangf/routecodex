@@ -468,7 +468,7 @@ describe('webui edge coverage', () => {
       if (path === '/config/routing' && method === 'GET') {
         return responseJson({
           routing: {
-            default: [{ targets: ['qwen.default.qwen-max', 'antigravity.work.gpt-4'] }]
+            default: [{ targets: ['qwen.default.qwen-max', 'tab.work.gpt-4'] }]
           }
         });
       }
@@ -486,7 +486,7 @@ describe('webui edge coverage', () => {
               consecutiveErrorCount: 0
             },
             {
-              providerKey: 'antigravity.work.gpt-4',
+              providerKey: 'tab.work.gpt-4',
               inPool: false,
               reason: 'authVerify',
               cooldownUntil: null,
@@ -503,8 +503,8 @@ describe('webui edge coverage', () => {
       if (path === '/quota/summary' && method === 'GET') {
         return responseJson({
           records: [
-            { key: 'antigravity://work/gpt-4', remainingFraction: 0.42, resetAt: Date.now() + 300000, fetchedAt: Date.now() },
-            { key: 'antigravity://lab/gpt-5', remainingFraction: 0.73, resetAt: Date.now() + 600000, fetchedAt: Date.now() }
+            { key: 'tab://work/gpt-4', remainingFraction: 0.42, resetAt: Date.now() + 300000, fetchedAt: Date.now() },
+            { key: 'tab://lab/gpt-5', remainingFraction: 0.73, resetAt: Date.now() + 600000, fetchedAt: Date.now() }
           ]
         });
       }
@@ -588,7 +588,7 @@ describe('webui edge coverage', () => {
 
     fireEvent.click(within(quotaPanel).getByText('Refresh Routing Targets'));
 
-    const snapshotPanel = screen.getByText('Antigravity Quota Snapshot').closest('.panel') as HTMLElement;
+    const snapshotPanel = screen.getByText('Quota Snapshot').closest('.panel') as HTMLElement;
     const routedOnlyCheckbox = snapshotPanel.querySelector('input[type="checkbox"]') as HTMLInputElement;
     fireEvent.click(routedOnlyCheckbox);
     await waitFor(() => expect(within(snapshotPanel).getByText('work')).toBeTruthy());

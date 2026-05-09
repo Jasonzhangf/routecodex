@@ -3,6 +3,7 @@ import { repairFindMeta } from './tooling.js';
 import { captureApplyPatchRegression } from '../../tools/patch-regression-capturer.js';
 import { normalizeExecCommandArgs } from '../../tools/exec-command/normalize.js';
 import {
+  buildBlockedApplyPatchArgs,
   repairCommandNameAsExecToolCall,
   resolveExecCommandGuardValidationOptions,
   rewriteExecCommandApplyPatchCall
@@ -40,7 +41,7 @@ export function normalizeApplyPatchToolCallsOnResponse(chat: Unknown): Unknown {
           if (validation?.ok && typeof validation.normalizedArgs === 'string') {
             (fn as any).arguments = validation.normalizedArgs;
           } else if (validation && !validation.ok) {
-            (fn as any).arguments = argsStr;
+            (fn as any).arguments = buildBlockedApplyPatchArgs(rawArgs, validation.reason, validation.message);
             captureApplyPatchFailure(rawArgs, argsStr, validation.reason);
           }
         } catch (error) {

@@ -15,8 +15,8 @@ const outDir = path.join(coreRoot, 'dist');
 const requiredOutputs = [
   path.join(outDir, 'bridge', 'routecodex-adapter.js'),
   path.join(outDir, 'conversion', 'hub', 'response', 'provider-response.js'),
-  // RouteCodex runtime loads this module via llmswitch bridge; ensure dev builds produce it.
-  path.join(outDir, 'router', 'virtual-router', 'error-center.js')
+  // RouteCodex runtime / hub pipeline / virtual-router tests all require this module.
+  path.join(outDir, 'router', 'virtual-router', 'engine.js')
 ];
 
 function fail(msg){ console.error(`[build-core] ${msg}`); process.exit(2); }

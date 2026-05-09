@@ -270,7 +270,6 @@ describe('HubRequestExecutor failover', () => {
       holdOnLastAvailable429: false,
       retryBackoffMs: 0,
       recoverableBackoffMs: 0,
-      antigravityRetrySignal: null
     });
 
     const responseContractReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
@@ -328,7 +327,6 @@ describe('HubRequestExecutor failover', () => {
       holdOnLastAvailable429: false,
       retryBackoffMs: 0,
       recoverableBackoffMs: 0,
-      antigravityRetrySignal: null
     });
 
     expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
@@ -689,29 +687,6 @@ describe('HubRequestExecutor failover', () => {
     expect(truncated.length).toBe(50);
     expect(truncated.endsWith('…')).toBe(true);
 
-    const excludedProviderKeys = new Set<string>();
-    const exclusionPlan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
-      providerKey: 'antigravity.alias1.gemini-3-pro-high',
-      status: 429,
-      error: Object.assign(new Error('HTTP 429: overload'), { statusCode: 429 }),
-      classification: 'recoverable',
-      promptTooLong: false,
-      isVerify: false,
-      isReauth: false,
-      antigravityRetrySignal: { signature: 'sig-1', consecutive: 2 },
-      routePool: [
-        'antigravity.alias1.gemini-3-pro-high',
-        'antigravity.alias2.gemini-3-pro-high'
-      ],
-      excludedProviderKeys
-    });
-    expect(exclusionPlan.excludedCurrentProvider).toBe(false);
-    expect(exclusionPlan.antigravityRetrySignal).toEqual({
-      signature: 'sig-1',
-      consecutive: 2
-    });
-    expect(Array.from(excludedProviderKeys)).toEqual([]);
-
     const singleton429ExclusionPlan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
       providerKey: 'mimo.key1.mimo-v2.5-pro',
       status: 429,
@@ -719,7 +694,6 @@ describe('HubRequestExecutor failover', () => {
       promptTooLong: false,
       isVerify: false,
       isReauth: false,
-      antigravityRetrySignal: null,
       routePool: ['mimo.key1.mimo-v2.5-pro'],
       excludedProviderKeys: new Set<string>()
     });
@@ -841,21 +815,6 @@ describe('HubRequestExecutor failover', () => {
       blockingRecoverable: false
     });
 
-    const antigravityEligibilityPlan = __requestExecutorTestables.resolveProviderRetryEligibilityPlan({
-      error: new Error('Please authenticate with Google OAuth first'),
-      retryError: { statusCode: 403, reason: 'Please authenticate with Google OAuth first' },
-      attempt: 1,
-      maxAttempts: 6,
-      providerKey: 'antigravity.alias1.gemini-3-pro-high',
-      isVerify: false,
-      isReauth: true,
-      allowAntigravityRecovery: true
-    });
-    expect(antigravityEligibilityPlan).toEqual({
-      shouldRetry: false,
-      blockingRecoverable: false
-    });
-
     const followupEligibilityPlan = __requestExecutorTestables.resolveProviderRetryEligibilityPlan({
       error: Object.assign(new Error('followup failed'), {
         code: 'SERVERTOOL_FOLLOWUP_FAILED',
@@ -894,16 +853,16 @@ describe('HubRequestExecutor failover', () => {
         retryError: { statusCode: 429, errorCode: 'HTTP_429', reason: 'HTTP 429: overload' },
         attempt: 1,
         maxAttempts: 6,
-        providerKey: 'antigravity.alias1.gemini-3-pro-high',
-        runtimeKey: 'runtime:antigravity',
+        providerKey: 'gemini.primary.gemini-2.5-pro',
+        runtimeKey: 'runtime:gemini-primary',
         logicalRequestChainKey: 'req-helper',
         logicalChainRetryLimitStageRequestId: 'req-helper',
         routePool: [
-          'antigravity.alias1.gemini-3-pro-high',
-          'antigravity.alias2.gemini-3-pro-high'
+          'gemini.primary.gemini-2.5-pro',
+          'gemini.backup.gemini-2.5-pro'
         ],
         runtimeManager: {
-          resolveRuntimeKey: () => 'runtime:antigravity'
+          resolveRuntimeKey: () => 'runtime:gemini-primary'
         },
         excludedProviderKeys: orchestratorExcluded,
         recordAttempt,
@@ -911,8 +870,6 @@ describe('HubRequestExecutor failover', () => {
         promptTooLong: false,
         isVerify: false,
         isReauth: false,
-        allowAntigravityRecovery: true,
-        antigravityRetrySignal: { signature: 'sig-1', consecutive: 2 },
         status: 429
       });
       expect(recordAttempt).toHaveBeenCalledWith({ error: true });
@@ -922,23 +879,19 @@ describe('HubRequestExecutor failover', () => {
         switchAction: 'retry_same_provider',
         decisionLabel: 'recoverable_backoff_same_provider'
       }));
-      expect(executionPlan.antigravityRetrySignal).toEqual({
-        signature: 'sig-1',
-        consecutive: 2
-      });
       expect(Array.from(orchestratorExcluded)).toEqual([]);
 
       const telemetryPlan = __requestExecutorTestables.buildProviderRetryTelemetryPlan({
         requestId: 'req-helper',
         attempt: 1,
         maxAttempts: 6,
-        providerKey: 'antigravity.alias1.gemini-3-pro-high',
+        providerKey: 'gemini.primary.gemini-2.5-pro',
         retryError: { statusCode: 429, errorCode: 'HTTP_429', reason: 'HTTP 429: overload' },
         excludedProviderKeys: orchestratorExcluded,
         routeHint: 'thinking',
         retryExecutionPlan: executionPlan,
         stage: 'provider.send',
-        runtimeKey: 'runtime:antigravity'
+        runtimeKey: 'runtime:gemini-primary'
       });
       expect(telemetryPlan.switchLogArgs).toEqual(expect.objectContaining({
         requestId: 'req-helper',
@@ -948,7 +901,7 @@ describe('HubRequestExecutor failover', () => {
         stage: 'provider.send'
       }));
       expect(telemetryPlan.retryStageDetails).toEqual(expect.objectContaining({
-        providerKey: 'antigravity.alias1.gemini-3-pro-high',
+        providerKey: 'gemini.primary.gemini-2.5-pro',
         routeHint: 'thinking',
         switchAction: 'retry_same_provider',
         backoffScope: 'recoverable',
@@ -1031,8 +984,7 @@ describe('HubRequestExecutor failover', () => {
         holdOnLastAvailable429: false,
         retryBackoffMs: 0,
         recoverableBackoffMs: 0,
-        antigravityRetrySignal: null
-      });
+        });
 
       const sqliteBusyExcluded = new Set<string>();
       const sqliteBusyExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
@@ -1104,7 +1056,6 @@ describe('HubRequestExecutor failover', () => {
         excludedProviderKeys: new Set<string>(),
         recordAttempt,
         logStage: () => undefined,
-        allowAntigravityRecovery: true,
         status: 401
       });
       expect(followupExecutionPlan).toEqual({
@@ -1114,8 +1065,7 @@ describe('HubRequestExecutor failover', () => {
         holdOnLastAvailable429: false,
         retryBackoffMs: 0,
         recoverableBackoffMs: 0,
-        antigravityRetrySignal: null
-      });
+        });
     } finally {
       if (previous429Base === undefined) {
         delete process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
@@ -1318,8 +1268,8 @@ describe('HubRequestExecutor failover', () => {
 
 
   test('keeps recoverable 429 on the same provider even when an alternative provider exists', async () => {
-    const firstProviderKey = 'antigravity.1-geetasamodgeetasamoda.claude-sonnet-4-5-thinking';
-    const secondProviderKey = 'antigravity.2-geetasamodgeetasamoda.claude-sonnet-4-5-thinking';
+    const firstProviderKey = 'gemini.primary.gemini-2.5-pro';
+    const secondProviderKey = 'gemini.backup.gemini-2.5-flash';
     const failingError = new Error('HTTP 429: quota exhausted');
     (failingError as any).statusCode = 429;
 
@@ -1795,8 +1745,8 @@ describe('HubRequestExecutor failover', () => {
   });
 
   test('surfaces 403 OAuth reauth-required error without alias rotation', async () => {
-    const firstProviderKey = 'antigravity.alias1.gemini-3-pro-high';
-    const secondProviderKey = 'antigravity.alias2.gemini-3-pro-high';
+    const firstProviderKey = 'gemini.primary.gemini-2.5-pro';
+    const secondProviderKey = 'gemini.backup.gemini-2.5-pro';
     const failingError = new Error('HTTP 403: Please authenticate with Google OAuth first');
     (failingError as any).statusCode = 403;
     (failingError as any).retryable = false;

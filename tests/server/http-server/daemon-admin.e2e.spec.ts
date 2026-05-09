@@ -216,24 +216,6 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       expect(status.status).toBe(200);
       expect(status.body).toHaveProperty('ok', true);
 
-      // Control snapshot should expose antigravity alias lease state when the persisted file is present.
-      const leasePath = path.join(os.homedir(), '.routecodex', 'state', 'antigravity-alias-leases.json');
-      await fs.mkdir(path.dirname(leasePath), { recursive: true });
-      await fs.writeFile(
-        leasePath,
-        JSON.stringify(
-          {
-            version: 1,
-            updatedAt: Date.now(),
-            leases: {
-              'antigravity.aliasA::gemini': { sessionKey: 'session:abc::gemini', lastSeenAt: Date.now() }
-            }
-          },
-          null,
-          2
-        ),
-        'utf8'
-      );
       const serverToolLogPath = path.join(os.homedir(), '.routecodex', 'logs', 'servertool-events.jsonl');
       await fs.mkdir(path.dirname(serverToolLogPath), { recursive: true });
       await fs.writeFile(
@@ -263,8 +245,6 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       const controlSnap = await getJson(baseUrl, '/daemon/control/snapshot', cookie);
       expect(controlSnap.status).toBe(200);
       expect(controlSnap.body).toHaveProperty('routing');
-      expect(controlSnap.body.routing).toHaveProperty('antigravityAliasLeases');
-      expect(controlSnap.body.routing.antigravityAliasLeases).toHaveProperty('leases');
       expect(controlSnap.body).toHaveProperty('serverTool');
       expect(controlSnap.body.serverTool.state).toHaveProperty('enabled', true);
       expect(Number(controlSnap.body.serverTool.stats?.executions ?? 0)).toBeGreaterThanOrEqual(1);

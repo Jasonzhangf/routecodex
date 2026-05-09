@@ -19,6 +19,7 @@ import { validateChatEnvelopeWithNative } from "../../../../../../router/virtual
 import { chatEnvelopeToStandardizedWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js";
 import { normalizeReqInboundShellLikeToolCallsWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics-tools.js";
 import { fixApplyPatchToolCallsWithNative } from "../../../../../../router/virtual-router/engine-selection/native-compat-action-semantics.js";
+import { normalizeApplyPatchToolCallsOnRequest } from "../../../../../../conversion/shared/tool-governor.js";
 import {
   applyAnthropicToolAliasSemantics,
   normalizeAnthropicToolAliasMap
@@ -189,6 +190,12 @@ export async function runReqInboundStage2SemanticMap(
         : []) as Array<Record<string, unknown>>,
     });
     chatEnvelope.messages = fixedApplyPatch.messages as unknown as ChatEnvelope["messages"];
+    const normalizedSpecialTools = normalizeApplyPatchToolCallsOnRequest({
+      messages: Array.isArray(chatEnvelope.messages) ? chatEnvelope.messages : []
+    }) as { messages?: ChatEnvelope["messages"] };
+    if (Array.isArray(normalizedSpecialTools?.messages)) {
+      chatEnvelope.messages = normalizedSpecialTools.messages;
+    }
   }
   logHubStageTiming(
     requestId,

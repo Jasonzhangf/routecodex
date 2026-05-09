@@ -173,7 +173,7 @@ async function runAnthropicHelperCoverage() {
 }
 
 async function runGeminiHelperCoverage() {
-  const antigravity = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/gemini-antigravity-request.js'));
+  const geminiRequestUtils = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/gemini-request-utils.js'));
   const systemSem = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/gemini-system-semantics.js'));
   const thinking = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/gemini-thinking-config.js'));
   const chatHelpers = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/gemini-chat-request-helpers.js'));
@@ -182,170 +182,170 @@ async function runGeminiHelperCoverage() {
   const protocolAudit = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/protocol-mapping-audit.js'));
   const state = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/gemini-semantics-state.js'));
 
-  assert.equal(antigravity.stripOnlineSuffix('gemini-pro-online'), 'gemini-pro');
-  assert.equal(antigravity.stripOnlineSuffix('gemini-pro'), 'gemini-pro');
+  assert.equal(geminiRequestUtils.stripOnlineSuffix('gemini-pro-online'), 'gemini-pro');
+  assert.equal(geminiRequestUtils.stripOnlineSuffix('gemini-pro'), 'gemini-pro');
   const reqNoTools = {};
-  antigravity.injectGoogleSearchTool(reqNoTools);
+  geminiRequestUtils.injectGoogleSearchTool(reqNoTools);
   assert.deepEqual(reqNoTools.tools, [{ googleSearch: {} }]);
   const reqWithDecls = { tools: [{ functionDeclarations: [{ name: 'exec_command' }] }] };
-  antigravity.injectGoogleSearchTool(reqWithDecls);
+  geminiRequestUtils.injectGoogleSearchTool(reqWithDecls);
   assert.equal(reqWithDecls.tools.length, 1);
   const reqWithNoiseTools = { tools: [null, 1, { name: 'noop' }] };
-  antigravity.injectGoogleSearchTool(reqWithNoiseTools);
+  geminiRequestUtils.injectGoogleSearchTool(reqWithNoiseTools);
   assert.equal(reqWithNoiseTools.tools.length, 4);
   const reqHasSearchTool = { tools: [{ googleSearch: {} }] };
-  antigravity.injectGoogleSearchTool(reqHasSearchTool);
+  geminiRequestUtils.injectGoogleSearchTool(reqHasSearchTool);
   assert.equal(reqHasSearchTool.tools.length, 1);
   const reqPrune = { tools: [{ functionDeclarations: [{ name: 'web_search' }, { name: 'exec_command' }] }, { functionDeclarations: [{ name: 'websearch' }] }] };
-  antigravity.pruneSearchFunctionDeclarations(reqPrune);
+  geminiRequestUtils.pruneSearchFunctionDeclarations(reqPrune);
   assert.equal(reqPrune.tools.length, 1);
   assert.equal(reqPrune.tools[0].functionDeclarations[0].name, 'exec_command');
   const reqPruneNoArray = {};
-  antigravity.pruneSearchFunctionDeclarations(reqPruneNoArray);
+  geminiRequestUtils.pruneSearchFunctionDeclarations(reqPruneNoArray);
   assert.equal(reqPruneNoArray.tools, undefined);
   const reqPruneKeepEmptyName = { tools: [{ functionDeclarations: [{ foo: 1 }] }] };
-  antigravity.pruneSearchFunctionDeclarations(reqPruneKeepEmptyName);
+  geminiRequestUtils.pruneSearchFunctionDeclarations(reqPruneKeepEmptyName);
   assert.equal(reqPruneKeepEmptyName.tools.length, 1);
   const reqPruneWithNoise = { tools: [1, { foo: 'bar' }, { functionDeclarations: [null, { name: 'web_search' }, { name: 'keep_me' }] }] };
-  antigravity.pruneSearchFunctionDeclarations(reqPruneWithNoise);
+  geminiRequestUtils.pruneSearchFunctionDeclarations(reqPruneWithNoise);
   assert.equal(reqPruneWithNoise.tools.length >= 2, true);
   const undefNode = { a: '[undefined]', nested: { b: '[undefined]', ok: 1 }, arr: [{ c: '[undefined]' }] };
-  antigravity.deepCleanUndefined(undefNode);
+  geminiRequestUtils.deepCleanUndefined(undefNode);
   assert.equal('a' in undefNode, false);
   assert.equal('b' in undefNode.nested, false);
   assert.equal('c' in undefNode.arr[0], false);
-  antigravity.deepCleanUndefined('noop');
-  const imageCfg = antigravity.resolveAntigravityRequestConfig({
+  geminiRequestUtils.deepCleanUndefined('noop');
+  const imageCfg = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-image-16x9-4k-online',
     mappedModel: 'gemini-3-pro-image-online'
   });
   assert.equal(imageCfg.requestType, 'image_gen');
   assert.equal(imageCfg.finalModel, 'gemini-3-pro-image');
   assert.equal(imageCfg.imageConfig.aspectRatio, '16:9');
-  const webCfg = antigravity.resolveAntigravityRequestConfig({
+  const webCfg = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-online',
     mappedModel: 'gemini-3-pro-online',
     tools: [{ function: { name: 'web_search' } }]
   });
   assert.equal(webCfg.requestType, 'web_search');
-  const agentCfg = antigravity.resolveAntigravityRequestConfig({
+  const agentCfg = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-preview',
     mappedModel: 'gemini-3-pro-preview'
   });
   assert.equal(agentCfg.requestType, 'agent');
   assert.equal(agentCfg.finalModel, 'gemini-3-pro-high');
-  const imageCfgMedium = antigravity.resolveAntigravityRequestConfig({
+  const imageCfgMedium = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-image-21x9-2k',
     mappedModel: 'gemini-3-pro-image'
   });
   assert.equal(imageCfgMedium.imageConfig.aspectRatio, '21:9');
   assert.equal(imageCfgMedium.imageConfig.imageSize, '2K');
-  const imageCfgBadSize = antigravity.resolveAntigravityRequestConfig({
+  const imageCfgBadSize = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-image-1x1',
     mappedModel: 'gemini-3-pro-image',
     size: 'bad'
   });
   assert.equal(imageCfgBadSize.imageConfig.aspectRatio, '1:1');
-  const imageCfgHd = antigravity.resolveAntigravityRequestConfig({
+  const imageCfgHd = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-image',
     mappedModel: 'gemini-3-pro-image',
     size: '1024x1024',
     quality: 'hd'
   });
   assert.equal(imageCfgHd.imageConfig.imageSize, '4K');
-  const imageCfgMediumQ = antigravity.resolveAntigravityRequestConfig({
+  const imageCfgMediumQ = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-image',
     mappedModel: 'gemini-3-pro-image',
     size: '1024x1024',
     quality: 'medium'
   });
   assert.equal(imageCfgMediumQ.imageConfig.imageSize, '2K');
-  const imageCfgTall = antigravity.resolveAntigravityRequestConfig({
+  const imageCfgTall = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-image',
     mappedModel: 'gemini-3-pro-image',
     size: '1024x1792'
   });
   assert.equal(imageCfgTall.imageConfig.aspectRatio, '9:16');
-  const imageCfgUltraWide = antigravity.resolveAntigravityRequestConfig({
+  const imageCfgUltraWide = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-image',
     mappedModel: 'gemini-3-pro-image',
     size: '2100x900'
   });
   assert.equal(imageCfgUltraWide.imageConfig.aspectRatio, '21:9');
-  const imageCfgPortrait = antigravity.resolveAntigravityRequestConfig({
+  const imageCfgPortrait = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-image',
     mappedModel: 'gemini-3-pro-image',
     size: '768x1024'
   });
   assert.equal(imageCfgPortrait.imageConfig.aspectRatio, '3:4');
-  const imageCfgLandscape43 = antigravity.resolveAntigravityRequestConfig({
+  const imageCfgLandscape43 = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-image',
     mappedModel: 'gemini-3-pro-image',
     size: '1024x768'
   });
   assert.equal(imageCfgLandscape43.imageConfig.aspectRatio, '4:3');
-  const imageCfgModelTag43 = antigravity.resolveAntigravityRequestConfig({
+  const imageCfgModelTag43 = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-image-4x3',
     mappedModel: 'gemini-3-pro-image'
   });
   assert.equal(imageCfgModelTag43.imageConfig.aspectRatio, '4:3');
-  const imageCfgModelTag916 = antigravity.resolveAntigravityRequestConfig({
+  const imageCfgModelTag916 = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-image-9x16',
     mappedModel: 'gemini-3-pro-image'
   });
   assert.equal(imageCfgModelTag916.imageConfig.aspectRatio, '9:16');
-  const imageCfgModelTag34 = antigravity.resolveAntigravityRequestConfig({
+  const imageCfgModelTag34 = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-image-3x4',
     mappedModel: 'gemini-3-pro-image'
   });
   assert.equal(imageCfgModelTag34.imageConfig.aspectRatio, '3:4');
-  const imageCfgModelTag11 = antigravity.resolveAntigravityRequestConfig({
+  const imageCfgModelTag11 = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-image-1-1',
     mappedModel: 'gemini-3-pro-image'
   });
   assert.equal(imageCfgModelTag11.imageConfig.aspectRatio, '1:1');
-  const imageCfgZeroWidth = antigravity.resolveAntigravityRequestConfig({
+  const imageCfgZeroWidth = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-image',
     mappedModel: 'gemini-3-pro-image',
     size: '0x100'
   });
   assert.equal(imageCfgZeroWidth.imageConfig.aspectRatio, '1:1');
-  const webByBuiltinSearch = antigravity.resolveAntigravityRequestConfig({
+  const webByBuiltinSearch = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro',
     mappedModel: 'gemini-3-pro',
     tools: [{ googleSearchRetrieval: {} }]
   });
   assert.equal(webByBuiltinSearch.requestType, 'web_search');
-  const webByType = antigravity.resolveAntigravityRequestConfig({
+  const webByType = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro',
     mappedModel: 'gemini-3-pro',
     tools: [{ type: 'web_search' }]
   });
   assert.equal(webByType.requestType, 'web_search');
-  const webByFnDecl = antigravity.resolveAntigravityRequestConfig({
+  const webByFnDecl = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro',
     mappedModel: 'gemini-3-pro',
     tools: [{ functionDeclarations: [{ name: 'websearch' }] }]
   });
   assert.equal(webByFnDecl.requestType, 'web_search');
-  const webByFnName = antigravity.resolveAntigravityRequestConfig({
+  const webByFnName = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro',
     mappedModel: 'gemini-3-pro',
     tools: [{ function: { name: 'google_search' } }]
   });
   assert.equal(webByFnName.requestType, 'web_search');
-  const agentByEmptyToolName = antigravity.resolveAntigravityRequestConfig({
+  const agentByEmptyToolName = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro',
     mappedModel: 'gemini-3-pro',
     tools: [{ name: '   ' }]
   });
   assert.equal(agentByEmptyToolName.requestType, 'agent');
-  const imagePreviewAlias = antigravity.resolveAntigravityRequestConfig({
+  const imagePreviewAlias = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-pro-image-preview',
     mappedModel: 'gemini-3-pro-image-preview'
   });
   assert.equal(imagePreviewAlias.finalModel, 'gemini-3-pro-image');
-  const flashPreviewAlias = antigravity.resolveAntigravityRequestConfig({
+  const flashPreviewAlias = geminiRequestUtils.resolveGeminiRequestConfig({
     originalModel: 'gemini-3-flash-preview',
     mappedModel: 'gemini-3-flash-preview'
   });
@@ -361,27 +361,27 @@ async function runGeminiHelperCoverage() {
   assert.deepEqual(systemSem.collectSystemSegments(['a', ['b'], { text: 'c' }]), ['a\nb\nc']);
   assert.deepEqual(systemSem.collectSystemSegments({ foo: 'bar' }), []);
   const req1 = {};
-  systemSem.applyGeminiRequestSystemInstruction({ request: req1, isAntigravityProvider: false, semanticsSystemInstruction: { parts: [{ text: 'x' }] } });
+  systemSem.applyGeminiRequestSystemInstruction({ request: req1, isGeminiCompatProvider: false, semanticsSystemInstruction: { parts: [{ text: 'x' }] } });
   assert.equal(req1.systemInstruction.parts[0].text, 'x');
   const req2 = {};
-  systemSem.applyGeminiRequestSystemInstruction({ request: req2, isAntigravityProvider: false, protocolStateSystemInstruction: { parts: [{ text: 'y' }] } });
+  systemSem.applyGeminiRequestSystemInstruction({ request: req2, isGeminiCompatProvider: false, protocolStateSystemInstruction: { parts: [{ text: 'y' }] } });
   assert.equal(req2.systemInstruction.parts[0].text, 'y');
   const req3 = {};
-  systemSem.applyGeminiRequestSystemInstruction({ request: req3, isAntigravityProvider: false, systemTextBlocksFromSemantics: ['a', 'b'] });
+  systemSem.applyGeminiRequestSystemInstruction({ request: req3, isGeminiCompatProvider: false, systemTextBlocksFromSemantics: ['a', 'b'] });
   assert.equal(req3.systemInstruction.parts.length, 2);
   const req3NoOp = {};
-  systemSem.applyGeminiRequestSystemInstruction({ request: req3NoOp, isAntigravityProvider: false, systemTextBlocksFromSemantics: ['   ', '', 1] });
+  systemSem.applyGeminiRequestSystemInstruction({ request: req3NoOp, isGeminiCompatProvider: false, systemTextBlocksFromSemantics: ['   ', '', 1] });
   assert.equal(req3NoOp.systemInstruction, undefined);
   const req4 = {};
-  systemSem.applyGeminiRequestSystemInstruction({ request: req4, isAntigravityProvider: true, semanticsSystemInstruction: 'extra', protocolStateSystemInstruction: 'extra', systemTextBlocksFromSemantics: ['extra', 'more'] });
-  assert.match(req4.systemInstruction.parts[0].text, /Antigravity/);
+  systemSem.applyGeminiRequestSystemInstruction({ request: req4, isGeminiCompatProvider: true, semanticsSystemInstruction: 'extra', protocolStateSystemInstruction: 'extra', systemTextBlocksFromSemantics: ['extra', 'more'] });
+  assert.match(req4.systemInstruction.parts[0].text, /Gemini/);
   assert.equal(req4.systemInstruction.parts.length, 2);
   const req5 = {};
-  systemSem.applyGeminiRequestSystemInstruction({ request: req5, isAntigravityProvider: true });
-  assert.match(req5.systemInstruction.parts[0].text, /Antigravity/);
+  systemSem.applyGeminiRequestSystemInstruction({ request: req5, isGeminiCompatProvider: true });
+  assert.match(req5.systemInstruction.parts[0].text, /Gemini/);
   const req6 = {};
-  systemSem.applyGeminiRequestSystemInstruction({ request: req6, isAntigravityProvider: true, systemTextBlocksFromSemantics: ['   ', '', 1] });
-  assert.match(req6.systemInstruction.parts[0].text, /Antigravity/);
+  systemSem.applyGeminiRequestSystemInstruction({ request: req6, isGeminiCompatProvider: true, systemTextBlocksFromSemantics: ['   ', '', 1] });
+  assert.match(req6.systemInstruction.parts[0].text, /Gemini/);
 
   assert.equal(thinking.buildGenerationConfigFromParameters({ temperature: 0.1 }).temperature, 0.1);
   assert.equal(thinking.buildGenerationConfigFromParameters({ max_tokens: 88 }).maxOutputTokens, 88);
@@ -401,33 +401,33 @@ async function runGeminiHelperCoverage() {
   assert.equal(thinking.buildGenerationConfigFromParameters({ reasoning: { max_tokens: 512 } }).thinkingConfig.thinkingBudget, 512);
   assert.equal(thinking.buildGenerationConfigFromParameters({ reasoning: { enabled: true } }).thinkingConfig.includeThoughts, true);
   const flashReq = { generationConfig: { thinkingConfig: { thinkingBudget: 999999 } } };
-  thinking.applyAntigravityThinkingConfig(flashReq, 'gemini-3-flash');
-  assert.equal(flashReq.generationConfig.thinkingConfig.thinkingBudget, antigravity.GEMINI_FLASH_DEFAULT_THINKING_BUDGET);
+  thinking.applyGeminiThinkingConfig(flashReq, 'gemini-3-flash');
+  assert.equal(flashReq.generationConfig.thinkingConfig.thinkingBudget, geminiRequestUtils.GEMINI_FLASH_DEFAULT_THINKING_BUDGET);
   const flashReq2 = { generationConfig: {} };
-  thinking.applyAntigravityThinkingConfig(flashReq2, 'gemini-3-flash');
+  thinking.applyGeminiThinkingConfig(flashReq2, 'gemini-3-flash');
   assert.equal(flashReq2.generationConfig.thinkingConfig.includeThoughts, true);
   const claudeToolReq = { generationConfig: {}, contents: [{ parts: [{ functionCall: { name: 'x' } }] }] };
-  thinking.applyAntigravityThinkingConfig(claudeToolReq, 'claude-sonnet-4-5-thinking');
+  thinking.applyGeminiThinkingConfig(claudeToolReq, 'claude-sonnet-4-5-thinking');
   assert.equal(claudeToolReq.generationConfig.thinkingConfig, undefined);
   const claudePlainReq = { generationConfig: { thinkingConfig: { thinkingLevel: 'high' } }, contents: [{ parts: [{ text: 'hi' }] }] };
-  thinking.applyAntigravityThinkingConfig(claudePlainReq, 'claude-sonnet-4-5-thinking');
+  thinking.applyGeminiThinkingConfig(claudePlainReq, 'claude-sonnet-4-5-thinking');
   assert.equal(claudePlainReq.generationConfig.thinkingConfig.includeThoughts, true);
   assert.equal('thinkingLevel' in claudePlainReq.generationConfig.thinkingConfig, false);
   const imageReq = { requestType: 'image_gen' };
-  thinking.applyAntigravityThinkingConfig(imageReq, 'gemini-image');
+  thinking.applyGeminiThinkingConfig(imageReq, 'gemini-image');
   assert.equal(imageReq.generationConfig, undefined);
   const proReq = {};
-  thinking.applyAntigravityThinkingConfig(proReq, 'gemini-pro');
+  thinking.applyGeminiThinkingConfig(proReq, 'gemini-pro');
   assert.equal(proReq.generationConfig.thinkingConfig.thinkingBudget, 1024);
   const disabledBudgetReq = { generationConfig: { thinkingConfig: { thinkingBudget: 0 } } };
-  thinking.applyAntigravityThinkingConfig(disabledBudgetReq, 'gemini-pro');
+  thinking.applyGeminiThinkingConfig(disabledBudgetReq, 'gemini-pro');
   assert.equal(disabledBudgetReq.generationConfig.thinkingConfig.thinkingBudget, 0);
   assert.equal(disabledBudgetReq.generationConfig.thinkingConfig.includeThoughts, undefined);
   const flashNonObjReq = { generationConfig: { thinkingConfig: 'bad' } };
-  thinking.applyAntigravityThinkingConfig(flashNonObjReq, 'gemini-3-flash');
+  thinking.applyGeminiThinkingConfig(flashNonObjReq, 'gemini-3-flash');
   assert.equal(flashNonObjReq.generationConfig.thinkingConfig.includeThoughts, true);
   const claudeSnakeCaseToolReq = { generationConfig: {}, contents: [{ parts: [{ function_call: { name: 'x' } }] }] };
-  thinking.applyAntigravityThinkingConfig(claudeSnakeCaseToolReq, 'claude-sonnet-thinking');
+  thinking.applyGeminiThinkingConfig(claudeSnakeCaseToolReq, 'claude-sonnet-thinking');
   assert.equal(claudeSnakeCaseToolReq.generationConfig.thinkingConfig, undefined);
 
   const defs = chatHelpers.buildToolSchemaKeyMap([
@@ -535,11 +535,11 @@ async function runGeminiHelperCoverage() {
   assert.equal(toolOutput.convertToolMessageToOutput({ id: 'x', content: 'ok' }, new Set(['x'])).tool_call_id, 'x');
   assert.equal(toolOutput.convertToolMessageToOutput({ tool_call_id: 'tc-x', content: 'ok' }, new Set(['tc-x'])).tool_call_id, 'tc-x');
   assert.equal(toolOutput.convertToolMessageToOutput({ content: 'ok' }, new Set(['x'])), null);
-  assert.equal(toolOutput.sanitizeAntigravityToolCallId('  bad id!*  '), 'bad_id');
-  assert.equal(toolOutput.sanitizeAntigravityToolCallId('clean_id'), 'clean_id');
-  assert.equal(toolOutput.sanitizeAntigravityToolCallId('   '), '');
-  assert.equal(toolOutput.sanitizeAntigravityToolCallId('!!!').startsWith('call_'), true);
-  assert.equal(toolOutput.sanitizeAntigravityToolCallId(123), '');
+  assert.equal(toolOutput.sanitizeGeminiToolCallId('  bad id!*  '), 'bad_id');
+  assert.equal(toolOutput.sanitizeGeminiToolCallId('clean_id'), 'clean_id');
+  assert.equal(toolOutput.sanitizeGeminiToolCallId('   '), '');
+  assert.equal(toolOutput.sanitizeGeminiToolCallId('!!!').startsWith('call_'), true);
+  assert.equal(toolOutput.sanitizeGeminiToolCallId(123), '');
   const cloned = toolOutput.cloneAsJsonValue({ big: 1n, nested: [1, 'x'] });
   assert.equal(cloned.big, '1');
   assert.equal(toolOutput.cloneAsJsonValue(5), 5);
@@ -1216,7 +1216,7 @@ async function runGeminiMainCoverage() {
   assert.equal(inboundMissing.metadata?.providerMetadata?.__rcc_raw_system, undefined);
   assert.equal(inboundMissing.parameters?.tool_choice, 'none');
 
-  const antigravity = await mapper.fromChat(
+  const geminiCompat = await mapper.fromChat(
     {
       messages: [
         { role: 'system', content: ['s1', { text: 's2' }] },
@@ -1245,27 +1245,27 @@ async function runGeminiMainCoverage() {
         system: { textBlocks: ['s3'] }
       },
       metadata: {
-        context: { ...ctx, providerId: 'antigravity.any' },
+        context: { ...ctx, providerId: 'gemini.any' },
         providerMetadata: { meta: 'ctx' },
         protocolState: { gemini: { systemInstruction: { parts: [{ text: 'proto-sys' }] } } }
       }
     },
-    { ...ctx, providerId: 'antigravity.any' }
+    { ...ctx, providerId: 'gemini.any' }
   );
-  assert.equal(antigravity.payload.requestType, 'web_search');
-  assert.equal(antigravity.payload.model, 'claude-sonnet-4-5-thinking');
-  assert.equal(antigravity.payload.generationConfig.maxOutputTokens, 64000);
-  assert.equal(antigravity.payload.metadata.__rcc_stream, true);
-  assert.equal(typeof antigravity.payload.metadata.antigravitySessionId, 'string');
-  assert.equal(antigravity.payload.tools[0].googleSearch.constructor, Object);
+  assert.equal(geminiCompat.payload.requestType, 'web_search');
+  assert.equal(geminiCompat.payload.model, 'claude-sonnet-4-5-thinking');
+  assert.equal(geminiCompat.payload.generationConfig.maxOutputTokens, 64000);
+  assert.equal(geminiCompat.payload.metadata.__rcc_stream, true);
+  assert.equal(typeof geminiCompat.payload.metadata.geminiSessionId, 'string');
+  assert.equal(geminiCompat.payload.tools[0].googleSearch.constructor, Object);
 
   const imageGen = await mapper.fromChat(
     {
       messages: [{ role: 'user', content: 'draw' }],
       parameters: { model: 'gemini-3-pro-image-16x9-4k-online', size: '1792x1024', quality: 'high' },
-      metadata: { context: { ...ctx, providerId: 'antigravity.any' } }
+      metadata: { context: { ...ctx, providerId: 'gemini.any' } }
     },
-    { ...ctx, providerId: 'antigravity.any' }
+    { ...ctx, providerId: 'gemini.any' }
   );
   assert.equal(imageGen.payload.requestType, 'image_gen');
   assert.equal(Array.isArray(imageGen.payload.tools), false);
@@ -1279,12 +1279,12 @@ async function runGeminiMainCoverage() {
       ],
       parameters: { model: 'models/gemini-pro' },
       metadata: {
-        context: { ...ctx, providerId: 'gemini-cli.any', entryEndpoint: '/v1/messages' },
+        context: { ...ctx, providerId: 'gemini.any', entryEndpoint: '/v1/messages' },
         providerMetadata: { meta: 'blocked' }
       },
       semantics: { gemini: { providerMetadata: { sem: 'blocked' } } }
     },
-    { ...ctx, providerId: 'gemini-cli.any', entryEndpoint: '/v1/messages' }
+    { ...ctx, providerId: 'gemini.any', entryEndpoint: '/v1/messages' }
   );
   assert.equal(cli.payload.contents[0].parts[0].text, '[tool:toolx] oops');
   assert.equal(cli.payload.contents[1].parts[0].text, 'done');
@@ -1515,19 +1515,19 @@ async function runGeminiMainCoverage() {
       parameters: 'bad-shape',
       semantics: {
         gemini: {
-          providerMetadata: { antigravitySessionId: 'keep-session' }
+          providerMetadata: { geminiSessionId: 'keep-session' }
         }
       },
       metadata: {
-        context: { ...ctx, providerId: 'antigravity.any' }
+        context: { ...ctx, providerId: 'gemini.any' }
       }
     },
     {
-      context: { ...ctx, providerId: 'antigravity.any' }
+      context: { ...ctx, providerId: 'gemini.any' }
     }
   );
   assert.equal(typeof builtEdgeBranches.model === 'string' && builtEdgeBranches.model.includes('gemini'), true);
-  assert.equal(builtEdgeBranches.metadata.antigravitySessionId, 'keep-session');
+  assert.equal(builtEdgeBranches.metadata.geminiSessionId, 'keep-session');
   assert.equal(Array.isArray(builtEdgeBranches.contents) && builtEdgeBranches.contents.length > 0, true);
 }
 

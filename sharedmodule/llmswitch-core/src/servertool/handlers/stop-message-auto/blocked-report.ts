@@ -1,7 +1,3 @@
-import * as childProcess from 'node:child_process';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-
 export interface StopMessageBlockedReport {
   summary: string;
   blocker: string;
@@ -9,13 +5,6 @@ export interface StopMessageBlockedReport {
   nextAction?: string;
   evidence: string[];
 }
-
-export interface StopMessageBlockedIssueContext {
-  requestId?: string;
-  sessionId?: string;
-}
-
-const STOP_MESSAGE_BD_CREATE_TIMEOUT_MS = 2_000;
 const STOP_MESSAGE_BLOCKED_TEXT_SCAN_LIMIT = 12;
 const STOP_MESSAGE_BLOCKED_CANDIDATE_MAX_LENGTH = 12_000;
 
@@ -39,51 +28,6 @@ export function extractBlockedReportFromMessages(messages: unknown[]): StopMessa
 
 export function extractBlockedReportFromMessagesForTests(messages: unknown[]): StopMessageBlockedReport | null {
   return extractBlockedReportFromMessages(messages);
-}
-
-export function createBdIssueFromBlockedReport(
-  blockedReport: StopMessageBlockedReport,
-  context?: StopMessageBlockedIssueContext,
-  cwdOverride?: string
-): string | null {
-  const cwd = resolveBdWorkingDirectoryForStopMessage(cwdOverride);
-  const title = buildBlockedIssueTitle(blockedReport);
-  const description = buildBlockedIssueDescription(blockedReport, context);
-  const acceptance = buildBlockedIssueAcceptance(blockedReport);
-
-  try {
-    const result = childProcess.spawnSync(
-      'bd',
-      [
-        '--no-db',
-        'create',
-        '--json',
-        '-t',
-        'bug',
-        '-p',
-        '0',
-        '--title',
-        title,
-        '--description',
-        description,
-        '--acceptance',
-        acceptance
-      ],
-      {
-        cwd,
-        encoding: 'utf8',
-        timeout: STOP_MESSAGE_BD_CREATE_TIMEOUT_MS,
-        maxBuffer: 1024 * 1024
-      }
-    );
-
-    if (result.error || result.status !== 0) {
-      return null;
-    }
-    return parseCreatedIssueId(result.stdout);
-  } catch {
-    return null;
-  }
 }
 
 export function extractCapturedMessageText(message: unknown): string {
@@ -373,93 +317,6 @@ function extractBalancedJsonObjectStrings(text: string): string[] {
     }
   }
   return results;
-}
-
-function resolveBdWorkingDirectoryForStopMessage(cwdOverride?: string): string {
-  const fromOverride = toNonEmptyText(cwdOverride);
-  if (fromOverride) {
-    return path.resolve(fromOverride);
-  }
-  const fromEnv = toNonEmptyText(process.env.ROUTECODEX_STOPMESSAGE_BD_WORKDIR);
-  if (fromEnv) {
-    return path.resolve(fromEnv);
-  }
-  const cwd = process.cwd();
-  return findBdProjectRootForStopMessage(cwd) || cwd;
-}
-
-function findBdProjectRootForStopMessage(startDirectory: string): string | null {
-  let current = path.resolve(startDirectory);
-  while (true) {
-    const beadFile = path.join(current, '.beads', 'issues.jsonl');
-    if (fs.existsSync(beadFile)) {
-      return current;
-    }
-    const parent = path.dirname(current);
-    if (parent === current) {
-      return null;
-    }
-    current = parent;
-  }
-}
-
-function buildBlockedIssueTitle(report: StopMessageBlockedReport): string {
-  const base = report.summary.trim() || report.blocker.trim() || 'stopMessage blocked';
-  const cleaned = base.replace(/\s+/g, ' ').slice(0, 120);
-  return `[stopMessage] ${cleaned}`.trim();
-}
-
-function buildBlockedIssueDescription(
-  report: StopMessageBlockedReport,
-  context?: StopMessageBlockedIssueContext
-): string {
-  const lines = [
-    '自动建单来源：stop_message_auto 结构化 blocked 报告',
-    '',
-    `Summary: ${report.summary}`,
-    `Blocker: ${report.blocker}`,
-    `Impact: ${report.impact || 'n/a'}`,
-    `Next Action: ${report.nextAction || 'n/a'}`,
-    '',
-    `RequestId: ${context?.requestId || 'n/a'}`,
-    `SessionId: ${context?.sessionId || 'n/a'}`,
-    '',
-    'Evidence:',
-    ...(report.evidence.length > 0 ? report.evidence.map((entry) => `- ${entry}`) : ['- n/a']),
-    '',
-    'Notes:',
-    '- 本 issue 由系统在 stopMessage 检测到结构化阻塞后自动创建。',
-    '- 请按 blocker/next action 先解除阻塞，再恢复执行。'
-  ];
-  return lines.join('\n');
-}
-
-function buildBlockedIssueAcceptance(report: StopMessageBlockedReport): string {
-  const next = report.nextAction || '执行可验证的解阻动作并记录结果';
-  return [
-    `1. 明确并确认 blocker：${report.blocker}`,
-    `2. 完成解阻动作：${next}`,
-    '3. 验证 stopMessage followup 可继续推进'
-  ].join('\n');
-}
-
-function parseCreatedIssueId(stdout: unknown): string | null {
-  if (typeof stdout !== 'string') {
-    return null;
-  }
-  const trimmed = stdout.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(trimmed);
-    const id = toNonEmptyText((parsed as { id?: unknown }).id);
-    return id || null;
-  } catch {
-    const match = trimmed.match(/\b[a-z]+-\d+(?:\.\d+)?\b/i);
-    return match ? match[0] : null;
-  }
 }
 
 function toNonEmptyText(value: unknown): string {
