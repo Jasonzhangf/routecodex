@@ -22,10 +22,3 @@ impl SelectionResult {
     }
 }
 
-#[derive(Debug, Default, Clone)]
-pub(super) struct PendingAliasBinding {
-    pub request_id: String,
-    pub provider_key: String,
-    pub session_scope: String,
-    pub alias_key: String,
-}

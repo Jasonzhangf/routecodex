@@ -14,6 +14,6 @@ export {
   resolveProjectId,
 } from './oauth-lifecycle/token-helpers.js';
 export {
-  normalizeGeminiCliAccountToken,
+  normalizeWrappedOAuthAccountToken,
   sanitizeToken,
 } from './oauth-lifecycle/token-io.js';

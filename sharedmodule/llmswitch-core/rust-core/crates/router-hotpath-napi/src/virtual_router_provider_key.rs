@@ -104,11 +104,7 @@ fn resolve_alias_selection_strategy(
         return "none".to_string();
     }
     let Some(config) = cfg else {
-        return if normalized_provider_id == "antigravity" {
-            "sticky-queue".to_string()
-        } else {
-            "none".to_string()
-        };
+        return "none".to_string();
     };
     if config.enabled == Some(false) {
         return "none".to_string();
@@ -123,9 +119,6 @@ fn resolve_alias_selection_strategy(
     }
     if let Some(v) = normalize_alias_strategy(config.default_strategy.as_deref()) {
         return v;
-    }
-    if normalized_provider_id == "antigravity" {
-        return "sticky-queue".to_string();
     }
     "none".to_string()
 }

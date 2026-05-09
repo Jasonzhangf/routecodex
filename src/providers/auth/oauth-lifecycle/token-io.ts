@@ -25,7 +25,7 @@ function logOAuthTokenIoNonBlocking(
   logOAuthDebug(`[OAuth] ${operation} failed (non-blocking): ${reason}${suffix}`);
 }
 
-export function normalizeGeminiCliAccountToken(token: UnknownObject): StoredOAuthToken | null {
+export function normalizeWrappedOAuthAccountToken(token: UnknownObject): StoredOAuthToken | null {
   const raw = token as { token?: UnknownObject };
   const tokenNode = raw.token;
   if (!tokenNode || typeof tokenNode !== 'object') {
@@ -79,7 +79,7 @@ export function sanitizeToken(token: UnknownObject | null): StoredOAuthToken | n
   if (!token || typeof token !== 'object') {
     return null;
   }
-  const normalized = normalizeGeminiCliAccountToken(token);
+  const normalized = normalizeWrappedOAuthAccountToken(token);
   if (normalized) {
     return normalized;
   }

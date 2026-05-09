@@ -405,11 +405,7 @@ fn prepare_gemini_tools_for_bridge(raw_tools: &Value, missing: &Value) -> Value 
 }
 
 fn normalize_tool_name(name: &str, mode: &str) -> String {
-    if mode == "antigravity" {
-        name.replace('-', "_")
-    } else {
-        name.to_string()
-    }
+    name.to_string()
 }
 
 fn apply_fixups(name: &str, parameters: &Value, mode: &str) -> Value {
@@ -422,46 +418,34 @@ fn apply_fixups(name: &str, parameters: &Value, mode: &str) -> Value {
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_else(Map::new);
-    let is_antigravity = mode == "antigravity";
     let lowered = name.trim().to_ascii_lowercase();
+    let _ = mode;
 
     if lowered == "exec_command" {
-        if is_antigravity {
-            props.remove("cmd");
+        if !props.contains_key("cmd") && props.contains_key("command") {
+            if let Some(v) = props.get("command") {
+                props.insert("cmd".to_string(), v.clone());
+            }
+        }
+        if !props.contains_key("command") && props.contains_key("cmd") {
+            if let Some(v) = props.get("cmd") {
+                props.insert("command".to_string(), v.clone());
+            }
+        }
+        if !props.contains_key("cmd") {
+            props.insert("cmd".to_string(), serde_json::json!({ "type": "string" }));
+        }
+        if !props.contains_key("command") {
             props.insert(
                 "command".to_string(),
-                serde_json::json!({ "type": "string", "description": "Shell command to execute." }),
+                serde_json::json!({ "type": "string" }),
             );
+        }
+        if !props.contains_key("workdir") {
             props.insert(
                 "workdir".to_string(),
-                serde_json::json!({ "type": "string", "description": "Working directory." }),
+                serde_json::json!({ "type": "string" }),
             );
-        } else {
-            if !props.contains_key("cmd") && props.contains_key("command") {
-                if let Some(v) = props.get("command") {
-                    props.insert("cmd".to_string(), v.clone());
-                }
-            }
-            if !props.contains_key("command") && props.contains_key("cmd") {
-                if let Some(v) = props.get("cmd") {
-                    props.insert("command".to_string(), v.clone());
-                }
-            }
-            if !props.contains_key("cmd") {
-                props.insert("cmd".to_string(), serde_json::json!({ "type": "string" }));
-            }
-            if !props.contains_key("command") {
-                props.insert(
-                    "command".to_string(),
-                    serde_json::json!({ "type": "string" }),
-                );
-            }
-            if !props.contains_key("workdir") {
-                props.insert(
-                    "workdir".to_string(),
-                    serde_json::json!({ "type": "string" }),
-                );
-            }
         }
         params.insert("properties".to_string(), Value::Object(props));
         params.remove("required");
@@ -498,8 +482,8 @@ fn apply_fixups(name: &str, parameters: &Value, mode: &str) -> Value {
             props.insert(
                 "patch".to_string(),
                 serde_json::json!({
-                  "type": "string",
-                  "description": "Patch text (*** Begin Patch / *** End Patch or GNU unified diff)."
+                    "type": "string",
+                    "description": "Patch text (*** Begin Patch / *** End Patch or GNU unified diff)."
                 }),
             );
         }
@@ -530,9 +514,7 @@ fn apply_fixups(name: &str, parameters: &Value, mode: &str) -> Value {
 }
 
 fn rewrite_description(name: &str, description: Option<&str>, mode: &str) -> Option<String> {
-    if mode != "antigravity" {
-        return description.map(|v| v.to_string());
-    }
+    let _ = mode;
     let lowered = name.trim().to_ascii_lowercase();
     if lowered == "apply_patch" {
         return Some(
@@ -561,11 +543,7 @@ fn build_gemini_tools_from_bridge(defs: &Value, mode_raw: Option<&str>) -> Value
     if defs_arr.is_empty() {
         return Value::Null;
     }
-    let mode = if mode_raw == Some("antigravity") {
-        "antigravity"
-    } else {
-        "default"
-    };
+    let mode = "default";
 
     let mut function_declarations: Vec<Value> = Vec::new();
     for def in defs_arr {
@@ -590,11 +568,7 @@ fn build_gemini_tools_from_bridge(defs: &Value, mode_raw: Option<&str>) -> Value
             .unwrap_or(&default_params);
         let parameters = clone_parameters(parameters_src);
         let fixed = apply_fixups(final_name.as_str(), &parameters, mode);
-        let normalized_parameters = if mode == "antigravity" {
-            normalize_schema_types(&fixed)
-        } else {
-            fixed
-        };
+        let normalized_parameters = fixed;
 
         let mut decl = Map::new();
         decl.insert("name".to_string(), Value::String(final_name.clone()));

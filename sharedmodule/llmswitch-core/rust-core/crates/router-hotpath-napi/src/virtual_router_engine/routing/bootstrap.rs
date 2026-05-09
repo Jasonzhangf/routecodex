@@ -411,7 +411,6 @@ fn normalize_route_pool_load_balancing(input: Option<&Value>) -> Option<LoadBala
             Some(weights)
         },
         health_weighted: None,
-        alias_selection: None,
     })
 }
 

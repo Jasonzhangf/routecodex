@@ -588,51 +588,6 @@ fn test_resp_profile_chat_qwen_native_applied() {
     );
 }
 
-#[test]
-fn test_resp_profile_chat_gemini_cli_native_applied() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "request_id": "req_resp_gemini_cli_1",
-            "candidates": [
-                {
-                    "content": {
-                        "parts": [
-                            { "thoughtSignature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }
-                        ]
-                    }
-                }
-            ]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:gemini-cli".to_string()),
-            provider_protocol: Some("gemini-chat".to_string()),
-            request_id: Some("req_resp_gemini_cli_1".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: Some("coding-primary".to_string()),
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: Some("antigravity".to_string()),
-            provider_key: Some("antigravity.alpha.gemini-2.5".to_string()),
-            runtime_key: Some("antigravity.alpha".to_string()),
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_resp_inbound_stage3_compat(input).unwrap();
-    assert!(result.native_applied);
-    assert_eq!(result.applied_profile, Some("chat:gemini-cli".to_string()));
-    assert_eq!(result.payload["request_id"], "req_resp_gemini_cli_1");
-}
 
 #[test]
 fn test_resp_profile_chat_iflow_unwraps_body_and_harvests_tool_calls() {

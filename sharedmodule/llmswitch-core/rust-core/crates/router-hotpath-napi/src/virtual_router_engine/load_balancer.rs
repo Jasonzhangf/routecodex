@@ -5,17 +5,10 @@ use super::health_weighted::HealthWeightedConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct AliasSelectionPolicy {
-    pub antigravity_session_binding: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct LoadBalancingPolicy {
     pub strategy: Option<String>,
     pub weights: Option<HashMap<String, i64>>,
     pub health_weighted: Option<HealthWeightedConfig>,
-    pub alias_selection: Option<AliasSelectionPolicy>,
 }
 
 impl Default for LoadBalancingPolicy {
@@ -24,7 +17,6 @@ impl Default for LoadBalancingPolicy {
             strategy: Some("round-robin".to_string()),
             weights: None,
             health_weighted: None,
-            alias_selection: None,
         }
     }
 }
@@ -49,8 +41,7 @@ impl RouteLoadBalancer {
                 strategy: Some("round-robin".to_string()),
                 weights: None,
                 health_weighted: None,
-                alias_selection: None,
-            }),
+                }),
             states: HashMap::new(),
         }
     }

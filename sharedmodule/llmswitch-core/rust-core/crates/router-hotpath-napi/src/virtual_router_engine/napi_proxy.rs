@@ -1,5 +1,5 @@
 use napi::bindgen_prelude::Result as NapiResult;
-use napi::{Env, JsFunction, JsObject, JsUnknown, Ref, ValueType};
+use napi::{Env, JsObject, JsUnknown, ValueType};
 use napi_derive::napi;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
@@ -16,22 +16,15 @@ struct RuntimePathOverrides {
 #[napi]
 pub struct VirtualRouterEngineProxy {
     core: Arc<Mutex<VirtualRouterEngineCore>>,
-    session_alias_map_ref: Ref<()>,
 }
 
 #[napi]
 impl VirtualRouterEngineProxy {
     #[napi(constructor)]
     pub fn new(env: Env, _engine: Option<JsObject>) -> Self {
-        let global = env.get_global().expect("global");
-        let map_ctor: JsFunction = global.get_named_property("Map").expect("Map ctor");
-        let map_obj = map_ctor
-            .new_instance::<JsUnknown>(&[])
-            .expect("Map instance");
-        let map_ref = env.create_reference(map_obj).expect("Map ref");
+        let _ = env;
         Self {
             core: Arc::new(Mutex::new(VirtualRouterEngineCore::new())),
-            session_alias_map_ref: map_ref,
         }
     }
 
@@ -98,7 +91,6 @@ impl VirtualRouterEngineProxy {
             })
         })
         .map_err(|e| napi::Error::from_reason(e))?;
-        self.sync_antigravity_map(env, &core)?;
         serde_json::to_string(&result).map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
@@ -154,7 +146,6 @@ impl VirtualRouterEngineProxy {
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
         let mut core = self.core.lock().expect("core lock");
         core.handle_provider_success(&event_value);
-        self.sync_antigravity_map(env, &core)?;
         Ok(())
     }
 
@@ -165,12 +156,6 @@ impl VirtualRouterEngineProxy {
             .map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
-    #[napi(getter)]
-    pub fn antigravity_session_alias_store(&self, env: Env) -> NapiResult<JsObject> {
-        let core = self.core.lock().expect("core lock");
-        self.sync_antigravity_map(env, &core)?;
-        env.get_reference_value(&self.session_alias_map_ref)
-    }
 
     #[napi]
     pub fn mark_provider_cooldown(
@@ -234,16 +219,4 @@ fn is_js_null_or_undefined(value: &JsUnknown) -> bool {
 }
 
 impl VirtualRouterEngineProxy {
-    fn sync_antigravity_map(&self, env: Env, core: &VirtualRouterEngineCore) -> NapiResult<()> {
-        let map_obj: JsObject = env.get_reference_value(&self.session_alias_map_ref)?;
-        let clear_fn: JsFunction = map_obj.get_named_property("clear")?;
-        let _ = clear_fn.call::<JsUnknown>(Some(&map_obj), &[])?;
-        let set_fn: JsFunction = map_obj.get_named_property("set")?;
-        for (key, value) in core.antigravity_session_alias_store.iter() {
-            let k = env.create_string(key)?;
-            let v = env.create_string(value)?;
-            let _ = set_fn.call(Some(&map_obj), &[k.into_unknown(), v.into_unknown()])?;
-        }
-        Ok(())
-    }
 }

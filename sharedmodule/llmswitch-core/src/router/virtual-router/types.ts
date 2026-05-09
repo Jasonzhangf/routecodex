@@ -268,8 +268,8 @@ export interface AliasSelectionConfig {
    */
   providers?: Record<string, AliasSelectionStrategy>;
   /**
-   * Antigravity session isolation cooldown window (ms).
-   * Within this window, the same Antigravity auth alias must not be reused by a different session.
+   * Session isolation cooldown window (ms).
+   * Within this window, the same auth alias must not be reused by a different session.
    * Default: 300000 (5 minutes).
    */
   sessionLeaseCooldownMs?: number;

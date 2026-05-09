@@ -569,7 +569,7 @@ function computeOsPolicy(provider?: string | null, alias?: string | null): strin
   //   - 同一个 alias 始终映射到同一个 OS
   //   - 不同 alias 在 windows/macos 之间分布
   //
-  // IMPORTANT: Linux 指纹会导致部分上游 OAuth/风控触发 re-verify（尤其是 Antigravity/Gemini Cloud Code Assist）。
+  // IMPORTANT: Linux 指纹会导致部分上游 OAuth/风控触发 re-verify。
   // 因此这里严格禁止生成 linux 指纹。
   const seed = `${family}:${effectiveAlias}`;
   let hash = 0;

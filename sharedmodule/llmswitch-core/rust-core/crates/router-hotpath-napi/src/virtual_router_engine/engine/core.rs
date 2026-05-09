@@ -8,7 +8,6 @@ use super::super::instructions::RoutingInstructionState;
 use super::super::load_balancer::{LoadBalancingPolicy, RouteLoadBalancer};
 use super::super::provider_registry::ProviderRegistry;
 use super::super::routing::{parse_routing, RoutingPools};
-use super::types::PendingAliasBinding;
 
 pub(crate) struct VirtualRouterEngineCore {
     pub routing: RoutingPools,
@@ -18,8 +17,6 @@ pub(crate) struct VirtualRouterEngineCore {
     pub classifier: RoutingClassifier,
     pub routing_instruction_state: HashMap<String, RoutingInstructionState>,
     pub web_search_force: bool,
-    pub pending_alias: Option<PendingAliasBinding>,
-    pub antigravity_session_alias_store: HashMap<String, String>,
     pub quota_view: Option<Ref<()>>,
 }
 
@@ -33,8 +30,6 @@ impl VirtualRouterEngineCore {
             classifier: RoutingClassifier::new(&Value::Object(Map::new())),
             routing_instruction_state: HashMap::new(),
             web_search_force: false,
-            pending_alias: None,
-            antigravity_session_alias_store: HashMap::new(),
             quota_view: None,
         }
     }

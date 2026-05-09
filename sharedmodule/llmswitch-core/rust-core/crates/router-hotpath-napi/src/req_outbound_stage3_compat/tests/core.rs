@@ -191,8 +191,8 @@ fn test_pinned_alias_lookup_and_unpin_json_api() {
         model_id: None,
         client_model_id: None,
         original_model_id: None,
-        provider_id: Some("antigravity".to_string()),
-        provider_key: Some("antigravity.demo.gemini-2.5-flash".to_string()),
+        provider_id: Some("gemini".to_string()),
+        provider_key: Some("gemini.demo.gemini-2.5-flash".to_string()),
         runtime_key: None,
         client_request_id: None,
         group_request_id: None,
@@ -200,52 +200,4 @@ fn test_pinned_alias_lookup_and_unpin_json_api() {
         conversation_id: None,
     };
 
-    let payload = json!({
-        "candidates": [
-            {
-                "content": {
-                    "parts": [
-                        { "thoughtSignature": signature }
-                    ]
-                }
-            }
-        ]
-    });
-    let _ = super::super::gemini_cli::cache_antigravity_thought_signature_from_gemini_response(
-        payload,
-        &adapter_context,
-    );
-
-    let lookup_raw = lookup_antigravity_pinned_alias_for_session_id_json(
-        json!({
-            "sessionId": session_id,
-            "hydrate": true
-        })
-        .to_string(),
-    )
-    .unwrap();
-    let lookup: AntigravityPinnedAliasLookupOutput = serde_json::from_str(&lookup_raw).unwrap();
-    assert_eq!(lookup.alias.as_deref(), Some("antigravity.demo"));
-
-    let unpin_raw = unpin_antigravity_session_alias_for_session_id_json(
-        json!({
-            "sessionId": session_id
-        })
-        .to_string(),
-    )
-    .unwrap();
-    let unpin: AntigravityPinnedAliasUnpinOutput = serde_json::from_str(&unpin_raw).unwrap();
-    assert!(unpin.changed);
-
-    let lookup_raw_after = lookup_antigravity_pinned_alias_for_session_id_json(
-        json!({
-            "sessionId": session_id,
-            "hydrate": true
-        })
-        .to_string(),
-    )
-    .unwrap();
-    let lookup_after: AntigravityPinnedAliasLookupOutput =
-        serde_json::from_str(&lookup_raw_after).unwrap();
-    assert!(lookup_after.alias.is_none());
 }

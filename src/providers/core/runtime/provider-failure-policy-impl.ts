@@ -646,11 +646,9 @@ export function resolveProviderFailureExclusionDecision(args: {
   isProviderTrafficSaturated?: boolean;
   isNetworkTransport?: boolean;
   hasAlternativeCandidate: boolean;
-  isAntigravity?: boolean;
   is429?: boolean;
   isVerify?: boolean;
   isReauth?: boolean;
-  shouldRotateAntigravityAlias?: boolean;
 }): ProviderFailureExclusionDecision {
   if (args.promptTooLong) {
     return {
@@ -676,21 +674,15 @@ export function resolveProviderFailureExclusionDecision(args: {
       retryAction: 'retry_same_provider'
     };
   }
-  if (args.isAntigravity && (args.isVerify || args.is429 || args.isReauth)) {
-    return {
-      excludeCurrentProvider: true,
-      retryAction: 'reroute_explicit_alternative'
-    };
-  }
-  if (!args.isAntigravity || args.shouldRotateAntigravityAlias) {
+  if (args.isVerify || args.is429 || args.isReauth) {
     return {
       excludeCurrentProvider: true,
       retryAction: 'reroute_explicit_alternative'
     };
   }
   return {
-    excludeCurrentProvider: false,
-    retryAction: 'retry_same_provider'
+    excludeCurrentProvider: true,
+    retryAction: 'reroute_explicit_alternative'
   };
 }
 

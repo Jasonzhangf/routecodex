@@ -29,20 +29,6 @@ impl VirtualRouterEngineCore {
             return;
         }
         self.health_manager.record_success(provider_key);
-        if let Some(pending) = &self.pending_alias {
-            let request_id = event
-                .get("runtime")
-                .and_then(|v| v.get("requestId"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            if pending.provider_key == provider_key
-                && (pending.request_id.is_empty() || pending.request_id == request_id)
-            {
-                self.antigravity_session_alias_store
-                    .insert(pending.session_scope.clone(), pending.alias_key.clone());
-                self.pending_alias = None;
-            }
-        }
     }
 
     pub(crate) fn handle_provider_failure(&mut self, event: &Value) {
@@ -107,40 +93,9 @@ impl VirtualRouterEngineCore {
             }
         }
         self.handle_provider_failure(event);
-        if self.apply_antigravity_auth_verify_blacklist(event) {
-            return;
-        }
         self.apply_series_cooldown(event);
     }
 
-    fn apply_antigravity_auth_verify_blacklist(&mut self, event: &Value) -> bool {
-        let Some(runtime_key) = resolve_antigravity_runtime_key(event) else {
-            return false;
-        };
-        if !is_google_account_verification_required(event) {
-            return false;
-        }
-        let prefix = format!("{}.", runtime_key);
-        let provider_keys = self
-            .provider_registry
-            .list_provider_keys("antigravity")
-            .into_iter()
-            .filter(|key| key.starts_with(&prefix))
-            .collect::<Vec<_>>();
-        if provider_keys.is_empty() {
-            return false;
-        }
-        let now = now_ms();
-        for key in provider_keys {
-            self.health_manager.trip_provider(
-                &key,
-                Some("auth_verify".to_string()),
-                Some(ANTIGRAVITY_AUTH_VERIFY_BAN_MS),
-                now,
-            );
-        }
-        true
-    }
 
     fn apply_qwen_auth_family_blacklist(&mut self, event: &Value) -> bool {
         let Some(provider_key) = resolve_provider_key(event) else {
@@ -197,7 +152,6 @@ impl VirtualRouterEngineCore {
                 self.health_manager
                     .trip_provider(provider_key, reason, Some(cooldown_ms), now);
                 let _ = self.apply_qwen_auth_family_blacklist(event);
-                let _ = self.apply_antigravity_auth_verify_blacklist(event);
                 true
             }
         }
@@ -504,42 +458,6 @@ fn is_qwen_auth_invalid_event(event: &Value) -> bool {
     })
 }
 
-fn resolve_antigravity_runtime_key(event: &Value) -> Option<String> {
-    let runtime = event.get("runtime").and_then(|v| v.as_object())?;
-    if let Some(target_runtime_key) = runtime
-        .get("target")
-        .and_then(|v| v.as_object())
-        .and_then(|target| target.get("runtimeKey"))
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-    {
-        return Some(target_runtime_key);
-    }
-    let provider_key = runtime
-        .get("providerKey")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .or_else(|| {
-            runtime
-                .get("target")
-                .and_then(|v| v.as_object())
-                .and_then(|target| target.get("providerKey"))
-                .and_then(|v| v.as_str())
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-        })?;
-    let parts = provider_key
-        .split('.')
-        .map(str::trim)
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>();
-    if parts.len() < 2 {
-        return None;
-    }
-    Some(format!("{}.{}", parts[0], parts[1]))
-}
 
 fn extract_series_cooldown_detail(event: &Value) -> Option<SeriesCooldownDetail> {
     let details = event.get("details")?.as_object()?;

@@ -108,8 +108,6 @@ export const DEFAULT_TOKEN_DAEMON = {
   // 最小刷新间隔：避免频繁刷新
   MIN_REFRESH_INTERVAL_MS: 5 * 60_000,  // 5 分钟
 
-  // Antigravity metadata 确保间隔
-  ANTIGRAVITY_METADATA_ENSURE_INTERVAL_MS: 10 * 60_000,  // 10 分钟
 } as const;
 
 // Pipeline Health Manager 默认配置

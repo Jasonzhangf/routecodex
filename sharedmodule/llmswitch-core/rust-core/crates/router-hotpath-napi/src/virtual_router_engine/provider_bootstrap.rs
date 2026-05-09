@@ -15,7 +15,7 @@ const QWEN_DEFAULT_USER_AGENT: &str = "QwenCode/0.14.3 (darwin; arm64)";
 const CLAUDE_CODE_DEFAULT_USER_AGENT: &str = "claude-cli/2.0.76 (external, cli)";
 const CLAUDE_CODE_DEFAULT_X_APP: &str = "claude-cli";
 const CLAUDE_CODE_DEFAULT_ANTHROPIC_BETA: &str = "claude-code";
-const MULTI_TOKEN_OAUTH_PROVIDERS: &[&str] = &["qwen", "gemini-cli", "antigravity"];
+const MULTI_TOKEN_OAUTH_PROVIDERS: &[&str] = &["qwen"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1618,13 +1618,6 @@ fn resolve_compatibility_profile(
             .unwrap_or_default()
     )
     .to_lowercase();
-    if normalized_id == "antigravity"
-        || normalized_id == "gemini-cli"
-        || provider_type.contains("antigravity")
-        || provider_type.contains("gemini-cli")
-    {
-        return Ok("chat:gemini-cli".to_string());
-    }
     Ok("compat:passthrough".to_string())
 }
 

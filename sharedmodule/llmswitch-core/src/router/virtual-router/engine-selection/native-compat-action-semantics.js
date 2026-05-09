@@ -140,9 +140,6 @@ export function applyGeminiWebSearchRequestCompatWithNative(payload, adapterCont
         adapterContext ?? {},
     ]);
 }
-export function prepareAntigravityThoughtSignatureForGeminiRequestWithNative(payload, adapterContext) {
-    return invokeRecordCapability('prepareAntigravityThoughtSignatureForGeminiRequestJson', [payload, adapterContext ?? {}]);
-}
 export function applyIflowToolTextFallbackWithNative(payload, adapterContext, models) {
     return invokeRecordCapability('applyIflowToolTextFallbackJson', [
         payload,

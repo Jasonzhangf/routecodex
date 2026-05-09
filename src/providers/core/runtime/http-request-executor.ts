@@ -168,35 +168,6 @@ export class HttpRequestExecutor {
       providerId: context.providerId
     });
 
-    const debugAntigravity = process.env.ROUTECODEX_DEBUG_ANTIGRAVITY === '1' || process.env.RCC_DEBUG_ANTIGRAVITY === '1';
-    if (debugAntigravity) {
-      try {
-        await writeProviderSnapshot({
-          phase: 'provider-preprocess-debug',
-          requestId: context.requestId,
-          data: {
-            method: 'POST',
-            endpoint,
-            wantsSse,
-            targetUrl,
-            headers: finalHeaders,
-            body: finalBody
-          },
-          headers: finalHeaders,
-          url: targetUrl,
-          entryEndpoint,
-          clientRequestId,
-          providerKey: context.providerKey,
-          providerId: context.providerId
-        });
-      } catch (snapshotError) {
-        logHttpRequestExecutorNonBlockingError('prepareHttpRequest.provider-preprocess-debug', snapshotError, {
-          requestId: context.requestId,
-          providerKey: context.providerKey,
-          providerId: context.providerId
-        });
-      }
-    }
 
     return {
       endpoint,

@@ -62,7 +62,7 @@ function isJsonRecord(value: unknown): value is JsonObject {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function hasGeminiCliRequestWrapper(payload: JsonObject): boolean {
+function hasGeminiAgentRequestWrapper(payload: JsonObject): boolean {
   const request = (payload as Record<string, unknown>).request;
   if (!isJsonRecord(request)) {
     return false;
@@ -78,14 +78,14 @@ function hasGeminiCliRequestWrapper(payload: JsonObject): boolean {
   );
 }
 
-function isGeminiCliPayload(payload: JsonObject): boolean {
+function isGeminiAgentPayload(payload: JsonObject): boolean {
   const record = payload as Record<string, unknown>;
   return (
     typeof record.project === 'string' ||
     typeof record.requestType === 'string' ||
     typeof record.userAgent === 'string' ||
     typeof record.requestId === 'string' ||
-    hasGeminiCliRequestWrapper(payload)
+    hasGeminiAgentRequestWrapper(payload)
   );
 }
 
@@ -93,7 +93,7 @@ function normalizeHubProviderProtocol(providerProtocol: string): string {
   return normalizeProviderProtocolTokenWithNative(providerProtocol) ?? providerProtocol;
 }
 
-function extendGeminiAllowlistIfNeeded(
+function extendGeminiEnvelopeAllowlistIfNeeded(
   providerProtocol: string,
   payload: JsonObject,
   allowedTopLevelKeys?: Set<string>
@@ -101,7 +101,7 @@ function extendGeminiAllowlistIfNeeded(
   if (providerProtocol !== 'gemini-chat') {
     return allowedTopLevelKeys;
   }
-  if (!isGeminiCliPayload(payload)) {
+  if (!isGeminiAgentPayload(payload)) {
     return allowedTopLevelKeys;
   }
   const extended = allowedTopLevelKeys ? new Set(allowedTopLevelKeys) : new Set<string>();
@@ -140,8 +140,8 @@ function applyProviderOutboundPolicy(providerProtocol: string, payload: JsonObje
     spec.providerOutbound.enforceAllowedTopLevelKeys === true
       ? new Set(spec.providerOutbound.allowedTopLevelKeys)
       : undefined;
-  const isGeminiCli = providerProtocol === 'gemini-chat' && isGeminiCliPayload(payload);
-  const allowedTopLevelKeysResolved = extendGeminiAllowlistIfNeeded(providerProtocol, payload, allowedTopLevelKeys);
+  const isGeminiEnvelope = providerProtocol === 'gemini-chat' && isGeminiAgentPayload(payload);
+  const allowedTopLevelKeysResolved = extendGeminiEnvelopeAllowlistIfNeeded(providerProtocol, payload, allowedTopLevelKeys);
 
   // Reserved/private keys must never be sent upstream.
   for (const key of Object.keys(payload)) {
@@ -158,7 +158,7 @@ function applyProviderOutboundPolicy(providerProtocol: string, payload: JsonObje
     if (!wrapperKey || typeof wrapperKey !== 'string') {
       continue;
     }
-    if (isGeminiCli && wrapperKey === 'request') {
+    if (isGeminiEnvelope && wrapperKey === 'request') {
       continue;
     }
     if (!isJsonRecord((out as any)[wrapperKey])) {
@@ -219,12 +219,12 @@ function observeProviderPayload(options: {
   // Do NOT modify payload here.
   const spec = resolveHubProtocolSpec(options.providerProtocol);
   const allowlistEnabled = options.phase === 'provider_outbound';
-  const isGeminiCli = options.providerProtocol === 'gemini-chat' && isGeminiCliPayload(options.payload);
+  const isGeminiEnvelope = options.providerProtocol === 'gemini-chat' && isGeminiAgentPayload(options.payload);
   const allowedTopLevelKeys =
     allowlistEnabled && Array.isArray(spec.providerOutbound.allowedTopLevelKeys)
       ? new Set(spec.providerOutbound.allowedTopLevelKeys)
       : undefined;
-  const allowedTopLevelKeysResolved = extendGeminiAllowlistIfNeeded(
+  const allowedTopLevelKeysResolved = extendGeminiEnvelopeAllowlistIfNeeded(
     options.providerProtocol,
     options.payload,
     allowedTopLevelKeys
@@ -233,7 +233,7 @@ function observeProviderPayload(options: {
     if (rule.code !== 'forbid_wrapper') {
       continue;
     }
-    if (isGeminiCli && rule.path === 'request') {
+    if (isGeminiEnvelope && rule.path === 'request') {
       continue;
     }
     if (rule.path in options.payload && isJsonRecord((options.payload as any)[rule.path])) {

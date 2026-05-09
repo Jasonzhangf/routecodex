@@ -362,15 +362,7 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
         .as_ref()
         .and_then(|tool| tool.label.clone());
 
-    let mut metadata_copy = metadata.clone();
-    if let Value::Object(map) = &mut metadata_copy {
-        if let Some(antigravity_session_id) = extract_antigravity_session_id(&messages) {
-            map.insert(
-                "antigravitySessionId".to_string(),
-                Value::String(antigravity_session_id),
-            );
-        }
-    }
+    let metadata_copy = metadata.clone();
 
     RoutingFeatures {
         request_id: metadata
@@ -409,34 +401,6 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
     }
 }
 
-fn extract_antigravity_session_id(messages: &[Value]) -> Option<String> {
-    let contents: Vec<Value> = messages
-        .iter()
-        .map(|msg| {
-            let role = if msg.get("role").and_then(|v| v.as_str()) == Some("user") {
-                "user"
-            } else {
-                "assistant"
-            };
-            let text = extract_message_text(msg);
-            json!({
-                "role": role,
-                "parts": [{ "text": text }]
-            })
-        })
-        .collect();
-    let payload = json!({ "contents": contents });
-    let session_id =
-        crate::req_outbound_stage3_compat::gemini_cli::extract_antigravity_gemini_session_id(
-            &payload,
-        );
-    let trimmed = session_id.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
 
 fn estimate_request_tokens(request: &Value, latest_user_text: &str) -> i64 {
     let mut total_chars: usize = latest_user_text.len();

@@ -11,7 +11,7 @@ export class GeminiSseNormalizer extends Transform {
   private processedEventCounter = 0;
   private capturedEvents: any[] = [];
 
-  constructor(_options?: { sessionId?: string; aliasKey?: string; enableAntigravitySignatureCache?: boolean }) {
+  constructor(_options?: { sessionId?: string; aliasKey?: string }) {
     super();
     this.decoder = new StringDecoder('utf8');
   }

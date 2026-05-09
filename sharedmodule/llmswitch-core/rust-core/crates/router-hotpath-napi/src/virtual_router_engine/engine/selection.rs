@@ -18,10 +18,9 @@ use crate::virtual_router_engine::health_weighted::{
 use crate::virtual_router_engine::instructions::RoutingInstructionState;
 use crate::virtual_router_engine::quota::{call_quota_view, QuotaViewEntry};
 use crate::virtual_router_engine::routing::{
-    build_antigravity_alias_key, build_route_queue, default_pool_supports_capability,
+    build_route_queue, default_pool_supports_capability,
     extract_excluded_provider_keys, extract_runtime_now_ms, filter_candidates_by_state,
     filter_pools_by_capability, resolve_instruction_target, route_has_targets,
-    should_avoid_antigravity_after_repeated_error, should_bind_antigravity_session,
     InstructionTargetMatchMode,
 };
 use crate::virtual_router_engine::time_utils::now_ms;
@@ -180,8 +179,6 @@ impl VirtualRouterEngineCore {
             route_queue = vec![DEFAULT_ROUTE.to_string()];
         }
         let sticky_key = crate::virtual_router_engine::routing::resolve_sticky_key(metadata);
-        let avoid_antigravity =
-            !excluded_keys.is_empty() && should_avoid_antigravity_after_repeated_error(metadata);
         let now_for_weights = extract_runtime_now_ms(metadata).unwrap_or_else(now_ms);
         let health_cfg =
             resolve_health_weighted_config(self.load_balancer.policy().health_weighted.as_ref());
@@ -280,88 +277,8 @@ impl VirtualRouterEngineCore {
                         available = alias_candidates;
                     }
                 }
-                let strict_binding = self
-                    .load_balancer
-                    .policy()
-                    .alias_selection
-                    .as_ref()
-                    .and_then(|selection| selection.antigravity_session_binding.as_deref())
-                    .map(|mode| mode.trim().eq_ignore_ascii_case("strict"))
-                    .unwrap_or(false);
-                if strict_binding && should_bind_antigravity_session(metadata) {
-                    if let Some(session_id) = metadata
-                        .get("antigravitySessionId")
-                        .and_then(|v| v.as_str())
-                    {
-                        let trimmed = session_id.trim();
-                        if !trimmed.is_empty() {
-                            let has_antigravity_gemini = available.iter().any(|key| {
-                                build_antigravity_alias_key(key, &self.provider_registry).is_some()
-                            });
-                            if has_antigravity_gemini {
-                                if let Some(pinned_alias) = crate::req_outbound_stage3_compat::gemini_cli::lookup_antigravity_pinned_alias_for_session_id(trimmed, true) {
-                                    let pinned_trimmed = pinned_alias.trim();
-                                    if !pinned_trimmed.is_empty() {
-                                        let pinned_key = if pinned_trimmed.contains("::") {
-                                            pinned_trimmed.to_string()
-                                        } else {
-                                            format!("{}::gemini", pinned_trimmed)
-                                        };
-                                        available = available
-                                            .into_iter()
-                                            .filter(|key| {
-                                                if let Some(alias_key) =
-                                                    build_antigravity_alias_key(key, &self.provider_registry)
-                                                {
-                                                    alias_key == pinned_key
-                                                } else {
-                                                    true
-                                                }
-                                            })
-                                            .collect();
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if avoid_antigravity && available.len() > 1 {
-                    let non_antigravity: Vec<String> = available
-                        .iter()
-                        .filter(|key| !key.starts_with("antigravity."))
-                        .cloned()
-                        .collect();
-                    if !non_antigravity.is_empty() {
-                        available = non_antigravity;
-                    }
-                }
                 if available.is_empty() {
                     continue;
-                }
-                let mut antigravity_sticky_key: Option<String> = None;
-                if pool.mode.as_deref() == Some("round-robin")
-                    && available.iter().all(|key| key.starts_with("antigravity."))
-                {
-                    let model_id = available
-                        .get(0)
-                        .and_then(|key| {
-                            self.provider_registry
-                                .get(key)
-                                .and_then(|profile| profile.model_id.clone())
-                        })
-                        .unwrap_or_else(|| "antigravity".to_string());
-                    antigravity_sticky_key =
-                        Some(format!("antigravity:{}:{}", route_name, model_id));
-                }
-                if antigravity_sticky_key.is_some() {
-                    if let Some(primary) = pool.targets.iter().find(|key| available.contains(key)) {
-                        return Ok(SelectionResult::new(
-                            primary.clone(),
-                            route_name.to_string(),
-                            pool.targets.clone(),
-                            Some(pool.id.clone()),
-                        ));
-                    }
                 }
                 let tier_load_balancing =
                     resolve_tier_load_balancing(&pool, self.load_balancer.policy());
@@ -424,7 +341,7 @@ impl VirtualRouterEngineCore {
                     tier_load_balancing.weights.as_ref(),
                     dynamic_weight_map.as_ref(),
                 );
-                let sticky_for_lb = antigravity_sticky_key.as_deref().unwrap_or(&sticky_key);
+                let sticky_for_lb = &sticky_key;
                 // v2 weighted pools may be materialized by the bootstrap layer as:
                 //   mode=priority + loadBalancing.strategy=weighted
                 // when the user only declared loadBalancing.weights (no explicit targets/order).
@@ -433,9 +350,7 @@ impl VirtualRouterEngineCore {
                 // provider.model group forever.
                 let effective_priority_mode = pool.mode.as_deref() == Some("priority")
                     && tier_load_balancing.strategy != "weighted";
-                let mode_override = if antigravity_sticky_key.is_some() {
-                    Some("sticky")
-                } else if effective_priority_mode {
+                let mode_override = if effective_priority_mode {
                     Some("priority")
                 } else if let Some(mode) = pool.mode.as_deref() {
                     if mode == "priority" {
@@ -446,17 +361,12 @@ impl VirtualRouterEngineCore {
                 } else {
                     Some(tier_load_balancing.strategy.as_str())
                 };
-                let route_key_for_lb = if antigravity_sticky_key.is_some() {
-                    format!("{}:{}:antigravity", route_name, pool.id)
-                } else {
-                    route_name.to_string()
-                };
+                let route_key_for_lb = route_name.to_string();
                 let (ordered_group_ids, grouped_candidates) =
                     build_primary_target_groups(&available, &self.provider_registry);
                 let has_runtime_key_level_weights =
                     has_runtime_key_level_weights(tier_load_balancing.weights.as_ref(), &available);
-                let can_select_grouped = antigravity_sticky_key.is_none()
-                    && pool.mode.as_deref() != Some("sticky")
+                let can_select_grouped = pool.mode.as_deref() != Some("sticky")
                     && tier_load_balancing.strategy != "sticky"
                     && dynamic_weight_map.is_none()
                     && !has_runtime_key_level_weights;

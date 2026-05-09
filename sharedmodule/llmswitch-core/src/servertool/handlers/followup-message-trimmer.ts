@@ -61,7 +61,7 @@ function findPrevIndex(
  * Trim OpenAI-style messages for internal servertool followups.
  *
  * Goal: avoid sending a massive chat history on auto-followup requests (e.g. stop_message_flow),
- * which can push Gemini/Antigravity into empty/malformed responses under long-context loads.
+ * which can push upstream providers into empty/malformed responses under long-context loads.
  *
  * Strategy:
  * - Always keep system/developer messages (regardless of position).

@@ -56,8 +56,6 @@ struct AliasSelectionConfigOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     session_lease_cooldown_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    antigravity_session_binding: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     providers: Option<BTreeMap<String, String>>,
 }
 
@@ -280,6 +278,64 @@ fn normalize_load_balancing(value: Option<&Value>) -> Option<LoadBalancingConfig
         health_weighted,
         context_weighted,
     })
+}
+
+fn normalize_weights(value: Option<&Value>) -> Option<BTreeMap<String, f64>> {
+    let record = value.and_then(Value::as_object)?;
+    let mut out = BTreeMap::new();
+    for (key, value) in record {
+        let Some(weight) = normalize_optional_f64(value) else {
+            continue;
+        };
+        out.insert(key.clone(), weight);
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+fn normalize_health_weighted(value: Option<&Value>) -> Option<HealthWeightedConfigOutput> {
+    let record = value.and_then(Value::as_object)?;
+    let output = HealthWeightedConfigOutput {
+        enabled: record.get("enabled").and_then(parse_bool_like),
+        recover_to_best_on_retry: record.get("recoverToBestOnRetry").and_then(parse_bool_like),
+        base_weight: record.get("baseWeight").and_then(normalize_optional_f64),
+        min_multiplier: record.get("minMultiplier").and_then(normalize_optional_f64),
+        beta: record.get("beta").and_then(normalize_optional_f64),
+        half_life_ms: record.get("halfLifeMs").and_then(normalize_optional_f64),
+    };
+    if output.enabled.is_none()
+        && output.recover_to_best_on_retry.is_none()
+        && output.base_weight.is_none()
+        && output.min_multiplier.is_none()
+        && output.beta.is_none()
+        && output.half_life_ms.is_none()
+    {
+        None
+    } else {
+        Some(output)
+    }
+}
+
+fn normalize_context_weighted(value: Option<&Value>) -> Option<ContextWeightedConfigOutput> {
+    let record = value.and_then(Value::as_object)?;
+    let output = ContextWeightedConfigOutput {
+        enabled: record.get("enabled").and_then(parse_bool_like),
+        client_cap_tokens: record.get("clientCapTokens").and_then(normalize_optional_f64),
+        gamma: record.get("gamma").and_then(normalize_optional_f64),
+        max_multiplier: record.get("maxMultiplier").and_then(normalize_optional_f64),
+    };
+    if output.enabled.is_none()
+        && output.client_cap_tokens.is_none()
+        && output.gamma.is_none()
+        && output.max_multiplier.is_none()
+    {
+        None
+    } else {
+        Some(output)
+    }
 }
 
 fn normalize_health(value: Option<&Value>) -> Option<ProviderHealthConfigOutput> {
@@ -535,20 +591,6 @@ fn normalize_alias_selection(value: Option<&Value>) -> Option<AliasSelectionConf
                 .get("sessionLease_cooldown_ms")
                 .and_then(normalize_non_negative_i64)
         });
-    let antigravity_session_binding = record
-        .get("antigravitySessionBinding")
-        .and_then(read_trimmed_string)
-        .or_else(|| {
-            record
-                .get("antigravity_session_binding")
-                .and_then(read_trimmed_string)
-        })
-        .map(|value| value.to_ascii_lowercase())
-        .and_then(|value| match value.as_str() {
-            "strict" => Some("strict".to_string()),
-            "lease" => Some("lease".to_string()),
-            _ => None,
-        });
     let providers = record
         .get("providers")
         .and_then(Value::as_object)
@@ -574,78 +616,16 @@ fn normalize_alias_selection(value: Option<&Value>) -> Option<AliasSelectionConf
         enabled,
         default_strategy,
         session_lease_cooldown_ms,
-        antigravity_session_binding,
         providers,
     };
     if output.enabled.is_none()
         && output.default_strategy.is_none()
         && output.session_lease_cooldown_ms.is_none()
-        && output.antigravity_session_binding.is_none()
         && output.providers.is_none()
     {
         None
     } else {
         Some(output)
-    }
-}
-
-fn normalize_health_weighted(value: Option<&Value>) -> Option<HealthWeightedConfigOutput> {
-    let record = value.and_then(Value::as_object)?;
-    let output = HealthWeightedConfigOutput {
-        enabled: record.get("enabled").and_then(parse_bool_like),
-        recover_to_best_on_retry: record.get("recoverToBestOnRetry").and_then(parse_bool_like),
-        base_weight: record.get("baseWeight").and_then(normalize_optional_f64),
-        min_multiplier: record.get("minMultiplier").and_then(normalize_optional_f64),
-        beta: record.get("beta").and_then(normalize_optional_f64),
-        half_life_ms: record.get("halfLifeMs").and_then(normalize_optional_f64),
-    };
-    if output.enabled.is_none()
-        && output.recover_to_best_on_retry.is_none()
-        && output.base_weight.is_none()
-        && output.min_multiplier.is_none()
-        && output.beta.is_none()
-        && output.half_life_ms.is_none()
-    {
-        None
-    } else {
-        Some(output)
-    }
-}
-
-fn normalize_context_weighted(value: Option<&Value>) -> Option<ContextWeightedConfigOutput> {
-    let record = value.and_then(Value::as_object)?;
-    let output = ContextWeightedConfigOutput {
-        enabled: record.get("enabled").and_then(parse_bool_like),
-        client_cap_tokens: record
-            .get("clientCapTokens")
-            .and_then(normalize_optional_f64),
-        gamma: record.get("gamma").and_then(normalize_optional_f64),
-        max_multiplier: record.get("maxMultiplier").and_then(normalize_optional_f64),
-    };
-    if output.enabled.is_none()
-        && output.client_cap_tokens.is_none()
-        && output.gamma.is_none()
-        && output.max_multiplier.is_none()
-    {
-        None
-    } else {
-        Some(output)
-    }
-}
-
-fn normalize_weights(value: Option<&Value>) -> Option<BTreeMap<String, f64>> {
-    let record = value.and_then(Value::as_object)?;
-    let mut weights = BTreeMap::new();
-    for (key, raw_weight) in record {
-        let Some(weight) = normalize_optional_f64(raw_weight) else {
-            continue;
-        };
-        weights.insert(key.clone(), weight);
-    }
-    if weights.is_empty() {
-        None
-    } else {
-        Some(weights)
     }
 }
 

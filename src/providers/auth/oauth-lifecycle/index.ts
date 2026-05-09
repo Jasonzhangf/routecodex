@@ -43,7 +43,7 @@ export {
 } from './token-helpers.js';
 
 export {
-  normalizeGeminiCliAccountToken,
+  normalizeWrappedOAuthAccountToken,
   sanitizeToken,
   readTokenFromFile,
   backupTokenFile,

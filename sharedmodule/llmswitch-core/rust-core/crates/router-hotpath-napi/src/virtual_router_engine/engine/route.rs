@@ -2,7 +2,7 @@ use napi::Env;
 use serde_json::{json, Value};
 
 use super::selection::build_provider_not_available_error;
-use super::types::{PendingAliasBinding, SelectionResult};
+use super::types::SelectionResult;
 use super::VirtualRouterEngineCore;
 use crate::virtual_router_engine::classifier::ClassificationResult;
 use crate::virtual_router_engine::error::format_virtual_router_error;
@@ -18,11 +18,10 @@ use crate::virtual_router_engine::instructions::{
 };
 use crate::virtual_router_engine::provider_registry::ProviderRegistry;
 use crate::virtual_router_engine::routing::{
-    alias_prefix_from_alias_key, build_antigravity_alias_key, extract_excluded_provider_keys,
+    extract_excluded_provider_keys,
     filter_candidates_by_state, parse_direct_provider_model,
     resolve_instruction_process_mode_for_selection, resolve_instruction_target,
     resolve_session_scope, resolve_sticky_key, resolve_stop_message_scope,
-    should_avoid_antigravity_after_repeated_error, should_bind_antigravity_session,
     should_fallback_direct_model_for_media,
 };
 use crate::virtual_router_engine::routing_state_store::{
@@ -366,21 +365,7 @@ impl VirtualRouterEngineCore {
             }
         }
 
-        let mut bound_alias_prefix: Option<String> = None;
-        if let Some(scope) = session_scope.as_ref() {
-            let scoped_key = crate::virtual_router_engine::routing::build_scoped_session_key(scope);
-            if let Some(alias_key) = self
-                .antigravity_session_alias_store
-                .get(&scoped_key)
-                .cloned()
-            {
-                if self.alias_blocked_by_quota(env, &alias_key) {
-                    self.antigravity_session_alias_store.remove(&scoped_key);
-                } else {
-                    bound_alias_prefix = alias_prefix_from_alias_key(&alias_key);
-                }
-            }
-        }
+        let bound_alias_prefix: Option<String> = None;
 
         let direct_model =
             parse_direct_provider_model(request_working.get("model"), &self.provider_registry);
@@ -433,18 +418,6 @@ impl VirtualRouterEngineCore {
                         .collect();
                     if !excluded_keys.is_empty() {
                         available.retain(|key| !excluded_keys.contains(key));
-                    }
-                    if !excluded_keys.is_empty()
-                        && should_avoid_antigravity_after_repeated_error(metadata)
-                    {
-                        let non_antigravity: Vec<String> = available
-                            .iter()
-                            .filter(|key| !key.starts_with("antigravity."))
-                            .cloned()
-                            .collect();
-                        if !non_antigravity.is_empty() {
-                            available = non_antigravity;
-                        }
                     }
                     if available.is_empty() {
                         return Err(build_provider_not_available_error(
@@ -545,28 +518,6 @@ impl VirtualRouterEngineCore {
                 (classification, requested_route, selection)
             };
 
-        self.pending_alias = None;
-        if should_bind_antigravity_session(metadata) {
-            if let Some(scope) = session_scope.as_ref() {
-                if let Some(alias_key) =
-                    build_antigravity_alias_key(&selection.provider_key, &self.provider_registry)
-                {
-                    let request_id = metadata
-                        .get("requestId")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let session_key =
-                        crate::virtual_router_engine::routing::build_scoped_session_key(scope);
-                    self.pending_alias = Some(PendingAliasBinding {
-                        request_id,
-                        provider_key: selection.provider_key.clone(),
-                        session_scope: session_key,
-                        alias_key,
-                    });
-                }
-            }
-        }
 
         let target = self
             .provider_registry
