@@ -364,7 +364,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     }
   });
 
-  it('fails fast when streamed stopless wrapper completes with finish_reason=stop and no finalized flag', async () => {
+  it('does not treat streamed wrapper finish_reason as stopless truth source', async () => {
     const handle = createRuntimeHandle(async () => ({ ok: true }));
     const { executor, request } = createExecutor(pipelineResult, handle);
     seedStoplessSession('session_stopless_stream_wrapper');
@@ -373,8 +373,6 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       sessionId: 'session_stopless_stream_wrapper',
       reasoningStopMode: 'on'
     };
-    const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
     jest
       .spyOn(executor as any, 'convertProviderResponseIfNeeded')
       .mockResolvedValue({
@@ -385,23 +383,11 @@ describe('HubRequestExecutor single attempt behaviour', () => {
         }
       });
 
-    try {
-      await expect(executor.execute(request)).rejects.toMatchObject({
-        code: 'STOPLESS_FINALIZATION_MISSING',
-        statusCode: 502,
-        retryable: true,
-        requestExecutorProviderErrorStage: 'host.stopless_contract'
-      });
-    } finally {
-      if (previousMaxAttempts === undefined) {
-        delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-      } else {
-        process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousMaxAttempts;
-      }
-    }
+    const response = await executor.execute(request);
+    expect((response.body as any)?.__routecodex_finish_reason).toBe('stop');
   });
 
-  it('allows streamed stopless wrapper when finalized flag is present', async () => {
+  it('keeps streamed wrapper pass-through when finalized flag is present', async () => {
     const handle = createRuntimeHandle(async () => ({ ok: true }));
     const { executor, request } = createExecutor(pipelineResult, handle);
     seedStoplessSession('session_stopless_stream_wrapper_finalized');

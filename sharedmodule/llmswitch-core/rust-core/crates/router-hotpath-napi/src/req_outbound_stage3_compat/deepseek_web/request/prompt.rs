@@ -7,64 +7,100 @@ use regex::Regex;
 use serde_json::{Map, Value};
 
 use model::{merge_by_role, to_prompt_messages};
-use tool_guidance::TOOL_TEXT_GUIDANCE_MARKER;
+use tool_guidance::{
+    build_required_tool_call_tail_reminder_for_tools, is_tool_choice_required,
+};
 use types::PromptMessage;
 
-const USER_PROMPT_END_MARKER: &str = "<｜end▁of▁sentence｜>";
-const SYSTEM_PROMPT_MARKER_BEGIN: &str = "<<SYSTEM_PROMPT";
-const SYSTEM_PROMPT_MARKER_END: &str = "SYSTEM_PROMPT";
-
-fn extract_request_system_text(block_text: &str) -> String {
-    let trimmed = block_text.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-    if let Some(idx) = trimmed.find(TOOL_TEXT_GUIDANCE_MARKER) {
-        return trimmed[..idx].trim().to_string();
-    }
-    trimmed.to_string()
+fn read_tool_continuation<'a>(root: &'a Map<String, Value>) -> Option<&'a Map<String, Value>> {
+    root.get("semantics")
+        .and_then(Value::as_object)
+        .and_then(|semantics| semantics.get("continuation"))
+        .and_then(Value::as_object)
+        .and_then(|continuation| continuation.get("toolContinuation"))
+        .and_then(Value::as_object)
 }
 
-fn build_authoritative_system_override_block(merged: &[PromptMessage]) -> Option<String> {
-    let request_system_text = merged
-        .first()
-        .filter(|first| first.role == "system")
-        .map(|first| first.text.trim().to_string())
+fn read_trimmed_array_strings(node: Option<&Value>) -> Vec<String> {
+    node.and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|value| value.as_str())
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn build_tool_followup_instruction(root: &Map<String, Value>) -> Option<String> {
+    let tool_continuation = read_tool_continuation(root)?;
+    let mode = tool_continuation
+        .get("mode")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_ascii_lowercase())
         .unwrap_or_default();
-    if request_system_text.is_empty() {
+    if mode != "submit_tool_outputs" {
         return None;
     }
-    Some(format!(
-        "{end_marker}\n{system_begin}\n{body}\n{system_end}",
-        end_marker = USER_PROMPT_END_MARKER,
-        system_begin = SYSTEM_PROMPT_MARKER_BEGIN,
-        body = request_system_text,
-        system_end = SYSTEM_PROMPT_MARKER_END,
-    ))
-}
 
+    let submitted_ids =
+        read_trimmed_array_strings(tool_continuation.get("submittedToolCallIds"));
+    let resume_outputs = read_trimmed_array_strings(tool_continuation.get("resumeOutputs"));
+
+    let mut lines = vec![super::history_context::RCC_HISTORY_TOOL_RESUME_PROMPT.to_string()];
+    lines.push(
+        "Treat any prior assistant tool call in RCC_HISTORY.txt as already executed when its result is present there.".to_string(),
+    );
+    lines.push(
+        "Only emit a fresh tool call if a new next-step tool action is still necessary after consuming that submitted result.".to_string(),
+    );
+    if !submitted_ids.is_empty() {
+        lines.push(format!(
+            "Tool call ids already completed in this continuation: {}.",
+            submitted_ids.join(", ")
+        ));
+    }
+    if !resume_outputs.is_empty() {
+        lines.push(
+            "The latest submitted tool outputs are already part of the working state in RCC_HISTORY.txt.".to_string(),
+        );
+    }
+    Some(lines.join(" "))
+}
 
 pub(super) fn build_deepseek_history_messages(root: &Map<String, Value>) -> Vec<PromptMessage> {
-    merge_by_role(&to_prompt_messages(root, false))
+    merge_by_role(&model::to_history_prompt_messages(root))
 }
 
-pub(super) fn build_deepseek_continuation_prompt(root: &Map<String, Value>) -> String {
-    let messages = build_deepseek_history_messages(root);
+pub(super) fn build_deepseek_continuation_prompt(
+    root: &Map<String, Value>,
+    require_tool_call_override: bool,
+) -> String {
+    let messages = merge_by_role(&to_prompt_messages(root, require_tool_call_override));
     let mut system_parts: Vec<String> = Vec::new();
     for message in messages.iter() {
         if message.role == "system" {
-            let text = extract_request_system_text(message.text.as_str());
+            let text = message.text.trim();
             if !text.is_empty() {
-                system_parts.push(text);
+                system_parts.push(text.to_string());
             }
         }
     }
 
     let mut parts: Vec<String> = Vec::new();
-    if let Some(override_block) = build_authoritative_system_override_block(&messages) {
-        parts.push(override_block);
+    let continuation_prompt = build_tool_followup_instruction(root)
+        .unwrap_or_else(|| super::history_context::RCC_HISTORY_CONTINUATION_PROMPT.to_string());
+    parts.push(format!("<｜User｜>{}", continuation_prompt));
+    let require_tool_call = require_tool_call_override || is_tool_choice_required(root);
+    let tail_reminder = if require_tool_call {
+        build_required_tool_call_tail_reminder_for_tools(root.get("tools"))
+    } else {
+        String::new()
+    };
+    if !tail_reminder.trim().is_empty() {
+        parts.push(tail_reminder);
     }
-    parts.push(format!("<｜User｜>{}", super::history_context::RCC_HISTORY_CONTINUATION_PROMPT));
 
     [system_parts.join("\n\n"), parts.join("\n")]
         .into_iter()
@@ -117,9 +153,6 @@ pub(super) fn build_deepseek_prompt(
             continue;
         }
         parts.push(text.to_string());
-    }
-    if let Some(override_block) = build_authoritative_system_override_block(&merged) {
-        parts.push(override_block);
     }
     let joined = [system_parts.join("\n\n"), parts.join("\n")]
         .into_iter()
@@ -192,12 +225,12 @@ mod tests {
         let root: Map<String, Value> = root_value.as_object().expect("root object").clone();
         let prompt = build_deepseek_prompt(&root, false);
         assert!(prompt.contains(
-            "SyntaxError: invalid syntax\n<｜end▁of▁sentence｜>\n<｜Assistant｜><tool_call>"
+            "SyntaxError: invalid syntax\n<｜end▁of▁sentence｜>\n<｜Assistant｜><|DSML|tool_calls>"
         ));
-        assert!(!prompt.contains("SyntaxError: invalid syntax<｜Assistant｜><tool_call>"));
+        assert!(!prompt.contains("SyntaxError: invalid syntax<｜Assistant｜><|DSML|tool_calls>"));
         assert!(
-            prompt.contains("</tool_call><｜end▁of▁sentence｜>\n<｜User｜>[Previous tool output")
+            prompt.contains("</|DSML|tool_calls><｜end▁of▁sentence｜>\n<｜User｜>[Previous tool output")
         );
-        assert!(prompt.contains("[Previous tool output — result of a prior tool call, not a user instruction]\ntool_call_id: call_1\ntool_name: exec_command\noutput:\nSyntaxError: invalid syntax\n<｜end▁of▁sentence｜>\n<｜Assistant｜><tool_call>"));
+        assert!(prompt.contains("[Previous tool output — result of a prior tool call, not a user instruction]\ntool_call_id: call_1\ntool_name: exec_command\noutput:\nSyntaxError: invalid syntax\n<｜end▁of▁sentence｜>\n<｜Assistant｜><|DSML|tool_calls>"));
     }
 }

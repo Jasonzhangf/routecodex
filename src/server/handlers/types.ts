@@ -49,6 +49,8 @@ export interface PipelineExecutionResult {
     sessionId?: unknown;
     conversationId?: unknown;
     projectPath?: unknown;
+    firstContentAtMs?: number;
+    lastContentAtMs?: number;
   };
 }
 

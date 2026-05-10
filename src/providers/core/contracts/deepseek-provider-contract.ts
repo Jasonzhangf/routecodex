@@ -160,6 +160,7 @@ export function readDeepSeekProviderRuntimeOptions(source: {
   runtimeOptions?: unknown;
   extensions?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  identity?: DeepSeekRuntimeIdentity;
 }): DeepSeekProviderRuntimeOptions | undefined {
   const direct = asRecord(source.runtimeOptions);
   if (direct) {
@@ -174,6 +175,18 @@ export function readDeepSeekProviderRuntimeOptions(source: {
   const metadataNode = asRecord(source.metadata?.deepseek);
   if (metadataNode) {
     return normalizeDeepSeekProviderRuntimeOptions(metadataNode);
+  }
+
+  if (
+    source.identity
+    && isDeepSeekRuntimeIdentity(source.identity)
+    && getToken(source.identity.compatibilityProfile) === DEEPSEEK_COMPATIBILITY_PROFILE
+  ) {
+    return {
+      ...DEFAULT_DEEPSEEK_OPTIONS,
+      toolProtocol: 'text',
+      contextFileEnabled: true
+    };
   }
 
   return undefined;

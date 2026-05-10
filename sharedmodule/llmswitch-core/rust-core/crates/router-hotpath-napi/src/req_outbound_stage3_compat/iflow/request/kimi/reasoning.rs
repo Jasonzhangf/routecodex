@@ -1,5 +1,7 @@
 use serde_json::{json, Map, Value};
 
+use crate::req_outbound_stage3_compat::thinking_history;
+
 fn parse_disabled_type(raw: Option<&Value>) -> bool {
     let Some(token) = raw.and_then(|v| v.as_str()) else {
         return false;
@@ -51,40 +53,5 @@ pub(super) fn normalize_thinking_for_kimi(root: &mut Map<String, Value>) -> bool
 }
 
 pub(super) fn fill_reasoning_content_for_tool_calls(root: &mut Map<String, Value>) {
-    let Some(messages) = root.get_mut("messages").and_then(|v| v.as_array_mut()) else {
-        return;
-    };
-    for message in messages.iter_mut() {
-        let Some(row) = message.as_object_mut() else {
-            continue;
-        };
-        let role = row
-            .get("role")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        if role != "assistant" {
-            continue;
-        }
-        let has_tool_calls = row
-            .get("tool_calls")
-            .and_then(|v| v.as_array())
-            .map(|entries| !entries.is_empty())
-            .unwrap_or(false);
-        if !has_tool_calls {
-            continue;
-        }
-        let missing_reasoning = row
-            .get("reasoning_content")
-            .and_then(|v| v.as_str())
-            .map(|v| v.trim().is_empty())
-            .unwrap_or(true);
-        if missing_reasoning {
-            row.insert(
-                "reasoning_content".to_string(),
-                Value::String(".".to_string()),
-            );
-        }
-    }
+    thinking_history::fill_reasoning_content_for_tool_calls(root);
 }

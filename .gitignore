@@ -108,3 +108,6 @@ sharedmodule/test-results/
 sharedmodule/llmswitch-core/src/conversion/shared/request-meta-store.ts
 sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.ts
 tests/sharedmodule/provider-runtime-ingress.spec.ts
+thinking_history.rs
+sharedmodule/llmswitch-core/src/sse/test/chat-converter.test.ts
+tmp-*

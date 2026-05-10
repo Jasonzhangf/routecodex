@@ -16,7 +16,7 @@ type ShadowCompareBaselineMode =
 
 export function buildRouteAndOutboundResultMetadata(args: {
   normalized: NormalizedRequest;
-  workingRequest: StandardizedRequest | ProcessedRequest;
+  capturedWorkingRequest: StandardizedRequest | ProcessedRequest;
   activeProcessMode: "chat" | "passthrough";
   outboundProtocol: NormalizedRequest["providerProtocol"];
   target: HubPipelineResult["target"];
@@ -29,7 +29,7 @@ export function buildRouteAndOutboundResultMetadata(args: {
 }): Record<string, unknown> {
   const capturedChatRequest = buildValidatedCapturedChatRequest({
     normalized: args.normalized,
-    workingRequest: args.workingRequest,
+    workingRequest: args.capturedWorkingRequest,
     activeProcessMode: args.activeProcessMode,
   });
   return finalizeRouteAndOutboundMetadata({

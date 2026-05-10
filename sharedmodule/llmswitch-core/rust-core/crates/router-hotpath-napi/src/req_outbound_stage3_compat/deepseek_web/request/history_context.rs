@@ -7,6 +7,7 @@ pub(crate) const RCC_HISTORY_TITLE: &str = "# RCC_HISTORY.txt";
 pub(crate) const RCC_HISTORY_SUMMARY: &str = "Prior conversation history and tool progress.";
 pub(crate) const RCC_HISTORY_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
 pub(crate) const RCC_HISTORY_CONTINUATION_PROMPT: &str = "Continue from the latest state in the attached RCC_HISTORY.txt context. Treat it as the current working state and answer the latest user request directly.";
+pub(crate) const RCC_HISTORY_TOOL_RESUME_PROMPT: &str = "Continue from the latest state in the attached RCC_HISTORY.txt context. The latest tool result has already been submitted. Do not repeat the same tool call just because it appears in history; use that result as completed context and continue to the next necessary step or final answer.";
 
 pub(crate) fn build_history_context_transcript(root: &Map<String, Value>) -> Option<String> {
     let messages = build_deepseek_history_messages(root);
@@ -109,7 +110,7 @@ mod tests {
         assert!(transcript.contains("=== 1. SYSTEM ===\nfollow contract"));
         assert!(transcript.contains("=== 2. USER ===\n请继续"));
         assert!(transcript.contains("=== 3. ASSISTANT ==="));
-        assert!(transcript.contains("<tool_call>"));
+        assert!(transcript.contains("<|DSML|tool_calls>"));
         assert!(transcript.contains("\"name\":\"exec_command\""));
         assert!(transcript.contains("=== 4. TOOL ==="));
         assert!(transcript.contains("tool_call_id: call_1"));

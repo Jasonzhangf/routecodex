@@ -338,6 +338,16 @@ pub(crate) fn strip_internal_tooling_metadata_impl(metadata: &mut Value) {
     };
     record.remove("toolCallIdStyle");
     record.remove(RAW_SYSTEM_SENTINEL);
+    let remove_deepseek = if let Some(Value::Object(deepseek)) = record.get_mut("deepseek") {
+        deepseek.remove("contextFile");
+        deepseek.remove("contextFileEnabled");
+        deepseek.is_empty()
+    } else {
+        false
+    };
+    if remove_deepseek {
+        record.remove("deepseek");
+    }
     let remove_extra = if let Some(Value::Object(extra_fields)) = record.get_mut("extraFields") {
         prune_private_extra_fields(extra_fields);
         extra_fields.is_empty()
@@ -414,6 +424,14 @@ mod tests {
         let mut metadata = serde_json::json!({
             "toolCallIdStyle": "fc",
             "__rcc_raw_system": "keep out",
+            "deepseek": {
+                "toolCallState": "text_tool_calls",
+                "contextFileEnabled": true,
+                "contextFile": {
+                    "filename": "RCC_HISTORY.txt",
+                    "content": "# RCC_HISTORY.txt"
+                }
+            },
             "extraFields": {
                 "__rcc_private": true,
                 "safe": { "value": 1 }
@@ -422,6 +440,12 @@ mod tests {
         strip_internal_tooling_metadata_impl(&mut metadata);
         assert!(metadata.get("toolCallIdStyle").is_none());
         assert!(metadata.get("__rcc_raw_system").is_none());
+        assert!(metadata["deepseek"].get("contextFileEnabled").is_none());
+        assert!(metadata["deepseek"].get("contextFile").is_none());
+        assert_eq!(
+            metadata["deepseek"]["toolCallState"],
+            Value::String("text_tool_calls".to_string())
+        );
         assert!(metadata["extraFields"].get("__rcc_private").is_none());
         assert_eq!(metadata["extraFields"]["safe"]["value"], 1);
     }

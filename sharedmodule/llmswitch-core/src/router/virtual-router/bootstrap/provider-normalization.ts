@@ -240,10 +240,20 @@ function resolveCompatibilityProfile(providerId: string, provider: Record<string
 function normalizeDeepSeekOptions(
   provider: Record<string, unknown>
 ): DeepSeekCompatRuntimeOptions | undefined {
+  const compatibilityProfile = resolveCompatibilityProfile(
+    typeof provider.id === 'string' ? provider.id : 'unknown',
+    provider
+  );
   const direct = asRecord(provider.deepseek);
   const ext = asRecord(asRecord(provider.extensions)?.deepseek);
   const source = Object.keys(direct).length ? direct : ext;
   if (!source || !Object.keys(source).length) {
+    if (compatibilityProfile === 'chat:deepseek-web') {
+      return {
+        toolProtocol: 'text',
+        contextFileEnabled: true
+      };
+    }
     return undefined;
   }
   const strictToolRequired =
@@ -274,7 +284,9 @@ function normalizeDeepSeekOptions(
           ? contextFileNode.enabled
           : typeof contextFileNode?.enabled === 'string'
             ? contextFileNode.enabled.trim().toLowerCase() === 'true'
-            : undefined;
+            : compatibilityProfile === 'chat:deepseek-web'
+              ? true
+              : undefined;
   if (toolProtocol === undefined && legacyTextToolFallback !== undefined) {
     toolProtocol = legacyTextToolFallback ? 'text' : 'native';
   }

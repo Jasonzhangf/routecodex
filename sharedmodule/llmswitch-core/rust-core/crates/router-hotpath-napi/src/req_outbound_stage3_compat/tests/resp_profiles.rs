@@ -158,9 +158,9 @@ fn test_resp_profile_chat_deepseek_web_harvests_real_sample_with_extra_trailing_
                 "mode": "sse",
                 "raw": concat!(
                     "data: {\"v\":{\"response\":{\"message_id\":2,\"status\":\"WIP\",\"content\":\"\"}}}\n\n",
-                    "data: {\"p\":\"response/content\",\"v\":\"<tool_call>\\n\"}\n\n",
+                    "data: {\"p\":\"response/content\",\"v\":\"<|DSML|tool_calls>\\n\"}\n\n",
                     "data: {\"o\":\"APPEND\",\"v\":\"{\\\"name\\\":\\\"exec_command\\\",\\\"arguments\\\":{\\\"cmd\\\":\\\"bash -lc 'curl -s -o /dev/null -w \\\\\\\"%{http_code}\\\\\\\" http://127.0.0.1:4040/'\\\"},\\\"id\\\":\\\"check_webdebug\\\",\\\"justification\\\":\\\"验证 fin web-debug 是否运行\\\"}}\"}\n\n",
-                    "data: {\"v\":\"\\n</tool_call>\"}\n\n",
+                    "data: {\"v\":\"\\n</|DSML|tool_calls>\"}\n\n",
                     "data: {\"p\":\"response/status\",\"v\":\"FINISHED\"}\n\n"
                 )
             }
@@ -1609,9 +1609,85 @@ fn test_resp_profile_chat_deepseek_web_declared_tools_missing_returns_error_with
         explicit_profile: None,
     };
 
-    let error = run_resp_inbound_stage3_compat(input).unwrap_err();
-    assert!(error.contains("declared tools present"));
-    assert!(error.contains("toolChoiceRequired=false"));
+    let error = run_resp_inbound_stage3_compat(input).expect_err("strict declared tools should fail without tool call");
+    assert!(error.contains("DeepSeek declared tools present but no valid tool call was produced"));
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_declared_tools_auto_without_tool_choice_allows_plain_text() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "当前目录是 /Users/fanzhang/Documents/github/routecodex。",
+                    "tool_calls": []
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_declared_tools_auto_text_ok".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("thinking-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "auto",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "先调用 exec_command 工具执行 pwd。拿到工具结果后，用一句中文返回当前目录，不要再次调用工具。"
+                    },
+                    {
+                        "role": "tool",
+                        "content": "/Users/fanzhang/Documents/github/routecodex"
+                    }
+                ]
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": true,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert_eq!(
+        result.payload["choices"][0]["message"]["content"],
+        Value::String("当前目录是 /Users/fanzhang/Documents/github/routecodex。".to_string())
+    );
+    assert_eq!(
+        result.payload["metadata"]["deepseek"]["toolCallState"],
+        Value::String("no_tool_calls".to_string())
+    );
 }
 
 #[test]
@@ -1674,9 +1750,81 @@ fn test_resp_profile_chat_deepseek_web_coding_route_plain_text_final_requires_to
         explicit_profile: None,
     };
 
-    let error = run_resp_inbound_stage3_compat(input).unwrap_err();
-    assert!(error.contains("declared tools present"));
-    assert!(error.contains("toolChoiceRequired=false"));
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "stop");
+    assert_eq!(
+        result.payload["choices"][0]["message"]["content"],
+        "我已经完成检查，根因在 response 侧 declared tools 判定过严，需要对齐 request 侧路由语义。"
+    );
+    assert_eq!(
+        result.payload["metadata"]["deepseek"]["toolCallState"],
+        Value::String("no_tool_calls".to_string())
+    );
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_coding_route_auto_without_tool_choice_allows_plain_text() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "我已经完成检查，根因在 response 侧 declared tools 判定过严。",
+                    "tool_calls": []
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_coding_auto_text_ok".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("coding-long-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "auto",
+                "messages": [{
+                    "role": "user",
+                    "content": "继续"
+                }]
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": true,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let error = run_resp_inbound_stage3_compat(input)
+        .expect_err("coding route with declared tools should fail fast when tool call is missing");
+    assert!(error.contains("DeepSeek declared tools present but no valid tool call was produced"));
 }
 
 #[test]
@@ -1735,7 +1883,7 @@ fn test_resp_profile_chat_deepseek_web_narrative_tool_intent_is_rejected_without
     };
 
     let error = run_resp_inbound_stage3_compat(input).unwrap_err();
-    assert!(error.contains("declared tools present"));
+    assert!(error.contains("narrative tool intent"));
 }
 
 #[test]
@@ -1748,7 +1896,7 @@ fn test_resp_profile_chat_deepseek_web_harvests_tool_call_from_reasoning_content
                 "message": {
                     "role": "assistant",
                     "content": "",
-                    "reasoning_content": "我们上次修改了 scheduler.rs，使 running 状态不再阻塞 dispatch_ready_task。\n\n让我先查看 fin-cli 的帮助，看看有哪些命令可以创建持久会话。\n<tool_call>\n{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"bash -lc '~/.cargo/bin/fin-cli --help'\"}}\n</tool_call>",
+                    "reasoning_content": "我们上次修改了 scheduler.rs，使 running 状态不再阻塞 dispatch_ready_task。\n\n让我先查看 fin-cli 的帮助，看看有哪些命令可以创建持久会话。\n<|DSML|tool_calls>\n{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"bash -lc '~/.cargo/bin/fin-cli --help'\"}}\n</|DSML|tool_calls>",
                     "tool_calls": []
                 }
             }]
@@ -1784,7 +1932,7 @@ fn test_resp_profile_chat_deepseek_web_harvests_tool_call_from_reasoning_content
             })),
             claude_code: None,
             anthropic_thinking: None,
-            estimated_input_tokens: None,
+            estimated_input_tokens: Some(23.0),
             model_id: None,
             client_model_id: None,
             original_model_id: None,
@@ -1813,11 +1961,20 @@ fn test_resp_profile_chat_deepseek_web_harvests_tool_call_from_reasoning_content
     )
     .unwrap_or(Value::Null);
     assert_eq!(args["cmd"], "bash -lc '~/.cargo/bin/fin-cli --help'");
-    assert_eq!(result.payload["usage"]["prompt_tokens"], 23);
-    assert_eq!(result.payload["usage"]["completion_tokens"], 100);
-    assert_eq!(result.payload["usage"]["total_tokens"], 123);
-    assert_eq!(result.payload["usage"]["input_tokens"], 23);
-    assert_eq!(result.payload["usage"]["output_tokens"], 100);
+    let prompt = result.payload["usage"]["prompt_tokens"]
+        .as_i64()
+        .unwrap_or_default();
+    let completion = result.payload["usage"]["completion_tokens"]
+        .as_i64()
+        .unwrap_or_default();
+    let total = result.payload["usage"]["total_tokens"]
+        .as_i64()
+        .unwrap_or_default();
+    assert_eq!(prompt, 23);
+    assert!(completion > 0);
+    assert_eq!(total, prompt + completion);
+    assert_eq!(result.payload["usage"]["input_tokens"], Value::from(prompt));
+    assert_eq!(result.payload["usage"]["output_tokens"], Value::from(completion));
 }
 
 #[test]
@@ -1831,9 +1988,9 @@ fn test_resp_profile_chat_deepseek_web_sse_patch_without_append_harvests_reasoni
                     "data: {\"request_message_id\":1,\"response_message_id\":2,\"model_type\":\"default\"}\n\n",
                     "data: {\"v\":{\"response\":{\"message_id\":2,\"status\":\"WIP\",\"content\":\"\",\"thinking_content\":null}}}\n\n",
                     "data: {\"p\":\"response/thinking_content\",\"v\":\"让我先查看 fin-cli 的帮助。\\n\"}\n\n",
-                    "data: {\"v\":\"<tool_call>\\n\"}\n\n",
+                    "data: {\"v\":\"<|DSML|tool_calls>\\n\"}\n\n",
                     "data: {\"v\":\"{\\\"name\\\":\\\"exec_command\\\",\\\"arguments\\\":{\\\"cmd\\\":\\\"bash -lc '~/.cargo/bin/fin-cli --help'\\\"}}\\n\"}\n\n",
-                    "data: {\"v\":\"</tool_call>\"}\n\n",
+                    "data: {\"v\":\"</|DSML|tool_calls>\"}\n\n",
                     "data: {\"p\":\"response/accumulated_token_usage\",\"o\":\"SET\",\"v\":123}\n\n",
                     "data: {\"p\":\"response/status\",\"v\":\"FINISHED\"}\n\n",
                     "event: finish\n",
@@ -1910,9 +2067,9 @@ fn test_resp_profile_chat_deepseek_web_harvests_invalid_backslash_escaped_shell_
             "body": {
                 "mode": "sse",
                 "raw": concat!(
-                    "data: {\"p\":\"response/content\",\"o\":\"APPEND\",\"v\":\"<tool_call>\\n\"}\n\n",
+                    "data: {\"p\":\"response/content\",\"o\":\"APPEND\",\"v\":\"<|DSML|tool_calls>\\n\"}\n\n",
                     "data: {\"v\":\"{\\\"arguments\\\":{\\\"cmd\\\":\\\"bash -lc 'cat > /tmp/a.ts << \\\\\\\"EOF\\\\\\\"\\\\nwith open\\\\('x'\\\\) as f:\\\\n    content = f.read\\\\(\\\\)\\\\nEOF'\\\",\\\"justification\\\":\\\"repair sample\\\"},\\\"id\\\":\\\"call_invalid_escape_1\\\",\\\"name\\\":\\\"exec_command\\\"}\"}\n\n",
-                    "data: {\"v\":\"\\n</tool_call>\"}\n\n",
+                    "data: {\"v\":\"\\n</|DSML|tool_calls>\"}\n\n",
                     "data: {\"p\":\"response/status\",\"v\":\"FINISHED\"}\n\n"
                 )
             }
@@ -1975,6 +2132,98 @@ fn test_resp_profile_chat_deepseek_web_harvests_invalid_backslash_escaped_shell_
     let cmd = args["cmd"].as_str().unwrap_or("");
     assert!(cmd.contains("with open\\('x'\\) as f:"));
     assert!(cmd.contains("content = f.read\\(\\)"));
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_sse_fragment_dsml_invoke_parameter_cdata_harvests_tool_call()
+{
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "body": {
+                "mode": "sse",
+                "raw": concat!(
+                    "event: ready\n",
+                    "data: {\"request_message_id\":1,\"response_message_id\":2,\"model_type\":\"expert\"}\n\n",
+                    "data: {\"updated_at\":1778402528.5027158}\n\n",
+                    "data: {\"v\":{\"response\":{\"message_id\":2,\"parent_id\":1,\"model\":\"\",\"role\":\"ASSISTANT\",\"thinking_enabled\":true,\"status\":\"WIP\",\"accumulated_token_usage\":0,\"fragments\":[{\"id\":2,\"type\":\"THINK\",\"content\":\"The\",\"elapsed_secs\":null,\"references\":[],\"stage_id\":1}]}}}\n\n",
+                    "data: {\"p\":\"response/fragments/-1/content\",\"o\":\"APPEND\",\"v\":\" user wants tool call.\"}\n\n",
+                    "data: {\"p\":\"response/fragments\",\"o\":\"APPEND\",\"v\":[{\"id\":3,\"type\":\"RESPONSE\",\"content\":\"<\",\"references\":[],\"stage_id\":1}]}\n\n",
+                    "data: {\"p\":\"response/fragments/-1/content\",\"v\":\"|DSML|tool_calls>\\n\"}\n\n",
+                    "data: {\"v\":\" <|DSML|invoke name=\\\"exec_command\\\">\\n\"}\n\n",
+                    "data: {\"v\":\"   <|DSML|parameter name=\\\"cmd\\\"><![CDATA[bash -lc 'pwd']]></|DSML|parameter>\\n\"}\n\n",
+                    "data: {\"v\":\" </|DSML|invoke>\\n\"}\n\n",
+                    "data: {\"v\":\"</|DSML|tool_calls>\"}\n\n",
+                    "data: {\"p\":\"response\",\"o\":\"BATCH\",\"v\":[{\"p\":\"accumulated_token_usage\",\"v\":2222},{\"p\":\"quasi_status\",\"v\":\"FINISHED\"}]}\n\n",
+                    "data: {\"p\":\"response/status\",\"o\":\"SET\",\"v\":\"FINISHED\"}\n\n",
+                    "event: close\n",
+                    "data: {\"click_behavior\":\"none\",\"auto_resume\":false}\n\n"
+                )
+            }
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_sse_fragment_dsml_cdata".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: Some("thinking/thinking-deepseek-web-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "required"
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": true,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["metadata"]["deepseek"]["toolCallState"],
+        "text_tool_calls"
+    );
+    assert_eq!(
+        result.payload["metadata"]["deepseek"]["toolCallSource"],
+        "fallback"
+    );
+    assert_eq!(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    let args: Value = serde_json::from_str(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    assert_eq!(args["cmd"], "bash -lc 'pwd'");
 }
 
 #[test]
@@ -2655,7 +2904,7 @@ fn test_resp_profile_chat_glm_extracts_tool_calls_from_reasoning_markup() {
                 "message": {
                     "role": "assistant",
                     "content": "",
-                    "reasoning_content": "exec_command<arg_key>cmd</arg_key><arg_value>node scripts/start-headful.mjs --profile weibo_fresh</arg_value><arg_key>yield_time_ms</arg_key><arg_value>30000</arg_value></tool_call>"
+                    "reasoning_content": "exec_command<arg_key>cmd</arg_key><arg_value>node scripts/start-headful.mjs --profile weibo_fresh</arg_value><arg_key>yield_time_ms</arg_key><arg_value>30000</arg_value></|DSML|tool_calls>"
                 }
             }]
         }),
@@ -2899,7 +3148,7 @@ fn test_resp_profile_chat_glm_preserves_tagged_exec_command_with_blank_cmd() {
                 "finish_reason": "stop",
                 "message": {
                     "role": "assistant",
-                    "reasoning_content": "exec_command<arg_key>cmd</arg_key><arg_value></arg_value></tool_call>"
+                    "reasoning_content": "exec_command<arg_key>cmd</arg_key><arg_value></arg_value></|DSML|tool_calls>"
                 }
             }]
         }),
@@ -2933,7 +3182,7 @@ fn test_resp_profile_chat_glm_preserves_tagged_exec_command_with_blank_cmd() {
     assert!(result.payload["choices"][0]["message"]["tool_calls"].is_null());
     assert_eq!(
         result.payload["choices"][0]["message"]["reasoning_content"],
-        "exec_command<arg_key>cmd</arg_key><arg_value></arg_value></tool_call>"
+        "exec_command<arg_key>cmd</arg_key><arg_value></arg_value></|DSML|tool_calls>"
     );
 }
 

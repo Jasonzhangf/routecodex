@@ -1,6 +1,8 @@
 const DEFAULT_SNAPSHOT_ALLOWED_STAGES = Object.freeze([
   'provider-request',
-  'provider-response'
+  'provider-request-contract',
+  'provider-response',
+  'provider-response-contract'
 ]);
 
 type SnapshotStagePolicy = {

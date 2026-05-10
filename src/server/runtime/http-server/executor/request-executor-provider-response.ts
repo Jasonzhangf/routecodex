@@ -48,6 +48,18 @@ export function buildProviderExecutionSuccessResult(args: {
 }): PipelineExecutionResult {
   const metadataHubStageTop = args.readHubStageTop(args.mergedMetadata);
   const hubDecodeBreakdown = args.readHubDecodeBreakdown(metadataHubStageTop);
+  const decodeStats =
+    args.converted.body && typeof args.converted.body === 'object' && !Array.isArray(args.converted.body)
+      ? (args.converted.body as Record<string, any>).__rccDecodeStats
+      : undefined;
+  const rccFirstContentAtMs: number | undefined =
+    decodeStats && typeof decodeStats.firstContentAtMs === 'number'
+      ? decodeStats.firstContentAtMs
+      : undefined;
+  const rccLastContentAtMs: number | undefined =
+    decodeStats && typeof decodeStats.lastContentAtMs === 'number'
+      ? decodeStats.lastContentAtMs
+      : undefined;
   return {
     ...args.converted,
     usageLogInfo: {
@@ -77,7 +89,9 @@ export function buildProviderExecutionSuccessResult(args: {
         args.readString(args.mergedMetadata.clientWorkdir)
         ?? args.readString(args.mergedMetadata.client_workdir)
         ?? args.readString(args.mergedMetadata.workdir)
-        ?? args.readString(args.mergedMetadata.cwd)
+        ?? args.readString(args.mergedMetadata.cwd),
+      firstContentAtMs: rccFirstContentAtMs,
+      lastContentAtMs: rccLastContentAtMs
     }
   };
 }
@@ -181,7 +195,11 @@ export async function processSuccessfulProviderResponse(args: {
     observation: unknown;
   }) => void;
   writeProviderSnapshot: (args: {
-    phase: 'provider-request' | 'provider-response';
+    phase:
+      | 'provider-request'
+      | 'provider-response'
+      | 'provider-request-contract'
+      | 'provider-response-contract';
     requestId: string;
     data: unknown;
     headers?: Record<string, unknown>;

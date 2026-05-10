@@ -5,13 +5,13 @@ const writeProviderSnapshot = jest.fn(async () => {});
 const attachProviderSseSnapshotStream = jest.fn((stream: NodeJS.ReadableStream) => stream);
 const shouldCaptureProviderStreamSnapshots = jest.fn(() => true);
 
-jest.unstable_mockModule('../../src/providers/core/utils/snapshot-writer.js', () => ({
+jest.mock('../../src/providers/core/utils/snapshot-writer.js', () => ({
   writeProviderSnapshot,
   attachProviderSseSnapshotStream,
   shouldCaptureProviderStreamSnapshots
 }));
 
-const { HttpRequestExecutor } = await import('../../src/providers/core/runtime/http-request-executor.ts');
+let HttpRequestExecutor: typeof import('../../src/providers/core/runtime/http-request-executor.ts').HttpRequestExecutor;
 
 function createExecutor() {
   const httpClient = {
@@ -76,6 +76,10 @@ function createExecutorWithPreparedSseResponse() {
 }
 
 describe('HttpRequestExecutor SSE snapshot finalization', () => {
+  beforeAll(async () => {
+    ({ HttpRequestExecutor } = await import('../../src/providers/core/runtime/http-request-executor.ts'));
+  });
+
   beforeEach(() => {
     writeProviderSnapshot.mockClear();
     attachProviderSseSnapshotStream.mockClear();

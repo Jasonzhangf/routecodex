@@ -26,7 +26,7 @@ fn current_unix_seconds() -> i64 {
         .unwrap_or(0)
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum DeepSeekAppendTarget {
     #[default]
     None,
@@ -39,6 +39,7 @@ struct DeepSeekSseState {
     content: String,
     thinking_content: String,
     append_target: DeepSeekAppendTarget,
+    fragment_targets: Vec<DeepSeekAppendTarget>,
     finished: bool,
     accumulated_token_usage: Option<i64>,
     response_message_id: Option<String>,
@@ -90,6 +91,67 @@ fn append_thinking_content(state: &mut DeepSeekSseState, text: &str) {
     state.thinking_content.push_str(text);
 }
 
+fn fragment_target_from_type(fragment_type: Option<&str>) -> DeepSeekAppendTarget {
+    match fragment_type
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_uppercase())
+        .as_deref()
+    {
+        Some("THINK") | Some("THINKING") | Some("REASONING") => DeepSeekAppendTarget::Thinking,
+        Some("RESPONSE") | Some("TEXT") | Some("ANSWER") => DeepSeekAppendTarget::Content,
+        _ => DeepSeekAppendTarget::Content,
+    }
+}
+
+fn append_fragment_text(state: &mut DeepSeekSseState, target: DeepSeekAppendTarget, text: &str) {
+    match target {
+        DeepSeekAppendTarget::Thinking => append_thinking_content(state, text),
+        DeepSeekAppendTarget::Content => append_content(state, text),
+        DeepSeekAppendTarget::None => {}
+    }
+}
+
+fn process_fragment_record(
+    fragment: &serde_json::Map<String, Value>,
+    state: &mut DeepSeekSseState,
+) {
+    let target = fragment_target_from_type(fragment.get("type").and_then(Value::as_str));
+    state.fragment_targets.push(target);
+    state.append_target = target;
+    if let Some(content) = fragment.get("content").and_then(Value::as_str) {
+        append_fragment_text(state, target, content);
+    }
+}
+
+fn process_fragments_array(items: &[Value], state: &mut DeepSeekSseState) {
+    for item in items {
+        let Some(fragment) = item.as_object() else {
+            continue;
+        };
+        process_fragment_record(fragment, state);
+    }
+}
+
+fn resolve_fragment_target_from_path(
+    path: &str,
+    state: &DeepSeekSseState,
+) -> Option<DeepSeekAppendTarget> {
+    let prefix = "response/fragments/";
+    if !path.starts_with(prefix) || !path.ends_with("/content") {
+        return None;
+    }
+    let index_raw = path
+        .strip_prefix(prefix)?
+        .strip_suffix("/content")?
+        .trim();
+    if index_raw == "-1" {
+        return state.fragment_targets.last().copied();
+    }
+    let index = index_raw.parse::<usize>().ok()?;
+    state.fragment_targets.get(index).copied()
+}
+
 fn process_response_record(
     response: &serde_json::Map<String, Value>,
     state: &mut DeepSeekSseState,
@@ -111,6 +173,9 @@ fn process_response_record(
     }
     if let Some(tokens) = read_i64(response.get("accumulated_token_usage")) {
         state.accumulated_token_usage = Some(tokens);
+    }
+    if let Some(fragments) = response.get("fragments").and_then(Value::as_array) {
+        process_fragments_array(fragments, state);
     }
     if let Some(message_id) = response
         .get("message_id")
@@ -152,6 +217,21 @@ fn process_patch_payload(payload: &serde_json::Map<String, Value>, state: &mut D
         if let Some(text) = value.and_then(Value::as_str) {
             state.append_target = DeepSeekAppendTarget::Thinking;
             append_thinking_content(state, text);
+            return;
+        }
+    }
+
+    if path == "response/fragments" && is_textual_patch_op {
+        if let Some(items) = value.and_then(Value::as_array) {
+            process_fragments_array(items, state);
+            return;
+        }
+    }
+
+    if let Some(target) = resolve_fragment_target_from_path(path, state) {
+        if let Some(text) = value.and_then(Value::as_str) {
+            state.append_target = target;
+            append_fragment_text(state, target, text);
             return;
         }
     }
@@ -619,6 +699,32 @@ mod tests {
         assert_eq!(normalized["object"], "chat.completion");
         assert_eq!(normalized["choices"][0]["message"]["role"], "assistant");
         assert_eq!(normalized["choices"][0]["message"]["content"], "");
+        assert_eq!(normalized["choices"][0]["finish_reason"], "stop");
+    }
+
+    #[test]
+    fn test_normalize_deepseek_business_envelope_collects_fragment_based_thinking_and_response() {
+        let payload = json!({
+            "body": {
+                "mode": "sse",
+                "raw": concat!(
+                    "event: ready\n",
+                    "data: {\"request_message_id\":1,\"response_message_id\":2,\"model_type\":\"expert\"}\n\n",
+                    "data: {\"v\":{\"response\":{\"message_id\":2,\"status\":\"WIP\",\"content\":\"\",\"fragments\":[{\"id\":2,\"type\":\"THINK\",\"content\":\"We\",\"elapsed_secs\":null,\"references\":[],\"stage_id\":1}]}}}\n\n",
+                    "data: {\"p\":\"response/fragments/-1/content\",\"o\":\"APPEND\",\"v\":\" need\"}\n\n",
+                    "data: {\"v\":\" to continue\"}\n\n",
+                    "data: {\"p\":\"response/fragments\",\"o\":\"APPEND\",\"v\":[{\"id\":3,\"type\":\"RESPONSE\",\"content\":\"Jason\",\"references\":[],\"stage_id\":1}]}\n\n",
+                    "data: {\"p\":\"response/status\",\"o\":\"SET\",\"v\":\"FINISHED\"}\n\n"
+                )
+            }
+        });
+
+        let normalized = normalize_deepseek_business_envelope(payload, None).unwrap();
+        assert_eq!(normalized["choices"][0]["message"]["content"], "Jason");
+        assert_eq!(
+            normalized["choices"][0]["message"]["reasoning_content"],
+            "We need to continue"
+        );
         assert_eq!(normalized["choices"][0]["finish_reason"], "stop");
     }
 }

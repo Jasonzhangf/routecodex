@@ -204,6 +204,13 @@ export function isStageLoggingEnabled(): boolean {
   return cachedStageLoggingFlag;
 }
 
+export function shouldEmitStageEvent(stage: string): boolean {
+  if (isStageLoggingEnabled()) {
+    return true;
+  }
+  return shouldLogReleaseSummaryStage(stage);
+}
+
 export function logPipelineStage(stage: string, requestId: string, details?: Record<string, unknown>): void {
   const timingEnabled = isStageTimingEnabled();
   const timingSummaryEnabled = isStageTimingSummaryEnabled();

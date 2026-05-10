@@ -37,6 +37,20 @@ export function buildCapturedChatRequestInput(args: unknown): unknown {
   const hasInput = Boolean(workingRequest && Object.prototype.hasOwnProperty.call(workingRequest, "input"));
   const input = hasInput ? workingRequest?.input : undefined;
   const tools = Array.isArray(workingRequest?.tools) ? workingRequest?.tools : null;
+  const hasToolChoice = Boolean(
+    workingRequest && Object.prototype.hasOwnProperty.call(workingRequest, "tool_choice"),
+  );
+  const toolChoice = hasToolChoice ? workingRequest?.tool_choice : undefined;
+  const hasSemantics = Boolean(
+    workingRequest && Object.prototype.hasOwnProperty.call(workingRequest, "semantics"),
+  );
+  const semantics =
+    hasSemantics &&
+    workingRequest?.semantics &&
+    typeof workingRequest.semantics === "object" &&
+    !Array.isArray(workingRequest.semantics)
+      ? workingRequest.semantics
+      : undefined;
   const parameters =
     workingRequest?.parameters && typeof workingRequest.parameters === "object" && !Array.isArray(workingRequest.parameters)
       ? workingRequest.parameters
@@ -47,6 +61,8 @@ export function buildCapturedChatRequestInput(args: unknown): unknown {
     messages,
     ...(hasInput ? { input } : {}),
     tools,
+    ...(hasToolChoice ? { tool_choice: toolChoice } : {}),
+    ...(hasSemantics ? { semantics: semantics ?? null } : {}),
     parameters,
   };
 }

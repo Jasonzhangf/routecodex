@@ -548,10 +548,7 @@ pub(crate) fn apply_deepseek_web_response_compat(
                 .to_string(),
         );
     }
-    if effective_declared_tools_present
-        && after_count <= 0
-        && detect_narrative_tool_intent(&governed)
-    {
+    if after_count <= 0 && detect_narrative_tool_intent(&governed) {
         return Err(
             "DeepSeek declared tools present but emitted narrative tool intent instead of a valid tool call"
                 .to_string(),

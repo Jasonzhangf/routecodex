@@ -7,15 +7,12 @@ import {
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
 const mockSyncReasoningStopModeFromRequest = jest.fn(() => 'off');
-const mockBridgeModule = () => ({
+jest.mock('../../../../../src/modules/llmswitch/bridge.js', () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
-});
-
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
+}));
 
 describe('provider-response-converter finish reason wrapper metadata', () => {
   it('preserves derived finish_reason for streamed responses logs', async () => {

@@ -101,7 +101,8 @@ describe('sendPipelineResponse SSE completion logging', () => {
       {
         status: 200,
         body: {
-          __sse_responses: stream
+          __sse_responses: stream,
+          __routecodex_finish_reason: 'tool_calls'
         }
       } as any,
       'req-stream-finish',
@@ -158,7 +159,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"sawTerminalEvent":false'));
   });
 
-  it('emits SSE error when stopless stream ends with finish_reason=stop but no reasoning.stop finalization', async () => {
+  it('does not enforce stopless contract inside raw SSE handler path', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       writeSnapshotViaHooks: async () => undefined
     }));
@@ -188,7 +189,8 @@ describe('sendPipelineResponse SSE completion logging', () => {
       {
         status: 200,
         body: {
-          __sse_responses: stream
+          __sse_responses: stream,
+          __routecodex_finish_reason: 'stop'
         },
         usageLogInfo: {
           stoplessMode: 'on',
@@ -202,12 +204,11 @@ describe('sendPipelineResponse SSE completion logging', () => {
     await finished;
 
     const output = chunks.join('');
-    expect(output).toContain('event: error');
-    expect(output).toContain('STOPLESS_FINALIZATION_MISSING');
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[host][req-stopless-sse-missing-finalization] stopless_finalization_missing'));
+    expect(output).not.toContain('event: error');
+    expect(output).not.toContain('STOPLESS_FINALIZATION_MISSING');
   });
 
-  it('emits SSE error when stopless wrapper is already resolved to stop before stream end', async () => {
+  it('does not treat streamed wrapper finish_reason as stopless truth source in handler path', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       writeSnapshotViaHooks: async () => undefined
     }));
@@ -250,8 +251,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     await finished;
 
     const output = chunks.join('');
-    expect(output).toContain('event: error');
-    expect(output).toContain('STOPLESS_FINALIZATION_MISSING');
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[host][req-stopless-sse-wrapper-stop] stopless_finalization_missing'));
+    expect(output).not.toContain('event: error');
+    expect(output).not.toContain('STOPLESS_FINALIZATION_MISSING');
   });
 });

@@ -109,6 +109,34 @@ describe('provider-profile-loader', () => {
     }
   });
 
+  it('defaults deepseek-web profile to contextFileEnabled when omitted', () => {
+    const config: Record<string, unknown> = {
+      providers: {
+        deepseek: {
+          type: 'deepseek',
+          baseUrl: 'https://chat.deepseek.com',
+          compatibilityProfile: 'chat:deepseek-web',
+          auth: {
+            type: 'deepseek-account',
+            tokenFile: '~/.routecodex/auth/deepseek-account-1.json'
+          },
+          deepseek: {
+            strictToolRequired: true,
+            toolProtocol: 'text'
+          }
+        }
+      }
+    };
+
+    const result = buildProviderProfiles(config);
+    const profile = result.byId.deepseek;
+    expect(profile.metadata?.deepseek).toMatchObject({
+      strictToolRequired: true,
+      toolProtocol: 'text',
+      contextFileEnabled: true
+    });
+  });
+
   it('extracts transport backend from provider config', () => {
     const config: Record<string, unknown> = {
       providers: {

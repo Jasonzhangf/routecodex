@@ -85,7 +85,7 @@ export async function executeRouteAndBuildOutbound<TContext = Record<string, unk
   });
   workingRequest = routeContext.workingRequest;
 
-  const { providerPayload, shadowBaselineProviderPayload } =
+  const { providerPayload, shadowBaselineProviderPayload, outboundWorkingRequest } =
     await buildOutboundProviderPayloadBundle({
       normalized,
       hooks,
@@ -105,7 +105,7 @@ export async function executeRouteAndBuildOutbound<TContext = Record<string, unk
     });
   const metadata = buildRouteAndOutboundResultMetadata({
     normalized,
-    workingRequest,
+    capturedWorkingRequest: outboundWorkingRequest,
     activeProcessMode,
     outboundProtocol: routeContext.outboundProtocol,
     target: routeContext.routing.target,

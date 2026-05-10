@@ -1,7 +1,6 @@
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { PassThrough } from 'node:stream';
 import { writeSnapshotViaHooks } from '../../../modules/llmswitch/bridge.js';
 import { buildInfo } from '../../../build-info.js';
 import { resolveRccSnapshotsDirFromEnv } from '../../../config/user-data-paths.js';
@@ -23,7 +22,9 @@ import type { ProviderSnapshotPersistInput } from './snapshot-writer-buffer.js';
 
 type Phase =
   | 'provider-request'
+  | 'provider-request-contract'
   | 'provider-response'
+  | 'provider-response-contract'
   | 'provider-error'
   | 'provider-preprocess-debug'
   | 'provider-body-debug';
@@ -646,22 +647,6 @@ type StreamSnapshotOptions = {
   extra?: Record<string, unknown>;
 };
 
-function toBuffer(chunk: unknown): Buffer {
-  if (Buffer.isBuffer(chunk)) {
-    return chunk;
-  }
-  if (chunk instanceof Uint8Array) {
-    return Buffer.from(chunk);
-  }
-  if (typeof chunk === 'string') {
-    return Buffer.from(chunk, 'utf8');
-  }
-  if (chunk === undefined || chunk === null) {
-    return Buffer.alloc(0);
-  }
-  return Buffer.from(String(chunk), 'utf8');
-}
-
 export function shouldCaptureProviderStreamSnapshots(): boolean {
   const flag = (process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS || '').trim().toLowerCase();
   if (flag === '1' || flag === 'true') {
@@ -673,61 +658,10 @@ export function shouldCaptureProviderStreamSnapshots(): boolean {
   return runtimeFlags.snapshotsEnabled && buildInfo.mode !== 'release';
 }
 
-function resolveProviderStreamSnapshotMaxBytes(): number {
-  const raw = String(
-    process.env.ROUTECODEX_PROVIDER_STREAM_SNAPSHOT_MAX_BYTES ||
-      process.env.RCC_PROVIDER_STREAM_SNAPSHOT_MAX_BYTES ||
-      '2000000'
-  ).trim();
-  const parsed = Number(raw);
-  if (!raw) {
-    return 2_000_000;
-  }
-  if (Number.isFinite(parsed) && parsed >= 0) {
-    return Math.floor(parsed);
-  }
-  return 2_000_000;
-}
-
 export function attachProviderSseSnapshotStream(
   stream: NodeJS.ReadableStream,
   options: StreamSnapshotOptions
 ): NodeJS.ReadableStream {
-  const maxBytes = resolveProviderStreamSnapshotMaxBytes();
-  if (maxBytes <= 0) {
-    return stream;
-  }
-
-  const tee = new PassThrough();
-  const capture = new PassThrough();
-  stream.pipe(tee);
-  stream.pipe(capture);
-
-  const chunks: Buffer[] = [];
-  let size = 0;
-  let truncated = false;
-  capture.on('data', (chunk) => {
-    const buf = toBuffer(chunk);
-    if (!buf.length) {
-      return;
-    }
-    if (truncated || size >= maxBytes) {
-      truncated = true;
-      return;
-    }
-    const remaining = maxBytes - size;
-    if (buf.length <= remaining) {
-      chunks.push(buf);
-      size += buf.length;
-      return;
-    }
-    if (remaining > 0) {
-      chunks.push(buf.slice(0, remaining));
-      size += remaining;
-    }
-    truncated = true;
-  });
-
   let flushed = false;
   const flushSnapshot = (error?: unknown) => {
     if (flushed) {
@@ -735,20 +669,13 @@ export function attachProviderSseSnapshotStream(
     }
     flushed = true;
     try {
-      stream.unpipe(capture);
-    } catch (unpipeError) {
-      logSnapshotNonBlockingError(`stream.unpipe:${options.requestId}`, unpipeError);
+      stream.removeListener('end', onEnd);
+      stream.removeListener('close', onClose);
+      stream.removeListener('error', onError);
+    } catch (removeListenerError) {
+      logSnapshotNonBlockingError(`stream.removeListener:${options.requestId}`, removeListenerError);
     }
-    capture.removeAllListeners();
-    const raw = chunks.length ? Buffer.concat(chunks).toString('utf8') : '';
     const payload: Record<string, unknown> = { mode: 'sse' };
-    if (raw) {
-      payload.raw = raw;
-    }
-    if (truncated) {
-      payload.truncated = true;
-      payload.maxBytes = maxBytes;
-    }
     if (options.extra) {
       Object.assign(payload, options.extra);
     }
@@ -774,22 +701,15 @@ export function attachProviderSseSnapshotStream(
     flushSnapshot(error);
   };
 
-  capture.on('end', () => flushSnapshot());
-  capture.on('close', () => flushSnapshot());
-  capture.on('error', handleError);
-  stream.on('error', (error) => {
-    flushSnapshot(error);
-    // 关键：pipe 不会自动把 source error 透传给 PassThrough。
-    // 若不显式 destroy，consumer（例如 SSE→JSON converter）会永久挂起等待 chunk。
-    try {
-      tee.destroy(error as Error);
-    } catch {
-      tee.destroy();
-    }
-  });
-  tee.on('error', handleError);
+  const onEnd = () => flushSnapshot();
+  const onClose = () => flushSnapshot();
+  const onError = (error?: unknown) => handleError(error);
 
-  return tee;
+  stream.on('end', onEnd);
+  stream.on('close', onClose);
+  stream.on('error', onError);
+
+  return stream;
 }
 
 export async function writeProviderRetrySnapshot(options: {

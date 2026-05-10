@@ -159,8 +159,20 @@ fn contains_explicit_tool_wrapper_marker(raw: &str) -> bool {
     lowered.contains("<<rcc_tool_calls")
         || lowered.contains("<function_calls>")
         || lowered.contains("</function_calls>")
+        || lowered.contains("<|dsml|tool_calls>")
+        || lowered.contains("</|dsml|tool_calls>")
+        || lowered.contains("<|dsml|invoke")
+        || lowered.contains("</|dsml|invoke>")
+        || lowered.contains("<|dsml|parameter")
+        || lowered.contains("</|dsml|parameter>")
         || lowered.contains("<tool_call>")
         || lowered.contains("</tool_call>")
+        || lowered.contains("<tool_calls>")
+        || lowered.contains("</tool_calls>")
+        || lowered.contains("<invoke")
+        || lowered.contains("</invoke>")
+        || lowered.contains("<parameter")
+        || lowered.contains("</parameter>")
         || lowered.contains("<|tool_call_begin|>")
         || lowered.contains("<|tool_calls_section_begin|>")
 }
@@ -2201,6 +2213,30 @@ fn decode_basic_xml_entities(raw: &str) -> String {
         .replace("&amp;", "&")
 }
 
+fn unwrap_xml_cdata_sections(raw: &str) -> String {
+    if !raw.contains("<![CDATA[") {
+        return raw.to_string();
+    }
+
+    let mut out = String::with_capacity(raw.len());
+    let mut remaining = raw;
+    loop {
+        let Some(start) = remaining.find("<![CDATA[") else {
+            out.push_str(remaining);
+            break;
+        };
+        out.push_str(&remaining[..start]);
+        let after_start = &remaining[start + "<![CDATA[".len()..];
+        let Some(end) = after_start.find("]]>") else {
+            out.push_str(after_start);
+            break;
+        };
+        out.push_str(&after_start[..end]);
+        remaining = &after_start[end + "]]>".len()..];
+    }
+    out
+}
+
 fn is_supported_xml_named_tool_name(raw_name: &str) -> bool {
     matches!(
         raw_name,
@@ -2385,6 +2421,36 @@ fn parse_xml_tag_attributes(raw_tag: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+fn normalize_dsml_tool_markup(raw: &str) -> String {
+    let mut normalized = raw.to_string();
+    let replacements = [
+        (
+            r#"(?is)<\|\s*dsml\s*\|\s*tool_calls\s*>"#,
+            "<tool_calls>",
+        ),
+        (
+            r#"(?is)</\|\s*dsml\s*\|\s*tool_calls\s*>"#,
+            "</tool_calls>",
+        ),
+        (r#"(?is)<\|\s*dsml\s*\|\s*invoke\b"#, "<invoke"),
+        (r#"(?is)</\|\s*dsml\s*\|\s*invoke\s*>"#, "</invoke>"),
+        (
+            r#"(?is)<\|\s*dsml\s*\|\s*parameter\b"#,
+            "<parameter",
+        ),
+        (
+            r#"(?is)</\|\s*dsml\s*\|\s*parameter\s*>"#,
+            "</parameter>",
+        ),
+    ];
+    for (pattern, target) in replacements {
+        if let Ok(re) = Regex::new(pattern) {
+            normalized = re.replace_all(normalized.as_str(), target).to_string();
+        }
+    }
+    normalized
+}
+
 fn read_xml_tag_attribute<'a>(attrs: &'a [(String, String)], keys: &[&str]) -> Option<&'a str> {
     for key in keys {
         if let Some((_, value)) = attrs.iter().find(|(name, _)| name == key) {
@@ -2494,8 +2560,11 @@ fn build_xml_named_tool_call_entry(
         let raw_value = body[open_end..value_end].trim();
         if !raw_key.is_empty() && !raw_value.is_empty() {
             let key = resolve_xml_named_child_arg_key(raw_key, &attrs, canonical_name.as_str());
-            let decoded = decode_basic_xml_entities(raw_value).trim().to_string();
-            let cleaned_value = if decoded.contains('<') && decoded.contains('>') {
+            let contains_cdata = raw_value.contains("<![CDATA[");
+            let decoded = unwrap_xml_cdata_sections(decode_basic_xml_entities(raw_value).as_str())
+                .trim()
+                .to_string();
+            let cleaned_value = if !contains_cdata && decoded.contains('<') && decoded.contains('>') {
                 let stripped = strip_xml_tags_preserve_text(decoded.as_str());
                 if stripped.trim().is_empty() {
                     decoded.clone()
@@ -2546,16 +2615,17 @@ fn build_xml_named_tool_call_entry(
 }
 
 fn extract_xml_named_tool_call_blocks(text: &str, fallback_start_id: usize) -> Vec<Value> {
+    let normalized_text = normalize_dsml_tool_markup(text);
     let Ok(open_pattern) = Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.-]*)(?:\s+[^<>]*?)?>") else {
         return Vec::new();
     };
-    let text_lower = text.to_ascii_lowercase();
+    let text_lower = normalized_text.to_ascii_lowercase();
 
     let mut recovered: Vec<Value> = Vec::new();
     let mut seen = HashSet::<String>::new();
     let mut cursor = 0usize;
     let mut index = 0usize;
-    while let Some(caps) = open_pattern.captures(&text[cursor..]) {
+    while let Some(caps) = open_pattern.captures(&normalized_text[cursor..]) {
         let Some(whole) = caps.get(0) else {
             break;
         };
@@ -2576,7 +2646,7 @@ fn extract_xml_named_tool_call_blocks(text: &str, fallback_start_id: usize) -> V
         let body_end = text_lower[open_end..]
             .find(close_tag.as_str())
             .map(|rel| open_end + rel)
-            .unwrap_or(text.len());
+            .unwrap_or(normalized_text.len());
         let full_end = text_lower[body_end..]
             .starts_with(close_tag.as_str())
             .then_some(body_end + close_tag.len())
@@ -2588,7 +2658,7 @@ fn extract_xml_named_tool_call_blocks(text: &str, fallback_start_id: usize) -> V
             )
             && should_attempt_xml_wrapper_harvest(raw_name_lower.as_str())
         {
-            let body = text[open_end..body_end].trim();
+            let body = normalized_text[open_end..body_end].trim();
             if !body.is_empty() {
                 index += 1;
                 if let Some(entry) = build_xml_named_tool_call_entry(
@@ -2614,13 +2684,14 @@ fn extract_xml_named_tool_call_blocks(text: &str, fallback_start_id: usize) -> V
 }
 
 fn strip_supported_xml_named_tool_blocks(raw: &str) -> String {
+    let normalized_raw = normalize_dsml_tool_markup(raw);
     let Ok(open_pattern) = Regex::new(r"(?is)<([A-Za-z_][A-Za-z0-9_.-]*)(?:\s+[^<>]*?)?>") else {
-        return raw.to_string();
+        return normalized_raw;
     };
-    let raw_lower = raw.to_ascii_lowercase();
+    let raw_lower = normalized_raw.to_ascii_lowercase();
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     let mut cursor = 0usize;
-    while let Some(caps) = open_pattern.captures(&raw[cursor..]) {
+    while let Some(caps) = open_pattern.captures(&normalized_raw[cursor..]) {
         let Some(whole) = caps.get(0) else {
             break;
         };
@@ -2642,7 +2713,7 @@ fn strip_supported_xml_named_tool_blocks(raw: &str) -> String {
         let body_end = raw_lower[open_end..]
             .find(close_tag.as_str())
             .map(|rel| open_end + rel)
-            .unwrap_or(raw.len());
+            .unwrap_or(normalized_raw.len());
         let full_end = raw_lower[body_end..]
             .starts_with(close_tag.as_str())
             .then_some(body_end + close_tag.len())
@@ -2655,19 +2726,19 @@ fn strip_supported_xml_named_tool_blocks(raw: &str) -> String {
     }
 
     if ranges.is_empty() {
-        return raw.to_string();
+        return normalized_raw;
     }
 
-    let mut out = String::with_capacity(raw.len());
+    let mut out = String::with_capacity(normalized_raw.len());
     let mut last = 0usize;
     for (start, end) in ranges {
         if start > last {
-            out.push_str(&raw[last..start]);
+            out.push_str(&normalized_raw[last..start]);
         }
-        last = end.min(raw.len());
+        last = end.min(normalized_raw.len());
     }
-    if last < raw.len() {
-        out.push_str(&raw[last..]);
+    if last < normalized_raw.len() {
+        out.push_str(&normalized_raw[last..]);
     }
     out
 }
@@ -2978,10 +3049,36 @@ fn maybe_parse_tool_call_text_value(raw: &str) -> Option<Value> {
     if let Some(parsed) = try_parse_json_value_lenient(trimmed) {
         return Some(parsed);
     }
+    if trimmed.starts_with('{') {
+        if let Some(balanced) = extract_balanced_json_object_at(trimmed, 0) {
+            if let Some(parsed) = try_parse_json_value_lenient(balanced.as_str()) {
+                return Some(parsed);
+            }
+        }
+    } else if trimmed.starts_with('[') {
+        if let Some(balanced) = extract_balanced_json_array_at(trimmed, 0) {
+            if let Some(parsed) = try_parse_json_value_lenient(balanced.as_str()) {
+                return Some(parsed);
+            }
+        }
+    }
     if trimmed.contains("\\\"") {
         let unescaped = unescape_outer_json_quotes_only(trimmed);
         if let Some(parsed) = try_parse_json_value_lenient(unescaped.as_str()) {
             return Some(parsed);
+        }
+        if unescaped.starts_with('{') {
+            if let Some(balanced) = extract_balanced_json_object_at(unescaped.as_str(), 0) {
+                if let Some(parsed) = try_parse_json_value_lenient(balanced.as_str()) {
+                    return Some(parsed);
+                }
+            }
+        } else if unescaped.starts_with('[') {
+            if let Some(balanced) = extract_balanced_json_array_at(unescaped.as_str(), 0) {
+                if let Some(parsed) = try_parse_json_value_lenient(balanced.as_str()) {
+                    return Some(parsed);
+                }
+            }
         }
         if let Some(parsed) = parse_tool_calls_shape_from_text(unescaped.as_str()) {
             return Some(parsed);
@@ -3702,6 +3799,8 @@ fn strip_tool_call_marker_payload(raw: &str) -> String {
         let mut earliest = [
             "<function_calls>",
             "<tool_call>",
+            "<tool_calls>",
+            "<|dsml|tool_calls>",
             "<|tool_calls_section_begin|>",
         ]
         .iter()
@@ -3742,7 +3841,8 @@ fn strip_tool_call_marker_payload(raw: &str) -> String {
         earliest
     }
 
-    let raw = strip_empty_tool_calls_payload_noise(raw);
+    let normalized_raw = normalize_dsml_tool_markup(raw);
+    let raw = strip_empty_tool_calls_payload_noise(normalized_raw.as_str());
     if raw.trim().is_empty() {
         return String::new();
     }
@@ -4496,6 +4596,37 @@ fn extract_strict_wrapper_tool_calls_from_function_calls(
     recovered
 }
 
+fn extract_strict_wrapper_tool_calls_from_tool_calls_container(
+    text: &str,
+    fallback_start_id: usize,
+) -> Vec<Value> {
+    let normalized_text = normalize_dsml_tool_markup(text);
+    let Ok(pattern) = Regex::new(r"(?is)<tool_calls>\s*([\s\S]*?)\s*</tool_calls>") else {
+        return Vec::new();
+    };
+    let mut recovered: Vec<Value> = Vec::new();
+    for caps in pattern.captures_iter(&normalized_text) {
+        let Some(raw) = caps.get(1).map(|m| m.as_str().trim()) else {
+            continue;
+        };
+        if raw.is_empty() {
+            continue;
+        }
+        let parsed = maybe_parse_tool_call_text_value(raw);
+        let Some(value) = parsed else {
+            continue;
+        };
+        for entry in extract_tool_call_entries_from_unknown(&value) {
+            if let Some(normalized) =
+                normalize_tool_call_entry(&entry, fallback_start_id + recovered.len())
+            {
+                recovered.push(normalized);
+            }
+        }
+    }
+    recovered
+}
+
 fn extract_strict_wrapper_tool_calls_from_rcc(text: &str, fallback_start_id: usize) -> Vec<Value> {
     let mut recovered: Vec<Value> = Vec::new();
     for inner in extract_rcc_tool_call_fence_segments(text) {
@@ -4558,6 +4689,18 @@ pub(crate) fn harvest_explicit_wrapper_only_tool_calls_from_payload(payload: &mu
 
                 recovered =
                     extract_xml_tool_call_blocks(&harvest_input, (harvested as usize) + 1);
+                if recovered.is_empty() {
+                    recovered = extract_xml_named_tool_call_blocks(
+                        &harvest_input,
+                        (harvested as usize) + 1,
+                    );
+                }
+                if recovered.is_empty() {
+                    recovered = extract_strict_wrapper_tool_calls_from_tool_calls_container(
+                        &harvest_input,
+                        (harvested as usize) + 1,
+                    );
+                }
                 if recovered.is_empty() {
                     recovered = extract_strict_wrapper_tool_calls_from_function_calls(
                         &harvest_input,
@@ -7041,6 +7184,31 @@ console.log('ok')"#;
         assert_eq!(
             args["cmd"].as_str().unwrap_or(""),
             "tail -100 ~/.finger/logs/daemon.log | tail -20"
+        );
+    }
+
+    #[test]
+    fn test_extract_xml_named_tool_call_blocks_dsml_parameter_cdata_wrapper() {
+        let text = r#"<|DSML|tool_calls>
+<|DSML|invoke name="exec_command">
+<|DSML|parameter name="cmd"><![CDATA[bash -lc 'pwd']]></|DSML|parameter>
+</|DSML|invoke>
+</|DSML|tool_calls>"#;
+        let out = extract_xml_named_tool_call_blocks(text, 1);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["function"]["name"], "exec_command");
+        let args: Value =
+            serde_json::from_str(out[0]["function"]["arguments"].as_str().unwrap_or("{}"))
+                .unwrap_or(Value::Null);
+        assert_eq!(args["cmd"].as_str().unwrap_or(""), "bash -lc 'pwd'");
+    }
+
+    #[test]
+    fn test_unwrap_xml_cdata_sections_merges_split_segments() {
+        let raw = "<![CDATA[bash -lc 'echo ]]]]><![CDATA[> ok']]>";
+        assert_eq!(
+            unwrap_xml_cdata_sections(raw),
+            "bash -lc 'echo ]]> ok'"
         );
     }
 

@@ -1,18 +1,25 @@
 import { PassThrough } from 'node:stream';
 import { once } from 'node:events';
-import { attachProviderSseSnapshotStream } from '../../../../src/providers/core/utils/snapshot-writer.js';
+import { jest } from '@jest/globals';
 import { runtimeFlags, setRuntimeFlag } from '../../../../src/runtime/runtime-flags.js';
 
+jest.mock('../../../../src/modules/llmswitch/bridge.js', () => ({
+  writeSnapshotViaHooks: async () => undefined
+}));
+
 describe('attachProviderSseSnapshotStream', () => {
-  it('propagates upstream stream errors to consumers', async () => {
+  it('returns original upstream stream and preserves upstream errors', async () => {
     const prevSnapshots = runtimeFlags.snapshotsEnabled;
     setRuntimeFlag('snapshotsEnabled', false);
 
     try {
+      const { attachProviderSseSnapshotStream } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
       const upstream = new PassThrough();
-      const tee = attachProviderSseSnapshotStream(upstream, { requestId: 'req_test' });
+      const observed = attachProviderSseSnapshotStream(upstream, { requestId: 'req_test' });
 
-      const errorPromise = once(tee, 'error') as Promise<[Error]>;
+      expect(observed).toBe(upstream);
+
+      const errorPromise = once(observed, 'error') as Promise<[Error]>;
       upstream.destroy(new Error('boom'));
 
       const [error] = await errorPromise;
@@ -23,4 +30,3 @@ describe('attachProviderSseSnapshotStream', () => {
     }
   });
 });
-

@@ -114,6 +114,7 @@ describe('usage logger timing summary', () => {
     homedirSpy.mockRestore();
   });
 
+
   it('prints breakdown in dev usage summary when summary mode is enabled and scoped timings exist', async () => {
     process.env.NODE_ENV = 'development';
     process.env.ROUTECODEX_BUILD_MODE = 'dev';

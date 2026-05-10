@@ -105,11 +105,15 @@ fn extract_context_length_diagnostics(adapter_context: &Value) -> Map<String, Va
 
 fn is_context_length_exceeded_signal(code: &str, message: &str, context: &Value) -> bool {
     let code_lower = code.trim().to_ascii_lowercase();
-    if code_lower.contains("context_length_exceeded") {
+    if code_lower.contains("context_length_exceeded")
+        || code_lower.contains("input_exceeds_limit")
+    {
         return true;
     }
     let message_lower = message.to_ascii_lowercase();
     if message_lower.contains("context_length_exceeded")
+        || message.contains("内容超长")
+        || message.contains("请删减后再试")
         || message.contains("达到对话长度上限")
         || message.contains("对话长度上限")
     {
@@ -123,7 +127,26 @@ fn is_context_length_exceeded_signal(code: &str, message: &str, context: &Value)
         .and_then(|v| v.as_str())
         .map(|v| v.trim().to_ascii_lowercase())
         .unwrap_or_default();
-    finish_reason == "context_length_exceeded"
+    finish_reason == "context_length_exceeded" || finish_reason == "input_exceeds_limit"
+}
+
+fn normalize_context_length_upstream_code(upstream_code: &str, context: &Value) -> String {
+    let finish_reason = context
+        .as_object()
+        .and_then(|obj| obj.get("errorData"))
+        .and_then(|v| v.as_object())
+        .and_then(|obj| obj.get("finish_reason"))
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if finish_reason == "input_exceeds_limit" || finish_reason == "context_length_exceeded" {
+        return finish_reason;
+    }
+    let normalized = upstream_code.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return "context_length_exceeded".to_string();
+    }
+    normalized
 }
 
 fn resolve_provider_type(protocol: &str) -> Option<String> {
@@ -246,6 +269,11 @@ fn build_resp_inbound_sse_error_descriptor(
             let adapter_context = row.get("adapterContext").cloned().unwrap_or(Value::Null);
             let context_length_exceeded =
                 is_context_length_exceeded_signal(&upstream_code, &message, &upstream_context);
+            let effective_upstream_code = if context_length_exceeded {
+                normalize_context_length_upstream_code(&upstream_code, &upstream_context)
+            } else {
+                upstream_code.clone()
+            };
             let retryable_network_failure = !context_length_exceeded
                 && protocol == "anthropic-messages"
                 && is_retryable_network_sse_decode_failure(&message, &upstream_code);
@@ -257,10 +285,10 @@ fn build_resp_inbound_sse_error_descriptor(
                 details.insert("status".to_string(), Value::from(502));
                 details.insert("retryable".to_string(), Value::Bool(true));
             }
-            if !upstream_code.is_empty() {
+            if !effective_upstream_code.is_empty() {
                 details.insert(
                     "upstreamCode".to_string(),
-                    Value::String(upstream_code.clone()),
+                    Value::String(effective_upstream_code.clone()),
                 );
             }
             if context_length_exceeded {
@@ -275,8 +303,11 @@ fn build_resp_inbound_sse_error_descriptor(
 
             let mut stage_record = Map::<String, Value>::new();
             stage_record.insert("error".to_string(), Value::String(message.clone()));
-            if !upstream_code.is_empty() {
-                stage_record.insert("upstreamCode".to_string(), Value::String(upstream_code));
+            if !effective_upstream_code.is_empty() {
+                stage_record.insert(
+                    "upstreamCode".to_string(),
+                    Value::String(effective_upstream_code),
+                );
             }
             if retryable_network_failure {
                 stage_record.insert("statusCode".to_string(), Value::from(502));
@@ -470,6 +501,44 @@ mod tests {
         assert_eq!(
             descriptor.stage_record.get("maxContextTokens"),
             Some(&Value::from(4096))
+        );
+    }
+
+    #[test]
+    fn classifies_input_exceeds_limit_as_context_length_exceeded() {
+        let descriptor = build_resp_inbound_sse_error_descriptor(&json!({
+            "kind": "decode_failure",
+            "providerProtocol": "openai-chat",
+            "requestId": "req-4",
+            "message": "内容超长，请删减后再试",
+            "upstreamCode": "input_exceeds_limit",
+            "upstreamContext": {
+                "errorData": {
+                    "finish_reason": "input_exceeds_limit"
+                }
+            },
+            "adapterContext": {
+                "estimatedInputTokens": 16384,
+                "target": {
+                    "maxContextTokens": 8192
+                }
+            }
+        }))
+        .expect("descriptor");
+
+        assert_eq!(descriptor.code, "SSE_DECODE_ERROR");
+        assert_eq!(descriptor.status, None);
+        assert_eq!(
+            descriptor.details.get("reason"),
+            Some(&Value::String("context_length_exceeded".to_string()))
+        );
+        assert_eq!(
+            descriptor.details.get("upstreamCode"),
+            Some(&Value::String("input_exceeds_limit".to_string()))
+        );
+        assert_eq!(
+            descriptor.stage_record.get("reason"),
+            Some(&Value::String("context_length_exceeded".to_string()))
         );
     }
 }

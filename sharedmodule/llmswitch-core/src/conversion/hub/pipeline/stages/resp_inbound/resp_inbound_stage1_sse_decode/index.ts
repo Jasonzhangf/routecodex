@@ -58,7 +58,11 @@ function extractDecodeStats(payload: JsonObject): Record<string, unknown> | unde
     'eventSpanMs',
     'parserMs',
     'builderMs',
-    'messageStopSeen'
+    'messageStopSeen',
+    'firstContentAtMs',
+    'lastContentAtMs',
+    'totalTokens',
+    'tokenRate'
   ]) {
     const value = stats[key];
     if (value !== undefined) {

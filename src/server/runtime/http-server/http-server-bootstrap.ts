@@ -4,7 +4,7 @@ import type { DebugCenter, DebugEvent } from '../../../modules/pipeline/types/ex
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import type { ProviderProfile, ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
 import { buildProviderProfiles } from '../../../providers/profile/provider-profile-loader.js';
-import { logPipelineStage } from '../../utils/stage-logger.js';
+import { logPipelineStage, shouldEmitStageEvent } from '../../utils/stage-logger.js';
 import { buildInfo } from '../../../build-info.js';
 import {
   bootstrapVirtualRouterConfig,
@@ -361,6 +361,10 @@ export function logStage(server: any, stage: string, requestId: string, details?
   // Always forward stage events so release timing summary can aggregate
   // internal scopes even when verbose stage logging is disabled.
   logPipelineStage(stage, requestId, details);
+}
+
+export function shouldLogStageEvent(_server: any, stage: string): boolean {
+  return shouldEmitStageEvent(stage);
 }
 
 // Delegates to canonical implementation in executor/provider-response-utils

@@ -74,6 +74,14 @@ fn is_tool_marker_line(line: &str) -> bool {
     let trimmed = line.trim();
     trimmed.starts_with("<tool_call>")
         || trimmed.starts_with("</tool_call>")
+        || trimmed.starts_with("<tool_calls>")
+        || trimmed.starts_with("</tool_calls>")
+        || trimmed.starts_with("<|DSML|tool_calls>")
+        || trimmed.starts_with("</|DSML|tool_calls>")
+        || trimmed.starts_with("<|DSML|invoke")
+        || trimmed.starts_with("</|DSML|invoke>")
+        || trimmed.starts_with("<|DSML|parameter")
+        || trimmed.starts_with("</|DSML|parameter>")
         || trimmed.starts_with("<execute_command>")
         || trimmed.starts_with("</execute_command>")
         || trimmed.starts_with("<apply_patch>")
@@ -452,7 +460,7 @@ mod tests {
 
     #[test]
     fn deepseek_prompt_content_unwraps_running_chunked_exec_transcript_shape() {
-        let content = json!("Chunk ID: 8297fb\nWall time: 10.0016 seconds\nProcess running with session ID 92528\nOriginal token count: 0\nOutput:\n<｜end▁of▁sentence｜>\n<｜Assistant｜><tool_call>\n{\"arguments\":{\"cmd\":\"echo next\"},\"id\":\"call_1\",\"name\":\"exec_command\"}\n</tool_call>");
+    let content = json!("Chunk ID: 8297fb\nWall time: 10.0016 seconds\nProcess running with session ID 92528\nOriginal token count: 0\nOutput:\n<｜end▁of▁sentence｜>\n<｜Assistant｜><tool_call>\n{\"arguments\":{\"cmd\":\"echo next\"},\"id\":\"call_1\",\"name\":\"exec_command\"}\n</tool_call>");
         assert_eq!(normalize_content_to_text(&content), "");
     }
 

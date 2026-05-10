@@ -77,6 +77,64 @@ describe('provider-response-converter servertool regressions', () => {
     });
   });
 
+  it('maps deepseek input_exceeds_limit bridge failures into CONTEXT_LENGTH_EXCEEDED', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockClear();
+    mockCreateSnapshotRecorder.mockClear();
+    mockConvertProviderResponse.mockImplementationOnce(async () => {
+      const error = new Error(
+        '[chat_process.resp.stage1.sse_decode] Failed to decode SSE payload for protocol openai-chat: 内容超长，请删减后再试'
+      ) as Error & {
+        code?: string;
+        name?: string;
+        details?: Record<string, unknown>;
+        upstreamCode?: string;
+      };
+      error.name = 'ProviderProtocolError';
+      error.code = 'SSE_DECODE_ERROR';
+      error.upstreamCode = 'CHAT_STREAM_ERROR';
+      error.details = {
+        upstreamCode: 'input_exceeds_limit',
+        reason: 'context_length_exceeded'
+      };
+      throw error;
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-chat',
+          requestId: 'req_deepseek_input_limit',
+          wantsStream: true,
+          response: {
+            body: {
+              id: 'mock'
+            }
+          } as any,
+          pipelineMetadata: {}
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'CONTEXT_LENGTH_EXCEEDED',
+      status: 400,
+      statusCode: 400,
+      retryable: false,
+      upstreamCode: 'CHAT_STREAM_ERROR'
+    });
+  });
+
   it('maps retryable anthropic SSE network failures into HTTP_502', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockClear();

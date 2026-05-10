@@ -38,13 +38,14 @@ export async function buildOutboundProviderPayloadBundle<TContext = Record<strin
 }): Promise<{
   providerPayload?: Record<string, unknown>;
   shadowBaselineProviderPayload?: Record<string, unknown>;
+  outboundWorkingRequest: StandardizedRequest | ProcessedRequest;
 }> {
   const outboundRecorder = createOutboundSnapshotStageRecorder({
     normalized: args.normalized,
     outboundAdapterContext: args.outboundAdapterContext as any,
   });
   const outboundStart = Date.now();
-  const { providerPayload, shadowBaselineProviderPayload } =
+  const { providerPayload, shadowBaselineProviderPayload, outboundWorkingRequest } =
     await buildRequestStageProviderPayload({
       normalized: args.normalized,
       hooks: args.hooks,
@@ -72,5 +73,6 @@ export async function buildOutboundProviderPayloadBundle<TContext = Record<strin
   return {
     providerPayload,
     shadowBaselineProviderPayload,
+    outboundWorkingRequest,
   };
 }

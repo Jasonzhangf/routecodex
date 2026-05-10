@@ -315,6 +315,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "pickHeaderJson",
   "resolveReqOutboundContextMergePlanJson",
   "runReqOutboundStage3CompatJson",
+  "runRespInboundStage3CompatJson",
   "runHubPipelineJson",
   "findMappableSemanticsKeysJson",
   "deriveToolCallKeyJson",

@@ -14,7 +14,11 @@ export { bodyContainsReasoningStopFinalizedMarker } from './reasoning-stop-final
 
 type StoplessLogMode = 'on' | 'off' | 'endless';
 type ProviderSnapshotWriteArgs = {
-  phase: 'provider-request' | 'provider-response';
+  phase:
+    | 'provider-request'
+    | 'provider-response'
+    | 'provider-request-contract'
+    | 'provider-response-contract';
   requestId: string;
   data: unknown;
   headers?: Record<string, unknown>;
@@ -353,14 +357,6 @@ export function detectStoplessTerminationWithoutFinalization(
     return null;
   }
   if (Object.prototype.hasOwnProperty.call(body, '__sse_responses')) {
-    const finishReason = readString(body[STREAM_LOG_FINISH_REASON_KEY])?.toLowerCase() ?? '';
-    const finalized = body[REASONING_STOP_FINALIZED_FLAG_KEY] === true;
-    if (!finalized && finishReason === 'stop') {
-      return {
-        reason: `stopless=${stoplessMode} but streamed wrapper completed with finish_reason=stop without reasoning.stop finalized marker`,
-        marker: 'stream_wrapper_stopless_missing_reasoning_stop_finalization'
-      };
-    }
     return null;
   }
   if (bodyContainsReasoningStopFinalizedMarker(body)) {
@@ -433,7 +429,7 @@ export async function persistPayloadContractProviderSnapshots(args: {
       ? args.providerRequestPayload
       : { payload: args.providerRequestPayload };
   await args.writeProviderSnapshot({
-    phase: 'provider-request',
+    phase: 'provider-request-contract',
     requestId: args.requestId,
     clientRequestId: args.requestId,
     entryEndpoint: args.entryEndpoint,
@@ -445,7 +441,7 @@ export async function persistPayloadContractProviderSnapshots(args: {
     forceLocalDiskWriteWhenDisabled: true
   });
   await args.writeProviderSnapshot({
-    phase: 'provider-response',
+    phase: 'provider-response-contract',
     requestId: args.requestId,
     clientRequestId: args.requestId,
     entryEndpoint: args.entryEndpoint,

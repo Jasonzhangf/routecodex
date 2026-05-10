@@ -2,8 +2,6 @@ use serde_json::Value;
 
 use super::super::{read_trimmed_string, AdapterContext};
 
-const SEARCH_ROUTE_PREFIXES: [&str; 2] = ["web_search", "search"];
-
 fn read_optional_boolean(value: Option<&Value>) -> Option<bool> {
     match value {
         Some(Value::Bool(v)) => Some(*v),
@@ -85,15 +83,6 @@ pub(super) fn resolve_tool_choice_required(adapter_context: &AdapterContext) -> 
     false
 }
 
-fn route_starts_with(adapter_context: &AdapterContext, prefixes: &[&str]) -> bool {
-    let route_id = adapter_context
-        .route_id
-        .as_ref()
-        .map(|v| v.trim().to_ascii_lowercase())
-        .unwrap_or_default();
-    prefixes.iter().any(|prefix| route_id.starts_with(prefix))
-}
-
 fn latest_message_role(adapter_context: &AdapterContext) -> Option<String> {
     adapter_context
         .captured_chat_request
@@ -130,13 +119,7 @@ pub(super) fn resolve_effective_declared_tools_present(
     if latest_message_role(adapter_context).as_deref() == Some("tool") {
         return false;
     }
-    if route_starts_with(adapter_context, &["thinking", "tools", "coding"]) {
-        return true;
-    }
-    if route_starts_with(adapter_context, &SEARCH_ROUTE_PREFIXES) {
-        return true;
-    }
-    false
+    true
 }
 
 pub(super) fn resolve_deepseek_options(adapter_context: &AdapterContext) -> (bool, bool) {

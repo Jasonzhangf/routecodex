@@ -26,7 +26,7 @@ export function buildProviderProfiles(config: UnknownRecord): ProviderProfileCol
     const transport = extractTransport(raw);
     const auth = extractAuth(raw);
     const compatibilityProfile = extractCompatProfile(id, raw);
-    const metadata = extractMetadata(raw);
+    const metadata = extractMetadata(raw, compatibilityProfile);
     profiles.push({
       id,
       protocol,
@@ -279,11 +279,14 @@ function extractCompatProfile(providerId: string, raw: UnknownRecord): string | 
   return declared;
 }
 
-function extractMetadata(raw: UnknownRecord): ProviderProfile['metadata'] {
+function extractMetadata(raw: UnknownRecord, compatibilityProfile?: string): ProviderProfile['metadata'] {
   const defaultModel = pickString(raw.defaultModel ?? raw.default_model);
   const modelsNode = isRecord(raw.models) ? raw.models : undefined;
   const supportedModels = modelsNode ? Object.keys(modelsNode) : undefined;
-  const deepseek = extractDeepSeekMetadata(raw.deepseek ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).deepseek : undefined));
+  const deepseek = extractDeepSeekMetadata(
+    raw.deepseek ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).deepseek : undefined),
+    compatibilityProfile
+  );
   const concurrency = extractConcurrencyMetadata(raw.concurrency ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).concurrency : undefined));
   const rpm = extractRpmMetadata(raw.rpm ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).rpm : undefined));
 
@@ -310,11 +313,8 @@ function extractMetadata(raw: UnknownRecord): ProviderProfile['metadata'] {
   return Object.keys(metadata).length ? metadata : undefined;
 }
 
-function extractDeepSeekMetadata(raw: unknown): DeepSeekMetadata | undefined {
-  if (!isRecord(raw)) {
-    return undefined;
-  }
-  const node = raw as UnknownRecord;
+function extractDeepSeekMetadata(raw: unknown, compatibilityProfile?: string): DeepSeekMetadata | undefined {
+  const node = isRecord(raw) ? (raw as UnknownRecord) : {};
   const toBool = (value: unknown): boolean | undefined => {
     if (typeof value === 'boolean') {
       return value;
@@ -348,7 +348,8 @@ function extractDeepSeekMetadata(raw: unknown): DeepSeekMetadata | undefined {
     (legacyFallback !== undefined ? (legacyFallback ? 'text' : 'native') : undefined);
   const contextFileEnabled =
     toBool(node.contextFileEnabled) ??
-    toBool(contextFileNode?.enabled);
+    toBool(contextFileNode?.enabled) ??
+    (compatibilityProfile === 'chat:deepseek-web' ? true : undefined);
 
   const normalized = {
     strictToolRequired: toBool(node.strictToolRequired),

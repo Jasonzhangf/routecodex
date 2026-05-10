@@ -268,5 +268,83 @@ describe('deepseek-web-request action wrapper', () => {
     expect((result as any).metadata.deepseek.contextFile.content).toContain('# RCC_HISTORY.txt');
     expect((result as any).metadata.deepseek.contextFile.content).toContain('=== 1. SYSTEM ===');
     expect((result as any).metadata.deepseek.contextFile.content).toContain('=== 2. USER ===');
+    expect((result as any).metadata.deepseek.contextFile.content).not.toContain('Tool-call output contract (STRICT)');
+    expect((result as any).metadata.deepseek.contextFile.content).not.toContain('This turn is tool-required.');
+  });
+
+  test('uses unified continuation semantics to mark submitted tool result as already completed', () => {
+    const result = applyDeepSeekWebRequestTransform(
+      {
+        model: 'deepseek-v4-pro',
+        messages: [
+          { role: 'user', content: '调用 exec_command 工具执行 pwd，然后返回工具调用，不要直接回答。' },
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  arguments: JSON.stringify({ cmd: "bash -lc 'pwd'" })
+                }
+              }
+            ]
+          },
+          {
+            role: 'tool',
+            tool_call_id: 'call_1',
+            name: 'exec_command',
+            content: '/Users/fanzhang/Documents/github/routecodex'
+          }
+        ],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: {
+                type: 'object',
+                properties: { cmd: { type: 'string' } },
+                required: ['cmd']
+              }
+            }
+          }
+        ],
+        semantics: {
+          continuation: {
+            chainId: 'req_chain_1',
+            stickyScope: 'request_chain',
+            stateOrigin: 'openai-responses',
+            restored: true,
+            toolContinuation: {
+              mode: 'submit_tool_outputs',
+              submittedToolCallIds: ['call_1'],
+              resumeOutputs: ['/Users/fanzhang/Documents/github/routecodex']
+            }
+          }
+        },
+        metadata: {
+          deepseek: {
+            contextFile: { enabled: true }
+          }
+        }
+      } as any,
+      {
+        providerProtocol: 'openai-chat',
+        compatibilityProfile: 'chat:deepseek-web',
+        routeId: 'tools-deepseek-web-primary',
+        deepseek: {
+          contextFile: { enabled: true }
+        }
+      } as any
+    );
+
+    expect((result as any).prompt).toContain('The latest tool result has already been submitted.');
+    expect((result as any).prompt).toContain('Do not repeat the same tool call');
+    expect((result as any).prompt).toContain('Tool call ids already completed in this continuation: call_1.');
+    expect((result as any).metadata.deepseek.contextFile.content).toContain('tool_call_id: call_1');
+    expect((result as any).metadata.deepseek.contextFile.content).toContain('/Users/fanzhang/Documents/github/routecodex');
   });
 });

@@ -116,9 +116,9 @@ function testRequestTransform() {
     'deepseek compat stage should inject strict tool-call guidance'
   );
   assert.equal(
-    out.prompt.includes('<tool_call>'),
+    out.prompt.includes('<|DSML|tool_calls>'),
     true,
-    'deepseek compat stage should require deepseek-web tool_call wrapper guidance'
+    'deepseek compat stage should require deepseek-web DSML tool-call wrapper guidance'
   );
 }
 
@@ -166,7 +166,7 @@ function testRequestTransformAutoToolChoiceHint() {
     'auto tool_choice still needs explicit deepseek tool-call guidance'
   );
   assert.equal(
-    out.prompt.includes('If no tool is needed, reply with plain text and do NOT emit any <tool_call> wrapper.'),
+    out.prompt.includes('If no tool is needed, reply with plain text (no <|DSML|tool_calls> block)'),
     true,
     'auto tool_choice path should carry the non-required branch guidance'
   );

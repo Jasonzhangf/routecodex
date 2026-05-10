@@ -103,7 +103,15 @@ async function listProviderConfigFiles(entry: ProviderDirEntry): Promise<Provide
       if (b === 'config.v2.json') return 1;
       return a.localeCompare(b);
     });
-  return files.map((fileName) => ({
+  const preferredBaseFile = files.find((fileName) => fileName === 'config.v2.toml')
+    ?? files.find((fileName) => fileName === 'config.v2.json');
+  const selectedFiles = files.filter((fileName) => {
+    if (fileName === 'config.v2.toml' || fileName === 'config.v2.json') {
+      return fileName === preferredBaseFile;
+    }
+    return true;
+  });
+  return selectedFiles.map((fileName) => ({
     fileName,
     filePath: path.join(entry.dirPath, fileName),
     isBaseFile: fileName === 'config.v2.json' || fileName === 'config.v2.toml'

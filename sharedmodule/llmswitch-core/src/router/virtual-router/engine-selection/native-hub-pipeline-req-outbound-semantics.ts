@@ -65,6 +65,19 @@ function safeStringify(value: unknown): string | undefined {
   }
 }
 
+function throwNativeExecutionError(capability: string, reason?: string): never {
+  throw new Error(
+    `[virtual-router-native-hotpath] native ${capability} execution failed${reason ? `: ${reason}` : ''}`
+  );
+}
+
+function rethrowNativeStageError(capability: string, error: unknown): never {
+  if (error instanceof Error) {
+    throw error;
+  }
+  return throwNativeExecutionError(capability, String(error ?? 'unknown'));
+}
+
 export function resolveReqOutboundContextMergePlanWithNative(
   input: NativeReqOutboundContextMergePlanInput
 ): NativeReqOutboundContextMergePlan {
@@ -79,18 +92,17 @@ export function resolveReqOutboundContextMergePlanWithNative(
   }
   const inputJson = safeStringify(input);
   if (!inputJson) {
-    return fail('json stringify failed');
+    return throwNativeExecutionError(capability, 'json stringify failed');
   }
   try {
     const raw = fn(inputJson);
     if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
+      return throwNativeExecutionError(capability, 'empty result');
     }
     const parsed = parseReqOutboundContextMergePlan(raw);
-    return parsed ?? fail('invalid payload');
+    return parsed ?? throwNativeExecutionError(capability, 'invalid payload');
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
+    return rethrowNativeStageError(capability, error);
   }
 }
 
@@ -111,18 +123,17 @@ export function buildReqOutboundFormatPayloadWithNative(
     protocol: input.protocol
   });
   if (!inputJson) {
-    return fail('json stringify failed');
+    return throwNativeExecutionError(capability, 'json stringify failed');
   }
   try {
     const raw = fn(inputJson);
     if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
+      return throwNativeExecutionError(capability, 'empty result');
     }
     const parsed = parseReqOutboundFormatBuildOutput(raw);
-    return parsed ?? fail('invalid payload');
+    return parsed ?? throwNativeExecutionError(capability, 'invalid payload');
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
+    return rethrowNativeStageError(capability, error);
   }
 }
 
@@ -140,18 +151,17 @@ export function applyReqOutboundContextSnapshotWithNative(
   }
   const inputJson = safeStringify(input);
   if (!inputJson) {
-    return fail('json stringify failed');
+    return throwNativeExecutionError(capability, 'json stringify failed');
   }
   try {
     const raw = fn(inputJson);
     if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
+      return throwNativeExecutionError(capability, 'empty result');
     }
     const parsed = parseReqOutboundContextSnapshotPatch(raw);
-    return parsed ?? fail('invalid payload');
+    return parsed ?? throwNativeExecutionError(capability, 'invalid payload');
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
+    return rethrowNativeStageError(capability, error);
   }
 }
 
@@ -169,18 +179,17 @@ export function runReqOutboundStage3CompatWithNative(
   }
   const inputJson = safeStringify(input);
   if (!inputJson) {
-    return fail('json stringify failed');
+    return throwNativeExecutionError(capability, 'json stringify failed');
   }
   try {
     const raw = fn(inputJson);
     if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
+      return throwNativeExecutionError(capability, 'empty result');
     }
     const parsed = parseReqOutboundCompatOutput(raw);
-    return parsed ?? fail('invalid payload');
+    return parsed ?? throwNativeExecutionError(capability, 'invalid payload');
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
+    return rethrowNativeStageError(capability, error);
   }
 }
 
@@ -198,18 +207,17 @@ export function runRespInboundStage3CompatWithNative(
   }
   const inputJson = safeStringify(input);
   if (!inputJson) {
-    return fail('json stringify failed');
+    return throwNativeExecutionError(capability, 'json stringify failed');
   }
   try {
     const raw = fn(inputJson);
     if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
+      return throwNativeExecutionError(capability, 'empty result');
     }
     const parsed = parseReqOutboundCompatOutput(raw);
-    return parsed ?? fail('invalid payload');
+    return parsed ?? throwNativeExecutionError(capability, 'invalid payload');
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
+    return rethrowNativeStageError(capability, error);
   }
 }
 
@@ -227,18 +235,17 @@ export function normalizeToolSessionMessagesWithNative(
   }
   const inputJson = safeStringify(input);
   if (!inputJson) {
-    return fail('json stringify failed');
+    return throwNativeExecutionError(capability, 'json stringify failed');
   }
   try {
     const raw = fn(inputJson);
     if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
+      return throwNativeExecutionError(capability, 'empty result');
     }
     const parsed = parseToolSessionCompatOutput(raw);
-    return parsed ?? fail('invalid payload');
+    return parsed ?? throwNativeExecutionError(capability, 'invalid payload');
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
+    return rethrowNativeStageError(capability, error);
   }
 }
 
@@ -256,18 +263,17 @@ export function updateToolSessionHistoryWithNative(
   }
   const inputJson = safeStringify(input);
   if (!inputJson) {
-    return fail('json stringify failed');
+    return throwNativeExecutionError(capability, 'json stringify failed');
   }
   try {
     const raw = fn(inputJson);
     if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
+      return throwNativeExecutionError(capability, 'empty result');
     }
     const parsed = parseToolSessionHistoryUpdateOutput(raw);
-    return parsed ?? fail('invalid payload');
+    return parsed ?? throwNativeExecutionError(capability, 'invalid payload');
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
+    return rethrowNativeStageError(capability, error);
   }
 }
 
@@ -285,18 +291,17 @@ export function applyClaudeThinkingToolSchemaCompatWithNative(
   }
   const payloadJson = safeStringify(payload);
   if (!payloadJson) {
-    return fail('json stringify failed');
+    return throwNativeExecutionError(capability, 'json stringify failed');
   }
   try {
     const raw = fn(payloadJson);
     if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
+      return throwNativeExecutionError(capability, 'empty result');
     }
     const parsed = parseJsonObject(raw);
-    return parsed ?? fail('invalid payload');
+    return parsed ?? throwNativeExecutionError(capability, 'invalid payload');
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
+    return rethrowNativeStageError(capability, error);
   }
 }
 
@@ -315,27 +320,26 @@ export function standardizedToChatEnvelopeWithNative(
   const requestJson = safeStringify(input.request);
   const adapterContextJson = safeStringify(input.adapterContext);
   if (!requestJson || !adapterContextJson) {
-    return fail('json stringify failed');
+    return throwNativeExecutionError(capability, 'json stringify failed');
   }
   try {
     const raw = fn(requestJson, adapterContextJson);
     if (raw instanceof Error) {
-      return fail(raw.message || 'native error');
+      return throwNativeExecutionError(capability, raw.message || 'native error');
     }
     if (raw && typeof raw === 'object' && 'message' in (raw as Record<string, unknown>)) {
       const message = (raw as Record<string, unknown>).message;
       if (typeof message === 'string' && message.trim().length) {
-        return fail(message.trim());
+        return throwNativeExecutionError(capability, message.trim());
       }
     }
     if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
+      return throwNativeExecutionError(capability, 'empty result');
     }
     const parsed = parseRecord(raw);
-    return (parsed as JsonObject | null) ?? fail('invalid payload');
+    return (parsed as JsonObject | null) ?? throwNativeExecutionError(capability, 'invalid payload');
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
+    return rethrowNativeStageError(capability, error);
   }
 }
 
@@ -355,16 +359,15 @@ export function shouldAttachReqOutboundContextSnapshotWithNative(
   try {
     const contextMetadataKeyJson = JSON.stringify(contextMetadataKey ?? null);
     if (typeof contextMetadataKeyJson !== 'string') {
-      return fail('json stringify failed');
+      return throwNativeExecutionError(capability, 'json stringify failed');
     }
     const raw = fn(hasSnapshot, contextMetadataKeyJson);
     if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
+      return throwNativeExecutionError(capability, 'empty result');
     }
     const parsed = parseBoolean(raw);
-    return parsed === null ? fail('invalid payload') : parsed;
+    return parsed === null ? throwNativeExecutionError(capability, 'invalid payload') : parsed;
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
+    return rethrowNativeStageError(capability, error);
   }
 }

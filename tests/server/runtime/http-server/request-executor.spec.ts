@@ -869,6 +869,11 @@ describe('HubRequestExecutor failover', () => {
     });
 
     expect(__requestExecutorTestables.detectStoplessTerminationWithoutFinalization({
+      __sse_responses: { pipe: () => undefined },
+      __routecodex_finish_reason: 'stop'
+    }, 'on')).toBeNull();
+
+    expect(__requestExecutorTestables.detectStoplessTerminationWithoutFinalization({
       status: 'completed',
       output: [
         {

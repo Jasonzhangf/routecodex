@@ -317,6 +317,10 @@ export interface ChatEventStats {
   totalEvents?: number;
   eventTypes?: Record<string, number>;
   lastEventTime?: number;
+  // TTFT: 首个内容 token 到达时间 (wall clock ms)
+  firstContentAtMs?: number;
+  // 最后一个内容 token 到达时间 (wall clock ms)
+  lastContentAtMs?: number;
 }
 
 // Chat转换错误

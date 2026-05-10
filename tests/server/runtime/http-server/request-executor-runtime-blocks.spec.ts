@@ -1,6 +1,7 @@
 import { describe, expect, jest, test } from '@jest/globals';
-
-import { logProviderRetrySwitchCompact } from '../../../../src/server/runtime/http-server/executor/request-executor-runtime-blocks.js';
+import {
+  logProviderRetrySwitchCompact
+} from '../../../../src/server/runtime/http-server/executor/request-executor-runtime-blocks.js';
 
 describe('request-executor-runtime-blocks', () => {
   test('caps attempt counters in provider-switch log when blocking recoverable retries exceed budget', () => {

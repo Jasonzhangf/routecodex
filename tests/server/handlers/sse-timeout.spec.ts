@@ -3,27 +3,31 @@ import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
-import { sendPipelineResponse } from '../../../src/server/handlers/handler-utils.js';
 
 describe('HTTP SSE stream timeout', () => {
   jest.setTimeout(10_000);
 
-  const originalIdle = process.env.ROUTECODEX_HTTP_SSE_IDLE_TIMEOUT_MS;
   const originalTotal = process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS;
 
   beforeEach(() => {
-    process.env.ROUTECODEX_HTTP_SSE_IDLE_TIMEOUT_MS = '50';
-    process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS = '500';
+    process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS = '50';
   });
 
   afterEach(() => {
-    if (originalIdle === undefined) delete process.env.ROUTECODEX_HTTP_SSE_IDLE_TIMEOUT_MS;
-    else process.env.ROUTECODEX_HTTP_SSE_IDLE_TIMEOUT_MS = originalIdle;
     if (originalTotal === undefined) delete process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS;
     else process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS = originalTotal;
   });
 
   it('ends stalled SSE streams with an error event', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      writeSnapshotViaHooks: async () => undefined
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
     const app = express();
     app.get('/sse', (_req, res) => {
       const stalled = new Readable({
@@ -57,7 +61,7 @@ describe('HTTP SSE stream timeout', () => {
       });
       const text = await response.text();
       expect(text).toContain('event: error');
-      expect(text).toContain('HTTP_SSE_IDLE_TIMEOUT');
+      expect(text).toContain('HTTP_SSE_TIMEOUT');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

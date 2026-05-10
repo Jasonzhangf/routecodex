@@ -14,6 +14,18 @@ pub(super) fn to_prompt_messages(
     root: &Map<String, Value>,
     require_tool_call_override: bool,
 ) -> Vec<PromptMessage> {
+    to_prompt_messages_with_options(root, require_tool_call_override, true)
+}
+
+pub(super) fn to_history_prompt_messages(root: &Map<String, Value>) -> Vec<PromptMessage> {
+    to_prompt_messages_with_options(root, false, false)
+}
+
+fn to_prompt_messages_with_options(
+    root: &Map<String, Value>,
+    require_tool_call_override: bool,
+    inject_tool_guidance: bool,
+) -> Vec<PromptMessage> {
     let mut messages: Vec<PromptMessage> = Vec::new();
     let require_tool_call = require_tool_call_override || is_tool_choice_required(root);
     let tail_reminder = if require_tool_call {
@@ -71,7 +83,7 @@ pub(super) fn to_prompt_messages(
         messages.push(PromptMessage { role, text });
     }
 
-    if require_tool_call && !tail_reminder.is_empty() {
+    if inject_tool_guidance && require_tool_call && !tail_reminder.is_empty() {
         if let Some(last_user) = messages.iter_mut().rev().find(|msg| msg.role == "user") {
             let current = last_user.text.trim();
             if !current.contains("This turn is tool-required.")
@@ -86,25 +98,27 @@ pub(super) fn to_prompt_messages(
         }
     }
 
-    let instruction = build_tool_fallback_instruction(root.get("tools"), require_tool_call);
-    if !instruction.is_empty() {
-        if let Some(first) = messages.first_mut() {
-            if first.role == "system" {
-                first.text = [first.text.clone(), instruction]
-                    .into_iter()
-                    .filter(|v| !v.is_empty())
-                    .collect::<Vec<String>>()
-                    .join("\n\n");
-                return messages;
+    if inject_tool_guidance {
+        let instruction = build_tool_fallback_instruction(root.get("tools"), require_tool_call);
+        if !instruction.is_empty() {
+            if let Some(first) = messages.first_mut() {
+                if first.role == "system" {
+                    first.text = [first.text.clone(), instruction]
+                        .into_iter()
+                        .filter(|v| !v.is_empty())
+                        .collect::<Vec<String>>()
+                        .join("\n\n");
+                    return messages;
+                }
             }
+            messages.insert(
+                0,
+                PromptMessage {
+                    role: "system".to_string(),
+                    text: instruction,
+                },
+            );
         }
-        messages.insert(
-            0,
-            PromptMessage {
-                role: "system".to_string(),
-                text: instruction,
-            },
-        );
     }
 
     messages

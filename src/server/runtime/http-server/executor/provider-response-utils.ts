@@ -254,3 +254,70 @@ export function resolveRequestSemantics(
     }
   };
 }
+
+function countArrayItems(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function summarizeSemanticsNode(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { present: false };
+  }
+  const row = value as Record<string, unknown>;
+  const toolsNode =
+    row.tools && typeof row.tools === 'object' && !Array.isArray(row.tools)
+      ? (row.tools as Record<string, unknown>)
+      : undefined;
+  return {
+    present: true,
+    keys: Object.keys(row),
+    rootToolsCount: countArrayItems(row.tools),
+    clientToolsRawCount: countArrayItems(toolsNode?.clientToolsRaw),
+    baselineToolsCount: countArrayItems(toolsNode?.baselineTools),
+    messagesCount: countArrayItems(row.messages),
+    toolOutputsCount: countArrayItems(row.toolOutputs) || countArrayItems(row.tool_outputs)
+  };
+}
+
+export function describeRequestSemanticsResolution(
+  processed?: Record<string, unknown>,
+  standardized?: Record<string, unknown>,
+  requestMetadata?: Record<string, unknown>,
+  resolved?: Record<string, unknown>
+): Record<string, unknown> {
+  const readRootTools = (value?: Record<string, unknown>): unknown[] | undefined =>
+    Array.isArray(value?.tools) ? value.tools : undefined;
+  const readMetadata = (value?: Record<string, unknown>): Record<string, unknown> | undefined =>
+    value?.metadata && typeof value.metadata === 'object' && value.metadata
+      ? (value.metadata as Record<string, unknown>)
+      : undefined;
+
+  const processedMetadata = readMetadata(processed);
+  const standardizedMetadata = readMetadata(standardized);
+  const requestMetadataRecord = requestMetadata && typeof requestMetadata === 'object' ? requestMetadata : undefined;
+  const metadataRequestSemantics =
+    processedMetadata?.requestSemantics && typeof processedMetadata.requestSemantics === 'object' && processedMetadata.requestSemantics
+      ? (processedMetadata.requestSemantics as Record<string, unknown>)
+      : standardizedMetadata?.requestSemantics && typeof standardizedMetadata.requestSemantics === 'object' && standardizedMetadata.requestSemantics
+        ? (standardizedMetadata.requestSemantics as Record<string, unknown>)
+        : requestMetadataRecord?.requestSemantics && typeof requestMetadataRecord.requestSemantics === 'object' && requestMetadataRecord.requestSemantics
+          ? (requestMetadataRecord.requestSemantics as Record<string, unknown>)
+          : undefined;
+  const processedSemantics =
+    processed?.semantics && typeof processed.semantics === 'object' && processed.semantics
+      ? (processed.semantics as Record<string, unknown>)
+      : undefined;
+  const standardizedSemantics =
+    standardized?.semantics && typeof standardized.semantics === 'object' && standardized.semantics
+      ? (standardized.semantics as Record<string, unknown>)
+      : undefined;
+  const fallbackTools = readRootTools(processed) ?? readRootTools(standardized);
+
+  return {
+    metadataRequestSemantics: summarizeSemanticsNode(metadataRequestSemantics),
+    processedSemantics: summarizeSemanticsNode(processedSemantics),
+    standardizedSemantics: summarizeSemanticsNode(standardizedSemantics),
+    fallbackToolsCount: countArrayItems(fallbackTools),
+    resolved: summarizeSemanticsNode(resolved)
+  };
+}

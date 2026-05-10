@@ -55,7 +55,8 @@ import {
   extractProviderModel,
   extractResponseStatus,
   normalizeProviderResponse,
-  resolveRequestSemantics
+  resolveRequestSemantics,
+  describeRequestSemanticsResolution
 } from './executor/provider-response-utils.js';
 import {
   isPoolExhaustedPipelineError,
@@ -205,6 +206,7 @@ export type RequestExecutorDeps = {
   getHubPipeline(): HubPipeline | null;
   getModuleDependencies(): ModuleDependencies;
   logStage(stage: string, requestId: string, details?: Record<string, unknown>): void;
+  shouldLogStageEvent?(stage: string): boolean;
   stats: StatsManager;
   trafficGovernor?: ProviderTrafficGovernorLike;
   onRequestStart?: (args: { requestId: string; metadata: Record<string, unknown> }) => void | Promise<void>;
@@ -353,6 +355,20 @@ export class HubRequestExecutor implements RequestExecutor {
     const logStage = (stage: string, requestId: string, details?: Record<string, unknown>): void => {
       this.deps.logStage(stage, requestId, details);
     };
+    const shouldLogStageEvent = (stage: string): boolean =>
+      typeof this.deps.shouldLogStageEvent === 'function'
+        ? this.deps.shouldLogStageEvent(stage)
+        : true;
+    const logStageLazy = (
+      stage: string,
+      requestId: string,
+      detailsFactory: () => Record<string, unknown>
+    ): void => {
+      if (!shouldLogStageEvent(stage)) {
+        return;
+      }
+      logStage(stage, requestId, detailsFactory());
+    };
     const queuePayloadContractErrorsample =
       createRequestExecutorPayloadContractErrorsampleWriter(logRequestExecutorNonBlockingError);
     let recordedAnyAttempt = false;
@@ -412,11 +428,11 @@ export class HubRequestExecutor implements RequestExecutor {
           throwIfClientAbortSignalAborted
         });
         const hubStartedAtMs = Date.now();
-        logStage(`${pipelineLabel}.start`, providerRequestId, {
+        logStageLazy(`${pipelineLabel}.start`, providerRequestId, () => ({
           endpoint: input.entryEndpoint,
           stream: metadataForAttempt.stream,
           attempt
-        });
+        }));
         let pipelineResult: Awaited<ReturnType<typeof runHubPipeline>>;
         try {
           pipelineResult = await runHubPipeline(hubPipeline, input, metadataForAttempt);
@@ -527,11 +543,11 @@ export class HubRequestExecutor implements RequestExecutor {
         let handle: ProviderHandle;
         let providerContext: ReturnType<typeof resolveProviderRequestContext>;
         try {
-          logStage('provider.runtime_resolve.start', providerRequestId, {
+          logStageLazy('provider.runtime_resolve.start', providerRequestId, () => ({
             providerKey: target.providerKey,
             route: pipelineResult.routingDecision?.routeName,
             attempt
-          });
+          }));
           const resolved = await resolveProviderRuntimeOrThrow({
             requestId: input.requestId,
             target: {
@@ -553,11 +569,11 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt
           });
 
-          logStage('provider.context_resolve.start', providerRequestId, {
+          logStageLazy('provider.context_resolve.start', providerRequestId, () => ({
             providerKey: target.providerKey,
             runtimeKey,
             attempt
-          });
+          }));
           providerContext = resolveProviderRequestContext({
             providerRequestId,
             entryEndpoint: input.entryEndpoint,
@@ -651,7 +667,7 @@ export class HubRequestExecutor implements RequestExecutor {
           model: providerModel
         });
 
-        logStage('provider.prepare', input.requestId, {
+        logStageLazy('provider.prepare', input.requestId, () => ({
           providerKey: target.providerKey,
           runtimeKey,
           protocol: providerProtocol,
@@ -660,14 +676,14 @@ export class HubRequestExecutor implements RequestExecutor {
           model: providerModel,
           providerLabel,
           attempt
-        });
+        }));
         throwIfClientAbortSignalAborted(clientAbortSignal);
 
-        logStage('provider.metadata_attach.start', input.requestId, {
+        logStageLazy('provider.metadata_attach.start', input.requestId, () => ({
           providerKey: target.providerKey,
           runtimeKey,
           attempt
-        });
+        }));
         attachProviderRuntimeMetadata(providerPayload, {
           requestId: input.requestId,
           providerId: handle.providerId,
@@ -818,7 +834,7 @@ export class HubRequestExecutor implements RequestExecutor {
           });
 
           providerSendStartedAtMs = Date.now();
-          logStage('provider.send.start', input.requestId, {
+          logStageLazy('provider.send.start', input.requestId, () => ({
             providerKey: target.providerKey,
             runtimeKey,
             protocol: providerProtocol,
@@ -828,7 +844,7 @@ export class HubRequestExecutor implements RequestExecutor {
             providerLabel,
             providerRequestedStream,
             attempt
-          });
+          }));
           throwIfClientAbortSignalAborted(clientAbortSignal);
 
           allowSnapshotLocalDiskWrite(
@@ -852,21 +868,21 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt
           });
           const wantsStreamBase = Boolean(input.metadata?.inboundStream ?? input.metadata?.stream);
-          logStage('provider.response_normalize.start', input.requestId, {
+          logStageLazy('provider.response_normalize.start', input.requestId, () => ({
             providerKey: target.providerKey,
             attempt
-          });
+          }));
           const normalized = normalizeProviderResponse(providerResponse);
           logStage('provider.response_normalize.completed', input.requestId, {
             providerKey: target.providerKey,
             status: normalized.status,
             attempt
           });
-          logStage('provider.usage_extract.start', input.requestId, {
+          logStageLazy('provider.usage_extract.start', input.requestId, () => ({
             providerKey: target.providerKey,
             source: 'provider_response',
             attempt
-          });
+          }));
           const usageFromProvider = extractUsageFromResult(normalized, mergedMetadata);
           logStage('provider.usage_extract.completed', input.requestId, {
             providerKey: target.providerKey,
@@ -874,36 +890,55 @@ export class HubRequestExecutor implements RequestExecutor {
             hasUsage: Boolean(usageFromProvider),
             attempt
           });
-          logStage('provider.request_semantics.start', input.requestId, {
+          logStageLazy('provider.request_semantics.start', input.requestId, () => ({
             providerKey: target.providerKey,
             attempt
-          });
+          }));
           const requestSemantics = resolveRequestSemantics(
             pipelineResult.processedRequest as Record<string, unknown> | undefined,
             pipelineResult.standardizedRequest as Record<string, unknown> | undefined,
             mergedMetadata
           );
+          if (
+            typeof target.providerKey === 'string'
+            && target.providerKey.startsWith('deepseek-web.')
+            && input.entryEndpoint?.includes('/v1/responses')
+          ) {
+            const semanticsTrace = describeRequestSemanticsResolution(
+              pipelineResult.processedRequest as Record<string, unknown> | undefined,
+              pipelineResult.standardizedRequest as Record<string, unknown> | undefined,
+              mergedMetadata,
+              requestSemantics
+            );
+            logStage('provider.request_semantics.trace', input.requestId, {
+              providerKey: target.providerKey,
+              attempt,
+              ...semanticsTrace,
+              hasRequestedToolsInSemantics: hasRequestedToolsInSemantics(requestSemantics),
+              isToolResultFollowupTurn: isToolResultFollowupTurn(requestSemantics)
+            });
+          }
           logStage('provider.request_semantics.completed', input.requestId, {
             providerKey: target.providerKey,
             hasSemantics: Boolean(requestSemantics && Object.keys(requestSemantics).length),
             attempt
           });
           const serverToolsEnabled = isServerToolEnabled();
-          logStage('provider.response_convert.start', input.requestId, {
+          logStageLazy('provider.response_convert.start', input.requestId, () => ({
             providerKey: target.providerKey,
             protocol: providerProtocol,
             processMode: pipelineResult.processMode,
             wantsStream: wantsStreamBase,
             serverToolsEnabled,
             attempt
-          });
+          }));
           const hubResponseStartedAtMs = Date.now();
-          logStage('hub.response.start', input.requestId, {
+          logStageLazy('hub.response.start', input.requestId, () => ({
             providerKey: target.providerKey,
             protocol: providerProtocol,
             processMode: pipelineResult.processMode,
             attempt
-          });
+          }));
           const converted = shouldBypassProviderResponseConversion(normalized)
             ? (() => {
               logStage('provider.response_convert.skipped', input.requestId, {

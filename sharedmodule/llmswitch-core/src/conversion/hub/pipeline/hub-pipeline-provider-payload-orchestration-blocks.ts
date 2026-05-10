@@ -50,7 +50,10 @@ export async function buildFormattedOutboundPayload<TContext = Record<string, un
   outboundSemanticMapper: ReturnType<RequestStageHooks<TContext>["createSemanticMapper"]>;
   outboundContextMetadataKey: string;
   outboundContextSnapshot?: Record<string, unknown>;
-}): Promise<JsonObject> {
+}): Promise<{
+  formattedPayload: JsonObject;
+  outboundWorkingRequest: StandardizedRequest | ProcessedRequest;
+}> {
   const routeAwareWorkingRequest = resolveRouteAwareResponsesContinuation({
     request: args.workingRequest,
     rawRequest: args.rawRequest,
@@ -96,5 +99,8 @@ export async function buildFormattedOutboundPayload<TContext = Record<string, un
       }),
   );
 
-  return formattedPayload as JsonObject;
+  return {
+    formattedPayload: formattedPayload as JsonObject,
+    outboundWorkingRequest: routeAwareWorkingRequest,
+  };
 }

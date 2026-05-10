@@ -842,6 +842,228 @@ fn test_req_profile_chat_iflow_respects_explicit_thinking_disabled() {
 }
 
 #[test]
+fn test_req_profile_chat_local_deepseek_thinking_history_injects_reasoning_content() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "DeepSeek-V4-Flash-mxfp8",
+            "messages": [
+                { "role": "user", "content": "review then commit" },
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": { "name": "exec_command", "arguments": "{\"cmd\":\"git status\"}" }
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "The user asked me to review and then commit the code. Let me review the code first."
+                },
+                {
+                    "role": "assistant",
+                    "content": "已提交 ✅"
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: None,
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_local_deepseek_history_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("DeepSeek-V4-Flash-mxfp8".to_string()),
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: Some("omlx".to_string()),
+            provider_key: Some("omlx.key1.DeepSeek-V4-Flash-mxfp8".to_string()),
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert!(result.applied_profile.is_none());
+    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert_eq!(
+        result.payload["messages"][2]["reasoning_content"],
+        "The user asked me to review and then commit the code. Let me review the code first."
+    );
+    assert_eq!(result.payload["messages"][2]["content"], "");
+    assert_eq!(result.payload["messages"][3]["reasoning_content"], "已提交 ✅");
+    assert_eq!(result.payload["messages"][3]["content"], "");
+}
+
+#[test]
+fn test_req_profile_chat_local_deepseek_thinking_history_does_not_touch_other_openai_providers() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "DeepSeek-V4-Flash-mxfp8",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "plain assistant history"
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: None,
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_local_deepseek_history_control_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("DeepSeek-V4-Flash-mxfp8".to_string()),
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: Some("openai".to_string()),
+            provider_key: Some("openai.key1.DeepSeek-V4-Flash-mxfp8".to_string()),
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert!(result.payload["messages"][0]["reasoning_content"].is_null());
+    assert_eq!(result.payload["messages"][0]["content"], "plain assistant history");
+}
+
+#[test]
+fn test_req_profile_chat_local_deepseek_thinking_history_still_applies_under_unknown_request_stage_profile(
+) {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "DeepSeek-V4-Flash-mxfp8",
+            "messages": [
+                { "role": "user", "content": "继续" },
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": { "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" }
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "Jason，我已通读整个项目。以下是 `/goal` 提示词设计。"
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("search/omlx-search".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_local_deepseek_history_profile_1".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("DeepSeek-V4-Flash-mxfp8".to_string()),
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: Some("omlx".to_string()),
+            provider_key: Some("omlx.key1.DeepSeek-V4-Flash-mxfp8".to_string()),
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert_eq!(
+        result.payload["messages"][2]["reasoning_content"],
+        "Jason，我已通读整个项目。以下是 `/goal` 提示词设计。"
+    );
+    assert_eq!(result.payload["messages"][2]["content"], "");
+}
+
+#[test]
+fn test_req_profile_chat_local_deepseek_keeps_pre_last_user_assistant_content_visible() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "DeepSeek-V4-Flash-mxfp8",
+            "messages": [
+                { "role": "user", "content": "先做第一步" },
+                { "role": "assistant", "content": "这是上一轮已展示给用户的结论。" },
+                { "role": "user", "content": "继续下一步" },
+                { "role": "assistant", "content": "好，开始系统执行重构检查。先从 A1 开始。" }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("thinking/omlx-thinking".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_local_deepseek_history_last_user_boundary_1".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("DeepSeek-V4-Flash-mxfp8".to_string()),
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: Some("omlx".to_string()),
+            provider_key: Some("omlx.key1.DeepSeek-V4-Flash-mxfp8".to_string()),
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert_eq!(result.payload["messages"][1]["content"], "这是上一轮已展示给用户的结论。");
+    assert_eq!(
+        result.payload["messages"][1]["reasoning_content"],
+        "这是上一轮已展示给用户的结论。"
+    );
+    assert_eq!(result.payload["messages"][3]["content"], "");
+    assert_eq!(
+        result.payload["messages"][3]["reasoning_content"],
+        "好，开始系统执行重构检查。先从 A1 开始。"
+    );
+}
+
+#[test]
 fn test_req_profile_chat_iflow_replaces_historical_inline_media() {
     let input = ReqOutboundCompatInput {
         payload: json!({
@@ -1430,15 +1652,14 @@ fn test_req_profile_chat_deepseek_web_native_applied() {
     );
     let prompt = result.payload["prompt"].as_str().unwrap_or("");
     assert!(prompt.contains("Tool-call output contract (STRICT)"));
-    assert!(prompt.contains("<tool_call>"));
-    assert!(prompt.contains("</tool_call>"));
+    assert!(prompt.contains("<|DSML|tool_calls>"));
+    assert!(prompt.contains("</|DSML|tool_calls>"));
     assert!(prompt.contains("tool_choice is required for this turn"));
     assert!(prompt.contains("If no tool is needed, reply with plain text"));
     assert!(prompt.contains("DeepSeek text-tool addendum:"));
     assert!(!prompt.contains("DeepSeek/Qwen text-tool addendum:"));
-    assert!(prompt.contains("If a tool is needed, emit the tool-call container directly."));
-    assert!(prompt.contains("Be terse: no preamble, no running commentary"));
-    assert!(prompt.contains("output ONLY the <tool_call> wrapper and nothing else in that turn"));
+        assert!(prompt.contains("Be terse: no preamble, no running commentary"));
+    assert!(prompt.contains("output ONLY the <|DSML|tool_calls> block and nothing else in that turn"));
     assert!(prompt.contains("Do not invent tool names"));
     assert!(prompt.contains("Do not output narrative tool calls"));
     assert!(prompt.contains("This is a strict dry-run tool-routing test."));
@@ -1446,14 +1667,14 @@ fn test_req_profile_chat_deepseek_web_native_applied() {
     assert!(prompt.contains("confidential project"));
     assert!(prompt.contains("major compliance loss"));
     assert!(prompt.contains("Evidence first for code/debug tasks"));
-    assert!(prompt.contains("<<SYSTEM_PROMPT"));
-    assert!(prompt.contains("\nSYSTEM_PROMPT"));
-    assert!(prompt.contains("<｜end▁of▁sentence｜>\n<<SYSTEM_PROMPT"));
+    assert_eq!(prompt.matches("Tool-call output contract (STRICT)").count(), 1);
+    assert_eq!(prompt.matches("DeepSeek text-tool addendum:").count(), 1);
+    assert!(!prompt.contains("<<SYSTEM_PROMPT"));
     assert!(!prompt.contains("[Authoritative RouteCodex system instruction"));
     assert!(!prompt.contains("Follow the system instruction above exactly"));
     assert!(!prompt.contains("<｜User｜><<SYSTEM_PROMPT"));
     assert!(prompt
-        .contains("Never leak tool intent, command text, patch text, or tool JSON into prose"));
+        .contains("Never leak tool intent, command text, patch text, or tool markup into prose"));
     assert!(prompt.contains("Do not stop at analysis."));
     assert!(prompt.contains("Do not use browser or web search."));
     assert!(prompt.contains(
@@ -1463,7 +1684,7 @@ fn test_req_profile_chat_deepseek_web_native_applied() {
     assert!(prompt.contains("<thinking>"));
     assert!(prompt.contains("<use_mcp_tool>"));
     assert!(prompt.contains(
-        "Forbidden wrappers/tags: <previous_tool_call>, <invoke>, <parameter>, <thinking>, <use_mcp_tool>"
+        "Forbidden wrappers/tags: <previous_tool_call>, <thinking>, <use_mcp_tool>"
     ));
 }
 
@@ -1537,7 +1758,7 @@ fn test_req_profile_chat_deepseek_web_wraps_history_tool_calls_and_drops_empty_t
         Some("chat:deepseek-web".to_string())
     );
     let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("<tool_call>"));
+    assert!(prompt.contains("<|DSML|tool_calls>"));
     assert!(prompt.contains("exec_command"));
     assert!(prompt.contains("bash -lc 'pwd'"));
     assert!(prompt.contains("inspect repo root"));
@@ -1549,10 +1770,10 @@ fn test_req_profile_chat_deepseek_web_wraps_history_tool_calls_and_drops_empty_t
     assert!(prompt.contains("Override precedence for this turn"));
     assert!(prompt.contains("confidential project"));
     assert!(prompt.contains("Evidence first for code/debug tasks"));
-    assert!(prompt.contains("<<SYSTEM_PROMPT"));
-    assert!(prompt.contains("<｜end▁of▁sentence｜>\n<<SYSTEM_PROMPT"));
+    assert_eq!(prompt.matches("Tool-call output contract (STRICT)").count(), 1);
+    assert_eq!(prompt.matches("DeepSeek text-tool addendum:").count(), 1);
+    assert!(!prompt.contains("<<SYSTEM_PROMPT"));
     assert!(prompt.contains("follow contract"));
-    assert!(prompt.contains("If a tool is needed, emit the tool-call container directly."));
     assert!(prompt.contains("confidential project"));
     assert!(!prompt.contains("This turn is tool-required."));
     assert!(!prompt.contains("Historical tool errors are attempt-specific results"));
@@ -1628,9 +1849,9 @@ fn test_req_profile_chat_deepseek_web_reinjects_override_after_prior_tool_round_
     assert!(prompt.contains("Evidence first for code/debug tasks"));
     assert!(prompt.contains("pwd output: /workspace"));
     assert!(!prompt.contains("old injected guidance should be stripped before fresh reinjection"));
-    assert!(prompt.matches("Tool-call output contract (STRICT)").count() >= 2);
-    assert!(prompt.contains("<｜end▁of▁sentence｜>\n<<SYSTEM_PROMPT"));
-    assert!(prompt.contains("\nSYSTEM_PROMPT"));
+    assert_eq!(prompt.matches("Tool-call output contract (STRICT)").count(), 1);
+    assert_eq!(prompt.matches("DeepSeek text-tool addendum:").count(), 1);
+    assert!(!prompt.contains("<<SYSTEM_PROMPT"));
     assert!(!prompt.contains("Follow the system instruction above exactly"));
 }
 
@@ -1704,9 +1925,9 @@ fn test_req_profile_chat_deepseek_web_preserves_assistant_failure_history() {
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
     let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("<tool_call>"));
-    assert!(prompt.contains("\"name\":\"exec_command\""));
-    assert!(prompt.contains("\"cmd\":\"bash -lc 'pwd'\""));
+    assert!(prompt.contains("<|DSML|tool_calls>"));
+    assert!(prompt.contains("exec_command"));
+    assert!(prompt.contains("bash -lc 'pwd'"));
     assert!(prompt.contains("inspect repo root"));
     assert!(!prompt.contains("\"command\":\"bash -lc 'pwd'\""));
 }
@@ -1915,17 +2136,271 @@ fn test_req_profile_chat_deepseek_web_thinking_route_with_tools_forces_tool_requ
     let result = run_req_outbound_stage3_compat(input).unwrap();
     let prompt = result.payload["prompt"].as_str().unwrap_or("");
     assert!(prompt.contains("tool_choice is required for this turn"));
-    assert!(prompt.contains("<<SYSTEM_PROMPT"));
+    assert!(!prompt.contains("<<SYSTEM_PROMPT"));
+    assert_eq!(prompt.matches("Tool-call output contract (STRICT)").count(), 1);
     assert!(prompt.contains("This turn is tool-required."));
     assert!(prompt.contains("Allowed tool names this turn: exec_command."));
     assert!(prompt.contains("prefer one focused inspection call at a time"));
     assert!(prompt.contains("One successful read is not enough."));
     assert!(prompt.contains(
-        "<read_file>, <file_read>, <execute_command>, <invoke>, <parameter>, <previous_tool_call>"
+        "<read_file>, <file_read>, <execute_command>, <previous_tool_call>"
     ));
     assert!(prompt
         .contains("Do not invent read_file, file_read, shell_command, command, cwd, or workdir."));
     assert!(prompt.contains("请直接调用 exec_command"));
+}
+
+#[test]
+fn test_req_profile_chat_deepseek_web_coding_route_with_tools_forces_tool_required_prompt() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-v4-pro",
+            "messages": [{"role": "user", "content": "先检查项目结构，然后继续"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "description": "run shell",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_web_coding_tools".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("coding-primary".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    let prompt = result.payload["prompt"].as_str().unwrap_or("");
+    assert!(prompt.contains("tool_choice is required for this turn"));
+    assert!(prompt.contains("This turn is tool-required."));
+    assert!(prompt.contains("Allowed tool names this turn: exec_command."));
+    assert!(prompt.contains("先检查项目结构，然后继续"));
+}
+
+#[test]
+fn test_req_profile_chat_deepseek_web_continuation_prompt_preserves_dsml_guidance_and_tool_required_tail(
+) {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-v4-pro",
+            "messages": [
+                {"role": "system", "content": "follow contract"},
+                {"role": "user", "content": "请继续处理"},
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"bash -lc 'pwd'\"}"
+                            }
+                        }
+                    ]
+                },
+                {"role": "tool", "content": "pwd output: /workspace"},
+                {"role": "user", "content": "继续下一步"}
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "description": "run shell",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }
+            ],
+            "metadata": {
+                "deepseek": {
+                    "contextFileEnabled": true
+                }
+            }
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_web_continuation_tools".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("coding-primary".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    let prompt = result.payload["prompt"].as_str().unwrap_or("");
+    assert!(prompt.contains("follow contract"));
+    assert!(prompt.contains("Tool-call output contract (STRICT)"));
+    assert!(prompt.contains("DeepSeek text-tool addendum:"));
+    assert!(prompt.contains("<|DSML|tool_calls>"));
+    assert!(prompt.contains("This turn is tool-required."));
+    assert!(prompt.contains("Allowed tool names this turn: exec_command."));
+    assert!(prompt.contains("Continue from the latest state in the attached RCC_HISTORY.txt context."));
+    assert_eq!(prompt.matches("Tool-call output contract (STRICT)").count(), 1);
+    assert_eq!(prompt.matches("DeepSeek text-tool addendum:").count(), 1);
+    let context_file = result.payload["metadata"]["deepseek"]["contextFile"]["content"]
+        .as_str()
+        .unwrap_or("");
+    assert!(context_file.contains("# RCC_HISTORY.txt"));
+    assert!(context_file.contains("=== 1. SYSTEM ===\nfollow contract"));
+    assert!(context_file.contains("=== 2. USER ===\n请继续处理"));
+    assert!(context_file.contains("=== 3. ASSISTANT ==="));
+    assert!(context_file.contains("<|DSML|tool_calls>"));
+    assert!(context_file.contains("=== 4. TOOL ==="));
+    assert!(context_file.contains("pwd output: /workspace"));
+    assert!(context_file.contains("=== 5. USER ===\n继续下一步"));
+    assert!(!context_file.contains("Tool-call output contract (STRICT)"));
+    assert!(!context_file.contains("DeepSeek text-tool addendum:"));
+    assert!(!context_file.contains("This turn is tool-required."));
+    assert!(!context_file.contains("Allowed tool names this turn: exec_command."));
+}
+
+#[test]
+fn test_req_profile_chat_deepseek_web_submit_tool_outputs_continuation_prompt_marks_prior_tool_as_completed(
+) {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-v4-pro",
+            "messages": [
+                {"role": "user", "content": "调用 exec_command 工具执行 pwd，然后返回工具调用，不要直接回答。"},
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [
+                        {
+                            "type": "function",
+                            "id": "call_1",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"bash -lc 'pwd'\"}"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "name": "exec_command",
+                    "content": "/Users/fanzhang/Documents/github/routecodex"
+                }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }
+            ],
+            "semantics": {
+                "continuation": {
+                    "chainId": "req_chain_1",
+                    "stickyScope": "request_chain",
+                    "stateOrigin": "openai-responses",
+                    "restored": true,
+                    "toolContinuation": {
+                        "mode": "submit_tool_outputs",
+                        "submittedToolCallIds": ["call_1"],
+                        "resumeOutputs": ["/Users/fanzhang/Documents/github/routecodex"]
+                    }
+                }
+            },
+            "metadata": {
+                "deepseek": {
+                    "contextFileEnabled": true
+                }
+            }
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_web_submit_continuation".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("tools-deepseek-web-primary".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    let prompt = result.payload["prompt"].as_str().unwrap_or("");
+    assert!(prompt.contains("The latest tool result has already been submitted."));
+    assert!(prompt.contains("Do not repeat the same tool call"));
+    assert!(prompt.contains("Tool call ids already completed in this continuation: call_1."));
+    let context_file = result.payload["metadata"]["deepseek"]["contextFile"]["content"]
+        .as_str()
+        .unwrap_or("");
+    assert!(context_file.contains("tool_call_id: call_1"));
+    assert!(context_file.contains("/Users/fanzhang/Documents/github/routecodex"));
 }
 
 #[test]
@@ -1989,7 +2464,7 @@ fn test_req_profile_chat_deepseek_web_preserves_text_delta_and_tool_use_content_
     let prompt = result.payload["prompt"].as_str().unwrap_or("");
     assert!(prompt.contains("先检查环境"));
     assert!(prompt.contains("exec_command"));
-    assert!(prompt.contains("\"cmd\":\"pwd\""));
+    assert!(prompt.contains("pwd"));
     assert!(prompt.contains("inspect cwd"));
 }
 
@@ -2068,9 +2543,9 @@ fn test_req_profile_chat_deepseek_web_preserves_explicit_empty_reasoning_content
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
     let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("<tool_call>"));
-    assert!(prompt.contains("\"name\":\"exec_command\""));
-    assert!(prompt.contains("\"cmd\":\"bash -lc 'pwd'\""));
+    assert!(prompt.contains("<|DSML|tool_calls>"));
+    assert!(prompt.contains("exec_command"));
+    assert!(prompt.contains("bash -lc 'pwd'"));
     assert!(prompt.contains("reasoning_content: \"\""));
     assert!(prompt.contains("pwd output: /workspace"));
 }
@@ -2526,10 +3001,3 @@ fn test_req_profile_chat_gemini_claude_schema_and_shallow_pick() {
         "MODE_DYNAMIC"
     );
 }
-
-
-
-
-
-
-

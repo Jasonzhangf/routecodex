@@ -20,8 +20,12 @@ export const CONTEXT_LENGTH_MESSAGE_HINTS = [
   "model's maximum context length",
   'maximum context length',
   'max context length',
+  'input_exceeds_limit',
+  'input exceeds limit',
   'input tokens exceeds',
   'input tokens exceed',
+  '内容超长',
+  '请删减后再试',
   '对话长度上限',
   '达到对话长度上限'
 ];
@@ -497,14 +501,16 @@ export function isContextLengthExceededError(
   if (
     normalizedUpstream.includes('context_length_exceeded') ||
     normalizedUpstream.includes('context_window_exceeded') ||
-    normalizedUpstream.includes('model_context_window_exceeded')
+    normalizedUpstream.includes('model_context_window_exceeded') ||
+    normalizedUpstream.includes('input_exceeds_limit')
   ) {
     return true;
   }
   if (
     normalizedReason === 'context_length_exceeded' ||
     normalizedReason === 'context_window_exceeded' ||
-    normalizedReason === 'model_context_window_exceeded'
+    normalizedReason === 'model_context_window_exceeded' ||
+    normalizedReason === 'input_exceeds_limit'
   ) {
     return true;
   }

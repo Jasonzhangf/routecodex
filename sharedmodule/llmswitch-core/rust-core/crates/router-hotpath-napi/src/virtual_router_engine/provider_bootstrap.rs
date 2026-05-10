@@ -1547,16 +1547,35 @@ fn parse_claude_code_app_version_from_user_agent(user_agent: &str) -> Option<Str
 }
 
 fn normalize_deepseek_options(provider: &Map<String, Value>) -> Option<Value> {
+    let provider_id = provider
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let compatibility_profile =
+        resolve_compatibility_profile(provider_id, provider)
+            .ok()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
     let direct = as_object(provider.get("deepseek"));
     let ext = as_object(as_object(provider.get("extensions")).and_then(|ext| ext.get("deepseek")));
     let source = if direct.map(|value| !value.is_empty()).unwrap_or(false) {
         direct
     } else {
         ext
-    }?;
-    if source.is_empty() {
+    };
+    let Some(source) = source else {
+        if compatibility_profile == "chat:deepseek-web" {
+            let mut out = Map::new();
+            out.insert(
+                "toolProtocol".to_string(),
+                Value::String("text".to_string()),
+            );
+            out.insert("contextFileEnabled".to_string(), Value::Bool(true));
+            return Some(Value::Object(out));
+        }
         return None;
-    }
+    };
     let strict_tool_required = source.get("strictToolRequired").and_then(parse_bool_like);
     let mut tool_protocol = source
         .get("toolProtocol")
@@ -1582,6 +1601,13 @@ fn normalize_deepseek_options(provider: &Map<String, Value>) -> Option<Value> {
                 .and_then(Value::as_object)
                 .and_then(|node| node.get("enabled"))
                 .and_then(parse_bool_like)
+        })
+        .or_else(|| {
+            if compatibility_profile == "chat:deepseek-web" {
+                Some(true)
+            } else {
+                None
+            }
         });
     if strict_tool_required.is_none() && tool_protocol.is_none() && context_file_enabled.is_none() {
         return None;

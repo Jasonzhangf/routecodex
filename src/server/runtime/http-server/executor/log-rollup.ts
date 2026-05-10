@@ -69,6 +69,9 @@ type UsageRollupRecord = {
   completionTokens?: number;
   cacheReadTokens?: number;
   totalTokens?: number;
+  firstContentAtMs?: number;
+  lastContentAtMs?: number;
+  requestStartedAtMs?: number;
 };
 
 type SessionRequestEvent = {
@@ -93,6 +96,9 @@ type SessionRequestEvent = {
   completionTokens?: number;
   cacheReadTokens?: number;
   totalTokens?: number;
+  firstContentAtMs?: number;
+  lastContentAtMs?: number;
+  requestStartedAtMs?: number;
 };
 
 type VirtualRouterHitAgg = {
@@ -340,11 +346,38 @@ function emitRealtimeSessionRequestLog(args: {
     if (reqUsage.promptTokens !== undefined) tokParts.push(`in=${formatWholeNumber(reqUsage.promptTokens)}`);
     if (reqUsage.completionTokens !== undefined) {
       tokParts.push(`out=${formatWholeNumber(reqUsage.completionTokens)}`);
-      // output speed = completion tokens / upstream provider time
-      const upstreamMs = reqUsage.externalLatencyMs > 0 ? reqUsage.externalLatencyMs : reqUsage.latencyMs;
-      if (reqUsage.completionTokens > 0 && upstreamMs > 0) {
-        const tokPerSec = ((reqUsage.completionTokens * 1000) / upstreamMs).toFixed(0);
-        tokParts.push(`speed=${tokPerSec}t/s`);
+      // Compute output speed based on token generation window:
+      // first content byte -> last content byte. This excludes TTFT.
+      const hasStreamTiming =
+        typeof reqUsage.firstContentAtMs === 'number' &&
+        typeof reqUsage.lastContentAtMs === 'number' &&
+        reqUsage.firstContentAtMs > 0 &&
+        reqUsage.lastContentAtMs >= reqUsage.firstContentAtMs;
+      if (hasStreamTiming) {
+        const genMs = reqUsage.lastContentAtMs! - reqUsage.firstContentAtMs!;
+        if (reqUsage.completionTokens > 0 && genMs > 0) {
+          const tokPerSec = ((reqUsage.completionTokens * 1000) / genMs).toFixed(0);
+          tokParts.push(`speed=${tokPerSec}t/s`);
+        }
+        // Compute TTFT if requestStartedAtMs is available
+        if (typeof reqUsage.requestStartedAtMs === 'number' && reqUsage.requestStartedAtMs > 0) {
+          const ttftMs = reqUsage.firstContentAtMs! - reqUsage.requestStartedAtMs;
+          if (ttftMs >= 0) {
+            tokParts.push(`ttft=${formatMs(ttftMs)}`);
+          }
+        }
+      } else {
+        // Fallback order:
+        // 1) full SSE aggregation wall-clock (closer to actual streamed output duration)
+        // 2) external latency (legacy coarse approximation)
+        const generationWindowMs =
+          reqUsage.sseDecodeMs > 0
+            ? reqUsage.sseDecodeMs
+            : (reqUsage.externalLatencyMs > 0 ? reqUsage.externalLatencyMs : reqUsage.latencyMs);
+        if (reqUsage.completionTokens > 0 && generationWindowMs > 0) {
+          const tokPerSec = ((reqUsage.completionTokens * 1000) / generationWindowMs).toFixed(0);
+          tokParts.push(`speed=${tokPerSec}t/s`);
+        }
       }
     }
     if (reqUsage.cacheReadTokens !== undefined) tokParts.push(`cache=${formatWholeNumber(reqUsage.cacheReadTokens)}`);
@@ -661,7 +694,10 @@ export function recordUsageRollup(event: UsageRollupRecord): void {
     promptTokens: typeof event.promptTokens === 'number' ? event.promptTokens : undefined,
     completionTokens: typeof event.completionTokens === 'number' ? event.completionTokens : undefined,
     cacheReadTokens: typeof event.cacheReadTokens === 'number' ? event.cacheReadTokens : undefined,
-    totalTokens: typeof event.totalTokens === 'number' ? event.totalTokens : undefined
+    totalTokens: typeof event.totalTokens === 'number' ? event.totalTokens : undefined,
+    firstContentAtMs: typeof event.firstContentAtMs === 'number' ? event.firstContentAtMs : undefined,
+    lastContentAtMs: typeof event.lastContentAtMs === 'number' ? event.lastContentAtMs : undefined,
+    requestStartedAtMs: typeof event.requestStartedAtMs === 'number' ? event.requestStartedAtMs : undefined
   };
   if (!isRealtimeRollupEnabled()) {
     const sessionEvents = sessionRequestEvents.get(sessionId);

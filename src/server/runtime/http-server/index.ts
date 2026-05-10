@@ -38,6 +38,7 @@ import { ManagerDaemon } from '../../../manager/index.js';
 import { ensureServerScopedSessionDir } from './session-dir.js';
 import { cleanupSessionStorageOnStartup } from './session-storage-cleanup.js';
 import { isTmuxSessionAlive } from './tmux-session-probe.js';
+import { shouldLogStageEvent } from './http-server-bootstrap.js';
 import { canonicalizeServerId } from './server-id.js';
 import { StatsManager } from './stats-manager.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
@@ -222,6 +223,7 @@ export class RouteCodexHttpServer {
       logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => {
         this.logStage(stage, requestId, details);
       },
+      shouldLogStageEvent: (stage: string) => shouldLogStageEvent(this, stage),
       stats: this.stats,
       onRequestStart: ({ requestId, metadata }) => {
         this.requestActivityTracker.start(requestId, metadata);

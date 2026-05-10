@@ -329,6 +329,9 @@ fn should_force_tool_required(
     if route_starts_with(adapter_context, &["thinking"]) {
         return true;
     }
+    if route_starts_with(adapter_context, &["coding"]) {
+        return true;
+    }
     if route_starts_with(adapter_context, &["tools"]) {
         return true;
     }
@@ -366,7 +369,7 @@ pub(crate) fn apply_deepseek_web_request_compat(
     };
     let inline_image_files = collect_inline_image_contracts(root);
     let prompt = if history_transcript.is_some() {
-        build_deepseek_continuation_prompt(root)
+        build_deepseek_continuation_prompt(root, force_tool_required)
     } else {
         build_deepseek_prompt(root, force_tool_required)
     };

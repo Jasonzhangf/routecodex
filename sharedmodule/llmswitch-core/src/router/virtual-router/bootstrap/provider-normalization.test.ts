@@ -185,4 +185,19 @@ describe('normalizeProvider anthropic thinking config', () => {
     expect(normalized.headers?.['X-DashScope-CacheControl']).toBe('enable');
     expect(normalized.headers?.['X-DashScope-AuthType']).toBe('qwen-oauth');
   });
+
+  it('defaults deepseek-web runtime deepseek options to contextFileEnabled + text tool protocol', () => {
+    const normalized = normalizeProvider('deepseek-web', {
+      id: 'deepseek-web',
+      type: 'deepseek',
+      baseURL: 'https://chat.deepseek.com',
+      compatibilityProfile: 'chat:deepseek-web',
+      auth: { type: 'deepseek-account', tokenFile: 'deepseek-account-1-default' }
+    });
+
+    expect(normalized.deepseek).toEqual({
+      toolProtocol: 'text',
+      contextFileEnabled: true
+    });
+  });
 });

@@ -13,6 +13,10 @@ use super::profile::{
 use super::qwen::apply_qwen_request_compat;
 use super::qwenchat::apply_qwenchat_request_compat;
 use super::responses::{apply_responses_c4m_request_compat, apply_responses_crs_request_compat};
+use super::thinking_history::{
+    ensure_reasoning_content_for_assistant_history,
+    should_apply_local_deepseek_thinking_history_compat,
+};
 use super::{CompatResult, ReqOutboundCompatInput};
 
 pub fn run_req_outbound_stage3_compat(
@@ -199,5 +203,12 @@ pub fn run_req_outbound_stage3_compat(
         }
     }
 
-    Ok(build_compat_result(input.payload, None))
+    let mut payload = input.payload;
+    if should_apply_local_deepseek_thinking_history_compat(&payload, &input.adapter_context) {
+        if let Some(root) = payload.as_object_mut() {
+            ensure_reasoning_content_for_assistant_history(root);
+        }
+    }
+
+    Ok(build_compat_result(payload, None))
 }

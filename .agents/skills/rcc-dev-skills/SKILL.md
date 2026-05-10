@@ -460,6 +460,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - 触发信号：`/v1/chat/completions` 客户端在 `reasoning_details` 上报 `sequence item 0: expected str instance, dict found`，或 Python `''.join(message['reasoning_details'])` 直接崩溃。
 - 可复用动作：**不要删除 `reasoning_details` 逃避兼容问题**；保留结构化真源在 `message.reasoning`，保留主文本在 `message.reasoning_content`，同时把兼容投影 `message.reasoning_details` 规范为 `Array<string>`（例如 `[type] text`），做到信息不丢、客户端可 join。
 - 验证：Rust outbound 单测 + `tests/monitoring/resp-outbound-stage.test.ts` 断言 `reasoning_details.join('')` 可用 + 5555 live chat 验证 `reasoning/reasoning_content/reasoning_details` 三者同时存在。
+- 本地 DeepSeek thinking 历史形状短路（2026-05-10）：若 `omlx/rapidmlx` 的 `DeepSeek-V4-Flash-mxfp8` 在 `/v1/responses` 或 openai-chat thinking 链上报 `ThinkingMode: thinking, invalid message without reasoning_content/tool_calls`，先查 `req_outbound_stage3_compat/request_stage.rs` 是否被某个 **未知 request-stage profile**（如 `search/omlx-search`）短路；`assistant history -> reasoning_content` 补齐必须挂在 provider/model/protocol 判定上统一执行，不能再受 `profile.is_none()` 之类条件限制。
 
 ## 服务器重启与热加载（合并自 rcc-server-restart）
 

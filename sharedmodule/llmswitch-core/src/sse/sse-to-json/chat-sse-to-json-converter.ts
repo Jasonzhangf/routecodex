@@ -33,6 +33,8 @@ type DeepSeekWebErrorInfo = {
   raw: Record<string, unknown>;
 };
 
+type DeepSeekPatchAppendTarget = 'content' | 'reasoning';
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -50,8 +52,11 @@ function includesContextLengthHint(value: string): boolean {
   }
   return (
     normalized.includes('context_length_exceeded')
+    || normalized.includes('input_exceeds_limit')
     || normalized.includes('context too long')
     || normalized.includes('context window')
+    || normalized.includes('内容超长')
+    || normalized.includes('请删减后再试')
     || normalized.includes('达到对话长度上限')
     || normalized.includes('请开启新对话')
   );
@@ -208,6 +213,14 @@ function normalizeChatUsage(usage: unknown): ChatUsage | null {
   };
 }
 
+function resolveDeepSeekFragmentTarget(fragmentType: unknown): DeepSeekPatchAppendTarget {
+  const normalized = readTrimmed(fragmentType).toUpperCase();
+  if (normalized === 'THINK' || normalized === 'THINKING' || normalized === 'REASONING') {
+    return 'reasoning';
+  }
+  return 'content';
+}
+
 /**
  * Chat SSE到JSON转换器
  */
@@ -326,7 +339,10 @@ export class ChatSseToJsonConverter {
           textBuffer = textBuffer.slice(delimiterIndex + 2);
           const trimmed = rawEvent.trim();
           if (trimmed) {
-            yield this.parseSseChunk(trimmed);
+            const parsed = this.parseSseChunk(trimmed);
+            if (parsed) {
+              yield parsed;
+            }
           }
           delimiterIndex = textBuffer.indexOf('\n\n');
         }
@@ -343,23 +359,29 @@ export class ChatSseToJsonConverter {
 
     const trailing = textBuffer.trim();
     if (trailing) {
-      yield this.parseSseChunk(trailing);
+      const parsed = this.parseSseChunk(trailing);
+      if (parsed) {
+        yield parsed;
+      }
     }
   }
 
   /**
    * 将SSE文本块解析为Chat事件
    */
-  private parseSseChunk(chunk: string): ChatSseEvent {
+  private parseSseChunk(chunk: string): ChatSseEvent | null {
     const lines = chunk.trim().split('\n');
     let rawEventType: string | undefined;
     const dataLines: string[] = [];
+    let hasCommentOnlyLines = false;
 
     for (const line of lines) {
       if (line.startsWith('event:')) {
         rawEventType = line.substring(6).trim();
       } else if (line.startsWith('data:')) {
         dataLines.push(line.substring(5).trim());
+      } else if (line.startsWith(':')) {
+        hasCommentOnlyLines = true;
       }
     }
     const dataValue = dataLines.join('\n');
@@ -423,6 +445,10 @@ export class ChatSseToJsonConverter {
       if (dataValue) {
         eventType = dataValue === '[DONE]' ? 'chat.done' : 'chat_chunk';
       }
+    }
+
+    if (!eventType && !dataValue && hasCommentOnlyLines) {
+      return null;
     }
 
     if (!eventType) {
@@ -693,49 +719,95 @@ export class ChatSseToJsonConverter {
     const choiceBuilder = this.ensureChoiceBuilder(context, 0);
     choiceBuilder.messageBuilder.role = choiceBuilder.messageBuilder.role || 'assistant';
 
+    const appendToTarget = (target: DeepSeekPatchAppendTarget, text: string): void => {
+      if (!text) {
+        return;
+      }
+      deepseekState.patchAppendTarget = target;
+      if (target === 'reasoning') {
+        choiceBuilder.messageBuilder.reasoningContent =
+          (choiceBuilder.messageBuilder.reasoningContent || '') + text;
+      } else {
+        choiceBuilder.messageBuilder.content = (choiceBuilder.messageBuilder.content || '') + text;
+      }
+      choiceBuilder.accumulatedContent += text;
+    };
+
+    const processFragmentRecord = (fragment: Record<string, unknown>): void => {
+      const target = resolveDeepSeekFragmentTarget(fragment.type);
+      deepseekState.fragmentTargets.push(target);
+      deepseekState.patchAppendTarget = target;
+      if (typeof fragment.content === 'string' && fragment.content.length > 0) {
+        appendToTarget(target, fragment.content);
+      }
+    };
+
+    const processFragmentsArray = (items: unknown[]): void => {
+      for (const item of items) {
+        const fragment = asRecord(item);
+        if (!fragment) {
+          continue;
+        }
+        processFragmentRecord(fragment);
+      }
+    };
+
+    const resolveFragmentTargetFromPath = (): DeepSeekPatchAppendTarget | undefined => {
+      const prefix = 'response/fragments/';
+      const suffix = '/content';
+      if (!path.startsWith(prefix) || !path.endsWith(suffix)) {
+        return undefined;
+      }
+      const rawIndex = path.slice(prefix.length, path.length - suffix.length).trim();
+      if (!rawIndex) {
+        return undefined;
+      }
+      if (rawIndex === '-1') {
+        return deepseekState.fragmentTargets.at(-1);
+      }
+      const index = Number(rawIndex);
+      if (!Number.isInteger(index) || index < 0) {
+        return undefined;
+      }
+      return deepseekState.fragmentTargets[index];
+    };
+
     if (path === 'response/content' && typeof value === 'string') {
-      deepseekState.patchAppendTarget = 'content';
-      choiceBuilder.messageBuilder.content = (choiceBuilder.messageBuilder.content || '') + value;
-      choiceBuilder.accumulatedContent += value;
+      appendToTarget('content', value);
     } else if (path === 'response/thinking_content' && typeof value === 'string') {
-      deepseekState.patchAppendTarget = 'reasoning';
-      choiceBuilder.messageBuilder.reasoningContent =
-        (choiceBuilder.messageBuilder.reasoningContent || '') + value;
-      choiceBuilder.accumulatedContent += value;
+      appendToTarget('reasoning', value);
     } else if (path === 'response/content') {
       deepseekState.patchAppendTarget = 'content';
     } else if (path === 'response/thinking_content') {
       deepseekState.patchAppendTarget = 'reasoning';
+    } else if (path === 'response/fragments' && op === 'APPEND' && Array.isArray(value)) {
+      processFragmentsArray(value);
+    } else if (resolveFragmentTargetFromPath() && typeof value === 'string') {
+      appendToTarget(resolveFragmentTargetFromPath()!, value);
     } else if (op === 'APPEND' && typeof value === 'string' && deepseekState.patchAppendTarget === 'reasoning') {
-      choiceBuilder.messageBuilder.reasoningContent =
-        (choiceBuilder.messageBuilder.reasoningContent || '') + value;
-      choiceBuilder.accumulatedContent += value;
+      appendToTarget('reasoning', value);
     } else if (op === 'APPEND' && typeof value === 'string' && deepseekState.patchAppendTarget === 'content') {
-      choiceBuilder.messageBuilder.content = (choiceBuilder.messageBuilder.content || '') + value;
-      choiceBuilder.accumulatedContent += value;
+      appendToTarget('content', value);
     } else if (!path && typeof value === 'string' && value.length > 0) {
       // DeepSeek sometimes continues APPEND content/reasoning via bare {"v":"..."} frames.
       if (deepseekState.patchAppendTarget === 'reasoning') {
-        choiceBuilder.messageBuilder.reasoningContent =
-          (choiceBuilder.messageBuilder.reasoningContent || '') + value;
+        appendToTarget('reasoning', value);
       } else {
-        choiceBuilder.messageBuilder.content = (choiceBuilder.messageBuilder.content || '') + value;
+        appendToTarget('content', value);
       }
-      choiceBuilder.accumulatedContent += value;
     } else if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
       const inner = value as Record<string, unknown>;
       const responseNode = inner.response;
       if (responseNode && typeof responseNode === 'object' && !Array.isArray(responseNode)) {
         const responseRecord = responseNode as Record<string, unknown>;
         if (typeof responseRecord.content === 'string' && responseRecord.content.length > 0) {
-          choiceBuilder.messageBuilder.content =
-            (choiceBuilder.messageBuilder.content || '') + responseRecord.content;
-          choiceBuilder.accumulatedContent += responseRecord.content;
+          appendToTarget('content', responseRecord.content);
         }
         if (typeof responseRecord.thinking_content === 'string' && responseRecord.thinking_content.length > 0) {
-          choiceBuilder.messageBuilder.reasoningContent =
-            (choiceBuilder.messageBuilder.reasoningContent || '') + responseRecord.thinking_content;
-          choiceBuilder.accumulatedContent += responseRecord.thinking_content;
+          appendToTarget('reasoning', responseRecord.thinking_content);
+        }
+        if (Array.isArray(responseRecord.fragments)) {
+          processFragmentsArray(responseRecord.fragments);
         }
         if (typeof responseRecord.status === 'string' && responseRecord.status.toUpperCase() === 'FINISHED') {
           choiceBuilder.finishReason = 'stop';
@@ -760,22 +832,31 @@ export class ChatSseToJsonConverter {
 
   private getDeepSeekPatchState(
     context: SseToChatJsonContext
-  ): { patchAppendTarget?: 'content' | 'reasoning' } {
+  ): { patchAppendTarget?: DeepSeekPatchAppendTarget; fragmentTargets: DeepSeekPatchAppendTarget[] } {
     const carrier = context as SseToChatJsonContext & {
-      deepseekPatchState?: { patchAppendTarget?: 'content' | 'reasoning' };
+      deepseekPatchState?: {
+        patchAppendTarget?: DeepSeekPatchAppendTarget;
+        fragmentTargets?: DeepSeekPatchAppendTarget[];
+      };
     };
     if (!carrier.deepseekPatchState) {
       carrier.deepseekPatchState = {};
+    }
+    if (!Array.isArray(carrier.deepseekPatchState.fragmentTargets)) {
+      carrier.deepseekPatchState.fragmentTargets = [];
     }
     return {
       get patchAppendTarget() {
         return carrier.deepseekPatchState?.patchAppendTarget;
       },
-      set patchAppendTarget(value: 'content' | 'reasoning' | undefined) {
+      set patchAppendTarget(value: DeepSeekPatchAppendTarget | undefined) {
         if (!carrier.deepseekPatchState) {
           carrier.deepseekPatchState = {};
         }
         carrier.deepseekPatchState.patchAppendTarget = value;
+      },
+      get fragmentTargets() {
+        return carrier.deepseekPatchState?.fragmentTargets || [];
       }
     };
   }
@@ -865,7 +946,7 @@ export class ChatSseToJsonConverter {
   private async processDelta(
     delta: NonNullable<ChatCompletionChunk['choices'][number]['delta']>,
     choiceBuilder: ChatChoiceBuilder,
-    _context: SseToChatJsonContext
+    context: SseToChatJsonContext
   ): Promise<void> {
     const messageBuilder = choiceBuilder.messageBuilder;
 
@@ -883,6 +964,9 @@ export class ChatSseToJsonConverter {
 
     // 处理content
     if (delta.content) {
+      const now = TimeUtils.now();
+      context.eventStats.firstContentAtMs ??= now;
+      context.eventStats.lastContentAtMs = now;
       messageBuilder.content += delta.content;
       choiceBuilder.accumulatedContent += delta.content;
     }
@@ -1213,7 +1297,7 @@ export class ChatSseToJsonConverter {
     context.eventStats.endTime = TimeUtils.now();
     context.eventStats.duration = (context.eventStats.endTime - context.eventStats.startTime) / 1000;
 
-    return {
+    const response: ChatCompletionResponse = {
       id: context.currentResponse.id || `chat_${context.requestId}`,
       object: 'chat.completion',
       created: context.currentResponse.created || Math.floor(Date.now() / 1000),
@@ -1221,6 +1305,27 @@ export class ChatSseToJsonConverter {
       choices,
       usage: usage || undefined
     };
+
+    // Attach decode stats for TTFT tracking
+    Object.defineProperty(response, '__rccDecodeStats', {
+      value: {
+        chunkCount: context.eventStats.totalChunks,
+        totalEvents: context.eventStats.totalChunks,
+        contentBlocks: context.eventStats.totalChoices,
+        firstContentAtMs: context.eventStats.firstContentAtMs,
+        lastContentAtMs: context.eventStats.lastContentAtMs,
+        streamMs:
+          context.eventStats.firstContentAtMs !== undefined && context.eventStats.lastContentAtMs !== undefined
+            ? Math.max(0, context.eventStats.lastContentAtMs - context.eventStats.firstContentAtMs)
+            : undefined,
+        totalTokens: context.eventStats.totalTokens,
+        tokenRate: context.eventStats.tokenRate
+      },
+      configurable: true,
+      enumerable: false,
+      writable: false
+    });
+    return response;
   }
 
   private isTerminatedError(error: unknown): boolean {

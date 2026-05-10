@@ -92,6 +92,48 @@ describe('ProviderConfig v2 loader', () => {
     expect(cfg.providerId).toBe('bar');
     expect(cfg.provider.baseURL).toBe('https://bar.example.com');
   });
+
+  it('treats config.v2.toml/json as one base config and prefers toml when both exist', async () => {
+    const root = await createTempDir('provider-v2-');
+    const providerDir = path.join(root, 'deepseek-web');
+    await fs.mkdir(providerDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(providerDir, 'config.v2.json'),
+      `${JSON.stringify(
+        {
+          version: '2.0.0',
+          providerId: 'deepseek-web',
+          provider: {
+            id: 'deepseek-web',
+            type: 'openai',
+            baseURL: 'https://json.example.com'
+          }
+        },
+        null,
+        2
+      )}\n`,
+      'utf8'
+    );
+    await fs.writeFile(
+      path.join(providerDir, 'config.v2.toml'),
+      [
+        'version = "2.0.0"',
+        'providerId = "deepseek-web"',
+        '',
+        '[provider]',
+        'id = "deepseek-web"',
+        'type = "openai"',
+        'baseURL = "https://toml.example.com"',
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+
+    const configs = await loadProviderConfigsV2(root);
+    expect(Object.keys(configs)).toEqual(['deepseek-web']);
+    expect(configs['deepseek-web']?.provider.baseURL).toBe('https://toml.example.com');
+  });
 });
 
 describe('buildVirtualRouterInputV2', () => {

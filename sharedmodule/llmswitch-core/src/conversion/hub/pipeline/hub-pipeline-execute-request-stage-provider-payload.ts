@@ -36,6 +36,7 @@ export async function buildRequestStageProviderPayload<TContext = Record<string,
 }): Promise<{
   providerPayload: Record<string, unknown>;
   shadowBaselineProviderPayload?: Record<string, unknown>;
+  outboundWorkingRequest: StandardizedRequest | ProcessedRequest;
 }> {
   const {
     normalized,
@@ -56,12 +57,16 @@ export async function buildRequestStageProviderPayload<TContext = Record<string,
   } = args;
 
   if (activeProcessMode === "passthrough") {
-    return resolvePassthroughProviderPayload({
+    const passthrough = resolvePassthroughProviderPayload({
       rawRequest,
       outboundStream,
       passthroughAudit,
       outboundProtocol,
     });
+    return {
+      ...passthrough,
+      outboundWorkingRequest: workingRequest,
+    };
   }
 
   const {
@@ -77,7 +82,7 @@ export async function buildRequestStageProviderPayload<TContext = Record<string,
   });
   const compatibilityProfile = resolveCompatibilityProfile(outboundAdapterContext);
 
-  const formattedPayload = await buildFormattedOutboundPayload({
+  const { formattedPayload, outboundWorkingRequest } = await buildFormattedOutboundPayload({
     normalized,
     workingRequest,
     rawRequest,
@@ -109,5 +114,6 @@ export async function buildRequestStageProviderPayload<TContext = Record<string,
   return buildProviderPayloadStageResult({
     providerPayload,
     shadowBaselineProviderPayload,
+    outboundWorkingRequest,
   });
 }

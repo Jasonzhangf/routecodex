@@ -9,7 +9,6 @@ import type {
   ReadableStreamDefaultReader
 } from 'node:stream/web';
 import type { ProviderError } from '../api/provider-types.js';
-import { PassThrough } from 'node:stream';
 import { DEFAULT_TIMEOUTS } from '../../../constants/index.js';
 
 /**
@@ -322,29 +321,36 @@ export class HttpClient {
     abortWithReason: (reason: string) => void,
     detachExternalAbort: () => void
   ): NodeJS.ReadableStream {
-    const pass = new PassThrough();
-    let idleTimer: NodeJS.Timeout | null = null;
     let cleaned = false;
+    let streamEnded = false;
+    let lastActivityAt = Date.now();
+    let idleWatchdog: NodeJS.Timeout | null = null;
     const onAbort = () => {
       cleanup();
       try {
         const reason = (controller.signal as { reason?: unknown }).reason;
+        const destroyable = upstream as unknown as { destroy?: (error?: Error) => void };
         if (reason instanceof Error) {
-          pass.destroy(reason);
+          destroyable.destroy?.(reason);
         } else if (reason !== undefined) {
-          pass.destroy(Object.assign(new Error(String(reason)), { code: 'UPSTREAM_STREAM_ABORTED' }));
+          destroyable.destroy?.(Object.assign(new Error(String(reason)), { code: 'UPSTREAM_STREAM_ABORTED' }));
         } else {
-          pass.destroy(Object.assign(new Error('UPSTREAM_STREAM_ABORTED'), { code: 'UPSTREAM_STREAM_ABORTED' }));
+          destroyable.destroy?.(Object.assign(new Error('UPSTREAM_STREAM_ABORTED'), { code: 'UPSTREAM_STREAM_ABORTED' }));
         }
       } catch {
-        pass.destroy();
+        try {
+          const destroyable = upstream as unknown as { destroy?: () => void };
+          destroyable.destroy?.();
+        } catch {
+          // ignore
+        }
       }
     };
 
     const clearTimers = () => {
-      if (idleTimer) {
-        clearTimeout(idleTimer);
-        idleTimer = null;
+      if (idleWatchdog) {
+        clearInterval(idleWatchdog);
+        idleWatchdog = null;
       }
       clearTimeout(timeoutId);
     };
@@ -367,44 +373,65 @@ export class HttpClient {
       }
     };
 
-    const resetIdle = () => {
+    const updateLastActivity = () => {
+      lastActivityAt = Date.now();
+    };
+
+    const startIdleWatchdog = () => {
       if (!Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0) {
         return;
       }
-      if (idleTimer) {
-        clearTimeout(idleTimer);
-      }
-      idleTimer = setTimeout(() => {
+      const intervalMs = Math.max(50, Math.min(1_000, Math.floor(idleTimeoutMs / 2) || 50));
+      idleWatchdog = setInterval(() => {
+        if (cleaned || streamEnded) {
+          return;
+        }
+        if (Date.now() - lastActivityAt < idleTimeoutMs) {
+          return;
+        }
         abortWithReason('UPSTREAM_STREAM_IDLE_TIMEOUT');
         try {
-          pass.destroy(Object.assign(new Error('UPSTREAM_STREAM_IDLE_TIMEOUT'), { code: 'UPSTREAM_STREAM_IDLE_TIMEOUT' }));
+          const destroyable = upstream as unknown as { destroy?: (error?: Error) => void };
+          destroyable.destroy?.(
+            Object.assign(new Error('UPSTREAM_STREAM_IDLE_TIMEOUT'), { code: 'UPSTREAM_STREAM_IDLE_TIMEOUT' })
+          );
         } catch (destroyError) {
           logHttpClientNonBlockingError('wrapStreamWithTimeouts.idleTimeoutDestroy', destroyError);
-          pass.destroy();
+          try {
+            const destroyable = upstream as unknown as { destroy?: () => void };
+            destroyable.destroy?.();
+          } catch {
+            // ignore
+          }
         }
-      }, idleTimeoutMs);
+      }, intervalMs);
+      idleWatchdog.unref?.();
     };
 
     const onData = () => {
-      resetIdle();
+      updateLastActivity();
     };
 
     const onEnd = () => {
+      streamEnded = true;
       cleanup();
     };
 
     const onError = (error: unknown) => {
       cleanup();
-      // ensure consumer sees error
-      try {
-        pass.destroy(error as Error);
-      } catch {
-        pass.destroy();
-      }
     };
 
     const onClose = () => {
+      const closedBeforeEnd = !streamEnded;
       cleanup();
+      if (!closedBeforeEnd) {
+        return;
+      }
+      try {
+        controller.abort();
+      } catch (abortError) {
+        logHttpClientNonBlockingError('wrapStreamWithTimeouts.closeAbort', abortError);
+      }
     };
 
     try {
@@ -413,32 +440,13 @@ export class HttpClient {
       logHttpClientNonBlockingError('wrapStreamWithTimeouts.addAbortListener', addListenerError);
     }
 
-    resetIdle();
+    startIdleWatchdog();
     upstream.on('data', onData);
     upstream.on('end', onEnd);
     upstream.on('error', onError);
     upstream.on('close', onClose);
 
-    // If consumer closes early, abort upstream fetch to avoid leaking sockets.
-    pass.on('close', () => {
-      cleanup();
-      try {
-        controller.abort();
-      } catch (abortError) {
-        logHttpClientNonBlockingError('wrapStreamWithTimeouts.closeAbort', abortError);
-      }
-      try {
-        const destroyable = upstream as unknown as { destroy?: () => void };
-        if (typeof destroyable.destroy === 'function') {
-          destroyable.destroy();
-        }
-      } catch (destroyUpstreamError) {
-        logHttpClientNonBlockingError('wrapStreamWithTimeouts.closeDestroyUpstream', destroyUpstreamError);
-      }
-    });
-
-    upstream.pipe(pass);
-    return pass;
+    return upstream;
   }
 
   /**

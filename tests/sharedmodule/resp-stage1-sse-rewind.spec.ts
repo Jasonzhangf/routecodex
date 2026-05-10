@@ -104,6 +104,37 @@ describe('resp_inbound stage1 SSE stream rewind', () => {
     });
   });
 
+  it('classifies deepseek input_exceeds_limit toast as context-length overflow', async () => {
+    const ssePayload = [
+      'event: ready\ndata: {"request_message_id":31,"response_message_id":32}\n\n',
+      'event: hint\ndata: {"type":"error","content":"内容超长，请删减后再试","clear_response":true,"finish_reason":"input_exceeds_limit"}\n\n',
+      'event: close\ndata: {"click_behavior":"none","auto_resume":false}\n\n'
+    ].join('');
+
+    await expect(
+      runRespInboundStage1SseDecode({
+        providerProtocol: 'openai-chat',
+        payload: {
+          __sse_stream: Readable.from([ssePayload], { objectMode: false })
+        } as any,
+        adapterContext: {
+          requestId: 'rewind-stage1-deepseek-input-limit',
+          reqTokens: 204800,
+          target: { maxContextTokens: 128000 }
+        } as any,
+        wantsStream: false
+      })
+    ).rejects.toMatchObject({
+      code: 'SSE_DECODE_ERROR',
+      details: {
+        reason: 'context_length_exceeded',
+        upstreamCode: 'context_length_exceeded',
+        estimatedPromptTokens: 204800,
+        maxContextTokens: 128000
+      }
+    });
+  });
+
   it('salvages partial deepseek-web patch content when SSE terminates before finish', async () => {
     async function* terminatedDeepseekPatch() {
       yield 'event: ready\ndata: {"request_message_id":31,"response_message_id":32}\n\n';

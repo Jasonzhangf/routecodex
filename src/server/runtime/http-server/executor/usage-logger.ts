@@ -75,6 +75,9 @@ export function logUsageSummary(
     sessionId?: unknown;
     conversationId?: unknown;
     projectPath?: unknown;
+    firstContentAtMs?: number;
+    lastContentAtMs?: number;
+    requestStartedAtMs?: number;
   },
   options?: {
     terminalTiming?: boolean;
@@ -145,7 +148,10 @@ export function logUsageSummary(
     promptTokens: info.usage?.prompt_tokens,
     completionTokens: info.usage?.completion_tokens,
     cacheReadTokens: info.usage?.cache_read_input_tokens,
-    totalTokens: info.usage?.total_tokens
+    totalTokens: info.usage?.total_tokens,
+    firstContentAtMs: info.firstContentAtMs,
+    lastContentAtMs: info.lastContentAtMs,
+    requestStartedAtMs: info.requestStartedAtMs
   });
   // Record token consumption for persistent cumulative tracking
   {

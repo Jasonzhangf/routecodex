@@ -772,6 +772,16 @@ fn build_captured_chat_request_snapshot(input: &Value) -> Result<Value, String> 
     } else {
         out.insert("tools".to_string(), Value::Null);
     }
+    if let Some(tool_choice) = row.get("tool_choice") {
+        out.insert("tool_choice".to_string(), tool_choice.clone());
+    } else {
+        out.insert("tool_choice".to_string(), Value::Null);
+    }
+    if let Some(semantics) = row.get("semantics") {
+        out.insert("semantics".to_string(), semantics.clone());
+    } else {
+        out.insert("semantics".to_string(), Value::Null);
+    }
     if let Some(parameters) = row.get("parameters") {
         out.insert("parameters".to_string(), parameters.clone());
     } else {
@@ -3894,6 +3904,16 @@ mod tests {
             "model": "glm-5",
             "messages": [{ "role": "user", "content": "hi" }],
             "tools": [{ "type": "function", "function": { "name": "x" } }],
+            "tool_choice": { "type": "function", "function": { "name": "x" } },
+            "semantics": {
+                "continuation": {
+                    "chainId": "req_chain_snapshot_1",
+                    "toolContinuation": {
+                        "mode": "submit_tool_outputs",
+                        "submittedToolCallIds": ["call_snapshot_1"]
+                    }
+                }
+            },
             "parameters": { "temperature": 0.2 }
         });
         let output =
@@ -3909,6 +3929,22 @@ mod tests {
         assert_eq!(
             row.get("tools").and_then(|v| v.as_array()).map(|v| v.len()),
             Some(1)
+        );
+        assert_eq!(
+            row.get("tool_choice")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("type"))
+                .and_then(|v| v.as_str()),
+            Some("function")
+        );
+        assert_eq!(
+            row.get("semantics")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("continuation"))
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("chainId"))
+                .and_then(|v| v.as_str()),
+            Some("req_chain_snapshot_1")
         );
         assert_eq!(
             row.get("parameters")
@@ -3929,6 +3965,8 @@ mod tests {
             build_captured_chat_request_snapshot(&input).expect("captured chat request snapshot");
         let row = output.as_object().expect("output object");
         assert!(row.get("tools").is_some_and(Value::is_null));
+        assert!(row.get("tool_choice").is_some_and(Value::is_null));
+        assert!(row.get("semantics").is_some_and(Value::is_null));
         assert!(row.get("parameters").is_some_and(Value::is_null));
     }
 
