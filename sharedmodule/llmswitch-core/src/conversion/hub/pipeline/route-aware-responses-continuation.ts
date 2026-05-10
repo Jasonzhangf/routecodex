@@ -1,4 +1,5 @@
 import { convertBridgeInputToChatMessages } from '../../bridge-message-utils.js';
+import { stripChatProcessHistoricalImages } from '../../../router/virtual-router/engine-selection/native-router-hotpath.js';
 import {
   materializeLatestResponsesContinuationByScope,
   resumeLatestResponsesContinuationByScope
@@ -112,7 +113,10 @@ export function resolveRouteAwareResponsesContinuation(args: {
 
   const next = cloneJson(args.request);
   if (Array.isArray(materialized.payload.input)) {
-    next.messages = convertInputToMessages(materialized.payload.input) as any;
+    next.messages = stripChatProcessHistoricalImages(
+      convertInputToMessages(materialized.payload.input),
+      '[Image omitted]'
+    ).messages as any;
   }
   attachResumeSemantics(next, materialized.meta);
   return next;

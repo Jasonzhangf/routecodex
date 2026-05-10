@@ -1,12 +1,19 @@
 import {
   analyzeChatProcessMedia,
+  stripChatProcessHistoricalImages,
 } from "../../../router/virtual-router/engine-selection/native-router-hotpath.js";
 import type { StandardizedMessage } from "../types/standardized.js";
 
 export function stripHistoricalImageAttachments(
   messages: StandardizedMessage[],
 ): StandardizedMessage[] {
-  return messages;
+  if (!Array.isArray(messages) || messages.length < 1) {
+    return messages;
+  }
+  return stripChatProcessHistoricalImages(
+    messages,
+    '[Image omitted]',
+  ).messages as StandardizedMessage[];
 }
 
 export function stripHistoricalVisualToolOutputs(

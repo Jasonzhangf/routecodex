@@ -2404,6 +2404,105 @@ fn test_req_profile_chat_deepseek_web_submit_tool_outputs_continuation_prompt_ma
 }
 
 #[test]
+fn test_req_profile_chat_deepseek_web_reads_submit_tool_outputs_continuation_from_captured_chat_request(
+) {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-v4-pro",
+            "messages": [
+                {"role": "user", "content": "调用 exec_command 工具执行 pwd，然后返回工具调用，不要直接回答。"},
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [
+                        {
+                            "type": "function",
+                            "id": "call_1",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"bash -lc 'pwd'\"}"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "name": "exec_command",
+                    "content": "/Users/fanzhang/Documents/github/routecodex"
+                }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }
+            ],
+            "metadata": {
+                "deepseek": {
+                    "contextFileEnabled": true
+                }
+            }
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_web_submit_continuation_captured".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("tools-deepseek-web-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "model": "deepseek-v4-pro",
+                "messages": [],
+                "tools": [],
+                "tool_choice": null,
+                "parameters": null,
+                "semantics": {
+                    "continuation": {
+                        "chainId": "req_chain_1",
+                        "stickyScope": "request_chain",
+                        "stateOrigin": "openai-responses",
+                        "restored": true,
+                        "toolContinuation": {
+                            "mode": "submit_tool_outputs",
+                            "submittedToolCallIds": ["call_1"],
+                            "resumeOutputs": ["/Users/fanzhang/Documents/github/routecodex"]
+                        }
+                    }
+                }
+            })),
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    let prompt = result.payload["prompt"].as_str().unwrap_or("");
+    assert!(prompt.contains("The latest tool result has already been submitted."));
+    assert!(prompt.contains("Tool call ids already completed in this continuation: call_1."));
+}
+
+#[test]
 fn test_req_profile_chat_deepseek_web_preserves_text_delta_and_tool_use_content_items() {
     let input = ReqOutboundCompatInput {
         payload: json!({

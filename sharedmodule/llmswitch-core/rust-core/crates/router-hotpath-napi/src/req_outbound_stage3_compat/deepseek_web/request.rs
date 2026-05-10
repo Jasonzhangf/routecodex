@@ -146,6 +146,24 @@ fn latest_message_role(root: &Map<String, Value>) -> Option<String> {
         .map(|role| role.to_ascii_lowercase())
 }
 
+fn enrich_root_with_captured_semantics(
+    root: &Map<String, Value>,
+    adapter_context: &AdapterContext,
+) -> Map<String, Value> {
+    if root.contains_key("semantics") {
+        return root.clone();
+    }
+    let mut next = root.clone();
+    if let Some(semantics) = adapter_context
+        .captured_chat_request
+        .as_ref()
+        .and_then(|value| value.as_object())
+        .and_then(|row| row.get("semantics"))
+    {
+        next.insert("semantics".to_string(), semantics.clone());
+    }
+    next
+}
 
 fn deepseek_config_node<'a>(adapter_context: &'a AdapterContext) -> Option<&'a Map<String, Value>> {
     adapter_context.deepseek.as_ref().and_then(|v| v.as_object())
@@ -345,37 +363,38 @@ pub(crate) fn apply_deepseek_web_request_compat(
     payload: Value,
     adapter_context: &AdapterContext,
 ) -> Value {
-    let Some(root) = payload.as_object() else {
+    let Some(raw_root) = payload.as_object() else {
         return payload;
     };
+    let root = enrich_root_with_captured_semantics(raw_root, adapter_context);
 
-    let model = resolve_model(root);
+    let model = resolve_model(&root);
     let (thinking_by_model, search_by_model) = resolve_thinking_search_flags(&model);
     let model_type = resolve_model_type(&model);
-    let thinking_enabled = resolve_explicit_thinking_flag(root, thinking_by_model);
-    let search_enabled = if should_force_search(root, adapter_context) {
+    let thinking_enabled = resolve_explicit_thinking_flag(&root, thinking_by_model);
+    let search_enabled = if should_force_search(&root, adapter_context) {
         true
     } else {
-        resolve_explicit_search_flag(root, search_by_model)
+        resolve_explicit_search_flag(&root, search_by_model)
     };
     let (strict_tool_required, text_tool_fallback) = resolve_deepseek_options(adapter_context);
     let force_tool_required =
-        should_force_tool_required(root, adapter_context, strict_tool_required, search_enabled);
-    let context_file_enabled = should_enable_context_file(root, adapter_context);
+        should_force_tool_required(&root, adapter_context, strict_tool_required, search_enabled);
+    let context_file_enabled = should_enable_context_file(&root, adapter_context);
     let history_transcript = if context_file_enabled {
-        build_history_context_transcript(root)
+        build_history_context_transcript(&root)
     } else {
         None
     };
-    let inline_image_files = collect_inline_image_contracts(root);
+    let inline_image_files = collect_inline_image_contracts(&root);
     let prompt = if history_transcript.is_some() {
-        build_deepseek_continuation_prompt(root, force_tool_required)
+        build_deepseek_continuation_prompt(&root, force_tool_required)
     } else {
-        build_deepseek_prompt(root, force_tool_required)
+        build_deepseek_prompt(&root, force_tool_required)
     };
 
     let mut next = Map::<String, Value>::new();
-    if let Some(chat_session_id) = read_trimmed_string(root.get("chat_session_id")) {
+    if let Some(chat_session_id) = read_trimmed_string(raw_root.get("chat_session_id")) {
         next.insert(
             "chat_session_id".to_string(),
             Value::String(chat_session_id),
@@ -383,14 +402,14 @@ pub(crate) fn apply_deepseek_web_request_compat(
     }
     next.insert(
         "parent_message_id".to_string(),
-        read_trimmed_string(root.get("parent_message_id"))
+        read_trimmed_string(raw_root.get("parent_message_id"))
             .map(Value::String)
             .unwrap_or(Value::Null),
     );
     next.insert("prompt".to_string(), Value::String(prompt));
     next.insert(
         "ref_file_ids".to_string(),
-        root.get("ref_file_ids")
+        raw_root.get("ref_file_ids")
             .and_then(|v| v.as_array())
             .map(|v| Value::Array(v.clone()))
             .unwrap_or_else(|| Value::Array(Vec::new())),
@@ -404,11 +423,11 @@ pub(crate) fn apply_deepseek_web_request_compat(
         "model_type".to_string(),
         Value::String(model_type.to_string()),
     );
-    if root.get("stream") == Some(&Value::Bool(true)) {
+    if raw_root.get("stream") == Some(&Value::Bool(true)) {
         next.insert("stream".to_string(), Value::Bool(true));
     }
 
-    let mut metadata = root
+    let mut metadata = raw_root
         .get("metadata")
         .and_then(|v| v.as_object())
         .cloned()

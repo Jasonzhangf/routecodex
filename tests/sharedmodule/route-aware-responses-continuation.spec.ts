@@ -260,4 +260,88 @@ describe('route-aware responses continuation', () => {
       materializedMode: 'local_full_input'
     });
   });
+
+  it('strips historical image turns when materializing responses continuation for non-responses outbound', () => {
+    captureResponsesRequestContext({
+      requestId: 'req-route-aware-1',
+      sessionId: 'sess-route-aware-1',
+      payload: {
+        model: 'gpt-5.4'
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [
+              {
+                type: 'input_image',
+                image_url: 'data:image/png;base64,AAAA'
+              },
+              {
+                type: 'input_text',
+                text: 'old image turn'
+              }
+            ]
+          },
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'ack' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: 'req-route-aware-1',
+      response: {
+        id: 'resp-route-aware-1',
+        output: []
+      }
+    });
+
+    const resolved = resolveRouteAwareResponsesContinuation({
+      request: {
+        model: 'qwen3.6-plus',
+        messages: [{ role: 'user', content: 'next turn' }],
+        parameters: {},
+        metadata: {}
+      } as any,
+      rawRequest: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'next turn' }]
+          }
+        ]
+      } as any,
+      normalizedMetadata: {
+        sessionId: 'sess-route-aware-1'
+      },
+      requestId: 'req-route-aware-2',
+      entryProtocol: 'openai-responses',
+      outboundProtocol: 'openai-chat-completions'
+    });
+
+    expect((resolved as any).messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: '[Image omitted]'
+          },
+          {
+            type: 'input_text',
+            text: 'old image turn'
+          }
+        ]
+      },
+      { role: 'assistant', content: 'ack' },
+      { role: 'user', content: 'next turn' }
+    ]);
+  });
 });
