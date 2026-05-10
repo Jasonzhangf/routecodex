@@ -141,7 +141,11 @@ export function logUsageSummary(
     providerDecodeTag: info.providerDecodeTag,
     providerAttemptCount,
     retryCount,
-    finishReason: info.finishReason
+    finishReason: info.finishReason,
+    promptTokens: info.usage?.prompt_tokens,
+    completionTokens: info.usage?.completion_tokens,
+    cacheReadTokens: info.usage?.cache_read_input_tokens,
+    totalTokens: info.usage?.total_tokens
   });
   // Record token consumption for persistent cumulative tracking
   {

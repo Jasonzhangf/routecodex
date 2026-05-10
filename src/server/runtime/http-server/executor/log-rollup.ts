@@ -65,6 +65,10 @@ type UsageRollupRecord = {
   providerAttemptCount?: number;
   retryCount?: number;
   finishReason?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  cacheReadTokens?: number;
+  totalTokens?: number;
 };
 
 type SessionRequestEvent = {
@@ -85,6 +89,10 @@ type SessionRequestEvent = {
   retryCount: number;
   finishReason?: string;
   atMs: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  cacheReadTokens?: number;
+  totalTokens?: number;
 };
 
 type VirtualRouterHitAgg = {
@@ -324,6 +332,23 @@ function emitRealtimeSessionRequestLog(args: {
   );
   const ts = getTokenStatsSnapshot();
   console.log(colorize(`  session.calls=${calls} session.retries=${retries}`, sessionColor) + ` ${ANSI_WHITE}tokens.alltime=${formatTokens(ts.alltime.totalTokens)} tokens.daily=${formatTokens(ts.daily.totalTokens)}${ANSI_RESET}`);
+  const reqUsage = args.event;
+  const hasReqTokens = reqUsage.promptTokens !== undefined || reqUsage.completionTokens !== undefined
+    || reqUsage.cacheReadTokens !== undefined || reqUsage.totalTokens !== undefined;
+  if (hasReqTokens) {
+    const tokParts: string[] = [];
+    if (reqUsage.promptTokens !== undefined) tokParts.push(`in=${formatWholeNumber(reqUsage.promptTokens)}`);
+    if (reqUsage.completionTokens !== undefined) tokParts.push(`out=${formatWholeNumber(reqUsage.completionTokens)}`);
+    if (reqUsage.cacheReadTokens !== undefined) tokParts.push(`cache=${formatWholeNumber(reqUsage.cacheReadTokens)}`);
+    if (reqUsage.totalTokens !== undefined) {
+      tokParts.push(`total=${formatWholeNumber(reqUsage.totalTokens)}`);
+      if (reqUsage.latencyMs > 0) {
+        const tokPerSec = ((reqUsage.totalTokens * 1000) / reqUsage.latencyMs).toFixed(0);
+        tokParts.push(`speed=${tokPerSec}t/s`);
+      }
+    }
+    console.log(colorize(`  ${tokParts.join(' ')}`, sessionColor));
+  }
 }
 
 function emitRealtimeVirtualRouterHitLog(args: {
@@ -630,7 +655,11 @@ export function recordUsageRollup(event: UsageRollupRecord): void {
     providerAttemptCount,
     retryCount,
     finishReason: normalizeFinishReason(event.finishReason),
-    atMs: nowMs
+    atMs: nowMs,
+    promptTokens: typeof event.promptTokens === 'number' ? event.promptTokens : undefined,
+    completionTokens: typeof event.completionTokens === 'number' ? event.completionTokens : undefined,
+    cacheReadTokens: typeof event.cacheReadTokens === 'number' ? event.cacheReadTokens : undefined,
+    totalTokens: typeof event.totalTokens === 'number' ? event.totalTokens : undefined
   };
   if (!isRealtimeRollupEnabled()) {
     const sessionEvents = sessionRequestEvents.get(sessionId);

@@ -97,7 +97,7 @@ export class HttpRequestExecutor {
     const prepared = await this.prepareHttpRequest(processedRequest, context);
     await this.snapshotProviderRequest(prepared, context);
     try {
-      return await this.executeHttpRequestWithRetries(prepared, processedRequest, context);
+      return await this.executeHttpRequestWithRetries(processedRequest, context, prepared);
     } catch (error) {
       const requestInfoOverride =
         error && typeof error === 'object' && '__routecodexRequestInfo' in error
@@ -258,14 +258,16 @@ export class HttpRequestExecutor {
   }
 
   private async executeHttpRequestWithRetries(
-    requestInfo: PreparedHttpRequest,
     processedRequest: UnknownObject,
-    context: ProviderContext
+    context: ProviderContext,
+    initialRequestInfo: PreparedHttpRequest
   ): Promise<unknown> {
     const captureSse = shouldCaptureProviderStreamSnapshots();
     const maxAttempts = this.deps.getHttpRetryLimit();
-    let lastRequestInfo: PreparedHttpRequest = requestInfo;
+    let lastRequestInfo: PreparedHttpRequest = initialRequestInfo;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const requestInfo = attempt === 1 ? initialRequestInfo : await this.prepareHttpRequest(processedRequest, context);
+      lastRequestInfo = requestInfo;
       if (requestInfo.abortSignal?.aborted) {
         const reason = (requestInfo.abortSignal as { reason?: unknown }).reason;
         throw reason instanceof Error
@@ -390,30 +392,28 @@ export class HttpRequestExecutor {
                 })
               : upstreamStream;
             const wrapped = await this.deps.wrapUpstreamSseResponse(streamForHost, context);
-            if (!captureSse) {
-              try {
-                await writeProviderSnapshot({
-                  phase: 'provider-response',
-                  requestId: context.requestId,
-                  data: {
-                    mode: 'sse',
-                    captureSse,
-                    transport: 'upstream-stream'
-                  },
-                  headers: requestInfo.headers,
-                  url: requestInfo.targetUrl,
-                  entryEndpoint: requestInfo.entryEndpoint,
-                  clientRequestId: requestInfo.clientRequestId,
-                  providerKey: context.providerKey,
-                  providerId: context.providerId
-                });
-              } catch (snapshotError) {
-                logHttpRequestExecutorNonBlockingError('executeHttpRequestOnce.provider-response.sse', snapshotError, {
-                  requestId: context.requestId,
-                  providerKey: context.providerKey,
-                  providerId: context.providerId
-                });
-              }
+            try {
+              await writeProviderSnapshot({
+                phase: 'provider-response',
+                requestId: context.requestId,
+                data: {
+                  mode: 'sse',
+                  captureSse,
+                  transport: 'upstream-stream'
+                },
+                headers: requestInfo.headers,
+                url: requestInfo.targetUrl,
+                entryEndpoint: requestInfo.entryEndpoint,
+                clientRequestId: requestInfo.clientRequestId,
+                providerKey: context.providerKey,
+                providerId: context.providerId
+              });
+            } catch (snapshotError) {
+              logHttpRequestExecutorNonBlockingError('executeHttpRequestOnce.provider-response.sse', snapshotError, {
+                requestId: context.requestId,
+                providerKey: context.providerKey,
+                providerId: context.providerId
+              });
             }
             return wrapped;
           })()
@@ -444,30 +444,28 @@ export class HttpRequestExecutor {
             })
           : upstreamStream;
         const wrapped = await this.deps.wrapUpstreamSseResponse(streamForHost, context);
-        if (!captureSse) {
-          try {
-            await writeProviderSnapshot({
-              phase: 'provider-response',
-              requestId: context.requestId,
-              data: {
-                mode: 'sse',
-                captureSse,
-                transport: 'prepared-request-executor'
-              },
-              headers: requestInfo.headers,
-              url: requestInfo.targetUrl,
-              entryEndpoint: requestInfo.entryEndpoint,
-              clientRequestId: requestInfo.clientRequestId,
-              providerKey: context.providerKey,
-              providerId: context.providerId
-            });
-          } catch (snapshotError) {
-            logHttpRequestExecutorNonBlockingError('executeHttpRequestOnce.provider-response.sse.prepared', snapshotError, {
-              requestId: context.requestId,
-              providerKey: context.providerKey,
-              providerId: context.providerId
-            });
-          }
+        try {
+          await writeProviderSnapshot({
+            phase: 'provider-response',
+            requestId: context.requestId,
+            data: {
+              mode: 'sse',
+              captureSse,
+              transport: 'prepared-request-executor'
+            },
+            headers: requestInfo.headers,
+            url: requestInfo.targetUrl,
+            entryEndpoint: requestInfo.entryEndpoint,
+            clientRequestId: requestInfo.clientRequestId,
+            providerKey: context.providerKey,
+            providerId: context.providerId
+          });
+        } catch (snapshotError) {
+          logHttpRequestExecutorNonBlockingError('executeHttpRequestOnce.provider-response.sse.prepared', snapshotError, {
+            requestId: context.requestId,
+            providerKey: context.providerKey,
+            providerId: context.providerId
+          });
         }
         if (wrapped && typeof wrapped === 'object') {
           return {
