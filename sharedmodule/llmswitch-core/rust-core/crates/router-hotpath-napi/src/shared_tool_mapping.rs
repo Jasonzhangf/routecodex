@@ -52,18 +52,6 @@ fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
     Some(raw)
 }
 
-fn normalize_anthropic_tool_name(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    if lower.starts_with("mcp__") {
-        return Some(lower);
-    }
-    Some(lower)
-}
-
 fn denormalize_anthropic_tool_name(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -686,6 +674,89 @@ pub fn flatten_chat_tools_for_function_calling_with_options_json(
         flatten_chat_tools_for_function_calling(rows.as_slice(), sanitize_mode.as_str());
     serde_json::to_string(&Value::Array(flattened))
         .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+/// Canonicalize an Anthropic tool name to its normalized lowercase form.
+///
+/// Applies these rules:
+/// - Empty/whitespace-only names → `None`
+/// - `bash` / `shell` / `terminal` → `shell_command`
+/// - `mcp__*` → lowercase passthrough
+/// - Everything else → lowercase
+pub(crate) fn normalize_anthropic_tool_name(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    match lower.as_str() {
+        "bash" | "shell" | "terminal" => return Some("shell_command".to_string()),
+        _ => {}
+    }
+    if lower.starts_with("mcp__") {
+        return Some(lower);
+    }
+    Some(lower)
+}
+
+/// Build a bidirectional alias map from a slice of raw tool definitions.
+///
+/// For each tool with a non-empty `name` field:
+/// 1. Canonicalize the name via `normalize_anthropic_tool_name`
+/// 2. Map `canonical → original_name`
+/// 3. Also map `canonical_lowercase → original_name` when different
+///
+/// Returns `None` when the input is empty or no valid entries were found.
+pub(crate) fn build_anthropic_tool_alias_map_from_slice(
+    raw_tools: &[Value],
+) -> Option<Map<String, Value>> {
+    if raw_tools.is_empty() {
+        return None;
+    }
+
+    let mut alias_map: Map<String, Value> = Map::new();
+    for entry in raw_tools {
+        let raw_name = match read_tool_name(entry) {
+            Some(v) => v,
+            None => continue,
+        };
+        let normalized =
+            normalize_anthropic_tool_name(raw_name.as_str()).unwrap_or(raw_name.clone());
+        let canonical_key = normalized.trim().to_string();
+        if canonical_key.is_empty() {
+            continue;
+        }
+
+        alias_map.insert(canonical_key.clone(), Value::String(raw_name.clone()));
+        let lower_key = canonical_key.to_ascii_lowercase();
+        if lower_key != canonical_key && !alias_map.contains_key(lower_key.as_str()) {
+            alias_map.insert(lower_key, Value::String(raw_name));
+        }
+    }
+
+    if alias_map.is_empty() {
+        return None;
+    }
+    Some(alias_map)
+}
+
+/// Build a bidirectional alias map from a JSON array value of raw tool definitions.
+///
+/// Convenience wrapper around [`build_anthropic_tool_alias_map_from_slice`].
+pub(crate) fn build_anthropic_tool_alias_map(
+    raw_tools: &Value,
+) -> Option<Map<String, Value>> {
+    let rows = raw_tools.as_array()?;
+    build_anthropic_tool_alias_map_from_slice(rows)
+}
+
+fn read_tool_name(entry: &Value) -> Option<String> {
+    let obj = entry.as_object()?;
+    let raw = obj.get("name")?.as_str()?.trim().to_string();
+    if raw.is_empty() {
+        return None;
+    }
+    Some(raw)
 }
 
 #[cfg(test)]

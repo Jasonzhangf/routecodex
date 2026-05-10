@@ -281,7 +281,7 @@ export class HttpClient {
           try {
             const { Readable } = await import('node:stream');
             if (typeof Readable.fromWeb === 'function') {
-              const nodeStream = Readable.fromWeb(body);
+              const nodeStream = Readable.fromWeb(body, { highWaterMark: 256 * 1024 });
               if (isNodeReadable(nodeStream)) {
                 return this.wrapStreamWithTimeouts(
                   nodeStream,
@@ -549,11 +549,18 @@ export class HttpClient {
           logHttpClientNonBlockingError('sendSingleRequest.errorHeadersParse', headerError, { url, status: response.status });
         }
         let parsed: unknown;
-        try {
-          parsed = errorText ? JSON.parse(errorText) : undefined;
-        } catch (parseError) {
-          logHttpClientNonBlockingError('sendSingleRequest.errorBodyParse', parseError, { url, status: response.status });
-          parsed = undefined;
+        if (
+          errorText &&
+          (response.headers.get('content-type')?.includes('application/json') ||
+            errorText.charCodeAt(0) === 0x7b /* '{' */ ||
+            errorText.charCodeAt(0) === 0x5b /* '[' */)
+        ) {
+          try {
+            parsed = JSON.parse(errorText);
+          } catch (parseError) {
+            logHttpClientNonBlockingError('sendSingleRequest.errorBodyParse', parseError, { url, status: response.status });
+            parsed = undefined;
+          }
         }
         const message = this.buildHttpErrorMessage(response.status, errorText);
         const err: UpstreamError = new Error(message) as UpstreamError;

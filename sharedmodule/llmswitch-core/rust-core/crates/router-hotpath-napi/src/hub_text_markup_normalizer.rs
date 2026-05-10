@@ -2164,9 +2164,6 @@ fn extract_xml_tool_calls_from_text_impl(text: &str) -> Option<Vec<ToolCallLite>
     if let Some(mut calls) = extract_simple_xml_tools_from_text_impl(text) {
         out.append(&mut calls);
     }
-    if let Some(mut calls) = extract_qwen_tool_call_tokens_from_text_impl(text) {
-        out.append(&mut calls);
-    }
     if out.is_empty() {
         None
     } else {
@@ -2399,86 +2396,6 @@ fn extract_explored_list_directory_calls_from_text_impl(_text: &str) -> Option<V
     None
 }
 
-fn extract_qwen_tool_call_tokens_from_text_impl(text: &str) -> Option<Vec<ToolCallLite>> {
-    if text.is_empty() {
-        return None;
-    }
-    let mut out = Vec::new();
-    let re = Regex::new(
-    r"(?is)<tool_call>[\s\S]*?<arg_key>[^<]+</arg_key>\s*<arg_value>[\s\S]*?</arg_value>[\s\S]*?</tool_call>"
-  ).unwrap();
-    if !re.is_match(text) {
-        return None;
-    }
-    let tool_re = Regex::new(r"(?is)<tool_call>([\s\S]*?)</tool_call>").unwrap();
-    for caps in tool_re.captures_iter(text) {
-        let payload = caps
-            .get(1)
-            .map(|m| m.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if payload.is_empty() {
-            continue;
-        }
-        if let Some(parsed) = parse_qwen_tool_call_payload(payload.as_str()) {
-            out.push(parsed);
-        }
-    }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
-}
-
-fn parse_qwen_tool_call_payload(raw: &str) -> Option<ToolCallLite> {
-    let name_re = Regex::new(r"<\s*tool\s*>\s*([^<]+)\s*</\s*tool\s*>").unwrap();
-    let mut name = name_re
-        .captures(raw)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().trim().to_string())
-        .filter(|v| !v.is_empty());
-    if name.is_none() {
-        let line_re = Regex::new(r"^\s*([^<\s][^<]*)$".trim()).unwrap();
-        for line in raw.lines() {
-            if let Some(caps) = line_re.captures(line.trim()) {
-                let candidate = caps
-                    .get(1)
-                    .map(|m| m.as_str())
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
-                if !candidate.is_empty() {
-                    name = Some(candidate);
-                    break;
-                }
-            }
-        }
-    }
-    let name_val = name?;
-    let mut args_obj = Map::new();
-    let arg_re = Regex::new(r"(?is)<\s*arg_key\s*>\s*([^<]+?)\s*</\s*arg_key\s*>\s*<\s*arg_value\s*>([\s\S]*?)</\s*arg_value\s*>").unwrap();
-    for caps in arg_re.captures_iter(raw) {
-        let raw_key = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-        let raw_val = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-        let key = normalize_key(raw_key);
-        if key.is_empty() {
-            continue;
-        }
-        args_obj.insert(key, Value::String(raw_val.trim().to_string()));
-    }
-    if args_obj.is_empty() {
-        return None;
-    }
-    let args = serde_json::to_string(&args_obj).unwrap_or_else(|_| "{}".to_string());
-    Some(ToolCallLite {
-        id: Some(gen_tool_call_id()),
-        name: name_val,
-        args,
-    })
-}
-
 #[napi]
 pub fn extract_json_tool_calls_from_text_json(input_json: String) -> NapiResult<String> {
     let input: JsonToolCallsInput = serde_json::from_str(&input_json).map_err(|e| {
@@ -2579,16 +2496,6 @@ pub fn extract_explored_list_directory_calls_from_text_json(
     })?;
     let text = value.get("text").and_then(Value::as_str).unwrap_or("");
     let calls = extract_explored_list_directory_calls_from_text_impl(text);
-    serde_json::to_string(&calls)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize tool calls: {}", e)))
-}
-
-#[napi]
-pub fn extract_qwen_tool_call_tokens_from_text_json(input_json: String) -> NapiResult<String> {
-    let value: Value = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse qwen input: {}", e)))?;
-    let text = value.get("text").and_then(Value::as_str).unwrap_or("");
-    let calls = extract_qwen_tool_call_tokens_from_text_impl(text);
     serde_json::to_string(&calls)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize tool calls: {}", e)))
 }

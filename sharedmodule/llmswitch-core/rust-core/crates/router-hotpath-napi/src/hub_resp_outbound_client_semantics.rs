@@ -11,7 +11,7 @@ use crate::hub_reasoning_tool_normalizer::{
 };
 use crate::shared_responses_tool_utils::strip_internal_tooling_metadata_impl;
 use crate::shared_tool_result_text_normalizer::normalize_tool_result_text;
-use crate::shared_tool_mapping::build_flattened_namespace_child_alias;
+use crate::shared_tool_mapping::{build_anthropic_tool_alias_map, build_flattened_namespace_child_alias, normalize_anthropic_tool_name};
 use crate::hub_resp_outbound_sse_stream::resolve_sse_stream_mode;
 
 
@@ -60,63 +60,6 @@ fn resolve_client_tools_raw(candidate: &Value) -> Option<Vec<Value>> {
         return None;
     }
     Some(filtered)
-}
-
-fn normalize_anthropic_tool_name(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    match lower.as_str() {
-        "bash" | "shell" | "terminal" => return Some("shell_command".to_string()),
-        _ => {}
-    }
-    if lower.starts_with("mcp__") {
-        return Some(lower);
-    }
-    Some(lower)
-}
-
-fn read_tool_name(entry: &Value) -> Option<String> {
-    let obj = entry.as_object()?;
-    let raw = obj.get("name")?.as_str()?.trim().to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(raw)
-}
-
-fn build_anthropic_tool_alias_map(raw_tools: &Value) -> Option<Map<String, Value>> {
-    let rows = raw_tools.as_array()?;
-    if rows.is_empty() {
-        return None;
-    }
-
-    let mut alias_map: Map<String, Value> = Map::new();
-    for entry in rows {
-        let raw_name = match read_tool_name(entry) {
-            Some(v) => v,
-            None => continue,
-        };
-        let normalized =
-            normalize_anthropic_tool_name(raw_name.as_str()).unwrap_or(raw_name.clone());
-        let canonical_key = normalized.trim().to_string();
-        if canonical_key.is_empty() {
-            continue;
-        }
-
-        alias_map.insert(canonical_key.clone(), Value::String(raw_name.clone()));
-        let lower_key = canonical_key.to_ascii_lowercase();
-        if lower_key != canonical_key && !alias_map.contains_key(lower_key.as_str()) {
-            alias_map.insert(lower_key, Value::String(raw_name));
-        }
-    }
-
-    if alias_map.is_empty() {
-        return None;
-    }
-    Some(alias_map)
 }
 
 fn read_tools_record_from_semantics(semantics: &Value) -> Option<Map<String, Value>> {

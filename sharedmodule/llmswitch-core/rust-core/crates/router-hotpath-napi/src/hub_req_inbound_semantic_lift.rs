@@ -2,6 +2,7 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use crate::shared_tool_mapping::{build_anthropic_tool_alias_map_from_slice, normalize_anthropic_tool_name};
 
 #[derive(Debug, Serialize, Clone)]
 struct ResumeToolOutput {
@@ -246,58 +247,6 @@ fn build_generic_continuation(
     Some(Value::Object(continuation))
 }
 
-fn normalize_anthropic_tool_name(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    if lower.starts_with("mcp__") {
-        return Some(lower);
-    }
-    Some(lower)
-}
-
-fn read_name(entry: &Value) -> Option<String> {
-    let obj = entry.as_object()?;
-    let raw = obj.get("name")?.as_str()?.trim().to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(raw)
-}
-
-fn build_anthropic_tool_alias_map(raw_tools: &[Value]) -> Option<Map<String, Value>> {
-    if raw_tools.is_empty() {
-        return None;
-    }
-
-    let mut alias_map: Map<String, Value> = Map::new();
-    for entry in raw_tools {
-        let raw_name = match read_name(entry) {
-            Some(v) => v,
-            None => continue,
-        };
-        let normalized =
-            normalize_anthropic_tool_name(raw_name.as_str()).unwrap_or(raw_name.clone());
-        let canonical_key = normalized.trim().to_string();
-        if canonical_key.is_empty() {
-            continue;
-        }
-
-        alias_map.insert(canonical_key.clone(), Value::String(raw_name.clone()));
-        let lower_key = canonical_key.to_ascii_lowercase();
-        if lower_key != canonical_key && !alias_map.contains_key(lower_key.as_str()) {
-            alias_map.insert(lower_key, Value::String(raw_name));
-        }
-    }
-
-    if alias_map.is_empty() {
-        return None;
-    }
-    Some(alias_map)
-}
-
 fn read_raw_tools(payload: Option<&Value>) -> Vec<Value> {
     payload
         .and_then(|v| v.as_object())
@@ -330,7 +279,7 @@ fn resolve_req_inbound_semantic_lift_plan(
         && !raw_tools.is_empty()
         && should_capture_alias_map(input.protocol.as_deref(), input.entry_endpoint.as_deref())
     {
-        output.tool_name_alias_map = build_anthropic_tool_alias_map(raw_tools.as_slice());
+        output.tool_name_alias_map = build_anthropic_tool_alias_map_from_slice(raw_tools.as_slice());
     }
 
     let responses_resume = input.responses_resume.as_ref().and_then(|value| {
