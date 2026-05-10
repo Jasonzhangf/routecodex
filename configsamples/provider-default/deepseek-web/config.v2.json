@@ -48,8 +48,11 @@
           "deepseek-chat-search",
           "deepseek-v3-search",
           "deepseek-v4-flash",
+          "deepseek-v4-flash-nothinking",
           "deepseek-v4-flash-search",
-          "deepseek-v4-vision"
+          "deepseek-v4-flash-search-nothinking",
+          "deepseek-v4-vision",
+          "deepseek-v4-vision-nothinking"
         ]
       },
       "deepseek-reasoner": {
@@ -65,7 +68,9 @@
           "deepseek-reasoner-search",
           "deepseek-r1-search",
           "deepseek-v4-pro",
-          "deepseek-v4-pro-search"
+          "deepseek-v4-pro-nothinking",
+          "deepseek-v4-pro-search",
+          "deepseek-v4-pro-search-nothinking"
         ]
       }
     },

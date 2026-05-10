@@ -275,4 +275,40 @@ describe('log rollup', () => {
 
     homedirSpy.mockRestore();
   });
+
+  it('prints realtime cache usage breakdown for a request', async () => {
+    process.env.ROUTECODEX_LOG_ROLLUP = '1';
+    process.env.ROUTECODEX_LOG_ROLLUP_REALTIME = '1';
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { recordUsageRollup } = await import('../../../../../src/server/runtime/http-server/executor/log-rollup.js');
+
+    recordUsageRollup({
+      requestId: 'req-cache-rt',
+      routeName: 'thinking',
+      poolId: 'thinking-deepseek-web-primary',
+      providerKey: 'deepseek-web.clary',
+      model: 'deepseek-v4-pro',
+      sessionId: 'sid-cache-rt',
+      projectPath: '/tmp/project-cache-rt',
+      latencyMs: 10000,
+      internalLatencyMs: 1000,
+      externalLatencyMs: 3000,
+      sseDecodeMs: 6000,
+      providerAttemptCount: 1,
+      retryCount: 0,
+      finishReason: 'stop',
+      promptTokens: 1000,
+      completionTokens: 200,
+      cacheReadTokens: 750,
+      cacheCreationTokens: 125,
+      totalTokens: 1200
+    });
+
+    const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(lines.some((line) => line.includes('[session-request][rt] session=sid-cache-rt'))).toBe(true);
+    expect(lines.some((line) => line.includes('cache.read=750'))).toBe(true);
+    expect(lines.some((line) => line.includes('cache.hit=75.0%'))).toBe(true);
+    expect(lines.some((line) => line.includes('cache.write=125'))).toBe(true);
+    expect(lines.some((line) => line.includes('total=1,200'))).toBe(true);
+  });
 });

@@ -53,7 +53,8 @@ export function resumeConversationPayload(
       requestId: entry.requestId,
       basePayload: entry.basePayload,
       input: entry.input,
-      tools: entry.tools
+      tools: entry.tools,
+      routeHint: entry.routeHint
     },
     responseId,
     submitPayload,
@@ -77,6 +78,7 @@ export function restoreContinuationPayload(
       basePayload: entry.basePayload,
       input: entry.input,
       tools: entry.tools,
+      routeHint: entry.routeHint,
       lastResponseId: entry.lastResponseId
     },
     payload,
@@ -104,6 +106,7 @@ export function materializeContinuationPayload(
       basePayload: entry.basePayload,
       input: entry.input,
       tools: entry.tools,
+      routeHint: entry.routeHint,
       lastResponseId: entry.lastResponseId
     },
     payload,

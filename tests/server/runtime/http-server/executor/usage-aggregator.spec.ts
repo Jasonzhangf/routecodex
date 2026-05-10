@@ -1,6 +1,7 @@
 import {
   buildUsageLogText,
-  extractUsageFromResult
+  extractUsageFromResult,
+  mergeUsageMetrics
 } from '../../../../../src/server/runtime/http-server/executor/usage-aggregator.js';
 
 describe('usage log text', () => {
@@ -213,5 +214,32 @@ describe('usage log text', () => {
     );
 
     expect(usage).toBeUndefined();
+  });
+
+  it('merges cache read and cache creation tokens across usage snapshots', () => {
+    const usage = mergeUsageMetrics(
+      {
+        prompt_tokens: 100,
+        completion_tokens: 25,
+        total_tokens: 125,
+        cache_read_input_tokens: 80,
+        cache_creation_input_tokens: 16
+      },
+      {
+        prompt_tokens: 50,
+        completion_tokens: 5,
+        total_tokens: 55,
+        cache_read_input_tokens: 20,
+        cache_creation_input_tokens: 4
+      }
+    );
+
+    expect(usage).toEqual({
+      prompt_tokens: 150,
+      completion_tokens: 30,
+      total_tokens: 180,
+      cache_read_input_tokens: 100,
+      cache_creation_input_tokens: 20
+    });
   });
 });

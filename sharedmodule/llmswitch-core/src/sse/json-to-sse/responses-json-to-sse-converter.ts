@@ -39,6 +39,12 @@ export class ResponsesJsonToSseConverterRefactored {
     request: ResponsesRequest,
     options: ResponsesJsonToSseOptions
   ): Promise<ResponsesSseEventStream> {
+    try {
+      this.validateRequest(request);
+    } catch (error) {
+      throw this.wrapError('REQUEST_CONVERSION_ERROR', error as Error, options.requestId);
+    }
+
     // 1. 创建上下文
     const context = this.createRequestContext(request, options);
     this.contexts.set(options.requestId, context);
@@ -72,6 +78,12 @@ export class ResponsesJsonToSseConverterRefactored {
     response: ResponsesResponse,
     options: ResponsesJsonToSseOptions
   ): Promise<ResponsesSseEventStream> {
+    try {
+      this.validateResponse(response);
+    } catch (error) {
+      throw this.wrapError('RESPONSE_CONVERSION_ERROR', error as Error, options.requestId);
+    }
+
     // 1. 创建上下文
     const context = this.createResponseContext(response, options);
     this.contexts.set(options.requestId, context);

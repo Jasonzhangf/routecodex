@@ -236,16 +236,19 @@ export async function handleResponses(
 	      headers: req.headers as Record<string, unknown>,
 	      query: req.query as Record<string, unknown>,
 	      body: payload,
-	      metadata: mergePipelineMetadata(requestBodyMetadata, {
-	        stream: wantsStream,
-	        clientRequestId,
-	        clientStream: acceptsSse || undefined,
-	        inboundStream: wantsStream,
-	        outboundStream,
-	        providerProtocol: 'openai-responses',
-	        __raw_request_body: originalPayload,
-	        clientHeaders,
-	        clientConnectionState,
+      metadata: mergePipelineMetadata(requestBodyMetadata, {
+        stream: wantsStream,
+        clientRequestId,
+        clientStream: acceptsSse || undefined,
+        inboundStream: wantsStream,
+        outboundStream,
+        ...(typeof resumeMeta?.routeHint === 'string' && resumeMeta.routeHint.trim()
+          ? { routeHint: resumeMeta.routeHint.trim() }
+          : {}),
+        providerProtocol: 'openai-responses',
+        __raw_request_body: originalPayload,
+        clientHeaders,
+        clientConnectionState,
 	        ...(resumeMeta ? { responsesResume: resumeMeta } : {}),
 	        ...(mockSampleReqId ? { mockSampleReqId } : {})
 	      })

@@ -90,9 +90,7 @@ export interface SseToResponsesJsonContext {
   startTime: number;
   endTime?: number;
   duration?: number;
-  aggregatedEvents: ResponsesSseEvent[];
   currentResponse: Partial<ResponsesResponse>;
-  outputItemBuilders: Map<string, OutputItemBuilder>;
   eventStats: ResponsesEventStats;
   isCompleted: boolean;
   isResponseCreated: boolean;

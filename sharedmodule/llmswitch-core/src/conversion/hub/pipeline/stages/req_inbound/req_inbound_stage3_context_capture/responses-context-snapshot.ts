@@ -32,7 +32,8 @@ export function persistResponsesConversationRequestContext(
     payload: options.rawRequest as unknown as Record<string, unknown>,
     context: options.context as unknown as Record<string, unknown>,
     sessionId: readNormalizedToken((options.adapterContext as Record<string, unknown>).sessionId),
-    conversationId: readNormalizedToken((options.adapterContext as Record<string, unknown>).conversationId)
+    conversationId: readNormalizedToken((options.adapterContext as Record<string, unknown>).conversationId),
+    routeHint: readNormalizedToken((options.adapterContext as Record<string, unknown>).routeId)
   });
 }
 

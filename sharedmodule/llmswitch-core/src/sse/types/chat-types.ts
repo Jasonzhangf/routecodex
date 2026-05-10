@@ -217,7 +217,6 @@ export interface SseToChatJsonContext {
   model: string;
   options: SseToChatJsonOptions;
   startTime: number;
-  aggregatedChunks: ChatCompletionChunk[];
   currentResponse: Partial<ChatCompletionResponse>;
   choiceIndexMap: Map<number, ChatChoiceBuilder>;
   toolCallIndexMap: Map<number, Map<number, ChatToolCallBuilder>>;

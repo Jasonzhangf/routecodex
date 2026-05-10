@@ -1,8 +1,24 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { resolveRccPath } from '../../runtime/user-data-paths.js';
 
 export function readSessionDirEnv(): string {
-  return String(process.env.ROUTECODEX_SESSION_DIR || '').trim();
+  const direct = String(
+    process.env.ROUTECODEX_SESSION_DIR
+    || process.env.RCC_SESSION_DIR
+    || ''
+  ).trim();
+  if (direct) {
+    const lowered = direct.toLowerCase();
+    if (lowered !== 'undefined' && lowered !== 'null') {
+      return direct;
+    }
+  }
+  try {
+    return resolveRccPath('sessions');
+  } catch {
+    return '';
+  }
 }
 
 function sanitizeSegment(value: string): string {

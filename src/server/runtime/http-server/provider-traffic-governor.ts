@@ -218,6 +218,46 @@ function normalizeCode(value: unknown): string {
   return value.trim().toUpperCase();
 }
 
+function readLowerToken(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function isWebProviderRuntime(runtime: ProviderRuntimeProfile): boolean {
+  const providerType = readLowerToken(runtime.providerType);
+  const compatibilityProfile = readLowerToken(runtime.compatibilityProfile);
+  const providerId = readLowerToken(runtime.providerId);
+  const providerKey = readLowerToken(runtime.providerKey);
+  const providerFamily = readLowerToken(runtime.providerFamily);
+  const runtimeKey = readLowerToken(runtime.runtimeKey);
+  const endpoint = readLowerToken(runtime.endpoint);
+  const baseUrl = readLowerToken(runtime.baseUrl);
+
+  if (providerType === 'mimoweb') {
+    return true;
+  }
+  if (
+    compatibilityProfile === 'chat:deepseek-web'
+    || compatibilityProfile === 'chat:qwenchat-web'
+  ) {
+    return true;
+  }
+
+  const tokens = [providerId, providerKey, providerFamily, runtimeKey, endpoint, baseUrl].filter(Boolean);
+  return tokens.some((value) => (
+    value === 'qwenchat'
+    || value.startsWith('qwenchat.')
+    || value === 'mimoweb'
+    || value.startsWith('mimoweb.')
+    || value === 'deepseek-web'
+    || value.startsWith('deepseek-web.')
+    || value.endsWith('-web')
+    || value.includes('/chat.qwen.ai')
+    || value.includes('chat.qwen.ai')
+    || value.includes('chat.deepseek.com')
+  ));
+}
+
+
 function readAdaptiveEnvInt(keys: string[], fallback: number): number {
   for (const key of keys) {
     const parsed = clampPositiveInt(process.env[key]);
@@ -324,11 +364,13 @@ export function resolveProviderTrafficPolicy(
   runtime: ProviderRuntimeProfile,
   _providerKey?: string
 ): ResolvedProviderTrafficPolicy {
-  const defaultMaxInFlight = 2;
+  const webProvider = isWebProviderRuntime(runtime);
+  const defaultMaxInFlight = webProvider ? 1 : 2;
   const defaultRpm = defaultMaxInFlight * 60;
   const configuredConcurrency = runtime.concurrency;
   const configuredRpm = runtime.rpm;
-  const maxInFlight = clampPositiveInt(configuredConcurrency?.maxInFlight) ?? defaultMaxInFlight;
+  const rawMaxInFlight = clampPositiveInt(configuredConcurrency?.maxInFlight) ?? defaultMaxInFlight;
+  const maxInFlight = webProvider ? 1 : rawMaxInFlight;
   const concurrencyTimeoutMs =
     clampPositiveInt(configuredConcurrency?.acquireTimeoutMs) ?? DEFAULT_CONCURRENCY_TIMEOUT_MS;
   const staleLeaseMs =
@@ -1078,7 +1120,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     }
     await this.ensureAdaptiveLoaded();
     const policyBase = resolveProviderTrafficPolicy(options.runtime, options.providerKey);
-    const adaptiveState = this.adaptiveEnabled
+    const adaptiveState = this.adaptiveEnabled && !isWebProviderRuntime(options.runtime)
       ? this.getOrCreateAdaptiveState(runtimeKey, policyBase.concurrency.maxInFlight)
       : null;
     const policy: ResolvedProviderTrafficPolicy = adaptiveState
@@ -1289,6 +1331,19 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     }
     const runtimeKey = typeof event.runtimeKey === 'string' ? event.runtimeKey.trim() : '';
     if (!runtimeKey) {
+      return;
+    }
+    const providerKey = typeof event.providerKey === 'string' ? event.providerKey.trim() : '';
+    const providerRoot = providerKey ? providerKey.split('.')[0]?.trim().toLowerCase() ?? '' : '';
+    if (isWebProviderRuntime({
+      runtimeKey,
+      providerId: providerRoot || runtimeKey,
+      providerKey,
+      providerType: providerRoot === 'mimoweb' ? 'mimoweb' : 'openai',
+      providerFamily: providerRoot || runtimeKey,
+      endpoint: '',
+      auth: { type: 'apikey' }
+    })) {
       return;
     }
     await this.ensureAdaptiveLoaded();

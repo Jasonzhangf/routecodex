@@ -78,6 +78,61 @@ describe('request continuation semantics', () => {
     );
   });
 
+  it('does not synthesize submit_tool_outputs continuation when responsesResume has no tool outputs', async () => {
+    const adapterContext = {
+      requestId: 'req-stage2-continuation-no-tool-outputs',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    };
+
+    const stage2 = await runReqInboundStage2SemanticMap({
+      adapterContext: adapterContext as any,
+      formatEnvelope: {
+        protocol: 'openai-responses',
+        direction: 'request',
+        payload: {
+          model: 'gpt-4o-mini',
+          previous_response_id: 'resp_prev_no_tool_outputs',
+          input: [
+            {
+              role: 'user',
+              content: [{ type: 'input_text', text: '继续，但这次没有工具结果' }]
+            }
+          ]
+        }
+      } as any,
+      semanticMapper: {
+        async toChat() {
+          return {
+            messages: [{ role: 'user', content: '继续，但这次没有工具结果' }],
+            parameters: { model: 'gpt-4o-mini' },
+            metadata: { context: adapterContext }
+          } as any;
+        }
+      } as any,
+      responsesResume: {
+        previousRequestId: 'req_chain_root_no_tool_outputs',
+        restoredFromResponseId: 'resp_restored_no_tool_outputs'
+      } as any
+    });
+
+    expect((stage2.chatEnvelope as any).semantics?.continuation).toMatchObject({
+      chainId: 'req_chain_root_no_tool_outputs',
+      stickyScope: 'request_chain',
+      stateOrigin: 'openai-responses',
+      restored: true,
+      resumeFrom: {
+        protocol: 'openai-responses',
+        requestId: 'req_chain_root_no_tool_outputs',
+        responseId: 'resp_restored_no_tool_outputs',
+        previousResponseId: 'resp_prev_no_tool_outputs'
+      }
+    });
+    expect((stage2.chatEnvelope as any).semantics?.continuation?.toolContinuation).toBeUndefined();
+    expect((stage2.standardizedRequest as any).semantics?.continuation?.toolContinuation).toBeUndefined();
+    expect((stage2.chatEnvelope as any).toolOutputs).toBeUndefined();
+  });
+
   it('cleans metadata.responsesResume after inbound semantic lift and keeps continuation on working request', async () => {
     const normalized = {
       id: 'req-inbound-continuation-cleanup',

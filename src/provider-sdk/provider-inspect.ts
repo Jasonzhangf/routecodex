@@ -70,7 +70,7 @@ function buildWebSearchPolicyOptions(summary: Record<string, unknown> | undefine
 }
 
 function buildRoutingHints(args: {
-  routeTargets: { default: string; webSearch?: string; multimodal?: string };
+  routeTargets: { default: string; webSearch?: string; multimodal?: string; tools?: string };
   capabilities?: ProviderCapabilityMap;
   webSearch?: Record<string, unknown>;
   catalogEntry?: InitProviderTemplate;
@@ -78,7 +78,7 @@ function buildRoutingHints(args: {
   const routing: Record<string, unknown> = {
     default: routePool('default', args.routeTargets.default),
     thinking: routePool('thinking', args.routeTargets.default),
-    tools: routePool('tools', args.routeTargets.default)
+    tools: routePool('tools', args.routeTargets.tools || args.routeTargets.default)
   };
   const notes: string[] = [
     'default/thinking/tools are always suggested so a single provider can be dropped into a fresh weighted pool.'
@@ -117,6 +117,7 @@ function buildRoutingHints(args: {
     ...(buildWebSearchPolicyOptions(args.webSearch) ? { policyOptions: buildWebSearchPolicyOptions(args.webSearch) } : {}),
     routeTargets: {
       default: args.routeTargets.default,
+      ...(args.routeTargets.tools ? { tools: args.routeTargets.tools } : {}),
       ...(args.routeTargets.webSearch ? { webSearch: args.routeTargets.webSearch } : {}),
       ...(args.routeTargets.multimodal ? { multimodal: args.routeTargets.multimodal } : {})
     },
@@ -129,6 +130,7 @@ export interface ProviderRoutingHints {
   policyOptions?: Record<string, unknown>;
   routeTargets: {
     default: string;
+    tools?: string;
     webSearch?: string;
     multimodal?: string;
   };
@@ -171,6 +173,7 @@ export interface ProviderInspection {
   catalogLabel?: string;
   routeTargets: {
     default: string;
+    tools?: string;
     webSearch?: string;
     multimodal?: string;
   };
@@ -205,6 +208,7 @@ export function inspectProviderConfig(
   const authType = readString(authNode?.type);
   const routeTargets = {
     default: defaultModel ? `${providerId}.${defaultModel}` : providerId,
+    ...(providerId === 'deepseek-web' ? { tools: 'deepseek-web.deepseek-v4-flash-nothinking' } : {}),
     ...(webSearchSummary?.routeTarget ? { webSearch: String(webSearchSummary.routeTarget) } : {}),
     ...(metadata.multimodalRouteTarget ? { multimodal: metadata.multimodalRouteTarget } : {})
   };

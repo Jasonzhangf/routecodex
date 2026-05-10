@@ -1422,6 +1422,43 @@ fn read_trimmed_optional_string(value: Option<&Value>) -> Option<String> {
     Some(raw)
 }
 
+fn normalize_resume_output_text(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Null) | None => "\"\"".to_string(),
+        Some(other) => {
+            serde_json::to_string(other).unwrap_or_else(|_| "[object Object]".to_string())
+        }
+    }
+}
+
+fn read_resume_tool_outputs_detailed(
+    resume_obj: &Map<String, Value>,
+) -> Vec<(String, String)> {
+    let detailed = resume_obj
+        .get("toolOutputsDetailed")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if detailed.is_empty() {
+        return Vec::new();
+    }
+
+    let mut mapped: Vec<(String, String)> = Vec::new();
+    for (index, entry) in detailed.iter().enumerate() {
+        let Some(row) = entry.as_object() else {
+            continue;
+        };
+        let call_id = read_trimmed_optional_string(row.get("callId"))
+            .or_else(|| read_trimmed_optional_string(row.get("originalId")))
+            .unwrap_or_else(|| format!("resume_tool_{}", index + 1));
+        let output_text = normalize_resume_output_text(row.get("outputText"));
+        mapped.push((call_id, output_text));
+    }
+
+    mapped
+}
+
 fn read_continuation_from_semantics_node(semantics: Option<&Value>) -> Option<Value> {
     let semantics_obj = semantics?.as_object()?;
     let continuation = semantics_obj.get("continuation")?;
@@ -1446,6 +1483,7 @@ fn synthesize_continuation_from_responses_resume(resume: Option<&Value>) -> Opti
     let previous_request_id = read_trimmed_optional_string(resume_obj.get("previousRequestId"));
     let restored_from_response_id =
         read_trimmed_optional_string(resume_obj.get("restoredFromResponseId"));
+    let route_hint = read_trimmed_optional_string(resume_obj.get("routeHint"));
 
     let mut continuation = Map::<String, Value>::new();
     if let Some(chain_id) = previous_request_id
@@ -1468,6 +1506,40 @@ fn synthesize_continuation_from_responses_resume(resume: Option<&Value>) -> Opti
     }
     if !resume_from.is_empty() {
         continuation.insert("resumeFrom".to_string(), Value::Object(resume_from));
+    }
+    if let Some(route_hint_value) = route_hint.clone() {
+        continuation.insert("routeHint".to_string(), Value::String(route_hint_value));
+    }
+
+    let mapped_outputs = read_resume_tool_outputs_detailed(resume_obj);
+    if !mapped_outputs.is_empty() {
+        let mut tool_continuation = Map::<String, Value>::new();
+        tool_continuation.insert(
+            "mode".to_string(),
+            Value::String("submit_tool_outputs".to_string()),
+        );
+        if !mapped_outputs.is_empty() {
+            let submitted_ids = mapped_outputs
+                .iter()
+                .map(|entry| Value::String(entry.0.clone()))
+                .collect::<Vec<_>>();
+            tool_continuation.insert(
+                "submittedToolCallIds".to_string(),
+                Value::Array(submitted_ids),
+            );
+            let resume_outputs = mapped_outputs
+                .iter()
+                .map(|entry| Value::String(entry.1.clone()))
+                .collect::<Vec<_>>();
+            tool_continuation.insert(
+                "resumeOutputs".to_string(),
+                Value::Array(resume_outputs),
+            );
+        }
+        continuation.insert(
+            "toolContinuation".to_string(),
+            Value::Object(tool_continuation),
+        );
     }
 
     if continuation.is_empty() {
@@ -1699,7 +1771,14 @@ fn lift_responses_resume_into_semantics(request: &Value, metadata: &Value) -> Va
         .as_object_mut()
         .expect("responses should be object after normalization");
     if !responses_obj.contains_key("resume") {
-        if let Some(resume_value) = resume {
+        if let Some(mut resume_value) = resume {
+            if let Some(resume_obj) = resume_value.as_object_mut() {
+                if !resume_obj.contains_key("routeHint") {
+                    if let Some(route_hint) = read_trimmed_optional_string(next_metadata.get("routeHint")) {
+                        resume_obj.insert("routeHint".to_string(), Value::String(route_hint));
+                    }
+                }
+            }
             responses_obj.insert("resume".to_string(), resume_value);
         }
     }

@@ -907,8 +907,13 @@ describe('cli init command', () => {
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(
+      parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.tools?.[0]?.loadBalancing?.weights?.[
+        'deepseek-web.deepseek-v4-flash-nothinking'
+      ]
+    ).toBe(1);
+    expect(
       parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.loadBalancing?.weights?.[
-        'deepseek-web.deepseek-v4-flash-search'
+        'deepseek-web.deepseek-v4-flash-search-nothinking'
       ]
     ).toBe(1);
     expect(
@@ -917,9 +922,9 @@ describe('cli init command', () => {
       ]
     ).toBe(1);
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('deepseek:web_search');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.providerKey).toBe('deepseek-web.deepseek-v4-flash-search');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.providerKey).toBe('deepseek-web.deepseek-v4-flash-search-nothinking');
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['deepseek:web_search']?.providerKey).toBe(
-      'deepseek-web.deepseek-v4-flash-search'
+      'deepseek-web.deepseek-v4-flash-search-nothinking'
     );
   });
 
@@ -963,11 +968,11 @@ describe('cli init command', () => {
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(
       Object.keys(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.loadBalancing?.weights || {})
-    ).toEqual(['deepseek-web.deepseek-v4-flash-search']);
+    ).toEqual(['deepseek-web.deepseek-v4-flash-search-nothinking']);
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('deepseek:web_search');
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.default).toBe(true);
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['deepseek:web_search']?.providerKey).toBe(
-      'deepseek-web.deepseek-v4-flash-search'
+      'deepseek-web.deepseek-v4-flash-search-nothinking'
     );
   });
 
@@ -2261,12 +2266,15 @@ describe('init-config', () => {
 
     expect(result.ok).toBe(true);
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.tools[0].loadBalancing.weights).toMatchObject({
+      'deepseek-web.deepseek-v4-flash-nothinking': 1
+    });
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('deepseek:web_search');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].providerKey).toBe('deepseek-web.deepseek-v4-flash-search');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-v4-flash-search');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].providerKey).toBe('deepseek-web.deepseek-v4-flash-search-nothinking');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-v4-flash-search-nothinking');
     expect(
       Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights)[0]
-    ).toBe('deepseek-web.deepseek-v4-flash-search');
+    ).toBe('deepseek-web.deepseek-v4-flash-search-nothinking');
     expect(
       Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.multimodal[0].loadBalancing.weights)[0]
     ).toBe('deepseek-web.deepseek-v4-vision');
@@ -2291,10 +2299,10 @@ describe('init-config', () => {
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('deepseek:web_search');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].default).toBe(true);
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-v4-flash-search');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-v4-flash-search-nothinking');
     expect(
       Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights)
-    ).toEqual(['deepseek-web.deepseek-v4-flash-search']);
+    ).toEqual(['deepseek-web.deepseek-v4-flash-search-nothinking']);
   });
 
   it('does not inject webSearch defaults when glm is not selected', async () => {

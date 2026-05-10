@@ -99,9 +99,9 @@ const CATALOG: InitProviderTemplate[] = [
     capabilities: { supportsReasoning: true, supportsTools: true, supportsMultimodal: true },
     webSearch: {
       engineId: 'deepseek:web_search',
-      providerKey: 'deepseek-web.deepseek-v4-flash-search',
-      routeTarget: 'deepseek-web.deepseek-v4-flash-search',
-      modelId: 'deepseek-v4-flash-search',
+      providerKey: 'deepseek-web.deepseek-v4-flash-search-nothinking',
+      routeTarget: 'deepseek-web.deepseek-v4-flash-search-nothinking',
+      modelId: 'deepseek-v4-flash-search-nothinking',
       description: 'DeepSeek native web_search route backend',
       executionMode: 'direct',
       directActivation: 'route',
@@ -135,12 +135,12 @@ const CATALOG: InitProviderTemplate[] = [
         'deepseek-chat': {
           supportsStreaming: true,
           capabilities: ['web_search', 'multimodal'],
-          aliases: ['deepseek-v3', 'deepseek-chat-search', 'deepseek-v3-search', 'deepseek-v4-flash', 'deepseek-v4-flash-search', 'deepseek-v4-vision']
+          aliases: ['deepseek-v3', 'deepseek-chat-search', 'deepseek-v3-search', 'deepseek-v4-flash', 'deepseek-v4-flash-nothinking', 'deepseek-v4-flash-search', 'deepseek-v4-flash-search-nothinking', 'deepseek-v4-vision', 'deepseek-v4-vision-nothinking']
         },
         'deepseek-reasoner': {
           supportsStreaming: true,
           capabilities: ['web_search', 'multimodal'],
-          aliases: ['deepseek-r1', 'deepseek-reasoner-search', 'deepseek-r1-search', 'deepseek-v4-pro', 'deepseek-v4-pro-search']
+          aliases: ['deepseek-r1', 'deepseek-reasoner-search', 'deepseek-r1-search', 'deepseek-v4-pro', 'deepseek-v4-pro-nothinking', 'deepseek-v4-pro-search', 'deepseek-v4-pro-search-nothinking']
         }
       }
     },

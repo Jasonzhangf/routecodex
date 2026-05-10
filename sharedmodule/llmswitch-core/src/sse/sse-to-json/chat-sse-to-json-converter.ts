@@ -35,6 +35,15 @@ type DeepSeekWebErrorInfo = {
 
 type DeepSeekPatchAppendTarget = 'content' | 'reasoning';
 
+type DeepSeekWebPayloadAnalysis = {
+  path: string;
+  op: string;
+  value: unknown;
+  isStandardChunk: boolean;
+  looksLikePatch: boolean;
+  errorInfo: DeepSeekWebErrorInfo | null;
+};
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -219,6 +228,38 @@ function resolveDeepSeekFragmentTarget(fragmentType: unknown): DeepSeekPatchAppe
     return 'reasoning';
   }
   return 'content';
+}
+
+function analyzeDeepSeekWebPayload(
+  payload: Record<string, unknown> | undefined,
+  hasPatchAppendTarget: boolean
+): DeepSeekWebPayloadAnalysis | null {
+  if (!payload) {
+    return null;
+  }
+
+  const path = typeof payload.p === 'string' ? payload.p : '';
+  const op = typeof payload.o === 'string' ? payload.o : '';
+  const value = payload.v;
+  const isStandardChunk = Array.isArray(payload.choices) || payload.object === 'chat.completion.chunk';
+  const isBareContinuation = hasPatchAppendTarget && !path && typeof value === 'string';
+  const looksLikePatch = !isStandardChunk && (
+    path.startsWith('response/')
+    || typeof payload.request_message_id === 'number'
+    || typeof payload.response_message_id === 'number'
+    || typeof payload.updated_at === 'number'
+    || (value !== null && typeof value === 'object' && !Array.isArray(value))
+    || isBareContinuation
+  );
+
+  return {
+    path,
+    op,
+    value,
+    isStandardChunk,
+    looksLikePatch,
+    errorInfo: extractDeepSeekWebErrorInfo(payload)
+  };
 }
 
 /**
@@ -479,7 +520,6 @@ export class ChatSseToJsonConverter {
       model: options.model,
       options: { ...DEFAULT_CHAT_CONVERSION_CONFIG, ...options },
       startTime: TimeUtils.now(),
-      aggregatedChunks: [],
       currentResponse: {
         id: '',
         object: 'chat.completion',
@@ -545,8 +585,6 @@ export class ChatSseToJsonConverter {
           );
       }
 
-      // 更新统计
-      this.updateStats(context);
 
     } catch (error) {
       context.eventStats.errorCount++;
@@ -568,7 +606,10 @@ export class ChatSseToJsonConverter {
         : this.parseChatChunkPayload(payload);
 
       for (const parsed of parsedEntries) {
-        const deepseekErrorInfo = extractDeepSeekWebErrorInfo(parsed);
+        const parsedRecord = asRecord(parsed);
+        const deepseekState = this.getDeepSeekPatchState(context);
+        const deepseekAnalysis = analyzeDeepSeekWebPayload(parsedRecord, Boolean(deepseekState.patchAppendTarget));
+        const deepseekErrorInfo = deepseekAnalysis?.errorInfo;
         if (deepseekErrorInfo) {
           const typedError = new Error(deepseekErrorInfo.message) as Error & { code?: string };
           typedError.code = deepseekErrorInfo.code;
@@ -586,7 +627,7 @@ export class ChatSseToJsonConverter {
             }
           );
         }
-        if (this.tryProcessDeepSeekWebPatchEvent(parsed, context)) {
+        if (this.tryProcessDeepSeekWebPatchEvent(parsed, context, deepseekAnalysis)) {
           continue;
         }
 
@@ -597,7 +638,6 @@ export class ChatSseToJsonConverter {
           this.validateChatChunk(chunk);
         }
 
-        context.aggregatedChunks.push(chunk);
 
         // 初始化响应结构（如果是第一个chunk）
         if (!context.currentResponse.id && chunk.id) {
@@ -674,34 +714,22 @@ export class ChatSseToJsonConverter {
 
   private tryProcessDeepSeekWebPatchEvent(
     parsed: unknown,
-    context: SseToChatJsonContext
+    context: SseToChatJsonContext,
+    analysis?: DeepSeekWebPayloadAnalysis | null
   ): boolean {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return false;
     }
     const payload = parsed as Record<string, unknown>;
-
-    // Standard OpenAI chunk path should continue with default processing.
-    if (Array.isArray(payload.choices) || payload.object === 'chat.completion.chunk') {
-      return false;
-    }
-
-    const path = typeof payload.p === 'string' ? payload.p : '';
-    const op = typeof payload.o === 'string' ? payload.o : '';
-    const value = payload.v;
     const deepseekState = this.getDeepSeekPatchState(context);
-    const isBareContinuation = Boolean(deepseekState.patchAppendTarget) && !path && typeof value === 'string';
-    const looksLikeDeepSeekPatch =
-      path.startsWith('response/')
-      || typeof payload.request_message_id === 'number'
-      || typeof payload.response_message_id === 'number'
-      || typeof payload.updated_at === 'number'
-      || (value !== null && typeof value === 'object' && !Array.isArray(value))
-      || isBareContinuation;
-
-    if (!looksLikeDeepSeekPatch) {
+    const resolvedAnalysis = analysis ?? analyzeDeepSeekWebPayload(payload, Boolean(deepseekState.patchAppendTarget));
+    if (!resolvedAnalysis) {
       return false;
     }
+    if (resolvedAnalysis.isStandardChunk || !resolvedAnalysis.looksLikePatch) {
+      return false;
+    }
+    const { path, op, value } = resolvedAnalysis;
 
     if (!context.currentResponse.id) {
       context.currentResponse.id = `chat_${context.requestId}`;
@@ -772,6 +800,8 @@ export class ChatSseToJsonConverter {
       return deepseekState.fragmentTargets[index];
     };
 
+    const fragmentTargetFromPath = resolveFragmentTargetFromPath();
+
     if (path === 'response/content' && typeof value === 'string') {
       appendToTarget('content', value);
     } else if (path === 'response/thinking_content' && typeof value === 'string') {
@@ -782,8 +812,8 @@ export class ChatSseToJsonConverter {
       deepseekState.patchAppendTarget = 'reasoning';
     } else if (path === 'response/fragments' && op === 'APPEND' && Array.isArray(value)) {
       processFragmentsArray(value);
-    } else if (resolveFragmentTargetFromPath() && typeof value === 'string') {
-      appendToTarget(resolveFragmentTargetFromPath()!, value);
+    } else if (fragmentTargetFromPath && typeof value === 'string') {
+      appendToTarget(fragmentTargetFromPath, value);
     } else if (op === 'APPEND' && typeof value === 'string' && deepseekState.patchAppendTarget === 'reasoning') {
       appendToTarget('reasoning', value);
     } else if (op === 'APPEND' && typeof value === 'string' && deepseekState.patchAppendTarget === 'content') {
@@ -840,25 +870,11 @@ export class ChatSseToJsonConverter {
       };
     };
     if (!carrier.deepseekPatchState) {
-      carrier.deepseekPatchState = {};
-    }
-    if (!Array.isArray(carrier.deepseekPatchState.fragmentTargets)) {
+      carrier.deepseekPatchState = { fragmentTargets: [] };
+    } else if (!Array.isArray(carrier.deepseekPatchState.fragmentTargets)) {
       carrier.deepseekPatchState.fragmentTargets = [];
     }
-    return {
-      get patchAppendTarget() {
-        return carrier.deepseekPatchState?.patchAppendTarget;
-      },
-      set patchAppendTarget(value: DeepSeekPatchAppendTarget | undefined) {
-        if (!carrier.deepseekPatchState) {
-          carrier.deepseekPatchState = {};
-        }
-        carrier.deepseekPatchState.patchAppendTarget = value;
-      },
-      get fragmentTargets() {
-        return carrier.deepseekPatchState?.fragmentTargets || [];
-      }
-    };
+    return carrier.deepseekPatchState as { patchAppendTarget?: DeepSeekPatchAppendTarget; fragmentTargets: DeepSeekPatchAppendTarget[] };
   }
 
   /**
@@ -1296,6 +1312,10 @@ export class ChatSseToJsonConverter {
     context.eventStats.totalChoices = choices.length;
     context.eventStats.endTime = TimeUtils.now();
     context.eventStats.duration = (context.eventStats.endTime - context.eventStats.startTime) / 1000;
+    if (context.eventStats.duration > 0) {
+      context.eventStats.chunkRate = context.eventStats.totalChunks / context.eventStats.duration;
+      context.eventStats.tokenRate = context.eventStats.totalTokens / context.eventStats.duration;
+    }
 
     const response: ChatCompletionResponse = {
       id: context.currentResponse.id || `chat_${context.requestId}`,
@@ -1377,16 +1397,7 @@ export class ChatSseToJsonConverter {
    */
   private buildUsageInfo(_context: SseToChatJsonContext): ChatCompletionResponse['usage'] | null {
     const directUsage = normalizeChatUsage(_context.currentResponse.usage);
-    if (directUsage) {
-      return directUsage;
-    }
-    for (let index = _context.aggregatedChunks.length - 1; index >= 0; index--) {
-      const usage = normalizeChatUsage(_context.aggregatedChunks[index]?.usage);
-      if (usage) {
-        return usage;
-      }
-    }
-    return null;
+    return directUsage || null;
   }
 
   /**
@@ -1440,17 +1451,6 @@ export class ChatSseToJsonConverter {
     }
   }
 
-  /**
-   * 更新统计信息
-   */
-  private updateStats(context: SseToChatJsonContext): void {
-    const now = TimeUtils.now();
-    const duration = (now - context.eventStats.startTime) / 1000;
-
-    context.eventStats.duration = duration;
-    context.eventStats.chunkRate = context.eventStats.totalChunks / duration;
-    context.eventStats.tokenRate = context.eventStats.totalTokens / duration;
-  }
 
   /**
    * 获取转换统计

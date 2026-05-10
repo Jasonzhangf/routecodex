@@ -6,11 +6,13 @@ export interface CaptureContextArgs {
   context: AnyRecord;
   sessionId?: string;
   conversationId?: string;
+  routeHint?: string;
 }
 
 export interface RecordResponseArgs {
   requestId?: string;
   response: AnyRecord;
+  routeHint?: string;
 }
 
 export interface ResumeOptions {
@@ -34,6 +36,7 @@ export interface ConversationEntry {
   basePayload: AnyRecord;
   input: AnyRecord[];
   tools?: AnyRecord[];
+  routeHint?: string;
   createdAt: number;
   updatedAt: number;
   lastResponseId?: string;

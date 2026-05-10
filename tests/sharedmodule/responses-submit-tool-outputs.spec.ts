@@ -11,6 +11,7 @@ import {
   clearResponsesConversationByRequestId,
   recordResponsesResponse,
   rebindResponsesConversationRequestId,
+  resumeLatestResponsesContinuationByScope,
   resumeResponsesConversation
 } from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js';
 
@@ -283,6 +284,8 @@ describe('ResponsesSemanticMapper submit tool outputs', () => {
 
     captureResponsesRequestContext({
       requestId: initialRequestId,
+      sessionId: 'sess-submit-rebind',
+      routeHint: 'tools',
       payload: { model: 'gpt-5.4', stream: false },
       context: {
         input: [
@@ -310,6 +313,7 @@ describe('ResponsesSemanticMapper submit tool outputs', () => {
     rebindResponsesConversationRequestId(initialRequestId, reboundRequestId);
     recordResponsesResponse({
       requestId: reboundRequestId,
+      routeHint: 'thinking',
       response: {
         id: responseId,
         object: 'response',
@@ -339,6 +343,40 @@ describe('ResponsesSemanticMapper submit tool outputs', () => {
         }
       }
     });
+
+    const restoredByScope = resumeLatestResponsesContinuationByScope({
+      requestId: `${initialRequestId}-scope`,
+      sessionId: 'sess-submit-rebind',
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'text', text: 'run a command' }]
+          },
+          {
+            type: 'function_call',
+            id: 'fc_call_exec_1',
+            role: 'assistant',
+            call_id: 'call_exec_1',
+            name: 'exec_command',
+            arguments: JSON.stringify({ cmd: 'bash -lc \'echo hello\'' }),
+            function: {
+              name: 'exec_command',
+              arguments: JSON.stringify({ cmd: 'bash -lc \'echo hello\'' })
+            }
+          },
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'text', text: 'next turn' }]
+          }
+        ]
+      }
+    });
+
+    expect((restoredByScope?.meta as any)?.routeHint).toBe('thinking');
 
     const resumed = resumeResponsesConversation(
       responseId,

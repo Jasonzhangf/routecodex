@@ -1483,3 +1483,7 @@ Tags: request-executor, provider-failure, retry-telemetry, host-shell, single-so
 - 2026-05-09: apply_patch shell-wrapper compatibility now follows a stricter “shape-repair-only if information is sufficient” rule. 可复用规则：exact `bash|zsh|sh -lc|-c apply_patch <<PATCH`、`cd rel && apply_patch <<PATCH`、以及显式 `cmd/command + workdir + patch body`/nested result-payload-data wrapper，应统一在 Rust `compat_fix_apply_patch.rs` 真源做回收并归一成 canonical apply_patch；但凡需要解释额外 shell 命令、猜工具名、补 hunk 或补文件语义，必须 fail-fast 为显式 invalid/unsupported。验证：Rust compat 32 tests 通过，direct sample check 命中 Codex shell/cd 与 provider broken wrapper 正样本，regression verifier `mismatches=0`。
 
 Tags: apply-patch, shell-wrapper, shape-repair-only, workdir-relativization, rust-ssot, regression-verifier, 2026-05-09
+
+- 2026-05-10: `responsesResume -> continuation` 这类 req_inbound / hub_pipeline 语义提升现在部分由 Rust native hotpath 执行。可复用规则：凡修改 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/` 下影响 inbound/outbound semantics 的逻辑，**先执行** `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`，再跑对应 Jest/运行态验证；否则 Jest 可能继续加载旧的 `dist/native/router_hotpath_napi.node`，出现“源码已改但测试仍是旧行为”的假阴性。
+
+Tags: native-hotpath, jest, router-hotpath-napi, build-gate, false-negative, 2026-05-10

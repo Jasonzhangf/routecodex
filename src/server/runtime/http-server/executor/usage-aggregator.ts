@@ -241,6 +241,11 @@ export function mergeUsageMetrics(base?: UsageMetrics, delta?: UsageMetrics): Us
 
   const total = (base.total_tokens ?? 0) + (delta.total_tokens ?? 0);
   merged.total_tokens = total || undefined;
+  const cacheRead = (base.cache_read_input_tokens ?? 0) + (delta.cache_read_input_tokens ?? 0);
+  merged.cache_read_input_tokens = cacheRead || undefined;
+  const cacheCreation =
+    (base.cache_creation_input_tokens ?? 0) + (delta.cache_creation_input_tokens ?? 0);
+  merged.cache_creation_input_tokens = cacheCreation || undefined;
 
   return merged;
 }

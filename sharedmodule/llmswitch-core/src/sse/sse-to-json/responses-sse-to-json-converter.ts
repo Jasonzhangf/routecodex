@@ -288,7 +288,15 @@ export class ResponsesSseToJsonConverterRefactored {
 
   private async *chunkStrings(stream: Readable): AsyncGenerator<string> {
     for await (const chunk of stream) {
-      yield typeof chunk === 'string' ? chunk : chunk.toString();
+      if (typeof chunk === 'string') {
+        yield chunk;
+        continue;
+      }
+      if (Buffer.isBuffer(chunk)) {
+        yield chunk.toString();
+        continue;
+      }
+      yield this.serializeEventToSSE(chunk as Partial<ResponsesSseEvent> | Record<string, unknown>);
     }
   }
 
@@ -412,9 +420,7 @@ export class ResponsesSseToJsonConverterRefactored {
       model: options.model,
       options,
       startTime: Date.now(),
-      aggregatedEvents: [],
       currentResponse: {},
-      outputItemBuilders: new Map(),
       eventStats,
       isCompleted: false,
       isResponseCreated: false,

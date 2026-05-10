@@ -115,6 +115,7 @@ class ResponsesConversationStore {
       basePayload: isRecord(prepared.basePayload) ? prepared.basePayload : pickPersistedFields(payload),
       input: Array.isArray(prepared.input) ? prepared.input : [],
       tools: Array.isArray(prepared.tools) ? prepared.tools : undefined,
+      routeHint: readScopeToken(args.routeHint),
       sessionId: readScopeToken(args.sessionId),
       conversationId: readScopeToken(args.conversationId),
       scopeKeys,
@@ -130,6 +131,11 @@ class ResponsesConversationStore {
     const response = args.response;
     const responseId = typeof response.id === 'string' ? response.id : undefined;
     if (!responseId) return;
+    const responseRouteHint = readScopeToken(args.routeHint);
+    if (responseRouteHint) {
+      entry.routeHint = responseRouteHint;
+      entry.basePayload.routeHint = responseRouteHint;
+    }
     if (entry.lastResponseId) {
       this.responseIndex.delete(entry.lastResponseId);
     }

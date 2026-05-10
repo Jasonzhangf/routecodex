@@ -21,6 +21,7 @@ describe('responses conversation store plain continuation restore', () => {
       requestId: 'req-resp-store-1',
       sessionId: 'sess-1',
       conversationId: 'conv-1',
+      routeHint: 'tools',
       payload: {
         model: 'gpt-5.3-codex',
         stream: true,
@@ -39,6 +40,7 @@ describe('responses conversation store plain continuation restore', () => {
 
     recordResponsesResponse({
       requestId: 'req-resp-store-1',
+      routeHint: 'thinking',
       response: {
         id: 'resp-store-1',
         output: [
@@ -91,6 +93,7 @@ describe('responses conversation store plain continuation restore', () => {
       previousRequestId: 'req-resp-store-1',
       restoredFromResponseId: 'resp-store-1',
       scopeKey: 'session:sess-1',
+      routeHint: 'thinking',
       restored: true
     });
   });

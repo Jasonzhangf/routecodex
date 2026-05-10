@@ -12,49 +12,8 @@ use crate::hub_reasoning_tool_normalizer::{
 use crate::shared_responses_tool_utils::strip_internal_tooling_metadata_impl;
 use crate::shared_tool_result_text_normalizer::normalize_tool_result_text;
 use crate::shared_tool_mapping::build_flattened_namespace_child_alias;
+use crate::hub_resp_outbound_sse_stream::resolve_sse_stream_mode;
 
-fn strip_rcc_history_transparency_text(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-    let patterns = [
-        "Continue from the latest state in the attached RCC_HISTORY.txt context. Treat it as the current working state and answer the latest user request directly.",
-        "# RCC_HISTORY.txt",
-        "RCC_HISTORY.txt",
-    ];
-    let mut text = raw.to_string();
-    for pattern in patterns {
-        text = text.replace(pattern, "");
-    }
-    text.trim().to_string()
-}
-
-fn scrub_rcc_history_from_reasoning_value(value: &mut Value) {
-    match value {
-        Value::String(raw) => {
-            *value = Value::String(strip_rcc_history_transparency_text(raw));
-        }
-        Value::Array(items) => {
-            for item in items.iter_mut() {
-                scrub_rcc_history_from_reasoning_value(item);
-            }
-        }
-        Value::Object(row) => {
-            for key in ["text", "content", "encrypted_content"] {
-                if let Some(Value::String(raw)) = row.get_mut(key) {
-                    *raw = strip_rcc_history_transparency_text(raw);
-                }
-            }
-            for key in ["summary", "content"] {
-                if let Some(child) = row.get_mut(key) {
-                    scrub_rcc_history_from_reasoning_value(child);
-                }
-            }
-        }
-        _ => {}
-    }
-}
 
 fn normalize_alias_map(candidate: &Value) -> Option<Map<String, Value>> {
     let row = candidate.as_object()?;
@@ -391,9 +350,6 @@ fn derive_reasoning_details_from_payload(reasoning: &Value) -> Vec<Value> {
 
 fn normalize_client_openai_chat_message_reasoning(message: &mut Map<String, Value>) {
     normalize_message_reasoning_ssot(message);
-    if let Some(reasoning) = message.get_mut("reasoning") {
-        scrub_rcc_history_from_reasoning_value(reasoning);
-    }
     let has_reasoning_payload = message.get("reasoning").is_some();
 
     let reasoning_text = message
@@ -408,7 +364,7 @@ fn normalize_client_openai_chat_message_reasoning(message: &mut Map<String, Valu
     if let Some(text) = reasoning_text {
         message.insert(
             "reasoning_content".to_string(),
-            Value::String(strip_rcc_history_transparency_text(text.as_str())),
+            Value::String(text.to_string()),
         );
     } else {
         message.remove("reasoning_content");
@@ -441,16 +397,6 @@ fn normalize_openai_chat_reasoning_outbound(candidate: &Value) -> Option<Value> 
         }
     }
     Some(Value::Object(row))
-}
-
-fn resolve_sse_stream_mode(wants_stream: bool, client_protocol: &str) -> bool {
-    if !wants_stream {
-        return false;
-    }
-    matches!(
-        client_protocol.trim(),
-        "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini-chat"
-    )
 }
 
 fn resolve_truthy_flag(raw: &Value) -> bool {
@@ -2256,7 +2202,7 @@ fn read_raw_object_string(row: &Map<String, Value>, key: &str) -> Option<String>
 fn normalize_output_text_content(content: &Value) -> Vec<Value> {
     let mut output: Vec<Value> = Vec::new();
     if let Some(raw) = content.as_str() {
-        let text = strip_rcc_history_transparency_text(raw);
+        let text = raw.trim().to_string();
         if !text.is_empty() {
             output.push(Value::Object(Map::from_iter([
                 ("type".to_string(), Value::String("output_text".to_string())),
@@ -2271,7 +2217,7 @@ fn normalize_output_text_content(content: &Value) -> Vec<Value> {
     };
     for part in parts {
         if let Some(raw) = part.as_str() {
-            let text = strip_rcc_history_transparency_text(raw);
+            let text = raw.trim().to_string();
             if !text.is_empty() {
                 output.push(Value::Object(Map::from_iter([
                     ("type".to_string(), Value::String("output_text".to_string())),
@@ -2291,7 +2237,7 @@ fn normalize_output_text_content(content: &Value) -> Vec<Value> {
         {
             let text = read_raw_object_string(row, "text")
                 .or_else(|| read_raw_object_string(row, "content"))
-                .map(|value| strip_rcc_history_transparency_text(value.as_str()))
+                .map(|value| value.trim().to_string())
                 .unwrap_or_default();
             if !text.is_empty() {
                 output.push(Value::Object(Map::from_iter([
@@ -2757,17 +2703,13 @@ fn merge_source_retention(out: &mut Map<String, Value>, source_row: &Map<String,
     }
 
     if let Some(source_metadata) = source_row.get("metadata").and_then(|v| v.as_object()) {
-        if let Some(deepseek_value) = source_metadata.get("deepseek") {
-            match out.get_mut("metadata").and_then(|v| v.as_object_mut()) {
-                Some(existing_metadata) => {
-                    existing_metadata.insert("deepseek".to_string(), deepseek_value.clone());
-                }
-                None => {
-                    let mut metadata = Map::new();
-                    metadata.insert("deepseek".to_string(), deepseek_value.clone());
-                    out.insert("metadata".to_string(), Value::Object(metadata));
-                }
-            }
+        let existing_metadata = out
+            .entry("metadata".to_string())
+            .or_insert_with(|| Value::Object(Map::new()))
+            .as_object_mut()
+            .unwrap();
+        for (key, value) in source_metadata {
+            existing_metadata.insert(key.clone(), value.clone());
         }
     }
 
@@ -2875,12 +2817,6 @@ fn build_responses_payload_from_chat_core(
         .ok_or_else(|| "responses outbound remap missing assistant message".to_string())?;
     let mut normalized_message = message.clone();
     normalize_message_reasoning_ssot(&mut normalized_message);
-    if let Some(reasoning) = normalized_message.get_mut("reasoning") {
-        scrub_rcc_history_from_reasoning_value(reasoning);
-    }
-    if let Some(Value::String(raw)) = normalized_message.get_mut("reasoning_content") {
-        *raw = strip_rcc_history_transparency_text(raw);
-    }
     let message = &normalized_message;
 
     let role = read_object_string(message, "role").unwrap_or_else(|| "assistant".to_string());
@@ -4117,7 +4053,7 @@ mod tests {
 
         assert_eq!(output["request_id"], Value::String("req_merge".to_string()));
         assert_eq!(output["metadata"]["keep"], Value::Bool(true));
-        assert!(output["metadata"].get("source").is_none());
+        assert_eq!(output["metadata"]["source"], Value::Bool(true));
         assert!(output["metadata"].get("toolCallIdStyle").is_none());
         assert_eq!(output["temperature"], Value::from(0.4));
         assert_eq!(output["top_p"], Value::from(0.8));
@@ -4207,68 +4143,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn build_responses_payload_from_chat_strips_rcc_history_transparency_fields() {
-        let payload = serde_json::json!({
-            "id": "resp_rcc_history_meta",
-            "model": "deepseek-chat",
-            "choices": [
-                {
-                    "message": {
-                        "role": "assistant",
-                        "content": [
-                            { "type": "text", "text": "Continue from the latest state in the attached RCC_HISTORY.txt context.\nfinal answer" }
-                        ],
-                        "reasoning": {
-                            "summary": [
-                                { "type": "summary_text", "text": "RCC_HISTORY.txt reasoning summary" }
-                            ],
-                            "content": [
-                                { "type": "reasoning_text", "text": "# RCC_HISTORY.txt\ninternal chain" }
-                            ]
-                        }
-                    }
-                }
-            ]
-        });
 
-        let context = serde_json::json!({
-            "requestId": "req_rcc_history_meta",
-            "toolsRaw": [],
-            "sourceForRetention": {
-                "metadata": {
-                    "deepseek": {
-                        "toolCallState": "text_tool_calls",
-                        "toolCallSource": "text",
-                        "contextFileEnabled": true,
-                        "contextFile": {
-                            "filename": "RCC_HISTORY.txt",
-                            "content": "# RCC_HISTORY.txt\nsecret"
-                        }
-                    }
-                }
-            }
-        });
-
-        let output = build_responses_payload_from_chat_core(
-            &payload,
-            Some("req_rcc_history_meta"),
-            &context,
-        )
-        .expect("build responses payload");
-
-        let output_json = serde_json::to_string(&output).expect("serialize output");
-        assert!(!output_json.contains("RCC_HISTORY.txt"));
-        assert!(!output_json.contains("attached RCC_HISTORY.txt context"));
-        assert!(output_json.contains("final answer"));
-        assert!(output_json.contains("internal chain"));
-        assert!(output["metadata"]["deepseek"].get("contextFileEnabled").is_none());
-        assert!(output["metadata"]["deepseek"].get("contextFile").is_none());
-        assert_eq!(
-            output["metadata"]["deepseek"]["toolCallState"],
-            Value::String("text_tool_calls".to_string())
-        );
-    }
 
     #[test]
     fn build_responses_payload_from_chat_preserves_structured_message_reasoning() {

@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { PassThrough } from 'node:stream';
 import { ResponsesJsonToSseConverter, defaultResponsesJsonToSseConverter } from '../json-to-sse/index.js';
 import { ResponsesSseToJsonConverter, defaultResponsesSseToJsonConverter } from '../sse-to-json/index.js';
+import { defaultResponsesEventSerializer } from '../shared/serializers/responses-event-serializer.js';
 import type { ResponsesResponse, ResponsesRequest } from '../../types/index.js';
 import type { ResponsesSseEvent, ResponsesSseEventStream, ResponsesJsonToSseOptions, SseToResponsesJsonOptions } from '../types/index.js';
 
@@ -318,7 +319,18 @@ describe('Responses协议转换器测试', () => {
           id: 'func_required',
           name: 'get_user_data',
           arguments: '{"user_id": "123"}'
-        }]
+        }],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [{
+              id: 'func_required',
+              type: 'function_call',
+              name: 'get_user_data',
+              arguments: '{"user_id": "123"}'
+            }]
+          }
+        } as any
       };
 
       const options: ResponsesJsonToSseOptions = {
@@ -332,8 +344,8 @@ describe('Responses协议转换器测试', () => {
 
       const requiredActionEvent = events.find(e => e.type === 'response.required_action');
       expect(requiredActionEvent).toBeDefined();
-      expect(requiredActionEvent!.data.type).toBe('submit_tool_outputs');
-      expect(requiredActionEvent!.data.submit_tool_outputs.tool_calls).toHaveLength(1);
+      expect(requiredActionEvent!.data.required_action.type).toBe('submit_tool_outputs');
+      expect(requiredActionEvent!.data.required_action.submit_tool_outputs.tool_calls).toHaveLength(1);
     });
 
     it('应该容忍缺少 reasoning.content 的响应', async () => {
@@ -963,7 +975,7 @@ describe('Responses协议转换器测试', () => {
       const reasoning = response.output.find(item => item.type === 'reasoning') as any;
       expect(reasoning).toBeDefined();
       expect(reasoning.encrypted_content).toBe('enc_payload');
-      expect(reasoning.summary).toEqual(['Summary text']);
+      expect(reasoning.summary).toEqual([{ type: 'summary_text', text: 'Summary text' }]);
     });
 
     it('应该处理required_action状态', async () => {
@@ -1115,13 +1127,16 @@ describe('Responses协议转换器测试', () => {
       ];
 
       const sseStream = createSseWireTextStream(sseFrames);
-      const response = await sseToJsonConverter.convertSseToJson(sseStream, { enableValidation: true });
-
-      expect(response.status).toBe('incomplete');
-      const message = response.output.find(item => item.type === 'message');
-      expect(message).toBeDefined();
-      expect((message as any)?.content?.[0]?.text).toContain('partial response text');
-      expect((response as any).output_text).toContain('partial response text');
+      await expect(
+        sseToJsonConverter.convertSseToJson(sseStream, { enableValidation: true })
+      ).rejects.toMatchObject({
+        code: 'SSE_TO_JSON_ERROR',
+        status: 502,
+        statusCode: 502,
+        retryable: true,
+        upstreamCode: 'UPSTREAM_STREAM_INCOMPLETE',
+        requestExecutorProviderErrorStage: 'provider.sse_decode'
+      });
     });
 
     it('应该在缺少completed/done但function_call参数已完整时返回incomplete', async () => {
@@ -1155,13 +1170,16 @@ describe('Responses协议转换器测试', () => {
       ];
 
       const sseStream = createSseWireTextStream(sseFrames);
-      const response = await sseToJsonConverter.convertSseToJson(sseStream, { enableValidation: true });
-
-      expect(response.status).toBe('incomplete');
-      const functionCall = response.output.find(item => item.type === 'function_call') as any;
-      expect(functionCall).toBeDefined();
-      expect(functionCall.name).toBe('echo');
-      expect(functionCall.arguments).toBe('{"message":"partial tool call"}');
+      await expect(
+        sseToJsonConverter.convertSseToJson(sseStream, { enableValidation: true })
+      ).rejects.toMatchObject({
+        code: 'SSE_TO_JSON_ERROR',
+        status: 502,
+        statusCode: 502,
+        retryable: true,
+        upstreamCode: 'UPSTREAM_STREAM_INCOMPLETE',
+        requestExecutorProviderErrorStage: 'provider.sse_decode'
+      });
     });
 
     it('应该处理无效的事件序列', async () => {
@@ -1207,13 +1225,35 @@ describe('Responses协议转换器测试', () => {
  */
 async function collectSseEvents(stream: ResponsesSseEventStream): Promise<ResponsesSseEvent[]> {
   const events: ResponsesSseEvent[] = [];
+  let wireBuffer = '';
 
-  for await (const event of stream) {
-    events.push(event);
+  for await (const chunk of stream as AsyncIterable<unknown>) {
+    if (chunk && typeof chunk === 'object' && !Buffer.isBuffer(chunk) && typeof (chunk as { type?: unknown }).type === 'string') {
+      const event = chunk as ResponsesSseEvent;
+      events.push(event);
+      if (event.type === 'response.done') {
+        break;
+      }
+      continue;
+    }
 
-    // 检查是否完成
-    if (event.type === 'response.completed' || event.type === 'response.done') {
-      break;
+    wireBuffer += typeof chunk === 'string' ? chunk : Buffer.from(chunk as Buffer | Uint8Array).toString();
+
+    while (true) {
+      const boundary = wireBuffer.indexOf('\n\n');
+      if (boundary < 0) {
+        break;
+      }
+      const frame = wireBuffer.slice(0, boundary).trim();
+      wireBuffer = wireBuffer.slice(boundary + 2);
+      if (!frame) {
+        continue;
+      }
+      const event = defaultResponsesEventSerializer.deserializeFromWire(`${frame}\n\n`);
+      events.push(event);
+      if (event.type === 'response.done') {
+        return events;
+      }
     }
   }
 

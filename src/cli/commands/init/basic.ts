@@ -3,7 +3,7 @@ import path from 'node:path';
 import { resolveRccProviderDir } from '../../../config/user-data-paths.js';
 
 import type { InitProviderTemplate } from '../../config/init-provider-catalog.js';
-import { buildInitRouting, buildV2ConfigObject } from '../../config/init-v2-builder.js';
+import { buildInitRouting, buildV2ConfigObject, resolveDefaultToolsTarget } from '../../config/init-v2-builder.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import type {
   ConfigState,
@@ -70,7 +70,7 @@ export function buildRouting(defaultTarget: string, overrides?: Partial<Record<'
   return buildInitRouting({
     defaultTarget,
     thinkingTarget: overrides?.thinking || overrides?.default || defaultTarget,
-    toolsTarget: overrides?.tools || overrides?.default || defaultTarget
+    toolsTarget: overrides?.tools || overrides?.default || resolveDefaultToolsTarget(defaultTarget)
   });
 }
 

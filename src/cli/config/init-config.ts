@@ -8,7 +8,7 @@ import {
   buildCatalogWebSearchDefaults,
   type InitProviderTemplate
 } from './init-provider-catalog.js';
-import { buildInitRouting, buildV2ConfigObject } from './init-v2-builder.js';
+import { buildInitRouting, buildV2ConfigObject, resolveDefaultToolsTarget } from './init-v2-builder.js';
 import { resolveRccProviderDir } from '../../config/user-data-paths.js';
 
 export type InitConfigIo = {
@@ -81,6 +81,7 @@ export function buildInitConfigObject(
   const multimodalTargets = buildCatalogMultimodalTargets(selection.providers);
   const routing = buildInitRouting({
     defaultTarget,
+    toolsTarget: resolveDefaultToolsTarget(defaultTarget),
     webSearchTargets: webSearchDefaults?.routeTargets,
     multimodalTargets
   });

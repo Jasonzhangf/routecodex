@@ -18,7 +18,7 @@ pub struct SseStreamOutput {
     pub payload: Value,
 }
 
-fn resolve_sse_stream_mode(wants_stream: bool, client_protocol: &str) -> bool {
+pub(crate) fn resolve_sse_stream_mode(wants_stream: bool, client_protocol: &str) -> bool {
     // SSE streaming is only supported for specific protocols
     match client_protocol.trim() {
         "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini-chat" => wants_stream,

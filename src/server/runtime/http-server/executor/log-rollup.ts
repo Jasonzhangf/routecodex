@@ -68,6 +68,7 @@ type UsageRollupRecord = {
   promptTokens?: number;
   completionTokens?: number;
   cacheReadTokens?: number;
+  cacheCreationTokens?: number;
   totalTokens?: number;
   firstContentAtMs?: number;
   lastContentAtMs?: number;
@@ -95,6 +96,7 @@ type SessionRequestEvent = {
   promptTokens?: number;
   completionTokens?: number;
   cacheReadTokens?: number;
+  cacheCreationTokens?: number;
   totalTokens?: number;
   firstContentAtMs?: number;
   lastContentAtMs?: number;
@@ -380,7 +382,15 @@ function emitRealtimeSessionRequestLog(args: {
         }
       }
     }
-    if (reqUsage.cacheReadTokens !== undefined) tokParts.push(`cache=${formatWholeNumber(reqUsage.cacheReadTokens)}`);
+    if (reqUsage.cacheReadTokens !== undefined) {
+      tokParts.push(`cache.read=${formatWholeNumber(reqUsage.cacheReadTokens)}`);
+      if (reqUsage.promptTokens !== undefined && reqUsage.promptTokens > 0) {
+        tokParts.push(`cache.hit=${formatRatio(reqUsage.cacheReadTokens, reqUsage.promptTokens)}`);
+      }
+    }
+    if (reqUsage.cacheCreationTokens !== undefined) {
+      tokParts.push(`cache.write=${formatWholeNumber(reqUsage.cacheCreationTokens)}`);
+    }
     if (reqUsage.totalTokens !== undefined) tokParts.push(`total=${formatWholeNumber(reqUsage.totalTokens)}`);
     console.log(`  ${ANSI_WHITE}${tokParts.join(' ')}${ANSI_RESET}`);
   }
@@ -694,6 +704,8 @@ export function recordUsageRollup(event: UsageRollupRecord): void {
     promptTokens: typeof event.promptTokens === 'number' ? event.promptTokens : undefined,
     completionTokens: typeof event.completionTokens === 'number' ? event.completionTokens : undefined,
     cacheReadTokens: typeof event.cacheReadTokens === 'number' ? event.cacheReadTokens : undefined,
+    cacheCreationTokens:
+      typeof event.cacheCreationTokens === 'number' ? event.cacheCreationTokens : undefined,
     totalTokens: typeof event.totalTokens === 'number' ? event.totalTokens : undefined,
     firstContentAtMs: typeof event.firstContentAtMs === 'number' ? event.firstContentAtMs : undefined,
     lastContentAtMs: typeof event.lastContentAtMs === 'number' ? event.lastContentAtMs : undefined,

@@ -233,25 +233,7 @@ export function createAnthropicResponseBuilder(options?: BuilderOptions) {
     },
     getResult(): AnthropicBuilderResult {
       if (!state.completed) {
-        // 网络提前断开时可能缺失 content_block_stop/message_stop。
-        // 若已经有可物化的 content/tool_use，则允许按可恢复完成态 salvage；
-        // 否则仍保持失败，避免把空半截流伪装成成功。
         flushCurrent();
-        if (state.content.length > 0) {
-          return {
-            success: true,
-            response: {
-              id: state.id || `msg_${Date.now()}`,
-              type: 'message',
-              role: state.role || 'assistant',
-              model: state.model || 'unknown',
-              content: state.content,
-              stop_reason: inferStopReason(),
-              stop_sequence: state.stopSequence ?? null,
-              usage: state.usage
-            }
-          };
-        }
         return {
           success: false,
           error: new Error('Anthropic SSE stream incomplete before message_stop')

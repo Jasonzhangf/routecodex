@@ -59,12 +59,12 @@ describe('provider inspect', () => {
             'deepseek-chat': {
               supportsStreaming: true,
               capabilities: ['web_search', 'multimodal'],
-              aliases: ['deepseek-v4-flash', 'deepseek-v4-flash-search', 'deepseek-v4-vision']
+              aliases: ['deepseek-v4-flash', 'deepseek-v4-flash-nothinking', 'deepseek-v4-flash-search', 'deepseek-v4-flash-search-nothinking', 'deepseek-v4-vision', 'deepseek-v4-vision-nothinking']
             },
             'deepseek-reasoner': {
               supportsStreaming: true,
               capabilities: ['web_search', 'multimodal'],
-              aliases: ['deepseek-v4-pro', 'deepseek-v4-pro-search']
+              aliases: ['deepseek-v4-pro', 'deepseek-v4-pro-nothinking', 'deepseek-v4-pro-search', 'deepseek-v4-pro-search-nothinking']
             }
           }
         }
@@ -73,13 +73,14 @@ describe('provider inspect', () => {
     );
 
     expect(inspection.routeTargets.default).toBe('deepseek-web.deepseek-chat');
-    expect(inspection.routeTargets.webSearch).toBe('deepseek-web.deepseek-v4-flash-search');
+    expect(inspection.routeTargets.tools).toBe('deepseek-web.deepseek-v4-flash-nothinking');
+    expect(inspection.routeTargets.webSearch).toBe('deepseek-web.deepseek-v4-flash-search-nothinking');
     expect(inspection.routeTargets.multimodal).toBe('deepseek-web.deepseek-v4-vision');
     expect(inspection.webSearch).toMatchObject({
       engineId: 'deepseek:web_search',
-      routeTarget: 'deepseek-web.deepseek-v4-flash-search',
-      providerKey: 'deepseek-web.deepseek-v4-flash-search',
-      modelId: 'deepseek-v4-flash-search',
+      routeTarget: 'deepseek-web.deepseek-v4-flash-search-nothinking',
+      providerKey: 'deepseek-web.deepseek-v4-flash-search-nothinking',
+      modelId: 'deepseek-v4-flash-search-nothinking',
       executionMode: 'direct'
     });
     expect(inspection.capabilities).toMatchObject({
@@ -88,6 +89,14 @@ describe('provider inspect', () => {
       supportsReasoning: true
     });
     expect(inspection.routingHints?.routing).toMatchObject({
+      tools: [
+        {
+          id: 'tools-primary',
+          loadBalancing: {
+            weights: { 'deepseek-web.deepseek-v4-flash-nothinking': 1 }
+          }
+        }
+      ],
       multimodal: [
         {
           id: 'multimodal-primary',
@@ -100,7 +109,7 @@ describe('provider inspect', () => {
         {
           id: 'web_search-primary',
           loadBalancing: {
-            weights: { 'deepseek-web.deepseek-v4-flash-search': 1 }
+            weights: { 'deepseek-web.deepseek-v4-flash-search-nothinking': 1 }
           }
         }
       ]

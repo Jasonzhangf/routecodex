@@ -354,7 +354,8 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       },
       meta: {
         previousRequestId: 'req_chain_submit_1',
-        restoredFromResponseId: 'resp_submit_prev_1'
+        restoredFromResponseId: 'resp_submit_prev_1',
+        routeHint: 'thinking'
       }
     });
 
@@ -492,8 +493,10 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(pipelineInput.metadata?.inboundStream).toBe(false);
       expect(pipelineInput.metadata?.responsesResume).toEqual({
         previousRequestId: 'req_chain_submit_1',
-        restoredFromResponseId: 'resp_submit_prev_1'
+        restoredFromResponseId: 'resp_submit_prev_1',
+        routeHint: 'thinking'
       });
+      expect(pipelineInput.metadata?.routeHint).toBe('thinking');
       expect(pipelineInput.payload?.previous_response_id).toBe('resp_submit_prev_1');
       expect(pipelineInput.payload?.tool_outputs).toEqual([{ tool_call_id: 'call_submit_1', output: 'ok' }]);
       expect(pipelineInput.metadata?.__raw_request_body).toEqual({

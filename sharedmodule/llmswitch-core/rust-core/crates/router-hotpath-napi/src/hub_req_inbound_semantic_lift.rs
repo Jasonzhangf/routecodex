@@ -154,7 +154,7 @@ fn build_responses_continuation(
     let mapped_outputs = responses_resume
         .map(map_resume_tool_outputs_detailed)
         .unwrap_or_default();
-    if responses_resume.is_some() || !mapped_outputs.is_empty() {
+    if !mapped_outputs.is_empty() {
         let mut tool_continuation = Map::<String, Value>::new();
         tool_continuation.insert(
             "mode".to_string(),

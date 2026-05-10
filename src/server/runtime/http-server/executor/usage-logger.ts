@@ -148,6 +148,7 @@ export function logUsageSummary(
     promptTokens: info.usage?.prompt_tokens,
     completionTokens: info.usage?.completion_tokens,
     cacheReadTokens: info.usage?.cache_read_input_tokens,
+    cacheCreationTokens: info.usage?.cache_creation_input_tokens,
     totalTokens: info.usage?.total_tokens,
     firstContentAtMs: info.firstContentAtMs,
     lastContentAtMs: info.lastContentAtMs,

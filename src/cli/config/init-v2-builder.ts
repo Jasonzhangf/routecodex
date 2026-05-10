@@ -64,6 +64,14 @@ export function buildWeightedRoutePool(id: string, targets: string[]): Record<st
   };
 }
 
+export function resolveDefaultToolsTarget(defaultTarget: string): string {
+  const normalizedDefaultTarget = defaultTarget.trim();
+  if (normalizedDefaultTarget.startsWith('deepseek-web.')) {
+    return 'deepseek-web.deepseek-v4-flash-nothinking';
+  }
+  return normalizedDefaultTarget;
+}
+
 export function buildInitRouting(args: {
   defaultTarget: string;
   thinkingTarget?: string;
@@ -73,7 +81,7 @@ export function buildInitRouting(args: {
 }): RoutingConfig {
   const defaultTarget = args.defaultTarget.trim();
   const thinkingTarget = (args.thinkingTarget || defaultTarget).trim();
-  const toolsTarget = (args.toolsTarget || defaultTarget).trim();
+  const toolsTarget = (args.toolsTarget || resolveDefaultToolsTarget(defaultTarget)).trim();
   const routing: RoutingConfig = {
     default: [buildWeightedRoutePool('primary', [defaultTarget])],
     thinking: [buildWeightedRoutePool('thinking-primary', [thinkingTarget])],

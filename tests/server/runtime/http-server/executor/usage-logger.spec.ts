@@ -108,10 +108,46 @@ describe('usage logger timing summary', () => {
 
     const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
     expect(getTokenTotals()).toEqual({ alltimeTokens: 15, dailyTokens: 15 });
-    expect(lines.some((line) => line.includes('[usage] request req_tokens_tool_calls'))).toBe(false);
+    expect(lines.some((line) => line.includes('[usage] request req_tokens_tool_calls'))).toBe(true);
 
     await fs.rm(fakeHome, { recursive: true, force: true });
     homedirSpy.mockRestore();
+  });
+
+  it('prints cache read and cache write metrics in realtime session token line', async () => {
+    process.env.ROUTECODEX_LOG_ROLLUP = '1';
+    process.env.ROUTECODEX_LOG_ROLLUP_REALTIME = '1';
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+
+    logUsageSummary('req_cache_metrics', {
+      providerKey: 'deepseek-web.2',
+      model: 'deepseek-v4-pro',
+      routeName: 'thinking',
+      poolId: 'thinking-deepseek-web-primary',
+      finishReason: 'stop',
+      latencyMs: 5000,
+      externalLatencyMs: 2000,
+      sseDecodeMs: 1000,
+      providerAttemptCount: 1,
+      retryCount: 0,
+      sessionId: 'sid-cache-metrics',
+      projectPath: '/tmp/cache-metrics-project',
+      usage: {
+        prompt_tokens: 1000,
+        completion_tokens: 250,
+        total_tokens: 1250,
+        cache_read_input_tokens: 800,
+        cache_creation_input_tokens: 120
+      }
+    });
+
+    const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(lines.some((line) => line.includes('[session-request][rt] session=sid-cache-metrics'))).toBe(true);
+    expect(lines.some((line) => line.includes('cache.read=800'))).toBe(true);
+    expect(lines.some((line) => line.includes('cache.hit=80.0%'))).toBe(true);
+    expect(lines.some((line) => line.includes('cache.write=120'))).toBe(true);
   });
 
 
@@ -453,9 +489,10 @@ describe('usage logger timing summary', () => {
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
     });
 
-    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('[usage] request req_rollup_1'));
     flushLogRollup('manual');
     const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(lines.some((line) => line.includes('[usage] request req_rollup_1'))).toBe(true);
+    expect(lines.some((line) => line.includes('[usage] request req_rollup_2'))).toBe(true);
     expect(lines.some((line) => line.includes('[usage][1m]'))).toBe(true);
     expect(lines.some((line) => line.includes('default/tools-primary'))).toBe(true);
     expect(lines.some((line) => line.includes('provider=qwen.1.qwen3.6-plus'))).toBe(true);

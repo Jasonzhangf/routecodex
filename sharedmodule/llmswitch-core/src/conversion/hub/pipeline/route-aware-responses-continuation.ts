@@ -1,5 +1,6 @@
 import { convertBridgeInputToChatMessages } from '../../bridge-message-utils.js';
 import { stripChatProcessHistoricalImages } from '../../../router/virtual-router/engine-selection/native-router-hotpath.js';
+import { liftResponsesResumeIntoSemanticsWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js';
 import {
   materializeLatestResponsesContinuationByScope,
   resumeLatestResponsesContinuationByScope
@@ -25,35 +26,23 @@ function readScopeToken(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
-function ensureSemanticsNode(request: StandardizedRequest | ProcessedRequest): Record<string, unknown> {
-  const root =
-    request.semantics && typeof request.semantics === 'object' && !Array.isArray(request.semantics)
-      ? ({ ...(request.semantics as Record<string, unknown>) } as Record<string, unknown>)
-      : {};
-  const responses =
-    isRecord(root.responses)
-      ? ({ ...(root.responses as Record<string, unknown>) } as Record<string, unknown>)
-      : {};
-  root.responses = responses;
-  request.semantics = root as any;
-  return responses;
-}
-
-function attachResumeSemantics(
+function applyUnifiedResponsesResumeSemantics(
   request: StandardizedRequest | ProcessedRequest,
   meta: Record<string, unknown>,
   extra: Record<string, unknown> = {}
-): void {
-  const responses = ensureSemanticsNode(request);
-  const existing =
-    isRecord(responses.resume)
-      ? ({ ...(responses.resume as Record<string, unknown>) } as Record<string, unknown>)
-      : {};
-  responses.resume = {
-    ...existing,
-    ...cloneJson(meta),
-    ...extra
-  };
+): StandardizedRequest | ProcessedRequest {
+  const next = cloneJson(request);
+  const lifted = liftResponsesResumeIntoSemanticsWithNative(
+    next as unknown as Record<string, unknown>,
+    {
+      payload: next as unknown as Record<string, unknown>,
+      responsesResume: {
+        ...cloneJson(meta),
+        ...cloneJson(extra)
+      }
+    }
+  );
+  return lifted.request as unknown as StandardizedRequest | ProcessedRequest;
 }
 
 function readScopeArgs(args: {
@@ -97,13 +86,11 @@ export function resolveRouteAwareResponsesContinuation(args: {
     if (!resumed || !isRecord(resumed.meta)) {
       return args.request;
     }
-    const next = cloneJson(args.request);
-    attachResumeSemantics(next, resumed.meta, {
+    return applyUnifiedResponsesResumeSemantics(args.request, resumed.meta, {
       deltaInput: Array.isArray((resumed.payload as Record<string, unknown>)?.input)
         ? cloneJson((resumed.payload as Record<string, unknown>).input)
         : []
     });
-    return next;
   }
 
   const materialized = materializeLatestResponsesContinuationByScope(scopeArgs);
@@ -111,13 +98,12 @@ export function resolveRouteAwareResponsesContinuation(args: {
     return args.request;
   }
 
-  const next = cloneJson(args.request);
+  let next = cloneJson(args.request);
   if (Array.isArray(materialized.payload.input)) {
     next.messages = stripChatProcessHistoricalImages(
       convertInputToMessages(materialized.payload.input),
       '[Image omitted]'
     ).messages as any;
   }
-  attachResumeSemantics(next, materialized.meta);
-  return next;
+  return applyUnifiedResponsesResumeSemantics(next, materialized.meta);
 }

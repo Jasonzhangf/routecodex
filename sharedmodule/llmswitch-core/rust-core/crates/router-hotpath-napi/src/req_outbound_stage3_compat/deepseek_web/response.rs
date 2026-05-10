@@ -463,6 +463,58 @@ fn attach_requested_tool_names(payload: &mut Value, adapter_context: &AdapterCon
     }
 }
 
+
+fn strip_rcc_text(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let patterns = [
+        "Continue from the latest state in the attached RCC_HISTORY.txt context. Treat it as the current working state and answer the latest user request directly.",
+        "# RCC_HISTORY.txt",
+        "RCC_HISTORY.txt",
+    ];
+    let mut text = raw.to_string();
+    for pattern in patterns {
+        text = text.replace(pattern, "");
+    }
+    text.trim().to_string()
+}
+
+fn scrub_rcc_from_deepseek_payload(payload: &mut Value) {
+    let Some(choices) = payload.get_mut("choices").and_then(|v| v.as_array_mut()) else {
+        return;
+    };
+    for choice in choices {
+        let Some(message) = choice
+            .as_object_mut()
+            .and_then(|row| row.get_mut("message"))
+            .and_then(|v| v.as_object_mut())
+        else {
+            continue;
+        };
+        for key in ["content", "reasoning", "reasoning_content"] {
+            match message.get_mut(key) {
+                Some(Value::String(raw)) => {
+                    *raw = strip_rcc_text(raw);
+                }
+                Some(Value::Array(parts)) => {
+                    for part in parts.iter_mut() {
+                        if let Some(part_obj) = part.as_object_mut() {
+                            for text_key in ["text", "content"] {
+                                if let Some(Value::String(raw)) = part_obj.get_mut(text_key) {
+                                    *raw = strip_rcc_text(raw);
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 pub(crate) fn apply_deepseek_web_response_compat(
     payload: Value,
     adapter_context: &AdapterContext,
@@ -562,6 +614,8 @@ pub(crate) fn apply_deepseek_web_response_compat(
             tool_choice_required, text_tool_fallback, strict_tool_required
         ));
     }
+
+    scrub_rcc_from_deepseek_payload(&mut governed);
 
     Ok(governed)
 }

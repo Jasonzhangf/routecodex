@@ -21,6 +21,7 @@ describe('route-aware responses continuation', () => {
     captureResponsesRequestContext({
       requestId: 'req-route-aware-1',
       sessionId: 'sess-route-aware-1',
+      routeHint: 'tools',
       payload: {
         model: 'gpt-5.3-codex'
       },
@@ -37,6 +38,7 @@ describe('route-aware responses continuation', () => {
 
     recordResponsesResponse({
       requestId: 'req-route-aware-1',
+      routeHint: 'thinking',
       response: {
         id: 'resp-route-aware-1',
         output: [
@@ -93,6 +95,7 @@ describe('route-aware responses continuation', () => {
     expect((resolved as any).semantics?.responses?.resume).toMatchObject({
       previousRequestId: 'req-route-aware-1',
       restoredFromResponseId: 'resp-route-aware-1',
+      routeHint: 'thinking',
       restored: true
     });
     expect((resolved as any).semantics?.responses?.resume?.deltaInput).toEqual([
@@ -259,6 +262,108 @@ describe('route-aware responses continuation', () => {
       materialized: true,
       materializedMode: 'local_full_input'
     });
+  });
+
+  it('synthesizes unified submit_tool_outputs continuation when materialized resume carries function_call_output items', () => {
+    captureResponsesRequestContext({
+      requestId: 'req-route-aware-1',
+      sessionId: 'sess-route-aware-1',
+      payload: {
+        model: 'gpt-5.4'
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '请执行 pwd' }]
+          },
+          {
+            type: 'function_call',
+            id: 'fc_route_aware_submit_1',
+            call_id: 'call_route_aware_submit_1',
+            name: 'exec_command',
+            arguments: JSON.stringify({ cmd: 'pwd' })
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: 'req-route-aware-1',
+      response: {
+        id: 'resp-route-aware-submit-1',
+        output: []
+      }
+    });
+
+    const resolved = resolveRouteAwareResponsesContinuation({
+      request: {
+        model: 'qwen3.6-plus',
+        messages: [{ role: 'user', content: '继续' }],
+        parameters: {},
+        metadata: {}
+      } as any,
+      rawRequest: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'function_call_output',
+            call_id: 'call_route_aware_submit_1',
+            output: '/tmp'
+          },
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '继续' }]
+          }
+        ]
+      } as any,
+      normalizedMetadata: {
+        sessionId: 'sess-route-aware-1'
+      },
+      requestId: 'req-route-aware-2',
+      entryProtocol: 'openai-responses',
+      outboundProtocol: 'openai-chat-completions'
+    });
+
+    expect((resolved as any).semantics?.responses?.resume).toMatchObject({
+      previousRequestId: 'req-route-aware-1',
+      restoredFromResponseId: 'resp-route-aware-submit-1',
+      materialized: true,
+      materializedMode: 'local_full_input'
+    });
+    expect((resolved as any).semantics?.continuation).toMatchObject({
+      chainId: 'req-route-aware-1',
+      stickyScope: 'request_chain',
+      stateOrigin: 'openai-responses',
+      restored: true,
+      toolContinuation: {
+        mode: 'submit_tool_outputs',
+        submittedToolCallIds: ['call_route_aware_submit_1'],
+        resumeOutputs: ['/tmp']
+      }
+    });
+    expect((resolved as any).messages).toEqual([
+      { role: 'user', content: '请执行 pwd' },
+      {
+        role: 'assistant',
+        tool_calls: [
+          expect.objectContaining({
+            id: 'call_route_aware_submit_1'
+          })
+        ],
+        content: ''
+      },
+      {
+        role: 'tool',
+        id: 'call_route_aware_submit_1',
+        name: 'exec_command',
+        tool_call_id: 'call_route_aware_submit_1',
+        content: '/tmp'
+      },
+      { role: 'user', content: '继续' }
+    ]);
   });
 
   it('strips historical image turns when materializing responses continuation for non-responses outbound', () => {

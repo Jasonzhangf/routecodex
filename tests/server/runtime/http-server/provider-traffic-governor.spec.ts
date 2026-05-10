@@ -53,6 +53,18 @@ describe('provider-traffic-governor', () => {
     expect(deepseekPolicy.concurrency.maxInFlight).toBe(2);
     expect(deepseekPolicy.rpm.requestsPerMinute).toBe(120);
 
+    const deepseekWebPolicy = resolveProviderTrafficPolicy(
+      createRuntime({
+        providerId: 'deepseek-web',
+        providerFamily: 'deepseek-web',
+        runtimeKey: 'deepseek-web.alias',
+        compatibilityProfile: 'chat:deepseek-web'
+      }),
+      'deepseek-web.alias.deepseek-v4-pro'
+    );
+    expect(deepseekWebPolicy.concurrency.maxInFlight).toBe(1);
+    expect(deepseekWebPolicy.rpm.requestsPerMinute).toBe(60);
+
     const tabglmPolicy = resolveProviderTrafficPolicy(
       createRuntime({
         providerId: 'tabglm',
@@ -87,11 +99,12 @@ describe('provider-traffic-governor', () => {
     expect(crsPolicy.rpm.requestsPerMinute).toBe(120);
   });
 
-  it('honors explicit runtime overrides for concurrency and rpm', () => {
+  it('honors explicit runtime overrides for non-web providers', () => {
     const policy = resolveProviderTrafficPolicy(
       createRuntime({
-        providerId: 'qwenchat',
-        providerFamily: 'qwenchat',
+        providerId: 'openrouter',
+        providerFamily: 'openrouter',
+        runtimeKey: 'openrouter.1',
         concurrency: {
           maxInFlight: 3,
           acquireTimeoutMs: 12000,
@@ -102,7 +115,7 @@ describe('provider-traffic-governor', () => {
           acquireTimeoutMs: 23000
         }
       }),
-      'qwenchat.1.qwen3.6-plus'
+      'openrouter.1.qwen3.6-plus'
     );
     expect(policy.concurrency).toEqual({
       maxInFlight: 3,
@@ -620,6 +633,103 @@ describe('provider-traffic-governor', () => {
       expect(afterRecovery.policy.concurrency.maxInFlight).toBeGreaterThanOrEqual(5);
       expect(afterRecovery.policy.concurrency.maxInFlight).toBeLessThanOrEqual(6);
       await governor.release(afterRecovery.permit);
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+
+  it('forces web providers to concurrency 1 even when runtime config asks for higher concurrency', () => {
+    const deepseekWebPolicy = resolveProviderTrafficPolicy(
+      createRuntime({
+        runtimeKey: 'deepseek-web.2',
+        providerId: 'deepseek-web',
+        providerFamily: 'deepseek-web',
+        compatibilityProfile: 'chat:deepseek-web',
+        concurrency: {
+          maxInFlight: 3,
+          acquireTimeoutMs: 12000,
+          staleLeaseMs: 150000
+        },
+        rpm: {
+          requestsPerMinute: 77,
+          acquireTimeoutMs: 23000
+        }
+      }),
+      'deepseek-web.2.deepseek-v4-pro'
+    );
+    expect(deepseekWebPolicy.concurrency).toEqual({
+      maxInFlight: 1,
+      acquireTimeoutMs: 12000,
+      staleLeaseMs: 150000
+    });
+    expect(deepseekWebPolicy.rpm.requestsPerMinute).toBe(77);
+
+    const qwenChatWebPolicy = resolveProviderTrafficPolicy(
+      createRuntime({
+        runtimeKey: 'qwenchat.1',
+        providerId: 'qwenchat',
+        providerFamily: 'qwenchat',
+        endpoint: 'https://chat.qwen.ai/api',
+        concurrency: {
+          maxInFlight: 4,
+          acquireTimeoutMs: 9000,
+          staleLeaseMs: 160000
+        }
+      }),
+      'qwenchat.1.qwen3.6-plus'
+    );
+    expect(qwenChatWebPolicy.concurrency.maxInFlight).toBe(1);
+  });
+
+  it('disables adaptive concurrency scale-up for web providers', async () => {
+    const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-web-adaptive-${process.pid}-${randomUUID()}`);
+    const adaptiveConfigPath = path.join(rootDir, 'adaptive', 'dynamic-concurrency-overrides.json');
+    process.env.ROUTECODEX_DYNAMIC_CONCURRENCY_CONFIG_PATH = adaptiveConfigPath;
+    const runtimeKey = 'deepseek-web.adaptive.runtime';
+    const providerKey = 'deepseek-web.2.deepseek-v4-pro';
+    const runtime = createRuntime({
+      runtimeKey,
+      providerId: 'deepseek-web',
+      providerFamily: 'deepseek-web',
+      compatibilityProfile: 'chat:deepseek-web',
+      concurrency: {
+        maxInFlight: 5,
+        acquireTimeoutMs: 6000,
+        staleLeaseMs: 60000
+      },
+      rpm: {
+        requestsPerMinute: 240,
+        acquireTimeoutMs: 6000
+      }
+    });
+    try {
+      const governor = new ProviderTrafficGovernor(rootDir);
+      const startMs = Date.now();
+      for (let minute = 0; minute < 6; minute += 1) {
+        await governor.observeOutcome?.({
+          runtimeKey,
+          providerKey,
+          requestId: `web-up-${minute}`,
+          success: true,
+          statusCode: 200,
+          activeInFlight: 1,
+          configuredMaxInFlight: 1,
+          observedAtMs: startMs + minute * 60_000
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 650));
+
+      const acquired = await governor.acquire({
+        runtimeKey,
+        providerKey,
+        requestId: 'web-up-check',
+        runtime
+      });
+      expect(acquired.policy.concurrency.maxInFlight).toBe(1);
+      await governor.release(acquired.permit);
+
+      await expect(fs.readFile(adaptiveConfigPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       await fs.rm(rootDir, { recursive: true, force: true });
     }

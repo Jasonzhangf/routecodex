@@ -54,7 +54,7 @@ import {
   coerceClientPayloadToCanonicalChatCompletionOrThrow,
   maybeCommitClockReservationFromContext,
   resolveProviderResponseContextSignals,
-  type ClientProtocol,
+  type ClientProtocol as ResponseClientProtocol,
   type ProviderProtocol
 } from './provider-response-helpers.js';
 import {
@@ -316,7 +316,7 @@ export async function convertProviderResponse(
   // ServerTool followups are internal hops. They must return canonical OpenAI-chat-like payloads
   // to re-enter the hub chat process deterministically (tools harvesting, governance, etc.).
   // Client protocol remapping happens only on the outermost request.
-  const clientProtocol: ClientProtocol = contextSignals.clientProtocol;
+  const clientProtocol: ResponseClientProtocol = contextSignals.clientProtocol;
   const toolSurfaceShadowEnabled = contextSignals.toolSurfaceShadowEnabled;
   // 对于由 server-side 工具触发的内部跳转（二跳/三跳），统一禁用 SSE 聚合输出，
   // 始终返回完整的 ChatCompletion JSON，便于在 llms 内部直接解析，而不是拿到
@@ -329,6 +329,7 @@ export async function convertProviderResponse(
   if (!plan) {
     throw new Error(`Unknown provider protocol: ${options.providerProtocol}`);
   }
+
 
   const inboundStage1 = await measureHubStage(
     requestId,
@@ -583,7 +584,11 @@ export async function convertProviderResponse(
     try {
       recordResponsesResponse({
         requestId: options.context.requestId,
-        response: clientPayload
+        response: clientPayload,
+        routeHint:
+          typeof options.context.routeId === 'string' && options.context.routeId.trim().length > 0
+            ? options.context.routeId.trim()
+            : undefined
       });
     } catch (error) {
       if (error instanceof ProviderProtocolError) {

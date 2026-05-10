@@ -74,6 +74,7 @@ export class ResponsesResponseBuilder {
   private state: ResponseBuilderState = 'initial';
   private response: Partial<ResponsesResponse> = {};
   private outputItemBuilders = new Map<string, OutputItemState>();
+  private outputIndexToItemId = new Map<number, string>();
   private lastSequenceNumber: number = -1;
   private config: ResponseBuilderConfig;
   private error?: Error;
@@ -197,7 +198,7 @@ export class ResponsesResponseBuilder {
           this.handleResponseDone(event);
           break;
         case 'response.content_part.done':
-          this.handleContentPartDone(event);
+          this.handleContentPartDone(this.mapContentPartDone(event));
           break;
         case 'error':
           this.handleError(event);
@@ -290,6 +291,19 @@ export class ResponsesResponseBuilder {
       lastEventTime: event.timestamp
     };
     this.outputItemBuilders.set(data.item_id, outputItemState);
+    if (typeof data.output_index === 'number' && data.item_id) {
+      this.outputIndexToItemId.set(data.output_index, data.item_id);
+    }
+  }
+  private resolveItemIdFromEventData(data: any): string | undefined {
+    if (typeof data?.item_id === 'string' && data.item_id.length > 0) {
+      return data.item_id;
+    }
+    const legacyIndex = data?.output_index ?? data?.item_index;
+    if (typeof legacyIndex === 'number') {
+      return this.outputIndexToItemId.get(legacyIndex);
+    }
+    return undefined;
   }
   private mapOutputItemAdded(event: ResponsesSseEvent): ResponsesSseEvent {
     const data = event.data as any;
@@ -307,6 +321,7 @@ export class ResponsesResponseBuilder {
       type: 'output_item.start',
       data: {
         item_id: data.item_id ?? item.id,
+        output_index: data.output_index ?? item.index,
         type: normalizedType,
         status: data.status ?? item.status ?? 'in_progress',
         role: data.role ?? item.role,
@@ -384,9 +399,9 @@ export class ResponsesResponseBuilder {
       ...event,
       type: 'content_part.start',
       data: {
-        item_id: data.item_id ?? part.item_id,
+        item_id: this.resolveItemIdFromEventData(data) ?? part.item_id,
         type: normalizedType,
-        content_index: data.content_index,
+        content_index: data.content_index ?? data.part_index,
         text: textValue,
         output_text: normalizedType === 'output_text' ? { type: 'output_text', text: textValue ?? '' } : undefined
       }
@@ -440,8 +455,8 @@ export class ResponsesResponseBuilder {
       ...event,
       type: 'content_part.delta',
       data: {
-        item_id: data.item_id,
-        part_index: data.content_index,
+        item_id: this.resolveItemIdFromEventData(data),
+        part_index: data.content_index ?? data.part_index,
         delta: {
           type: 'output_text',
           text: data.delta
@@ -461,6 +476,17 @@ export class ResponsesResponseBuilder {
     const contentIndex = data.content_index ?? data.part_index ?? outputItemState.currentContentIndex;
     if (contentIndex !== undefined) {
       const contentPart = outputItemState.contentParts[contentIndex];
+      const finalText = typeof data.text === 'string'
+        ? data.text
+        : typeof data.part?.text === 'string'
+          ? data.part.text
+          : undefined;
+      if (contentPart &&
+        finalText !== undefined &&
+        (contentPart.type === 'input_text' || contentPart.type === 'output_text')) {
+        (contentPart as any).text = finalText;
+        (contentPart as any)._hasDelta = true;
+      }
       if (contentPart &&
         (contentPart as any)._hasDelta !== true &&
         (contentPart as any)._initialText &&
@@ -480,8 +506,10 @@ export class ResponsesResponseBuilder {
       ...event,
       type: 'content_part.done',
       data: {
-        item_id: data.item_id,
-        part_index: data.content_index ?? data.part_index
+        item_id: this.resolveItemIdFromEventData(data),
+        part_index: data.content_index ?? data.part_index,
+        text: typeof data.text === 'string' ? data.text : undefined,
+        part: data.part
       }
     };
   }
@@ -556,7 +584,7 @@ export class ResponsesResponseBuilder {
       ...event,
       type: 'function_call.delta',
       data: {
-        item_id: data.item_id,
+        item_id: this.resolveItemIdFromEventData(data),
         delta: {
           arguments: argChunk,
           name: (deltaObj as any)?.name ?? data.name
@@ -603,7 +631,7 @@ export class ResponsesResponseBuilder {
       ...event,
       type: 'function_call.done',
       data: {
-        item_id: data.item_id,
+        item_id: this.resolveItemIdFromEventData(data),
         call_id: data.call_id,
         name: data.name ?? delta.name,
         arguments: data.arguments ?? delta.arguments
@@ -1204,18 +1232,6 @@ export class ResponsesResponseBuilder {
       this.applyDerivedTopLevelOutputText(this.response as ResponsesResponse);
       return { success: true, response: this.response as ResponsesResponse };
     }
-    const salvagedOutput = this.buildOutputItems();
-    if (salvagedOutput.length > 0) {
-      const response = {
-        ...(this.response as ResponsesResponse),
-        object: 'response',
-        status: 'completed',
-        output: salvagedOutput
-      } as ResponsesResponse;
-      this.applyDerivedTopLevelOutputText(response);
-      this.response = response;
-      return { success: true, response };
-    }
     return {
       success: false,
       error: new Error('Responses SSE stream incomplete before response.completed/response.done')
@@ -1234,6 +1250,7 @@ export class ResponsesResponseBuilder {
     this.state = 'initial';
     this.response = {};
     this.outputItemBuilders.clear();
+    this.outputIndexToItemId.clear();
     this.lastSequenceNumber = -1;
     this.error = undefined;
   }
