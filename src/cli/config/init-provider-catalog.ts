@@ -32,6 +32,7 @@ export type InitProviderTemplate = {
   capabilities?: ProviderCatalogCapabilities;
   sdkBinding?: ProviderCatalogSdkBinding;
   webSearch?: ProviderCatalogWebSearchBinding;
+  multimodalRouteTarget?: string;
 };
 
 function apikeyAuthEnv(envVar: string) {
@@ -95,17 +96,18 @@ const CATALOG: InitProviderTemplate[] = [
       supported: false,
       notes: 'Requires the DeepSeek web-account runtime path rather than direct Vercel AI SDK auth.'
     },
-    capabilities: { supportsReasoning: true, supportsTools: true },
+    capabilities: { supportsReasoning: true, supportsTools: true, supportsMultimodal: true },
     webSearch: {
       engineId: 'deepseek:web_search',
-      providerKey: 'deepseek-web.deepseek-chat-search',
-      routeTarget: 'deepseek-web.deepseek-chat-search',
-      modelId: 'deepseek-chat-search',
+      providerKey: 'deepseek-web.deepseek-v4-flash-search',
+      routeTarget: 'deepseek-web.deepseek-v4-flash-search',
+      modelId: 'deepseek-v4-flash-search',
       description: 'DeepSeek native web_search route backend',
       executionMode: 'direct',
       directActivation: 'route',
       default: true
     },
+    multimodalRouteTarget: 'deepseek-web.deepseek-v4-vision',
     provider: {
       id: 'deepseek-web',
       enabled: true,
@@ -132,11 +134,13 @@ const CATALOG: InitProviderTemplate[] = [
       models: {
         'deepseek-chat': {
           supportsStreaming: true,
-          aliases: ['deepseek-v3', 'deepseek-chat-search', 'deepseek-v3-search']
+          capabilities: ['web_search', 'multimodal'],
+          aliases: ['deepseek-v3', 'deepseek-chat-search', 'deepseek-v3-search', 'deepseek-v4-flash', 'deepseek-v4-flash-search', 'deepseek-v4-vision']
         },
         'deepseek-reasoner': {
           supportsStreaming: true,
-          aliases: ['deepseek-r1', 'deepseek-reasoner-search', 'deepseek-r1-search']
+          capabilities: ['web_search', 'multimodal'],
+          aliases: ['deepseek-r1', 'deepseek-reasoner-search', 'deepseek-r1-search', 'deepseek-v4-pro', 'deepseek-v4-pro-search']
         }
       }
     },
@@ -344,4 +348,14 @@ export function buildCatalogWebSearchDefaults(
       search
     }
   };
+}
+
+export function buildCatalogMultimodalTargets(
+  providers: InitProviderTemplate[]
+): string[] {
+  return dedupeTargets(
+    providers
+      .map((provider) => provider.multimodalRouteTarget)
+      .filter((target): target is string => typeof target === 'string' && target.trim().length > 0)
+  );
 }

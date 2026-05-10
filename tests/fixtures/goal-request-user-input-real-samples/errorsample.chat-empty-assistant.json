@@ -1,0 +1,39 @@
+{
+  "kind": "payload_contract_error",
+  "timestamp": "2026-05-09T08:14:48.238Z",
+  "phase": "provider-response",
+  "marker": "chat_empty_assistant",
+  "reason": "finish_reason=stop but assistant text/tool_calls are empty",
+  "requestId": "req_test",
+  "endpoint": "/v1/responses",
+  "providerKey": "qwenchat.aliasA",
+  "providerId": "antigravity",
+  "observation": {
+    "providerRequestPayload": {
+      "data": {
+        "messages": []
+      }
+    },
+    "normalizedResponse": {
+      "status": null,
+      "headers": null,
+      "body": {
+        "ok": true
+      }
+    },
+    "convertedResponse": {
+      "status": 200,
+      "headers": null,
+      "body": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "message": {
+              "content": ""
+            }
+          }
+        ]
+      }
+    }
+  }
+}

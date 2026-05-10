@@ -86,7 +86,8 @@
           "strictToolRequired": true,
           "toolProtocol": "text",
           "powTimeoutMs": 15000,
-          "sessionReuseTtlMs": 1800000
+          "sessionReuseTtlMs": 1800000,
+          "contextFileEnabled": false
         }
       }
     }

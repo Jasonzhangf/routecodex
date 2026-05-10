@@ -69,6 +69,7 @@ export function buildInitRouting(args: {
   thinkingTarget?: string;
   toolsTarget?: string;
   webSearchTargets?: string[];
+  multimodalTargets?: string[];
 }): RoutingConfig {
   const defaultTarget = args.defaultTarget.trim();
   const thinkingTarget = (args.thinkingTarget || defaultTarget).trim();
@@ -81,6 +82,10 @@ export function buildInitRouting(args: {
   const webSearchTargets = sanitizeTargets(args.webSearchTargets || []);
   if (webSearchTargets.length > 0) {
     routing.web_search = [buildWeightedRoutePool('web_search-primary', webSearchTargets)];
+  }
+  const multimodalTargets = sanitizeTargets(args.multimodalTargets || []);
+  if (multimodalTargets.length > 0) {
+    routing.multimodal = [buildWeightedRoutePool('multimodal-primary', multimodalTargets)];
   }
   return routing;
 }

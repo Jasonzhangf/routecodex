@@ -4,7 +4,11 @@ import { homedir } from 'node:os';
 import type { Command } from 'commander';
 
 import { getBootstrapProviderTemplates } from '../config/bootstrap-provider-templates.js';
-import { buildCatalogWebSearchDefaults, type InitProviderTemplate } from '../config/init-provider-catalog.js';
+import {
+  buildCatalogMultimodalTargets,
+  buildCatalogWebSearchDefaults,
+  type InitProviderTemplate
+} from '../config/init-provider-catalog.js';
 import { parseProvidersArg } from '../config/init-config.js';
 import { buildV2ConfigObject } from '../config/init-v2-builder.js';
 import { resolveRccConfigFile } from '../../config/user-data-paths.js';
@@ -296,6 +300,7 @@ Examples:
             ? (safeSpinnerStop(), (await interactiveRoutingWizard(promptBundle.prompt, baseRouting, defaultTarget)) ?? baseRouting)
             : baseRouting;
           const webSearchDefaults = buildCatalogWebSearchDefaults(selectedTemplates);
+          const multimodalTargets = buildCatalogMultimodalTargets(selectedTemplates);
           const routingWithWebSearch = { ...(routing as Record<string, unknown>) };
           if (webSearchDefaults) {
             const existingWebSearchRoute = routingWithWebSearch.web_search;
@@ -306,6 +311,20 @@ Examples:
                   loadBalancing: {
                     strategy: 'weighted',
                     weights: Object.fromEntries(webSearchDefaults.routeTargets.map((target) => [target, 1]))
+                  }
+                }
+              ];
+            }
+          }
+          if (multimodalTargets.length > 0) {
+            const existingMultimodalRoute = routingWithWebSearch.multimodal;
+            if (!Array.isArray(existingMultimodalRoute) || existingMultimodalRoute.length === 0) {
+              routingWithWebSearch.multimodal = [
+                {
+                  id: 'multimodal-primary',
+                  loadBalancing: {
+                    strategy: 'weighted',
+                    weights: Object.fromEntries(multimodalTargets.map((target) => [target, 1]))
                   }
                 }
               ];

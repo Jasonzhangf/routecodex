@@ -1,5 +1,6 @@
-import { detectLastAssistantToolCategory } from '../../../../sharedmodule/llmswitch-core/src/router/virtual-router/tool-signals.js';
+import { detectLastAssistantToolCategory, detectWebSearchToolDeclared } from '../../../../sharedmodule/llmswitch-core/src/router/virtual-router/tool-signals.js';
 import type { StandardizedMessage } from '../../../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
+import type { StandardizedRequest } from '../../../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 
 function buildToolCallMessages(toolName: string, command: string): StandardizedMessage[] {
   return [
@@ -45,10 +46,10 @@ function buildMultiToolCallMessages(tools: { name: string; command: string }[]):
 }
 
 describe('shell command classification', () => {
-  it('treats sed print commands as read operations', () => {
+  it('treats sed print commands as coding operations under current shell semantics', () => {
     const messages = buildShellMessages("nl -ba scripts/demo.mjs | sed -n '130,210p'");
     const result = detectLastAssistantToolCategory(messages);
-    expect(result?.category).toBe('read');
+    expect(result?.category).toBe('coding');
   });
 
   it('detects ripgrep invocations as search operations', () => {
@@ -57,10 +58,10 @@ describe('shell command classification', () => {
     expect(result?.category).toBe('search');
   });
 
-  it('still flags sed -i usage as write operations', () => {
+  it('still flags sed -i usage as coding operations', () => {
     const messages = buildShellMessages("sed -i '' 's/foo/bar/' file.txt");
     const result = detectLastAssistantToolCategory(messages);
-    expect(result?.category).toBe('write');
+    expect(result?.category).toBe('coding');
   });
 
   it('treats ls listing as other operations', () => {
@@ -78,19 +79,28 @@ describe('shell command classification', () => {
   it('classifies exec_command payloads using the inner command', () => {
     const messages = buildToolCallMessages('exec_command', 'cat README.md');
     const result = detectLastAssistantToolCategory(messages);
-    expect(result?.category).toBe('read');
+    expect(result?.category).toBe('thinking');
   });
 
   it('classifies bash tool calls via inner shell command', () => {
     const messages = buildToolCallMessages('bash', "sed -i '' 's/foo/bar/' file.txt");
     const result = detectLastAssistantToolCategory(messages);
-    expect(result?.category).toBe('write');
+    expect(result?.category).toBe('coding');
   });
 
   it('classifies declared web_search tools separately from local search', () => {
     const messages = buildToolCallMessages('web_search', JSON.stringify({ query: 'latest news' }));
     const result = detectLastAssistantToolCategory(messages);
     expect(result?.category).toBe('websearch');
+  });
+
+  it('treats web_search_preview tool declaration as web_search intent', () => {
+    const request = {
+      model: 'gpt-4.1',
+      messages: [{ role: 'user', content: 'search web' }],
+      tools: [{ type: 'web_search_preview' }]
+    } as unknown as StandardizedRequest;
+    expect(detectWebSearchToolDeclared(request)).toBe(true);
   });
 
   it('detects grep pipelines as shell search operations', () => {
@@ -111,19 +121,19 @@ describe('shell command classification', () => {
     expect(result?.category).toBe('search');
   });
 
-  it('treats echo redirection in shell commands as write operations', () => {
+  it('treats echo redirection in shell commands as coding operations', () => {
     const messages = buildShellMessages("echo 'console.log(1)' > scripts/tmp-check.js");
     const result = detectLastAssistantToolCategory(messages);
-    expect(result?.category).toBe('write');
+    expect(result?.category).toBe('coding');
   });
 
-  it('treats head usage in pipelines as read operations', () => {
+  it('treats head usage in pipelines as thinking operations', () => {
     const messages = buildShellMessages('lsof -i :7701 -i :7704 | head -20');
     const result = detectLastAssistantToolCategory(messages);
-    expect(result?.category).toBe('read');
+    expect(result?.category).toBe('thinking');
   });
 
-  it('prioritizes search over read when a multi-tool assistant message includes search commands', () => {
+  it('prioritizes search over thinking when a multi-tool assistant message includes search commands', () => {
     const messages = buildMultiToolCallMessages([
       { name: 'exec_command', command: 'rg "RouteCodex" src' },
       { name: 'exec_command', command: 'cat README.md' },
@@ -133,7 +143,7 @@ describe('shell command classification', () => {
     expect(result?.category).toBe('search');
   });
 
-  it('classifies codex Read tool name as read even without shell command args', () => {
+  it('classifies codex Read tool name as thinking even without shell command args', () => {
     const messages: StandardizedMessage[] = [
       {
         role: 'assistant',
@@ -151,10 +161,10 @@ describe('shell command classification', () => {
       }
     ];
     const result = detectLastAssistantToolCategory(messages);
-    expect(result?.category).toBe('read');
+    expect(result?.category).toBe('thinking');
   });
 
-  it('classifies codex Edit tool name as write even without shell command args', () => {
+  it('classifies codex Edit tool name as coding even without shell command args', () => {
     const messages: StandardizedMessage[] = [
       {
         role: 'assistant',
@@ -176,6 +186,6 @@ describe('shell command classification', () => {
       }
     ];
     const result = detectLastAssistantToolCategory(messages);
-    expect(result?.category).toBe('write');
+    expect(result?.category).toBe('coding');
   });
 });

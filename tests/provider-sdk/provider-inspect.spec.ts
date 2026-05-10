@@ -44,6 +44,69 @@ describe('provider inspect', () => {
     expect(inspection.configPath).toBe('/tmp/provider/qwen/config.v2.json');
   });
 
+  it('infers deepseek-web multimodal + web_search routing from config aliases/capabilities', () => {
+    const inspection = inspectProviderConfig(
+      {
+        version: '2.0.0',
+        providerId: 'deepseek-web',
+        provider: {
+          id: 'deepseek-web',
+          type: 'openai',
+          baseURL: 'https://chat.deepseek.com',
+          compatibilityProfile: 'chat:deepseek-web',
+          auth: { type: 'deepseek-account' },
+          models: {
+            'deepseek-chat': {
+              supportsStreaming: true,
+              capabilities: ['web_search', 'multimodal'],
+              aliases: ['deepseek-v4-flash', 'deepseek-v4-flash-search', 'deepseek-v4-vision']
+            },
+            'deepseek-reasoner': {
+              supportsStreaming: true,
+              capabilities: ['web_search', 'multimodal'],
+              aliases: ['deepseek-v4-pro', 'deepseek-v4-pro-search']
+            }
+          }
+        }
+      } as any,
+      { includeRoutingHints: true }
+    );
+
+    expect(inspection.routeTargets.default).toBe('deepseek-web.deepseek-chat');
+    expect(inspection.routeTargets.webSearch).toBe('deepseek-web.deepseek-v4-flash-search');
+    expect(inspection.routeTargets.multimodal).toBe('deepseek-web.deepseek-v4-vision');
+    expect(inspection.webSearch).toMatchObject({
+      engineId: 'deepseek:web_search',
+      routeTarget: 'deepseek-web.deepseek-v4-flash-search',
+      providerKey: 'deepseek-web.deepseek-v4-flash-search',
+      modelId: 'deepseek-v4-flash-search',
+      executionMode: 'direct'
+    });
+    expect(inspection.capabilities).toMatchObject({
+      supportsMultimodal: true,
+      supportsTools: true,
+      supportsReasoning: true
+    });
+    expect(inspection.routingHints?.routing).toMatchObject({
+      multimodal: [
+        {
+          id: 'multimodal-primary',
+          loadBalancing: {
+            weights: { 'deepseek-web.deepseek-v4-vision': 1 }
+          }
+        }
+      ],
+      web_search: [
+        {
+          id: 'web_search-primary',
+          loadBalancing: {
+            weights: { 'deepseek-web.deepseek-v4-flash-search': 1 }
+          }
+        }
+      ]
+    });
+  });
+
   it('builds routing hints for capability-driven pools and web search policy wiring', () => {
     const inspection = inspectProviderConfig(
       {

@@ -535,6 +535,83 @@ describe('cli config command', () => {
     const written = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(written?.virtualrouter?.activeRoutingPolicyGroup).toBe('canary');
   });
+
+  it('switch-group preserves TOML comments when updating activeRoutingPolicyGroup', async () => {
+    const writes = new Map<string, string>();
+    const success: string[] = [];
+    const tomlConfig = `
+# top-level comment
+version = "2.0.0"
+
+[httpserver]
+# server port comment
+port = 5555
+
+[virtualrouter]
+# active group comment
+activeRoutingPolicyGroup = "default"
+
+[virtualrouter.routingPolicyGroups.default.routing]
+
+[[virtualrouter.routingPolicyGroups.default.routing.default]]
+id = "d"
+targets = ["test.foo"]
+
+[virtualrouter.routingPolicyGroups.canary.routing]
+
+[[virtualrouter.routingPolicyGroups.canary.routing.default]]
+id = "c"
+targets = ["test.bar"]
+`;
+
+    const program = new Command();
+    createConfigCommand(program, {
+      logger: {
+        info: () => {},
+        warning: () => {},
+        success: (msg) => success.push(msg),
+        error: () => {}
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: () => true,
+        readFileSync: () => tomlConfig,
+        writeFileSync: (p: any, content: any) => writes.set(String(p), String(content)),
+        mkdirSync: () => {}
+      },
+      loadProviderConfigsV2: async () => ({
+        test: {
+          provider: {
+            models: {
+              foo: {},
+              bar: {}
+            }
+          }
+        } as any
+      })
+    });
+
+    await program.parseAsync(
+      ['node', 'routecodex', 'config', 'switch-group', '--group', 'canary', '--config', '/tmp/config.toml', '--no-reload'],
+      { from: 'node' }
+    );
+
+    const written = writes.get('/tmp/config.toml') || '';
+    expect(written).toContain('# top-level comment');
+    expect(written).toContain('# server port comment');
+    expect(written).toContain('# active group comment');
+    expect(written).toContain('activeRoutingPolicyGroup = "canary"');
+    expect(success.join('\n')).toContain('Switched active routing group');
+  });
 });
 
 describe('cli init command', () => {
@@ -829,15 +906,24 @@ describe('cli init command', () => {
     );
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.targets?.[0]).toBe('deepseek-web.deepseek-chat');
+    expect(
+      parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.loadBalancing?.weights?.[
+        'deepseek-web.deepseek-v4-flash-search'
+      ]
+    ).toBe(1);
+    expect(
+      parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.multimodal?.[0]?.loadBalancing?.weights?.[
+        'deepseek-web.deepseek-v4-vision'
+      ]
+    ).toBe(1);
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('deepseek:web_search');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.providerKey).toBe('deepseek-web.deepseek-chat');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.providerKey).toBe('deepseek-web.deepseek-v4-flash-search');
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['deepseek:web_search']?.providerKey).toBe(
-      'deepseek-web.deepseek-chat'
+      'deepseek-web.deepseek-v4-flash-search'
     );
   });
 
-  it('init (non-interactive) prioritizes deepseek then falls back to glm when both are selected', async () => {
+  it('init (non-interactive) keeps deepseek as the only webSearch engine when glm has no webSearch binding', async () => {
     const writes = new Map<string, string>();
     const program = new Command();
     createInitCommand(program, {
@@ -875,17 +961,14 @@ describe('cli init command', () => {
     );
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.targets).toEqual([
-      'deepseek-web.deepseek-chat',
-      expect.stringContaining('glm.')
-    ]);
+    expect(
+      Object.keys(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.loadBalancing?.weights || {})
+    ).toEqual(['deepseek-web.deepseek-v4-flash-search']);
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('deepseek:web_search');
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.default).toBe(true);
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[1]?.id).toBe('glm:web_search');
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['deepseek:web_search']?.providerKey).toBe(
-      'deepseek-web.deepseek-chat'
+      'deepseek-web.deepseek-v4-flash-search'
     );
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['glm:web_search']?.providerKey).toBe('glm');
   });
 
   it('init prepares camoufox environment when selected provider requires oauth/deepseek fingerprint', async () => {
@@ -2179,14 +2262,17 @@ describe('init-config', () => {
     expect(result.ok).toBe(true);
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('deepseek:web_search');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].providerKey).toBe('deepseek-web.deepseek-chat');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-chat');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].providerKey).toBe('deepseek-web.deepseek-v4-flash-search');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-v4-flash-search');
     expect(
       Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights)[0]
-    ).toBe('deepseek-web.deepseek-chat');
+    ).toBe('deepseek-web.deepseek-v4-flash-search');
+    expect(
+      Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.multimodal[0].loadBalancing.weights)[0]
+    ).toBe('deepseek-web.deepseek-v4-vision');
   });
 
-  it('prioritizes deepseek then falls back to glm when both are selected', async () => {
+  it('keeps deepseek as the only webSearch engine when glm has no webSearch binding', async () => {
     const writes = new Map<string, string>();
     const result = await initializeConfigV1(
       {
@@ -2205,15 +2291,10 @@ describe('init-config', () => {
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('deepseek:web_search');
     expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].default).toBe(true);
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[1].id).toBe('glm:web_search');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-chat');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['glm:web_search'].providerKey).toBe('glm');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-v4-flash-search');
     expect(
       Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights)
-    ).toEqual([
-      'deepseek-web.deepseek-chat',
-      expect.stringContaining('glm.')
-    ]);
+    ).toEqual(['deepseek-web.deepseek-v4-flash-search']);
   });
 
   it('does not inject webSearch defaults when glm is not selected', async () => {

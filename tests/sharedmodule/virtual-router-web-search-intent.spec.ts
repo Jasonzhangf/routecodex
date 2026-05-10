@@ -17,6 +17,12 @@ function classifyRouteFromMessages(messages: Array<{ role: string; content: stri
   return classifier.classify(features).routeName;
 }
 
+function classifyRouteFromRequest(req: Record<string, unknown>): string {
+  const features = buildRoutingFeatures(req as any, { requestId: 'req_test' } as any);
+  const classifier = new RoutingClassifier({});
+  return classifier.classify(features).routeName;
+}
+
 describe('virtual-router web_search intent detection', () => {
   it('does not misclassify generic progress text as web_search', () => {
     const route = classifyRoute('显示实时的进度查询和结果统计，输出成功与失败数量。');
@@ -52,5 +58,14 @@ describe('virtual-router web_search intent detection', () => {
       { role: 'assistant', content: '好的，我先检查仓库结构。' }
     ]);
     expect(route).not.toBe('web_search');
+  });
+
+  it('keeps thinking on first turn even when web_search_preview tool is declared', () => {
+    const route = classifyRouteFromRequest({
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: '搜索今天的 RouteCodex 相关新闻。' }],
+      tools: [{ type: 'web_search_preview' }]
+    });
+    expect(route).toBe('thinking');
   });
 });

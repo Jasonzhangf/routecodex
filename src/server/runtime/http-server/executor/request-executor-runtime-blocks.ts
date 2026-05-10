@@ -249,9 +249,10 @@ export function logProviderRetrySwitchCompact(args: {
     console.warn(`[provider-switch] aggregated ${aggregateDetails.join(' ')}`);
   }
   args.providerSwitchLogState.set(dedupeKey, { lastAtMs: now, suppressed: 0 });
-  const boundedNextAttempt = Math.max(args.attempt, Math.min(args.maxAttempts, args.nextAttempt));
+  const boundedAttempt = Math.max(1, Math.min(args.maxAttempts, args.attempt));
+  const boundedNextAttempt = Math.max(boundedAttempt, Math.min(args.maxAttempts, args.nextAttempt));
   const retryTag =
-    `[provider-switch] req=${args.requestId} attempt=${args.attempt}/${args.maxAttempts} -> ` +
+    `[provider-switch] req=${args.requestId} attempt=${boundedAttempt}/${args.maxAttempts} -> ` +
     `${boundedNextAttempt}/${args.maxAttempts}`;
   const details = [
     `provider=${providerLabel}`,

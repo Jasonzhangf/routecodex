@@ -14,14 +14,16 @@ describe('deepseek-provider-contract', () => {
       textToolFallback: true,
       powTimeoutMs: '999999',
       powMaxAttempts: 0,
-      sessionReuseTtlMs: 999
+      sessionReuseTtlMs: 999,
+      contextFile: { enabled: true }
     });
 
     expect(normalized.strictToolRequired).toBe(false);
-    expect(normalized.textToolFallback).toBe(true);
+    expect(normalized.toolProtocol).toBe('text');
     expect(normalized.powTimeoutMs).toBe(120000);
     expect(normalized.powMaxAttempts).toBe(1);
     expect(normalized.sessionReuseTtlMs).toBe(1000);
+    expect(normalized.contextFileEnabled).toBe(true);
   });
 
   it('detects deepseek runtime identity by family, key, and compat profile', () => {
@@ -33,17 +35,19 @@ describe('deepseek-provider-contract', () => {
 
   it('reads deepseek options from runtime/extension/metadata layers', () => {
     const fromRuntime = readDeepSeekProviderRuntimeOptions({
-      runtimeOptions: { strictToolRequired: false }
+      runtimeOptions: { strictToolRequired: false, contextFileEnabled: true }
     });
     const fromExtension = readDeepSeekProviderRuntimeOptions({
       extensions: { deepseek: { textToolFallback: false } }
     });
     const fromMetadata = readDeepSeekProviderRuntimeOptions({
-      metadata: { deepseek: { powTimeoutMs: 5000 } }
+      metadata: { deepseek: { powTimeoutMs: 5000, contextFile: { enabled: true } } }
     });
 
     expect(fromRuntime?.strictToolRequired).toBe(false);
-    expect(fromExtension?.textToolFallback).toBe(false);
+    expect(fromRuntime?.contextFileEnabled).toBe(true);
+    expect(fromExtension?.toolProtocol).toBe('native');
     expect(fromMetadata?.powTimeoutMs).toBe(5000);
+    expect(fromMetadata?.contextFileEnabled).toBe(true);
   });
 });

@@ -13,7 +13,9 @@ describe('deepseek search model aliases in virtual router bootstrap', () => {
           compatibilityProfile: 'chat:deepseek-web',
           auth: { type: 'apikey', apiKey: 'TEST_KEY' },
           models: {
-            'deepseek-chat': {},
+            'deepseek-chat': {
+              aliases: ['deepseek-chat-search']
+            },
             'deepseek-reasoner': {}
           }
         }
@@ -52,5 +54,60 @@ describe('deepseek search model aliases in virtual router bootstrap', () => {
 
     expect(routed.target?.providerKey).toMatch(/deepseek-web/);
     expect(routed.target?.modelId).toBe('deepseek-chat-search');
+  });
+
+  it('accepts deepseek-v4-flash-search alias in routing/web_search and routes to that alias', async () => {
+    const v4Input: any = {
+      virtualrouter: {
+        providers: {
+          'deepseek-web': {
+            id: 'deepseek-web',
+            enabled: true,
+            type: 'openai',
+            endpoint: 'https://chat.deepseek.com',
+            compatibilityProfile: 'chat:deepseek-web',
+            auth: { type: 'apikey', apiKey: 'TEST_KEY' },
+            models: {
+              'deepseek-chat': {
+                capabilities: ['web_search', 'multimodal'],
+                aliases: ['deepseek-v4-flash', 'deepseek-v4-flash-search', 'deepseek-v4-vision']
+              },
+              'deepseek-reasoner': {
+                capabilities: ['web_search', 'multimodal'],
+                aliases: ['deepseek-v4-pro', 'deepseek-v4-pro-search']
+              }
+            }
+          }
+        },
+        routing: {
+          web_search: ['deepseek-web.deepseek-v4-flash-search']
+        }
+      }
+    };
+
+    const result = bootstrapVirtualRouterConfig(v4Input);
+    const providerKeys = Object.keys(result.providers);
+    expect(providerKeys.some((key) => key.endsWith('.deepseek-v4-flash-search'))).toBe(true);
+
+    const engine = new VirtualRouterEngine();
+    engine.initialize(result.config);
+
+    const routed = await engine.route(
+      {
+        model: 'deepseek-web.deepseek-v4-flash-search',
+        messages: [{ role: 'user', content: 'Search latest updates' }]
+      },
+      {
+        requestId: 'req-deepseek-v4-flash-search-alias',
+        entryEndpoint: '/v1/chat/completions',
+        processMode: 'chat',
+        stream: false,
+        direction: 'request',
+        providerProtocol: 'openai-chat'
+      }
+    );
+
+    expect(routed.target?.providerKey).toMatch(/deepseek-web/);
+    expect(routed.target?.modelId).toBe('deepseek-v4-flash-search');
   });
 });

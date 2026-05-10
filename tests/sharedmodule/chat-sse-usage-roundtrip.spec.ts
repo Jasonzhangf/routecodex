@@ -1,4 +1,4 @@
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect, jest } from '@jest/globals';
 import { Readable } from 'node:stream';
 import { ChatJsonToSseConverterRefactored } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.js';
 import { ChatSseToJsonConverter } from '../../sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.js';
@@ -133,5 +133,32 @@ describe('chat SSE usage compatibility', () => {
     });
 
     expect(parsed.choices?.[0]?.message?.reasoning_content).toBe('先检查上下文，再继续执行');
+  });
+
+  it('reuses parsed deepseek patch payload instead of reparsing the same chunk', async () => {
+    const sseText = [
+      'data: {"v":{"response":{"message_id":2,"status":"WIP","content":""}}}',
+      '',
+      'data: {"p":"response/content","o":"APPEND","v":"hello"}',
+      '',
+      'data: {"p":"response/status","v":"FINISHED"}',
+      '',
+      'event: finish',
+      'data: {}',
+      ''
+    ].join('\n');
+
+    const converter = new ChatSseToJsonConverter();
+    const parseChatChunkPayloadSpy = jest.spyOn(converter as any, 'parseChatChunkPayload');
+    try {
+      const response = await converter.convertSseToJson(Readable.from([sseText]), {
+        requestId: 'req_deepseek_patch_reuse_parsed_data',
+        model: 'deepseek-chat'
+      });
+      expect(response.choices?.[0]?.message?.content).toContain('hello');
+      expect(parseChatChunkPayloadSpy).not.toHaveBeenCalled();
+    } finally {
+      parseChatChunkPayloadSpy.mockRestore();
+    }
   });
 });

@@ -1,0 +1,49 @@
+{
+  "kind": "payload_contract_error",
+  "timestamp": "2026-05-09T08:14:48.607Z",
+  "phase": "provider-response",
+  "marker": "responses_missing_required_tool_call",
+  "reason": "responses status=completed with declared request tools but no function_call output",
+  "requestId": "req_reasoning_only_missing_tool_call",
+  "endpoint": "/v1/responses",
+  "providerKey": "qwenchat.aliasA",
+  "providerId": "gemini",
+  "observation": {
+    "providerRequestPayload": {
+      "data": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "retry me"
+          }
+        ]
+      }
+    },
+    "normalizedResponse": {
+      "status": 200,
+      "headers": null,
+      "body": {
+        "ok": true
+      }
+    },
+    "convertedResponse": {
+      "status": 200,
+      "headers": null,
+      "body": {
+        "status": "completed",
+        "output_text": "",
+        "output": [
+          {
+            "type": "reasoning",
+            "summary": [
+              {
+                "type": "summary_text",
+                "text": "I have all the information I need. Let me create the hook file now."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

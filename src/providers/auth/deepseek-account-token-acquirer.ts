@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import {
   DEEPSEEK_ERROR_CODES,
+  DEEPSEEK_UPSTREAM_CLIENT_VERSION,
   DEEPSEEK_UPSTREAM_USER_AGENT,
   type DeepSeekErrorCode
 } from '../core/contracts/deepseek-provider-contract.js';
@@ -337,7 +338,7 @@ function buildDeepSeekBrowserHeaders(fingerprint: CamoufoxFingerprintSnapshot | 
   return {
     'User-Agent': DEEPSEEK_UPSTREAM_USER_AGENT,
     'x-client-platform': clientPlatform,
-    'x-client-version': '1.8.0',
+    'x-client-version': DEEPSEEK_UPSTREAM_CLIENT_VERSION,
     'x-client-locale': 'zh_CN',
     'accept-charset': 'UTF-8',
     Origin: 'https://chat.deepseek.com',
@@ -822,6 +823,7 @@ export async function ensureDeepSeekAccountToken(
 }
 
 export const __deepSeekAccountTokenAcquirerTestables = {
+  buildDeepSeekBrowserHeaders,
   loadCamoufoxFingerprint,
   readTokenFileSnapshot,
   resolveCredentialFromFile,

@@ -81,7 +81,10 @@ describe('ProviderFactory no fallback', () => {
         textToolFallback: false,
         powTimeoutMs: 5000,
         powMaxAttempts: 3,
-        sessionReuseTtlMs: 120000
+        sessionReuseTtlMs: 120000,
+        contextFile: {
+          enabled: true
+        }
       },
       auth: {
         type: 'apikey',
@@ -102,7 +105,8 @@ describe('ProviderFactory no fallback', () => {
       toolProtocol: 'native',
       powTimeoutMs: 5000,
       powMaxAttempts: 3,
-      sessionReuseTtlMs: 120000
+      sessionReuseTtlMs: 120000,
+      contextFileEnabled: true
     });
   });
 

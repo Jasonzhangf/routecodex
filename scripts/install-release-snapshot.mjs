@@ -10,6 +10,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const USER_DIR_ENV_KEYS = ['RCC_HOME', 'ROUTECODEX_USER_DIR', 'ROUTECODEX_HOME'];
 const REQUIRED_COPY_PATHS = [
   'dist',
+  'sharedmodule/llmswitch-core/dist',
   'config',
   'configsamples',
   'package.json',
@@ -49,6 +50,7 @@ function copyIntoSnapshot(relativePath, targetRoot) {
   const sourcePath = requireExisting(relativePath);
   const targetPath = path.join(targetRoot, relativePath);
   const stat = fs.statSync(sourcePath);
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   if (stat.isDirectory()) {
     fs.cpSync(sourcePath, targetPath, {
       recursive: true,

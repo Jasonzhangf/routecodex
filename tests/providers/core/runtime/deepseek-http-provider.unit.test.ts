@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
-import { DEEPSEEK_UPSTREAM_USER_AGENT } from '../../../../src/providers/core/contracts/deepseek-provider-contract.js';
+import { DEEPSEEK_UPSTREAM_CLIENT_VERSION, DEEPSEEK_UPSTREAM_USER_AGENT } from '../../../../src/providers/core/contracts/deepseek-provider-contract.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 import { DeepSeekHttpProvider } from '../../../../src/providers/core/runtime/deepseek-http-provider.js';
 
@@ -212,6 +212,314 @@ describe('DeepSeekHttpProvider', () => {
       search_enabled: false,
       stream: true
     });
+  });
+
+  it('uploads inline image contracts and appends ref_file_ids', async () => {
+    const tokenFile = await createDeepSeekTokenFile('inline-image-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-inline'),
+      createPowResponse: jest.fn(async () => 'pow-inline'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    (provider as any).setRuntimeProfile({
+      runtimeKey: 'deepseek-web.1',
+      keyAlias: '1',
+      providerId: 'deepseek-web',
+      providerKey: 'deepseek-web.1.deepseek-v4-vision',
+      providerType: 'openai'
+    });
+
+    const httpPost = jest.spyOn((provider as any).httpClient, 'post')
+      .mockResolvedValue({
+        status: 200,
+        data: { code: 0, data: { biz_data: { id: 'file-inline-1' } } }
+      } as any);
+    const httpGet = jest.spyOn((provider as any).httpClient, 'get')
+      .mockResolvedValue({
+        status: 200,
+        data: { code: 0, data: { biz_data: { files: [{ file_id: 'file-inline-1', status: 'processed' }] } } }
+      } as any);
+
+    await provider.initialize();
+
+    const request = {
+      data: {
+        model: 'deepseek-v4-vision',
+        model_type: 'vision',
+        prompt: 'look at image',
+        ref_file_ids: [],
+        metadata: {
+          deepseek: {
+            inlineFiles: {
+              enabled: true,
+              files: [
+                {
+                  type: 'image',
+                  imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0ioAAAAASUVORK5CYII=',
+                  filename: 'smoke.png'
+                }
+              ]
+            }
+          }
+        }
+      }
+    };
+
+    const finalizedHeaders = await (provider as any).finalizeRequestHeaders({}, request);
+    const body = (provider as any).buildHttpRequestBody(request);
+
+    expect(finalizedHeaders['x-ds-pow-response']).toBe('pow-inline');
+    expect(httpPost).toHaveBeenCalledTimes(1);
+    expect(httpGet).toHaveBeenCalledTimes(1);
+    expect(httpPost.mock.calls[0]?.[2]?.['x-model-type']).toBe('vision');
+    expect(body.ref_file_ids).toEqual(['file-inline-1']);
+  });
+
+  it('waits for uploaded inline image file to become ready before using ref_file_id', async () => {
+    const tokenFile = await createDeepSeekTokenFile('inline-image-wait-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-inline-ready'),
+      createPowResponse: jest.fn(async () => 'pow-inline-ready'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    (provider as any).setRuntimeProfile({
+      runtimeKey: 'deepseek-web.1',
+      keyAlias: '1',
+      providerId: 'deepseek-web',
+      providerKey: 'deepseek-web.1.deepseek-v4-vision',
+      providerType: 'openai'
+    });
+
+    const httpPost = jest.spyOn((provider as any).httpClient, 'post')
+      .mockResolvedValue({
+        status: 200,
+        data: { code: 0, data: { biz_data: { id: 'file-inline-ready-1' } } }
+      } as any);
+    const httpGet = jest.spyOn((provider as any).httpClient, 'get')
+      .mockResolvedValueOnce({
+        status: 200,
+        data: { code: 0, data: { biz_data: { files: [{ file_id: 'file-inline-ready-1', status: 'uploaded' }] } } }
+      } as any)
+      .mockResolvedValueOnce({
+        status: 200,
+        data: { code: 0, data: { biz_data: { files: [{ file_id: 'file-inline-ready-1', status: 'processed' }] } } }
+      } as any);
+
+    await provider.initialize();
+
+    const request = {
+      data: {
+        model: 'deepseek-v4-vision',
+        model_type: 'vision',
+        prompt: 'look at image',
+        ref_file_ids: [],
+        metadata: {
+          deepseek: {
+            inlineFiles: {
+              enabled: true,
+              files: [
+                {
+                  type: 'image',
+                  imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0ioAAAAASUVORK5CYII=',
+                  filename: 'ready.png'
+                }
+              ]
+            }
+          }
+        }
+      }
+    };
+
+    await (provider as any).finalizeRequestHeaders({}, request);
+    const body = (provider as any).buildHttpRequestBody(request);
+
+    expect(httpPost).toHaveBeenCalledTimes(1);
+    expect(httpGet).toHaveBeenCalledTimes(2);
+    expect(body.ref_file_ids).toEqual(['file-inline-ready-1']);
+  });
+
+  it('keeps model_type on deepseek completion payload after file upload', async () => {
+    const tokenFile = await createDeepSeekTokenFile('completion-model-type-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-model-type'),
+      createPowResponse: jest.fn(async () => 'pow-model-type'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    (provider as any).setRuntimeProfile({
+      runtimeKey: 'deepseek-web.1',
+      keyAlias: '1',
+      providerId: 'deepseek-web',
+      providerKey: 'deepseek-web.1.deepseek-v4-vision',
+      providerType: 'openai'
+    });
+
+    jest.spyOn((provider as any).httpClient, 'post').mockResolvedValue({
+      status: 200,
+      data: { code: 0, data: { biz_data: { id: 'file-model-type-1' } } }
+    } as any);
+    jest.spyOn((provider as any).httpClient, 'get').mockResolvedValue({
+      status: 200,
+      data: { code: 0, data: { biz_data: { files: [{ file_id: 'file-model-type-1', status: 'processed' }] } } }
+    } as any);
+
+    await provider.initialize();
+    await (provider as any).finalizeRequestHeaders({}, {
+      data: {
+        model: 'deepseek-v4-vision',
+        model_type: 'vision',
+        metadata: {
+          deepseek: {
+            contextFile: {
+              enabled: true,
+              filename: 'RCC_HISTORY.txt',
+              content: 'history',
+              contentType: 'text/plain; charset=utf-8'
+            }
+          }
+        }
+      }
+    });
+
+    const body = (provider as any).buildHttpRequestBody({
+      data: {
+        model: 'deepseek-v4-vision',
+        model_type: 'vision',
+        prompt: 'look',
+        ref_file_ids: []
+      }
+    });
+
+    expect(body.model_type).toBe('vision');
+  });
+
+  it('infers vision upload model_type from model when explicit model_type is missing', async () => {
+    const tokenFile = await createDeepSeekTokenFile('inferred-model-type-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-inferred-model-type'),
+      createPowResponse: jest.fn(async () => 'pow-inferred-model-type'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    (provider as any).setRuntimeProfile({
+      runtimeKey: 'deepseek-web.1',
+      keyAlias: '1',
+      providerId: 'deepseek-web',
+      providerKey: 'deepseek-web.1.deepseek-v4-vision',
+      providerType: 'openai'
+    });
+
+    const httpPost = jest.spyOn((provider as any).httpClient, 'post')
+      .mockResolvedValue({
+        status: 200,
+        data: { code: 0, data: { biz_data: { id: 'file-inferred-1' } } }
+      } as any);
+    jest.spyOn((provider as any).httpClient, 'get')
+      .mockResolvedValue({
+        status: 200,
+        data: { code: 0, data: { biz_data: { files: [{ file_id: 'file-inferred-1', status: 'processed' }] } } }
+      } as any);
+
+    await provider.initialize();
+    await (provider as any).finalizeRequestHeaders({}, {
+      data: {
+        model: 'deepseek-v4-vision',
+        metadata: {
+          deepseek: {
+            inlineFiles: {
+              enabled: true,
+              files: [
+                {
+                  type: 'image',
+                  imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0ioAAAAASUVORK5CYII=',
+                  filename: 'inferred.png'
+                }
+              ]
+            }
+          }
+        }
+      }
+    });
+
+    expect(httpPost.mock.calls[0]?.[2]?.['x-model-type']).toBe('vision');
   });
 
   it('derives compat prompt from chat messages when prompt is missing', async () => {
@@ -783,7 +1091,8 @@ describe('DeepSeekHttpProvider', () => {
     );
 
     expect(finalizedHeaders['User-Agent']).toBe(DEEPSEEK_UPSTREAM_USER_AGENT);
-    expect(finalizedHeaders['x-client-platform']).toBe('windows');
+    expect(finalizedHeaders['x-client-platform']).toBe('android');
+    expect(finalizedHeaders['x-client-version']).toBe(DEEPSEEK_UPSTREAM_CLIENT_VERSION);
     expect(finalizedHeaders['Origin']).toBe('https://chat.deepseek.com');
     expect(finalizedHeaders['Referer']).toBe('https://chat.deepseek.com/');
     expect(fakeSessionPow.ensureChatSession).toHaveBeenCalledTimes(1);
@@ -992,5 +1301,194 @@ describe('DeepSeekHttpProvider', () => {
     );
 
     expect(wantsSse).toBe(true);
+  });
+
+  it('uploads RCC_HISTORY context file and prepends uploaded ref_file_id', async () => {
+    const tokenFile = await createDeepSeekTokenFile('context-file-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-context-1'),
+      createPowResponse: jest.fn(async (_headers, targetPath?: string) => targetPath === '/api/v0/file/upload_file' ? 'pow-upload-1' : 'pow-completion-1'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek-web',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+    const postSpy = jest.spyOn((provider as any).httpClient, 'post')
+      .mockResolvedValueOnce({
+        data: { code: 0, data: { biz_data: { file: { file_id: 'file_ctx_1' } } } },
+        status: 200, statusText: 'OK', headers: {}, url: 'https://chat.deepseek.com/api/v0/file/upload_file'
+      } as any);
+    const getSpy = jest.spyOn((provider as any).httpClient, 'get')
+      .mockResolvedValueOnce({
+        data: { code: 0, data: { biz_data: { files: [{ file_id: 'file_ctx_1', status: 'processed' }] } } },
+        status: 200, statusText: 'OK', headers: {}, url: 'https://chat.deepseek.com/api/v0/file/fetch_files?file_ids=file_ctx_1'
+      } as any);
+
+    const request = {
+      data: {
+        prompt: 'Continue from the latest state in the attached RCC_HISTORY.txt context.',
+        ref_file_ids: ['existing_file'],
+        thinking_enabled: false,
+        search_enabled: false,
+        metadata: {
+          deepseek: {
+            contextFile: {
+              enabled: true,
+              filename: 'RCC_HISTORY.txt',
+              content: '# RCC_HISTORY.txt\nhello\n',
+              contentType: 'text/plain; charset=utf-8'
+            }
+          }
+        }
+      }
+    };
+
+    await (provider as any).finalizeRequestHeaders({}, request);
+    const body = (provider as any).buildHttpRequestBody(request);
+
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(getSpy).toHaveBeenCalledTimes(1);
+    expect(fakeSessionPow.createPowResponse).toHaveBeenCalledWith(expect.any(Object), '/api/v0/file/upload_file');
+    expect(body.ref_file_ids).toEqual(['file_ctx_1', 'existing_file']);
+  });
+
+  it('waits for uploaded RCC_HISTORY file to become ready before using ref_file_id', async () => {
+    const tokenFile = await createDeepSeekTokenFile('context-file-ready-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-context-ready'),
+      createPowResponse: jest.fn(async (_headers, targetPath?: string) => targetPath === '/api/v0/file/upload_file' ? 'pow-upload-ready' : 'pow-completion-ready'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek-web',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+    const postSpy = jest.spyOn((provider as any).httpClient, 'post')
+      .mockResolvedValueOnce({
+        data: { code: 0, data: { biz_data: { file: { file_id: 'file_ctx_ready_1' } } } },
+        status: 200, statusText: 'OK', headers: {}, url: 'https://chat.deepseek.com/api/v0/file/upload_file'
+      } as any);
+    const getSpy = jest.spyOn((provider as any).httpClient, 'get')
+      .mockResolvedValueOnce({
+        data: { code: 0, data: { biz_data: { files: [{ file_id: 'file_ctx_ready_1', status: 'uploaded' }] } } },
+        status: 200, statusText: 'OK', headers: {}, url: 'https://chat.deepseek.com/api/v0/file/fetch_files?file_ids=file_ctx_ready_1'
+      } as any)
+      .mockResolvedValueOnce({
+        data: { code: 0, data: { biz_data: { files: [{ file_id: 'file_ctx_ready_1', status: 'processed' }] } } },
+        status: 200, statusText: 'OK', headers: {}, url: 'https://chat.deepseek.com/api/v0/file/fetch_files?file_ids=file_ctx_ready_1'
+      } as any);
+
+    const request = {
+      data: {
+        prompt: 'Continue from the latest state in the attached RCC_HISTORY.txt context.',
+        ref_file_ids: ['existing_file'],
+        thinking_enabled: false,
+        search_enabled: false,
+        metadata: {
+          deepseek: {
+            contextFile: {
+              enabled: true,
+              filename: 'RCC_HISTORY.txt',
+              content: '# RCC_HISTORY.txt\nhello\n',
+              contentType: 'text/plain; charset=utf-8'
+            }
+          }
+        }
+      }
+    };
+
+    await (provider as any).finalizeRequestHeaders({}, request);
+    const body = (provider as any).buildHttpRequestBody(request);
+
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(getSpy).toHaveBeenCalledTimes(2);
+    expect(body.ref_file_ids).toEqual(['file_ctx_ready_1', 'existing_file']);
+  });
+
+  it('fails fast when RCC_HISTORY upload fails', async () => {
+    const tokenFile = await createDeepSeekTokenFile('context-file-fail-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-context-fail'),
+      createPowResponse: jest.fn(async () => 'pow-any'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek-web',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+    jest.spyOn((provider as any).httpClient, 'post').mockResolvedValueOnce({
+      data: { code: 500, msg: 'boom' },
+      status: 500, statusText: 'ERR', headers: {}, url: 'https://chat.deepseek.com/api/v0/file/upload_file'
+    } as any);
+
+    await expect((provider as any).finalizeRequestHeaders({}, {
+      data: {
+        prompt: 'Continue from the latest state in the attached RCC_HISTORY.txt context.',
+        thinking_enabled: false,
+        search_enabled: false,
+        metadata: {
+          deepseek: {
+            contextFile: {
+              enabled: true,
+              filename: 'RCC_HISTORY.txt',
+              content: '# RCC_HISTORY.txt\nhello\n',
+              contentType: 'text/plain; charset=utf-8'
+            }
+          }
+        }
+      }
+    })).rejects.toMatchObject({ code: 'DEEPSEEK_FILE_UPLOAD_FAILED' });
   });
 });

@@ -3,7 +3,10 @@ import * as path from 'node:path';
 import { jest } from '@jest/globals';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../src/server/runtime/handlers/types.js';
 import type { HubPipeline } from '../../../src/server/runtime/http-server/types.js';
-import { HubRequestExecutor } from '../../../src/server/runtime/http-server/request-executor.js';
+import {
+  HubRequestExecutor,
+  __requestExecutorTestables
+} from '../../../src/server/runtime/http-server/request-executor.js';
 import type { ProviderRuntimeManager } from '../../../src/server/runtime/http-server/runtime-manager.js';
 import type { ProviderHandle } from '../../../src/server/runtime/http-server/types.js';
 import type { ModuleDependencies } from '../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
@@ -118,6 +121,7 @@ function createExecutor(pipelineResult: PipelineExecutionResult, handle: Provide
 
 describe('HubRequestExecutor single attempt behaviour', () => {
   const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  let convertProviderResponseSpy: ReturnType<typeof jest.spyOn> | null = null;
   const originalSnapshotDir = process.env.ROUTECODEX_SNAPSHOT_DIR;
   const originalCompatSnapshotDir = process.env.RCC_SNAPSHOT_DIR;
   const originalSnapshotsEnabled = runtimeFlags.snapshotsEnabled;
@@ -128,12 +132,17 @@ describe('HubRequestExecutor single attempt behaviour', () => {
 
   beforeEach(() => {
     warnSpy.mockClear();
+    convertProviderResponseSpy?.mockRestore();
+    convertProviderResponseSpy = null;
+    __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
     __resetSnapshotLocalDiskGateForTests();
     fs.rmSync(SESSION_DIR, { recursive: true, force: true });
     fs.mkdirSync(SESSION_DIR, { recursive: true });
   });
 
   afterAll(() => {
+    convertProviderResponseSpy?.mockRestore();
+    convertProviderResponseSpy = null;
     if (originalSnapshotDir === undefined) {
       delete process.env.ROUTECODEX_SNAPSHOT_DIR;
     } else {
@@ -161,12 +170,20 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     metadata: {}
   };
 
+  function stubConvertProviderResponse(
+    converted: PipelineExecutionResult = { status: 200, body: { output_text: 'ok' } }
+  ) {
+    convertProviderResponseSpy?.mockRestore();
+    convertProviderResponseSpy = jest
+      .spyOn(HubRequestExecutor.prototype as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValue(converted);
+    return convertProviderResponseSpy;
+  }
+
   it('invokes provider only once on success', async () => {
     const handle = createRuntimeHandle(async () => ({ ok: true }));
     const { executor, request } = createExecutor(pipelineResult, handle);
-    jest
-      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
-      .mockResolvedValue({ status: 200, body: { output_text: 'ok' } });
+    stubConvertProviderResponse();
 
     const response = await executor.execute(request);
 
@@ -186,9 +203,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     try {
       const handle = createRuntimeHandle(async () => ({ ok: true }));
       const { executor, request } = createExecutor(pipelineResult, handle);
-      jest
-        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
-        .mockResolvedValue({ status: 200, body: { output_text: 'ok' } });
+      stubConvertProviderResponse();
 
       await executor.execute(request);
       await __flushErrorsampleQueueForTests();
@@ -212,9 +227,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       return { ok: true };
     });
     const { executor, request } = createExecutor(pipelineResult, handle);
-    jest
-      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
-      .mockResolvedValue({ status: 200, body: { output_text: 'ok' } });
+    stubConvertProviderResponse();
 
     await executor.execute(request);
 
@@ -494,7 +507,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(secondCallMetadata.excludedProviderKeys).toEqual(['gemini.primary']);
   });
 
-  it('retries without excluding provider when converted response is finish_reason=stop with empty assistant payload', async () => {
+  it('fails fast without excluding provider when converted response is finish_reason=stop with empty assistant payload', async () => {
     const firstHandle = createRuntimeHandle(async () => ({ status: 200, data: { ok: true } }));
     const secondHandle = createRuntimeHandle(async () => ({ status: 200, data: { ok: true } }));
     const pipelineResultOne: PipelineExecutionResult = {
@@ -569,15 +582,15 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       metadata: { stream: false, inboundStream: false }
     };
 
-    const response = await executor.execute(request);
+    await expect(executor.execute(request)).rejects.toMatchObject({
+      code: 'EMPTY_ASSISTANT_RESPONSE',
+      statusCode: 502,
+      requestExecutorProviderErrorStage: 'host.response_contract'
+    });
 
-    expect(response).toBeDefined();
-    expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(1);
     expect(firstHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
-    expect(secondHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
-    const secondCallMetadata = fakePipeline.execute.mock.calls[1][0]
-      .metadata as Record<string, unknown>;
-    expect(secondCallMetadata.excludedProviderKeys ?? []).toEqual([]);
+    expect(secondHandle.instance.processIncoming).toHaveBeenCalledTimes(0);
   });
 
   it('writes payload-contract-error errorsample for empty assistant response by default', async () => {
@@ -733,6 +746,75 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       fs.rmSync(errorsDir, { recursive: true, force: true });
       fs.rmSync(snapshotDir, { recursive: true, force: true });
     }
+  });
+
+  it('throws missing required tool call instead of empty assistant response for non-empty reasoning-only payload', async () => {
+    const handle = createRuntimeHandle(async () => ({ status: 200, data: { ok: true } }));
+    const declaredTools = [{
+      type: 'function',
+      function: {
+        name: 'exec_command',
+        parameters: {
+          type: 'object',
+          properties: { cmd: { type: 'string' } },
+          required: ['cmd']
+        }
+      }
+    }];
+    const pipelineResult: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [{ role: 'user', content: 'retry me' }] } },
+      processedRequest: {
+        model: 'test-model',
+        messages: [{ role: 'user', content: '继续执行' }],
+        tools: declaredTools,
+        metadata: {}
+      } as any,
+      target: {
+        providerKey: 'qwenchat.aliasA',
+        providerType: 'openai',
+        outboundProfile: 'openai-chat',
+        runtimeKey: 'runtime:one',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const { executor } = createExecutor(pipelineResult, handle);
+    jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValue({
+        status: 200,
+        body: {
+          status: 'completed',
+          output_text: '',
+          output: [
+            {
+              type: 'reasoning',
+              summary: [
+                {
+                  type: 'summary_text',
+                  text: 'I have all the information I need. Let me create the hook file now.'
+                }
+              ]
+            }
+          ]
+        }
+      });
+
+    await expect(executor.execute({
+      requestId: 'req_reasoning_only_missing_tool_call',
+      entryEndpoint: '/v1/responses',
+      headers: {},
+      body: {
+        input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }],
+        tools: declaredTools
+      },
+      metadata: { stream: false, inboundStream: false }
+    })).rejects.toMatchObject({
+      code: 'MISSING_REQUIRED_TOOL_CALL',
+      statusCode: 502,
+      requestExecutorProviderErrorStage: 'host.response_contract'
+    });
   });
 
   it('logs provider-switch status/code/upstreamCode parsed from raw error text', async () => {
@@ -1469,9 +1551,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       stats
     };
     const executor = new HubRequestExecutor(deps);
-    jest
-      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
-      .mockResolvedValue({ status: 200, body: { output_text: 'ok' } });
+    stubConvertProviderResponse();
     const request: PipelineExecutionInput = {
       requestId: 'req_runtime_scope_exclude',
       entryEndpoint: '/v1/responses',
@@ -1569,9 +1649,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       stats
     };
     const executor = new HubRequestExecutor(deps);
-    jest
-      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
-      .mockResolvedValue({ status: 200, body: { output_text: 'ok' } });
+    stubConvertProviderResponse();
 
     await executor.execute({
       requestId: 'req_soft_wait_same_runtime',
@@ -1657,9 +1735,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       stats
     };
     const executor = new HubRequestExecutor(deps);
-    jest
-      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
-      .mockResolvedValue({ status: 200, body: { output_text: 'ok' } });
+    stubConvertProviderResponse();
 
     const response = await executor.execute({
       requestId: 'req_followup_root:reasoning_stop_guard',

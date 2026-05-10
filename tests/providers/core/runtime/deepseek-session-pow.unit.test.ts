@@ -63,6 +63,34 @@ describe('DeepSeekSessionPowManager', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('accepts nested biz_data.chat_session.id create-session response shape', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 0,
+            data: {
+              biz_data: {
+                chat_session: {
+                  id: 'nested-session-1'
+                }
+              }
+            }
+          }),
+          { status: 200 }
+        )
+      );
+
+    const manager = new DeepSeekSessionPowManager({
+      baseUrl: 'https://chat.deepseek.com',
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    await expect(manager.ensureChatSession({ authorization: 'Bearer token' })).resolves.toBe('nested-session-1');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('throws when solver is not configured', async () => {
     const fetchMock = jest
       .fn()

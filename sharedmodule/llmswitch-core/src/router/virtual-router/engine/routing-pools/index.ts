@@ -646,8 +646,7 @@ function isWebSearchRouteRequested(
 ): boolean {
   return (
     normalizeRouteAlias(requestedRoute || DEFAULT_ROUTE) === 'web_search' ||
-    normalizeRouteAlias(classification.routeName || DEFAULT_ROUTE) === 'web_search' ||
-    features.hasWebSearchToolDeclared === true
+    normalizeRouteAlias(classification.routeName || DEFAULT_ROUTE) === 'web_search'
   );
 }
 

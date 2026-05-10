@@ -329,6 +329,63 @@ describe('HubRequestExecutor failover', () => {
       recoverableBackoffMs: 0,
     });
 
+    const missingToolCallReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+      error: Object.assign(new Error('missing required tool call'), {
+        code: 'MISSING_REQUIRED_TOOL_CALL',
+        statusCode: 502,
+        retryable: true,
+        requestExecutorProviderErrorStage: 'host.response_contract'
+      }),
+      retryError: {
+        statusCode: 502,
+        errorCode: 'MISSING_REQUIRED_TOOL_CALL',
+        reason: 'missing required tool call'
+      },
+      fallbackStage: 'provider.send'
+    });
+    expect(missingToolCallReportPlan).toEqual({
+      errorCode: 'MISSING_REQUIRED_TOOL_CALL',
+      statusCode: 502,
+      stageHint: 'host.response_contract'
+    });
+
+    const missingToolCallExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+      error: Object.assign(new Error('missing required tool call'), {
+        code: 'MISSING_REQUIRED_TOOL_CALL',
+        statusCode: 502,
+        retryable: true,
+        requestExecutorProviderErrorStage: 'host.response_contract'
+      }),
+      retryError: {
+        statusCode: 502,
+        errorCode: 'MISSING_REQUIRED_TOOL_CALL',
+        reason: 'missing required tool call'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'host.response_contract',
+      providerKey: 'qwenchat.aliasA',
+      runtimeKey: 'runtime:one',
+      logicalRequestChainKey: 'req-missing-tool-call-host',
+      logicalChainRetryLimitStageRequestId: 'req-missing-tool-call-host',
+      routePool: ['qwenchat.aliasA', 'tab.aliasB'],
+      runtimeManager: {
+        resolveRuntimeKey: () => 'runtime:one'
+      },
+      excludedProviderKeys: new Set<string>(),
+      recordAttempt: jest.fn(),
+      logStage: () => undefined,
+      status: 502
+    });
+    expect(missingToolCallExecutionPlan).toEqual({
+      shouldRetry: false,
+      blockingRecoverable: false,
+      excludedCurrentProvider: false,
+      holdOnLastAvailable429: false,
+      retryBackoffMs: 0,
+      recoverableBackoffMs: 0,
+    });
+
     expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       status: 'completed',
       output: [
@@ -338,9 +395,7 @@ describe('HubRequestExecutor failover', () => {
         }
       ],
       reasoning: 'internal only'
-    })).toMatchObject({
-      marker: 'responses_empty_output'
-    });
+    })).toBeNull();
 
     expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       choices: [
@@ -374,6 +429,32 @@ describe('HubRequestExecutor failover', () => {
           content: 'ok'
         }
       ]
+    })).toBe(true);
+
+    expect(__requestExecutorTestables.isToolResultFollowupTurn({
+      continuation: {
+        toolContinuation: {
+          mode: 'submit_tool_outputs',
+          submittedToolCallIds: ['call_submit_1']
+        }
+      },
+      toolOutputs: [
+        {
+          tool_call_id: 'call_submit_1',
+          content: 'ok'
+        }
+      ],
+      responses: {
+        resume: {
+          restoredFromResponseId: 'resp_submit_prev_1',
+          toolOutputsDetailed: [
+            {
+              callId: 'call_submit_1',
+              outputText: 'ok'
+            }
+          ]
+        }
+      }
     })).toBe(true);
 
     expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
@@ -561,6 +642,94 @@ describe('HubRequestExecutor failover', () => {
     })).toMatchObject({
       marker: 'responses_missing_required_tool_call'
     });
+
+    const malformedToolWrapperText = `<tool_call>
+{"arguments":{"cmd":"bash -lc 'pwd'","justification":"check"}}
+</tool_call>`;
+
+    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+      __sse_responses: true,
+      __routecodex_finish_reason: 'stop',
+      __routecodex_stream_contract_probe_body: {
+        status: 'completed',
+        output_text: malformedToolWrapperText,
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [
+              {
+                type: 'output_text',
+                text: malformedToolWrapperText
+              }
+            ]
+          }
+        ]
+      }
+    }, {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      },
+      messages: [
+        {
+          role: 'user',
+          content: '继续'
+        }
+      ]
+    })).toMatchObject({
+      marker: 'responses_missing_required_tool_call'
+    });
+
+    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+      status: 'completed',
+      output_text: '当前目录是 /Users/fanzhang/Documents/github/routecodex。',
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            { type: 'output_text', text: '当前目录是 /Users/fanzhang/Documents/github/routecodex。' }
+          ]
+        }
+      ]
+    }, {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      },
+      continuation: {
+        toolContinuation: {
+          mode: 'submit_tool_outputs',
+          submittedToolCallIds: ['call_1']
+        }
+      },
+      toolOutputs: [
+        {
+          tool_call_id: 'call_1',
+          content: '/Users/fanzhang/Documents/github/routecodex\\n'
+        }
+      ],
+      responses: {
+        resume: {
+          restoredFromResponseId: 'resp_submit_prev_1',
+          toolOutputsDetailed: [
+            {
+              callId: 'call_1',
+              outputText: '/Users/fanzhang/Documents/github/routecodex\\n'
+            }
+          ]
+        }
+      }
+    })).toBeNull();
 
     expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       status: 'completed',
@@ -1925,7 +2094,7 @@ describe('HubRequestExecutor failover', () => {
 
     expect(pipeline.execute).toHaveBeenCalledTimes(2);
     const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
-    expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
+    expect(secondCallMetadata.excludedProviderKeys).toEqual([firstProviderKey]);
   });
   test('keeps blocking on singleton 429 when reroute temporarily reports provider unavailable', async () => {
     const firstProviderKey = 'glm.key1.glm-4.7';
@@ -2384,7 +2553,10 @@ describe('HubRequestExecutor failover', () => {
           outboundProfile: 'openai-chat',
           runtimeKey: firstProviderKey
         },
-        routingDecision: { routeName: 'deepseek' },
+        routingDecision: {
+          routeName: 'deepseek',
+          pool: [firstProviderKey, secondProviderKey]
+        },
         metadata: {}
       })),
       updateVirtualRouterConfig: jest.fn()
@@ -2414,6 +2586,8 @@ describe('HubRequestExecutor failover', () => {
     expect(pipeline.execute).toHaveBeenCalledTimes(2);
     expect(failingProcess).toHaveBeenCalledTimes(2);
     expect(successProcess).toHaveBeenCalledTimes(0);
+    const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
+    expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
     expect(result).toEqual(expect.objectContaining({ status: 200 }));
   });
 

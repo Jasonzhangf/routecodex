@@ -21,6 +21,9 @@ type DeepSeekSessionResponse = {
   data?: {
     biz_data?: {
       id?: string;
+      chat_session?: {
+        id?: string;
+      };
       challenge?: DeepSeekPowChallenge;
     };
   };
@@ -76,6 +79,14 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_POW_TIMEOUT_MS = 15_000;
 const DEFAULT_POW_MAX_ATTEMPTS = 2;
 const DEFAULT_SESSION_REUSE_TTL_MS = 30 * 60 * 1000;
+
+function extractDeepSeekSessionId(response: DeepSeekSessionResponse): string | undefined {
+  const directSessionId = normalizeString(response.data?.biz_data?.id);
+  if (directSessionId) {
+    return directSessionId;
+  }
+  return normalizeString(response.data?.biz_data?.chat_session?.id);
+}
 
 export class DeepSeekSessionPowManager {
   private readonly baseUrl: string;
@@ -138,7 +149,7 @@ export class DeepSeekSessionPowManager {
       DEEPSEEK_ERROR_CODES.SESSION_CREATE_FAILED
     );
 
-    const sessionId = normalizeString(response.data?.biz_data?.id);
+    const sessionId = extractDeepSeekSessionId(response);
     if (!sessionId) {
       throw createDeepSeekSessionPowError({
         code: DEEPSEEK_ERROR_CODES.SESSION_CREATE_FAILED,

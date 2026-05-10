@@ -599,8 +599,25 @@ describe('HubRequestExecutor provider error reporting', () => {
     const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
     process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
     try {
+      const declaredTools = [{
+        type: 'function',
+        function: {
+          name: 'exec_command',
+          parameters: {
+            type: 'object',
+            properties: { cmd: { type: 'string' } },
+            required: ['cmd']
+          }
+        }
+      }];
       const pipelineResult: PipelineExecutionResult = {
         providerPayload: { data: { messages: [] } },
+        processedRequest: {
+          model: 'test-model',
+          messages: [{ role: 'user', content: '继续执行' }],
+          tools: declaredTools,
+          metadata: {}
+        } as any,
         target: {
           providerKey: 'qwenchat.aliasA',
           providerType: 'openai',
@@ -624,6 +641,84 @@ describe('HubRequestExecutor provider error reporting', () => {
 
       await expect(executor.execute(request)).rejects.toMatchObject({
         code: 'EMPTY_ASSISTANT_RESPONSE',
+        statusCode: 502,
+        requestExecutorProviderErrorStage: 'host.response_contract'
+      });
+
+      expect(mockEmitProviderError).not.toHaveBeenCalled();
+    } finally {
+      if (previousMaxAttempts === undefined) {
+        delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      } else {
+        process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousMaxAttempts;
+      }
+    }
+  });
+
+  it('keeps missing required tool call host contract failures outside provider health reporting', async () => {
+    const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
+    try {
+      const declaredTools = [{
+        type: 'function',
+        function: {
+          name: 'exec_command',
+          description: 'run shell command',
+          parameters: {
+            type: 'object',
+            properties: {
+              cmd: { type: 'string' }
+            },
+            required: ['cmd']
+          }
+        }
+      }];
+      const pipelineResult: PipelineExecutionResult = {
+        providerPayload: { data: { messages: [] } },
+        processedRequest: {
+          tools: declaredTools
+        },
+        target: {
+          providerKey: 'qwenchat.aliasA',
+          providerType: 'openai',
+          outboundProfile: 'openai-chat',
+          runtimeKey: 'runtime:key',
+          processMode: 'standard'
+        },
+        processMode: 'standard',
+        metadata: {}
+      };
+      const handle = createRuntimeHandle(async () => ({ ok: true }));
+      const { executor, request } = createExecutor(pipelineResult, handle);
+      jest
+        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+        .mockResolvedValue({
+          status: 200,
+          body: {
+            status: 'completed',
+            output_text: '',
+            output: [
+              {
+                type: 'reasoning',
+                summary: [
+                  {
+                    type: 'summary_text',
+                    text: 'I have all the information I need. Let me create the hook file now.'
+                  }
+                ]
+              }
+            ]
+          }
+        });
+
+      await expect(executor.execute({
+        ...request,
+        body: {
+          input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }],
+          tools: declaredTools
+        }
+      })).rejects.toMatchObject({
+        code: 'MISSING_REQUIRED_TOOL_CALL',
         statusCode: 502,
         requestExecutorProviderErrorStage: 'host.response_contract'
       });

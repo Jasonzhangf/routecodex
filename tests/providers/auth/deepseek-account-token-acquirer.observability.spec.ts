@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { jest } from '@jest/globals';
+import { DEEPSEEK_UPSTREAM_CLIENT_VERSION } from '../../../src/providers/core/contracts/deepseek-provider-contract.js';
 
 describe('deepseek-account-token-acquirer observability', () => {
   afterEach(() => {
@@ -68,5 +69,14 @@ describe('deepseek-account-token-acquirer observability', () => {
       else process.env.HOME = prevHome;
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
+  });
+
+  it('uses the shared deepseek client version for login headers', async () => {
+    const { __deepSeekAccountTokenAcquirerTestables } = await import(
+      '../../../src/providers/auth/deepseek-account-token-acquirer.js'
+    );
+
+    const headers = __deepSeekAccountTokenAcquirerTestables.buildDeepSeekBrowserHeaders(null);
+    expect(headers['x-client-version']).toBe(DEEPSEEK_UPSTREAM_CLIENT_VERSION);
   });
 });

@@ -107,12 +107,6 @@ pub(crate) fn build_route_queue(
         }
     }
 
-    if features.has_web_search_tool_declared && route_has_targets(routing, "web_search") {
-        if !queue.iter().any(|v| v == "web_search") {
-            queue.insert(0, "web_search".to_string());
-        }
-    }
-
     let mut deduped: Vec<String> = Vec::new();
     for route in queue {
         if !route.trim().is_empty() && !deduped.contains(&route) {
@@ -203,4 +197,51 @@ pub(crate) fn default_pool_supports_capability(
 ) -> bool {
     let pools = routing.get(super::super::classifier::DEFAULT_ROUTE);
     !filter_pools_by_capability(&pools, provider_registry, capability).is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::virtual_router_engine::features::RoutingFeatures;
+    use serde_json::{Map, Value};
+
+    #[test]
+    fn declared_web_search_tool_does_not_prepend_web_search_route() {
+        let routing = parse_routing(&Map::from_iter([(
+            "web_search".to_string(),
+            Value::Array(vec![serde_json::json!({
+                "id": "web-search",
+                "priority": 100,
+                "targets": ["provider.search"]
+            })]),
+        )]));
+        let features = RoutingFeatures {
+            has_web_search_tool_declared: true,
+            ..Default::default()
+        };
+
+        let queue = build_route_queue("thinking", &["default".to_string()], &features, &routing);
+
+        assert_eq!(queue, vec!["thinking".to_string(), "default".to_string()]);
+    }
+
+    #[test]
+    fn explicit_web_search_route_is_preserved() {
+        let routing = parse_routing(&Map::from_iter([(
+            "web_search".to_string(),
+            Value::Array(vec![serde_json::json!({
+                "id": "web-search",
+                "priority": 100,
+                "targets": ["provider.search"]
+            })]),
+        )]));
+        let features = RoutingFeatures {
+            has_web_search_tool_declared: true,
+            ..Default::default()
+        };
+
+        let queue = build_route_queue("web_search", &["default".to_string()], &features, &routing);
+
+        assert_eq!(queue, vec!["web_search".to_string(), "default".to_string()]);
+    }
 }

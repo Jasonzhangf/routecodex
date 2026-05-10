@@ -4,7 +4,10 @@ import type {
   ProviderFamilyProfile,
   ResolveUserAgentInput
 } from '../profile-contracts.js';
-import { DEEPSEEK_UPSTREAM_USER_AGENT } from '../../core/contracts/deepseek-provider-contract.js';
+import {
+  DEEPSEEK_UPSTREAM_CLIENT_VERSION,
+  DEEPSEEK_UPSTREAM_USER_AGENT
+} from '../../core/contracts/deepseek-provider-contract.js';
 
 function assignHeader(headers: Record<string, string>, target: string, value: string): void {
   const normalizedValue = typeof value === 'string' ? value.trim() : '';
@@ -82,11 +85,27 @@ function resolveRequestType(request: unknown): string {
 function applyDeepSeekHeaderContract(headers: Record<string, string>, request?: unknown): Record<string, string> {
   const next = { ...headers };
 
-  // DeepSeek 可能不需要某些特定头，但保留清理逻辑
+  // DeepSeek upstream identity must stay single-source and never leak client/Codex identity.
   deleteHeaderInsensitive(next, 'x-goog-api-client');
   deleteHeaderInsensitive(next, 'client-metadata');
   deleteHeaderInsensitive(next, 'accept-encoding');
   deleteHeaderInsensitive(next, 'originator');
+  deleteHeaderInsensitive(next, 'anthropic-originator');
+  deleteHeaderInsensitive(next, 'session_id');
+  deleteHeaderInsensitive(next, 'conversation_id');
+  deleteHeaderInsensitive(next, 'anthropic-session-id');
+  deleteHeaderInsensitive(next, 'anthropic-conversation-id');
+
+  assignHeader(next, 'User-Agent', DEEPSEEK_UPSTREAM_USER_AGENT);
+  assignHeader(next, 'x-client-platform', 'android');
+  assignHeader(next, 'x-client-version', DEEPSEEK_UPSTREAM_CLIENT_VERSION);
+  assignHeader(next, 'x-client-locale', 'zh_CN');
+  assignHeader(next, 'accept-charset', 'UTF-8');
+  assignHeader(next, 'Origin', 'https://chat.deepseek.com');
+  assignHeader(next, 'Referer', 'https://chat.deepseek.com/');
+  assignHeader(next, 'Sec-Fetch-Site', 'same-origin');
+  assignHeader(next, 'Sec-Fetch-Mode', 'cors');
+  assignHeader(next, 'Sec-Fetch-Dest', 'empty');
 
   const mode = getDeepSeekHeaderMode();
   if (mode === 'minimal') {
