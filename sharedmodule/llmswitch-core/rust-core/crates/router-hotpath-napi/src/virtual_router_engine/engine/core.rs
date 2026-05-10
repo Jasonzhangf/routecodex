@@ -1,6 +1,6 @@
 use napi::Ref;
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::super::classifier::RoutingClassifier;
 use super::super::health::{ProviderHealthConfig, ProviderHealthManager};
@@ -18,6 +18,7 @@ pub(crate) struct VirtualRouterEngineCore {
     pub routing_instruction_state: HashMap<String, RoutingInstructionState>,
     pub web_search_force: bool,
     pub quota_view: Option<Ref<()>>,
+    pub(crate) concurrency_busy_keys: HashSet<String>,
 }
 
 impl VirtualRouterEngineCore {
@@ -31,6 +32,7 @@ impl VirtualRouterEngineCore {
             routing_instruction_state: HashMap::new(),
             web_search_force: false,
             quota_view: None,
+            concurrency_busy_keys: HashSet::new(),
         }
     }
 
@@ -74,5 +76,17 @@ impl VirtualRouterEngineCore {
 
     pub(crate) fn update_quota_view(&mut self, quota_view: Option<Ref<()>>) {
         self.quota_view = quota_view;
+    }
+
+    pub(crate) fn mark_concurrency_busy(&mut self, provider_key: &str) {
+        self.concurrency_busy_keys.insert(provider_key.to_string());
+    }
+
+    pub(crate) fn mark_concurrency_idle(&mut self, provider_key: &str) {
+        self.concurrency_busy_keys.remove(provider_key);
+    }
+
+    pub(crate) fn is_concurrency_busy(&self, provider_key: &str) -> bool {
+        self.concurrency_busy_keys.contains(provider_key)
     }
 }

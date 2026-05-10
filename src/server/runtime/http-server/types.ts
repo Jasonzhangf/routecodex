@@ -95,6 +95,10 @@ export interface HubPipeline {
     request: PipelineExecutionInput & { payload: Record<string, unknown> | { readable?: Readable } | Readable }
   ): Promise<HubPipelineExecutionResult>;
   updateVirtualRouterConfig(config: unknown): void;
+  getVirtualRouter?(): {
+    markProviderConcurrencyBusy(runtimeKey: string): void;
+    markProviderConcurrencyIdle(runtimeKey: string): void;
+  };
 }
 
 export type HubPipelineCtor = new (config: { virtualRouter: unknown; [key: string]: unknown }) => HubPipeline;

@@ -164,13 +164,18 @@ export function selectProviderKeyFromCandidatePool(opts: {
     healthWeightedCfg,
     contextWeightedCfg
   } = opts;
-  const selectableCandidates =
+  const nonExcluded =
     excludedKeys.size > 0
       ? candidates.filter((key) => !excludedKeys.has(key))
       : candidates;
-  if (selectableCandidates.length === 0) {
+  if (nonExcluded.length === 0) {
     return null;
   }
+  const capacityCheck = deps.isProviderAtConcurrencyCapacity;
+  const idle = capacityCheck
+    ? nonExcluded.filter((key) => !capacityCheck(key))
+    : nonExcluded;
+  const effectiveCandidates = idle.length > 0 ? idle : nonExcluded;
 
   const quotaView = deps.quotaView;
   const tierLoadBalancing = resolveTierLoadBalancing(tier, deps.loadBalancer.getPolicy());
@@ -213,14 +218,14 @@ export function selectProviderKeyFromCandidatePool(opts: {
     // Single-provider pool should never be "emptied" by health/cooldown.
     // If there's only one possible target, we must return it even if it's currently unhealthy,
     // otherwise context routing can incorrectly fall back to a smaller-context route.
-    if (selectableCandidates.length === 1) {
-      return selectableCandidates[0] ?? null;
+    if (effectiveCandidates.length === 1) {
+      return effectiveCandidates[0] ?? null;
     }
 
     // Alias-level selection strategy (config-driven).
     // Apply sticky-queue pinning per provider/model group (candidates can be mixed providers).
     const pinnedCandidates = applyAliasStickyQueuePinning({
-      candidates: selectableCandidates,
+      candidates: effectiveCandidates,
       orderedTargets: tier.targets,
       deps,
       excludedKeys
@@ -349,7 +354,7 @@ export function selectProviderKeyFromCandidatePool(opts: {
     routeName,
     tier,
     stickyKey,
-    candidates: selectableCandidates,
+    candidates: effectiveCandidates,
     isSafePool,
     deps,
     options,

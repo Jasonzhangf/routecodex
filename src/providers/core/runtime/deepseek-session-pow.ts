@@ -53,6 +53,8 @@ export interface DeepSeekSessionPowManagerOptions {
   timeoutMs?: number;
   powTimeoutMs?: number;
   powMaxAttempts?: number;
+  sessionMaxAttempts?: number;
+  sessionRetryDelayMs?: number;
   sessionReuseTtlMs?: number;
   solverPath?: string;
   wasmPath?: string;
@@ -78,6 +80,8 @@ const DEFAULT_COMPLETION_TARGET_PATH = '/api/v0/chat/completion';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_POW_TIMEOUT_MS = 15_000;
 const DEFAULT_POW_MAX_ATTEMPTS = 2;
+const DEFAULT_SESSION_MAX_ATTEMPTS = 3;
+const DEFAULT_SESSION_RETRY_DELAY_MS = 1_000;
 const DEFAULT_SESSION_REUSE_TTL_MS = 30 * 60 * 1000;
 
 function extractDeepSeekSessionId(response: DeepSeekSessionResponse): string | undefined {
@@ -96,6 +100,8 @@ export class DeepSeekSessionPowManager {
   private readonly timeoutMs: number;
   private readonly powTimeoutMs: number;
   private readonly powMaxAttempts: number;
+  private readonly sessionMaxAttempts: number;
+  private readonly sessionRetryDelayMs: number;
   private readonly sessionReuseTtlMs: number;
   private readonly solverPath?: string;
   private readonly wasmPath?: string;
@@ -114,6 +120,8 @@ export class DeepSeekSessionPowManager {
     this.timeoutMs = normalizeInteger(options.timeoutMs, DEFAULT_TIMEOUT_MS, 1_000, 300_000);
     this.powTimeoutMs = normalizeInteger(options.powTimeoutMs, DEFAULT_POW_TIMEOUT_MS, 1_000, 300_000);
     this.powMaxAttempts = normalizeInteger(options.powMaxAttempts, DEFAULT_POW_MAX_ATTEMPTS, 1, 10);
+    this.sessionMaxAttempts = normalizeInteger(options.sessionMaxAttempts, DEFAULT_SESSION_MAX_ATTEMPTS, 1, 10);
+    this.sessionRetryDelayMs = normalizeInteger(options.sessionRetryDelayMs, DEFAULT_SESSION_RETRY_DELAY_MS, 100, 60_000);
     this.sessionReuseTtlMs = normalizeInteger(
       options.sessionReuseTtlMs,
       DEFAULT_SESSION_REUSE_TTL_MS,
@@ -140,32 +148,57 @@ export class DeepSeekSessionPowManager {
       return this.cachedSession.sessionId;
     }
 
-    const response = await this.postJson(
-      this.createSessionEndpoint,
-      {
-        agent: 'chat'
-      },
-      authHeaders,
-      DEEPSEEK_ERROR_CODES.SESSION_CREATE_FAILED
-    );
+    let lastError: unknown = undefined;
 
-    const sessionId = extractDeepSeekSessionId(response);
-    if (!sessionId) {
-      throw createDeepSeekSessionPowError({
-        code: DEEPSEEK_ERROR_CODES.SESSION_CREATE_FAILED,
-        message: 'DeepSeek session create returned empty session id',
-        statusCode: 502,
-        details: {
-          response
+    for (let attempt = 1; attempt <= this.sessionMaxAttempts; attempt += 1) {
+      try {
+        const response = await this.postJson(
+          this.createSessionEndpoint,
+          { agent: 'chat' },
+          authHeaders,
+          DEEPSEEK_ERROR_CODES.SESSION_CREATE_FAILED
+        );
+
+        const sessionId = extractDeepSeekSessionId(response);
+        if (!sessionId) {
+          throw createDeepSeekSessionPowError({
+            code: DEEPSEEK_ERROR_CODES.SESSION_CREATE_FAILED,
+            message: 'DeepSeek session create returned empty session id',
+            statusCode: 502,
+            details: { response }
+          });
         }
-      });
+
+        this.cachedSession = {
+          sessionId,
+          expiresAt: now + this.sessionReuseTtlMs
+        };
+        return sessionId;
+      } catch (error) {
+        lastError = error;
+        if (attempt < this.sessionMaxAttempts) {
+          this.log('deepseek-session-retry', {
+            attempt,
+            maxAttempts: this.sessionMaxAttempts,
+            message: error instanceof Error ? error.message : String(error)
+          });
+          await this.delay(this.sessionRetryDelayMs);
+        }
+      }
     }
 
-    this.cachedSession = {
-      sessionId,
-      expiresAt: now + this.sessionReuseTtlMs
-    };
-    return sessionId;
+    if (lastError instanceof Error && (lastError as DeepSeekSessionPowError).code) {
+      throw lastError;
+    }
+
+    throw createDeepSeekSessionPowError({
+      code: DEEPSEEK_ERROR_CODES.SESSION_CREATE_FAILED,
+      message: `DeepSeek session create failed after ${this.sessionMaxAttempts} attempts`,
+      statusCode: 502,
+      details: {
+        error: lastError instanceof Error ? lastError.message : String(lastError)
+      }
+    });
   }
 
   async createPowResponse(authHeaders: Record<string, string>, targetPath?: string): Promise<string> {
@@ -502,6 +535,10 @@ export class DeepSeekSessionPowManager {
   private joinUrl(endpoint: string): string {
     const suffix = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
     return `${this.baseUrl}${suffix}`;
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise<void>((resolve) => setTimeout(resolve, ms));
   }
 
   private log(stage: string, details?: Record<string, unknown>): void {

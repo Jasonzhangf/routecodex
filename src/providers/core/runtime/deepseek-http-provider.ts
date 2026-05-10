@@ -412,7 +412,7 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
     }
   }
 
-  private buildDeepSeekBrowserHeaders(fingerprint: CamoufoxFingerprintSnapshot | null): Record<string, string> {
+  private buildDeepSeekBrowserHeaders(_fingerprint: CamoufoxFingerprintSnapshot | null): Record<string, string> {
     const clientPlatform = 'android';
 
     return {
@@ -422,10 +422,7 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
       'x-client-locale': 'zh_CN',
       'accept-charset': 'UTF-8',
       Origin: 'https://chat.deepseek.com',
-      Referer: 'https://chat.deepseek.com/',
-      'Sec-Fetch-Site': 'same-origin',
-      'Sec-Fetch-Mode': 'cors',
-      'Sec-Fetch-Dest': 'empty'
+      Referer: 'https://chat.deepseek.com/'
     };
   }
 }

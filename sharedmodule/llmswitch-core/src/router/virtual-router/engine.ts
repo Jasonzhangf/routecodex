@@ -99,6 +99,14 @@ export class VirtualRouterEngine {
     this.nativeProxy.clearProviderCooldown(providerKey);
   }
 
+  markProviderConcurrencyBusy(providerKey: string): void {
+    this.nativeProxy.markProviderConcurrencyBusy?.(providerKey);
+  }
+
+  markProviderConcurrencyIdle(providerKey: string): void {
+    this.nativeProxy.markProviderConcurrencyIdle?.(providerKey);
+  }
+
   route(
     request: StandardizedRequest | ProcessedRequest,
     metadata: RouterMetadataInput

@@ -15,6 +15,7 @@ export type SelectionDeps = {
   resolveStickyKey: (metadata: RouterMetadataInput) => string | undefined;
   quotaView?: ProviderQuotaView;
   aliasQueueStore?: Map<string, string[]>;
+  isProviderAtConcurrencyCapacity?: (providerKey: string) => boolean;
 };
 
 export type TrySelectFromTierOptions = {

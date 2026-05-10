@@ -14,6 +14,8 @@ export interface NativeVirtualRouterEngineProxy {
   handleProviderError(eventJson: string): void;
   handleProviderSuccess(eventJson: string): void;
   getStatus(): string;
+  markProviderConcurrencyBusy?(providerKey: string): void;
+  markProviderConcurrencyIdle?(providerKey: string): void;
 }
 
 type ProxyConstructor = new (engine?: object) => NativeVirtualRouterEngineProxy;

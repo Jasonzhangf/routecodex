@@ -105,14 +105,27 @@ function extractDeepSeekWebErrorInfo(payload: unknown): DeepSeekWebErrorInfo | n
     return null;
   }
 
+  const path = readTrimmed(row.p);
+  const op = readTrimmed(row.o).toUpperCase();
+  const type = readTrimmed(row.type).toLowerCase();
+
+  if (type !== 'error' && path !== 'response/error' && op !== 'ERROR') {
+    if (path === 'response/status' && typeof row.v === 'string') {
+      const sv = (row.v as string).trim().toUpperCase();
+      if (!sv || sv === 'FINISHED') {
+        return null;
+      }
+    } else {
+      return null;
+    }
+  }
+
   const directError = asRecord(row.error);
   const valueNode = asRecord(row.v);
+  const value = row.v;
   const responseNode = asRecord(valueNode?.response) || asRecord(row.response);
   const responseError = asRecord(responseNode?.error);
   const responseStatus = readTrimmed(responseNode?.status);
-  const path = readTrimmed(row.p);
-  const op = readTrimmed(row.o);
-  const value = row.v;
   const valueRecord = asRecord(value);
 
   const topLevelMessage =
@@ -154,10 +167,7 @@ function extractDeepSeekWebErrorInfo(payload: unknown): DeepSeekWebErrorInfo | n
     status: rawStatus
   });
 
-  const explicitErrorLike =
-    readTrimmed(row.type).toLowerCase() === 'error'
-    || path === 'response/error'
-    || op.toUpperCase() === 'ERROR';
+  const explicitErrorLike = type === 'error' || path === 'response/error' || op === 'ERROR';
   const failedStatusLike = ['FAILED', 'ERROR', 'REJECTED', 'ABORTED', 'CANCELLED'].includes(rawStatus.toUpperCase());
   const contextLengthLike = includesContextLengthHint(rawMessage) || includesContextLengthHint(rawCode) || finishReason === 'context_length_exceeded';
 
@@ -228,6 +238,18 @@ function resolveDeepSeekFragmentTarget(fragmentType: unknown): DeepSeekPatchAppe
     return 'reasoning';
   }
   return 'content';
+}
+
+function isDeepSeekFragmentStatusPath(path: string): boolean {
+  if (!path.startsWith('response/fragments/') || !path.endsWith('/status')) {
+    return false;
+  }
+  const middle = path.slice('response/fragments/'.length, path.length - '/status'.length).trim();
+  if (!middle) {
+    return false;
+  }
+  const normalized = middle.startsWith('-') ? middle.slice(1) : middle;
+  return normalized.length > 0 && /^[0-9]+$/.test(normalized);
 }
 
 function analyzeDeepSeekWebPayload(
@@ -366,26 +388,24 @@ export class ChatSseToJsonConverter {
   private async *ensureEventStream(
     source: AsyncIterable<ChatSseEvent> | AsyncIterable<string | Buffer>
   ): AsyncGenerator<ChatSseEvent> {
-    let textBuffer = '';
+    let tailBuffer = '';
 
     for await (const chunk of source) {
       if (typeof chunk === 'string' || Buffer.isBuffer(chunk)) {
-        const normalizedChunk = (typeof chunk === 'string' ? chunk : chunk.toString())
-          .replace(/\r\n/g, '\n');
-        textBuffer += normalizedChunk;
+        const raw = typeof chunk === 'string' ? chunk : chunk.toString();
+        const normalized = raw.replace(/\r\n/g, '\n');
+        const combined = tailBuffer + normalized;
+        const segments = combined.split('\n\n');
+        tailBuffer = segments.pop() ?? '';
 
-        let delimiterIndex = textBuffer.indexOf('\n\n');
-        while (delimiterIndex !== -1) {
-          const rawEvent = textBuffer.slice(0, delimiterIndex);
-          textBuffer = textBuffer.slice(delimiterIndex + 2);
-          const trimmed = rawEvent.trim();
+        for (const segment of segments) {
+          const trimmed = segment.trim();
           if (trimmed) {
             const parsed = this.parseSseChunk(trimmed);
             if (parsed) {
               yield parsed;
             }
           }
-          delimiterIndex = textBuffer.indexOf('\n\n');
         }
       } else if ((chunk as ChatSseEvent)?.event) {
         yield chunk as ChatSseEvent;
@@ -398,7 +418,7 @@ export class ChatSseToJsonConverter {
       }
     }
 
-    const trailing = textBuffer.trim();
+    const trailing = tailBuffer.trim();
     if (trailing) {
       const parsed = this.parseSseChunk(trailing);
       if (parsed) {
@@ -507,8 +527,9 @@ export class ChatSseToJsonConverter {
       data: dataValue,
       protocol: 'chat',
       direction: 'sse_to_json',
-      parsedData
-    };
+      parsedData,
+      _errorInfo: deepseekErrorInfo
+    } as ChatSseEvent & { _errorInfo?: DeepSeekWebErrorInfo | null };
   }
 
   /**
@@ -600,33 +621,32 @@ export class ChatSseToJsonConverter {
     context: SseToChatJsonContext
   ): Promise<void> {
     try {
-      const payload = typeof event.data === 'string' ? event.data : JSON.stringify(event.data ?? {});
       const parsedEntries = event.parsedData !== undefined
         ? [event.parsedData]
-        : this.parseChatChunkPayload(payload);
+        : [JSON.parse(typeof event.data === 'string' ? event.data : '{}')];
 
       for (const parsed of parsedEntries) {
         const parsedRecord = asRecord(parsed);
         const deepseekState = this.getDeepSeekPatchState(context);
-        const deepseekAnalysis = analyzeDeepSeekWebPayload(parsedRecord, Boolean(deepseekState.patchAppendTarget));
-        const deepseekErrorInfo = deepseekAnalysis?.errorInfo;
-        if (deepseekErrorInfo) {
-          const typedError = new Error(deepseekErrorInfo.message) as Error & { code?: string };
-          typedError.code = deepseekErrorInfo.code;
+        const cachedErrorInfo = (event as unknown as Record<string, unknown>)._errorInfo as DeepSeekWebErrorInfo | null | undefined;
+        if (cachedErrorInfo) {
+          const typedError = new Error(cachedErrorInfo.message) as Error & { code?: string };
+          typedError.code = cachedErrorInfo.code;
           throw ErrorUtils.createError(
             typedError.message,
             CHAT_CONVERSION_ERROR_CODES.STREAM_ERROR,
             {
               errorData: {
-                ...deepseekErrorInfo.raw,
-                code: deepseekErrorInfo.code,
-                finish_reason: deepseekErrorInfo.finishReason,
-                message: deepseekErrorInfo.message
+                ...cachedErrorInfo.raw,
+                code: cachedErrorInfo.code,
+                finish_reason: cachedErrorInfo.finishReason,
+                message: cachedErrorInfo.message
               },
               parsed
             }
           );
         }
+        const deepseekAnalysis = analyzeDeepSeekWebPayload(parsedRecord, Boolean(deepseekState.patchAppendTarget));
         if (this.tryProcessDeepSeekWebPatchEvent(parsed, context, deepseekAnalysis)) {
           continue;
         }
@@ -730,6 +750,30 @@ export class ChatSseToJsonConverter {
       return false;
     }
     const { path, op, value } = resolvedAnalysis;
+
+    if (path === 'response/accumulated_token_usage' && typeof value === 'number') {
+      context.eventStats.totalTokens = value;
+      return true;
+    }
+
+    if (isDeepSeekFragmentStatusPath(path)) {
+      return true;
+    }
+
+    if (path === 'response/status' && typeof value === 'string') {
+      const normalizedStatus = value.trim().toUpperCase();
+      if (normalizedStatus !== 'FINISHED') {
+        return true;
+      }
+      context.isCompleted = true;
+      const existingChoice = context.choiceIndexMap.get(0);
+      if (existingChoice) {
+        deepseekState.patchAppendTarget = undefined;
+        existingChoice.finishReason = 'stop';
+        existingChoice.isCompleted = true;
+      }
+      return true;
+    }
 
     if (!context.currentResponse.id) {
       context.currentResponse.id = `chat_${context.requestId}`;
@@ -846,9 +890,6 @@ export class ChatSseToJsonConverter {
       }
     }
 
-    if (path === 'response/accumulated_token_usage' && typeof value === 'number') {
-      context.eventStats.totalTokens = value;
-    }
     if (path === 'response/status' && typeof value === 'string' && value.toUpperCase() === 'FINISHED') {
       deepseekState.patchAppendTarget = undefined;
       choiceBuilder.finishReason = 'stop';
@@ -856,7 +897,6 @@ export class ChatSseToJsonConverter {
       context.isCompleted = true;
     }
 
-    this.updateResponseChoice(0, choiceBuilder, context);
     return true;
   }
 
@@ -1297,6 +1337,10 @@ export class ChatSseToJsonConverter {
    * 完成响应构建
    */
   private finalizeResponse(context: SseToChatJsonContext): ChatCompletionResponse {
+    for (const [choiceIndex, choiceBuilder] of context.choiceIndexMap.entries()) {
+      this.updateResponseChoice(choiceIndex, choiceBuilder, context);
+    }
+
     const choices = context.currentResponse.choices || [];
 
     // 确保所有choices都已完成

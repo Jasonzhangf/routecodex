@@ -62,6 +62,10 @@ export class HubPipeline {
     disposeHubPipelineRuntime(this);
   }
 
+  getVirtualRouter(): VirtualRouterEngine {
+    return this.routerEngine;
+  }
+
   async execute(request: HubPipelineRequest): Promise<HubPipelineResult> {
     return executeHubPipeline({
       request,

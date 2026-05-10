@@ -1,36 +1,36 @@
 {
-  "generatedAt": "2026-05-10T07:50:21.957Z",
+  "generatedAt": "2026-05-10T16:12:43.611Z",
   "scope": "sharedmodule/llmswitch-core/src",
   "metrics": {
     "prodTsFileCount": 679,
-    "prodTsLocTotal": 107813,
-    "nonNativeFileCount": 390,
-    "nonNativeLocTotal": 66326
+    "prodTsLocTotal": 107958,
+    "nonNativeFileCount": 389,
+    "nonNativeLocTotal": 66334
   },
   "byTopDir": {
     "conversion": {
       "prodTsFiles": 326,
-      "prodTsLoc": 32673,
-      "nonNativeFiles": 134,
-      "nonNativeLoc": 12622
+      "prodTsLoc": 32727,
+      "nonNativeFiles": 133,
+      "nonNativeLoc": 12550
     },
     "router": {
       "prodTsFiles": 151,
-      "prodTsLoc": 31903,
+      "prodTsLoc": 31920,
       "nonNativeFiles": 70,
-      "nonNativeLoc": 13729
+      "nonNativeLoc": 13735
     },
     "servertool": {
       "prodTsFiles": 99,
-      "prodTsLoc": 20489,
+      "prodTsLoc": 20505,
       "nonNativeFiles": 86,
-      "nonNativeLoc": 17839
+      "nonNativeLoc": 17855
     },
     "sse": {
       "prodTsFiles": 44,
-      "prodTsLoc": 13876,
+      "prodTsLoc": 13934,
       "nonNativeFiles": 43,
-      "nonNativeLoc": 13499
+      "nonNativeLoc": 13557
     },
     "tools": {
       "prodTsFiles": 25,
@@ -762,7 +762,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage-provider-payload.ts",
-      "loc": 114,
+      "loc": 120,
       "nativeLinked": false,
       "topDir": "conversion"
     },
@@ -780,7 +780,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-heavy-input-captured-request.ts",
-      "loc": 53,
+      "loc": 69,
       "nativeLinked": false,
       "topDir": "conversion"
     },
@@ -888,7 +888,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-provider-payload-orchestration-blocks.ts",
-      "loc": 101,
+      "loc": 107,
       "nativeLinked": false,
       "topDir": "conversion"
     },
@@ -912,7 +912,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-provider-payload-result-blocks.ts",
-      "loc": 37,
+      "loc": 42,
       "nativeLinked": false,
       "topDir": "conversion"
     },
@@ -972,7 +972,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-route-and-outbound-payload-blocks.ts",
-      "loc": 77,
+      "loc": 79,
       "nativeLinked": false,
       "topDir": "conversion"
     },
@@ -1068,7 +1068,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts",
-      "loc": 74,
+      "loc": 78,
       "nativeLinked": false,
       "topDir": "conversion"
     },
@@ -1122,8 +1122,8 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts",
-      "loc": 120,
-      "nativeLinked": false,
+      "loc": 110,
+      "nativeLinked": true,
       "topDir": "conversion"
     },
     {
@@ -1176,7 +1176,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage3_context_capture/responses-context-snapshot.ts",
-      "loc": 58,
+      "loc": 59,
       "nativeLinked": true,
       "topDir": "conversion"
     },
@@ -1410,7 +1410,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-media.ts",
-      "loc": 32,
+      "loc": 39,
       "nativeLinked": true,
       "topDir": "conversion"
     },
@@ -1518,7 +1518,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts",
-      "loc": 662,
+      "loc": 667,
       "nativeLinked": true,
       "topDir": "conversion"
     },
@@ -1932,19 +1932,19 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.ts",
-      "loc": 121,
+      "loc": 124,
       "nativeLinked": true,
       "topDir": "conversion"
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-types.ts",
-      "loc": 44,
+      "loc": 47,
       "nativeLinked": false,
       "topDir": "conversion"
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts",
-      "loc": 404,
+      "loc": 410,
       "nativeLinked": false,
       "topDir": "conversion"
     },
@@ -2622,7 +2622,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.ts",
-      "loc": 371,
+      "loc": 374,
       "nativeLinked": true,
       "topDir": "router"
     },
@@ -2874,7 +2874,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/selection-deps.ts",
-      "loc": 40,
+      "loc": 41,
       "nativeLinked": false,
       "topDir": "router"
     },
@@ -2904,7 +2904,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/tier-selection-select.ts",
-      "loc": 377,
+      "loc": 382,
       "nativeLinked": false,
       "topDir": "router"
     },
@@ -2916,7 +2916,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/router/virtual-router/engine.ts",
-      "loc": 407,
+      "loc": 415,
       "nativeLinked": true,
       "topDir": "router"
     },
@@ -3198,7 +3198,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/servertool/clock/paths.ts",
-      "loc": 35,
+      "loc": 51,
       "nativeLinked": false,
       "topDir": "servertool"
     },
@@ -3798,7 +3798,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts",
-      "loc": 398,
+      "loc": 410,
       "nativeLinked": false,
       "topDir": "sse"
     },
@@ -3918,19 +3918,19 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/anthropic-response-builder.ts",
-      "loc": 276,
+      "loc": 258,
       "nativeLinked": false,
       "topDir": "sse"
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts",
-      "loc": 1259,
+      "loc": 1276,
       "nativeLinked": false,
       "topDir": "sse"
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts",
-      "loc": 1480,
+      "loc": 1524,
       "nativeLinked": false,
       "topDir": "sse"
     },
@@ -3954,7 +3954,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts",
-      "loc": 450,
+      "loc": 456,
       "nativeLinked": false,
       "topDir": "sse"
     },
@@ -3966,7 +3966,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/types/chat-types.ts",
-      "loc": 429,
+      "loc": 428,
       "nativeLinked": false,
       "topDir": "sse"
     },
@@ -3996,7 +3996,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/types/responses-types.ts",
-      "loc": 452,
+      "loc": 450,
       "nativeLinked": false,
       "topDir": "sse"
     },

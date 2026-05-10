@@ -311,6 +311,15 @@ export class HubRequestExecutor implements RequestExecutor {
       return;
     }
     this.trafficGovernor = getSharedProviderTrafficGovernor();
+    this.trafficGovernor.setConcurrencyBusyCallback?.((runtimeKey, busy) => {
+      try {
+        const vr = this.deps.getHubPipeline()?.getVirtualRouter?.();
+        if (vr) {
+          if (busy) vr.markProviderConcurrencyBusy(runtimeKey);
+          else vr.markProviderConcurrencyIdle(runtimeKey);
+        }
+      } catch { /* non-blocking */ }
+    });
   }
 
   private logProviderRetrySwitch(args: {

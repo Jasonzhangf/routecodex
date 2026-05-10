@@ -451,6 +451,9 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn is_provider_available(&mut self, env: Env, provider_key: &str) -> bool {
+        if self.is_concurrency_busy(provider_key) {
+            return false;
+        }
         if let Some(profile) = self.provider_registry.get(provider_key) {
             if !profile.enabled {
                 return false;

@@ -179,6 +179,20 @@ impl VirtualRouterEngineProxy {
         core.health_manager.record_success(&provider_key);
         Ok(())
     }
+
+    #[napi]
+    pub fn mark_provider_concurrency_busy(&self, provider_key: String) -> NapiResult<()> {
+        let mut core = self.core.lock().expect("core lock");
+        core.mark_concurrency_busy(&provider_key);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn mark_provider_concurrency_idle(&self, provider_key: String) -> NapiResult<()> {
+        let mut core = self.core.lock().expect("core lock");
+        core.mark_concurrency_idle(&provider_key);
+        Ok(())
+    }
 }
 
 fn resolve_runtime_path_overrides(metadata: &Value) -> RuntimePathOverrides {

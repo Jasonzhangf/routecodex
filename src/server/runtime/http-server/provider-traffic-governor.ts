@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import fssync from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -90,6 +91,9 @@ export interface ProviderTrafficGovernorLike {
     softWaitTimeoutMs?: number;
   }): Promise<ProviderTrafficAcquireResult>;
   release(permit: ProviderTrafficPermit): Promise<{ released: boolean; activeInFlight: number }>;
+  isProviderAtConcurrencyCapacity(runtimeKey: string, runtime: ProviderRuntimeProfile): Promise<boolean>;
+  isProviderAtConcurrencyCapacitySync(runtimeKey: string, runtime: ProviderRuntimeProfile): boolean;
+  setConcurrencyBusyCallback?(cb: ((runtimeKey: string, busy: boolean) => void) | null): void;
   observeOutcome?(event: ProviderTrafficOutcomeEvent): Promise<void>;
 }
 
@@ -490,6 +494,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
   private adaptiveLoadPromise: Promise<void> | null = null;
   private adaptiveWritePromise: Promise<void> | null = null;
   private adaptiveWriteTimer: NodeJS.Timeout | null = null;
+  private concurrencyBusyCallback: ((runtimeKey: string, busy: boolean) => void) | null = null;
 
   constructor(rootDir?: string) {
     const jestWorker = clampPositiveInt(process.env.JEST_WORKER_ID);
@@ -946,6 +951,10 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     return path.join(this.lockDir, `${stateKey}.lock`);
   }
 
+  setConcurrencyBusyCallback(cb: ((runtimeKey: string, busy: boolean) => void) | null): void {
+    this.concurrencyBusyCallback = cb;
+  }
+
   private getStateFile(stateKey: string): string {
     return path.join(this.stateDir, `${stateKey}.json`);
   }
@@ -1185,6 +1194,10 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
               adaptiveState.updatedAtMs = now;
             }
             const waitedMs = Math.max(0, now - startedAt);
+            const newInFlight = activeInFlight + 1;
+            if (newInFlight >= policy.concurrency.maxInFlight && this.concurrencyBusyCallback) {
+              this.concurrencyBusyCallback(runtimeKey, true);
+            }
             return {
               permit: {
                 runtimeKey,
@@ -1195,7 +1208,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
               },
               policy,
               waitedMs,
-              activeInFlight: activeInFlight + 1,
+              activeInFlight: newInFlight,
               rpmInWindow: rpmInWindow + 1
             };
           }
@@ -1316,12 +1329,43 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
       const released = state.leases.length < before;
       state.updatedAt = now;
       await writeTrafficState(stateFile, state);
+      const remaining = state.leases.length;
+      if (released && remaining <= 0 && this.concurrencyBusyCallback) {
+        this.concurrencyBusyCallback(runtimeKey, false);
+      }
       return {
         released,
-        activeInFlight: state.leases.length
+        activeInFlight: remaining
       };
     } finally {
       await lock.release();
+    }
+  }
+
+  async isProviderAtConcurrencyCapacity(
+    runtimeKey: string,
+    runtime: ProviderRuntimeProfile
+  ): Promise<boolean> {
+    return this.isProviderAtConcurrencyCapacitySync(runtimeKey, runtime);
+  }
+
+  isProviderAtConcurrencyCapacitySync(
+    runtimeKey: string,
+    runtime: ProviderRuntimeProfile
+  ): boolean {
+    const normalizedKey = runtimeKey.trim();
+    if (!normalizedKey) return false;
+    const policy = resolveProviderTrafficPolicy(runtime, undefined);
+    const stateKey = toStateKey(normalizedKey);
+    const stateFile = this.getStateFile(stateKey);
+    try {
+      const raw = fssync.readFileSync(stateFile, 'utf8');
+      const state = JSON.parse(raw) as ProviderTrafficState | null;
+      if (!state || !Array.isArray(state.leases)) return false;
+      const pruned = this.pruneState(state, Date.now(), policy);
+      return pruned.leases.length >= policy.concurrency.maxInFlight;
+    } catch {
+      return false;
     }
   }
 
@@ -1403,6 +1447,9 @@ export function createNoopProviderTrafficGovernor(): ProviderTrafficGovernorLike
         activeInFlight: 0
       };
     },
+    async isProviderAtConcurrencyCapacity() { return false; },
+    isProviderAtConcurrencyCapacitySync() { return false; },
+    setConcurrencyBusyCallback() {},
     async observeOutcome() {
       return;
     }
