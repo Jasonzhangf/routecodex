@@ -23,6 +23,7 @@ type TrafficLease = {
   leaseId: string;
   requestId: string;
   pid: number;
+  serverId: string;
   startedAt: number;
   expiresAt: number;
 };
@@ -293,6 +294,32 @@ function isProcessAlive(pid: number | undefined): boolean {
   }
 }
 
+function resolveProviderTrafficServerId(): string {
+  const explicit = [
+    process.env.ROUTECODEX_SERVER_ID,
+    process.env.RCC_SERVER_ID,
+    process.env.ROUTECODEX_CANONICAL_SERVER_ID,
+    process.env.RCC_CANONICAL_SERVER_ID
+  ].find((value) => typeof value === 'string' && value.trim());
+  if (explicit && explicit.trim()) {
+    return explicit.trim();
+  }
+  return `pid-${process.pid}`;
+}
+
+function isLeaseAlive(lease: TrafficLease, currentServerId: string): boolean {
+  if (!Number.isFinite(lease.pid) || lease.pid <= 0) {
+    return false;
+  }
+  if (typeof lease.serverId !== 'string' || !lease.serverId.trim()) {
+    return false;
+  }
+  if (lease.serverId.trim() !== currentServerId) {
+    return true;
+  }
+  return isProcessAlive(lease.pid);
+}
+
 export function resolveProviderTrafficPolicy(
   runtime: ProviderRuntimeProfile,
   _providerKey?: string
@@ -339,11 +366,12 @@ async function readTrafficState(filePath: string): Promise<ProviderTrafficState>
               leaseId: typeof value.leaseId === 'string' ? value.leaseId : '',
               requestId: typeof value.requestId === 'string' ? value.requestId : '',
               pid: clampPositiveInt(value.pid) ?? 0,
+              serverId: typeof value.serverId === 'string' ? value.serverId.trim() : '',
               startedAt: clampPositiveInt(value.startedAt) ?? 0,
               expiresAt: clampPositiveInt(value.expiresAt) ?? 0
             } satisfies TrafficLease;
           })
-          .filter((entry) => entry.leaseId && entry.requestId && entry.pid > 0 && entry.startedAt > 0 && entry.expiresAt > 0)
+          .filter((entry) => entry.leaseId && entry.requestId && entry.pid > 0 && entry.serverId && entry.startedAt > 0 && entry.expiresAt > 0)
       : [];
     const rpmEvents = Array.isArray(record.rpmEvents)
       ? record.rpmEvents
@@ -380,7 +408,7 @@ async function writeTrafficState(filePath: string, state: ProviderTrafficState):
   await fs.rename(tempPath, filePath);
 }
 
-async function tryReadLockMeta(lockFile: string): Promise<{ pid?: number; createdAt?: number }> {
+async function tryReadLockMeta(lockFile: string): Promise<{ pid?: number; createdAt?: number; serverId?: string }> {
   try {
     const raw = await fs.readFile(lockFile, 'utf8');
     const parsed = raw.trim() ? (JSON.parse(raw) as unknown) : {};
@@ -390,16 +418,19 @@ async function tryReadLockMeta(lockFile: string): Promise<{ pid?: number; create
     const record = parsed as Record<string, unknown>;
     return {
       pid: clampPositiveInt(record.pid),
-      createdAt: clampPositiveInt(record.createdAt)
+      createdAt: clampPositiveInt(record.createdAt),
+      serverId: typeof record.serverId === 'string' ? record.serverId.trim() : undefined
     };
   } catch {
     return {};
   }
 }
 
-function hasValidLockMeta(meta: { pid?: number; createdAt?: number }): boolean {
+function hasValidLockMeta(meta: { pid?: number; createdAt?: number; serverId?: string }): boolean {
   return Number.isFinite(meta.pid) && (meta.pid as number) > 0
-    && Number.isFinite(meta.createdAt) && (meta.createdAt as number) > 0;
+    && Number.isFinite(meta.createdAt) && (meta.createdAt as number) > 0
+    && typeof meta.serverId === 'string'
+    && meta.serverId.trim().length > 0;
 }
 
 export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
@@ -411,6 +442,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
   private readonly adaptiveHardMax: number;
   private readonly adaptiveHardMultiplier: number;
   private readonly adaptiveStateByRuntime = new Map<string, AdaptiveRuntimeState>();
+  private readonly serverId: string;
   private readonly waiterStateByRuntime = new Map<string, { activeWaiters: number; updatedAtMs: number }>();
   private ensureDirsPromise: Promise<void> | null = null;
   private adaptiveLoadPromise: Promise<void> | null = null;
@@ -422,9 +454,14 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     const testScopedRoot = jestWorker
       ? path.join(resolveRccStateDir(), 'provider-traffic-test', `worker-${jestWorker}`, `pid-${process.pid}`)
       : undefined;
-    const sharedNamespaceEnabled =
-      process.env.ROUTECODEX_PROVIDER_TRAFFIC_SHARED === '1'
-      || process.env.RCC_PROVIDER_TRAFFIC_SHARED === '1';
+    const sharedNamespaceEnabled = (() => {
+      const raw = String(
+        process.env.ROUTECODEX_PROVIDER_TRAFFIC_SHARED
+          ?? process.env.RCC_PROVIDER_TRAFFIC_SHARED
+          ?? '1'
+      ).trim().toLowerCase();
+      return !(raw === '0' || raw === 'false' || raw === 'off' || raw === 'no');
+    })();
     const defaultRoot = sharedNamespaceEnabled
       ? path.join(resolveRccStateDir(), 'provider-traffic')
       : path.join(resolveRccStateDir(), 'provider-traffic', PROVIDER_TRAFFIC_RUN_NAMESPACE);
@@ -432,6 +469,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
       ? path.resolve(rootDir)
       : (testScopedRoot ?? defaultRoot);
     this.rootDir = base;
+    this.serverId = resolveProviderTrafficServerId();
     this.lockDir = path.join(base, 'locks');
     this.stateDir = path.join(base, 'state');
     this.adaptiveEnabled = (() => {
@@ -904,10 +942,10 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
         const state = await readTrafficState(stateFile);
         const removedRequestIds = new Set(
           state.leases
-            .filter((lease) => lease.pid === process.pid)
+            .filter((lease) => lease.pid === process.pid && lease.serverId === this.serverId)
             .map((lease) => lease.requestId)
         );
-        const nextLeases = state.leases.filter((lease) => lease.pid !== process.pid);
+        const nextLeases = state.leases.filter((lease) => !(lease.pid === process.pid && lease.serverId === this.serverId));
         const nextRpmEvents = state.rpmEvents.filter((event) => !removedRequestIds.has(event.requestId));
         const leaseDelta = Math.max(0, state.leases.length - nextLeases.length);
         const rpmDelta = Math.max(0, state.rpmEvents.length - nextRpmEvents.length);
@@ -978,7 +1016,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
         }
         const createdAt = meta.createdAt ?? 0;
         const lockAgeMs = createdAt > 0 ? now - createdAt : 0;
-        const stale = lockAgeMs > LOCK_STALE_MS || !isProcessAlive(meta.pid);
+        const stale = lockAgeMs > LOCK_STALE_MS || !isLeaseAlive({ leaseId: '', requestId: '', pid: meta.pid ?? 0, serverId: meta.serverId ?? '', startedAt: meta.createdAt ?? 0, expiresAt: Number.MAX_SAFE_INTEGER }, this.serverId);
         if (stale) {
           try {
             await fs.unlink(lockFile);
@@ -1009,7 +1047,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
       if (lease.expiresAt <= now) {
         return false;
       }
-      if (!isProcessAlive(lease.pid)) {
+      if (!isLeaseAlive(lease, this.serverId)) {
         return false;
       }
       return true;
@@ -1087,6 +1125,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
               leaseId,
               requestId,
               pid: process.pid,
+              serverId: this.serverId,
               startedAt: now,
               expiresAt: now + policy.concurrency.staleLeaseMs
             });

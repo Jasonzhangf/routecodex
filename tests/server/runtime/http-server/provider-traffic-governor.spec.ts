@@ -113,6 +113,66 @@ describe('provider-traffic-governor', () => {
     expect(policy.rpm.acquireTimeoutMs).toBe(23000);
   });
 
+  it('defaults to shared provider-traffic root outside test workers', async () => {
+    const prevShared = process.env.ROUTECODEX_PROVIDER_TRAFFIC_SHARED;
+    const prevServerId = process.env.ROUTECODEX_SERVER_ID;
+    delete process.env.ROUTECODEX_PROVIDER_TRAFFIC_SHARED;
+    process.env.ROUTECODEX_SERVER_ID = 'host-a:10000';
+    const governor = new ProviderTrafficGovernor();
+    const runtime = createRuntime({
+      runtimeKey: 'deepseek-web.berg',
+      providerId: 'deepseek-web',
+      providerFamily: 'deepseek-web',
+      concurrency: { maxInFlight: 1, acquireTimeoutMs: 500, staleLeaseMs: 60000 },
+      rpm: { requestsPerMinute: 60, acquireTimeoutMs: 500 }
+    });
+    const acquired = await governor.acquire({
+      runtimeKey: runtime.runtimeKey,
+      providerKey: 'deepseek-web.berg.deepseek-v4-pro',
+      requestId: 'shared-root-check',
+      runtime
+    });
+    const stateKey = encodeURIComponent(runtime.runtimeKey);
+    expect(acquired.permit.stateKey).toBe(stateKey);
+    await governor.release(acquired.permit);
+    if (typeof prevShared === 'string') process.env.ROUTECODEX_PROVIDER_TRAFFIC_SHARED = prevShared; else delete process.env.ROUTECODEX_PROVIDER_TRAFFIC_SHARED;
+    if (typeof prevServerId === 'string') process.env.ROUTECODEX_SERVER_ID = prevServerId; else delete process.env.ROUTECODEX_SERVER_ID;
+  });
+
+  it('keeps leases from another server id alive during prune', async () => {
+    const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-cross-server-${process.pid}-${randomUUID()}`);
+    const prevServerId = process.env.ROUTECODEX_SERVER_ID;
+    process.env.ROUTECODEX_SERVER_ID = 'server-a:10000';
+    const governorA = new ProviderTrafficGovernor(rootDir);
+    const runtime = createRuntime({
+      runtimeKey: 'deepseek-web.berg',
+      providerId: 'deepseek-web',
+      providerFamily: 'deepseek-web',
+      concurrency: { maxInFlight: 1, acquireTimeoutMs: 250, staleLeaseMs: 60000 },
+      rpm: { requestsPerMinute: 100, acquireTimeoutMs: 250 }
+    });
+    try {
+      const first = await governorA.acquire({
+        runtimeKey: runtime.runtimeKey,
+        providerKey: 'deepseek-web.berg.deepseek-v4-pro',
+        requestId: 'cross-a',
+        runtime
+      });
+      process.env.ROUTECODEX_SERVER_ID = 'server-b:10001';
+      const governorB = new ProviderTrafficGovernor(rootDir);
+      await expect(governorB.acquire({
+        runtimeKey: runtime.runtimeKey,
+        providerKey: 'deepseek-web.berg.deepseek-v4-pro',
+        requestId: 'cross-b',
+        runtime
+      })).rejects.toBeInstanceOf(ProviderTrafficSaturatedError);
+      await governorA.release(first.permit);
+    } finally {
+      if (typeof prevServerId === 'string') process.env.ROUTECODEX_SERVER_ID = prevServerId; else delete process.env.ROUTECODEX_SERVER_ID;
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
   it('enforces concurrency and releases slots', async () => {
     const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-${process.pid}-${randomUUID()}`);
     const governor = new ProviderTrafficGovernor(rootDir);
