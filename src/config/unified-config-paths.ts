@@ -58,11 +58,13 @@ const ENVIRONMENT_VARIABLES = [
  * Default configuration file preferences for directory scanning
  */
 const CONFIG_FILE_PREFERENCES = [
-  'config.v2.json',   // V2 canonical config (preferred when present)
+  'config.v2.toml',   // V2 canonical config — TOML (highest priority)
+  'config.v2.json',   // V2 canonical config — JSON
+  'config.toml',      // Primary user config — TOML
   'default.json',      // Default/primary configuration
   'glm.json',          // GLM provider configuration
   'routecodex.json',   // Legacy format
-  'config.json',       // Generic config name
+  'config.json',       // Generic config name (JSON fallback)
   'lmstudio.json',     // LM Studio configuration
   'qwen.json',         // Qwen provider configuration
 ];
@@ -193,7 +195,7 @@ export class UnifiedConfigPathResolver {
     // Return fallback path
     const fallbackPath = configName
       ? path.join(this.getDefaultConfigDirectory(), configName)
-      : path.join(this.getDefaultConfigDirectory(), 'config.json');
+      : path.join(this.getDefaultConfigDirectory(), 'config.toml');
 
     return {
       resolvedPath: fallbackPath,
@@ -226,16 +228,19 @@ export class UnifiedConfigPathResolver {
     try {
       const preferredSet = new Set(CONFIG_FILE_PREFERENCES.map(name => name.toLowerCase()));
       const entries = fs.readdirSync(directory)
-        .filter(file => file.toLowerCase().endsWith('.json'))
+        .filter(file => {
+          const lower = file.toLowerCase();
+          return lower.endsWith('.json') || lower.endsWith('.toml');
+        })
         .filter(file => {
           const lower = file.toLowerCase();
           if (preferredSet.has(lower)) {
             return true;
           }
-          if (lower === 'config.json' || lower === 'routecodex.json') {
+          if (lower === 'config.json' || lower === 'config.toml' || lower === 'routecodex.json') {
             return true;
           }
-          if (lower.startsWith('config.') && lower.endsWith('.json')) {
+          if (lower.startsWith('config.') && (lower.endsWith('.json') || lower.endsWith('.toml'))) {
             return true;
           }
           return false;
@@ -259,7 +264,7 @@ export class UnifiedConfigPathResolver {
       }
 
       // Prefer config.v2*.json when present (v2 canonical)
-      const v2Matches = entries.filter(entry => /^config\.v2(\..+)?\.json$/i.test(entry.name));
+      const v2Matches = entries.filter(entry => /^config\.v2(\..+)?\.(json|toml)$/i.test(entry.name));
       if (v2Matches.length) {
         v2Matches.sort((a, b) => b.mtime - a.mtime);
         return path.join(directory, v2Matches[0].name);
@@ -324,6 +329,7 @@ export class UnifiedConfigPathResolver {
       candidates.push(path.join(primaryHome, 'config', configName));
     } else {
       const primaryHome = resolveRccUserDir();
+      candidates.push(path.join(primaryHome, 'config.toml'));
       candidates.push(path.join(primaryHome, 'config.json'));
       candidates.push(path.join(primaryHome, 'routecodex.json'));
     }
@@ -415,7 +421,10 @@ export class UnifiedConfigPathResolver {
       try {
         if (fs.existsSync(dir)) {
           const files = fs.readdirSync(dir)
-            .filter(file => file.toLowerCase().endsWith('.json'))
+            .filter(file => {
+              const lower = file.toLowerCase();
+              return lower.endsWith('.json') || lower.endsWith('.toml');
+            })
             .sort();
           results.push({ directory: dir, files });
         }

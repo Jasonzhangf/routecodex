@@ -11,6 +11,9 @@ import { resolveRccConfigFile } from '../../config/user-data-paths.js';
 import { getBootstrapProviderTemplates } from '../config/bootstrap-provider-templates.js';
 import { installBundledDocsBestEffort } from '../config/bundled-docs.js';
 import { loadProviderConfigsV2 } from '../../config/provider-v2-loader.js';
+import { decodeUserConfigFileSync } from '../../config/user-config-codec.js';
+import { updateTomlStringScalarInTable } from '../../config/toml-comment-preserving.js';
+import { migrateUserConfigJsonToToml, migrateAllProviderConfigs } from '../../config/config-migration-json-to-toml.js';
 
 type Spinner = {
   start(text?: string): Spinner;
@@ -326,6 +329,10 @@ function parsePort(value: unknown): number | null {
   return Math.floor(parsed);
 }
 
+function isTomlConfigPath(configPath: string): boolean {
+  return path.extname(configPath).trim().toLowerCase() === '.toml';
+}
+
 function buildInteractivePrompt(
   ctx: ConfigCommandContext
 ): { prompt: (question: string) => Promise<string>; close: () => void } | null {
@@ -444,7 +451,8 @@ Examples:
             break;
           case 'show':
             if (fsImpl.existsSync(configPath)) {
-              const config = JSON.parse(fsImpl.readFileSync(configPath, 'utf8'));
+              const decoded = decodeUserConfigFileSync(configPath, fsImpl as Pick<typeof fs, 'readFileSync'>);
+              const config = decoded.parsed;
               log(JSON.stringify(config, null, 2));
             } else {
               ctx.logger.error('Configuration file not found');
@@ -457,7 +465,8 @@ Examples:
                 ctx.logger.error('Configuration file not found');
                 break;
               }
-              const parsed = JSON.parse(fsImpl.readFileSync(configPath, 'utf8'));
+              const decoded = decodeUserConfigFileSync(configPath, fsImpl as Pick<typeof fs, 'readFileSync'>);
+              const parsed = decoded.parsed;
               const snapshot = extractRoutingGroupsSnapshot(parsed);
               const ids = Object.keys(snapshot.groups).sort((a, b) => a.localeCompare(b));
               if (!ids.length) {
@@ -478,7 +487,8 @@ Examples:
                 ctx.logger.error('Configuration file not found');
                 break;
               }
-              const parsed = JSON.parse(fsImpl.readFileSync(configPath, 'utf8'));
+              const decoded = decodeUserConfigFileSync(configPath, fsImpl as Pick<typeof fs, 'readFileSync'>);
+              const parsed = decoded.parsed;
               const snapshot = extractRoutingGroupsSnapshot(parsed);
               log(snapshot.activeGroupId);
             }
@@ -495,7 +505,8 @@ Examples:
                 ctx.logger.error('Missing --group <id>');
                 break;
               }
-              const parsed = JSON.parse(fsImpl.readFileSync(configPath, 'utf8'));
+              const decoded = decodeUserConfigFileSync(configPath, fsImpl as Pick<typeof fs, 'readFileSync'>);
+              const parsed = decoded.parsed;
               const snapshot = extractRoutingGroupsSnapshot(parsed);
               const policy = snapshot.groups[groupId];
               if (!policy) {
@@ -513,7 +524,32 @@ Examples:
               ctx.logger.success(`Group is valid: ${groupId}`);
             }
             break;
-          case 'switch-group':
+          case 'migrate':
+              {
+                console.log('Migrating config.json → config.toml...');
+                const userResult = migrateUserConfigJsonToToml();
+                console.log(`User config: ${userResult.summary}`);
+                
+                console.log('Migrating provider config.v2.json → config.v2.toml...');
+                const providerResult = migrateAllProviderConfigs();
+                console.log(`Provider configs: ${providerResult.summary}`);
+                
+                if (userResult.errors.length > 0) {
+                  for (const e of userResult.errors) {
+                    console.error(`Error (user config): ${e.path} - ${e.message}`);
+                  }
+                }
+                if (providerResult.errors.length > 0) {
+                  for (const e of providerResult.errors) {
+                    console.error(`Error (provider): ${e.path} - ${e.message}`);
+                  }
+                }
+                
+                console.log('\nMigration complete. TOML files are now available alongside JSON originals.');
+                console.log('JSON files are NOT deleted — verify TOML works before removing JSON.');
+                break;
+              }
+            case 'switch-group':
           case 'group-switch':
             {
               if (!fsImpl.existsSync(configPath)) {
@@ -525,7 +561,8 @@ Examples:
                 ctx.logger.error('Missing --group <id>');
                 break;
               }
-              const parsed = JSON.parse(fsImpl.readFileSync(configPath, 'utf8'));
+              const decoded = decodeUserConfigFileSync(configPath, fsImpl as Pick<typeof fs, 'readFileSync'>);
+              const parsed = decoded.parsed;
               const snapshot = extractRoutingGroupsSnapshot(parsed);
               const policy = snapshot.groups[groupId];
               if (!policy) {
@@ -542,7 +579,12 @@ Examples:
               }
 
               const next = applyRoutingGroupsIntoConfig(parsed, snapshot.groups, groupId);
-              fsImpl.writeFileSync(configPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+              if (isTomlConfigPath(configPath)) {
+                const nextRaw = updateTomlStringScalarInTable(decoded.raw, ['virtualrouter'], 'activeRoutingPolicyGroup', groupId);
+                fsImpl.writeFileSync(configPath, nextRaw, 'utf8');
+              } else {
+                fsImpl.writeFileSync(configPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+              }
               ctx.logger.success(`Switched active routing group: ${snapshot.activeGroupId} -> ${groupId}`);
 
               if (options.reload !== false) {
@@ -578,7 +620,7 @@ Examples:
           case 'validate': {
             if (fsImpl.existsSync(configPath)) {
               try {
-                JSON.parse(fsImpl.readFileSync(configPath, 'utf8'));
+                decodeUserConfigFileSync(configPath, fsImpl as Pick<typeof fs, 'readFileSync'>);
                 ctx.logger.success('Configuration is valid');
               } catch (error) {
                 ctx.logger.error(`Configuration is invalid: ${error instanceof Error ? error.message : String(error)}`);
@@ -589,7 +631,7 @@ Examples:
             break;
           }
           default:
-            ctx.logger.error('Unknown action. Use: show, edit, validate, init, group-list, group-current, group-validate, switch-group');
+            ctx.logger.error('Unknown action. Use: show, edit, validate, init, migrate, group-list, group-current, group-validate, switch-group');
         }
       } catch (error) {
         ctx.logger.error(`Config command failed: ${error instanceof Error ? error.message : String(error)}`);

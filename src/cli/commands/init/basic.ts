@@ -46,6 +46,10 @@ export function getProviderRoot(pathImpl: typeof path, homeDir: string): string 
 }
 
 export function getProviderV2Path(pathImpl: typeof path, providerRoot: string, providerId: string): string {
+  const tomlPath = pathImpl.join(providerRoot, providerId, 'config.v2.toml');
+  if (fs.existsSync(tomlPath)) {
+    return tomlPath;
+  }
   return pathImpl.join(providerRoot, providerId, 'config.v2.json');
 }
 

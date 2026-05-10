@@ -1,0 +1,196 @@
+# RouteCodex 主用户配置 (V2)
+# 路径: ~/.rcc/config.toml
+# 格式: TOML — 支持完整注释，注意不要删除注释，CLI/admin 写回会尽量保留
+
+#------------------------------------------------------------------------------
+# 配置版本 (必填，当前只支持 2.0.0)
+#------------------------------------------------------------------------------
+version = "2.0.0"
+
+#------------------------------------------------------------------------------
+# HTTP 服务器配置
+# 如果不需要对外暴露 HTTP API，可将 host 改为 127.0.0.1
+#------------------------------------------------------------------------------
+[httpserver]
+# 监听端口 (范围 1024-65535)
+port = 5521
+# 监听地址 (建议 127.0.0.1 仅本地访问)
+host = "127.0.0.1"
+
+#------------------------------------------------------------------------------
+# Virtual Router 模式 (V2 only)
+#------------------------------------------------------------------------------
+virtualrouterMode = "v2"
+
+#------------------------------------------------------------------------------
+# Virtual Router 核心配置
+# 路由策略组 + active 组决定请求命中哪个 provider
+#------------------------------------------------------------------------------
+[virtualrouter]
+# 当前激活的策略组名称 (必须是下方 routingPolicyGroups 中存在的 key)
+activeRoutingPolicyGroup = "default"
+
+#------------------------------------------------------------------------------
+# 策略组: default
+#------------------------------------------------------------------------------
+[virtualrouter.routingPolicyGroups."default"]
+
+# 路由类型: default
+# 决定 "default" 类请求发往哪些 provider
+[[virtualrouter.routingPolicyGroups."default".routing.default]]
+id = "default-primary"
+priority = 200
+mode = "priority"
+[virtualrouter.routingPolicyGroups."default".routing.default.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."default".routing.default.loadBalancing.weights]
+"mimo.mimo-v2.5-pro" = 1
+
+# 路由类型: coding
+# 决定 "coding" 类请求发往哪些 provider
+[[virtualrouter.routingPolicyGroups."default".routing.coding]]
+id = "coding-primary"
+priority = 200
+mode = "weighted"
+targets = ["ali-coding-plan.key1.glm-5"]
+[virtualrouter.routingPolicyGroups."default".routing.coding.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."default".routing.coding.loadBalancing.weights]
+"ali-coding-plan.key1.glm-5" = 4
+
+# 路由类型: longcontext
+# 决定 "longcontext" 类请求发往哪些 provider
+[[virtualrouter.routingPolicyGroups."default".routing.longcontext]]
+id = "longcontext-primary"
+priority = 200
+mode = "weighted"
+targets = ["ali-coding-plan.qwen3.6-plus"]
+[virtualrouter.routingPolicyGroups."default".routing.longcontext.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."default".routing.longcontext.loadBalancing.weights]
+"ali-coding-plan.qwen3.6-plus" = 5
+
+# 路由类型: thinking
+# 决定 "thinking" 类请求发往哪些 provider
+[[virtualrouter.routingPolicyGroups."default".routing.thinking]]
+id = "thinking-primary"
+priority = 200
+mode = "weighted"
+targets = ["llmgate.deepseek-v4-flash", "ali-coding-plan.glm-5"]
+[virtualrouter.routingPolicyGroups."default".routing.thinking.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."default".routing.thinking.loadBalancing.weights]
+"llmgate.deepseek-v4-flash" = 3
+"ali-coding-plan.glm-5" = 2
+
+# 路由类型: search
+# 决定 "search" 类请求发往哪些 provider
+[[virtualrouter.routingPolicyGroups."default".routing.search]]
+id = "search-primary"
+priority = 200
+mode = "weighted"
+targets = ["ali-coding-plan.kimi-k2.5"]
+[virtualrouter.routingPolicyGroups."default".routing.search.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."default".routing.search.loadBalancing.weights]
+"ali-coding-plan.kimi-k2.5" = 3
+
+# 路由类型: tools
+# 决定 "tools" 类请求发往哪些 provider
+[[virtualrouter.routingPolicyGroups."default".routing.tools]]
+id = "tools-primary"
+priority = 200
+mode = "weighted"
+targets = ["mimo.mimo-v2.5-pro"]
+[virtualrouter.routingPolicyGroups."default".routing.tools.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."default".routing.tools.loadBalancing.weights]
+"mimo.mimo-v2.5-pro" = 10
+
+# 路由类型: web_search
+# 决定 "web_search" 类请求发往哪些 provider
+[[virtualrouter.routingPolicyGroups."default".routing.web_search]]
+id = "web_search-deepseek-main"
+priority = 180
+targets = ["deepseek-web.deepseek-chat"]
+[virtualrouter.routingPolicyGroups."default".routing.web_search.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."default".routing.web_search.loadBalancing.weights]
+"deepseek-web.deepseek-chat" = 10
+
+# 路由类型: multimodal
+# 决定 "multimodal" 类请求发往哪些 provider
+[[virtualrouter.routingPolicyGroups."default".routing.multimodal]]
+id = "multimodal-auto-capability"
+priority = 180
+mode = "priority"
+targets = ["ali-coding-plan.kimi-k2.5", "opencode-zen-free.mimo-v2-omni-free"]
+[virtualrouter.routingPolicyGroups."default".routing.multimodal.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."default".routing.multimodal.loadBalancing.weights]
+"ali-coding-plan.kimi-k2.5" = 1
+"opencode-zen-free.mimo-v2-omni-free" = 1
+
+# 路由类型: video
+# 决定 "video" 类请求发往哪些 provider
+[[virtualrouter.routingPolicyGroups."default".routing.video]]
+id = "video-auto-capability"
+priority = 180
+mode = "priority"
+targets = ["opencode-zen-free.mimo-v2-omni-free"]
+[virtualrouter.routingPolicyGroups."default".routing.video.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."default".routing.video.loadBalancing.weights]
+"opencode-zen-free.mimo-v2-omni-free" = 1
+
+# 路由类型: vision
+# 决定 "vision" 类请求发往哪些 provider
+[[virtualrouter.routingPolicyGroups."default".routing.vision]]
+id = "vision-auto-capability"
+priority = 180
+mode = "priority"
+targets = ["ali-coding-plan.kimi-k2.5", "opencode-zen-free.mimo-v2-omni-free"]
+[virtualrouter.routingPolicyGroups."default".routing.vision.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."default".routing.vision.loadBalancing.weights]
+"ali-coding-plan.kimi-k2.5" = 1
+"opencode-zen-free.mimo-v2-omni-free" = 1
+
+# 路由类型: local
+# 决定 "local" 类请求发往哪些 provider
+[[virtualrouter.routingPolicyGroups."default".routing.local]]
+id = "local-rapidmlx"
+priority = 200
+mode = "priority"
+targets = ["rapidmlx.DeepSeek-V4-Flash-mxfp8"]
+[virtualrouter.routingPolicyGroups."default".routing.local.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."default".routing.local.loadBalancing.weights]
+"rapidmlx.DeepSeek-V4-Flash-mxfp8" = 1
+
+# 组级负载均衡策略
+[virtualrouter.routingPolicyGroups."default".loadBalancing]
+strategy = "round-robin"
+
+# 会话保持配置 (避免频繁切换 provider)
+[virtualrouter.routingPolicyGroups."default".session]
+enabled = true
+tickMs = 1500
+dueWindowMs = 0
+retentionMs = 1200000
+holdNonStreaming = true
+holdMaxMs = 60000
+
+# 网页搜索配置
+[virtualrouter.routingPolicyGroups."default".webSearch]
+injectPolicy = "selective"
+force = false
+[[virtualrouter.routingPolicyGroups."default".webSearch.engines]]
+id = "deepseek:web_search_direct"
+providerKey = "deepseek-web.deepseek-chat"
+description = "DeepSeek Chat direct web search"
+default = true
+executionMode = "direct"
+directActivation = "route"
+modelId = "deepseek-chat"
+serverToolsDisabled = true

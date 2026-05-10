@@ -5,6 +5,7 @@ import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { resolveRccConfigFile, resolveRccUserDir } from '../../config/user-data-paths.js';
+import { detectUserConfigFormat, parseUserConfigText } from '../../config/user-config-codec.js';
 import { describeHealthProbeFailure, probeRouteCodexHealth } from '../../utils/http-health-probe.js';
 import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
 import { ensureDefaultPrecommandScriptBestEffort } from '../config/precommand-default-script.js';
@@ -191,10 +192,11 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         let config: any;
         try {
           const configContent = fsImpl.readFileSync(configPath, 'utf8');
-          config = JSON.parse(configContent);
+          const format = detectUserConfigFormat(configPath);
+          config = parseUserConfigText(configContent, format);
         } catch {
           spinner.fail('Failed to parse configuration file');
-          ctx.logger.error(`Invalid JSON in configuration file: ${configPath}`);
+          ctx.logger.error(`Invalid configuration file: ${configPath}`);
           ctx.exit(1);
         }
 

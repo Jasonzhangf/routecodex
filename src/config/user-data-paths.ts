@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 
@@ -227,11 +228,21 @@ export function resolveRccPrecommandDir(homeDir?: string): string {
 }
 
 export function resolveRccConfigFile(homeDir?: string): string {
-  return path.join(resolveRccUserDir(homeDir), 'config.json');
+  const userDir = resolveRccUserDir(homeDir);
+  const toml = path.join(userDir, 'config.toml');
+  if (fs.existsSync(toml)) {
+    return toml;
+  }
+  return path.join(userDir, 'config.json');
 }
 
 export function resolveRccConfigFileForRead(homeDir?: string): string {
-  return resolveRccConfigFile(homeDir);
+  const userDir = resolveRccUserDir(homeDir);
+  const toml = path.join(userDir, 'config.toml');
+  if (fs.existsSync(toml)) {
+    return toml;
+  }
+  return path.join(userDir, 'config.json');
 }
 
 export function ensureRccUserDirEnvironment(homeDir?: string): string {

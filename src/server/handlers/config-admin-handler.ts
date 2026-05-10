@@ -130,7 +130,9 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
           if (!entry.isDirectory()) {
             continue;
           }
-          const fullPath = path.join(providerDir, entry.name, 'config.v2.json');
+          const jsonPath = path.join(providerDir, entry.name, 'config.v2.json');
+          const tomlPath = path.join(providerDir, entry.name, 'config.v2.toml');
+          const fullPath = fsSync.existsSync(tomlPath) ? tomlPath : jsonPath;
           if (!fsSync.existsSync(fullPath)) {
             continue;
           }

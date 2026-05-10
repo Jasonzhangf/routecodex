@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 
 import { runVercelAiProviderDoctor } from '../provider-sdk/vercel-ai-doctor.js';
@@ -7,6 +8,7 @@ import { buildProviderFromTemplate, getProviderTemplates, pickProviderTemplate }
 import { buildRoutingHintsConfigFragment, inspectProviderConfig } from '../provider-sdk/provider-inspect.js';
 import { loadProviderConfigsV2, type ProviderConfigV2 } from '../config/provider-v2-loader.js';
 import type { UnknownRecord } from '../config/virtual-router-types.js';
+import { serializeTomlRecord } from '../config/toml-basic.js';
 import {
   ask,
   askYesNo,
@@ -20,6 +22,18 @@ import {
   readString,
   resolveProviderRoot
 } from './provider-update-shared.js';
+/**
+ * Resolve provider config path with .toml preference.
+ * Returns config.v2.toml if exists, otherwise config.v2.json.
+ */
+function resolveProviderV2Path(providerRoot: string, providerId: string): string {
+  const baseDir = path.join(providerRoot, providerId);
+  const tomlPath = path.join(baseDir, 'config.v2.toml');
+  const jsonPath = path.join(baseDir, 'config.v2.json');
+  return fsSync.existsSync(tomlPath) ? tomlPath : jsonPath;
+}
+
+
 
 export function createInspectCommand(): Command {
   return new Command('inspect')
@@ -45,7 +59,7 @@ export function createInspectCommand(): Command {
         console.error(`No config.v2.json found for provider "${providerId}" under ${root}`);
         process.exit(1);
       }
-      const configPath = path.join(root, providerId, 'config.v2.json');
+      const configPath = resolveProviderV2Path(root, providerId);
       const inspection = inspectProviderConfig(cfg, { configPath, includeRoutingHints: Boolean(opts.routingHints) });
       if (opts.json) {
         console.log(JSON.stringify(inspection, null, 2));
@@ -215,7 +229,7 @@ export function createAddCommand(): Command {
       await ensureDir(root);
       const dir = path.join(root, providerId);
       await ensureDir(dir);
-      const v2Path = path.join(dir, 'config.v2.json');
+      const v2Path = resolveProviderV2Path(dir, providerId);
       if (await fileExists(v2Path)) {
         const shouldOverwrite = await askYesNo(`config.v2.json already exists for "${providerId}". Overwrite?`, false);
         if (!shouldOverwrite) {
@@ -289,7 +303,10 @@ export function createAddCommand(): Command {
         return;
       }
 
-      await fs.writeFile(v2Path, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+      const addSerialized = v2Path.endsWith('.toml')
+        ? serializeTomlRecord(payload as unknown as Record<string, unknown>)
+        : `${JSON.stringify(payload, null, 2)}\n`;
+      await fs.writeFile(v2Path, addSerialized, 'utf8');
       console.log(`Provider "${providerId}" written to ${v2Path}`);
       const inspection = inspectProviderConfig(payload, { configPath: v2Path, includeRoutingHints: true });
       if (inspection.routingHints) {
@@ -312,7 +329,7 @@ export function createChangeCommand(): Command {
       }
       const root = resolveProviderRoot(opts.root);
       const dir = path.join(root, providerId);
-      const v2Path = path.join(dir, 'config.v2.json');
+      const v2Path = resolveProviderV2Path(dir, providerId);
       if (!(await fileExists(v2Path))) {
         console.error(`No config.v2.json found for provider "${providerId}" under ${dir}`);
         process.exit(1);
@@ -409,7 +426,10 @@ export function createChangeCommand(): Command {
         return;
       }
 
-      await fs.writeFile(v2Path, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+      const changeSerialized = v2Path.endsWith('.toml')
+        ? serializeTomlRecord(parsed as unknown as Record<string, unknown>)
+        : `${JSON.stringify(parsed, null, 2)}\n`;
+      await fs.writeFile(v2Path, changeSerialized, 'utf8');
       console.log(`Provider "${providerId}" updated at ${v2Path}`);
     });
 }
@@ -428,7 +448,7 @@ export function createDeleteCommand(): Command {
       }
       const root = resolveProviderRoot(opts.root);
       const dir = path.join(root, providerId);
-      const v2Path = path.join(dir, 'config.v2.json');
+      const v2Path = resolveProviderV2Path(dir, providerId);
       const targetDescription = opts.purge ? `directory ${dir}` : `file ${v2Path}`;
       const confirmed = await askYesNo(`Are you sure you want to delete provider "${providerId}" (${targetDescription})?`, false);
       if (!confirmed) {

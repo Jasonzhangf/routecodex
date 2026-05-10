@@ -32,12 +32,6 @@ const USER_CONFIG_MIGRATION_ENTRIES: readonly MigrationEntry[] = [
     targetRelativePath: 'provider',
     skipRelativeSegments: ['samples']
   },
-  {
-    id: 'auth_dir',
-    kind: 'dir',
-    legacyRelativePath: 'auth',
-    targetRelativePath: 'auth'
-  }
 ] as const;
 
 export type UserConfigMigrationAction = 'copy' | 'overwrite' | 'unchanged' | 'conflict';

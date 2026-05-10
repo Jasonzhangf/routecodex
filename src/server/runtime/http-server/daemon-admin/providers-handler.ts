@@ -1,5 +1,6 @@
 import type { Application, Request, Response } from 'express';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { resolveRccAuthDirForRead } from '../../../../config/user-data-paths.js';
@@ -29,6 +30,8 @@ import {
   upsertRoutingGroupAtLocation,
   type RoutingLocation
 } from './providers-handler-routing-utils.js';
+import { parseUserConfigText } from '../../../../config/user-config-codec.js';
+import { updateTomlStringScalarInTable } from '../../../../config/toml-comment-preserving.js';
 
 interface ProviderRuntimeView {
   providerKey: string;
@@ -73,6 +76,10 @@ async function resolveProviderConfigFilePath(
     const error = new Error('provider path is not allowed') as Error & { code?: string };
     error.code = 'forbidden_path';
     throw error;
+  }
+  const tomlPath = path.join(providerDirReal, 'config.v2.toml');
+  if (fsSync.existsSync(tomlPath)) {
+    return tomlPath;
   }
   return path.join(providerDirReal, 'config.v2.json');
 }
@@ -563,7 +570,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
     try {
       const configPath = pickUserConfigPath();
       const raw = await fs.readFile(configPath, 'utf8');
-      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      const parsed = raw.trim() ? parseUserConfigText(raw, configPath.endsWith('.toml') ? 'toml' : 'json') : {};
       const oauthBrowser =
         typeof (parsed as { oauthBrowser?: unknown }).oauthBrowser === 'string'
           ? ((parsed as { oauthBrowser?: string }).oauthBrowser as string)
@@ -591,11 +598,17 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
     }
     try {
       const configPath = pickUserConfigPath();
+      const isToml = configPath.endsWith('.toml');
       const raw = await fs.readFile(configPath, 'utf8');
-      const parsed = raw.trim() ? JSON.parse(raw) : {};
-      const next = { ...(parsed as Record<string, unknown>), oauthBrowser };
       await backupFile(configPath);
-      await fs.writeFile(configPath, JSON.stringify(next, null, 2), 'utf8');
+      if (isToml) {
+        const nextRaw = updateTomlStringScalarInTable(raw, [], 'oauthBrowser', oauthBrowser);
+        await fs.writeFile(configPath, nextRaw, 'utf8');
+      } else {
+        const parsed = raw.trim() ? JSON.parse(raw) : {};
+        const next = { ...(parsed as Record<string, unknown>), oauthBrowser };
+        await fs.writeFile(configPath, JSON.stringify(next, null, 2), 'utf8');
+      }
       // apply immediately for oauth flows without requiring restart
       process.env.ROUTECODEX_OAUTH_BROWSER = oauthBrowser;
       res.status(200).json({ ok: true, path: configPath, oauthBrowser });

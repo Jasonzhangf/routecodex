@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { UnknownRecord } from './virtual-router-types.js';
 import { resolveRccProviderDir } from './user-data-paths.js';
+import { coerceProviderConfigV2FromParsed, decodeProviderConfigFile } from './provider-config-codec.js';
 
 export interface ProviderConfigV2 {
   version: string;
@@ -63,9 +64,8 @@ async function listProviderDirs(rootDir: string): Promise<ProviderDirEntry[]> {
 
 async function readJsonFile(filePath: string): Promise<UnknownRecord | null> {
   try {
-    const raw = await fs.readFile(filePath, 'utf8');
-    const parsed = raw.trim() ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as UnknownRecord) : {};
+    const decoded = await decodeProviderConfigFile(filePath);
+    return decoded.parsed;
   } catch {
     return null;
   }
@@ -73,7 +73,7 @@ async function readJsonFile(filePath: string): Promise<UnknownRecord | null> {
 
 function isProviderConfigV2FileName(fileName: string): boolean {
   const normalized = fileName.trim().toLowerCase();
-  if (!normalized.endsWith('.json')) {
+  if (!normalized.endsWith('.json') && !normalized.endsWith('.toml')) {
     return false;
   }
   if (!normalized.startsWith('config.v2')) {
@@ -82,7 +82,12 @@ function isProviderConfigV2FileName(fileName: string): boolean {
   if (normalized.includes('.bak.')) {
     return false;
   }
-  return normalized === 'config.v2.json' || /^config\.v2\..+\.json$/i.test(normalized);
+  return (
+    normalized === 'config.v2.json' ||
+    normalized === 'config.v2.toml' ||
+    /^config\.v2\..+\.json$/i.test(normalized) ||
+    /^config\.v2\..+\.toml$/i.test(normalized)
+  );
 }
 
 async function listProviderConfigFiles(entry: ProviderDirEntry): Promise<ProviderConfigFileEntry[]> {
@@ -92,6 +97,8 @@ async function listProviderConfigFiles(entry: ProviderDirEntry): Promise<Provide
     .map((item) => item.name)
     .filter((fileName) => isProviderConfigV2FileName(fileName))
     .sort((a, b) => {
+      if (a === 'config.v2.toml') return -1;
+      if (b === 'config.v2.toml') return 1;
       if (a === 'config.v2.json') return -1;
       if (b === 'config.v2.json') return 1;
       return a.localeCompare(b);
@@ -99,7 +106,7 @@ async function listProviderConfigFiles(entry: ProviderDirEntry): Promise<Provide
   return files.map((fileName) => ({
     fileName,
     filePath: path.join(entry.dirPath, fileName),
-    isBaseFile: fileName === 'config.v2.json'
+    isBaseFile: fileName === 'config.v2.json' || fileName === 'config.v2.toml'
   }));
 }
 
@@ -159,23 +166,14 @@ async function loadProviderConfigV2(
     return null;
   }
 
-  const providerNode = (parsed as { provider?: unknown }).provider;
-
-  if (!providerNode || typeof providerNode !== 'object' || Array.isArray(providerNode)) {
+  const coerced = coerceProviderConfigV2FromParsed(parsed, entry.id);
+  if (!coerced) {
     return null;
   }
-
-  const providerRecord = providerNode as UnknownRecord;
-  const providerId = resolveProviderIdForConfigFile(entry, file, parsed, providerRecord);
-
-  const versionRaw = (parsed as { version?: unknown }).version;
-  const version =
-    typeof versionRaw === 'string' && versionRaw.trim().length ? versionRaw : '2.0.0';
-
+  const providerId = resolveProviderIdForConfigFile(entry, file, parsed, coerced.provider);
   return {
-    version,
-    providerId,
-    provider: providerRecord
+    ...coerced,
+    providerId
   };
 }
 

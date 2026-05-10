@@ -134,8 +134,10 @@ export function installBundledProviderPackBestEffort(opts?: {
   const overwriteExisting = Boolean(opts?.overwriteExisting);
 
   for (const providerId of providers) {
-    const src = pathImpl.join(sourceDir, providerId, 'config.v2.json');
-    const dst = pathImpl.join(providerRoot, providerId, 'config.v2.json');
+    const srcJson = pathImpl.join(sourceDir, providerId, 'config.v2.json');
+    const srcToml = pathImpl.join(sourceDir, providerId, 'config.v2.toml');
+    const src = fsImpl.existsSync(srcToml) ? srcToml : srcJson;
+    const dst = pathImpl.join(providerRoot, providerId, 'config.v2.toml');
     try {
       if (!fsImpl.existsSync(src)) {
         skippedProviders.push(providerId);

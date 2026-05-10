@@ -3,7 +3,11 @@ import type * as fs from 'node:fs';
 import { homedir } from 'node:os';
 
 import { getBootstrapProviderTemplates } from './bootstrap-provider-templates.js';
-import { buildCatalogWebSearchDefaults, type InitProviderTemplate } from './init-provider-catalog.js';
+import {
+  buildCatalogMultimodalTargets,
+  buildCatalogWebSearchDefaults,
+  type InitProviderTemplate
+} from './init-provider-catalog.js';
 import { buildInitRouting, buildV2ConfigObject } from './init-v2-builder.js';
 import { resolveRccProviderDir } from '../../config/user-data-paths.js';
 
@@ -74,9 +78,11 @@ export function buildInitConfigObject(
   }
   const defaultTarget = `${defaultProvider.id}.${defaultProvider.defaultModel}`;
   const webSearchDefaults = buildCatalogWebSearchDefaults(selection.providers);
+  const multimodalTargets = buildCatalogMultimodalTargets(selection.providers);
   const routing = buildInitRouting({
     defaultTarget,
-    webSearchTargets: webSearchDefaults?.routeTargets
+    webSearchTargets: webSearchDefaults?.routeTargets,
+    multimodalTargets
   });
 
   return buildV2ConfigObject({
@@ -170,7 +176,9 @@ function writeProviderV2Configs(
     if (!fsImpl.existsSync(providerDir)) {
       fsImpl.mkdirSync(providerDir, { recursive: true });
     }
-    const providerConfigPath = pathImpl.join(providerDir, 'config.v2.json');
+    const jsonPath = pathImpl.join(providerDir, 'config.v2.json');
+    const tomlPath = pathImpl.join(providerDir, 'config.v2.toml');
+    const providerConfigPath = fsImpl.existsSync(tomlPath) ? tomlPath : jsonPath;
     const payload = {
       version: '2.0.0',
       providerId: provider.id,

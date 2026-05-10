@@ -244,3 +244,36 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
     expect((second.userConfig.httpserver as any).port).toBe(6666);
   });
 });
+
+describe('loadRouteCodexConfig TOML support', () => {
+  it('loads a TOML config when explicit .toml path is provided', async () => {
+    const root = await mkTmp('routecodex-v2-toml-loader-');
+    process.env.RCC_HOME = root;
+    process.env.ROUTECODEX_USER_DIR = root;
+    process.env.ROUTECODEX_HOME = root;
+    await writeProviderConfig(root);
+
+    const configPath = path.join(root, 'config.toml');
+    const tomlPayload = `version = "2.0.0"
+virtualrouterMode = "v2"
+
+[httpserver]
+host = "127.0.0.1"
+port = 5555
+
+[virtualrouter]
+activeRoutingPolicyGroup = "default"
+
+[[virtualrouter.routingPolicyGroups.default.routing.default]]
+id = "default-primary"
+targets = ["ali-coding-plan.glm-5"]
+`;
+    await fs.writeFile(configPath, tomlPayload, 'utf8');
+
+    const loaded = await loadRouteCodexConfig(configPath);
+    expect(loaded.configPath).toBe(configPath);
+    expect((loaded.userConfig.httpserver as any).port).toBe(5555);
+    expect(process.env.ROUTECODEX_REASONING_STOP_MODE).toBe('off');
+    expect(loaded.userConfig.virtualrouter).toBeTruthy();
+  });
+});

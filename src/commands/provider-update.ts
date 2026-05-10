@@ -8,6 +8,7 @@ import { readBlacklist, writeBlacklist } from '../tools/provider-update/blacklis
 import { probeContextForModel } from '../tools/provider-update/probe-context.js';
 import type { ProviderInputConfig } from '../tools/provider-update/types.js';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
+import { serializeTomlRecord } from '../config/toml-basic.js';
 import type { ProviderConfigV2 } from '../config/provider-v2-loader.js';
 import type { UnknownRecord } from '../config/virtual-router-types.js';
 import {
@@ -203,7 +204,9 @@ function createSyncModelsCommand(): Command {
       parsed.provider = providerNode;
 
       if (opts.write) {
-        await fs.writeFile(v2Path, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+        const serialized = v2Path.endsWith('.toml') ? serializeTomlRecord(parsed as unknown as Record<string, unknown>) : `${JSON.stringify(parsed, null, 2)}
+`;
+        await fs.writeFile(v2Path, serialized, 'utf8');
         console.log(`Provider "${providerId}" updated: ${v2Path}`);
       } else {
         console.log(`[DRY RUN] Provider "${providerId}" would be updated: ${v2Path}`);
@@ -371,7 +374,9 @@ function createProbeContextCommand(): Command {
       parsed.provider = providerNode;
 
       if (opts.write) {
-        await fs.writeFile(v2Path, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+        const serialized = v2Path.endsWith('.toml') ? serializeTomlRecord(parsed as unknown as Record<string, unknown>) : `${JSON.stringify(parsed, null, 2)}
+`;
+        await fs.writeFile(v2Path, serialized, 'utf8');
         console.log(`\nProvider "${providerId}" updated: ${v2Path} (models changed=${changed})`);
       } else {
         console.log(`\n[DRY RUN] Provider "${providerId}" would be updated: ${v2Path} (models changed=${changed})`);
