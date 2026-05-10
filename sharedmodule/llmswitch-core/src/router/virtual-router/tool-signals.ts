@@ -249,6 +249,14 @@ export function detectWebSearchToolDeclared(
     return false;
   }
   return request.tools.some((tool) => {
+    const candidate = tool as unknown as ToolCandidate;
+    const rawType =
+      typeof (candidate as { type?: unknown }).type === "string"
+        ? (candidate as { type?: string }).type!.trim().toLowerCase()
+        : "";
+    if (rawType === "web_search_preview" || rawType === "websearch_preview") {
+      return true;
+    }
     const functionName = extractToolName(tool);
     const normalizedName = functionName.toLowerCase().replace(/[-_]/g, "");
     // Match exact web_search tool name (with or without underscore/dash)

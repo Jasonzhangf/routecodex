@@ -314,7 +314,48 @@ export type ResolvedProviderRuntimeMetadata = {
   sdkBinding?: ProviderCatalogSdkBinding;
   capabilities?: ProviderCapabilityMap;
   webSearch?: ProviderCatalogWebSearchBinding;
+  multimodalRouteTarget?: string;
 };
+
+function modelSupportsMultimodal(modelId: string, modelNode: UnknownRecord): boolean {
+  const modelCapabilities = Array.isArray(modelNode.capabilities)
+    ? modelNode.capabilities
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim().toLowerCase())
+    : [];
+  return (
+    readBoolean(modelNode.supportsVision) === true ||
+    readBoolean(modelNode.supportsImages) === true ||
+    readBoolean(modelNode.supportsImageInput) === true ||
+    readBoolean(modelNode.multimodal) === true ||
+    modelCapabilities.includes('multimodal') ||
+    modelCapabilities.includes('vision') ||
+    modelCapabilities.includes('image') ||
+    /(^|[-._])(vl|vision|image)([-._]|$)/i.test(modelId)
+  );
+}
+
+function inferMultimodalRouteTargetFromConfig(
+  providerNode: UnknownRecord,
+  args: { providerId: string }
+): string | undefined {
+  for (const [modelId, modelNode] of Object.entries(normalizeModelsNode(providerNode.models))) {
+    if (!modelSupportsMultimodal(modelId, modelNode)) {
+      continue;
+    }
+    const aliases = Array.isArray(modelNode.aliases)
+      ? modelNode.aliases.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : [];
+    const preferredAlias = aliases.find((alias) => /(^|[-._])(vl|vision|image)([-._]|$)/i.test(alias));
+    if (preferredAlias) {
+      return `${args.providerId}.${preferredAlias}`;
+    }
+    if (/(^|[-._])(vl|vision|image)([-._]|$)/i.test(modelId)) {
+      return `${args.providerId}.${modelId}`;
+    }
+  }
+  return undefined;
+}
 
 export function resolveProviderRuntimeMetadata(
   providerId: string,
@@ -325,10 +366,14 @@ export function resolveProviderRuntimeMetadata(
   const sdkBinding = mergeSdkBinding(inferSdkBindingFromConfig(providerId, providerNode), catalogEntry?.sdkBinding);
   const capabilities = mergeCapabilities(inferCapabilitiesFromConfig(providerNode), catalogEntry?.capabilities);
   const webSearch = inferWebSearchFromConfig(providerNode, { providerId, defaultModel: args.defaultModel }) ?? catalogEntry?.webSearch;
+  const multimodalRouteTarget =
+    inferMultimodalRouteTargetFromConfig(providerNode, { providerId }) ??
+    catalogEntry?.multimodalRouteTarget;
   return {
     ...(catalogEntry ? { catalogEntry } : {}),
     ...(sdkBinding ? { sdkBinding } : {}),
     ...(capabilities ? { capabilities } : {}),
-    ...(webSearch ? { webSearch } : {})
+    ...(webSearch ? { webSearch } : {}),
+    ...(multimodalRouteTarget ? { multimodalRouteTarget } : {})
   };
 }

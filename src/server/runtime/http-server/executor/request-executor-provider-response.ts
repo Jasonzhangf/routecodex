@@ -123,7 +123,7 @@ function throwProviderHttpError(converted: PipelineExecutionResult): never {
 
 function createResponseContractError(args: {
   message: string;
-  code: 'EMPTY_ASSISTANT_RESPONSE' | 'STOPLESS_FINALIZATION_MISSING';
+  code: 'EMPTY_ASSISTANT_RESPONSE' | 'MISSING_REQUIRED_TOOL_CALL' | 'STOPLESS_FINALIZATION_MISSING';
   stage: 'host.response_contract' | 'host.stopless_contract';
   body?: Record<string, unknown>;
 }): never {
@@ -137,6 +137,13 @@ function createResponseContractError(args: {
     errorToThrow.response = { data: args.body };
   }
   throw errorToThrow;
+}
+
+function isMissingRequiredToolCallMarker(marker: string): boolean {
+  return marker === 'chat_missing_required_tool_call'
+    || marker === 'responses_missing_required_tool_call'
+    || marker === 'chat_textual_tool_registry_missing'
+    || marker === 'responses_textual_tool_registry_missing';
 }
 
 export async function processSuccessfulProviderResponse(args: {
@@ -295,8 +302,12 @@ export async function processSuccessfulProviderResponse(args: {
       attempt: args.attempt
     });
     createResponseContractError({
-      message: `Upstream returned empty assistant payload: ${emptyAssistantSignal.reason}`,
-      code: 'EMPTY_ASSISTANT_RESPONSE',
+      message: isMissingRequiredToolCallMarker(emptyAssistantSignal.marker)
+        ? `Upstream omitted required structured tool call: ${emptyAssistantSignal.reason}`
+        : `Upstream returned empty assistant payload: ${emptyAssistantSignal.reason}`,
+      code: isMissingRequiredToolCallMarker(emptyAssistantSignal.marker)
+        ? 'MISSING_REQUIRED_TOOL_CALL'
+        : 'EMPTY_ASSISTANT_RESPONSE',
       stage: 'host.response_contract',
       body: bodyForError
     });

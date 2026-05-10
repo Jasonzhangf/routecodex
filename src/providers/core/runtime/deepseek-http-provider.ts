@@ -13,6 +13,7 @@ import { resolveRccCamoufoxFingerprintDir } from '../../../config/user-data-path
 import {
   DEEPSEEK_COMPATIBILITY_PROFILE,
   DEEPSEEK_ERROR_CODES,
+  DEEPSEEK_UPSTREAM_CLIENT_VERSION,
   DEEPSEEK_UPSTREAM_USER_AGENT,
   normalizeDeepSeekProviderRuntimeOptions
 } from '../contracts/deepseek-provider-contract.js';
@@ -25,6 +26,10 @@ import {
   mapPlatformToClientPlatform,
   normalizeString,
   parseCamoufoxConfig,
+  prependUniqueRefFileId,
+  readDeepSeekContextFileContract,
+  readDeepSeekInlineFileContracts,
+  readDeepSeekModelType,
   readEnvBoolean,
   readStreamIntent,
   shouldForceUpstreamSseForTools,
@@ -33,6 +38,7 @@ import {
   type DeepSeekCompletionBody
 } from './deepseek-http-provider-helpers.js';
 import { DeepSeekSessionPowManager } from './deepseek-session-pow.js';
+import { uploadDeepSeekContextFile, uploadDeepSeekInlineFile } from './deepseek-file-upload.js';
 
 const DEFAULT_BASE_URL = 'https://chat.deepseek.com';
 const DEFAULT_COMPLETION_ENDPOINT = '/api/v0/chat/completion';
@@ -148,6 +154,7 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
     };
 
     const sessionId = await this.deepseekSessionPow.ensureChatSession(sessionHeaders);
+    await this.uploadContextArtifactsIfNeeded(request, sessionHeaders);
     const powResponse = await this.deepseekSessionPow.createPowResponse(sessionHeaders);
     this.pendingSessionId = sessionId;
 
@@ -205,11 +212,59 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
       ref_file_ids: Array.isArray(body.ref_file_ids) ? body.ref_file_ids : [],
       thinking_enabled: Boolean(body.thinking_enabled),
       search_enabled: Boolean(body.search_enabled),
+      ...(normalizeString(body.model_type) ? { model_type: normalizeString(body.model_type) } : {}),
       ...(readStreamIntent(request) ? { stream: true } : {})
     };
 
     this.pendingSessionId = null;
     return normalized;
+  }
+
+
+  private async uploadContextArtifactsIfNeeded(request: UnknownObject, authHeaders: Record<string, string>): Promise<void> {
+    if (!this.deepseekSessionPow) {
+      const hasContextFile = Boolean(readDeepSeekContextFileContract(request));
+      const hasInlineFiles = readDeepSeekInlineFileContracts(request).length > 0;
+      if (hasContextFile || hasInlineFiles) {
+        throw createProviderError(
+          DEEPSEEK_ERROR_CODES.FILE_UPLOAD_FAILED,
+          'DeepSeek file upload requires initialized session/PoW manager',
+          500
+        );
+      }
+      return;
+    }
+
+    const payload = this.extractCompatPayload(request);
+    const modelType = readDeepSeekModelType(request);
+    const contextFile = readDeepSeekContextFileContract(request);
+    if (contextFile) {
+      const uploaded = await uploadDeepSeekContextFile(contextFile, authHeaders, {
+        httpClient: this.httpClient,
+        powManager: this.deepseekSessionPow,
+        baseUrl: this.getDeepSeekBaseUrl()
+      }, modelType ? { modelType } : undefined);
+
+      if (isRecord(payload)) {
+        payload.ref_file_ids = prependUniqueRefFileId(payload.ref_file_ids, uploaded.id);
+      }
+    }
+
+    const inlineFiles = readDeepSeekInlineFileContracts(request);
+    for (const inlineFile of inlineFiles) {
+      const uploaded = await uploadDeepSeekInlineFile({
+        imageUrl: inlineFile.imageUrl || '',
+        ...(inlineFile.filename ? { filename: inlineFile.filename } : {}),
+        ...(inlineFile.contentType ? { contentType: inlineFile.contentType } : {})
+      }, authHeaders, {
+        httpClient: this.httpClient,
+        powManager: this.deepseekSessionPow,
+        baseUrl: this.getDeepSeekBaseUrl()
+      }, modelType ? { modelType } : undefined);
+      if (isRecord(payload)) {
+        payload.ref_file_ids = prependUniqueRefFileId(payload.ref_file_ids, uploaded.id);
+      }
+    }
   }
 
   private extractCompatPayload(request: UnknownObject): UnknownObject {
@@ -358,12 +413,12 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
   }
 
   private buildDeepSeekBrowserHeaders(fingerprint: CamoufoxFingerprintSnapshot | null): Record<string, string> {
-    const clientPlatform = mapPlatformToClientPlatform(fingerprint?.platform) || 'android';
+    const clientPlatform = 'android';
 
     return {
       'User-Agent': DEEPSEEK_UPSTREAM_USER_AGENT,
       'x-client-platform': clientPlatform,
-      'x-client-version': '1.3.0-auto-resume',
+      'x-client-version': DEEPSEEK_UPSTREAM_CLIENT_VERSION,
       'x-client-locale': 'zh_CN',
       'accept-charset': 'UTF-8',
       Origin: 'https://chat.deepseek.com',

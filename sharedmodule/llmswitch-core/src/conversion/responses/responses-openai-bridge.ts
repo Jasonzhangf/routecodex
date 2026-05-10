@@ -16,6 +16,7 @@ import {
 import { mapChatToolsToBridge } from '../shared/tool-mapping.js';
 import { ProviderProtocolError } from '../provider-protocol-error.js';
 import { isJsonObject, jsonClone } from '../hub/types/json.js';
+import { ensureRuntimeMetadata } from '../runtime-metadata.js';
 import {
   captureReqInboundResponsesContextSnapshotWithNative,
   mapReqInboundBridgeToolsToChatWithNative
@@ -511,6 +512,14 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
         out[key] = value;
       }
     }
+  }
+  if (forceWebSearch) {
+    const metadataCarrier =
+      out.metadata && typeof out.metadata === 'object' && !Array.isArray(out.metadata)
+        ? (out.metadata as Record<string, unknown>)
+        : ((out.metadata = {}) as Record<string, unknown>);
+    const rt = ensureRuntimeMetadata(metadataCarrier);
+    rt.forceWebSearch = true;
   }
 
   const history =

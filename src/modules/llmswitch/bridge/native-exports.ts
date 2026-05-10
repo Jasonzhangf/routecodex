@@ -11,7 +11,7 @@ import {
   getNetworkErrorCodes as getNetworkErrorCodesFromCore,
   isBlockingRecoverableNative as isBlockingRecoverableNativeFromCore,
   shouldRetryNative as shouldRetryNativeFromCore
-} from '../../../../node_modules/rcc-llmswitch-core/dist/router/virtual-router/engine-selection/native-failure-policy.js';
+} from '../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/engine-selection/native-failure-policy.js';
 
 type NativeFailureClassification = Parameters<typeof isBlockingRecoverableNativeFromCore>[0];
 

@@ -70,7 +70,7 @@ function buildWebSearchPolicyOptions(summary: Record<string, unknown> | undefine
 }
 
 function buildRoutingHints(args: {
-  routeTargets: { default: string; webSearch?: string };
+  routeTargets: { default: string; webSearch?: string; multimodal?: string };
   capabilities?: ProviderCapabilityMap;
   webSearch?: Record<string, unknown>;
   catalogEntry?: InitProviderTemplate;
@@ -93,8 +93,12 @@ function buildRoutingHints(args: {
     notes.push('longcontext route suggested from supportsLongContext capability.');
   }
   if (args.capabilities?.supportsMultimodal) {
-    routing.multimodal = routePool('multimodal', args.routeTargets.default);
-    notes.push('multimodal route suggested from supportsMultimodal capability.');
+    routing.multimodal = routePool('multimodal', args.routeTargets.multimodal || args.routeTargets.default);
+    notes.push(
+      args.routeTargets.multimodal
+        ? 'multimodal route suggested from provider multimodal target.'
+        : 'multimodal route suggested from supportsMultimodal capability.'
+    );
   }
   if (args.capabilities?.supportsVideo) {
     routing.video = routePool('video', args.routeTargets.default);
@@ -113,7 +117,8 @@ function buildRoutingHints(args: {
     ...(buildWebSearchPolicyOptions(args.webSearch) ? { policyOptions: buildWebSearchPolicyOptions(args.webSearch) } : {}),
     routeTargets: {
       default: args.routeTargets.default,
-      ...(args.routeTargets.webSearch ? { webSearch: args.routeTargets.webSearch } : {})
+      ...(args.routeTargets.webSearch ? { webSearch: args.routeTargets.webSearch } : {}),
+      ...(args.routeTargets.multimodal ? { multimodal: args.routeTargets.multimodal } : {})
     },
     notes
   };
@@ -125,6 +130,7 @@ export interface ProviderRoutingHints {
   routeTargets: {
     default: string;
     webSearch?: string;
+    multimodal?: string;
   };
   notes: string[];
 }
@@ -166,6 +172,7 @@ export interface ProviderInspection {
   routeTargets: {
     default: string;
     webSearch?: string;
+    multimodal?: string;
   };
   routingHints?: ProviderRoutingHints;
 }
@@ -198,7 +205,8 @@ export function inspectProviderConfig(
   const authType = readString(authNode?.type);
   const routeTargets = {
     default: defaultModel ? `${providerId}.${defaultModel}` : providerId,
-    ...(webSearchSummary?.routeTarget ? { webSearch: String(webSearchSummary.routeTarget) } : {})
+    ...(webSearchSummary?.routeTarget ? { webSearch: String(webSearchSummary.routeTarget) } : {}),
+    ...(metadata.multimodalRouteTarget ? { multimodal: metadata.multimodalRouteTarget } : {})
   };
 
   const inspection: ProviderInspection = {

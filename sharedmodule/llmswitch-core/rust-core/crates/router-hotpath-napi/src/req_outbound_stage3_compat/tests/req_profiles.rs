@@ -1795,6 +1795,77 @@ fn test_req_profile_chat_deepseek_web_preserves_explicit_thinking_and_search_fla
 }
 
 #[test]
+fn test_req_profile_chat_deepseek_web_v4_aliases_map_to_expected_flags() {
+    let thinking_input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-v4-pro",
+            "messages": [{"role": "user", "content": "think hard"}]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_web_v4_pro".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("thinking-primary".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let thinking_result = run_req_outbound_stage3_compat(thinking_input).unwrap();
+    assert_eq!(thinking_result.payload["thinking_enabled"], true);
+    assert_eq!(thinking_result.payload["search_enabled"], false);
+
+    let search_input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-v4-flash",
+            "messages": [{"role": "user", "content": "search the web"}]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_web_v4_flash".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("web_search-primary".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let search_result = run_req_outbound_stage3_compat(search_input).unwrap();
+    assert_eq!(search_result.payload["thinking_enabled"], false);
+    assert_eq!(search_result.payload["search_enabled"], true);
+}
+
+#[test]
 fn test_req_profile_chat_deepseek_web_thinking_route_with_tools_forces_tool_required_prompt() {
     let input = ReqOutboundCompatInput {
         payload: json!({
@@ -2455,7 +2526,6 @@ fn test_req_profile_chat_gemini_claude_schema_and_shallow_pick() {
         "MODE_DYNAMIC"
     );
 }
-
 
 
 

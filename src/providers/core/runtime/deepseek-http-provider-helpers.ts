@@ -2,6 +2,20 @@ import type { UnknownObject } from '../../../types/common-types.js';
 import { formatUnknownError, isRecord, normalizeString } from '../../../utils/common-utils.js';
 export { isRecord, normalizeString };
 
+export type DeepSeekContextFileContract = {
+  enabled?: boolean;
+  filename?: string;
+  content?: string;
+  contentType?: string;
+};
+
+export type DeepSeekInlineFileContract = {
+  type?: string;
+  imageUrl?: string;
+  filename?: string;
+  contentType?: string;
+};
+
 export type DeepSeekCompletionBody = {
   chat_session_id: string;
   parent_message_id: string | null;
@@ -9,6 +23,7 @@ export type DeepSeekCompletionBody = {
   ref_file_ids: unknown[];
   thinking_enabled: boolean;
   search_enabled: boolean;
+  model_type?: string;
   stream?: boolean;
 };
 
@@ -381,4 +396,108 @@ export function extractSessionIdFromMetadata(request: UnknownObject): string | u
       ? request.data.metadata
       : undefined;
   return normalizeString(metadata?.sessionId) || normalizeString(metadata?.conversationId);
+}
+
+
+export function readDeepSeekContextFileContract(request: UnknownObject): DeepSeekContextFileContract | undefined {
+  const direct = isRecord(request) ? request : {};
+  const dataNode = isRecord(direct.data) ? direct.data : undefined;
+  const metadataNode = isRecord(direct.metadata)
+    ? direct.metadata
+    : dataNode && isRecord(dataNode.metadata)
+      ? dataNode.metadata
+      : undefined;
+  const deepseekNode = metadataNode && isRecord(metadataNode.deepseek) ? metadataNode.deepseek : undefined;
+  const contextFile = deepseekNode && isRecord(deepseekNode.contextFile) ? deepseekNode.contextFile : undefined;
+  if (!contextFile) {
+    return undefined;
+  }
+  const enabled = contextFile.enabled === undefined ? true : contextFile.enabled === true;
+  const filename = normalizeString(contextFile.filename);
+  const content = normalizeString(contextFile.content);
+  const contentType = normalizeString(contextFile.contentType) || 'text/plain; charset=utf-8';
+  if (!enabled || !filename || !content) {
+    return undefined;
+  }
+  return { enabled, filename, content, contentType };
+}
+
+export function readDeepSeekInlineFileContracts(request: UnknownObject): DeepSeekInlineFileContract[] {
+  const direct = isRecord(request) ? request : {};
+  const dataNode = isRecord(direct.data) ? direct.data : undefined;
+  const metadataNode = isRecord(direct.metadata)
+    ? direct.metadata
+    : dataNode && isRecord(dataNode.metadata)
+      ? dataNode.metadata
+      : undefined;
+  const deepseekNode = metadataNode && isRecord(metadataNode.deepseek) ? metadataNode.deepseek : undefined;
+  const inlineFilesNode = deepseekNode && isRecord(deepseekNode.inlineFiles) ? deepseekNode.inlineFiles : undefined;
+  if (!inlineFilesNode || inlineFilesNode.enabled === false || !Array.isArray(inlineFilesNode.files)) {
+    return [];
+  }
+  return inlineFilesNode.files
+    .map((item): DeepSeekInlineFileContract | null => {
+      if (!isRecord(item)) {
+        return null;
+      }
+      const imageUrl = normalizeString(item.imageUrl ?? item.image_url ?? item.url);
+      if (!imageUrl) {
+        return null;
+      }
+      return {
+        type: normalizeString(item.type) || 'image',
+        imageUrl,
+        filename: normalizeString(item.filename) || undefined,
+        contentType: normalizeString(item.contentType ?? item.content_type) || undefined
+      };
+    })
+    .filter((item): item is DeepSeekInlineFileContract => item !== null);
+}
+
+export function readDeepSeekModelType(request: UnknownObject): string | undefined {
+  const direct = isRecord(request) ? request : {};
+  const dataNode = isRecord(direct.data) ? direct.data : undefined;
+  const candidate =
+    normalizeString(direct.model_type) ||
+    normalizeString(dataNode?.model_type) ||
+    normalizeString(direct.modelType) ||
+    normalizeString(dataNode?.modelType);
+  if (candidate) {
+    return candidate;
+  }
+  const model =
+    normalizeString(direct.model) ||
+    normalizeString(dataNode?.model) ||
+    normalizeString(direct.model_id) ||
+    normalizeString(dataNode?.model_id);
+  const normalizedModel = normalizeString(model)?.toLowerCase() || '';
+  if (!normalizedModel) {
+    return undefined;
+  }
+  if (normalizedModel.includes('vision')) {
+    return 'vision';
+  }
+  if (normalizedModel.includes('pro')) {
+    return 'expert';
+  }
+  return 'default';
+}
+
+export function prependUniqueRefFileId(refFileIds: unknown, fileId: string): string[] {
+  const normalizedFileId = normalizeString(fileId);
+  const base = Array.isArray(refFileIds) ? refFileIds : [];
+  if (!normalizedFileId) {
+    return base
+      .map((item) => normalizeString(item))
+      .filter((item): item is string => Boolean(item));
+  }
+  const out: string[] = [normalizedFileId];
+  for (const item of base) {
+    const normalized = normalizeString(item);
+    if (!normalized || normalized.toLowerCase() === normalizedFileId.toLowerCase()) {
+      continue;
+    }
+    out.push(normalized);
+  }
+  return out;
 }

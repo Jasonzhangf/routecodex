@@ -235,4 +235,38 @@ describe('deepseek-web-request action wrapper', () => {
     expect((result as any).prompt).toContain('"arguments":{"cmd":"bash -lc');
     expect((result as any).prompt).not.toContain('<<RCC_TOOL_CALLS_JSON');
   });
+
+  test('emits RCC_HISTORY contextFile metadata and continuation prompt when enabled', () => {
+    const result = applyDeepSeekWebRequestTransform(
+      {
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: 'follow contract' },
+          { role: 'user', content: '先分析代码' },
+          { role: 'assistant', content: '我先看下' },
+          { role: 'user', content: '继续' }
+        ],
+        metadata: {
+          deepseek: {
+            contextFile: { enabled: true }
+          }
+        }
+      } as any,
+      {
+        providerProtocol: 'openai-chat',
+        compatibilityProfile: 'chat:deepseek-web',
+        deepseek: {
+          contextFile: { enabled: true }
+        }
+      } as any
+    );
+
+    expect((result as any).prompt).toContain('attached RCC_HISTORY.txt context');
+    expect((result as any).prompt).not.toContain('先分析代码');
+    expect((result as any).metadata.deepseek.contextFile.filename).toBe('RCC_HISTORY.txt');
+    expect((result as any).metadata.deepseek.contextFile.contentType).toBe('text/plain; charset=utf-8');
+    expect((result as any).metadata.deepseek.contextFile.content).toContain('# RCC_HISTORY.txt');
+    expect((result as any).metadata.deepseek.contextFile.content).toContain('=== 1. SYSTEM ===');
+    expect((result as any).metadata.deepseek.contextFile.content).toContain('=== 2. USER ===');
+  });
 });

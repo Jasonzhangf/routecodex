@@ -264,15 +264,27 @@ function normalizeDeepSeekOptions(
       : typeof source.textToolFallback === 'string'
         ? source.textToolFallback.trim().toLowerCase() === 'true'
         : undefined;
+  const contextFileNode = asRecord(source.contextFile);
+  const contextFileEnabled =
+    typeof source.contextFileEnabled === 'boolean'
+      ? source.contextFileEnabled
+      : typeof source.contextFileEnabled === 'string'
+        ? source.contextFileEnabled.trim().toLowerCase() === 'true'
+        : typeof contextFileNode?.enabled === 'boolean'
+          ? contextFileNode.enabled
+          : typeof contextFileNode?.enabled === 'string'
+            ? contextFileNode.enabled.trim().toLowerCase() === 'true'
+            : undefined;
   if (toolProtocol === undefined && legacyTextToolFallback !== undefined) {
     toolProtocol = legacyTextToolFallback ? 'text' : 'native';
   }
-  if (strictToolRequired === undefined && toolProtocol === undefined) {
+  if (strictToolRequired === undefined && toolProtocol === undefined && contextFileEnabled === undefined) {
     return undefined;
   }
   return {
     ...(strictToolRequired !== undefined ? { strictToolRequired } : {}),
-    ...(toolProtocol !== undefined ? { toolProtocol } : {})
+    ...(toolProtocol !== undefined ? { toolProtocol } : {}),
+    ...(contextFileEnabled !== undefined ? { contextFileEnabled } : {})
   };
 }
 

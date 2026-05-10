@@ -1813,6 +1813,11 @@ fn test_resp_profile_chat_deepseek_web_harvests_tool_call_from_reasoning_content
     )
     .unwrap_or(Value::Null);
     assert_eq!(args["cmd"], "bash -lc '~/.cargo/bin/fin-cli --help'");
+    assert_eq!(result.payload["usage"]["prompt_tokens"], 23);
+    assert_eq!(result.payload["usage"]["completion_tokens"], 100);
+    assert_eq!(result.payload["usage"]["total_tokens"], 123);
+    assert_eq!(result.payload["usage"]["input_tokens"], 23);
+    assert_eq!(result.payload["usage"]["output_tokens"], 100);
 }
 
 #[test]
@@ -1896,6 +1901,80 @@ fn test_resp_profile_chat_deepseek_web_sse_patch_without_append_harvests_reasoni
     )
     .unwrap_or(Value::Null);
     assert_eq!(args["cmd"], "bash -lc '~/.cargo/bin/fin-cli --help'");
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_harvests_invalid_backslash_escaped_shell_payload() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "body": {
+                "mode": "sse",
+                "raw": concat!(
+                    "data: {\"p\":\"response/content\",\"o\":\"APPEND\",\"v\":\"<tool_call>\\n\"}\n\n",
+                    "data: {\"v\":\"{\\\"arguments\\\":{\\\"cmd\\\":\\\"bash -lc 'cat > /tmp/a.ts << \\\\\\\"EOF\\\\\\\"\\\\nwith open\\\\('x'\\\\) as f:\\\\n    content = f.read\\\\(\\\\)\\\\nEOF'\\\",\\\"justification\\\":\\\"repair sample\\\"},\\\"id\\\":\\\"call_invalid_escape_1\\\",\\\"name\\\":\\\"exec_command\\\"}\"}\n\n",
+                    "data: {\"v\":\"\\n</tool_call>\"}\n\n",
+                    "data: {\"p\":\"response/status\",\"v\":\"FINISHED\"}\n\n"
+                )
+            }
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_invalid_backslash_escape_1".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: Some("coding/coding-deepseek-web-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "required"
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": true,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    let args: Value = serde_json::from_str(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    let cmd = args["cmd"].as_str().unwrap_or("");
+    assert!(cmd.contains("with open\\('x'\\) as f:"));
+    assert!(cmd.contains("content = f.read\\(\\)"));
 }
 
 #[test]

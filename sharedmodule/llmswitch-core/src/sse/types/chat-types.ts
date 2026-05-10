@@ -31,6 +31,8 @@ export interface ChatSseEvent extends BaseSseEvent {
   protocol: 'chat';
   /** 方向标识 */
   direction: StreamDirection;
+  /** 可选：解析阶段已得到的 JSON payload，供下游复用，避免重复 JSON.parse */
+  parsedData?: unknown;
 }
 
 // Chat SSE事件（使用event字段作为类型标识符的版本）

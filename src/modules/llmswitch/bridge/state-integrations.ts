@@ -10,10 +10,10 @@ import type { AnyRecord } from './module-loader.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import {
   extractSessionIdentifiersFromMetadataWithNative
-} from '../../../../node_modules/rcc-llmswitch-core/dist/router/virtual-router/engine-selection/native-hub-pipeline-session-identifiers-semantics.js';
+} from '../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/engine-selection/native-hub-pipeline-session-identifiers-semantics.js';
 import {
   syncReasoningStopModeFromRequest as syncReasoningStopModeFromRequestFromCore
-} from '../../../../node_modules/rcc-llmswitch-core/dist/servertool/handlers/reasoning-stop-state.js';
+} from '../../../../sharedmodule/llmswitch-core/dist/servertool/handlers/reasoning-stop-state.js';
 
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();

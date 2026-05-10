@@ -107,6 +107,12 @@ pub(crate) fn build_route_queue(
         }
     }
 
+    if features.has_web_search_tool_declared && route_has_targets(routing, "web_search") {
+        if !queue.iter().any(|v| v == "web_search") {
+            queue.insert(0, "web_search".to_string());
+        }
+    }
+
     let mut deduped: Vec<String> = Vec::new();
     for route in queue {
         if !route.trim().is_empty() && !deduped.contains(&route) {

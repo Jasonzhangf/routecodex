@@ -19,6 +19,38 @@ function isReasoningStopFollowupTurn(requestSemantics?: Record<string, unknown>)
   return source === 'servertool.reasoning_stop_guard' || source === 'servertool.reasoning_stop_continue';
 }
 
+function hasNonEmptyArray(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function readContinuationToolMode(requestSemantics?: Record<string, unknown>): string {
+  const continuation =
+    requestSemantics?.continuation && typeof requestSemantics.continuation === 'object' && !Array.isArray(requestSemantics.continuation)
+      ? (requestSemantics.continuation as Record<string, unknown>)
+      : undefined;
+  const toolContinuation =
+    continuation?.toolContinuation && typeof continuation.toolContinuation === 'object' && !Array.isArray(continuation.toolContinuation)
+      ? (continuation.toolContinuation as Record<string, unknown>)
+      : undefined;
+  const raw = toolContinuation?.mode;
+  return typeof raw === 'string' && raw.trim().length ? raw.trim().toLowerCase() : '';
+}
+
+function hasResponsesResumeToolOutputs(requestSemantics?: Record<string, unknown>): boolean {
+  const responses =
+    requestSemantics?.responses && typeof requestSemantics.responses === 'object' && !Array.isArray(requestSemantics.responses)
+      ? (requestSemantics.responses as Record<string, unknown>)
+      : undefined;
+  const resume =
+    responses?.resume && typeof responses.resume === 'object' && !Array.isArray(responses.resume)
+      ? (responses.resume as Record<string, unknown>)
+      : undefined;
+  return (
+    hasNonEmptyArray(resume?.toolOutputsDetailed)
+    || hasNonEmptyArray(resume?.tool_outputs)
+  );
+}
+
 export function hasRequestedToolsInSemantics(requestSemantics?: Record<string, unknown>): boolean {
   if (!requestSemantics || typeof requestSemantics !== 'object') {
     return false;
@@ -34,6 +66,17 @@ export function hasRequestedToolsInSemantics(requestSemantics?: Record<string, u
 export function isToolResultFollowupTurn(requestSemantics?: Record<string, unknown>): boolean {
   if (isReasoningStopFollowupTurn(requestSemantics)) {
     return false;
+  }
+  if (readContinuationToolMode(requestSemantics) === 'submit_tool_outputs') {
+    return true;
+  }
+  if (
+    hasNonEmptyArray(requestSemantics?.toolOutputs)
+    || hasNonEmptyArray(requestSemantics?.tool_outputs)
+    || hasNonEmptyArray(requestSemantics?.__captured_tool_results)
+    || hasResponsesResumeToolOutputs(requestSemantics)
+  ) {
+    return true;
   }
   const messages = Array.isArray(requestSemantics?.messages) ? requestSemantics.messages : [];
   for (let index = messages.length - 1; index >= 0; index -= 1) {

@@ -70,4 +70,65 @@ describe('anthropic tool schema stability', () => {
     expect((schema.properties as any).payload.anyOf).toBeDefined();
     expect(schema.required).toEqual(['payload']);
   });
+
+  test('preserves nested request_user_input schema shape for goal continuation feedback', () => {
+    const tools: any[] = [
+      {
+        type: 'function',
+        function: {
+          name: 'request_user_input',
+          description: 'ask user',
+          parameters: {
+            type: 'object',
+            properties: {
+              questions: {
+                type: 'array',
+                description: 'Questions to show the user. Prefer 1 and do not exceed 3',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string', description: 'Stable identifier for mapping answers (snake_case).' },
+                    header: { type: 'string', description: 'Short header label shown in the UI (12 or fewer chars).' },
+                    question: { type: 'string', description: 'Single-sentence prompt shown to the user.' },
+                    options: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          label: { type: 'string', description: 'User-facing label (1-5 words).' },
+                          description: { type: 'string', description: 'One short sentence explaining impact/tradeoff if selected.' }
+                        },
+                        required: ['label', 'description'],
+                        additionalProperties: false
+                      }
+                    }
+                  },
+                  required: ['id', 'header', 'question', 'options'],
+                  additionalProperties: false
+                }
+              }
+            },
+            required: ['questions'],
+            additionalProperties: false
+          }
+        }
+      }
+    ];
+
+    const anthropicTools = mapChatToolsToAnthropicTools(tools) as any[];
+    expect(anthropicTools).toHaveLength(1);
+
+    const schema = anthropicTools[0].input_schema as Record<string, unknown>;
+    const questions = (schema.properties as any).questions;
+    expect(schema.required).toEqual(['questions']);
+    expect(questions.type).toBe('array');
+    expect(questions.items.type).toBe('object');
+    expect(questions.items.required).toEqual(['id', 'header', 'question', 'options']);
+    expect(questions.items.additionalProperties).toBe(false);
+    expect(Object.keys(questions.items.properties).sort()).toEqual(['header', 'id', 'options', 'question']);
+    expect(questions.items.properties.options.type).toBe('array');
+    expect(questions.items.properties.options.items.type).toBe('object');
+    expect(questions.items.properties.options.items.required).toEqual(['label', 'description']);
+    expect(Object.keys(questions.items.properties.options.items.properties).sort()).toEqual(['description', 'label']);
+  });
 });

@@ -229,9 +229,6 @@ export function resolveProviderRetryEligibilityPlan(args: {
   contextOverflowRetries?: number;
   maxContextOverflowRetries?: number;
 }): ProviderRetryEligibilityPlan {
-  const hostResponseContractRetryEligible =
-    args.stage === 'host.response_contract'
-    && (args.error as { retryable?: unknown } | undefined)?.retryable === true;
   const eligibility = resolveProviderFailureRetryEligibility({
     error: args.error,
     stage: args.stage,
@@ -249,9 +246,10 @@ export function resolveProviderRetryEligibilityPlan(args: {
     promptTooLong: args.promptTooLong,
     contextOverflowRetries: args.contextOverflowRetries,
     maxContextOverflowRetries: args.maxContextOverflowRetries ?? MAX_CONTEXT_OVERFLOW_RETRIES,
-    allowNonPolicyRetry: hostResponseContractRetryEligible,
+    allowNonPolicyRetry: false,
     stageOutsideProviderFailurePolicy:
       args.stage === 'host.stopless_contract'
+      || args.stage === 'host.response_contract'
   });
   return {
     shouldRetry: eligibility.shouldRetry,

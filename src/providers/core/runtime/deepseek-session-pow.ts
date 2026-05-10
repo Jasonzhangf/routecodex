@@ -157,7 +157,7 @@ export class DeepSeekSessionPowManager {
     return sessionId;
   }
 
-  async createPowResponse(authHeaders: Record<string, string>): Promise<string> {
+  async createPowResponse(authHeaders: Record<string, string>, targetPath?: string): Promise<string> {
     let lastError: unknown = undefined;
 
     for (let attempt = 1; attempt <= this.powMaxAttempts; attempt += 1) {
@@ -165,7 +165,7 @@ export class DeepSeekSessionPowManager {
         const challengeResponse = await this.postJson(
           this.createPowEndpoint,
           {
-            target_path: this.completionTargetPath
+            target_path: normalizeString(targetPath) || this.completionTargetPath
           },
           authHeaders,
           DEEPSEEK_ERROR_CODES.POW_CHALLENGE_FAILED

@@ -40,7 +40,16 @@
         "maxContext": 512000,
         "supportsStreaming": true,
         "capabilities": [
-          "web_search"
+          "web_search",
+          "multimodal"
+        ],
+        "aliases": [
+          "deepseek-v3",
+          "deepseek-chat-search",
+          "deepseek-v3-search",
+          "deepseek-v4-flash",
+          "deepseek-v4-flash-search",
+          "deepseek-v4-vision"
         ]
       },
       "deepseek-reasoner": {
@@ -48,7 +57,15 @@
         "maxContext": 512000,
         "supportsStreaming": true,
         "capabilities": [
-          "web_search"
+          "web_search",
+          "multimodal"
+        ],
+        "aliases": [
+          "deepseek-r1",
+          "deepseek-reasoner-search",
+          "deepseek-r1-search",
+          "deepseek-v4-pro",
+          "deepseek-v4-pro-search"
         ]
       }
     },

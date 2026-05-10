@@ -142,7 +142,7 @@ function sanitizeAnthropicBuiltinInputSchema(toolName: string, schemaSource: unk
     if (allowedKeys && !allowedKeys.has(key)) {
       continue;
     }
-    sanitizedProperties[key] = compactAnthropicPropertySchema(value);
+    sanitizedProperties[key] = normalizedName === 'request_user_input' ? cloneAnthropicSchema(value) : compactAnthropicPropertySchema(value);
   }
 
   const required = Array.isArray(source.required)

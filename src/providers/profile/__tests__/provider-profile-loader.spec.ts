@@ -79,7 +79,10 @@ describe('provider-profile-loader', () => {
             toolProtocol: 'text',
             powTimeoutMs: 9000,
             powMaxAttempts: 3,
-            sessionReuseTtlMs: 120000
+            sessionReuseTtlMs: 120000,
+            contextFile: {
+              enabled: true
+            }
           }
         }
       }
@@ -94,7 +97,8 @@ describe('provider-profile-loader', () => {
       toolProtocol: 'text',
       powTimeoutMs: 9000,
       powMaxAttempts: 3,
-      sessionReuseTtlMs: 120000
+      sessionReuseTtlMs: 120000,
+      contextFileEnabled: true
     });
     expect(profile.auth.kind).toBe('apikey');
     if (profile.auth.kind === 'apikey') {

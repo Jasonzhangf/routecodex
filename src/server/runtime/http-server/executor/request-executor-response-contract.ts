@@ -1,6 +1,7 @@
 import type { PipelineExecutionResult } from '../../../handlers/types.js';
 import {
   REASONING_STOP_FINALIZED_FLAG_KEY,
+  STREAM_CONTRACT_PROBE_BODY_KEY,
 } from './servertool-response-normalizer.js';
 import { readString } from './request-executor-error-shared.js';
 import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../../../utils/finish-reason.js';
@@ -36,6 +37,17 @@ export type PayloadContractSignal = {
 
 const EMPTY_ASSISTANT_SANITIZED_PLACEHOLDER =
   '[RouteCodex] assistant response became empty after response sanitization.';
+
+function unwrapStreamContractProbeBody(body: Record<string, unknown>): Record<string, unknown> | null {
+  if (!Object.prototype.hasOwnProperty.call(body, '__sse_responses')) {
+    return body;
+  }
+  const probe = body[STREAM_CONTRACT_PROBE_BODY_KEY];
+  if (!isRecord(probe)) {
+    return null;
+  }
+  return probe;
+}
 
 function valueHasVisibleAssistantText(value: unknown): boolean {
   if (typeof value === 'string') {
@@ -141,11 +153,12 @@ export function detectRetryableEmptyAssistantResponse(
   if (!isRecord(body)) {
     return null;
   }
-  if (Object.prototype.hasOwnProperty.call(body, '__sse_responses')) {
+  const effectiveBody = unwrapStreamContractProbeBody(body);
+  if (!effectiveBody) {
     return null;
   }
 
-  const choices = Array.isArray(body.choices) ? body.choices : [];
+  const choices = Array.isArray(effectiveBody.choices) ? effectiveBody.choices : [];
   if (choices.length > 0) {
     const firstChoice = isRecord(choices[0]) ? choices[0] : undefined;
     if (!firstChoice) {
@@ -186,21 +199,21 @@ export function detectRetryableEmptyAssistantResponse(
     }
   }
 
-  const status = readString(body.status)?.toLowerCase() ?? '';
+  const status = readString(effectiveBody.status)?.toLowerCase() ?? '';
   if (status === 'completed' || status === 'stop') {
-    const requiredAction = isRecord(body.required_action) ? body.required_action : undefined;
+    const requiredAction = isRecord(effectiveBody.required_action) ? effectiveBody.required_action : undefined;
     const submitToolOutputs =
       requiredAction && isRecord(requiredAction.submit_tool_outputs)
         ? requiredAction.submit_tool_outputs
         : undefined;
     const hasRequiredActionToolCalls = hasNonEmptyToolCalls(submitToolOutputs?.tool_calls);
-    const hasFunctionCalls = hasOutputFunctionCalls(body.output);
+    const hasFunctionCalls = hasOutputFunctionCalls(effectiveBody.output);
     const hasText =
-      valueHasVisibleAssistantText(body.output_text)
-      || valueHasVisibleAssistantText(body.output);
+      valueHasVisibleAssistantText(effectiveBody.output_text)
+      || valueHasVisibleAssistantText(effectiveBody.output);
     const hasReasoningOnly =
-      valueHasReasoningOnlyContent(body.output)
-      || valueHasReasoningOnlyContent(body.reasoning);
+      valueHasReasoningOnlyContent(effectiveBody.output)
+      || valueHasReasoningOnlyContent(effectiveBody.reasoning);
     if (!hasRequiredActionToolCalls && !hasFunctionCalls && !hasText && !hasReasoningOnly) {
       return {
         reason: `responses status=${status} but output text/tool_calls are empty${hasReasoningOnly ? ' (reasoning-only payload)' : ''}`,
@@ -212,15 +225,15 @@ export function detectRetryableEmptyAssistantResponse(
       !hasFunctionCalls &&
       hasRequestedToolsInSemantics(requestSemantics) &&
       !isToolResultFollowupTurn(requestSemantics) &&
-      !containsReasoningStopFinalizedMarker(body.output) &&
-      !containsReasoningStopFinalizedMarker(body.output_text)
+      !containsReasoningStopFinalizedMarker(effectiveBody.output) &&
+      !containsReasoningStopFinalizedMarker(effectiveBody.output_text)
     ) {
       return {
         reason: `responses status=${status} with declared request tools but no function_call output`,
         marker: 'responses_missing_required_tool_call'
       };
     }
-    if (!hasRequiredActionToolCalls && !hasFunctionCalls && containsToolRegistryMissingText(body.output_text)) {
+    if (!hasRequiredActionToolCalls && !hasFunctionCalls && containsToolRegistryMissingText(effectiveBody.output_text)) {
       return {
         reason: 'responses completed with textual tool-not-found complaint but no function_call output',
         marker: 'responses_textual_tool_registry_missing'

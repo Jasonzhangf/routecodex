@@ -337,7 +337,7 @@ function buildDeepSeekBrowserHeaders(fingerprint: CamoufoxFingerprintSnapshot | 
   return {
     'User-Agent': DEEPSEEK_UPSTREAM_USER_AGENT,
     'x-client-platform': clientPlatform,
-    'x-client-version': '1.3.0-auto-resume',
+    'x-client-version': '1.8.0',
     'x-client-locale': 'zh_CN',
     'accept-charset': 'UTF-8',
     Origin: 'https://chat.deepseek.com',

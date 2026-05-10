@@ -381,9 +381,10 @@ export class ChatSseToJsonConverter {
 
     const normalizeEventType = (
       candidate: string | undefined,
-      payload?: Record<string, unknown>
+      payload?: Record<string, unknown>,
+      payloadErrorInfo?: DeepSeekWebErrorInfo | null
     ): ChatSseEventType | undefined => {
-      if (payload && extractDeepSeekWebErrorInfo(payload)) {
+      if (payloadErrorInfo) {
         return 'error';
       }
       if (!candidate) return undefined;
@@ -416,7 +417,7 @@ export class ChatSseToJsonConverter {
       return undefined;
     };
 
-    let eventType = normalizeEventType(rawEventType, parsedData);
+    let eventType = normalizeEventType(rawEventType, parsedData, deepseekErrorInfo);
     if (!eventType) {
       // OpenAI-compatible streams often omit `event:`; use `[DONE]` sentinel to mark completion.
       if (dataValue) {
@@ -438,7 +439,8 @@ export class ChatSseToJsonConverter {
       timestamp: TimeUtils.now(),
       data: dataValue,
       protocol: 'chat',
-      direction: 'sse_to_json'
+      direction: 'sse_to_json',
+      parsedData
     };
   }
 
@@ -535,7 +537,9 @@ export class ChatSseToJsonConverter {
   ): Promise<void> {
     try {
       const payload = typeof event.data === 'string' ? event.data : JSON.stringify(event.data ?? {});
-      const parsedEntries = this.parseChatChunkPayload(payload);
+      const parsedEntries = event.parsedData !== undefined
+        ? [event.parsedData]
+        : this.parseChatChunkPayload(payload);
 
       for (const parsed of parsedEntries) {
         const deepseekErrorInfo = extractDeepSeekWebErrorInfo(parsed);
@@ -1095,8 +1099,12 @@ export class ChatSseToJsonConverter {
 
     // 解析done事件数据（如果有的话）
     try {
-      if (typeof event.data === 'string') {
-        const doneData = JSON.parse(event.data) as { totalTokens?: number };
+      const doneData = event.parsedData && typeof event.parsedData === 'object' && !Array.isArray(event.parsedData)
+        ? event.parsedData as { totalTokens?: number }
+        : typeof event.data === 'string'
+          ? JSON.parse(event.data) as { totalTokens?: number }
+          : undefined;
+      if (doneData) {
         if (typeof doneData.totalTokens === 'number') {
           context.eventStats.totalTokens = doneData.totalTokens;
         }
@@ -1116,7 +1124,9 @@ export class ChatSseToJsonConverter {
     const rawPayload = typeof event.data === 'string' ? event.data : JSON.stringify(event.data ?? {});
     let errorData: Record<string, unknown> | undefined;
     try {
-      const parsed = JSON.parse(rawPayload);
+      const parsed = event.parsedData !== undefined
+        ? event.parsedData
+        : JSON.parse(rawPayload);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         errorData = parsed as Record<string, unknown>;
       }

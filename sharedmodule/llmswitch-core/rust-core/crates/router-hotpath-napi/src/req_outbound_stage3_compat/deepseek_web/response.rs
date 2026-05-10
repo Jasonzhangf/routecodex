@@ -467,7 +467,7 @@ pub(crate) fn apply_deepseek_web_response_compat(
     payload: Value,
     adapter_context: &AdapterContext,
 ) -> Result<Value, String> {
-    let mut normalized = normalize_deepseek_business_envelope(payload)?;
+    let mut normalized = normalize_deepseek_business_envelope(payload, Some(adapter_context))?;
     let harvested_function_results = harvest_function_results_markup(&mut normalized);
     let before_count = count_tool_calls_from_choices(&normalized);
     attach_requested_tool_names(&mut normalized, adapter_context);

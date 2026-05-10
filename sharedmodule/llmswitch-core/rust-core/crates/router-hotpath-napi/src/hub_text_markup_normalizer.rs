@@ -459,64 +459,104 @@ fn infer_tool_name_from_args_shape(
     }
 }
 
-fn infer_explicit_tool_name_from_broken_json_text(
-    candidate: &str,
-    options: &Option<TextMarkupNormalizeOptions>,
-) -> Option<String> {
-    let lowered = candidate.to_ascii_lowercase();
-    let has_explicit_wrapper = lowered.contains("\"tool_calls\"")
-        || lowered.contains("'tool_calls'")
-        || lowered.contains("\"arguments\"")
-        || lowered.contains("'arguments'")
-        || lowered.contains("\"input\"")
-        || lowered.contains("'input'")
-        || lowered.contains("\"function\"")
-        || lowered.contains("'function'");
-    if !has_explicit_wrapper {
-        return None;
-    }
-
-    let mut candidates: Vec<String> = Vec::new();
-    let has_cmd = Regex::new(r#"["']cmd["']\s*:\s*["']"#)
-        .unwrap()
-        .is_match(candidate);
-    if has_cmd {
-        candidates.push("exec_command".to_string());
-    }
-
-    let has_session_id = Regex::new(r#"["'](?:session_id|sessionId)["']\s*:\s*\d+"#)
-        .unwrap()
-        .is_match(candidate);
-    let has_write_payload = Regex::new(r#"["'](?:chars|text|input|data)["']\s*:\s*["']"#)
-        .unwrap()
-        .is_match(candidate);
-    if has_session_id && has_write_payload {
-        candidates.push("write_stdin".to_string());
-    }
-
-    let has_patch = Regex::new(r#"["']patch["']\s*:\s*["']"#)
-        .unwrap()
-        .is_match(candidate);
-    if has_patch {
-        candidates.push("apply_patch".to_string());
-    }
-
-    if candidates.len() != 1 {
-        return None;
-    }
-    canonicalize_json_tool_name(&Value::String(candidates.remove(0)), options)
-}
-
 fn extract_explicit_tool_name_from_broken_json_text(
     candidate: &str,
     options: &Option<TextMarkupNormalizeOptions>,
 ) -> Option<String> {
-    let name_re = Regex::new(r#"\"name\"\s*:\s*\"([^\"]+)\""#).unwrap();
-    let raw_name = name_re
-        .captures(candidate)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().to_string())?;
-    canonicalize_json_tool_name(&Value::String(raw_name), options)
+    fn parse_quoted_token(chars: &[char], start: usize) -> Option<(String, usize)> {
+        let quote = *chars.get(start)?;
+        if quote != '"' && quote != '\'' {
+            return None;
+        }
+        let mut out = String::new();
+        let mut idx = start + 1;
+        let mut escaped = false;
+        while idx < chars.len() {
+            let ch = chars[idx];
+            if escaped {
+                out.push(ch);
+                escaped = false;
+                idx += 1;
+                continue;
+            }
+            if ch == '\\' {
+                escaped = true;
+                idx += 1;
+                continue;
+            }
+            if ch == quote {
+                return Some((out, idx + 1));
+            }
+            out.push(ch);
+            idx += 1;
+        }
+        None
+    }
+
+    let chars: Vec<char> = candidate.chars().collect();
+    let mut idx = 0usize;
+    let mut depth = 0i32;
+    let mut function_object_depth: Option<i32> = None;
+    let mut pending_function_key_at_depth1 = false;
+
+    while idx < chars.len() {
+        match chars[idx] {
+            '{' => {
+                depth += 1;
+                if pending_function_key_at_depth1 && depth == 2 {
+                    function_object_depth = Some(depth);
+                }
+                pending_function_key_at_depth1 = false;
+                idx += 1;
+            }
+            '}' => {
+                if function_object_depth == Some(depth) {
+                    function_object_depth = None;
+                }
+                pending_function_key_at_depth1 = false;
+                depth -= 1;
+                idx += 1;
+            }
+            '"' | '\'' => {
+                let Some((token, after_token)) = parse_quoted_token(&chars, idx) else {
+                    idx += 1;
+                    continue;
+                };
+                let mut cursor = after_token;
+                while cursor < chars.len() && chars[cursor].is_whitespace() {
+                    cursor += 1;
+                }
+                if cursor >= chars.len() || chars[cursor] != ':' {
+                    idx = after_token;
+                    continue;
+                }
+                cursor += 1;
+                while cursor < chars.len() && chars[cursor].is_whitespace() {
+                    cursor += 1;
+                }
+                if depth == 1 && token == "function" {
+                    pending_function_key_at_depth1 = cursor < chars.len() && chars[cursor] == '{';
+                    idx = cursor;
+                    continue;
+                }
+                let explicit_name_scope =
+                    (depth == 1 && token == "name")
+                        || (function_object_depth == Some(depth) && token == "name");
+                if explicit_name_scope {
+                    if let Some((raw_name, _)) = parse_quoted_token(&chars, cursor) {
+                        return canonicalize_json_tool_name(&Value::String(raw_name), options);
+                    }
+                }
+                pending_function_key_at_depth1 = false;
+                idx = after_token;
+            }
+            _ => {
+                idx += 1;
+            }
+        }
+    }
+
+    None
 }
 
 fn escape_inner_quotes_in_whitelisted_string_fields(raw: &str, keys: &[&str]) -> Option<String> {
@@ -596,8 +636,7 @@ fn try_parse_json_with_explicit_whitelisted_field_masks(
     raw: &str,
     options: &Option<TextMarkupNormalizeOptions>,
 ) -> Option<Value> {
-    let tool_name = extract_explicit_tool_name_from_broken_json_text(raw, options)
-        .or_else(|| infer_explicit_tool_name_from_broken_json_text(raw, options))?;
+    let tool_name = extract_explicit_tool_name_from_broken_json_text(raw, options)?;
     let fields = resolve_explicit_whitelisted_string_fields_for_tool(tool_name.as_str());
     if fields.is_empty() {
         return None;
@@ -1172,6 +1211,121 @@ fn collect_embedded_explicit_top_level_tool_call_objects(
     out
 }
 
+fn extract_broken_explicit_top_level_tool_call_prefix_candidates(
+    text: &str,
+    options: &Option<TextMarkupNormalizeOptions>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    let prefix_re = Regex::new(
+        r#"(?is)(?:^|[\n\r])\s*(?:[•*\-]\s*)?\{\s*(?:"name"|"function"|"arguments"|"input").*"#,
+    )
+    .expect("valid broken explicit tool prefix regex");
+
+    for matched in prefix_re.find_iter(text) {
+        let candidate = matched.as_str().trim();
+        if candidate.is_empty() {
+            continue;
+        }
+        let Some(tool_name) =
+            extract_explicit_tool_name_from_broken_json_text(candidate, options)
+        else {
+            continue;
+        };
+        let fields = resolve_explicit_whitelisted_string_fields_for_tool(tool_name.as_str());
+        if fields.is_empty() {
+            continue;
+        }
+        let repaired = escape_inner_quotes_in_whitelisted_string_fields(candidate, fields)
+            .unwrap_or_else(|| candidate.to_string());
+
+        let mut brace_depth: i32 = 0;
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut collected = String::new();
+        let mut started = false;
+        for ch in repaired.chars() {
+            if !started {
+                if ch == '{' {
+                    started = true;
+                    brace_depth = 1;
+                    collected.push(ch);
+                }
+                continue;
+            }
+
+            collected.push(ch);
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+
+            if ch == '"' {
+                in_string = true;
+                continue;
+            }
+            if ch == '{' {
+                brace_depth += 1;
+            } else if ch == '}' {
+                brace_depth -= 1;
+                if brace_depth == 0 {
+                    break;
+                }
+            }
+        }
+
+        if brace_depth == 0 {
+            let normalized = collected.trim().to_string();
+            if !normalized.is_empty() && seen.insert(normalized.clone()) {
+                out.push(normalized);
+            }
+        }
+    }
+
+    out
+}
+
+fn salvage_broken_explicit_top_level_tool_calls(
+    text: &str,
+    options: &Option<TextMarkupNormalizeOptions>,
+) -> Vec<ToolCallLite> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for candidate in extract_broken_explicit_top_level_tool_call_prefix_candidates(text, options) {
+        let Some(tool_name) =
+            extract_explicit_tool_name_from_broken_json_text(candidate.as_str(), options)
+        else {
+            continue;
+        };
+        let Some(args_obj) = salvage_tool_args_from_raw_text(tool_name.as_str(), candidate.as_str()) else {
+            continue;
+        };
+        let Some(filtered) = normalize_json_tool_args(
+            tool_name.as_str(),
+            &Value::Object(args_obj),
+            options,
+        ) else {
+            continue;
+        };
+        let args = serde_json::to_string(&filtered).unwrap_or_else(|_| "{}".to_string());
+        let key = format!("{}:{}", tool_name, args);
+        if seen.insert(key) {
+            out.push(ToolCallLite {
+                id: Some(gen_tool_call_id()),
+                name: tool_name.clone(),
+                args,
+            });
+        }
+    }
+    out
+}
+
 fn decode_json_escapes(raw: &str) -> String {
     raw.replace("\\r\\n", "\n")
         .replace("\\n", "\n")
@@ -1329,6 +1483,12 @@ fn extract_json_tool_calls_from_text_impl(
     for inner in extract_rcc_tool_call_fence_segments(text) {
         add_candidate(inner.as_str(), true);
     }
+    for inner in collect_embedded_explicit_top_level_tool_call_objects(text, options) {
+        add_candidate(inner.as_str(), true);
+    }
+    for inner in extract_broken_explicit_top_level_tool_call_prefix_candidates(text, options) {
+        add_candidate(inner.as_str(), true);
+    }
 
     let mut out: Vec<ToolCallLite> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -1412,6 +1572,15 @@ fn extract_json_tool_calls_from_text_impl(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    if out.is_empty() {
+        for normalized in salvage_broken_explicit_top_level_tool_calls(text, options) {
+            let key = format!("{}:{}", normalized.name, normalized.args);
+            if seen.insert(key) {
+                out.push(normalized);
             }
         }
     }
@@ -2537,6 +2706,41 @@ continue"#;
         assert_eq!(
             args.get("filePath").and_then(Value::as_str),
             Some("/tmp/a.txt")
+        );
+    }
+
+    #[test]
+    fn extract_json_tool_calls_from_text_impl_salvages_broken_explicit_exec_command_prefix_shape()
+    {
+        let text = r#"{"name":"exec_command","arguments":"cmd":"cd /Users/fanzhang/Documents/github/routecodex && git status --short | head -40"}"#;
+        let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "exec_command");
+        let args: Value = serde_json::from_str(calls[0].args.as_str()).unwrap_or(Value::Null);
+        assert_eq!(
+            args.get("cmd").and_then(Value::as_str),
+            Some("cd /Users/fanzhang/Documents/github/routecodex && git status --short | head -40")
+        );
+    }
+
+    #[test]
+    fn extract_json_tool_calls_from_text_impl_rejects_broken_prefix_without_explicit_name() {
+        let text =
+            r#"{"arguments":"cmd":"cd /Users/fanzhang/Documents/github/routecodex && git status --short | head -40"}"#;
+        let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn extract_json_tool_calls_from_text_impl_salvages_broken_explicit_function_name_shape() {
+        let text = r#"{"function":{"name":"exec_command"},"arguments":"cmd":"cd /Users/fanzhang/Documents/github/routecodex && git status --short | head -40"}"#;
+        let calls = extract_json_tool_calls_from_text_impl(text, &None).unwrap_or_default();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "exec_command");
+        let args: Value = serde_json::from_str(calls[0].args.as_str()).unwrap_or(Value::Null);
+        assert_eq!(
+            args.get("cmd").and_then(Value::as_str),
+            Some("cd /Users/fanzhang/Documents/github/routecodex && git status --short | head -40")
         );
     }
 

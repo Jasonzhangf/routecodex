@@ -342,16 +342,21 @@ function extractDeepSeekMetadata(raw: unknown): DeepSeekMetadata | undefined {
   };
 
   const legacyFallback = toBool(node.textToolFallback);
+  const contextFileNode = isRecord(node.contextFile) ? node.contextFile : undefined;
   const toolProtocol =
     toToolProtocol(node.toolProtocol) ??
     (legacyFallback !== undefined ? (legacyFallback ? 'text' : 'native') : undefined);
+  const contextFileEnabled =
+    toBool(node.contextFileEnabled) ??
+    toBool(contextFileNode?.enabled);
 
   const normalized = {
     strictToolRequired: toBool(node.strictToolRequired),
     toolProtocol,
     powTimeoutMs: pickNumber(node.powTimeoutMs),
     powMaxAttempts: pickNumber(node.powMaxAttempts),
-    sessionReuseTtlMs: pickNumber(node.sessionReuseTtlMs)
+    sessionReuseTtlMs: pickNumber(node.sessionReuseTtlMs),
+    contextFileEnabled
   } as Record<string, unknown>;
 
   const pruned = Object.fromEntries(Object.entries(normalized).filter(([, value]) => value !== undefined));

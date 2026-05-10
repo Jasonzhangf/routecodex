@@ -172,7 +172,13 @@ fn normalize_tools(tools: Option<&Value>) -> Vec<Value> {
         let Some(tool_row) = tool.as_object() else {
             continue;
         };
-        if tool_row.get("type").and_then(|v| v.as_str()) == Some("namespace") {
+        let tool_type = tool_row
+            .get("type")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .unwrap_or_default();
+        let lowered_tool_type = tool_type.to_ascii_lowercase();
+        if tool_type == "namespace" {
             let Some(namespace_name) = tool_row
                 .get("name")
                 .and_then(|v| v.as_str())
@@ -267,7 +273,57 @@ fn normalize_tools(tools: Option<&Value>) -> Vec<Value> {
             normalized.push(Value::Object(namespace_out));
             continue;
         }
-        if tool_row.get("type").and_then(|v| v.as_str()) != Some("function") {
+        if lowered_tool_type == "web_search_preview"
+            || lowered_tool_type == "websearch_preview"
+            || lowered_tool_type == "web_search"
+            || lowered_tool_type == "websearch"
+        {
+            let name = tool_row
+                .get("function")
+                .and_then(as_object)
+                .and_then(|row| row.get("name"))
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .or_else(|| {
+                    tool_row
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty())
+                })
+                .unwrap_or_else(|| "web_search".to_string());
+            let mut function = Map::new();
+            function.insert("name".to_string(), Value::String(name));
+            if let Some(description) = tool_row
+                .get("function")
+                .and_then(as_object)
+                .and_then(|row| row.get("description"))
+                .or_else(|| tool_row.get("description"))
+                .and_then(|v| v.as_str())
+            {
+                function.insert(
+                    "description".to_string(),
+                    Value::String(description.to_string()),
+                );
+            }
+            if let Some(parameters) = tool_row
+                .get("function")
+                .and_then(as_object)
+                .and_then(|row| row.get("parameters"))
+                .or_else(|| tool_row.get("parameters"))
+                .cloned()
+            {
+                function.insert("parameters".to_string(), parameters);
+            }
+
+            let mut out_tool = Map::new();
+            out_tool.insert("type".to_string(), Value::String(tool_type));
+            out_tool.insert("function".to_string(), Value::Object(function));
+            normalized.push(Value::Object(out_tool));
+            continue;
+        }
+        if tool_type != "function" {
             continue;
         }
         let Some(fn_row) = tool_row.get("function").and_then(as_object) else {
@@ -559,6 +615,7 @@ fn map_standardized_tools(tools: Option<&Value>) -> Option<Value> {
         .filter_map(|tool| {
             let tool_row = tool.as_object()?;
             let tool_type = tool_row.get("type")?.as_str()?.to_string();
+            let lowered_tool_type = tool_type.trim().to_ascii_lowercase();
             if tool_type.trim().eq_ignore_ascii_case("namespace") {
                 let namespace_name = tool_row
                     .get("name")
@@ -643,6 +700,56 @@ fn map_standardized_tools(tools: Option<&Value>) -> Option<Value> {
                 }
                 out_namespace.insert("tools".to_string(), Value::Array(child_tools));
                 return Some(Value::Object(out_namespace));
+            }
+            if lowered_tool_type == "web_search_preview"
+                || lowered_tool_type == "websearch_preview"
+                || lowered_tool_type == "web_search"
+                || lowered_tool_type == "websearch"
+            {
+                let name = tool_row
+                    .get("function")
+                    .and_then(|v| v.as_object())
+                    .and_then(|row| row.get("name"))
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())
+                    .or_else(|| {
+                        tool_row
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .map(|v| v.trim().to_string())
+                            .filter(|v| !v.is_empty())
+                    })
+                    .unwrap_or_else(|| "web_search".to_string());
+
+                let mut out_fn = Map::new();
+                out_fn.insert("name".to_string(), Value::String(name));
+                if let Some(description) = tool_row
+                    .get("function")
+                    .and_then(|v| v.as_object())
+                    .and_then(|row| row.get("description"))
+                    .or_else(|| tool_row.get("description"))
+                    .and_then(|v| v.as_str())
+                {
+                    out_fn.insert(
+                        "description".to_string(),
+                        Value::String(description.to_string()),
+                    );
+                }
+                if let Some(parameters) = tool_row
+                    .get("function")
+                    .and_then(|v| v.as_object())
+                    .and_then(|row| row.get("parameters"))
+                    .or_else(|| tool_row.get("parameters"))
+                    .cloned()
+                {
+                    out_fn.insert("parameters".to_string(), parameters);
+                }
+
+                let mut out_tool = Map::new();
+                out_tool.insert("type".to_string(), Value::String(tool_type));
+                out_tool.insert("function".to_string(), Value::Object(out_fn));
+                return Some(Value::Object(out_tool));
             }
             let fn_row = tool_row.get("function").and_then(|v| v.as_object())?;
             let name = fn_row.get("name")?.as_str()?.to_string();
@@ -978,6 +1085,37 @@ mod tests {
         assert_eq!(
             standardized["tools"][0]["tools"][0]["defer_loading"],
             Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn standardization_preserves_web_search_preview_builtin_tool_surface() {
+        let chat = json!({
+            "messages": [{ "role": "user", "content": "search latest news" }],
+            "tools": [
+                {
+                    "type": "web_search_preview",
+                    "function": {
+                        "name": "web_search"
+                    }
+                }
+            ],
+            "parameters": { "model": "gpt-4.1", "tool_choice": "auto" },
+            "metadata": {}
+        });
+
+        let standardized = chat_envelope_to_standardized_impl(
+            &chat,
+            &json!({}),
+            "/v1/responses",
+            Some("req_web_search_preview"),
+        )
+        .expect("standardized");
+
+        assert_eq!(standardized["tools"][0]["type"], "web_search_preview");
+        assert_eq!(
+            standardized["tools"][0]["function"]["name"],
+            Value::String("web_search".to_string())
         );
     }
 }

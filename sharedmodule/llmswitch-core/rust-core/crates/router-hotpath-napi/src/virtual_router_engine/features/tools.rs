@@ -216,9 +216,24 @@ pub(super) fn detect_web_search_tool_declared(tools: Option<&Value>) -> bool {
         None => return false,
     };
     tools.iter().any(|tool| {
+        // Match by tool type (OpenAI Responses style)
+        let raw_type = tool
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_lowercase();
+        if raw_type == "web_search_preview" || raw_type == "websearch_preview" {
+            return true;
+        }
+        // Bridge injects {type: "web_search"} after stripping server-side web_search function
+        if raw_type == "web_search" || raw_type == "websearch" || raw_type.starts_with("web_search") {
+            return true;
+        }
+        // Match by function name (Chat Completions style)
         let name = extract_tool_name(tool);
         let normalized = name.to_lowercase().replace(['-', '_'], "");
-        normalized == "websearch"
+        normalized == "websearch" || normalized == "websearchpreview"
     })
 }
 

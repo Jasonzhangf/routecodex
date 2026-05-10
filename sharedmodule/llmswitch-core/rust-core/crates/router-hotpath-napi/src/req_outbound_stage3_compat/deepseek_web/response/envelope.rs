@@ -1,7 +1,7 @@
-use serde_json::{json, Value};
+use serde_json::{json, Number, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::super::read_trimmed_string;
+use super::super::{read_trimmed_string, AdapterContext};
 
 fn read_number(value: Option<&Value>) -> Option<f64> {
     match value {
@@ -213,14 +213,35 @@ fn process_patch_payload(payload: &serde_json::Map<String, Value>, state: &mut D
     }
 }
 
+fn is_terminal_sse_event(event: &str) -> bool {
+    matches!(
+        event.trim().to_ascii_lowercase().as_str(),
+        "close" | "finish" | "finished" | "done" | "completed" | "end"
+    )
+}
+
 fn flush_sse_block(block: &str, state: &mut DeepSeekSseState) {
+    let mut event_name: Option<String> = None;
     let data = block
         .lines()
-        .filter_map(|line| line.strip_prefix("data:"))
+        .filter_map(|line| {
+            if let Some(raw) = line.strip_prefix("event:") {
+                event_name = Some(raw.trim().to_string());
+                return None;
+            }
+            line.strip_prefix("data:")
+        })
         .map(str::trim_start)
         .collect::<Vec<&str>>()
         .join("\n");
     let trimmed = data.trim();
+    if event_name
+        .as_deref()
+        .map(is_terminal_sse_event)
+        .unwrap_or(false)
+    {
+        state.finished = true;
+    }
     if trimmed.is_empty() || trimmed == "[DONE]" {
         return;
     }
@@ -263,7 +284,20 @@ fn parse_deepseek_sse_raw(raw: &str) -> Option<DeepSeekSseState> {
     Some(state)
 }
 
-fn build_deepseek_sse_chat_completion(value: &Value) -> Option<Value> {
+fn normalize_estimated_input_tokens(adapter_context: &AdapterContext) -> Option<i64> {
+    let raw = adapter_context.estimated_input_tokens?;
+    if !raw.is_finite() {
+        return None;
+    }
+    let rounded = raw.round();
+    let clamped = if rounded < 0.0 { 0.0 } else { rounded };
+    Some(clamped as i64)
+}
+
+fn build_deepseek_sse_chat_completion(
+    value: &Value,
+    adapter_context: Option<&AdapterContext>,
+) -> Option<Value> {
     let (_, raw) = extract_sse_raw_record(value)?;
     let state = parse_deepseek_sse_raw(raw)?;
     let response_id = state
@@ -288,12 +322,34 @@ fn build_deepseek_sse_chat_completion(value: &Value) -> Option<Value> {
         }]
     });
 
-    if let Some(tokens) = state.accumulated_token_usage {
-        output["usage"] = json!({
-            "prompt_tokens": 0,
-            "completion_tokens": tokens,
-            "total_tokens": tokens,
-        });
+    if let Some(total_tokens) = state.accumulated_token_usage {
+        let estimated_prompt = adapter_context.and_then(normalize_estimated_input_tokens);
+        let prompt_tokens = estimated_prompt.unwrap_or(0).min(total_tokens);
+        let completion_tokens = total_tokens.saturating_sub(prompt_tokens);
+        let mut usage = serde_json::Map::new();
+        usage.insert(
+            "prompt_tokens".to_string(),
+            Value::Number(Number::from(prompt_tokens)),
+        );
+        usage.insert(
+            "completion_tokens".to_string(),
+            Value::Number(Number::from(completion_tokens)),
+        );
+        usage.insert(
+            "total_tokens".to_string(),
+            Value::Number(Number::from(total_tokens)),
+        );
+        if estimated_prompt.is_some() {
+            usage.insert(
+                "input_tokens".to_string(),
+                Value::Number(Number::from(prompt_tokens)),
+            );
+            usage.insert(
+                "output_tokens".to_string(),
+                Value::Number(Number::from(completion_tokens)),
+            );
+        }
+        output["usage"] = Value::Object(usage);
     }
 
     Some(output)
@@ -332,11 +388,15 @@ fn looks_like_known_provider_response_shape(value: &Value) -> bool {
     false
 }
 
-fn try_unwrap_known_shape(value: &Value, depth: i32) -> Option<Value> {
+fn try_unwrap_known_shape(
+    value: &Value,
+    depth: i32,
+    adapter_context: Option<&AdapterContext>,
+) -> Option<Value> {
     if depth < 0 {
         return None;
     }
-    if let Some(converted) = build_deepseek_sse_chat_completion(value) {
+    if let Some(converted) = build_deepseek_sse_chat_completion(value, adapter_context) {
         return Some(converted);
     }
     if looks_like_known_provider_response_shape(value) {
@@ -345,7 +405,7 @@ fn try_unwrap_known_shape(value: &Value, depth: i32) -> Option<Value> {
     let row = value.as_object()?;
     for key in ["data", "body", "response", "payload", "result", "biz_data"] {
         if let Some(next) = row.get(key) {
-            if let Some(unwrapped) = try_unwrap_known_shape(next, depth - 1) {
+            if let Some(unwrapped) = try_unwrap_known_shape(next, depth - 1, adapter_context) {
                 return Some(unwrapped);
             }
         }
@@ -353,8 +413,11 @@ fn try_unwrap_known_shape(value: &Value, depth: i32) -> Option<Value> {
     None
 }
 
-pub(super) fn normalize_deepseek_business_envelope(payload: Value) -> Result<Value, String> {
-    if let Some(converted) = build_deepseek_sse_chat_completion(&payload) {
+pub(super) fn normalize_deepseek_business_envelope(
+    payload: Value,
+    adapter_context: Option<&AdapterContext>,
+) -> Result<Value, String> {
+    if let Some(converted) = build_deepseek_sse_chat_completion(&payload, adapter_context) {
         return Ok(converted);
     }
     if looks_like_known_provider_response_shape(&payload) {
@@ -368,7 +431,7 @@ pub(super) fn normalize_deepseek_business_envelope(payload: Value) -> Result<Val
     }
 
     if let Some(data) = root.get("data") {
-        if let Some(unwrapped) = try_unwrap_known_shape(data, 6) {
+        if let Some(unwrapped) = try_unwrap_known_shape(data, 6, adapter_context) {
             return Ok(unwrapped);
         }
     }
@@ -398,6 +461,7 @@ pub(super) fn normalize_deepseek_business_envelope(payload: Value) -> Result<Val
 #[cfg(test)]
 mod tests {
     use super::normalize_deepseek_business_envelope;
+    use crate::req_outbound_stage3_compat::AdapterContext;
     use serde_json::json;
 
     #[test]
@@ -417,7 +481,7 @@ mod tests {
             }
         });
 
-        let normalized = normalize_deepseek_business_envelope(payload).unwrap();
+        let normalized = normalize_deepseek_business_envelope(payload, None).unwrap();
         assert_eq!(normalized["object"], "chat.completion");
         assert_eq!(normalized["choices"][0]["message"]["role"], "assistant");
         assert_eq!(
@@ -442,7 +506,7 @@ mod tests {
             }
         });
 
-        let normalized = normalize_deepseek_business_envelope(payload).unwrap();
+        let normalized = normalize_deepseek_business_envelope(payload, None).unwrap();
         assert_eq!(normalized["choices"][0]["message"]["content"], "hi");
         assert_eq!(normalized["choices"][0]["finish_reason"], "stop");
     }
@@ -462,7 +526,7 @@ mod tests {
             }
         });
 
-        let normalized = normalize_deepseek_business_envelope(payload).unwrap();
+        let normalized = normalize_deepseek_business_envelope(payload, None).unwrap();
         assert_eq!(normalized["choices"][0]["message"]["content"], "");
         assert_eq!(
             normalized["choices"][0]["message"]["reasoning_content"],
@@ -483,12 +547,78 @@ mod tests {
             }
         });
 
-        let normalized = normalize_deepseek_business_envelope(payload).unwrap();
+        let normalized = normalize_deepseek_business_envelope(payload, None).unwrap();
         assert_eq!(normalized["choices"][0]["message"]["content"], "");
         assert_eq!(
             normalized["choices"][0]["message"]["reasoning_content"],
             "先看日志"
         );
+        assert_eq!(normalized["choices"][0]["finish_reason"], "stop");
+    }
+
+    #[test]
+    fn test_normalize_deepseek_business_envelope_splits_accumulated_usage_with_estimated_prompt() {
+        let payload = json!({
+            "body": {
+                "mode": "sse",
+                "raw": concat!(
+                    "data: {\"p\":\"response/content\",\"o\":\"APPEND\",\"v\":\"hello\"}\n\n",
+                    "data: {\"p\":\"response/accumulated_token_usage\",\"o\":\"SET\",\"v\":123}\n\n",
+                    "data: {\"p\":\"response/status\",\"v\":\"FINISHED\"}\n\n"
+                )
+            }
+        });
+        let adapter_context = AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_envelope_usage_split".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: Some(23.0),
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        };
+
+        let normalized =
+            normalize_deepseek_business_envelope(payload, Some(&adapter_context)).unwrap();
+        assert_eq!(normalized["usage"]["prompt_tokens"], 23);
+        assert_eq!(normalized["usage"]["completion_tokens"], 100);
+        assert_eq!(normalized["usage"]["total_tokens"], 123);
+        assert_eq!(normalized["usage"]["input_tokens"], 23);
+        assert_eq!(normalized["usage"]["output_tokens"], 100);
+    }
+
+    #[test]
+    fn test_normalize_deepseek_business_envelope_treats_terminal_close_event_as_completion() {
+        let payload = json!({
+            "body": {
+                "mode": "sse",
+                "raw": concat!(
+                    "event: ready\n",
+                    "data: {\"request_message_id\":1,\"response_message_id\":2,\"model_type\":\"default\"}\n\n",
+                    "event: close\n",
+                    "data: {\"click_behavior\":\"none\",\"auto_resume\":false}\n\n"
+                )
+            }
+        });
+
+        let normalized = normalize_deepseek_business_envelope(payload, None).unwrap();
+        assert_eq!(normalized["object"], "chat.completion");
+        assert_eq!(normalized["choices"][0]["message"]["role"], "assistant");
+        assert_eq!(normalized["choices"][0]["message"]["content"], "");
         assert_eq!(normalized["choices"][0]["finish_reason"], "stop");
     }
 }

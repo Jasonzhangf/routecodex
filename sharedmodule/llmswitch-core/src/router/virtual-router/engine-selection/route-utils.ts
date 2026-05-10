@@ -151,6 +151,15 @@ export function buildRouteCandidates(
     }
   }
 
+  if (features.hasWebSearchToolDeclared) {
+    if (routeHasTargets(routing.web_search) && !baseList.includes('web_search')) {
+      baseList.unshift('web_search');
+    }
+    if (routeHasTargets(routing.tools) && !baseList.includes('tools')) {
+      baseList.push('tools');
+    }
+  }
+
   let ordered = sortByPriority(baseList);
 
   // Reorder by capability for thinking/web_search routes

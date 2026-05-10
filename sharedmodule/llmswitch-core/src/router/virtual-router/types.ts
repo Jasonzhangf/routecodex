@@ -90,6 +90,7 @@ export interface ProviderAuthConfig {
 export interface DeepSeekCompatRuntimeOptions {
   strictToolRequired?: boolean;
   toolProtocol?: "native" | "text";
+  contextFileEnabled?: boolean;
 }
 
 export type AnthropicThinkingEffort = "low" | "medium" | "high" | "max";

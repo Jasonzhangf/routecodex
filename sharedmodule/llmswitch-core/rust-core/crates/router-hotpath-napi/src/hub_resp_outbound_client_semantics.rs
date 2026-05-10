@@ -66,6 +66,10 @@ fn normalize_anthropic_tool_name(value: &str) -> Option<String> {
         return None;
     }
     let lower = trimmed.to_ascii_lowercase();
+    match lower.as_str() {
+        "bash" | "shell" | "terminal" => return Some("shell_command".to_string()),
+        _ => {}
+    }
     if lower.starts_with("mcp__") {
         return Some(lower);
     }
@@ -120,17 +124,42 @@ fn read_tools_record_from_semantics(semantics: &Value) -> Option<Map<String, Val
     Some(tools_row.clone())
 }
 
-fn resolve_alias_map_from_resp_semantics(semantics: &Value) -> Option<Map<String, Value>> {
-    let tools_record = read_tools_record_from_semantics(semantics)?;
+fn read_anthropic_record_from_semantics(semantics: &Value) -> Option<Map<String, Value>> {
+    let semantics_row = semantics.as_object()?;
+    let anthropic_node = semantics_row.get("anthropic")?;
+    let anthropic_row = anthropic_node.as_object()?;
+    Some(anthropic_row.clone())
+}
 
-    if let Some(tool_name_alias_map) = tools_record.get("toolNameAliasMap") {
-        if let Some(from_candidate) = normalize_alias_map(tool_name_alias_map) {
+fn resolve_semantics_tool_name_alias_map_candidate(semantics: &Value) -> Option<Value> {
+    if let Some(tools_record) = read_tools_record_from_semantics(semantics) {
+        if let Some(candidate) = tools_record.get("toolNameAliasMap") {
+            return Some(candidate.clone());
+        }
+    }
+    let anthropic_record = read_anthropic_record_from_semantics(semantics)?;
+    anthropic_record.get("toolNameAliasMap").cloned()
+}
+
+fn resolve_semantics_client_tools_raw_candidate(semantics: &Value) -> Option<Value> {
+    if let Some(tools_record) = read_tools_record_from_semantics(semantics) {
+        if let Some(candidate) = tools_record.get("clientToolsRaw") {
+            return Some(candidate.clone());
+        }
+    }
+    let anthropic_record = read_anthropic_record_from_semantics(semantics)?;
+    anthropic_record.get("clientToolsRaw").cloned()
+}
+
+fn resolve_alias_map_from_resp_semantics(semantics: &Value) -> Option<Map<String, Value>> {
+    if let Some(tool_name_alias_map) = resolve_semantics_tool_name_alias_map_candidate(semantics) {
+        if let Some(from_candidate) = normalize_alias_map(&tool_name_alias_map) {
             return Some(from_candidate);
         }
     }
 
-    let raw_tools = tools_record.get("clientToolsRaw")?;
-    let derived_alias = build_anthropic_tool_alias_map(raw_tools)?;
+    let raw_tools = resolve_semantics_client_tools_raw_candidate(semantics)?;
+    let derived_alias = build_anthropic_tool_alias_map(&raw_tools)?;
     normalize_alias_map(&Value::Object(derived_alias))
 }
 
@@ -173,9 +202,8 @@ fn resolve_alias_map_from_sources(
 }
 
 fn resolve_client_tools_raw_from_resp_semantics(semantics: &Value) -> Option<Vec<Value>> {
-    let tools_record = read_tools_record_from_semantics(semantics)?;
-    let raw_tools = tools_record.get("clientToolsRaw")?;
-    resolve_client_tools_raw(raw_tools)
+    let raw_tools = resolve_semantics_client_tools_raw_candidate(semantics)?;
+    resolve_client_tools_raw(&raw_tools)
 }
 
 fn is_json_object(value: Option<&Value>) -> bool {
@@ -4435,6 +4463,81 @@ mod tests {
         assert_eq!(
             output.get("exec_command").and_then(|v| v.as_str()),
             Some("ExecCommand")
+        );
+    }
+
+    #[test]
+    fn resolve_alias_map_from_sources_repairs_anthropic_semantics_mirror_shape() {
+        let output = resolve_alias_map_from_sources(
+            &serde_json::json!({}),
+            &serde_json::json!({
+                "semantics": {
+                    "anthropic": {
+                        "toolNameAliasMap": {
+                            "shell_command": "Bash"
+                        }
+                    }
+                }
+            }),
+        )
+        .expect("alias map from anthropic semantics mirror");
+        assert_eq!(
+            output.get("shell_command").and_then(|v| v.as_str()),
+            Some("Bash")
+        );
+    }
+
+    #[test]
+    fn resolve_client_tools_raw_from_resp_semantics_repairs_anthropic_semantics_mirror_shape() {
+        let output = resolve_client_tools_raw_from_resp_semantics(&serde_json::json!({
+            "anthropic": {
+                "clientToolsRaw": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "Bash",
+                            "parameters": {
+                                "type": "object"
+                            }
+                        }
+                    }
+                ]
+            }
+        }))
+        .expect("client tools raw from anthropic semantics mirror");
+        assert_eq!(output.len(), 1);
+        assert_eq!(
+            output[0]["function"]["name"].as_str(),
+            Some("Bash")
+        );
+    }
+
+    #[test]
+    fn resolve_alias_map_from_sources_derives_shell_command_alias_from_anthropic_client_tools_raw() {
+        let output = resolve_alias_map_from_sources(
+            &serde_json::json!({}),
+            &serde_json::json!({
+                "semantics": {
+                    "anthropic": {
+                        "clientToolsRaw": [
+                            {
+                                "name": "Bash",
+                                "input_schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "command": { "type": "string" }
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
+            }),
+        )
+        .expect("derived alias map from anthropic client tools raw");
+        assert_eq!(
+            output.get("shell_command").and_then(|v| v.as_str()),
+            Some("Bash")
         );
     }
 

@@ -1,5 +1,5 @@
 #[derive(Clone)]
-pub(super) struct PromptMessage {
-    pub(super) role: String,
-    pub(super) text: String,
+pub(crate) struct PromptMessage {
+    pub(crate) role: String,
+    pub(crate) text: String,
 }

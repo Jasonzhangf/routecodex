@@ -520,7 +520,13 @@ export class HttpClient {
 
       // 添加请求体（如果有）
       if (data !== undefined) {
-        fetchOptions.body = typeof data === 'string' ? data : JSON.stringify(data);
+        const binaryLike =
+          data instanceof ArrayBuffer ||
+          ArrayBuffer.isView(data) ||
+          (typeof Buffer !== 'undefined' && data instanceof Buffer);
+        fetchOptions.body = typeof data === 'string' || binaryLike
+          ? (data as BodyInit)
+          : JSON.stringify(data);
       }
 
       const response = await fetch(url, fetchOptions);

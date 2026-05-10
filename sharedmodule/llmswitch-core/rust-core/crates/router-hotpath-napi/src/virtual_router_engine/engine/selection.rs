@@ -185,7 +185,8 @@ impl VirtualRouterEngineCore {
         let requires_remote_video = features.has_video_attachment
             && features.has_remote_video_attachment
             && route_has_targets(&self.routing, "video");
-        let web_search_route_requested = classification.route_name == "web_search";
+        let web_search_route_requested = classification.route_name == "web_search"
+            || features.has_web_search_tool_declared;
         let multimodal_route_requested = features.has_image_attachment;
         let has_explicit_web_search_route = route_has_targets(&self.routing, "web_search");
         let default_pool_supports_web_search =

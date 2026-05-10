@@ -1,6 +1,7 @@
 export const DEEPSEEK_PROVIDER_FAMILY = 'deepseek';
 export const DEEPSEEK_COMPATIBILITY_PROFILE = 'chat:deepseek-web';
-export const DEEPSEEK_UPSTREAM_USER_AGENT = 'opencode/1.2.27';
+export const DEEPSEEK_UPSTREAM_USER_AGENT = 'DeepSeek/2.0.4 Android/35';
+export const DEEPSEEK_UPSTREAM_CLIENT_VERSION = '2.0.4';
 
 export type DeepSeekToolCallState = 'native_tool_calls' | 'text_tool_calls' | 'no_tool_calls';
 export type DeepSeekToolCallSource = 'native' | 'text' | 'none';
@@ -11,6 +12,7 @@ export const DEEPSEEK_ERROR_CODES = Object.freeze({
   SESSION_CREATE_FAILED: 'DEEPSEEK_SESSION_CREATE_FAILED',
   POW_CHALLENGE_FAILED: 'DEEPSEEK_POW_CHALLENGE_FAILED',
   POW_SOLVE_FAILED: 'DEEPSEEK_POW_SOLVE_FAILED',
+  FILE_UPLOAD_FAILED: 'DEEPSEEK_FILE_UPLOAD_FAILED',
   COMPLETION_FAILED: 'DEEPSEEK_COMPLETION_FAILED',
   TOOL_REQUIRED_MISSING: 'DEEPSEEK_TOOL_REQUIRED_MISSING'
 } as const);
@@ -23,6 +25,7 @@ export interface DeepSeekProviderRuntimeOptions {
   powTimeoutMs: number;
   powMaxAttempts: number;
   sessionReuseTtlMs: number;
+  contextFileEnabled: boolean;
 }
 
 const DEFAULT_DEEPSEEK_OPTIONS: DeepSeekProviderRuntimeOptions = {
@@ -30,7 +33,8 @@ const DEFAULT_DEEPSEEK_OPTIONS: DeepSeekProviderRuntimeOptions = {
   toolProtocol: 'native',
   powTimeoutMs: 15000,
   powMaxAttempts: 2,
-  sessionReuseTtlMs: 30 * 60 * 1000
+  sessionReuseTtlMs: 30 * 60 * 1000,
+  contextFileEnabled: false
 };
 
 export interface DeepSeekRuntimeIdentity {
@@ -111,15 +115,20 @@ function readToolProtocol(input: unknown): DeepSeekProviderRuntimeOptions['toolP
 export function normalizeDeepSeekProviderRuntimeOptions(input: unknown): DeepSeekProviderRuntimeOptions {
   const node = asRecord(input) ?? {};
   const legacyFallback = readOptionalBoolean(node.textToolFallback);
+  const contextFileNode = asRecord(node.contextFile);
   const toolProtocol =
     readToolProtocol(node.toolProtocol) ??
     (legacyFallback !== undefined ? (legacyFallback ? 'text' : 'native') : undefined);
+  const contextFileEnabled =
+    readOptionalBoolean(node.contextFileEnabled) ??
+    readOptionalBoolean(contextFileNode?.enabled);
   return {
     strictToolRequired: readBoolean(node.strictToolRequired, DEFAULT_DEEPSEEK_OPTIONS.strictToolRequired),
     toolProtocol: toolProtocol ?? DEFAULT_DEEPSEEK_OPTIONS.toolProtocol,
     powTimeoutMs: readInteger(node.powTimeoutMs, DEFAULT_DEEPSEEK_OPTIONS.powTimeoutMs, 1000, 120000),
     powMaxAttempts: readInteger(node.powMaxAttempts, DEFAULT_DEEPSEEK_OPTIONS.powMaxAttempts, 1, 10),
-    sessionReuseTtlMs: readInteger(node.sessionReuseTtlMs, DEFAULT_DEEPSEEK_OPTIONS.sessionReuseTtlMs, 1000, 24 * 60 * 60 * 1000)
+    sessionReuseTtlMs: readInteger(node.sessionReuseTtlMs, DEFAULT_DEEPSEEK_OPTIONS.sessionReuseTtlMs, 1000, 24 * 60 * 60 * 1000),
+    contextFileEnabled: contextFileEnabled ?? DEFAULT_DEEPSEEK_OPTIONS.contextFileEnabled
   };
 }
 

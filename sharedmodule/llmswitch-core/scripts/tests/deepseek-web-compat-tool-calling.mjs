@@ -116,9 +116,9 @@ function testRequestTransform() {
     'deepseek compat stage should inject strict tool-call guidance'
   );
   assert.equal(
-    out.prompt.includes('RCC_TOOL_CALLS_JSON'),
+    out.prompt.includes('<tool_call>'),
     true,
-    'deepseek compat stage should require RCC tool-call container guidance'
+    'deepseek compat stage should require deepseek-web tool_call wrapper guidance'
   );
 }
 
@@ -166,7 +166,7 @@ function testRequestTransformAutoToolChoiceHint() {
     'auto tool_choice still needs explicit deepseek tool-call guidance'
   );
   assert.equal(
-    out.prompt.includes('If no tool is needed, reply with plain text and do NOT emit the container.'),
+    out.prompt.includes('If no tool is needed, reply with plain text and do NOT emit any <tool_call> wrapper.'),
     true,
     'auto tool_choice path should carry the non-required branch guidance'
   );

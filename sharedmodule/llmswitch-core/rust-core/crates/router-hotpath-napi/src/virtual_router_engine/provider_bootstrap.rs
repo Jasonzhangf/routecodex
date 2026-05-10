@@ -1573,7 +1573,17 @@ fn normalize_deepseek_options(provider: &Map<String, Value>) -> Option<Value> {
             });
         }
     }
-    if strict_tool_required.is_none() && tool_protocol.is_none() {
+    let context_file_enabled = source
+        .get("contextFileEnabled")
+        .and_then(parse_bool_like)
+        .or_else(|| {
+            source
+                .get("contextFile")
+                .and_then(Value::as_object)
+                .and_then(|node| node.get("enabled"))
+                .and_then(parse_bool_like)
+        });
+    if strict_tool_required.is_none() && tool_protocol.is_none() && context_file_enabled.is_none() {
         return None;
     }
     let mut out = Map::new();
@@ -1582,6 +1592,9 @@ fn normalize_deepseek_options(provider: &Map<String, Value>) -> Option<Value> {
     }
     if let Some(value) = tool_protocol {
         out.insert("toolProtocol".to_string(), Value::String(value));
+    }
+    if let Some(value) = context_file_enabled {
+        out.insert("contextFileEnabled".to_string(), Value::Bool(value));
     }
     Some(Value::Object(out))
 }
@@ -1962,6 +1975,30 @@ fn normalize_model_capabilities(
             result.insert(model_id, valid);
         }
     });
+    // Propagate capabilities from parent model to its aliases.
+    // Alias targets like deepseek-v4-vision / deepseek-v4-flash-search
+    // inherit their parent model's capabilities so the registry can
+    // filter multimodal/web_search pools correctly.
+    let mut alias_caps: Vec<(String, String, Vec<String>)> = Vec::new();
+    for (model_id, caps) in result.iter() {
+        if let Some(model_obj) = resolve_model_by_id(provider, model_id) {
+            if let Some(aliases) = model_obj.get("aliases").and_then(Value::as_array) {
+                for alias in aliases {
+                    if let Some(alias_name) = alias.as_str() {
+                        let trimmed = alias_name.trim().to_string();
+                        if !trimmed.is_empty() && trimmed != *model_id {
+                            alias_caps.push((trimmed, model_id.clone(), caps.clone()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (alias_name, _parent_id, caps) in alias_caps {
+        if !result.contains_key(&alias_name) {
+            result.insert(alias_name, caps);
+        }
+    }
     if result.is_empty() {
         None
     } else {
@@ -1969,6 +2006,27 @@ fn normalize_model_capabilities(
     }
 }
 
+fn resolve_model_by_id<'a>(provider: &'a Map<String, Value>, target_id: &str) -> Option<&'a Map<String, Value>> {
+    let models = provider.get("models")?;
+    match models {
+        Value::Array(items) => {
+            for item in items {
+                if let Some(obj) = item.as_object() {
+                    if obj.get("id").and_then(|v| v.as_str()).unwrap_or("").trim() == target_id {
+                        return Some(obj);
+                    }
+                }
+            }
+        }
+        Value::Object(map) => {
+            if let Some(obj) = map.get(target_id).and_then(|v| v.as_object()) {
+                return Some(obj);
+            }
+        }
+        _ => {}
+    }
+    None
+}
 fn normalize_anthropic_thinking(
     provider: &Map<String, Value>,
     provider_type: &str,

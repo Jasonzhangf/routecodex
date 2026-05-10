@@ -625,6 +625,53 @@ fn escape_unescaped_quotes_inside_json_strings(raw: &str) -> String {
     out
 }
 
+fn escape_invalid_backslashes_inside_json_strings(raw: &str) -> String {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut out = String::with_capacity(raw.len() + 16);
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut idx = 0usize;
+
+    while idx < chars.len() {
+        let ch = chars[idx];
+        if in_string {
+            if escaped {
+                let is_valid_json_escape = matches!(
+                    ch,
+                    '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' | 'u'
+                );
+                if !is_valid_json_escape {
+                    out.push('\\');
+                }
+                out.push(ch);
+                escaped = false;
+                idx += 1;
+                continue;
+            }
+            if ch == '\\' {
+                escaped = true;
+                out.push(ch);
+                idx += 1;
+                continue;
+            }
+            if ch == '"' {
+                in_string = false;
+            }
+            out.push(ch);
+            idx += 1;
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+        }
+        out.push(ch);
+        idx += 1;
+    }
+
+    out
+}
+
 fn try_parse_json_value_lenient(raw: &str) -> Option<Value> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -645,6 +692,27 @@ fn try_parse_json_value_lenient(raw: &str) -> Option<Value> {
     }
     let escaped_quotes_newlines = escape_newlines_inside_json_strings(&escaped_quotes);
     if let Ok(parsed) = serde_json::from_str::<Value>(&escaped_quotes_newlines) {
+        return Some(parsed);
+    }
+    let escaped_invalid_backslashes =
+        escape_invalid_backslashes_inside_json_strings(trimmed);
+    if let Ok(parsed) = serde_json::from_str::<Value>(&escaped_invalid_backslashes) {
+        return Some(parsed);
+    }
+    let escaped_invalid_backslashes_newlines =
+        escape_newlines_inside_json_strings(&escaped_invalid_backslashes);
+    if let Ok(parsed) = serde_json::from_str::<Value>(&escaped_invalid_backslashes_newlines) {
+        return Some(parsed);
+    }
+    let escaped_invalid_backslashes_quotes =
+        escape_unescaped_quotes_inside_json_strings(&escaped_invalid_backslashes);
+    if let Ok(parsed) = serde_json::from_str::<Value>(&escaped_invalid_backslashes_quotes) {
+        return Some(parsed);
+    }
+    let escaped_invalid_backslashes_quotes_newlines =
+        escape_newlines_inside_json_strings(&escaped_invalid_backslashes_quotes);
+    if let Ok(parsed) = serde_json::from_str::<Value>(&escaped_invalid_backslashes_quotes_newlines)
+    {
         return Some(parsed);
     }
 
@@ -691,12 +759,22 @@ fn try_parse_json_value_lenient(raw: &str) -> Option<Value> {
     if let Ok(parsed) = serde_json::from_str::<Value>(&escaped_candidate_quotes) {
         return Some(parsed);
     }
+    let escaped_candidate_invalid_backslashes =
+        escape_invalid_backslashes_inside_json_strings(candidate.as_str());
+    if let Ok(parsed) = serde_json::from_str::<Value>(&escaped_candidate_invalid_backslashes) {
+        return Some(parsed);
+    }
     let escaped_candidate = escape_newlines_inside_json_strings(candidate.as_str());
     if let Ok(parsed) = serde_json::from_str::<Value>(&escaped_candidate) {
         return Some(parsed);
     }
     let escaped_candidate_mix = escape_newlines_inside_json_strings(&escaped_candidate_quotes);
     if let Ok(parsed) = serde_json::from_str::<Value>(&escaped_candidate_mix) {
+        return Some(parsed);
+    }
+    let escaped_candidate_invalid_backslashes_mix =
+        escape_newlines_inside_json_strings(&escaped_candidate_invalid_backslashes);
+    if let Ok(parsed) = serde_json::from_str::<Value>(&escaped_candidate_invalid_backslashes_mix) {
         return Some(parsed);
     }
 
@@ -714,8 +792,18 @@ fn try_parse_json_value_lenient(raw: &str) -> Option<Value> {
         if let Ok(parsed) = serde_json::from_str::<Value>(&escaped) {
             return Some(parsed);
         }
+        let escaped_invalid_backslashes =
+            escape_invalid_backslashes_inside_json_strings(matched.as_str());
+        if let Ok(parsed) = serde_json::from_str::<Value>(&escaped_invalid_backslashes) {
+            return Some(parsed);
+        }
         let escaped_mix = escape_newlines_inside_json_strings(&escaped_quotes);
         if let Ok(parsed) = serde_json::from_str::<Value>(&escaped_mix) {
+            return Some(parsed);
+        }
+        let escaped_invalid_backslashes_mix =
+            escape_newlines_inside_json_strings(&escaped_invalid_backslashes);
+        if let Ok(parsed) = serde_json::from_str::<Value>(&escaped_invalid_backslashes_mix) {
             return Some(parsed);
         }
     }
@@ -2585,12 +2673,15 @@ fn strip_supported_xml_named_tool_blocks(raw: &str) -> String {
 }
 
 fn extract_xml_tool_call_blocks(text: &str, fallback_start_id: usize) -> Vec<Value> {
-    let Ok(pattern) = Regex::new(r"(?is)<tool_call>\s*([\s\S]*?)\s*</tool_call>") else {
+    let Ok(pattern) =
+        Regex::new(r#"(?is)<tool_call(?:\s+name\s*=\s*["']([^"']+)["'])?\s*>\s*([\s\S]*?)\s*</tool_call>"#)
+    else {
         return Vec::new();
     };
     let mut recovered: Vec<Value> = Vec::new();
     for (idx, caps) in pattern.captures_iter(text).enumerate() {
-        let Some(raw) = caps.get(1).map(|m| m.as_str().trim()) else {
+        let wrapper_name = caps.get(1).map(|m| m.as_str().trim()).filter(|v| !v.is_empty());
+        let Some(raw) = caps.get(2).map(|m| m.as_str().trim()) else {
             continue;
         };
         if raw.is_empty() {
@@ -2600,9 +2691,16 @@ fn extract_xml_tool_call_blocks(text: &str, fallback_start_id: usize) -> Vec<Val
             let repaired = auto_close_jsonish_shape(raw);
             try_parse_json_value_lenient(repaired.as_str())
         });
-        let Some(value) = parsed else {
+        let Some(mut value) = parsed else {
             continue;
         };
+        if let Some(explicit_name) = wrapper_name {
+            if let Some(row) = value.as_object_mut() {
+                if !row.contains_key("name") {
+                    row.insert("name".to_string(), Value::String(explicit_name.to_string()));
+                }
+            }
+        }
         if let Some(entry) = normalize_tool_call_entry(&value, fallback_start_id + idx) {
             recovered.push(entry);
         }
@@ -6821,6 +6919,23 @@ console.log('ok')"#;
             args["cmd"],
             "bash -lc 'echo \"=== 最终状态报告 ===\" && echo \"6. web-debug HTTP: $(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:4040/)\"'"
         );
+    }
+
+    #[test]
+    fn test_extract_xml_tool_call_blocks_salvages_wrapper_attribute_name_without_guessing_args() {
+        let text = r#"
+<tool_call name="exec_command">
+{"arguments":{"cmd":"bash -lc 'pwd'","justification":"check cwd"}}
+</tool_call>
+"#;
+        let out = extract_xml_tool_call_blocks(text, 1);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["function"]["name"], "exec_command");
+        let args: Value =
+            serde_json::from_str(out[0]["function"]["arguments"].as_str().unwrap_or("{}"))
+                .unwrap_or(Value::Null);
+        assert_eq!(args["cmd"], "bash -lc 'pwd'");
+        assert_eq!(args["justification"], "check cwd");
     }
 
     #[test]

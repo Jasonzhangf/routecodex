@@ -43,6 +43,38 @@ fn build_authoritative_system_override_block(merged: &[PromptMessage]) -> Option
     ))
 }
 
+
+pub(super) fn build_deepseek_history_messages(root: &Map<String, Value>) -> Vec<PromptMessage> {
+    merge_by_role(&to_prompt_messages(root, false))
+}
+
+pub(super) fn build_deepseek_continuation_prompt(root: &Map<String, Value>) -> String {
+    let messages = build_deepseek_history_messages(root);
+    let mut system_parts: Vec<String> = Vec::new();
+    for message in messages.iter() {
+        if message.role == "system" {
+            let text = extract_request_system_text(message.text.as_str());
+            if !text.is_empty() {
+                system_parts.push(text);
+            }
+        }
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(override_block) = build_authoritative_system_override_block(&messages) {
+        parts.push(override_block);
+    }
+    parts.push(format!("<｜User｜>{}", super::history_context::RCC_HISTORY_CONTINUATION_PROMPT));
+
+    [system_parts.join("\n\n"), parts.join("\n")]
+        .into_iter()
+        .filter(|v| !v.is_empty())
+        .collect::<Vec<String>>()
+        .join("")
+        .trim()
+        .to_string()
+}
+
 pub(super) fn build_deepseek_prompt(
     root: &Map<String, Value>,
     require_tool_call_override: bool,
