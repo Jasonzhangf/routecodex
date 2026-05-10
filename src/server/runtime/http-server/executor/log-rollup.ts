@@ -338,16 +338,18 @@ function emitRealtimeSessionRequestLog(args: {
   if (hasReqTokens) {
     const tokParts: string[] = [];
     if (reqUsage.promptTokens !== undefined) tokParts.push(`in=${formatWholeNumber(reqUsage.promptTokens)}`);
-    if (reqUsage.completionTokens !== undefined) tokParts.push(`out=${formatWholeNumber(reqUsage.completionTokens)}`);
-    if (reqUsage.cacheReadTokens !== undefined) tokParts.push(`cache=${formatWholeNumber(reqUsage.cacheReadTokens)}`);
-    if (reqUsage.totalTokens !== undefined) {
-      tokParts.push(`total=${formatWholeNumber(reqUsage.totalTokens)}`);
-      if (reqUsage.latencyMs > 0) {
-        const tokPerSec = ((reqUsage.totalTokens * 1000) / reqUsage.latencyMs).toFixed(0);
+    if (reqUsage.completionTokens !== undefined) {
+      tokParts.push(`out=${formatWholeNumber(reqUsage.completionTokens)}`);
+      // output speed = completion tokens / upstream provider time
+      const upstreamMs = reqUsage.externalLatencyMs > 0 ? reqUsage.externalLatencyMs : reqUsage.latencyMs;
+      if (reqUsage.completionTokens > 0 && upstreamMs > 0) {
+        const tokPerSec = ((reqUsage.completionTokens * 1000) / upstreamMs).toFixed(0);
         tokParts.push(`speed=${tokPerSec}t/s`);
       }
     }
-    console.log(colorize(`  ${tokParts.join(' ')}`, sessionColor));
+    if (reqUsage.cacheReadTokens !== undefined) tokParts.push(`cache=${formatWholeNumber(reqUsage.cacheReadTokens)}`);
+    if (reqUsage.totalTokens !== undefined) tokParts.push(`total=${formatWholeNumber(reqUsage.totalTokens)}`);
+    console.log(`  ${ANSI_WHITE}${tokParts.join(' ')}${ANSI_RESET}`);
   }
 }
 
