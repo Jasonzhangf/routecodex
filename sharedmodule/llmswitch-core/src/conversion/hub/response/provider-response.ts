@@ -653,14 +653,11 @@ export async function convertProviderResponse(
   }
 
   if (outbound.stream) {
-    const usage = clientPayload && typeof clientPayload === 'object' && !Array.isArray(clientPayload)
-      ? (clientPayload as JsonObject).usage
-      : undefined;
-    const body =
-      usage !== undefined
-        ? ({ usage } as JsonObject)
-        : undefined;
-    return { __sse_responses: outbound.stream, body, format: clientProtocol };
+    return {
+      __sse_responses: outbound.stream,
+      body: clientPayload,
+      format: clientProtocol
+    };
   }
   return { body: clientPayload, format: clientProtocol };
 }

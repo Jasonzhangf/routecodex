@@ -66,9 +66,33 @@ describe('Hub provider response pipeline', () => {
       wantsStream: true
     });
     expect(result.__sse_responses).toBeDefined();
+    expect((result.body as any)?.__routecodex_finish_reason).toBe('stop');
+    expect((result.body as any)?.choices?.[0]?.finish_reason).toBe('stop');
     const payload = await collectStream(result.__sse_responses);
     expect(payload).toContain('"Hub response pipeline rocks."');
     expect(payload).toContain('data:');
+  });
+
+  test('streamed openai-responses payload preserves wrapper finish reason and contract body', async () => {
+    const chatResponse = buildChatResponse();
+    const responsesPayload = buildResponsesPayloadFromChat(chatResponse);
+    const ctx: AdapterContext = {
+      ...baseContext,
+      providerProtocol: 'openai-responses'
+    };
+    const converted = await convertProviderResponse({
+      providerProtocol: 'openai-responses',
+      providerResponse: responsesPayload as JsonObject,
+      context: ctx,
+      entryEndpoint: '/v1/responses',
+      wantsStream: true
+    });
+
+    expect(converted.__sse_responses).toBeDefined();
+    expect((converted.body as any)?.__routecodex_finish_reason).toBe('stop');
+    expect((converted.body as any)?.output?.[0]?.type).toBe('message');
+    expect((converted.body as any)?.output_text).toContain('Hub response pipeline rocks.');
+    expect((converted.body as any)?.usage?.total_tokens).toBe(12);
   });
 
   test('responses provider maps to Anthropic shape when client endpoint is /v1/messages', async () => {
