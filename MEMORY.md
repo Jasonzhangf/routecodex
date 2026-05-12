@@ -1491,3 +1491,7 @@ Tags: native-hotpath, jest, router-hotpath-napi, build-gate, false-negative, 202
 - 2026-05-12: DeepSeek-Web `DEEPSEEK_FILE_UPLOAD_FAILED` 本轮已验证的一类真因不是 session 坏，也不是 file-id 递归漏解析，而是 **history context 上传文件名为无扩展名 `context`** 时，上游 `upload_file` 会返回 `{"code":0,"data":{"biz_code":9,"biz_msg":"unsupported file type"}}`。可复用规则：DeepSeek context file 必须用**显式 `.txt` 文件名**（当前收敛为 `context.txt`），且 upload success/failure 判断必须同时检查 **HTTP status + top-level `code` + `data.biz_code/biz_msg`**；不能把 `code=0 但 biz_code!=0` 误报成 “succeeded without file id”。运行态证据：`~/.rcc/logs/server-10000.log` 出现该 payload；修复后 build/install/restart 到 `/health`=`0.90.1543`。
 
 Tags: deepseek-web, file-upload, context.txt, unsupported-file-type, biz-code, no-session-corruption, upload-contract, runtime-verification, 2026-05-12
+
+- 2026-05-12: `Provider runtime deepseek-web.key1 not found` 的真源不是 quota 脏数据，而是 **native Rust provider bootstrap** 会把 V2 provider 配置里的空 `auth.entries` 物化成默认 alias `key1`。可复用规则：排查 Virtual Router bootstrap/runtime alias 问题时，先看 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs`，不要误改 TS `bootstrap/auth-utils.ts`（当前无调用点）；对 `auth.entries` 空记录必须在 Rust `push_auth_entry_from_record` 入口直接忽略，避免生成幽灵 runtime。
+
+Tags: virtual-router, provider-bootstrap, deepseek-web, key1, empty-auth-entry, rust-ssot, no-ts-dead-fix, runtime-alias, 2026-05-12

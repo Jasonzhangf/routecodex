@@ -6,17 +6,15 @@ import {
   keyFor,
   shouldThrottle,
   updateThrottle,
-  getInFlight,
-  setInFlight,
-  deleteInFlight,
-  hasInFlight,
-  getInFlightPromise
+  inFlight
 } from '../../../../src/providers/auth/oauth-lifecycle/throttle.js';
 
 describe('throttle', () => {
   beforeEach(() => {
-    // Clear inFlight map between tests
-    getInFlight().clear();
+    // Clear inFlight map between tests by deleting any leftover keys
+    for (const k of ['key', 'test-key', 'key1']) {
+      inFlight.delete(k);
+    }
   });
 
   describe('keyFor', () => {
@@ -57,31 +55,34 @@ describe('throttle', () => {
   });
 
   describe('inFlight operations', () => {
-    it('hasInFlight returns false initially', () => {
-      expect(hasInFlight('key')).toBe(false);
+    it('has returns false initially', () => {
+      expect(inFlight.has('key')).toBe(false);
     });
 
-    it('setInFlight and hasInFlight work together', () => {
+    it('set and has work together', () => {
       const promise = Promise.resolve();
-      setInFlight('key', promise);
-      expect(hasInFlight('key')).toBe(true);
+      inFlight.set('key', promise);
+      expect(inFlight.has('key')).toBe(true);
     });
 
-    it('getInFlightPromise returns set promise', async () => {
+    it('get returns set promise', async () => {
       const promise = Promise.resolve('value');
-      setInFlight('key', promise);
-      expect(getInFlightPromise('key')).toBe(promise);
+      inFlight.set('key', promise);
+      expect(inFlight.get('key')).toBe(promise);
     });
 
-    it('deleteInFlight removes entry', () => {
-      setInFlight('key', Promise.resolve());
-      deleteInFlight('key');
-      expect(hasInFlight('key')).toBe(false);
+    it('delete removes entry', () => {
+      inFlight.set('key', Promise.resolve());
+      inFlight.delete('key');
+      expect(inFlight.has('key')).toBe(false);
     });
 
-    it('getInFlight returns the map', () => {
-      const map = getInFlight();
-      expect(map).toBeInstanceOf(Map);
+    it('inFlight object is exposed', () => {
+      expect(inFlight).toBeDefined();
+      expect(typeof inFlight.has).toBe('function');
+      expect(typeof inFlight.get).toBe('function');
+      expect(typeof inFlight.set).toBe('function');
+      expect(typeof inFlight.delete).toBe('function');
     });
   });
 });

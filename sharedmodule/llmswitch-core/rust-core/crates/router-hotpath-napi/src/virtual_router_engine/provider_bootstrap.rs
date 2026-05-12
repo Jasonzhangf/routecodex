@@ -1016,6 +1016,41 @@ fn auth_candidate_has_material(candidate: &AuthCandidate) -> bool {
             .unwrap_or(false)
 }
 
+fn auth_candidate_has_effective_material(
+    candidate: &AuthCandidate,
+    defaults: &AuthFieldDefaults,
+) -> bool {
+    candidate.value.is_some()
+        || candidate.secret_ref.is_some()
+        || candidate.token_file.is_some()
+        || candidate.token_url.is_some()
+        || candidate.device_code_url.is_some()
+        || candidate.client_id.is_some()
+        || candidate.client_secret.is_some()
+        || candidate.authorization_url.is_some()
+        || candidate.user_info_url.is_some()
+        || candidate.refresh_url.is_some()
+        || candidate
+            .scopes
+            .as_ref()
+            .map(|items| !items.is_empty())
+            .unwrap_or(false)
+        || defaults.secret_ref.is_some()
+        || defaults.token_file.is_some()
+        || defaults.token_url.is_some()
+        || defaults.device_code_url.is_some()
+        || defaults.client_id.is_some()
+        || defaults.client_secret.is_some()
+        || defaults.authorization_url.is_some()
+        || defaults.user_info_url.is_some()
+        || defaults.refresh_url.is_some()
+        || defaults
+            .scopes
+            .as_ref()
+            .map(|items| !items.is_empty())
+            .unwrap_or(false)
+}
+
 fn push_auth_entry_from_record(
     provider_id: &str,
     record: Option<&Map<String, Value>>,
@@ -1060,6 +1095,9 @@ fn push_auth_entry_from_record(
             ..Default::default()
         },
     );
+    if !auth_candidate_has_effective_material(&candidate, defaults) {
+        return Ok(());
+    }
     push_auth_entry(
         provider_id,
         alias,

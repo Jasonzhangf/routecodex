@@ -78,4 +78,36 @@ describe('virtual-router native provider auth bootstrap', () => {
     expect(runtime?.headers?.['X-DashScope-CacheControl']).toBe('enable');
     expect(runtime?.headers?.['X-DashScope-AuthType']).toBe('qwen-oauth');
   });
+
+  it('ignores empty auth.entries records instead of materializing phantom key aliases', () => {
+    const result = bootstrapProvidersWithNative({
+      providersSource: {
+        'deepseek-web': {
+          type: 'openai',
+          baseURL: 'https://chat.deepseek.com',
+          compatibilityProfile: 'chat:deepseek-web',
+          auth: {
+            type: 'deepseek-account',
+            entries: [
+              {},
+              {
+                alias: 'clary',
+                type: 'deepseek-account',
+                tokenFile: '~/.rcc/auth/deepseek-clary.json'
+              }
+            ]
+          },
+          models: {
+            'deepseek-v4-pro': {}
+          }
+        }
+      }
+    });
+
+    expect(Object.keys(result.runtimeEntries).filter((key) => key.startsWith('deepseek-web.'))).toEqual([
+      'deepseek-web.clary'
+    ]);
+    expect(result.aliasIndex.get('deepseek-web')).toEqual(['clary']);
+    expect(result.runtimeEntries['deepseek-web.key1']).toBeUndefined();
+  });
 });
