@@ -122,8 +122,8 @@ async function main() {
       formatEnvelope: makeFormatEnvelope({ tools: [{ name: 'Bash' }] }, 'anthropic-messages'),
       adapterContext: makeAdapterContext({ entryEndpoint: '/v1/messages' })
     });
-    assert.equal(chatEnvelope.semantics.tools.toolNameAliasMap.bash, 'Bash');
-    assert.equal(chatEnvelope.semantics.tools.toolNameAliasMap.shell_command, undefined);
+    assert.equal(chatEnvelope.semantics.tools.toolNameAliasMap.shell_command, "Bash");
+    assert.equal(chatEnvelope.semantics.tools.toolNameAliasMap.bash, undefined);
     assert.equal(chatEnvelope.semantics.tools.toolNameAliasMap.exec_command, undefined);
   }
 
