@@ -48,12 +48,12 @@ const COLOR_ERROR = '\x1b[31m';
 const COLOR_WHITE = '\x1b[97m';
 type StageLevel = 'info' | 'start' | 'success' | 'error';
 
-function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
-  if (!value) {return fallback;}
+function resolveBoolFromEnv(value: string | undefined, defaultValue: boolean): boolean {
+  if (!value) {return defaultValue;}
   const normalized = value.trim().toLowerCase();
   if (truthy.has(normalized)) {return true;}
   if (falsy.has(normalized)) {return false;}
-  return fallback;
+  return defaultValue;
 }
 
 function computeStageLoggingEnabled(): boolean {
@@ -447,6 +447,13 @@ function shouldLogStage(
 
   if (scope.startsWith('response.sse')) {
     return false;
+  }
+
+  if (
+    normalizedStage === 'provider.traffic.acquire.wait'
+    || normalizedStage === 'provider.traffic.acquire.completed'
+  ) {
+    return true;
   }
 
   return false;

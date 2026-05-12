@@ -1760,7 +1760,7 @@ fn test_req_profile_chat_deepseek_web_wraps_history_tool_calls_and_drops_empty_t
     let prompt = result.payload["prompt"].as_str().unwrap_or("");
     assert!(prompt.contains("<|DSML|tool_calls>"));
     assert!(prompt.contains("exec_command"));
-    assert!(prompt.contains("bash -lc 'pwd'"));
+    assert!(prompt.contains("<![CDATA[pwd]]>"));
     assert!(prompt.contains("inspect repo root"));
     assert!(prompt.contains("If no tool is needed, reply with plain text"));
     assert!(!prompt.ends_with("<｜User｜>"));
@@ -1927,7 +1927,7 @@ fn test_req_profile_chat_deepseek_web_preserves_assistant_failure_history() {
     let prompt = result.payload["prompt"].as_str().unwrap_or("");
     assert!(prompt.contains("<|DSML|tool_calls>"));
     assert!(prompt.contains("exec_command"));
-    assert!(prompt.contains("bash -lc 'pwd'"));
+    assert!(prompt.contains("<![CDATA[pwd]]>"));
     assert!(prompt.contains("inspect repo root"));
     assert!(!prompt.contains("\"command\":\"bash -lc 'pwd'\""));
 }
@@ -2284,13 +2284,13 @@ fn test_req_profile_chat_deepseek_web_continuation_prompt_preserves_dsml_guidanc
     assert!(prompt.contains("<|DSML|tool_calls>"));
     assert!(prompt.contains("This turn is tool-required."));
     assert!(prompt.contains("Allowed tool names this turn: exec_command."));
-    assert!(prompt.contains("Continue from the latest state in the attached RCC_HISTORY.txt context."));
+    assert!(prompt.contains("Continue from the latest state in the attached context."));
     assert_eq!(prompt.matches("Tool-call output contract (STRICT)").count(), 1);
     assert_eq!(prompt.matches("DeepSeek text-tool addendum:").count(), 1);
     let context_file = result.payload["metadata"]["deepseek"]["contextFile"]["content"]
         .as_str()
         .unwrap_or("");
-    assert!(context_file.contains("# RCC_HISTORY.txt"));
+    assert!(context_file.contains("# context"));
     assert!(context_file.contains("=== 1. SYSTEM ===\nfollow contract"));
     assert!(context_file.contains("=== 2. USER ===\n请继续处理"));
     assert!(context_file.contains("=== 3. ASSISTANT ==="));
@@ -2644,7 +2644,7 @@ fn test_req_profile_chat_deepseek_web_preserves_explicit_empty_reasoning_content
     let prompt = result.payload["prompt"].as_str().unwrap_or("");
     assert!(prompt.contains("<|DSML|tool_calls>"));
     assert!(prompt.contains("exec_command"));
-    assert!(prompt.contains("bash -lc 'pwd'"));
+    assert!(prompt.contains("<![CDATA[pwd]]>"));
     assert!(prompt.contains("reasoning_content: \"\""));
     assert!(prompt.contains("pwd output: /workspace"));
 }

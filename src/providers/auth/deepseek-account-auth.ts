@@ -131,17 +131,10 @@ export class DeepSeekAccountAuthProvider implements IAuthProvider {
 
   async refreshCredentials(): Promise<void> {
     this.assertTokenFileOnlyAuthScheme();
-    try {
-      await this.ensureTokenWithAutoAcquire('refresh', true);
-    } catch (error) {
-      if (this.isDeepSeekAuthError(error, DEEPSEEK_ERROR_CODES.AUTH_MISSING)) {
-        // Backward compatibility: if auto-acquire is not configured, keep the
-        // previous tokenFile hot-reload behavior.
-        await this.forceReloadTokenFromFile();
-        return;
-      }
-      throw error;
-    }
+    // Fail-fast: if auto-acquire cannot obtain a fresh token, do NOT fall back
+    // to re-reading the stale token file. The caller (Virtual Router) will
+    // handle the error and switch to a different account entry.
+    await this.ensureTokenWithAutoAcquire('refresh', true);
   }
 
   async cleanup(): Promise<void> {

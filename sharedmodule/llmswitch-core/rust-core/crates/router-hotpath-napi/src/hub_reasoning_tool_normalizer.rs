@@ -937,6 +937,41 @@ fn normalize_tool_arg_key(raw: &str) -> Option<String> {
     }
 }
 
+fn unwrap_xml_cdata_sections(raw: &str) -> String {
+    if !raw.contains("<![CDATA[") {
+        return raw.to_string();
+    }
+    let mut out = String::with_capacity(raw.len());
+    let mut remaining = raw;
+    loop {
+        let Some(start) = remaining.find("<![CDATA[") else {
+            out.push_str(remaining);
+            break;
+        };
+        out.push_str(&remaining[..start]);
+        let after_start = &remaining[start + "<![CDATA[".len()..];
+        let Some(end) = after_start.find("]]>") else {
+            out.push_str(remaining);
+            break;
+        };
+        out.push_str(&after_start[..end]);
+        remaining = &after_start[end + "]]>".len()..];
+    }
+    out
+}
+
+fn decode_basic_xml_entities(raw: &str) -> String {
+    raw.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
+fn normalize_markup_scalar_text(raw: &str) -> String {
+    decode_basic_xml_entities(unwrap_xml_cdata_sections(raw).trim())
+}
+
 fn parse_markup_argument_value(raw: &str) -> Value {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -954,37 +989,38 @@ fn parse_markup_argument_value(raw: &str) -> Value {
     if trimmed.is_empty() {
         return Value::String(String::new());
     }
-    if let Ok(parsed) = serde_json::from_str::<Value>(trimmed.as_str()) {
+    let normalized_scalar = normalize_markup_scalar_text(trimmed.as_str());
+    if let Ok(parsed) = serde_json::from_str::<Value>(normalized_scalar.as_str()) {
         return parsed;
     }
-    if (trimmed.starts_with('{') && trimmed.ends_with('}'))
-        || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+    if (normalized_scalar.starts_with('{') && normalized_scalar.ends_with('}'))
+        || (normalized_scalar.starts_with('[') && normalized_scalar.ends_with(']'))
     {
-        let parsed = parse_lenient_string_preserving_shell(trimmed.as_str());
+        let parsed = parse_lenient_string_preserving_shell(normalized_scalar.as_str());
         if !matches!(parsed, Value::Object(ref row) if row.is_empty()) {
             return parsed;
         }
     }
-    if trimmed.eq_ignore_ascii_case("true") {
+    if normalized_scalar.eq_ignore_ascii_case("true") {
         return Value::Bool(true);
     }
-    if trimmed.eq_ignore_ascii_case("false") {
+    if normalized_scalar.eq_ignore_ascii_case("false") {
         return Value::Bool(false);
     }
-    if let Ok(value) = trimmed.parse::<i64>() {
+    if let Ok(value) = normalized_scalar.parse::<i64>() {
         return Value::Number(value.into());
     }
-    if let Ok(value) = trimmed.parse::<f64>() {
+    if let Ok(value) = normalized_scalar.parse::<f64>() {
         if let Some(number) = serde_json::Number::from_f64(value) {
             return Value::Number(number);
         }
     }
-    let quoted = (trimmed.starts_with('"') && trimmed.ends_with('"'))
-        || (trimmed.starts_with('\'') && trimmed.ends_with('\''));
-    if quoted && trimmed.len() >= 2 {
-        return Value::String(trimmed[1..trimmed.len() - 1].to_string());
+    let quoted = (normalized_scalar.starts_with('"') && normalized_scalar.ends_with('"'))
+        || (normalized_scalar.starts_with('\'') && normalized_scalar.ends_with('\''));
+    if quoted && normalized_scalar.len() >= 2 {
+        return Value::String(normalized_scalar[1..normalized_scalar.len() - 1].to_string());
     }
-    Value::String(trimmed.to_string())
+    Value::String(normalized_scalar)
 }
 
 fn normalize_tool_name(raw: &str) -> String {
@@ -2283,11 +2319,112 @@ fn strip_trailing_orphan_tool_markup_suffix(text: &str) -> String {
         .to_string()
 }
 
+fn mask_xml_cdata_sections(raw: &str) -> (String, Vec<String>) {
+    if !raw.contains("<![CDATA[") {
+        return (raw.to_string(), Vec::new());
+    }
+
+    let mut out = String::with_capacity(raw.len());
+    let mut masked: Vec<String> = Vec::new();
+    let mut remaining = raw;
+
+    loop {
+        let Some(start) = remaining.find("<![CDATA[") else {
+            out.push_str(remaining);
+            break;
+        };
+        out.push_str(&remaining[..start]);
+        let after_start = &remaining[start + "<![CDATA[".len()..];
+        let Some(end) = after_start.find("]]>") else {
+            out.push_str(remaining);
+            break;
+        };
+        let token = format!("__RCC_CDATA_MASK_{}__", masked.len());
+        masked.push(after_start[..end].to_string());
+        out.push_str(token.as_str());
+        remaining = &after_start[end + "]]>".len()..];
+    }
+
+    (out, masked)
+}
+
+fn unmask_xml_cdata_sections(mut raw: String, masked: &[String]) -> String {
+    for (index, value) in masked.iter().enumerate() {
+        let token = format!("__RCC_CDATA_MASK_{}__", index);
+        raw = raw.replace(token.as_str(), format!("<![CDATA[{}]]>", value).as_str());
+    }
+    raw
+}
+
+fn canonicalize_dsml_tool_markup_variants(raw: &str) -> String {
+    if !raw.contains("DSML") && !raw.contains("dsml") {
+        return raw.to_string();
+    }
+
+    let (masked_text, masked_cdata) = mask_xml_cdata_sections(raw);
+    let open_pattern = Regex::new(
+        r#"(?is)<\s*[|｜│]+\s*DSML\s*[|｜│]+\s*(tool_calls|invoke|parameter)\b([^>]*)>"#,
+    )
+    .expect("valid dsml open canonicalization pattern");
+    let close_pattern = Regex::new(
+        r#"(?is)</\s*[|｜│]+\s*DSML\s*[|｜│]+\s*(tool_calls|invoke|parameter)\s*>"#,
+    )
+    .expect("valid dsml close canonicalization pattern");
+
+    let normalized_open = open_pattern
+        .replace_all(masked_text.as_str(), |caps: &regex::Captures| {
+            let tag = caps
+                .get(1)
+                .map(|m| m.as_str().trim().to_ascii_lowercase())
+                .unwrap_or_else(|| "tool_calls".to_string());
+            let attrs = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+            format!("<{}{}>", tag, attrs)
+        })
+        .to_string();
+    let normalized = close_pattern
+        .replace_all(normalized_open.as_str(), |caps: &regex::Captures| {
+            let tag = caps
+                .get(1)
+                .map(|m| m.as_str().trim().to_ascii_lowercase())
+                .unwrap_or_else(|| "tool_calls".to_string());
+            format!("</{}>", tag)
+        })
+        .to_string();
+
+    unmask_xml_cdata_sections(normalized, masked_cdata.as_slice())
+}
+
+fn strip_empty_tool_transport_wrappers(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let empty_wrapper_pattern = Regex::new(
+        r"(?is)<\s*(?:tool_calls|function_calls)\s*>\s*</\s*(?:tool_calls|function_calls)\s*>",
+    )
+    .expect("valid empty tool wrapper pattern");
+
+    let mut current = trimmed.to_string();
+    loop {
+        let replaced = empty_wrapper_pattern
+            .replace_all(current.as_str(), "")
+            .trim()
+            .to_string();
+        if replaced == current {
+            return replaced;
+        }
+        current = replaced;
+    }
+}
+
 fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (String, Vec<Value>) {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return (text.to_string(), Vec::new());
     }
+    let canonicalized_text = canonicalize_dsml_tool_markup_variants(text);
+    let source = canonicalized_text.as_str();
 
     let mut matches: Vec<MatchEntry> = Vec::new();
 
@@ -2296,7 +2433,7 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
     )
     .expect("valid fence pattern");
     consume_pattern(
-        text,
+        source,
         &fence_pattern,
         |caps| {
             let body = caps.get(1).map(|m| m.as_str().to_string())?;
@@ -2309,7 +2446,7 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
         Regex::new(r#"(?is)<tool_call(?:\s+name=\"([^\"]+)\")?\s*>([\s\S]*?)</tool_call>"#)
             .expect("valid tool tag pattern");
     consume_pattern(
-        text,
+        source,
         &tag_tool_pattern,
         |caps| {
             let body = caps.get(2).map(|m| m.as_str().to_string())?;
@@ -2323,7 +2460,7 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
         Regex::new(r#"(?is)<function_call(?:\s+name=\"([^\"]+)\")?\s*>([\s\S]*?)</function_call>"#)
             .expect("valid function tag pattern");
     consume_pattern(
-        text,
+        source,
         &tag_function_pattern,
         |caps| {
             let body = caps.get(2).map(|m| m.as_str().to_string())?;
@@ -2337,7 +2474,7 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
         Regex::new(r#"(?is)<function=([A-Za-z_][A-Za-z0-9_.-]*)\s*>([\s\S]*?)</function>"#)
             .expect("valid function equals pattern");
     consume_pattern(
-        text,
+        source,
         &function_equals_pattern,
         |caps| {
             let body = caps.get(2).map(|m| m.as_str().to_string())?;
@@ -2351,7 +2488,7 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
         Regex::new(r#"(?is)<invoke(?:\s+name=\"([^\"]+)\")?\s*>([\s\S]*?)</invoke>"#)
             .expect("valid invoke pattern");
     consume_pattern(
-        text,
+        source,
         &invoke_pattern,
         |caps| {
             let body = caps.get(2).map(|m| m.as_str().to_string())?;
@@ -2366,7 +2503,7 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
     )
     .expect("valid tool namespace pattern");
     consume_pattern(
-        text,
+        source,
         &tool_namespace_pattern,
         |caps| {
             let body = caps.get(2).map(|m| m.as_str().to_string())?;
@@ -2381,7 +2518,7 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
     )
     .expect("valid prefixed markup label pattern");
     consume_pattern(
-        text,
+        source,
         &prefixed_markup_label_pattern,
         |caps| {
             let body = caps.get(2).map(|m| m.as_str().to_string())?;
@@ -2395,7 +2532,7 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
         Regex::new(r#"(?is)\[tool_call(?:\s+name=\"([^\"]+)\")?\]([\s\S]*?)\[/tool_call\]"#)
             .expect("valid tool bracket pattern");
     consume_pattern(
-        text,
+        source,
         &bracket_tool_pattern,
         |caps| {
             let body = caps.get(2).map(|m| m.as_str().to_string())?;
@@ -2410,7 +2547,7 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
     )
     .expect("valid function bracket pattern");
     consume_pattern(
-        text,
+        source,
         &bracket_function_pattern,
         |caps| {
             let body = caps.get(2).map(|m| m.as_str().to_string())?;
@@ -2421,12 +2558,12 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
     );
 
     if matches.is_empty() {
-        let explicit_json_tool_calls = parse_explicit_json_tool_calls(text, id_prefix);
+        let explicit_json_tool_calls = parse_explicit_json_tool_calls(source, id_prefix);
         if !explicit_json_tool_calls.is_empty() {
             return (String::new(), explicit_json_tool_calls);
         }
-        let stripped = strip_trailing_orphan_tool_markup_suffix(text);
-        if stripped.len() < text.trim_end().len() {
+        let stripped = strip_trailing_orphan_tool_markup_suffix(source);
+        if stripped.len() < source.trim_end().len() {
             return (stripped, Vec::new());
         }
         return (text.to_string(), Vec::new());
@@ -2439,14 +2576,17 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
         .collect::<Vec<Value>>();
 
     matches.sort_by(|a, b| b.start.cmp(&a.start));
-    let mut cleaned = text.to_string();
+    let mut cleaned = source.to_string();
     for entry in matches {
         if entry.start <= entry.end && entry.end <= cleaned.len() {
             cleaned.replace_range(entry.start..entry.end, "");
         }
     }
 
-    (cleaned.trim().to_string(), tool_calls)
+    (
+        strip_empty_tool_transport_wrappers(cleaned.trim()),
+        tool_calls,
+    )
 }
 
 fn derive_tool_call_key(call: &Value) -> Option<String> {
@@ -3350,6 +3490,37 @@ mod tests {
                 .and_then(Value::as_str),
             Some("exec_command")
         );
+    }
+
+    #[test]
+    fn extract_tool_calls_canonicalizes_dsml_variant_wrappers_with_masked_cdata() {
+        let source = r#"<｜DSML│tool_calls>
+<│DSML│invoke name="exec_command">
+<│DSML│parameter name="cmd"><![CDATA[pwd]]></│DSML│parameter>
+</│DSML│invoke>
+</｜DSML│tool_calls>"#;
+        let (cleaned, tool_calls) =
+            extract_tool_calls_from_reasoning_text(source, "reasoning_test");
+        assert_eq!(cleaned, "");
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(
+            tool_calls[0]
+                .as_object()
+                .and_then(|row| row.get("function"))
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("name"))
+                .and_then(Value::as_str),
+            Some("exec_command")
+        );
+        let args = tool_calls[0]
+            .as_object()
+            .and_then(|row| row.get("function"))
+            .and_then(Value::as_object)
+            .and_then(|row| row.get("arguments"))
+            .and_then(Value::as_str)
+            .unwrap_or("{}");
+        let parsed_args: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+        assert_eq!(parsed_args["cmd"], "pwd");
     }
 
     #[test]

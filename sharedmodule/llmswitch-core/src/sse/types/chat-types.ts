@@ -286,6 +286,10 @@ export interface SseToChatJsonOptions {
   requestId: string;
   model: string;
   timeoutMs?: number;
+  firstFrameTimeoutMs?: number;
+  noContentTimeoutMs?: number;
+  preAnchorIdleTimeoutMs?: number;
+  contentIdleTimeoutMs?: number;
   validateChunks?: boolean;
   enableSequenceValidation?: boolean;
   accumulateToolCalls?: boolean;
@@ -320,6 +324,10 @@ export interface ChatEventStats {
   firstContentAtMs?: number;
   // 最后一个内容 token 到达时间 (wall clock ms)
   lastContentAtMs?: number;
+  // 首个上游帧/块到达时间（不要求语义内容）
+  firstFrameAtMs?: number;
+  // 最近一个上游帧/块到达时间（不要求语义内容）
+  lastFrameAtMs?: number;
 }
 
 // Chat转换错误

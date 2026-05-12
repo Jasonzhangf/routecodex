@@ -365,7 +365,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
         }
 
         // 如果是授权待处理错误，继续轮询
-        const errorData = await response.json().catch(() => ({}));
+        const errorData = await response.json();
         if (errorData.error === 'authorization_pending') {
           logOAuthDebug(`[OAuth] Authorization pending... (${attempt + 1}/${maxAttempts})`);
           continue;

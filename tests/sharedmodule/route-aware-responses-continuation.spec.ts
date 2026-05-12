@@ -366,6 +366,88 @@ describe('route-aware responses continuation', () => {
     ]);
   });
 
+  it('does not materialize scope continuation when stored prefix still has unresolved tool call and incoming turn has no tool output', () => {
+    captureResponsesRequestContext({
+      requestId: 'req-route-aware-1',
+      sessionId: 'sess-route-aware-1',
+      payload: {
+        model: 'gpt-5.4'
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '请执行 pwd' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: 'req-route-aware-1',
+      response: {
+        id: 'resp-route-aware-pending-plain-1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            id: 'fc_route_aware_pending_plain_1',
+            call_id: 'call_route_aware_pending_plain_1',
+            name: 'exec_command',
+            arguments: JSON.stringify({ cmd: 'pwd' }),
+            status: 'in_progress'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_route_aware_pending_plain_1',
+                type: 'function',
+                name: 'exec_command',
+                arguments: JSON.stringify({ cmd: 'pwd' })
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    const workingRequest = {
+      model: 'qwen3.6-plus',
+      messages: [{ role: 'user', content: '继续，但没有工具结果' }],
+      parameters: {},
+      metadata: {}
+    } as any;
+
+    const resolved = resolveRouteAwareResponsesContinuation({
+      request: workingRequest,
+      rawRequest: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '继续，但没有工具结果' }]
+          }
+        ]
+      } as any,
+      normalizedMetadata: {
+        sessionId: 'sess-route-aware-1'
+      },
+      requestId: 'req-route-aware-2',
+      entryProtocol: 'openai-responses',
+      outboundProtocol: 'openai-chat-completions'
+    });
+
+    expect((resolved as any).messages).toEqual([{ role: 'user', content: '继续，但没有工具结果' }]);
+    expect((resolved as any).semantics?.responses?.resume).toBeUndefined();
+    expect((resolved as any).semantics?.continuation).toBeUndefined();
+  });
+
   it('strips historical image turns when materializing responses continuation for non-responses outbound', () => {
     captureResponsesRequestContext({
       requestId: 'req-route-aware-1',

@@ -99,12 +99,12 @@ export class VirtualRouterEngine {
     this.nativeProxy.clearProviderCooldown(providerKey);
   }
 
-  markProviderConcurrencyBusy(providerKey: string): void {
-    this.nativeProxy.markProviderConcurrencyBusy?.(providerKey);
+  markConcurrencyScopeBusy(scopeKey: string): void {
+    this.nativeProxy.markConcurrencyScopeBusy?.(scopeKey);
   }
 
-  markProviderConcurrencyIdle(providerKey: string): void {
-    this.nativeProxy.markProviderConcurrencyIdle?.(providerKey);
+  markConcurrencyScopeIdle(scopeKey: string): void {
+    this.nativeProxy.markConcurrencyScopeIdle?.(scopeKey);
   }
 
   route(

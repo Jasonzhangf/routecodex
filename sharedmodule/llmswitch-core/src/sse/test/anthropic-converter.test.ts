@@ -72,6 +72,137 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
     });
   });
 
+  it('fails fast with anthropic no-content timeout before total timeout', async () => {
+    const converter = new AnthropicSseToJsonConverter();
+    async function* stalledSse(): AsyncGenerator<string> {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+
+    await expect(
+      converter.convertSseToJson(stalledSse(), {
+        requestId: 'req_anthropic_no_frame_timeout',
+        firstFrameTimeoutMs: 50
+      })
+    ).rejects.toMatchObject({
+      code: 'ANTHROPIC_SSE_TO_JSON_FAILED',
+      status: 504,
+      statusCode: 504,
+      retryable: true,
+      upstreamCode: 'UPSTREAM_STREAM_NO_FRAME_TIMEOUT',
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    });
+  });
+
+  it('uses pre-anchor idle timeout after thinking-only deltas', async () => {
+    const converter = new AnthropicSseToJsonConverter();
+    async function* thinkingThenIdle(): AsyncGenerator<string> {
+      yield `event: message_start
+data: {"type":"message_start","message":{"id":"msg_timeout2","type":"message","role":"assistant","model":"glm-5"}}
+
+`;
+      yield `event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}
+
+`;
+      yield `event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"internal"}}
+
+`;
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+
+      await expect(
+        converter.convertSseToJson(thinkingThenIdle(), {
+          requestId: 'req_anthropic_content_idle_timeout',
+          preAnchorIdleTimeoutMs: 30,
+          contentIdleTimeoutMs: 50
+        })
+      ).rejects.toMatchObject({
+        code: 'ANTHROPIC_SSE_TO_JSON_FAILED',
+        status: 504,
+        statusCode: 504,
+        retryable: true,
+        upstreamCode: 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT',
+        requestExecutorProviderErrorStage: 'provider.sse_decode'
+      });
+  });
+
+  it('switches anthropic timeout mode after explicit tool wrapper inside thinking delta', async () => {
+    const converter = new AnthropicSseToJsonConverter();
+    async function* thinkingToolWrapperThenIdle(): AsyncGenerator<string> {
+      yield `event: message_start
+data: {"type":"message_start","message":{"id":"msg_timeout3","type":"message","role":"assistant","model":"glm-5"}}
+
+`;
+      yield `event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}
+
+`;
+      yield `event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"<tool_call>{\\"name\\":\\"exec_command\\",\\"arguments\\":{\\"cmd\\":\\"pwd\\"}}</tool_call>"}}
+
+`;
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+
+    await expect(
+      converter.convertSseToJson(thinkingToolWrapperThenIdle(), {
+        requestId: 'req_anthropic_tool_wrapper_progress',
+        preAnchorIdleTimeoutMs: 30,
+        contentIdleTimeoutMs: 50
+      })
+    ).rejects.toMatchObject({
+      code: 'ANTHROPIC_SSE_TO_JSON_FAILED',
+      status: 504,
+      statusCode: 504,
+      retryable: true,
+      upstreamCode: 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT',
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    });
+  });
+
+  it('does not let non-semantic anthropic events endlessly extend no-content timeout', async () => {
+    const converter = new AnthropicSseToJsonConverter();
+    async function* noisyButNonSemantic(): AsyncGenerator<string> {
+      yield `event: message_start
+data: {"type":"message_start","message":{"id":"msg_non_semantic","type":"message","role":"assistant","model":"glm-5"}}
+
+`;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      yield `event: ping
+data: {"type":"ping"}
+
+`;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      yield `event: ping
+data: {"type":"ping"}
+
+`;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      yield `event: ping
+data: {"type":"ping"}
+
+`;
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+
+    const startedAt = Date.now();
+      await expect(
+        converter.convertSseToJson(noisyButNonSemantic(), {
+          requestId: 'req_anthropic_non_semantic_timeout',
+          preAnchorIdleTimeoutMs: 50
+        })
+      ).rejects.toMatchObject({
+        code: 'ANTHROPIC_SSE_TO_JSON_FAILED',
+        status: 504,
+        statusCode: 504,
+        retryable: true,
+        upstreamCode: 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT',
+        requestExecutorProviderErrorStage: 'provider.sse_decode'
+      });
+    expect(Date.now() - startedAt).toBeLessThan(110);
+  });
+
   it('uses 15-minute SSE conversion defaults', () => {
     expect(DEFAULT_CONVERSION_CONFIG.defaultTimeoutMs).toBe(900000);
     expect(DEFAULT_CONVERSION_CONFIG.inactivityTimeoutMs).toBe(900000);

@@ -84,7 +84,9 @@ export interface HubPipelineExecutionResult {
     providerType: string;
     outboundProfile: string;
     runtimeKey?: string;
+    concurrencyScopeKey?: string;
     processMode?: string;
+    compatibilityProfile?: string;
   };
   routingDecision?: { routeName?: string };
   metadata: Record<string, unknown>;
@@ -96,8 +98,8 @@ export interface HubPipeline {
   ): Promise<HubPipelineExecutionResult>;
   updateVirtualRouterConfig(config: unknown): void;
   getVirtualRouter?(): {
-    markProviderConcurrencyBusy(runtimeKey: string): void;
-    markProviderConcurrencyIdle(runtimeKey: string): void;
+    markConcurrencyScopeBusy(scopeKey: string): void;
+    markConcurrencyScopeIdle(scopeKey: string): void;
   };
 }
 

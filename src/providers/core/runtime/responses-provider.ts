@@ -38,7 +38,12 @@ import {
 
 type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'>;
 type ResponsesSseConverter = {
-  convertSseToJson(stream: unknown, options: { requestId: string; model: string }): Promise<unknown>;
+  convertSseToJson(stream: unknown, options: {
+    requestId: string;
+    model: string;
+    noContentTimeoutMs?: number;
+    contentIdleTimeoutMs?: number;
+  }): Promise<unknown>;
 };
 export class ResponsesProvider extends HttpTransportProvider {
   private readonly responsesClient: ResponsesProtocolClient;
@@ -241,7 +246,9 @@ export class ResponsesProvider extends HttpTransportProvider {
     const converter = await this.loadResponsesSseConverter();
     const json = await converter.convertSseToJson(streamForHost, {
       requestId: context.requestId,
-      model: typeof body.model === 'string' ? body.model : 'unknown'
+      model: typeof body.model === 'string' ? body.model : 'unknown',
+      noContentTimeoutMs: this.resolveNoContentTimeoutMs(context),
+      contentIdleTimeoutMs: this.resolveContentIdleTimeoutMs(context)
     });
     if (!captureSse) {
       await this.snapshotPhase(
@@ -336,6 +343,42 @@ export class ResponsesProvider extends HttpTransportProvider {
 
   private async loadResponsesSseConverter(): Promise<ResponsesSseConverter> {
     return await createResponsesSseToJsonConverter();
+  }
+
+  private resolveNoContentTimeoutMs(context: ProviderContext): number | undefined {
+    const meta = context.metadata && typeof context.metadata === 'object'
+      ? context.metadata as Record<string, unknown>
+      : undefined;
+    const candidate =
+      meta?.providerStreamNoContentTimeoutMs
+      ?? meta?.streamNoContentTimeoutMs
+      ?? meta?.noContentTimeoutMs;
+    if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
+      return Math.floor(candidate);
+    }
+    const profileCandidate = context.profile?.extensions?.providerStreamNoContentTimeoutMs;
+    if (typeof profileCandidate === 'number' && Number.isFinite(profileCandidate) && profileCandidate > 0) {
+      return Math.floor(profileCandidate);
+    }
+    return 120_000;
+  }
+
+  private resolveContentIdleTimeoutMs(context: ProviderContext): number | undefined {
+    const meta = context.metadata && typeof context.metadata === 'object'
+      ? context.metadata as Record<string, unknown>
+      : undefined;
+    const candidate =
+      meta?.providerStreamContentIdleTimeoutMs
+      ?? meta?.streamContentIdleTimeoutMs
+      ?? meta?.contentIdleTimeoutMs;
+    if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
+      return Math.floor(candidate);
+    }
+    const profileCandidate = context.profile?.extensions?.providerStreamContentIdleTimeoutMs;
+    if (typeof profileCandidate === 'number' && Number.isFinite(profileCandidate) && profileCandidate > 0) {
+      return Math.floor(profileCandidate);
+    }
+    return 300_000;
   }
 
   private reportResponsesFailureIfNeeded(payload: unknown, context: ProviderContext): void {

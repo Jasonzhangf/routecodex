@@ -109,11 +109,10 @@ export async function handleResponses(
       ''
   ).trim();
   const parsedTimeout = Number(rawTimeout);
-  const defaultTimeoutMs = DEFAULT_TIMEOUTS.HTTP_SSE_TOTAL_MS;
   const configuredRequestTimeoutMs =
     rawTimeout === ''
-      ? defaultTimeoutMs
-      : (Number.isFinite(parsedTimeout) ? parsedTimeout : defaultTimeoutMs);
+      ? undefined
+      : (Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : undefined);
   let requestTimeoutMs = configuredRequestTimeoutMs;
   let isVideoRequest = false;
   let timedOut = false;
@@ -202,9 +201,13 @@ export async function handleResponses(
     }
     isVideoRequest = payloadContainsVideoInput(payload);
     if (isVideoRequest) {
-      requestTimeoutMs = Math.max(configuredRequestTimeoutMs, VIDEO_REQUEST_TIMEOUT_MS);
+      requestTimeoutMs = Math.max(configuredRequestTimeoutMs ?? 0, VIDEO_REQUEST_TIMEOUT_MS);
     }
     const wantsStream = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
+
+    if (wantsStream && !isVideoRequest) {
+      requestTimeoutMs = undefined;
+    }
 
     if (!isSubmitToolOutputs && entryEndpoint === '/v1/responses') {
       applySystemPromptOverride(entryEndpoint, payload);
@@ -254,11 +257,15 @@ export async function handleResponses(
 	      })
 	    };
 
-    if (Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0) {
+    const activeRequestTimeoutMs =
+      typeof requestTimeoutMs === 'number' && Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
+        ? requestTimeoutMs
+        : undefined;
+    if (activeRequestTimeoutMs !== undefined) {
       timeoutHandle = setTimeout(() => {
         if (timedOut) {return;}
         timedOut = true;
-        const err = Object.assign(new Error(`[http] request timeout after ${requestTimeoutMs}ms`), {
+        const err = Object.assign(new Error(`[http] request timeout after ${activeRequestTimeoutMs}ms`), {
           code: 'HTTP_REQUEST_TIMEOUT',
           status: 504
         });
@@ -304,7 +311,7 @@ export async function handleResponses(
           return;
         }
         void respondWithPipelineError(res, ctx, err, entryEndpoint, requestId, { forceSse: wantsStreamForError });
-      }, requestTimeoutMs);
+      }, activeRequestTimeoutMs);
       // Let Node exit even if a client hangs; this timer is per-request and should not keep the process alive.
       timeoutHandle.unref?.();
     }

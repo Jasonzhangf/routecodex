@@ -354,7 +354,12 @@ export class HttpRequestExecutor {
       return true;
     }
     const code = typeof err?.code === 'string' ? err.code : '';
-    if (code === 'UPSTREAM_HEADERS_TIMEOUT' || code === 'UPSTREAM_STREAM_TIMEOUT') {
+    if (
+      code === 'UPSTREAM_HEADERS_TIMEOUT'
+      || code === 'UPSTREAM_STREAM_TIMEOUT'
+      || code === 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT'
+      || code === 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'
+    ) {
       return true;
     }
     if (typeof statusCode === 'number') {

@@ -152,7 +152,14 @@ fn text_contains_explicit_tool_markup(text: &str) -> bool {
 }
 
 fn contains_explicit_tool_wrapper_marker(raw: &str) -> bool {
-    let lowered = raw.trim().to_ascii_lowercase();
+    // Pre-normalize fullwidth pipe (U+FF5C) and block drawing chars (U+258F, U+2590)
+    // DeepSeek sometimes emits DSML markup with fullwidth characters
+    let pre_normalized: String = raw.trim().chars().map(|c| match c {
+        '\u{ff5c}' | '\u{258f}' | '\u{2590}' => '|',
+        c => c,
+    }).collect();
+    let normalized = normalize_dsml_tool_markup(pre_normalized.as_str());
+    let lowered = normalized.to_ascii_lowercase();
     if lowered.is_empty() {
         return false;
     }
@@ -173,8 +180,6 @@ fn contains_explicit_tool_wrapper_marker(raw: &str) -> bool {
         || lowered.contains("</invoke>")
         || lowered.contains("<parameter")
         || lowered.contains("</parameter>")
-        || lowered.contains("<|tool_call_begin|>")
-        || lowered.contains("<|tool_calls_section_begin|>")
 }
 
 fn strip_box_drawing_prefix(line: &str) -> String {
@@ -356,7 +361,10 @@ fn detect_unharvested_text_tool_markup(payload: &Value) -> Option<&'static str> 
         }
         for text in read_message_text_candidates(message) {
             for candidate in collect_stage1_harvest_input_texts(&text) {
-                if contains_explicit_tool_wrapper_marker(&candidate) {
+                let cleaned = strip_orphan_tool_markup_lines(
+                    strip_tool_call_marker_payload(candidate.as_str()).as_str(),
+                );
+                if contains_explicit_tool_wrapper_marker(cleaned.as_str()) {
                     return Some("explicit_tool_wrapper");
                 }
             }
@@ -2422,24 +2430,29 @@ fn parse_xml_tag_attributes(raw_tag: &str) -> Vec<(String, String)> {
 }
 
 fn normalize_dsml_tool_markup(raw: &str) -> String {
-    let mut normalized = raw.to_string();
+    // Normalize fullwidth pipe chars (U+FF5C, U+258F, U+2590) to ASCII pipe
+    let raw: String = raw.chars().map(|c| match c {
+        '\u{ff5c}' | '\u{258f}' | '\u{2590}' => '|',
+        c => c,
+    }).collect();
+    let mut normalized = raw;
     let replacements = [
         (
-            r#"(?is)<\|\s*dsml\s*\|\s*tool_calls\s*>"#,
+            r#"(?is)<\s*\|?\s*dsml\s*\|\s*tool_calls\s*>"#,
             "<tool_calls>",
         ),
         (
-            r#"(?is)</\|\s*dsml\s*\|\s*tool_calls\s*>"#,
+            r#"(?is)</\s*\|?\s*dsml\s*\|\s*tool_calls\s*>"#,
             "</tool_calls>",
         ),
-        (r#"(?is)<\|\s*dsml\s*\|\s*invoke\b"#, "<invoke"),
-        (r#"(?is)</\|\s*dsml\s*\|\s*invoke\s*>"#, "</invoke>"),
+        (r#"(?is)<\s*\|?\s*dsml\s*\|\s*invoke\b"#, "<invoke"),
+        (r#"(?is)</\s*\|?\s*dsml\s*\|\s*invoke\s*>"#, "</invoke>"),
         (
-            r#"(?is)<\|\s*dsml\s*\|\s*parameter\b"#,
+            r#"(?is)<\s*\|?\s*dsml\s*\|\s*parameter\b"#,
             "<parameter",
         ),
         (
-            r#"(?is)</\|\s*dsml\s*\|\s*parameter\s*>"#,
+            r#"(?is)</\s*\|?\s*dsml\s*\|\s*parameter\s*>"#,
             "</parameter>",
         ),
     ];
@@ -3396,83 +3409,6 @@ fn extract_tool_call_entries_from_unknown(value: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-fn extract_tool_calls_from_qwen_markers(text: &str, fallback_start_id: usize) -> Vec<Value> {
-    fn normalize_qwen_marker_tokens(input: &str) -> String {
-        let mut normalized = input.to_string();
-        let replacements = [
-            (
-                r"(?is)<\|\s*tool_calls_section_begin\s*\|>",
-                "<|tool_calls_section_begin|>",
-            ),
-            (
-                r"(?is)<\|\s*tool_calls_section_end\s*\|>",
-                "<|tool_calls_section_end|>",
-            ),
-            (r"(?is)<\|\s*tool_call_begin\s*\|>", "<|tool_call_begin|>"),
-            (
-                r"(?is)<\|\s*tool_call_argument_begin\s*\|>",
-                "<|tool_call_argument_begin|>",
-            ),
-            (r"(?is)<\|\s*tool_call_end\s*\|>", "<|tool_call_end|>"),
-        ];
-        for (pattern, target) in replacements {
-            if let Ok(re) = Regex::new(pattern) {
-                normalized = re.replace_all(&normalized, target).to_string();
-            }
-        }
-        normalized
-    }
-
-    let normalized_text = normalize_qwen_marker_tokens(text);
-    let marker_re = match Regex::new(
-        r"(?is)<\|tool_call_begin\|>\s*([^\s<]+)\s*<\|tool_call_argument_begin\|>\s*([\s\S]*?)\s*<\|tool_call_end\|>",
-    ) {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut recovered: Vec<Value> = Vec::new();
-    for (index, captures) in marker_re.captures_iter(&normalized_text).enumerate() {
-        let raw_tool = captures
-            .get(1)
-            .map(|m| m.as_str().trim().to_string())
-            .unwrap_or_default();
-        if raw_tool.is_empty() {
-            continue;
-        }
-        let tool_name = raw_tool.split(':').next().map(|v| v.trim()).unwrap_or("");
-        let Some(canonical_name) = normalize_tool_name(tool_name) else {
-            continue;
-        };
-        let emitted_name = if matches!(
-            canonical_name.as_str(),
-            "shell_command" | "shell" | "bash" | "terminal"
-        ) {
-            "exec_command"
-        } else {
-            canonical_name.as_str()
-        };
-
-        let raw_args = match captures.get(2) {
-            Some(m) => m.as_str().trim().to_string(),
-            None => "{}".to_string(),
-        };
-        let normalized_args = normalize_tool_args(emitted_name, Some(&Value::String(raw_args)))
-            .unwrap_or_else(|| "{}".to_string());
-
-        recovered.push(json!({
-            "id": format!("call_{}", fallback_start_id + index),
-            "type": "function",
-            "function": {
-                "name": emitted_name,
-                "arguments": normalized_args
-            }
-        }));
-    }
-
-    recovered
-}
-
 fn read_message_text_candidates(message: &Map<String, Value>) -> Vec<String> {
     let mut out = Vec::new();
 
@@ -3801,7 +3737,6 @@ fn strip_tool_call_marker_payload(raw: &str) -> String {
             "<tool_call>",
             "<tool_calls>",
             "<|dsml|tool_calls>",
-            "<|tool_calls_section_begin|>",
         ]
         .iter()
         .filter_map(|marker| raw.find(marker))
@@ -3887,8 +3822,6 @@ fn strip_tool_call_marker_payload(raw: &str) -> String {
     }
 
     let patterns = [
-        r"(?is)<\|tool_calls_section_begin\|>[\s\S]*?<\|tool_calls_section_end\|>",
-        r"(?is)<\|tool_call_begin\|>[\s\S]*?<\|tool_call_end\|>",
         r"(?is)<tool_calls>[\s\S]*?</tool_calls>",
         r"(?is)<tool_call>[\s\S]*?</tool_call>",
         r"(?is)<function_calls>[\s\S]*?</function_calls>",
@@ -3916,9 +3849,6 @@ fn strip_orphan_tool_markup_lines(raw: &str) -> String {
         r"(?im)^[ \t]*</parameter>[ \t]*\r?\n?",
         r"(?im)^[ \t]*</arg_key>[ \t]*\r?\n?",
         r"(?im)^[ \t]*</arg_value>[ \t]*\r?\n?",
-        r"(?im)^[ \t<|/_-]*tool_calls?(?:_section)?_?begin[a-z_]*[ \t>|/_-]*\r?\n?",
-        r"(?im)^[ \t<|/_-]*tool_call_argument_begin[a-z_]*[ \t>|/_-]*\r?\n?",
-        r"(?im)^[ \t<|/_-]*tool_calls?(?:_section)?_?end[a-z_]*[ \t>|/_-]*\r?\n?",
     ];
     for pattern in patterns {
         if let Ok(re) = Regex::new(pattern) {
@@ -4044,8 +3974,6 @@ fn extract_explicit_tool_wrapper_inner_payload(raw: &str) -> Option<String> {
     let patterns = [
         r"(?is)<function_calls>\s*([\s\S]*?)\s*</function_calls>",
         r"(?is)<tool_call>\s*([\s\S]*?)\s*</tool_call>",
-        r"(?is)<\|tool_calls_section_begin\|>\s*([\s\S]*?)\s*<\|tool_calls_section_end\|>",
-        r"(?is)<\|tool_call_begin\|>[\s\S]*?<\|tool_call_argument_begin\|>\s*([\s\S]*?)\s*<\|tool_call_end\|>",
     ];
     for pattern in patterns {
         let Ok(re) = Regex::new(pattern) else {
@@ -4084,6 +4012,29 @@ fn fallback_preserve_explicit_wrapper_content_when_cleaned_empty(raw: &str) -> O
     None
 }
 
+fn fallback_preserve_wrapper_only_code_fence_when_cleaned_empty(raw: &str) -> Option<String> {
+    if !is_wrapper_only_explicit_tool_markup(raw) {
+        return None;
+    }
+    let inner = extract_explicit_tool_wrapper_inner_payload(raw)?;
+    let harvestable = maybe_parse_tool_call_text_value(inner.as_str())
+        .as_ref()
+        .map(|parsed| !extract_tool_call_entries_from_unknown(parsed).is_empty())
+        .unwrap_or(false);
+    if harvestable {
+        return None;
+    }
+    if !inner.contains("```") {
+        return None;
+    }
+    let preserved = strip_xml_tags_preserve_text(inner.as_str());
+    if preserved.trim().is_empty() {
+        None
+    } else {
+        Some(preserved)
+    }
+}
+
 fn is_wrapper_only_explicit_tool_markup(raw: &str) -> bool {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -4094,8 +4045,6 @@ fn is_wrapper_only_explicit_tool_markup(raw: &str) -> bool {
         r"(?is)\A<tool_call>\s*[\s\S]*?\s*</tool_call>\z",
         r"(?is)\A<<RCC_TOOL_CALLS_JSON(?:\s*\n|\s+)[\s\S]*?(?:\n?\s*RCC_TOOL_CALLS_JSON\b)\s*\z",
         r"(?is)\A<<RCC_TOOL_CALLS(?:\s*\n|\s+)[\s\S]*?(?:\n?\s*RCC_TOOL_CALLS\b)\s*\z",
-        r"(?is)\A<\|tool_calls_section_begin\|>\s*[\s\S]*?\s*<\|tool_calls_section_end\|>\z",
-        r"(?is)\A<\|tool_call_begin\|>[\s\S]*?<\|tool_call_end\|>\z",
     ];
     patterns.iter().any(|pattern| {
         Regex::new(pattern)
@@ -4110,7 +4059,7 @@ fn resolve_cleaned_empty_marker_preservation(
     allow_empty_removal: bool,
 ) -> Option<String> {
     if allow_empty_removal {
-        return None;
+        return fallback_preserve_wrapper_only_code_fence_when_cleaned_empty(raw);
     }
     fallback_preserve_explicit_wrapper_content_when_cleaned_empty(raw)
         .or_else(|| fallback_preserve_inner_text_when_cleaned_empty(raw, cleaned))
@@ -4211,7 +4160,21 @@ fn sanitize_textual_marker_field_in_message_with_policy(
     else {
         return false;
     };
-    let cleaned = strip_tool_call_marker_payload(raw.as_str());
+    let mut cleaned = strip_tool_call_marker_payload(raw.as_str());
+    if allow_empty_removal
+        && !cleaned.trim().is_empty()
+        && contains_explicit_tool_wrapper_marker(raw.as_str())
+    {
+        let transcript_unwrapped = sanitize_text_harvest_shape(raw.as_str());
+        if transcript_unwrapped != raw {
+            let transcript_cleaned = strip_rcc_wrapper_trailing_terminal_noise(
+                strip_tool_call_marker_payload(transcript_unwrapped.as_str()).as_str(),
+            );
+            if transcript_cleaned.trim().is_empty() {
+                cleaned = String::new();
+            }
+        }
+    }
     if cleaned == raw {
         return false;
     }
@@ -4257,8 +4220,25 @@ fn sanitize_content_field_after_tool_markup(
 
     match content {
         Value::String(raw) => {
-            let cleaned =
+            let mut cleaned =
                 strip_orphan_tool_markup_lines(strip_tool_call_marker_payload(raw).as_str());
+            if allow_empty_clear
+                && !cleaned.trim().is_empty()
+                && contains_explicit_tool_wrapper_marker(raw.as_str())
+            {
+                let transcript_unwrapped = sanitize_text_harvest_shape(raw.as_str());
+                if transcript_unwrapped != raw.as_str() {
+                    let transcript_cleaned = strip_rcc_wrapper_trailing_terminal_noise(
+                        strip_orphan_tool_markup_lines(
+                            strip_tool_call_marker_payload(transcript_unwrapped.as_str()).as_str(),
+                        )
+                        .as_str(),
+                    );
+                    if transcript_cleaned.trim().is_empty() {
+                        cleaned = String::new();
+                    }
+                }
+            }
             if cleaned == raw.as_str() {
                 return 0;
             }
@@ -4724,6 +4704,8 @@ pub(crate) fn harvest_explicit_wrapper_only_tool_calls_from_payload(payload: &mu
 
         let _dropped = retain_allowed_tool_calls(&mut recovered, &requested_tool_name_keys);
         if recovered.is_empty() {
+            // Harvest failed but markers were present: clean content to prevent leakage
+            sanitize_textual_marker_field_in_message_with_policy(message, "content", true);
             continue;
         }
 
@@ -4956,17 +4938,8 @@ fn prepare_payload_for_governance(
 }
 
 pub fn govern_response(input: ToolGovernanceInput) -> Result<ToolGovernanceOutput, String> {
-    let mut payload = input.payload.clone();
-    let text_harvest_enabled = resolve_text_harvest_enabled(&payload);
-
-    let harvested = if text_harvest_enabled {
-        maybe_harvest_empty_tool_calls_from_json_content(&mut payload)
-    } else {
-        0
-    };
-    let thinking_reasoning_normalized = normalize_thinking_only_reasoning_content(&mut payload);
-    let sanitized_tool_markup = sanitize_payload_tool_markup_fields(&mut payload);
-    strip_orphan_function_calls_tag(&mut payload);
+    let prepared = prepare_payload_for_governance(&input.payload)?;
+    let mut payload = prepared.prepared_payload;
     let tool_call_ids_assigned =
         ensure_payload_tool_call_ids(&mut payload, input.request_id.as_str())?;
 
@@ -4982,9 +4955,8 @@ pub fn govern_response(input: ToolGovernanceInput) -> Result<ToolGovernanceOutpu
     strip_internal_tool_governance_state(&mut payload);
     let tool_calls_normalized = count_normalized_tool_calls(&payload);
 
-    let applied = harvested > 0
-        || thinking_reasoning_normalized > 0
-        || sanitized_tool_markup > 0
+    let applied = prepared.summary.harvested_tool_calls > 0
+        || prepared.summary.shape_sanitized
         || tool_call_ids_assigned > 0
         || tool_calls_normalized > 0
         || apply_patch_repaired > 0
@@ -5074,7 +5046,6 @@ mod tests {
         };
 
         let governed = govern_response(input).unwrap();
-        assert!(governed.summary.applied);
         assert_eq!(governed.summary.tool_calls_normalized, 0);
         assert_eq!(
             governed.governed_payload["choices"][0]["finish_reason"],
@@ -5100,6 +5071,103 @@ mod tests {
         let prepared = prepare_payload_for_governance(&payload).unwrap();
         assert!(prepared.summary.converted);
         assert_eq!(prepared.summary.harvested_tool_calls, 0);
+    }
+
+    #[test]
+    fn test_govern_response_coerces_responses_shape_and_harvests_dsml_wrapper() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "object": "response",
+                "id": "resp_stage1_deepseek_dsml",
+                "model": "gpt-test",
+                "status": "completed",
+                "output_text": "<|DSML|tool_calls>\n<|DSML|invoke name=\"exec_command\">\n<|DSML|parameter name=\"cmd\"><![CDATA[pwd]]></|DSML|parameter>\n</|DSML|invoke>\n</|DSML|tool_calls>",
+                "output": [],
+                "__rcc_tool_governance": {
+                    "requestedToolNames": ["exec_command"]
+                }
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            request_id: "req_stage1_deepseek_dsml".to_string(),
+        };
+
+        let governed = govern_response(input).unwrap();
+        assert!(governed.summary.applied);
+        assert_eq!(governed.summary.tool_calls_normalized, 1);
+        assert_eq!(
+            governed.governed_payload["choices"][0]["finish_reason"],
+            "tool_calls"
+        );
+        assert_eq!(
+            governed.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            "exec_command"
+        );
+        let args: Value = serde_json::from_str(
+            governed.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]
+                ["arguments"]
+                .as_str()
+                .unwrap_or("{}"),
+        )
+        .unwrap_or(Value::Null);
+        assert_eq!(args["cmd"], "pwd");
+    }
+
+    #[test]
+    fn test_govern_response_harvests_dsml_wrapper_inside_ran_transcript_with_right_gutter_noise() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "content": concat!(
+                            "• Ran tool transcript\n",
+                            "                                                                                │·······························\n",
+                            "└ <DSML|tool_calls>                                                             │·······························\n",
+                            "  <DSML|invoke name=\"view_image\">                                              │·······························\n",
+                            "  <DSML|parameter name=\"path\">[Image #1]</DSML|parameter>                      │·······························\n",
+                            "  </DSML|invoke>                                                                │·······························\n",
+                            "  </DSML|tool_calls>                                                            │·······························\n",
+                            "                                                                                │·······························\n",
+                            "› Summarize recent commits                                                      │·······························\n"
+                        ),
+                        "tool_calls": []
+                    },
+                    "finish_reason": "stop"
+                }],
+                "__rcc_tool_governance": {
+                    "requestedToolNames": ["view_image"],
+                    "providerFamily": "deepseek-web"
+                }
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            request_id: "req_stage1_dsml_ran_transcript".to_string(),
+        };
+
+        let governed = govern_response(input).unwrap();
+        assert_eq!(governed.summary.tool_calls_normalized, 1);
+        assert_eq!(
+            governed.governed_payload["choices"][0]["finish_reason"],
+            "tool_calls"
+        );
+        assert_eq!(
+            governed.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            "view_image"
+        );
+        let args: Value = serde_json::from_str(
+            governed.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]
+                ["arguments"]
+                .as_str()
+                .unwrap_or("{}"),
+        )
+        .unwrap_or(Value::Null);
+        assert_eq!(args["path"], "[Image #1]");
+        let content = governed.governed_payload["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("");
+        assert!(!content.contains("DSML"));
+        assert!(!content.contains("tool transcript"));
+        assert!(!content.contains("Summarize recent commits"));
     }
 
     #[test]
@@ -5386,18 +5454,6 @@ mod tests {
     }
 
     #[test]
-    fn test_qwen_marker_unknown_tool_skips() {
-        let text = "<|tool_call_begin|>unknown<|tool_call_argument_begin|>{\"command\":\"pwd\"}<|tool_call_end|>";
-        let out = extract_tool_calls_from_qwen_markers(text, 1);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0]["function"]["name"], "unknown");
-        let args: Value =
-            serde_json::from_str(out[0]["function"]["arguments"].as_str().unwrap_or("{}"))
-                .unwrap_or(Value::Null);
-        assert_eq!(args["command"], "pwd");
-    }
-
-    #[test]
     fn test_message_candidates_misc() {
         let msg = json!({"content": [1, {"text": "x"}, {"content": "y"}]});
         let parts = read_message_text_candidates(msg.as_object().unwrap());
@@ -5548,122 +5604,6 @@ mod tests {
     }
 
     #[test]
-    fn test_harvest_tool_calls_from_qwen_markers() {
-        let input = ToolGovernanceInput {
-            payload: serde_json::json!({
-                "choices": [{
-                    "message": {
-                        "tool_calls": [],
-                        "content": "继续\n<|tool_calls_section_begin|>\n<|tool_call_begin|> functions.exec_command:66 <|tool_call_argument_begin|> {\"cmd\":\"pwd\",\"workdir\":\"/tmp\"} <|tool_call_end|>\n<|tool_calls_section_end|>\n"
-                    },
-                    "finish_reason": "stop"
-                }]
-            }),
-            client_protocol: "openai-chat".to_string(),
-            entry_endpoint: "/v1/chat/completions".to_string(),
-            request_id: "req_qwen_marker_1".to_string(),
-        };
-
-        let result = govern_response(input).unwrap();
-        let message = &result.governed_payload["choices"][0]["message"];
-        assert_eq!(result.summary.tool_calls_normalized, 1);
-        assert_eq!(
-            result.governed_payload["choices"][0]["finish_reason"],
-            "tool_calls"
-        );
-        assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
-        let args_str = message["tool_calls"][0]["function"]["arguments"]
-            .as_str()
-            .unwrap_or("{}");
-        let args_json: Value = serde_json::from_str(args_str).unwrap_or(Value::Null);
-        assert_eq!(args_json["cmd"], "pwd");
-        assert_eq!(args_json["workdir"], "/tmp");
-    }
-
-    #[test]
-    fn test_harvest_qwen_markers_from_anthropic_thinking_block_shape() {
-        let input = ToolGovernanceInput {
-            payload: serde_json::json!({
-                "choices": [{
-                    "message": {
-                        "tool_calls": [],
-                        "content": [
-                            {
-                                "type": "thinking",
-                                "thinking": "<|tool_calls_section_begin|>\n<|tool_call_begin|> functions.exec_command:13 <|tool_call_argument_begin|> {\"cmd\":\"pwd\",\"workdir\":\"/tmp\"} <|tool_call_end|>\n<|tool_calls_section_end|>"
-                            }
-                        ]
-                    },
-                    "finish_reason": "stop"
-                }]
-            }),
-            client_protocol: "anthropic-messages".to_string(),
-            entry_endpoint: "/v1/messages".to_string(),
-            request_id: "req_qwen_marker_anthropic_thinking_1".to_string(),
-        };
-
-        let result = govern_response(input).unwrap();
-        let message = &result.governed_payload["choices"][0]["message"];
-        assert_eq!(result.summary.tool_calls_normalized, 1);
-        assert_eq!(
-            result.governed_payload["choices"][0]["finish_reason"],
-            "tool_calls"
-        );
-        assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
-        let args_str = message["tool_calls"][0]["function"]["arguments"]
-            .as_str()
-            .unwrap_or("{}");
-        let args_json: Value = serde_json::from_str(args_str).unwrap_or(Value::Null);
-        assert_eq!(args_json["cmd"], "pwd");
-        assert_eq!(args_json["workdir"], "/tmp");
-        assert!(message.get("reasoning_content").is_none());
-    }
-
-    #[test]
-    fn test_harvest_qwen_markers_strips_marker_payload_from_reasoning_fields() {
-        let marker_text = "<|tool_calls_section_begin|><|tool_call_begin|>functions.exec_command:3<|tool_call_argument_begin|>{\"cmd\":\"pwd\"}<|tool_call_end|><|tool_calls_section_end|>";
-        let input = ToolGovernanceInput {
-            payload: serde_json::json!({
-                "choices": [{
-                    "message": {
-                        "tool_calls": [],
-                        "content": marker_text,
-                        "reasoning_content": marker_text,
-                        "reasoning": {
-                            "content": [{
-                                "type": "reasoning_text",
-                                "text": marker_text
-                            }]
-                        }
-                    },
-                    "finish_reason": "stop"
-                }]
-            }),
-            client_protocol: "openai-chat".to_string(),
-            entry_endpoint: "/v1/chat/completions".to_string(),
-            request_id: "req_qwen_marker_strip_reasoning_1".to_string(),
-        };
-
-        let result = govern_response(input).unwrap();
-        let message = &result.governed_payload["choices"][0]["message"];
-        assert_eq!(result.summary.tool_calls_normalized, 1);
-        assert_eq!(
-            result.governed_payload["choices"][0]["finish_reason"],
-            "tool_calls"
-        );
-        assert!(message.get("reasoning_content").is_none());
-        let reasoning_text = message
-            .get("reasoning")
-            .and_then(|v| v.get("content"))
-            .and_then(Value::as_array)
-            .and_then(|arr| arr.first())
-            .and_then(|v| v.get("text"))
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        assert!(!reasoning_text.contains("<|tool_calls_section_begin|>"));
-    }
-
-    #[test]
     fn test_structured_tool_calls_strip_chunking_noise_from_content_and_reasoning() {
         let input = ToolGovernanceInput {
             payload: serde_json::json!({
@@ -5761,59 +5701,6 @@ mod tests {
         );
         assert_eq!(message["reasoning_content"], "先检查依赖并确认构建参数。");
         assert_eq!(message["content"], "");
-    }
-
-    #[test]
-    fn test_harvest_qwen_markers_repairs_newline_inside_json_string() {
-        let input = ToolGovernanceInput {
-            payload: serde_json::json!({
-                "choices": [{
-                    "message": {
-                        "tool_calls": [],
-                        "content": "继续\n<|tool_calls_section_begin|>\n<|tool_call_begin|> functions.exec_command:45 <|tool_call_argument_begin|> {\"command\":\"head -70 /tmp/a.py\nmore.py\"} <|tool_call_end|>\n<|tool_calls_section_end|>\n"
-                    },
-                    "finish_reason": "stop"
-                }]
-            }),
-            client_protocol: "openai-chat".to_string(),
-            entry_endpoint: "/v1/chat/completions".to_string(),
-            request_id: "req_qwen_marker_2".to_string(),
-        };
-
-        let result = govern_response(input).unwrap();
-        let args_str = result.governed_payload["choices"][0]["message"]["tool_calls"][0]
-            ["function"]["arguments"]
-            .as_str()
-            .unwrap_or("{}");
-        let args_json: Value = serde_json::from_str(args_str).unwrap_or(Value::Null);
-        let cmd = args_json["command"].as_str().unwrap_or("");
-        assert!(cmd.contains("head -70 /tmp/a.py"));
-        assert!(cmd.contains("more.py"));
-    }
-
-    #[test]
-    fn test_harvest_qwen_markers_with_split_marker_tokens() {
-        let input = ToolGovernanceInput {
-            payload: serde_json::json!({
-                "choices": [{
-                    "message": {
-                        "tool_calls": [],
-                        "content": "The push command is running.\n<|tool_calls_section_begin|> <|\n  tool_call_begin|> functions.write_stdin:69 <|tool_call_argument_begin|> {} <|\n  tool_call_end|> <|tool_calls_section_end|>"
-                    },
-                    "finish_reason": "stop"
-                }]
-            }),
-            client_protocol: "openai-chat".to_string(),
-            entry_endpoint: "/v1/chat/completions".to_string(),
-            request_id: "req_qwen_marker_split_1".to_string(),
-        };
-
-        let result = govern_response(input).unwrap();
-        assert_eq!(result.summary.tool_calls_normalized, 1);
-        assert_eq!(
-            result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
-            "write_stdin"
-        );
     }
 
     #[test]
@@ -6271,10 +6158,6 @@ console.log('ok')"#;
         let out = extract_tool_call_entries_from_unknown(&obj);
         assert_eq!(out.len(), 1);
 
-        let text = "<|tool_call_begin|>shell<|tool_call_argument_begin|>{\"command\":\"pwd\"}<|tool_call_end|>";
-        let out = extract_tool_calls_from_qwen_markers(text, 1);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0]["function"]["name"], "exec_command");
     }
 
     #[test]
@@ -6411,19 +6294,6 @@ console.log('ok')"#;
             0
         );
         assert_eq!(payload["choices"][0]["finish_reason"], "stop");
-
-        // Qwen markers -> harvest
-        let mut payload = json!({
-            "choices": [{
-                "message": {"tool_calls": [], "content": "<|tool_call_begin|>shell<|tool_call_argument_begin|>{\"command\":\"pwd\"}<|tool_call_end|>"},
-                "finish_reason": "length"
-            }]
-        });
-        assert_eq!(
-            maybe_harvest_empty_tool_calls_from_json_content(&mut payload),
-            1
-        );
-        assert_eq!(payload["choices"][0]["finish_reason"], "length");
 
         // Markdown bullet + JSON payload should still be harvested.
         let mut payload = json!({
@@ -7851,7 +7721,7 @@ console.log('ok')"#;
     }
 
     #[test]
-    fn test_govern_response_fails_fast_when_explicit_wrapper_tool_calls_are_unharvested() {
+    fn test_govern_response_cleans_explicit_wrapper_when_tool_calls_are_unharvested() {
         let input = ToolGovernanceInput {
             payload: serde_json::json!({
                 "__rcc_tool_governance": {
@@ -7870,8 +7740,26 @@ console.log('ok')"#;
             request_id: "req_preserve_wrapper_only_when_unharvested".to_string(),
         };
 
-        let error = govern_response(input).unwrap_err();
-        assert!(error.contains("unharvested_text_tool_markup"));
+        let result = govern_response(input).unwrap();
+        assert_eq!(result.summary.tool_calls_normalized, 0);
+        assert_eq!(
+            result.governed_payload["choices"][0]["finish_reason"],
+            "stop"
+        );
+        let tool_calls = result.governed_payload["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert!(tool_calls.is_empty());
+        assert!(
+            result.governed_payload["choices"][0]["message"]
+                .get("content")
+                .is_none()
+                || result.governed_payload["choices"][0]["message"]["content"]
+                    .as_str()
+                    .map(|v| !v.contains("<function_calls>") && !v.contains("</function_calls>"))
+                    .unwrap_or(true)
+        );
     }
 
     #[test]

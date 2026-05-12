@@ -69,6 +69,9 @@ describe('goal request_user_input real sample regression', () => {
               function: { name: 'exec_command' }
             }
           ]
+        },
+        responses: {
+          toolChoice: 'required'
         }
       }
     );
@@ -116,6 +119,9 @@ describe('goal request_user_input real sample regression', () => {
               function: { name: 'exec_command' }
             }
           ]
+        },
+        responses: {
+          toolChoice: 'required'
         }
       }
     );

@@ -378,6 +378,98 @@ describe('DeepSeekHttpProvider', () => {
     expect(body.ref_file_ids).toEqual(['file-inline-ready-1']);
   });
 
+  it('downloads remote inline image urls and appends uploaded ref_file_ids', async () => {
+    const tokenFile = await createDeepSeekTokenFile('inline-image-remote-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-inline-remote'),
+      createPowResponse: jest.fn(async () => 'pow-inline-remote'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    (provider as any).setRuntimeProfile({
+      runtimeKey: 'deepseek-web.1',
+      keyAlias: '1',
+      providerId: 'deepseek-web',
+      providerKey: 'deepseek-web.1.deepseek-v4-vision',
+      providerType: 'openai'
+    });
+
+    const httpPost = jest.spyOn((provider as any).httpClient, 'post')
+      .mockResolvedValue({
+        status: 200,
+        data: { code: 0, data: { biz_data: { id: 'file-inline-remote-1' } } }
+      } as any);
+    const httpGet = jest.spyOn((provider as any).httpClient, 'get')
+      .mockResolvedValue({
+        status: 200,
+        data: { code: 0, data: { biz_data: { files: [{ file_id: 'file-inline-remote-1', status: 'processed' }] } } }
+      } as any);
+    const fetchSpy = jest.spyOn(globalThis, 'fetch' as any).mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'image/png' }),
+      body: null,
+      arrayBuffer: async () => Uint8Array.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00
+      ]).buffer
+    } as Response);
+
+    await provider.initialize();
+
+    const request = {
+      data: {
+        model: 'deepseek-v4-vision',
+        model_type: 'vision',
+        prompt: 'look at remote image',
+        ref_file_ids: [],
+        metadata: {
+          deepseek: {
+            inlineFiles: {
+              enabled: true,
+              files: [
+                {
+                  type: 'image',
+                  imageUrl: 'https://example.com/shot.png',
+                  filename: 'shot.png'
+                }
+              ]
+            }
+          }
+        }
+      }
+    };
+
+    await (provider as any).finalizeRequestHeaders({}, request);
+    const body = (provider as any).buildHttpRequestBody(request);
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://example.com/shot.png',
+      expect.objectContaining({ method: 'GET', redirect: 'follow' })
+    );
+    expect(httpPost).toHaveBeenCalledTimes(1);
+    expect(httpGet).toHaveBeenCalledTimes(1);
+    expect(body.ref_file_ids).toEqual(['file-inline-remote-1']);
+  });
+
   it('keeps model_type on deepseek completion payload after file upload', async () => {
     const tokenFile = await createDeepSeekTokenFile('completion-model-type-token');
     const fakeSessionPow: FakeSessionPow = {
@@ -431,7 +523,7 @@ describe('DeepSeekHttpProvider', () => {
           deepseek: {
             contextFile: {
               enabled: true,
-              filename: 'RCC_HISTORY.txt',
+              filename: 'context',
               content: 'history',
               contentType: 'text/plain; charset=utf-8'
             }
@@ -1303,7 +1395,7 @@ describe('DeepSeekHttpProvider', () => {
     expect(wantsSse).toBe(true);
   });
 
-  it('uploads RCC_HISTORY context file and prepends uploaded ref_file_id', async () => {
+  it('uploads context file and prepends uploaded ref_file_id', async () => {
     const tokenFile = await createDeepSeekTokenFile('context-file-token');
     const fakeSessionPow: FakeSessionPow = {
       ensureChatSession: jest.fn(async () => 'session-context-1'),
@@ -1344,7 +1436,7 @@ describe('DeepSeekHttpProvider', () => {
 
     const request = {
       data: {
-        prompt: 'Continue from the latest state in the attached RCC_HISTORY.txt context.',
+        prompt: 'Continue from the latest state in the attached context.',
         ref_file_ids: ['existing_file'],
         thinking_enabled: false,
         search_enabled: false,
@@ -1352,8 +1444,77 @@ describe('DeepSeekHttpProvider', () => {
           deepseek: {
             contextFile: {
               enabled: true,
-              filename: 'RCC_HISTORY.txt',
-              content: '# RCC_HISTORY.txt\nhello\n',
+              filename: 'context',
+              content: '# context\nhello\n',
+              contentType: 'text/plain; charset=utf-8'
+            }
+          }
+        }
+      }
+    };
+
+    await (provider as any).finalizeRequestHeaders({}, request);
+    const body = (provider as any).buildHttpRequestBody(request);
+    const uploadBody = Buffer.from(postSpy.mock.calls[0]?.[1] ?? []).toString('utf8');
+
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(getSpy).toHaveBeenCalledTimes(1);
+    expect(fakeSessionPow.createPowResponse).toHaveBeenCalledWith(expect.any(Object), '/api/v0/file/upload_file');
+    expect(uploadBody).toContain('filename="context.txt"');
+    expect(body.ref_file_ids).toEqual(['file_ctx_1', 'existing_file']);
+  });
+
+  it('extracts uploaded context file id from array-shaped upload response', async () => {
+    const tokenFile = await createDeepSeekTokenFile('context-file-array-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-context-array'),
+      createPowResponse: jest.fn(async (_headers, targetPath?: string) => targetPath === '/api/v0/file/upload_file' ? 'pow-upload-array' : 'pow-completion-array'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek-web',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+    const postSpy = jest.spyOn((provider as any).httpClient, 'post')
+      .mockResolvedValueOnce({
+        data: { code: 0, data: { biz_data: { files: [{ file_id: 'file_ctx_array_1', status: 'uploaded' }] } } },
+        status: 200, statusText: 'OK', headers: {}, url: 'https://chat.deepseek.com/api/v0/file/upload_file'
+      } as any);
+    const getSpy = jest.spyOn((provider as any).httpClient, 'get')
+      .mockResolvedValueOnce({
+        data: { code: 0, data: { biz_data: { files: [{ file_id: 'file_ctx_array_1', status: 'processed' }] } } },
+        status: 200, statusText: 'OK', headers: {}, url: 'https://chat.deepseek.com/api/v0/file/fetch_files?file_ids=file_ctx_array_1'
+      } as any);
+
+    const request = {
+      data: {
+        prompt: 'Continue from the latest state in the attached context.',
+        ref_file_ids: ['existing_file'],
+        thinking_enabled: false,
+        search_enabled: false,
+        metadata: {
+          deepseek: {
+            contextFile: {
+              enabled: true,
+              filename: 'context',
+              content: '# context\nhello\n',
               contentType: 'text/plain; charset=utf-8'
             }
           }
@@ -1366,11 +1527,86 @@ describe('DeepSeekHttpProvider', () => {
 
     expect(postSpy).toHaveBeenCalledTimes(1);
     expect(getSpy).toHaveBeenCalledTimes(1);
-    expect(fakeSessionPow.createPowResponse).toHaveBeenCalledWith(expect.any(Object), '/api/v0/file/upload_file');
-    expect(body.ref_file_ids).toEqual(['file_ctx_1', 'existing_file']);
+    expect(body.ref_file_ids).toEqual(['file_ctx_array_1', 'existing_file']);
   });
 
-  it('waits for uploaded RCC_HISTORY file to become ready before using ref_file_id', async () => {
+  it('extracts uploaded context file id from deeply nested mixed upload response', async () => {
+    const tokenFile = await createDeepSeekTokenFile('context-file-nested-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-context-nested'),
+      createPowResponse: jest.fn(async (_headers, targetPath?: string) => targetPath === '/api/v0/file/upload_file' ? 'pow-upload-nested' : 'pow-completion-nested'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek-web',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+    const postSpy = jest.spyOn((provider as any).httpClient, 'post')
+      .mockResolvedValueOnce({
+        data: {
+          code: 0,
+          data: {
+            biz_data: {
+              items: [
+                'ignored',
+                { nested: [{ file: { file_id: 'file_ctx_nested_1', status: 'uploaded' } }] }
+              ]
+            }
+          }
+        },
+        status: 200, statusText: 'OK', headers: {}, url: 'https://chat.deepseek.com/api/v0/file/upload_file'
+      } as any);
+    const getSpy = jest.spyOn((provider as any).httpClient, 'get')
+      .mockResolvedValueOnce({
+        data: { code: 0, data: { biz_data: { files: [{ file_id: 'file_ctx_nested_1', status: 'processed' }] } } },
+        status: 200, statusText: 'OK', headers: {}, url: 'https://chat.deepseek.com/api/v0/file/fetch_files?file_ids=file_ctx_nested_1'
+      } as any);
+
+    const request = {
+      data: {
+        prompt: 'Continue from the latest state in the attached context.',
+        ref_file_ids: ['existing_file'],
+        thinking_enabled: false,
+        search_enabled: false,
+        metadata: {
+          deepseek: {
+            contextFile: {
+              enabled: true,
+              filename: 'context',
+              content: '# context\nhello\n',
+              contentType: 'text/plain; charset=utf-8'
+            }
+          }
+        }
+      }
+    };
+
+    await (provider as any).finalizeRequestHeaders({}, request);
+    const body = (provider as any).buildHttpRequestBody(request);
+
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(getSpy).toHaveBeenCalledTimes(1);
+    expect(body.ref_file_ids).toEqual(['file_ctx_nested_1', 'existing_file']);
+  });
+
+  it('waits for uploaded context file to become ready before using ref_file_id', async () => {
     const tokenFile = await createDeepSeekTokenFile('context-file-ready-token');
     const fakeSessionPow: FakeSessionPow = {
       ensureChatSession: jest.fn(async () => 'session-context-ready'),
@@ -1415,7 +1651,7 @@ describe('DeepSeekHttpProvider', () => {
 
     const request = {
       data: {
-        prompt: 'Continue from the latest state in the attached RCC_HISTORY.txt context.',
+        prompt: 'Continue from the latest state in the attached context.',
         ref_file_ids: ['existing_file'],
         thinking_enabled: false,
         search_enabled: false,
@@ -1423,8 +1659,8 @@ describe('DeepSeekHttpProvider', () => {
           deepseek: {
             contextFile: {
               enabled: true,
-              filename: 'RCC_HISTORY.txt',
-              content: '# RCC_HISTORY.txt\nhello\n',
+              filename: 'context',
+              content: '# context\nhello\n',
               contentType: 'text/plain; charset=utf-8'
             }
           }
@@ -1440,7 +1676,7 @@ describe('DeepSeekHttpProvider', () => {
     expect(body.ref_file_ids).toEqual(['file_ctx_ready_1', 'existing_file']);
   });
 
-  it('fails fast when RCC_HISTORY upload fails', async () => {
+  it('fails fast when context upload fails', async () => {
     const tokenFile = await createDeepSeekTokenFile('context-file-fail-token');
     const fakeSessionPow: FakeSessionPow = {
       ensureChatSession: jest.fn(async () => 'session-context-fail'),
@@ -1475,20 +1711,75 @@ describe('DeepSeekHttpProvider', () => {
 
     await expect((provider as any).finalizeRequestHeaders({}, {
       data: {
-        prompt: 'Continue from the latest state in the attached RCC_HISTORY.txt context.',
+        prompt: 'Continue from the latest state in the attached context.',
         thinking_enabled: false,
         search_enabled: false,
         metadata: {
           deepseek: {
             contextFile: {
               enabled: true,
-              filename: 'RCC_HISTORY.txt',
-              content: '# RCC_HISTORY.txt\nhello\n',
+              filename: 'context',
+              content: '# context\nhello\n',
               contentType: 'text/plain; charset=utf-8'
             }
           }
         }
       }
     })).rejects.toMatchObject({ code: 'DEEPSEEK_FILE_UPLOAD_FAILED' });
+  });
+
+  it('fails fast on upload biz_code error instead of misclassifying it as missing file id', async () => {
+    const tokenFile = await createDeepSeekTokenFile('context-file-bizcode-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-context-bizcode'),
+      createPowResponse: jest.fn(async () => 'pow-any'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek-web',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+    jest.spyOn((provider as any).httpClient, 'post').mockResolvedValueOnce({
+      data: { code: 0, msg: '', data: { biz_code: 9, biz_msg: 'unsupported file type', biz_data: null } },
+      status: 200, statusText: 'OK', headers: {}, url: 'https://chat.deepseek.com/api/v0/file/upload_file'
+    } as any);
+
+    await expect((provider as any).finalizeRequestHeaders({}, {
+      data: {
+        prompt: 'Continue from the latest state in the attached context.',
+        thinking_enabled: false,
+        search_enabled: false,
+        metadata: {
+          deepseek: {
+            contextFile: {
+              enabled: true,
+              filename: 'context',
+              content: '# context\nhello\n',
+              contentType: 'text/plain; charset=utf-8'
+            }
+          }
+        }
+      }
+    })).rejects.toMatchObject({
+      code: 'DEEPSEEK_FILE_UPLOAD_FAILED',
+      message: expect.stringContaining('biz_code=9')
+    });
   });
 });

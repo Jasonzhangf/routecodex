@@ -58,7 +58,7 @@ describe('token stats store', () => {
   it('flushes current snapshot to disk with atomic full payload', async () => {
     const fakeHome = allocateFakeHome('token-stats-flush');
     const statsPath = path.join(fakeHome, '.rcc', 'token-stats.json');
-    const { recordTokens, flushTokenStats } = await import(
+    const { recordTokens, flushTokenStats, __dumpPersistedTokenStatsForTest } = await import(
       '../../../../../src/server/runtime/http-server/executor/token-stats-store.js'
     );
 
@@ -67,18 +67,20 @@ describe('token stats store', () => {
     flushTokenStats();
 
     const persisted = JSON.parse(await fs.readFile(statsPath, 'utf8'));
-    expect(persisted.version).toBe(1);
-    expect(persisted.alltime).toEqual({
+    expect(persisted.version).toBe(2);
+    const aggregate = __dumpPersistedTokenStatsForTest();
+    expect(aggregate.alltime).toEqual({
       promptTokens: 14,
       completionTokens: 11,
-      totalTokens: 25
+      totalTokens: 25,
+      cacheReadTokens: 0
     });
-    expect(persisted.providers['provider.a|model.a']).toMatchObject({
+    expect(aggregate.providers?.['provider.a|model.a']).toMatchObject({
       providerKey: 'provider.a',
       model: 'model.a',
       totalTokens: 15
     });
-    expect(persisted.providers['provider.b|model.b']).toMatchObject({
+    expect(aggregate.providers?.['provider.b|model.b']).toMatchObject({
       providerKey: 'provider.b',
       model: 'model.b',
       totalTokens: 10
@@ -94,33 +96,39 @@ describe('token stats store', () => {
     await fs.writeFile(
       statsPath,
       `${JSON.stringify({
-        version: 1,
-        alltime: {
-          promptTokens: 30,
-          completionTokens: 12,
-          totalTokens: 42
-        },
-        daily: {
-          [todayKey]: {
-            promptTokens: 7,
-            completionTokens: 5,
-            totalTokens: 12
-          }
-        },
-        providers: {
-          'provider.small|model.s': {
-            providerKey: 'provider.small',
-            model: 'model.s',
-            promptTokens: 2,
-            completionTokens: 3,
-            totalTokens: 5
-          },
-          'provider.big|model.b': {
-            providerKey: 'provider.big',
-            model: 'model.b',
-            promptTokens: 10,
-            completionTokens: 10,
-            totalTokens: 20
+        version: 2,
+        sessions: {
+          'foreign-session': {
+            sessionId: 'foreign-session',
+            updatedAt: 1,
+            alltime: {
+              promptTokens: 30,
+              completionTokens: 12,
+              totalTokens: 42
+            },
+            daily: {
+              [todayKey]: {
+                promptTokens: 7,
+                completionTokens: 5,
+                totalTokens: 12
+              }
+            },
+            providers: {
+              'provider.small|model.s': {
+                providerKey: 'provider.small',
+                model: 'model.s',
+                promptTokens: 2,
+                completionTokens: 3,
+                totalTokens: 5
+              },
+              'provider.big|model.b': {
+                providerKey: 'provider.big',
+                model: 'model.b',
+                promptTokens: 10,
+                completionTokens: 10,
+                totalTokens: 20
+              }
+            }
           }
         }
       }, null, 2)}\n`,

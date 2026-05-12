@@ -94,9 +94,9 @@ export function parseServerUrl(
 /**
  * Resolve boolean from environment variable
  */
-export function resolveBoolFromEnv(value: unknown, fallback: boolean): boolean {
+export function resolveBoolFromEnv(value: unknown, defaultValue: boolean): boolean {
   if (typeof value !== 'string') {
-    return fallback;
+    return defaultValue;
   }
   const normalized = value.trim().toLowerCase();
   if (['1', 'true', 'yes', 'on'].includes(normalized)) {
@@ -105,7 +105,7 @@ export function resolveBoolFromEnv(value: unknown, fallback: boolean): boolean {
   if (['0', 'false', 'no', 'off'].includes(normalized)) {
     return false;
   }
-  return fallback;
+  return defaultValue;
 }
 
 /**

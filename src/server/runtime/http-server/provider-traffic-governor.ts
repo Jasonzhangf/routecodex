@@ -45,6 +45,7 @@ export type ProviderTrafficPermit = {
   requestId: string;
   leaseId: string;
   stateKey: string;
+  maxInFlight: number;
 };
 
 export class ProviderTrafficSaturatedError extends Error {
@@ -93,7 +94,7 @@ export interface ProviderTrafficGovernorLike {
   release(permit: ProviderTrafficPermit): Promise<{ released: boolean; activeInFlight: number }>;
   isProviderAtConcurrencyCapacity(runtimeKey: string, runtime: ProviderRuntimeProfile): Promise<boolean>;
   isProviderAtConcurrencyCapacitySync(runtimeKey: string, runtime: ProviderRuntimeProfile): boolean;
-  setConcurrencyBusyCallback?(cb: ((runtimeKey: string, busy: boolean) => void) | null): void;
+  setConcurrencyBusyCallback?(cb: ((scopeKey: string, busy: boolean) => void) | null): void;
   observeOutcome?(event: ProviderTrafficOutcomeEvent): Promise<void>;
 }
 
@@ -255,9 +256,6 @@ function isWebProviderRuntime(runtime: ProviderRuntimeProfile): boolean {
     || value === 'deepseek-web'
     || value.startsWith('deepseek-web.')
     || value.endsWith('-web')
-    || value.includes('/chat.qwen.ai')
-    || value.includes('chat.qwen.ai')
-    || value.includes('chat.deepseek.com')
   ));
 }
 
@@ -494,7 +492,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
   private adaptiveLoadPromise: Promise<void> | null = null;
   private adaptiveWritePromise: Promise<void> | null = null;
   private adaptiveWriteTimer: NodeJS.Timeout | null = null;
-  private concurrencyBusyCallback: ((runtimeKey: string, busy: boolean) => void) | null = null;
+  private concurrencyBusyCallback: ((scopeKey: string, busy: boolean) => void) | null = null;
 
   constructor(rootDir?: string) {
     const jestWorker = clampPositiveInt(process.env.JEST_WORKER_ID);
@@ -951,7 +949,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     return path.join(this.lockDir, `${stateKey}.lock`);
   }
 
-  setConcurrencyBusyCallback(cb: ((runtimeKey: string, busy: boolean) => void) | null): void {
+  setConcurrencyBusyCallback(cb: ((scopeKey: string, busy: boolean) => void) | null): void {
     this.concurrencyBusyCallback = cb;
   }
 
@@ -1204,7 +1202,8 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
                 providerKey: options.providerKey,
                 requestId,
                 leaseId,
-                stateKey
+                stateKey,
+                maxInFlight: policy.concurrency.maxInFlight
               },
               policy,
               waitedMs,
@@ -1330,7 +1329,8 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
       state.updatedAt = now;
       await writeTrafficState(stateFile, state);
       const remaining = state.leases.length;
-      if (released && remaining <= 0 && this.concurrencyBusyCallback) {
+      const busyThreshold = clampPositiveInt(permit.maxInFlight) ?? 1;
+      if (released && remaining < busyThreshold && this.concurrencyBusyCallback) {
         this.concurrencyBusyCallback(runtimeKey, false);
       }
       return {
@@ -1433,7 +1433,8 @@ export function createNoopProviderTrafficGovernor(): ProviderTrafficGovernorLike
           providerKey: options.providerKey,
           requestId: options.requestId,
           leaseId: `noop-${randomUUID()}`,
-          stateKey: 'noop'
+          stateKey: 'noop',
+          maxInFlight: policy.concurrency.maxInFlight
         },
         policy,
         waitedMs: 0,

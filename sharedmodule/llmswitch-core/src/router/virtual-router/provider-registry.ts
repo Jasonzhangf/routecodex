@@ -203,6 +203,7 @@ listKeys(): string[] {
       outboundProfile: profile.outboundProfile,
       compatibilityProfile: profile.compatibilityProfile,
       runtimeKey: profile.runtimeKey,
+      concurrencyScopeKey: profile.runtimeKey,
       modelId,
       processMode: profile.processMode || 'chat',
       responsesConfig: profile.responsesConfig,

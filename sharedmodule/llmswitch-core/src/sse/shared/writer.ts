@@ -132,17 +132,10 @@ export class StreamWriter {
       } else if (event && (event as any).protocol === 'gemini-chat') {
         serialized = serializeGeminiEventToSSE(event as GeminiSseEvent);
       } else {
-        // 兜底处理：尝试通过事件字段识别
-        const eventField = (event as any).event;
-        if (eventField === 'chat_chunk' || eventField === 'chat.done' || eventField === 'error' || eventField === 'ping') {
-          serialized = serializeChatEventToSSE(event as ChatSseEvent);
-        } else if (eventField === 'message_start' || eventField === 'content_block_start') {
-          serialized = serializeAnthropicEventToSSE(event as any);
-        } else if (eventField === 'gemini.data' || eventField === 'gemini.done') {
-          serialized = serializeGeminiEventToSSE(event as GeminiSseEvent);
-        } else {
-          serialized = this.serializeResponsesEvent(event as ResponsesSseEvent);
-        }
+        throw new Error(
+          '[SSEWriter] Event missing explicit protocol field; heuristic protocol detection is not allowed. ' +
+          `Event: ${JSON.stringify((event as any)?.event ?? 'unknown')}`
+        );
       }
 
       const needsBackpressure =

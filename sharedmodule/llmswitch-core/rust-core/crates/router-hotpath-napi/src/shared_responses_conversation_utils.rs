@@ -626,6 +626,77 @@ fn collect_submitted_tool_output_details(input_items: &[Value]) -> Vec<Value> {
     submitted
 }
 
+fn read_bridge_function_call_id(row: &Map<String, Value>) -> Option<String> {
+    read_trimmed_string(row.get("call_id"))
+        .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+        .or_else(|| read_trimmed_string(row.get("id")))
+}
+
+fn is_bridge_tool_output_item_type(item_type: &str) -> bool {
+    matches!(
+        item_type,
+        "function_call_output" | "tool_result" | "tool_message"
+    )
+}
+
+fn collect_pending_bridge_function_call_ids(input_items: &[Value]) -> Vec<String> {
+    let mut pending: Vec<String> = Vec::new();
+    for entry in input_items {
+        let Some(row) = entry.as_object() else {
+            continue;
+        };
+        let item_type = row.get("type").and_then(Value::as_str).unwrap_or("").trim().to_ascii_lowercase();
+        if item_type == "function_call" {
+            if let Some(call_id) = read_bridge_function_call_id(row) {
+                if !pending.iter().any(|existing| existing == &call_id) {
+                    pending.push(call_id);
+                }
+            }
+            continue;
+        }
+        if !is_bridge_tool_output_item_type(item_type.as_str()) {
+            continue;
+        }
+        let Some(call_id) = read_bridge_function_call_id(row) else {
+            continue;
+        };
+        if let Some(position) = pending.iter().position(|existing| existing == &call_id) {
+            pending.remove(position);
+        }
+    }
+    pending
+}
+
+fn leading_input_consumes_pending_tool_calls(
+    incoming_items: &[Value],
+    pending_call_ids: &[String],
+) -> bool {
+    if pending_call_ids.is_empty() {
+        return true;
+    }
+    let mut remaining = pending_call_ids.to_vec();
+    for entry in incoming_items {
+        let Some(row) = entry.as_object() else {
+            return false;
+        };
+        let item_type = row.get("type").and_then(Value::as_str).unwrap_or("").trim().to_ascii_lowercase();
+        if !is_bridge_tool_output_item_type(item_type.as_str()) {
+            break;
+        }
+        let Some(call_id) = read_bridge_function_call_id(row) else {
+            return false;
+        };
+        let Some(position) = remaining.iter().position(|existing| existing == &call_id) else {
+            return false;
+        };
+        remaining.remove(position);
+        if remaining.is_empty() {
+            return true;
+        }
+    }
+    remaining.is_empty()
+}
+
 fn restore_responses_continuation_payload(
     entry: &Value,
     incoming_payload: &Value,
@@ -715,6 +786,7 @@ fn materialize_responses_continuation_payload(
     if prefix.is_empty() {
         return Value::Null;
     }
+    let pending_call_ids = collect_pending_bridge_function_call_ids(&prefix);
 
     if find_exact_prefix_delta(&prefix, &input_items).is_some() || input_items == prefix {
         return Value::Null;
@@ -722,6 +794,11 @@ fn materialize_responses_continuation_payload(
 
     let common_prefix_len = count_common_leading_items(&prefix, &input_items);
     if common_prefix_len > 0 {
+        return Value::Null;
+    }
+    if !pending_call_ids.is_empty()
+        && !leading_input_consumes_pending_tool_calls(&input_items, &pending_call_ids)
+    {
         return Value::Null;
     }
 
@@ -1018,6 +1095,62 @@ mod tests {
         let input = payload.get("input").and_then(Value::as_array).unwrap();
         assert_eq!(input.len(), 3);
         assert_eq!(input[2]["content"][0]["text"].as_str(), Some("next"));
+    }
+
+    #[test]
+    fn does_not_materialize_plain_continuation_when_prefix_has_pending_tool_call_without_leading_output() {
+        let materialized = materialize_responses_continuation_payload(
+            &json!({
+                "requestId": "req_prev",
+                "lastResponseId": "resp_prev",
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "run pwd" }] },
+                    { "type": "function_call", "id": "fc_call_1", "call_id": "call_1", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" }
+                ]
+            }),
+            &json!({
+                "model": "gpt-5.3-codex",
+                "stream": true,
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "继续" }] }
+                ]
+            }),
+            Some("req_now"),
+            Some("session:sess-1"),
+        );
+
+        assert!(materialized.is_null());
+    }
+
+    #[test]
+    fn materializes_plain_continuation_when_leading_tool_output_consumes_pending_tool_call() {
+        let materialized = materialize_responses_continuation_payload(
+            &json!({
+                "requestId": "req_prev",
+                "lastResponseId": "resp_prev",
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "run pwd" }] },
+                    { "type": "function_call", "id": "fc_call_1", "call_id": "call_1", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" }
+                ]
+            }),
+            &json!({
+                "model": "gpt-5.3-codex",
+                "stream": true,
+                "input": [
+                    { "type": "function_call_output", "call_id": "call_1", "output": "/tmp" },
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "继续" }] }
+                ]
+            }),
+            Some("req_now"),
+            Some("session:sess-1"),
+        );
+
+        let payload = materialized.get("payload").and_then(Value::as_object).unwrap();
+        let input = payload.get("input").and_then(Value::as_array).unwrap();
+        assert_eq!(input.len(), 4);
+        assert_eq!(input[1]["type"].as_str(), Some("function_call"));
+        assert_eq!(input[2]["type"].as_str(), Some("function_call_output"));
+        assert_eq!(input[3]["content"][0]["text"].as_str(), Some("继续"));
     }
 
     #[test]

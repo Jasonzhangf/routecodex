@@ -588,6 +588,188 @@ fn test_resp_profile_chat_qwen_native_applied() {
     );
 }
 
+#[test]
+fn test_resp_profile_chat_qwen_harvests_marker_tool_calls_in_compat_layer() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "data": {
+                "id": "qwen_resp_marker_1",
+                "created": 1730000001,
+                "model": "qwen3-plus",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "继续\n<|tool_calls_section_begin|>\n<|tool_call_begin|> functions.exec_command:66 <|tool_call_argument_begin|> {\"cmd\":\"pwd\",\"workdir\":\"/tmp\"} <|tool_call_end|>\n<|tool_calls_section_end|>\n"
+                    },
+                    "finish_reason": "stop"
+                }]
+            }
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:qwen".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_qwen_marker_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.applied_profile, Some("chat:qwen".to_string()));
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["choices"][0]["message"]["content"],
+        "继续"
+    );
+    assert_eq!(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    let args_str = result.payload["choices"][0]["message"]["tool_calls"][0]["function"]
+        ["arguments"]
+        .as_str()
+        .unwrap_or("{}");
+    let args_json: Value = serde_json::from_str(args_str).unwrap_or(Value::Null);
+    assert_eq!(args_json["cmd"], "pwd");
+    assert_eq!(args_json["workdir"], "/tmp");
+}
+
+#[test]
+fn test_resp_profile_chat_qwen_harvests_marker_tool_calls_from_thinking_content() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "data": {
+                "id": "qwen_resp_marker_2",
+                "created": 1730000002,
+                "model": "qwen3-plus",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": [{
+                            "type": "thinking",
+                            "thinking": "<|tool_calls_section_begin|>\n<|tool_call_begin|> functions.exec_command:13 <|tool_call_argument_begin|> {\"cmd\":\"pwd\",\"workdir\":\"/tmp\"} <|tool_call_end|>\n<|tool_calls_section_end|>"
+                        }]
+                    },
+                    "finish_reason": "stop"
+                }]
+            }
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:qwen".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_qwen_marker_2".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    assert!(result.payload["choices"][0]["message"]
+        .get("reasoning_content")
+        .is_none());
+    assert_eq!(result.payload["choices"][0]["message"]["content"], "");
+}
+
+#[test]
+fn test_resp_profile_chat_qwen_repairs_newline_inside_marker_json_and_split_tokens() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "data": {
+                "id": "qwen_resp_marker_3",
+                "created": 1730000003,
+                "model": "qwen3-plus",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "The push command is running.\n<|tool_calls_section_begin|> <|\n  tool_call_begin|> functions.write_stdin:69 <|tool_call_argument_begin|> {} <|\n  tool_call_end|> <|tool_calls_section_end|>\n继续\n<|tool_calls_section_begin|>\n<|tool_call_begin|> functions.exec_command:45 <|tool_call_argument_begin|> {\"command\":\"head -70 /tmp/a.py\nmore.py\"} <|tool_call_end|>\n<|tool_calls_section_end|>\n"
+                    },
+                    "finish_reason": "stop"
+                }]
+            }
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:qwen".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_qwen_marker_3".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    let tool_calls = result.payload["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(tool_calls.len(), 2);
+    assert_eq!(tool_calls[0]["function"]["name"], "write_stdin");
+    assert_eq!(tool_calls[1]["function"]["name"], "exec_command");
+    let args_str = tool_calls[1]["function"]["arguments"]
+        .as_str()
+        .unwrap_or("{}");
+    let args_json: Value = serde_json::from_str(args_str).unwrap_or(Value::Null);
+    let command = args_json["command"].as_str().unwrap_or("");
+    assert!(command.contains("head -70 /tmp/a.py"));
+    assert!(command.contains("more.py"));
+}
+
 
 #[test]
 fn test_resp_profile_chat_iflow_unwraps_body_and_harvests_tool_calls() {
@@ -1975,6 +2157,220 @@ fn test_resp_profile_chat_deepseek_web_harvests_tool_call_from_reasoning_content
     assert_eq!(total, prompt + completion);
     assert_eq!(result.payload["usage"]["input_tokens"], Value::from(prompt));
     assert_eq!(result.payload["usage"]["output_tokens"], Value::from(completion));
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_rejects_dsml_interrupt_wrapper_as_hidden_transport() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "<|DSML|interrupt|reason>No recent actions to report; waiting for user continuation.</|DSML|interrupt|reason>",
+                    "tool_calls": []
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_dsml_interrupt".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("search/search-deepseek-web-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "auto"
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": false,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let error = run_resp_inbound_stage3_compat(input).unwrap_err();
+    assert!(error.contains("forbidden hidden tool transport markup"));
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_strips_final_wrapper_transparently() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "<final>\n\nJason，先确认 SSH 链路恢复，再继续后续配置检查。\n</final>"
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_final_wrapper".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("thinking/thinking-deepseek-web-primary".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).expect("deepseek-web final wrapper strip");
+    assert_eq!(
+        result.payload["choices"][0]["message"]["content"],
+        "Jason，先确认 SSH 链路恢复，再继续后续配置检查。"
+    );
+}
+
+#[test]
+fn test_resp_profile_chat_deepseek_web_responses_shape_reasoning_tail_harvests_tool_call() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "object": "response",
+            "id": "resp_deepseek_live_same_shape",
+            "created_at": 1778459296,
+            "status": "completed",
+            "model": "gpt-5.4",
+            "output": [
+                {
+                    "id": "reasoning_req_live_1",
+                    "type": "reasoning",
+                    "status": "completed",
+                    "content": [{
+                        "type": "reasoning_text",
+                        "text": "我们先检查当前目录，确认工作区位置。\n<|DSML|tool_calls>\n<|DSML|invoke name=\"exec_command\">\n<|DSML|parameter name=\"cmd\"><![CDATA[bash -lc 'pwd']]></|DSML|parameter>\n</|DSML|invoke>\n</|DSML|tool_calls>"
+                    }],
+                    "summary": [{
+                        "type": "summary_text",
+                        "text": "我们先检查当前目录。"
+                    }]
+                },
+                {
+                    "id": "message_req_live_1",
+                    "role": "assistant",
+                    "status": "completed",
+                    "type": "message",
+                    "content": []
+                }
+            ],
+            "usage": {
+                "input_tokens": 81,
+                "output_tokens": 32,
+                "total_tokens": 113
+            }
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_live_same_shape".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: Some("coding/coding-deepseek-web-primary".to_string()),
+            rt: None,
+            captured_chat_request: Some(json!({
+                "model": "gpt-5.4",
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "required",
+                "messages": [{
+                    "role": "user",
+                    "content": "继续"
+                }]
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": true,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["metadata"]["deepseek"]["toolCallState"],
+        "text_tool_calls"
+    );
+    assert_eq!(
+        result.payload["metadata"]["deepseek"]["toolCallSource"],
+        "fallback"
+    );
+    assert_eq!(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    let args: Value = serde_json::from_str(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    assert_eq!(args["cmd"], "bash -lc 'pwd'");
 }
 
 #[test]

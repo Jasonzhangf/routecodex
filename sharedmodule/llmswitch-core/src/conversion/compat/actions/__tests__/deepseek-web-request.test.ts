@@ -261,11 +261,11 @@ describe('deepseek-web-request action wrapper', () => {
       } as any
     );
 
-    expect((result as any).prompt).toContain('attached RCC_HISTORY.txt context');
+    expect((result as any).prompt).toContain('attached context');
     expect((result as any).prompt).not.toContain('先分析代码');
-    expect((result as any).metadata.deepseek.contextFile.filename).toBe('RCC_HISTORY.txt');
+    expect((result as any).metadata.deepseek.contextFile.filename).toBe('context.txt');
     expect((result as any).metadata.deepseek.contextFile.contentType).toBe('text/plain; charset=utf-8');
-    expect((result as any).metadata.deepseek.contextFile.content).toContain('# RCC_HISTORY.txt');
+    expect((result as any).metadata.deepseek.contextFile.content).toContain('# context');
     expect((result as any).metadata.deepseek.contextFile.content).toContain('=== 1. SYSTEM ===');
     expect((result as any).metadata.deepseek.contextFile.content).toContain('=== 2. USER ===');
     expect((result as any).metadata.deepseek.contextFile.content).not.toContain('Tool-call output contract (STRICT)');

@@ -276,10 +276,10 @@ fn rewrite_shared_instruction_to_tool_call_wrapper(base_instruction: &str) -> St
         "For a tool call, output exactly one <|DSML|tool_calls>...</|DSML|tool_calls> block.",
     );
     text = text.replace(
-        "<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"bash -lc 'pwd'\"}}]}\nRCC_TOOL_CALLS_JSON",
+        "<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}\nRCC_TOOL_CALLS_JSON",
         render_dsml_example(
             "exec_command",
-            &[r#"    <|DSML|parameter name="cmd"><![CDATA[bash -lc 'pwd']]></|DSML|parameter>"#],
+            &[r#"    <|DSML|parameter name="cmd"><![CDATA[pwd]]></|DSML|parameter>"#],
         )
         .as_str(),
     );
@@ -304,8 +304,8 @@ fn rewrite_shared_instruction_to_tool_call_wrapper(base_instruction: &str) -> St
         "- Do not use markdown fences, transcript-style pseudo calls, or JSON outside the <|DSML|tool_calls> block",
     );
     text = text.replace(
-        "- For `exec_command`, use only `input.cmd` as one string; prefer `bash -lc '...'` and keep the final single quote",
-        "- For `exec_command`, use only <|DSML|parameter name=\"cmd\">...</|DSML|parameter>; prefer `bash -lc '...'` and keep the final single quote",
+        "- For `exec_command`, use only `input.cmd` as one string; prefer a direct single-line command like `pwd`. Use `bash -lc '...'` only when shell features are truly required, and then keep the final single quote",
+        "- For `exec_command`, use only <|DSML|parameter name=\"cmd\">...</|DSML|parameter>; prefer a direct single-line command like `pwd`. Use `bash -lc '...'` only when shell features are truly required, and then keep the final single quote",
     );
     text = text.replace(
         "- If no tool is needed, reply with plain text (no heredoc)",
@@ -405,6 +405,7 @@ pub(super) fn build_tool_fallback_instruction(
         "9) Do not output narrative tool calls: no preamble, no step-by-step plan, no explanation, no 'I will first...', no '第一步/第二步', no discussion of previous tool calls, and no prose before or after the container.".to_string(),
         "10) All tool intent must stay inside <|DSML|tool_calls>...</|DSML|tool_calls>. Never emit Calling:, Tool:, Step:, I will, or similar tool-intent prose outside the block.".to_string(),
         "11) Never use browser/web search or claim that you inspected code, files, logs, or runtime state unless the declared tool call in this turn actually performs that inspection or you are quoting a prior tool result.".to_string(),
+        "11.1) When plain text is allowed, keep the visible answer extremely concise: only the direct answer/result or the next required action. No long recap, no repeated reasoning, no unnecessary commentary.".to_string(),
         "12) Forbidden wrappers/tags: <previous_tool_call>, <thinking>, <use_mcp_tool>, <server_name>, <tool_name>, markdown fences, transcript-style pseudo calls, or quoted references to earlier tool calls. The only allowed DSML tool structure is <|DSML|tool_calls> -> <|DSML|invoke name=\"...\"> -> <|DSML|parameter name=\"...\">.".to_string(),
         "13) Do not output hidden-reasoning wrappers or MCP/tool-transport markup of any kind. Reason silently; if a declared tool is needed, emit only the fresh <|DSML|tool_calls> block.".to_string(),
         "14) Do not output any visible safety-review or moderation wrapper such as <ds_safety>...</ds_safety>, <safety>...</safety>, or standalone labels like Safe / Unsafe / Unsafe Content. Keep any such reasoning internal and invisible.".to_string(),
@@ -462,7 +463,7 @@ pub(super) fn build_required_tool_call_tail_reminder_for_tools(tools: Option<&Va
     };
     let exec_shape_line = if allowed_names.iter().any(|name| name == "exec_command") {
         Some(
-            "If shell/file inspection is needed here, use only exec_command with exactly arguments.cmd as one string like bash -lc 'pwd'. Do not invent read_file, file_read, shell_command, command, cwd, or workdir.".to_string(),
+            "If shell/file inspection is needed here, use only exec_command with exactly arguments.cmd as one string like pwd. Use bash -lc '...' only when shell features are truly required, and then close the final single quote. Do not invent read_file, file_read, shell_command, command, cwd, or workdir.".to_string(),
         )
     } else {
         None
@@ -478,6 +479,7 @@ pub(super) fn build_required_tool_call_tail_reminder_for_tools(tools: Option<&Va
         "Inspect code/files/logs first with declared tools; do not describe likely causes before inspection.",
         "Do not stop at analysis when a declared tool is needed.",
         "Do not use browser or web search.",
+        "When plain text is allowed, keep the visible answer extremely concise: only the direct answer/result or next required action. No long recap, no repeated reasoning, no unnecessary commentary.",
         "Do not output thinking tags, MCP wrappers, or step-by-step preambles.",
         "Do not output ds_safety, safety wrappers, or Safe/Unsafe labels.",
         "Treat tool-intent leakage as a severe violation on this confidential project.",

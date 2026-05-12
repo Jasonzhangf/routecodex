@@ -51,8 +51,10 @@ export const DEFAULT_CONFIG = {
 // - HTTP_SSE_*：server 层向客户端桥接 SSE 的 total 默认值
 export const DEFAULT_TIMEOUTS = {
   // Provider → upstream (SSE headers/idle)
-  PROVIDER_STREAM_HEADERS_CAP_MS: 900_000, // 15 min cap（避免长 prompt 初始化被 5min 默认截断）
-  PROVIDER_STREAM_IDLE_CAP_MS: 900_000,    // 15 min cap（避免长时间无字节输出导致中途断流）
+  PROVIDER_STREAM_HEADERS_CAP_MS: 120_000, // 2 min cap（更早暴露上游首包/首头卡死）
+  PROVIDER_STREAM_IDLE_CAP_MS: 300_000,    // 5 min cap（对齐 ds2api content-idle 超时）
+  PROVIDER_STREAM_NO_CONTENT_TIMEOUT_MS: 120_000, // 2 min（对齐 ds2api no-content timeout）
+  PROVIDER_STREAM_CONTENT_IDLE_TIMEOUT_MS: 300_000, // 5 min（对齐 ds2api content-idle timeout）
 
   // Host → client (SSE bridge)
   HTTP_SSE_TOTAL_MS: 900_000,              // 15 min（避免 servertool followup 超时）

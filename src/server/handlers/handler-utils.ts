@@ -1,11 +1,9 @@
 import type { Response } from 'express';
 import type { IncomingHttpHeaders } from 'http';
-import chalk from 'chalk';
 import type { HandlerContext } from './types.js';
 import { mapErrorToHttp, type HttpErrorPayload } from '../utils/http-error-mapper.js';
 import { buildInfo } from '../../build-info.js';
 import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js';
-import { reportRouteError } from '../../error-handling/route-error-hub.js';
 // import { runtimeFlags } from '../../runtime/runtime-flags.js';
 import { formatErrorForConsole } from '../../utils/log-helpers.js';
 import { colorizeRequestLog, formatHighlightedFinishReasonLabel } from '../utils/request-log-color.js';
@@ -45,9 +43,9 @@ function logHandlerNonBlockingError(operation: string, error: unknown): void {
   console.warn(`[handler-utils] ${operation} failed (non-blocking): ${reason}`);
 }
 
-function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
+function resolveBoolFromEnv(value: string | undefined, defaultValue: boolean): boolean {
   if (!value) {
-    return fallback;
+    return defaultValue;
   }
   const normalized = value.trim().toLowerCase();
   if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
@@ -56,7 +54,7 @@ function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boole
   if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') {
     return false;
   }
-  return fallback;
+  return defaultValue;
 }
 
 function shouldLogHttpErrorMeta(): boolean {
@@ -205,8 +203,28 @@ export function nextRequestId(
 }
 
 export function logRequestStart(endpoint: string, requestId: string, meta?: RequestLogMeta): void {
-  // HTTP request start logs are intentionally suppressed to reduce noise.
-  return;
+  if (!SHOULD_LOG_HTTP_EVENTS) {
+    return;
+  }
+  const resolvedId = formatRequestId(requestId);
+  const timestamp = formatTimestamp();
+  const suffix = meta && typeof meta === 'object'
+    ? (() => {
+        const bag = meta as Record<string, unknown>;
+        const fields = [
+          typeof bag.inboundStream === 'boolean' ? `stream=${bag.inboundStream}` : undefined,
+          typeof bag.clientAcceptsSse === 'boolean' ? `acceptsSse=${bag.clientAcceptsSse}` : undefined,
+          typeof bag.timeoutMs === 'number' ? `timeoutMs=${bag.timeoutMs}` : undefined,
+          typeof bag.videoRequest === 'boolean' ? `video=${bag.videoRequest}` : undefined,
+          typeof bag.type === 'string' && bag.type.trim() ? `type=${bag.type}` : undefined
+        ]
+          .filter((item): item is string => Boolean(item))
+          .join(' ');
+        return fields ? ` (${fields})` : '';
+      })()
+    : '';
+  const line = `▶ [${endpoint}] ${timestamp} request ${resolvedId} started${suffix}`;
+  console.log(colorizeRequestLog(line, resolvedId));
 }
 
 export function logRequestComplete(
@@ -417,6 +435,7 @@ export async function resolveReportedRouteErrorHttpResponse(args: {
 }): Promise<HttpErrorPayload> {
   let mapped = mapErrorToHttp(args.normalizedError);
   try {
+    const { reportRouteError } = await import('../../error-handling/route-error-hub.js');
     const { http } = await reportRouteError(args.routePayload, { includeHttpResult: true });
     if (http) {
       mapped = http;

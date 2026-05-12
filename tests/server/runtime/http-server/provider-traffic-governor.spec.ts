@@ -234,6 +234,53 @@ describe('provider-traffic-governor', () => {
     }
   });
 
+  it('clears busy state once in-flight drops below maxInFlight', async () => {
+    const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-busy-clear-${process.pid}-${randomUUID()}`);
+    const governor = new ProviderTrafficGovernor(rootDir);
+    const runtime = createRuntime({
+      runtimeKey: 'demo.alias',
+      providerId: 'demo',
+      providerFamily: 'demo',
+      concurrency: {
+        maxInFlight: 2,
+        acquireTimeoutMs: 300,
+        staleLeaseMs: 60000
+      },
+      rpm: {
+        requestsPerMinute: 100,
+        acquireTimeoutMs: 300
+      }
+    });
+    const events: Array<{ scopeKey: string; busy: boolean }> = [];
+    governor.setConcurrencyBusyCallback?.((scopeKey, busy) => {
+      events.push({ scopeKey, busy });
+    });
+    try {
+      const first = await governor.acquire({
+        runtimeKey: runtime.runtimeKey,
+        providerKey: 'demo.alias.model-a',
+        requestId: 'busy-clear-1',
+        runtime
+      });
+      const second = await governor.acquire({
+        runtimeKey: runtime.runtimeKey,
+        providerKey: 'demo.alias.model-b',
+        requestId: 'busy-clear-2',
+        runtime
+      });
+
+      expect(events.some((event) => event.busy === true && event.scopeKey === 'demo.alias')).toBe(true);
+
+      await governor.release(second.permit);
+
+      expect(events.some((event) => event.busy === false && event.scopeKey === 'demo.alias')).toBe(true);
+
+      await governor.release(first.permit);
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
   it('resetCurrentProcessState releases stale local leases without process restart', async () => {
     const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-reset-${process.pid}-${randomUUID()}`);
     const governor = new ProviderTrafficGovernor(rootDir);

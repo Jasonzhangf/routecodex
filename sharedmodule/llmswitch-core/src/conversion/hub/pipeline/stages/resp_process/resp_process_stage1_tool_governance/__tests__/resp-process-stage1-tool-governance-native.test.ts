@@ -95,6 +95,71 @@ describe('resp-process-stage1-tool-governance native wrapper', () => {
     expect(String(result.governedPayload.choices?.[0]?.message?.content ?? '')).toContain('保留正文');
   });
 
+  it('harvests DSML transcript wrapper with right gutter noise without leaking markup', async () => {
+    const result = await runRespProcessStage1ToolGovernance({
+      payload: {
+        choices: [{
+          message: {
+            tool_calls: [],
+            content: [
+              '• Ran tool transcript',
+              '                                                                                │·······························',
+              '└ <DSML|tool_calls>                                                             │·······························',
+              '  <DSML|invoke name="view_image">                                              │·······························',
+              '  <DSML|parameter name="path">[Image #1]</DSML|parameter>                      │·······························',
+              '  </DSML|invoke>                                                                │·······························',
+              '  </DSML|tool_calls>                                                            │·······························',
+              '                                                                                │·······························',
+              '› Summarize recent commits                                                      │·······························'
+            ].join('\n')
+          },
+          finish_reason: 'stop'
+        }],
+        __rcc_tool_governance: {
+          requestedToolNames: ['view_image'],
+          providerFamily: 'deepseek-web'
+        }
+      } as any,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stage1-dsml-ran-transcript',
+      clientProtocol: 'openai-responses'
+    });
+
+    expect(result.governedPayload.choices?.[0]?.message?.tool_calls ?? []).toHaveLength(1);
+    expect(result.governedPayload.choices?.[0]?.message?.tool_calls?.[0]?.function?.name).toBe('view_image');
+    expect(result.governedPayload.choices?.[0]?.finish_reason).toBe('tool_calls');
+    const content = String(result.governedPayload.choices?.[0]?.message?.content ?? '');
+    expect(content.includes('DSML')).toBe(false);
+    expect(content.includes('tool transcript')).toBe(false);
+    expect(content.includes('Summarize recent commits')).toBe(false);
+  });
+
+  it('does not fail fast on unharvested explicit wrapper and keeps cleaned inner text for next round', async () => {
+    const result = await runRespProcessStage1ToolGovernance({
+      payload: {
+        choices: [{
+          message: {
+            tool_calls: [],
+            content: '<function_calls>{"tool_calls":[{"name":"mailbox.status","input":{"target":"finger-system-agent"}}]}</function_calls>'
+          },
+          finish_reason: 'stop'
+        }],
+        __rcc_tool_governance: {
+          requestedToolNames: ['exec_command']
+        }
+      } as any,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stage1-unharvested-wrapper-continue',
+      clientProtocol: 'openai-responses'
+    });
+
+    expect(result.governedPayload.choices?.[0]?.message?.tool_calls ?? []).toHaveLength(0);
+    expect(result.governedPayload.choices?.[0]?.finish_reason).toBe('stop');
+    const content = String(result.governedPayload.choices?.[0]?.message?.content ?? '');
+    expect(content.includes('<function_calls>')).toBe(false);
+    expect(content.includes('</function_calls>')).toBe(false);
+  });
+
   it('preserves anthropic tool_use exec_command on reasoning_stop_continue followup when requestSemantics carries original client tools', async () => {
     const anthropicPayload = {
       id: 'msg_reasoning_stop_continue_sample',

@@ -1391,6 +1391,49 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(runtimeManager.getHandleByRuntimeKey).toHaveBeenCalledTimes(1);
   });
 
+  it('does not retry DeepSeek file upload failures across same-runtime aliases', async () => {
+    const fatal = Object.assign(new Error('DeepSeek file upload returned non-JSON payload'), {
+      statusCode: 502,
+      code: 'DEEPSEEK_FILE_UPLOAD_FAILED',
+      upstreamCode: 'DEEPSEEK_FILE_UPLOAD_FAILED',
+      retryable: true
+    });
+    const handle = createRuntimeHandle(async () => {
+      throw fatal;
+    });
+    const pipelineResult: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'deepseek-web.berg.deepseek-v4-pro',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'deepseek-web.berg',
+        processMode: 'standard'
+      },
+      routingDecision: {
+        routeName: 'coding',
+        pool: [
+          'deepseek-web.berg.deepseek-v4-pro',
+          'deepseek-web.spence.deepseek-v4-pro',
+          'deepseek-web.sargent.deepseek-v4-pro'
+        ]
+      } as unknown as { routeName?: string },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const { executor, request, runtimeManager } = createExecutor(pipelineResult, handle);
+    runtimeManager.resolveRuntimeKey = jest.fn((providerKey?: string) => {
+      if (providerKey === 'deepseek-web.berg.deepseek-v4-pro') return 'deepseek-web.berg';
+      if (providerKey === 'deepseek-web.spence.deepseek-v4-pro') return 'deepseek-web.spence';
+      if (providerKey === 'deepseek-web.sargent.deepseek-v4-pro') return 'deepseek-web.sargent';
+      return undefined;
+    }) as unknown as ProviderRuntimeManager['resolveRuntimeKey'];
+
+    await expect(executor.execute(request)).rejects.toThrow('DeepSeek file upload returned non-JSON payload');
+    expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
+    expect(runtimeManager.getHandleByRuntimeKey).toHaveBeenCalledTimes(1);
+  });
+
   it('does not host-retry on HTTP 400 signature-invalid errors (handled by llmswitch-core servertool)', async () => {
     const invalidSig = Object.assign(new Error('HTTP 400: thinking.signature invalid'), {
       statusCode: 400,
@@ -1557,7 +1600,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(excluded).toEqual([]);
   });
 
-  it('uses soft wait timeout only when route pool has cross-runtime alternatives', async () => {
+  it('uses short soft wait timeout for web provider traffic acquire', async () => {
     const acquireArgs: Array<Record<string, unknown>> = [];
     const trafficGovernor = {
       acquire: jest.fn(async (options: Record<string, unknown>) => {
@@ -1587,6 +1630,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       target: {
         providerKey: 'tab.key1',
         providerType: 'responses',
+        compatibilityProfile: 'chat:deepseek-web',
         outboundProfile: 'openai-responses',
         runtimeKey: 'runtime:one',
         processMode: 'standard'
@@ -1645,7 +1689,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       metadata: { stream: false, inboundStream: false }
     });
 
-    expect(acquireArgs[0]?.softWaitTimeoutMs).toBeUndefined();
+    expect(acquireArgs[0]?.softWaitTimeoutMs).toBe(1500);
 
     (fakePipeline.execute as jest.Mock).mockResolvedValueOnce({
       ...pipelineResult,
@@ -1663,7 +1707,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       metadata: { stream: false, inboundStream: false }
     });
 
-    expect(acquireArgs[1]?.softWaitTimeoutMs).toBeUndefined();
+    expect(acquireArgs[1]?.softWaitTimeoutMs).toBe(1500);
   });
 
   it('bypasses provider traffic governor for servertool followup hops', async () => {

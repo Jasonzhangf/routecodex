@@ -3,6 +3,7 @@ export interface TargetMetadata {
   providerType?: string;
   providerProtocol?: string;
   runtimeKey?: string;
+  concurrencyScopeKey?: string;
   routeName?: string;
   defaultModel?: string;
   compatibilityProfile?: string;

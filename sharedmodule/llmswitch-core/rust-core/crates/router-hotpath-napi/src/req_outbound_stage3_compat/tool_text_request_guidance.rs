@@ -109,7 +109,7 @@ fn build_default_instruction(
     );
     if has_exec_command {
         push_line(
-            "If calling tools, output exactly one heredoc container: <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"bash -lc 'pwd'\"}}]}\\nRCC_TOOL_CALLS_JSON"
+            "If calling tools, output exactly one heredoc container: <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}\\nRCC_TOOL_CALLS_JSON"
                 .to_string(),
         );
     } else {
@@ -141,7 +141,7 @@ fn build_default_instruction(
     );
     if tool_names.iter().any(|name| name == "exec_command") {
         push_line(
-            "For shell/terminal execution, ALWAYS use tool name `exec_command` with exactly `input.cmd`, and make `cmd` a single string like `bash -lc 'pwd'`. Do NOT emit `command`, `cwd`, or `workdir`."
+            "For shell/terminal execution, ALWAYS use tool name `exec_command` with exactly `input.cmd`, and prefer a direct single-line command like `pwd`. Use `bash -lc '...'` only when shell features are truly required. Do NOT emit `command`, `cwd`, or `workdir`."
                 .to_string(),
         );
         push_line(

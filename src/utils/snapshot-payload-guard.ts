@@ -1,6 +1,6 @@
 const DEFAULT_SNAPSHOT_PAYLOAD_MAX_BYTES = 256 * 1024;
 
-function resolveBoolFromEnv(names: string[], fallback: boolean): boolean {
+function resolveBoolFromEnv(names: string[], defaultValue: boolean): boolean {
   for (const name of names) {
     const raw = String(process.env[name] ?? '').trim().toLowerCase();
     if (!raw) {
@@ -13,7 +13,7 @@ function resolveBoolFromEnv(names: string[], fallback: boolean): boolean {
       return false;
     }
   }
-  return fallback;
+  return defaultValue;
 }
 
 function normalizeStageToken(stage: string): string {

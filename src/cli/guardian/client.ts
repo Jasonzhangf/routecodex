@@ -264,7 +264,7 @@ export async function registerGuardianProcess(args: RegisterGuardianArgs): Promi
       'x-rcc-guardian-token': state.token
     },
     body: JSON.stringify(args.registration)
-  }).catch(() => { return null; });
+  });
 
   if (!response?.ok) {
     const status = response?.status ?? 'n/a';
@@ -285,7 +285,7 @@ export async function stopGuardianDaemon(args: StopGuardianArgs): Promise<Guardi
       'x-rcc-guardian-token': state.token,
       'x-rcc-guardian-stop-token': state.stopToken
     }
-  }).catch(() => { return null; });
+  });
 
   if (!response?.ok) {
     return {
@@ -324,6 +324,6 @@ export async function reportGuardianLifecycleEvent(args: ReportGuardianLifecycle
       'x-rcc-guardian-token': state.token
     },
     body: JSON.stringify(args.event)
-  }).catch(() => { return null; });
+  });
   return Boolean(response?.ok);
 }

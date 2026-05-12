@@ -195,6 +195,134 @@ describe('DeepSeekSessionPowManager', () => {
     expect(typeof resolvedWasmPath === 'string' && fs.existsSync(resolvedWasmPath)).toBe(true);
   });
 
+  it('refreshes auth and retries session create on auth-indicative biz_code failure', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 0,
+            msg: '',
+            data: {
+              biz_code: 400123,
+              biz_msg: 'login expired, token invalid'
+            }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 0,
+            data: {
+              biz_code: 0,
+              biz_data: {
+                id: 'session-after-refresh'
+              }
+            }
+          }),
+          { status: 200 }
+        )
+      );
+
+    const refreshAuth = jest.fn(async () => {});
+    const manager = new DeepSeekSessionPowManager({
+      baseUrl: 'https://chat.deepseek.com',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      refreshAuth,
+      sessionMaxAttempts: 2
+    });
+
+    await expect(manager.ensureChatSession({ authorization: 'Bearer token' })).resolves.toBe('session-after-refresh');
+    expect(refreshAuth).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not refresh auth on non-auth biz_code failure during session create', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: 0,
+          msg: '',
+          data: {
+            biz_code: 400123,
+            biz_msg: 'session create failed: quota reached'
+          }
+        }),
+        { status: 200 }
+      )
+    );
+
+    const refreshAuth = jest.fn(async () => {});
+    const manager = new DeepSeekSessionPowManager({
+      baseUrl: 'https://chat.deepseek.com',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      refreshAuth,
+      sessionMaxAttempts: 1
+    });
+
+    await expect(manager.ensureChatSession({ authorization: 'Bearer token' })).rejects.toMatchObject({
+      code: 'DEEPSEEK_SESSION_CREATE_FAILED',
+      upstreamCode: '400123'
+    });
+    expect(refreshAuth).not.toHaveBeenCalled();
+  });
+
+  it('supports provider-injected postJson transport for session create and pow', async () => {
+    const postJsonImpl = jest
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          code: 0,
+          data: {
+            biz_code: 0,
+            biz_data: {
+              id: 'transport-session-1'
+            }
+          }
+        }
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          code: 0,
+          data: {
+            biz_code: 0,
+            biz_data: {
+              challenge: {
+                algorithm: 'DeepSeekHashV1',
+                challenge: 'abc',
+                salt: 'salt',
+                difficulty: 123,
+                expire_at: 999999,
+                signature: 'sig',
+                target_path: '/api/v0/chat/completion'
+              }
+            }
+          }
+        }
+      });
+
+    const manager = new DeepSeekSessionPowManager({
+      baseUrl: 'https://chat.deepseek.com',
+      postJsonImpl,
+      powMaxAttempts: 1,
+      solvePow: async () => 7
+    });
+
+    const sessionId = await manager.ensureChatSession({ authorization: 'Bearer token' });
+    const encoded = await manager.createPowResponse({ authorization: 'Bearer token' });
+    const decoded = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8')) as Record<string, unknown>;
+
+    expect(sessionId).toBe('transport-session-1');
+    expect(decoded.answer).toBe(7);
+    expect(postJsonImpl).toHaveBeenCalledTimes(2);
+    expect(postJsonImpl.mock.calls[0]?.[0]?.endpoint).toBe('/api/v0/chat_session/create');
+    expect(postJsonImpl.mock.calls[1]?.[0]?.endpoint).toBe('/api/v0/chat/create_pow_challenge');
+  });
+
   it('re-resolves solver/wasm before execution when cached paths become invalid', async () => {
     const manager = new DeepSeekSessionPowManager({
       baseUrl: 'https://chat.deepseek.com'

@@ -8,6 +8,11 @@ use super::super::instructions::RoutingInstructionState;
 use super::super::load_balancer::{LoadBalancingPolicy, RouteLoadBalancer};
 use super::super::provider_registry::ProviderRegistry;
 use super::super::routing::{parse_routing, RoutingPools};
+use super::super::time_utils::now_ms;
+
+/// Default TTL for concurrency busy entries (60 seconds).
+/// Prevents leaked busy marks from permanently blocking a provider.
+const CONCURRENCY_BUSY_TTL_MS: i64 = 60_000;
 
 pub(crate) struct VirtualRouterEngineCore {
     pub routing: RoutingPools,
@@ -18,7 +23,7 @@ pub(crate) struct VirtualRouterEngineCore {
     pub routing_instruction_state: HashMap<String, RoutingInstructionState>,
     pub web_search_force: bool,
     pub quota_view: Option<Ref<()>>,
-    pub(crate) concurrency_busy_keys: HashSet<String>,
+    pub(crate) concurrency_busy_keys: HashMap<String, i64>,  // key -> expires_at_ms
 }
 
 impl VirtualRouterEngineCore {
@@ -32,7 +37,7 @@ impl VirtualRouterEngineCore {
             routing_instruction_state: HashMap::new(),
             web_search_force: false,
             quota_view: None,
-            concurrency_busy_keys: HashSet::new(),
+            concurrency_busy_keys: HashMap::new(),
         }
     }
 
@@ -78,15 +83,27 @@ impl VirtualRouterEngineCore {
         self.quota_view = quota_view;
     }
 
-    pub(crate) fn mark_concurrency_busy(&mut self, provider_key: &str) {
-        self.concurrency_busy_keys.insert(provider_key.to_string());
+    pub(crate) fn mark_concurrency_scope_busy(&mut self, scope_key: &str) {
+        let expires_at = now_ms() + CONCURRENCY_BUSY_TTL_MS;
+        self.concurrency_busy_keys
+            .insert(scope_key.to_string(), expires_at);
     }
 
-    pub(crate) fn mark_concurrency_idle(&mut self, provider_key: &str) {
-        self.concurrency_busy_keys.remove(provider_key);
+    pub(crate) fn mark_concurrency_scope_idle(&mut self, scope_key: &str) {
+        self.concurrency_busy_keys.remove(scope_key);
+    }
+
+    /// GC expired concurrency busy entries. Call periodically (e.g. at route entry/exit).
+    pub(crate) fn gc_concurrency_busy_expired(&mut self) {
+        let now = now_ms();
+        self.concurrency_busy_keys.retain(|_, expires_at| *expires_at > now);
     }
 
     pub(crate) fn is_concurrency_busy(&self, provider_key: &str) -> bool {
-        self.concurrency_busy_keys.contains(provider_key)
+        let now = now_ms();
+        match self.concurrency_busy_keys.get(provider_key) {
+            Some(expires_at) => *expires_at > now,
+            None => false,
+        }
     }
 }

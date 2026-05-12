@@ -68,16 +68,39 @@ export function readReasoningStopBoolean(value: unknown): boolean | undefined {
 }
 
 export function containsBroadKillCommand(cmd: string): boolean {
-  const text = String(cmd || '').trim().toLowerCase();
+  const text = String(cmd || '').trim();
   if (!text) {
     return false;
   }
-  return (
-    /\bpkill\b/.test(text) ||
-    /\bkillall\b/.test(text) ||
-    /\bkill\s*\$\s*\(/.test(text) ||
-    /\bxargs\s+kill\b/.test(text)
-  );
+  const unwrapped = unwrapShellWrapperCommand(text);
+  const commandSpans = tokenizeShellWords(unwrapped);
+  for (let index = 0; index < commandSpans.length; index += 1) {
+    const current = commandSpans[index];
+    if (!isCommandPosition(commandSpans, index)) {
+      continue;
+    }
+    const commandName = normalizeCommandName(current.value);
+    if (!commandName) {
+      continue;
+    }
+    if (commandName === 'pkill' || commandName === 'killall' || commandName === 'taskkill') {
+      return true;
+    }
+    if (commandName === 'kill') {
+      const tail = unwrapped.slice(current.end).trimStart();
+      if (tail.startsWith('$(')) {
+        return true;
+      }
+      continue;
+    }
+    if (commandName === 'xargs') {
+      const xargsCommand = findXargsInvokedCommand(commandSpans, index + 1);
+      if (xargsCommand === 'kill' || xargsCommand === 'pkill' || xargsCommand === 'killall' || xargsCommand === 'taskkill') {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 export function hasInvalidShellWrapperShape(cmd: string): boolean {
@@ -100,6 +123,141 @@ function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+type ShellTokenSpan = {
+  value: string;
+  start: number;
+  end: number;
+};
+
+function unwrapShellWrapperCommand(input: string): string {
+  const trimmed = String(input || '').trim();
+  const wrapperMatch = trimmed.match(/^(?:bash|sh|zsh)\s+-l?c\s+(['"])([\s\S]*)\1\s*$/i);
+  if (!wrapperMatch) {
+    return trimmed;
+  }
+  return wrapperMatch[2] ?? trimmed;
+}
+
+function tokenizeShellWords(input: string): ShellTokenSpan[] {
+  const tokens: ShellTokenSpan[] = [];
+  const text = String(input || '');
+  let tokenStart = -1;
+  let tokenValue = '';
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let escaping = false;
+
+  const flushToken = (end: number) => {
+    if (tokenStart < 0) {
+      return;
+    }
+    tokens.push({ value: tokenValue, start: tokenStart, end });
+    tokenStart = -1;
+    tokenValue = '';
+  };
+
+  const pushTokenChar = (char: string, index: number) => {
+    if (tokenStart < 0) {
+      tokenStart = index;
+    }
+    tokenValue += char;
+  };
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = index + 1 < text.length ? text[index + 1] : '';
+
+    if (escaping) {
+      pushTokenChar(char, index);
+      escaping = false;
+      continue;
+    }
+
+    if (!inSingleQuote && char === '\\') {
+      pushTokenChar(char, index);
+      escaping = true;
+      continue;
+    }
+
+    if (!inDoubleQuote && char === '\'') {
+      pushTokenChar(char, index);
+      inSingleQuote = !inSingleQuote;
+      continue;
+    }
+
+    if (!inSingleQuote && char === '"') {
+      pushTokenChar(char, index);
+      inDoubleQuote = !inDoubleQuote;
+      continue;
+    }
+
+    if (!inSingleQuote && !inDoubleQuote) {
+      const isWhitespace = /\s/.test(char);
+      if (isWhitespace) {
+        flushToken(index);
+        continue;
+      }
+      if ((char === '&' && next === '&') || (char === '|' && next === '|')) {
+        flushToken(index);
+        tokens.push({ value: `${char}${next}`, start: index, end: index + 2 });
+        index += 1;
+        continue;
+      }
+      if (char === '|' || char === ';') {
+        flushToken(index);
+        tokens.push({ value: char, start: index, end: index + 1 });
+        continue;
+      }
+    }
+
+    pushTokenChar(char, index);
+  }
+
+  flushToken(text.length);
+  return tokens;
+}
+
+function isCommandPosition(tokens: ShellTokenSpan[], index: number): boolean {
+  if (index <= 0) {
+    return true;
+  }
+  const previous = tokens[index - 1]?.value;
+  return previous === '|' || previous === '||' || previous === '&&' || previous === ';';
+}
+
+function normalizeCommandName(value: string): string {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) {
+    return '';
+  }
+  const unquoted = trimmed.replace(/^['"]|['"]$/g, '');
+  const segments = unquoted.split('/').filter(Boolean);
+  return (segments[segments.length - 1] || '').toLowerCase();
+}
+
+function isShellOperator(value: string): boolean {
+  return value === '|' || value === '||' || value === '&&' || value === ';';
+}
+
+function isOptionToken(value: string): boolean {
+  const normalized = String(value || '').trim();
+  return normalized.startsWith('-') && normalized !== '-';
+}
+
+function findXargsInvokedCommand(tokens: ShellTokenSpan[], startIndex: number): string {
+  for (let index = startIndex; index < tokens.length; index += 1) {
+    const value = tokens[index]?.value ?? '';
+    if (!value || isShellOperator(value)) {
+      return '';
+    }
+    if (isOptionToken(value)) {
+      continue;
+    }
+    return normalizeCommandName(value);
+  }
+  return '';
 }
 
 export function validateCanonicalClientToolCall(

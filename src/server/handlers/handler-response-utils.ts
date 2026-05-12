@@ -421,13 +421,23 @@ export function sendPipelineResponse(
       return fallback;
     };
 
-    let totalTimeoutMs = readTimeoutMs(
-      ['ROUTECODEX_HTTP_SSE_TIMEOUT_MS', 'RCC_HTTP_SSE_TIMEOUT_MS'],
-      DEFAULT_TIMEOUTS.HTTP_SSE_TOTAL_MS
-    );
+    let totalTimeoutMs: number | undefined;
+    for (const name of ['ROUTECODEX_HTTP_SSE_TIMEOUT_MS', 'RCC_HTTP_SSE_TIMEOUT_MS']) {
+      const raw = String(process.env[name] || '').trim();
+      if (!raw) {
+        continue;
+      }
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        totalTimeoutMs = parsed;
+        break;
+      }
+    }
     const overrideSseTotalTimeoutMs = Number(options?.sseTotalTimeoutMs);
     if (Number.isFinite(overrideSseTotalTimeoutMs) && overrideSseTotalTimeoutMs > 0) {
-      totalTimeoutMs = Math.max(totalTimeoutMs, overrideSseTotalTimeoutMs);
+      totalTimeoutMs = totalTimeoutMs === undefined
+        ? overrideSseTotalTimeoutMs
+        : Math.max(totalTimeoutMs, overrideSseTotalTimeoutMs);
     }
 
     const keepaliveMs = readTimeoutMs(
@@ -471,7 +481,7 @@ export function sendPipelineResponse(
       }
     };
 
-    if (Number.isFinite(totalTimeoutMs) && totalTimeoutMs > 0) {
+    if (typeof totalTimeoutMs === 'number' && Number.isFinite(totalTimeoutMs) && totalTimeoutMs > 0) {
       totalTimer = setTimeout(() => {
         endWithSseError('HTTP_SSE_TIMEOUT', `SSE timeout after ${totalTimeoutMs}ms`);
       }, totalTimeoutMs);

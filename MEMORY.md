@@ -1487,3 +1487,7 @@ Tags: apply-patch, shell-wrapper, shape-repair-only, workdir-relativization, rus
 - 2026-05-10: `responsesResume -> continuation` 这类 req_inbound / hub_pipeline 语义提升现在部分由 Rust native hotpath 执行。可复用规则：凡修改 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/` 下影响 inbound/outbound semantics 的逻辑，**先执行** `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`，再跑对应 Jest/运行态验证；否则 Jest 可能继续加载旧的 `dist/native/router_hotpath_napi.node`，出现“源码已改但测试仍是旧行为”的假阴性。
 
 Tags: native-hotpath, jest, router-hotpath-napi, build-gate, false-negative, 2026-05-10
+
+- 2026-05-12: DeepSeek-Web `DEEPSEEK_FILE_UPLOAD_FAILED` 本轮已验证的一类真因不是 session 坏，也不是 file-id 递归漏解析，而是 **history context 上传文件名为无扩展名 `context`** 时，上游 `upload_file` 会返回 `{"code":0,"data":{"biz_code":9,"biz_msg":"unsupported file type"}}`。可复用规则：DeepSeek context file 必须用**显式 `.txt` 文件名**（当前收敛为 `context.txt`），且 upload success/failure 判断必须同时检查 **HTTP status + top-level `code` + `data.biz_code/biz_msg`**；不能把 `code=0 但 biz_code!=0` 误报成 “succeeded without file id”。运行态证据：`~/.rcc/logs/server-10000.log` 出现该 payload；修复后 build/install/restart 到 `/health`=`0.90.1543`。
+
+Tags: deepseek-web, file-upload, context.txt, unsupported-file-type, biz-code, no-session-corruption, upload-contract, runtime-verification, 2026-05-12

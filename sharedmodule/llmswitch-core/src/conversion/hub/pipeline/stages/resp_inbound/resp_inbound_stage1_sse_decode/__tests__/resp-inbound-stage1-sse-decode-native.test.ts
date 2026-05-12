@@ -225,4 +225,40 @@ describe('resp-inbound-stage1-sse-decode native wrapper', () => {
       ]
     });
   });
+
+  it('passes timeout options from adapterContext into codec registry decode path', async () => {
+    const payload = {
+      __sse_responses: Readable.from(['event: ready\n', 'data: {"ok":true}\n\n'])
+    } as any;
+    const registry = await import('../../../../../../../sse/index.js');
+    const codec = registry.defaultSseCodecRegistry.get('openai-chat');
+    const original = codec.convertSseToJson.bind(codec);
+    let captured: Record<string, unknown> | undefined;
+    codec.convertSseToJson = async (_stream: unknown, context: Record<string, unknown>) => {
+      captured = context;
+      return { id: 'chatcmpl_test', object: 'chat.completion', created: 1, model: 'deepseek-web', choices: [] };
+    };
+
+    try {
+      await runRespInboundStage1SseDecode({
+        providerProtocol: 'openai-chat',
+        payload,
+        adapterContext: createAdapterContext({
+          providerProtocol: 'openai-chat',
+          providerStreamFirstFrameTimeoutMs: 111,
+          providerStreamPreAnchorIdleTimeoutMs: 222,
+          providerStreamContentIdleTimeoutMs: 333
+        }),
+        wantsStream: true
+      });
+    } finally {
+      codec.convertSseToJson = original;
+    }
+
+    expect(captured).toMatchObject({
+      firstFrameTimeoutMs: 111,
+      preAnchorIdleTimeoutMs: 222,
+      contentIdleTimeoutMs: 333
+    });
+  });
 });

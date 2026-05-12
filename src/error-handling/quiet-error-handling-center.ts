@@ -46,9 +46,9 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
-function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
+function resolveBoolFromEnv(value: string | undefined, defaultValue: boolean): boolean {
   if (!value) {
-    return fallback;
+    return defaultValue;
   }
   const normalized = value.trim().toLowerCase();
   if (['1', 'true', 'yes', 'on'].includes(normalized)) {
@@ -57,7 +57,7 @@ function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boole
   if (['0', 'false', 'no', 'off'].includes(normalized)) {
     return false;
   }
-  return fallback;
+  return defaultValue;
 }
 
 function shouldLogRouteErrorToConsole(): boolean {

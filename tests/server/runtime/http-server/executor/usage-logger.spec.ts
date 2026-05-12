@@ -84,8 +84,11 @@ describe('usage logger timing summary', () => {
 
     flushTokenStats();
     const persisted = JSON.parse(await fs.readFile(statsPath, 'utf8'));
-    expect(persisted.alltime.totalTokens).toBe(25);
-    expect(persisted.providers['demo.key1|demo-model'].totalTokens).toBe(25);
+    expect(persisted.version).toBe(2);
+    const { __dumpPersistedTokenStatsForTest } = await import('../../../../../src/server/runtime/http-server/executor/token-stats-store.js');
+    const aggregate = __dumpPersistedTokenStatsForTest();
+    expect(aggregate.alltime.totalTokens).toBe(25);
+    expect(aggregate.providers?.['demo.key1|demo-model']?.totalTokens).toBe(25);
 
     await fs.rm(fakeHome, { recursive: true, force: true });
     homedirSpy.mockRestore();

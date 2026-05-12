@@ -62,24 +62,32 @@ else
 fi
 
 verify_server_request() {
-  local VERIFY_CONFIG=${ROUTECODEX_INSTALL_VERIFY_CONFIG:-"$HOME/.rcc/config.json"}
   local VERIFY_TIMEOUT=${ROUTECODEX_INSTALL_VERIFY_TIMEOUT:-240}
   local VERIFY_LOG="/tmp/routecodex-release-verify-$(date +%s).log"
   local TIMEOUT_BIN=""
+  local VERIFY_CMD=()
   if command -v gtimeout >/dev/null 2>&1; then
     TIMEOUT_BIN="gtimeout"
   elif command -v timeout >/dev/null 2>&1; then
     TIMEOUT_BIN="timeout"
   fi
-  local VERIFY_CMD=(node scripts/install-verify.mjs --launcher cli --cli-binary rcc --mode responses --config "$VERIFY_CONFIG")
+  if [ -n "${ROUTECODEX_INSTALL_VERIFY_CONFIG:-}" ]; then
+    VERIFY_CMD=(node scripts/install-verify.mjs --launcher cli --cli-binary rcc --mode responses --config "$ROUTECODEX_INSTALL_VERIFY_CONFIG")
+  else
+    VERIFY_CMD=(node scripts/install-verify.mjs --launcher cli --cli-binary rcc --mode responses --use-mock-config)
+  fi
   echo ""
   echo "🧪 验证 release 安装的端到端工具链路..."
-  if [ ! -f "$VERIFY_CONFIG" ]; then
-    echo "❌ 未找到验证配置文件: $VERIFY_CONFIG"
-    echo "💡 请先准备该 provider 配置后重试"
-    exit 1
+  if [ -n "${ROUTECODEX_INSTALL_VERIFY_CONFIG:-}" ]; then
+    if [ ! -f "${ROUTECODEX_INSTALL_VERIFY_CONFIG}" ]; then
+      echo "❌ 未找到验证配置文件: ${ROUTECODEX_INSTALL_VERIFY_CONFIG}"
+      echo "💡 请先准备该 provider 配置后重试"
+      exit 1
+    fi
+    echo "   使用外部配置: ${ROUTECODEX_INSTALL_VERIFY_CONFIG}"
+  else
+    echo "   使用内置 mock 配置（provider-free）"
   fi
-  echo "   使用配置: $VERIFY_CONFIG"
   echo "   日志: $VERIFY_LOG"
   if [ -n "$TIMEOUT_BIN" ]; then
     echo "   使用 ${TIMEOUT_BIN} 超时保护 (${VERIFY_TIMEOUT}s)"

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::virtual_router_engine::load_balancer::LoadBalancingPolicy;
 use crate::virtual_router_engine::provider_registry::ProviderRegistry;
-use crate::virtual_router_engine::routing::RoutePoolTier;
+use crate::virtual_router_engine::routing::{extract_provider_id, RoutePoolTier};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedTierLoadBalancing {
@@ -116,7 +116,7 @@ fn resolve_candidate_weight(
     if let Some(weight) = normalize_positive_weight(weights.get(key).cloned()) {
         return Some(weight);
     }
-    let provider_id = key.split('.').next().unwrap_or("").trim();
+    let provider_id = extract_provider_id(key).unwrap_or_default();
     if provider_id.is_empty() {
         return None;
     }
@@ -129,7 +129,7 @@ fn resolve_candidate_weight(
             return Some(weight);
         }
     }
-    normalize_positive_weight(weights.get(provider_id).cloned())
+    normalize_positive_weight(weights.get(provider_id.as_str()).cloned())
 }
 
 fn resolve_group_weight(group_id: &str, weights: Option<&HashMap<String, i64>>) -> i64 {
@@ -140,8 +140,8 @@ fn resolve_group_weight(group_id: &str, weights: Option<&HashMap<String, i64>>) 
     if let Some(weight) = normalize_positive_weight(weights.get(group_id).cloned()) {
         return weight;
     }
-    let provider_id = group_id.split('.').next().unwrap_or(group_id);
-    normalize_positive_weight(weights.get(provider_id).cloned()).unwrap_or(1)
+    let provider_id = extract_provider_id(group_id).unwrap_or_else(|| group_id.to_string());
+    normalize_positive_weight(weights.get(provider_id.as_str()).cloned()).unwrap_or(1)
 }
 
 fn normalize_positive_weight(value: Option<i64>) -> Option<i64> {

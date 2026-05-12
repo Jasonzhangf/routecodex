@@ -30,9 +30,13 @@ type ProviderSnapshotWriteArgs = {
   forceLocalDiskWriteWhenDisabled?: boolean;
 };
 
-import { hasRequestedToolsInSemantics, isToolResultFollowupTurn } from './request-executor-request-semantics.js';
+import {
+  hasRequestedToolsInSemantics,
+  isRequiredToolCallTurn,
+  isToolResultFollowupTurn
+} from './request-executor-request-semantics.js';
 import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
-export { hasRequestedToolsInSemantics, isToolResultFollowupTurn };
+export { hasRequestedToolsInSemantics, isRequiredToolCallTurn, isToolResultFollowupTurn };
 
 export type PayloadContractSignal = {
   reason: string;
@@ -187,7 +191,7 @@ export function detectRetryableEmptyAssistantResponse(
     if (
       (finishReason === 'stop' || !finishReason)
       && !hasToolCalls
-      && hasRequestedToolsInSemantics(requestSemantics)
+      && isRequiredToolCallTurn(requestSemantics)
       && !isToolResultFollowupTurn(requestSemantics)
     ) {
       return {
@@ -227,7 +231,7 @@ export function detectRetryableEmptyAssistantResponse(
     if (
       !hasRequiredActionToolCalls &&
       !hasFunctionCalls &&
-      hasRequestedToolsInSemantics(requestSemantics) &&
+      isRequiredToolCallTurn(requestSemantics) &&
       !isToolResultFollowupTurn(requestSemantics) &&
       !containsReasoningStopFinalizedMarker(effectiveBody.output) &&
       !containsReasoningStopFinalizedMarker(effectiveBody.output_text)

@@ -51,6 +51,7 @@ export interface ProviderAuthEntry {
 export interface NormalizedProvider {
   providerId: string;
   providerType: string;
+  providerModule?: string;
   endpoint: string;
   headers?: Record<string, string>;
   enabled?: boolean;
@@ -93,6 +94,12 @@ export function normalizeProvider(providerId: string, raw: unknown): NormalizedP
         ? provider.enabled.trim().toLowerCase() !== 'false'
         : undefined;
   const providerType = detectProviderType(provider);
+  const providerModule =
+    typeof provider.type === 'string' && provider.type.trim()
+      ? provider.type.trim()
+      : typeof provider.module === 'string' && provider.module.trim()
+        ? provider.module.trim()
+        : undefined;
   const endpoint =
     typeof provider.endpoint === 'string' && provider.endpoint.trim()
       ? provider.endpoint.trim()
@@ -144,6 +151,7 @@ export function normalizeProvider(providerId: string, raw: unknown): NormalizedP
   return {
     providerId,
     providerType,
+    ...(providerModule ? { providerModule } : {}),
     endpoint,
     headers,
     ...(enabled !== undefined ? { enabled } : {}),

@@ -3,6 +3,11 @@
  *
  * Tracks alltime, daily, and per-provider token consumption.
  * Persists to ~/.rcc/token-stats.json (throttled, survives restarts).
+ *
+ * Important: multiple RouteCodex server processes may run at the same time
+ * (for example 5520 + 5555). The persisted file therefore stores per-process
+ * session snapshots and every write merges external sessions from disk before
+ * committing, so processes do not overwrite each other.
  */
 
 import fs from 'node:fs/promises';
@@ -31,11 +36,20 @@ export interface TokenStatsSnapshot {
   providers: TokenProviderEntry[];
 }
 
-interface PersistedTokenStats {
-  version: number;
+interface PersistedTokenSessionEntry {
+  sessionId: string;
+  updatedAt: number;
   alltime: TokenCounters;
   daily: Record<string, TokenCounters>;
   providers: Record<string, TokenProviderEntry>;
+}
+
+interface PersistedTokenStats {
+  version: number;
+  sessions?: Record<string, PersistedTokenSessionEntry>;
+  alltime?: TokenCounters;
+  daily?: Record<string, TokenCounters>;
+  providers?: Record<string, TokenProviderEntry>;
 }
 
 // ── State ──────────────────────────────────────────────────────────
@@ -43,9 +57,11 @@ interface PersistedTokenStats {
 let tokenAlltime: TokenCounters = { promptTokens: 0, completionTokens: 0, totalTokens: 0, cacheReadTokens: 0 };
 let tokenDaily = new Map<string, TokenCounters>();
 let tokenByProvider = new Map<string, TokenProviderEntry>();
+let persistedSessions = new Map<string, PersistedTokenSessionEntry>();
 let initialized = false;
 let dirty = false;
 let lastSaveAtMs = 0;
+let lastRefreshAtMs = 0;
 let flushTimer: ReturnType<typeof setTimeout> | undefined;
 let flushInFlight: Promise<void> | null = null;
 let pendingFlushAfterCurrent = false;
@@ -53,6 +69,8 @@ let exitHookBound = false;
 let beforeExitHook: (() => void) | undefined;
 let exitHook: (() => void) | undefined;
 const SAVE_THROTTLE_MS = 10_000;
+const REFRESH_THROTTLE_MS = 1_000;
+const currentSessionId = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -76,88 +94,74 @@ function emptyCounters(): TokenCounters {
   return { promptTokens: 0, completionTokens: 0, totalTokens: 0, cacheReadTokens: 0 };
 }
 
-function buildPersistedSnapshot(): PersistedTokenStats {
-  const dailyObj: Record<string, TokenCounters> = {};
-  for (const [k, v] of tokenDaily.entries()) {
-    dailyObj[k] = { ...v };
-  }
-  const providersObj: Record<string, TokenProviderEntry> = {};
-  for (const [k, v] of tokenByProvider.entries()) {
-    providersObj[k] = { ...v };
-  }
+function cloneCounters(value: TokenCounters): TokenCounters {
   return {
-    version: 1,
-    alltime: { ...tokenAlltime },
-    daily: dailyObj,
-    providers: providersObj
+    promptTokens: Number(value.promptTokens) || 0,
+    completionTokens: Number(value.completionTokens) || 0,
+    totalTokens: Number(value.totalTokens) || 0,
+    cacheReadTokens: Number(value.cacheReadTokens) || 0
   };
 }
 
-function pruneOldDailyEntries(): void {
-  // Keep last 30 days only
-  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-  for (const [key] of tokenDaily) {
-    // key is "YYYY-MM-DD"
-    const parts = key.split('-');
-    if (parts.length === 3) {
-      const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-      if (d.getTime() < cutoff) {
-        tokenDaily.delete(key);
-      }
-    }
+function cloneDailyMap(source: Map<string, TokenCounters>): Record<string, TokenCounters> {
+  const out: Record<string, TokenCounters> = {};
+  for (const [key, value] of source.entries()) {
+    out[key] = cloneCounters(value);
   }
+  return out;
 }
 
-// ── Load / Save ────────────────────────────────────────────────────
+function cloneProviderMap(source: Map<string, TokenProviderEntry>): Record<string, TokenProviderEntry> {
+  const out: Record<string, TokenProviderEntry> = {};
+  for (const [key, value] of source.entries()) {
+    out[key] = { ...value, ...cloneCounters(value) };
+  }
+  return out;
+}
 
-function ensureLoaded(): void {
-  if (initialized) return;
-  initialized = true;
-  try {
-    const filePath = getFilePath();
-    if (!fsSync.existsSync(filePath)) return;
-    const raw = fsSync.readFileSync(filePath, 'utf-8');
-    const data: PersistedTokenStats = JSON.parse(raw);
-    if (!data || typeof data !== 'object') return;
+function readCounters(value: unknown): TokenCounters {
+  if (!value || typeof value !== 'object') {
+    return emptyCounters();
+  }
+  const row = value as Partial<TokenCounters>;
+  return {
+    promptTokens: Number(row.promptTokens) || 0,
+    completionTokens: Number(row.completionTokens) || 0,
+    totalTokens: Number(row.totalTokens) || 0,
+    cacheReadTokens: Number(row.cacheReadTokens) || 0
+  };
+}
 
-    tokenAlltime = {
-      promptTokens: Number(data.alltime?.promptTokens) || 0,
-      completionTokens: Number(data.alltime?.completionTokens) || 0,
-      totalTokens: Number(data.alltime?.totalTokens) || 0,
-      cacheReadTokens: Number(data.alltime?.cacheReadTokens) || 0,
-    };
+function readProviderEntry(value: unknown): TokenProviderEntry | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const row = value as Partial<TokenProviderEntry>;
+  return {
+    providerKey: String(row.providerKey ?? '') || '',
+    model: String(row.model ?? '') || '',
+    ...readCounters(row)
+  };
+}
 
-    if (data.daily && typeof data.daily === 'object') {
-      for (const [k, v] of Object.entries(data.daily)) {
-        if (v && typeof v === 'object') {
-          tokenDaily.set(k, {
-            promptTokens: Number((v as TokenCounters).promptTokens) || 0,
-            completionTokens: Number((v as TokenCounters).completionTokens) || 0,
-            totalTokens: Number((v as TokenCounters).totalTokens) || 0,
-            cacheReadTokens: Number((v as TokenCounters).cacheReadTokens) || 0,
-          });
-        }
-      }
+function accumulateCounters(target: TokenCounters, delta: TokenCounters): void {
+  target.promptTokens += delta.promptTokens || 0;
+  target.completionTokens += delta.completionTokens || 0;
+  target.totalTokens += delta.totalTokens || 0;
+  target.cacheReadTokens += delta.cacheReadTokens || 0;
+}
+
+function pruneOldDailyEntries(): void {
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  for (const [key] of tokenDaily) {
+    const parts = key.split('-');
+    if (parts.length !== 3) {
+      continue;
     }
-
-    if (data.providers && typeof data.providers === 'object') {
-      for (const [k, v] of Object.entries(data.providers)) {
-        if (v && typeof v === 'object') {
-          tokenByProvider.set(k, {
-            providerKey: String((v as TokenProviderEntry).providerKey) || '',
-            model: String((v as TokenProviderEntry).model) || '',
-            promptTokens: Number((v as TokenProviderEntry).promptTokens) || 0,
-            completionTokens: Number((v as TokenProviderEntry).completionTokens) || 0,
-            totalTokens: Number((v as TokenProviderEntry).totalTokens) || 0,
-            cacheReadTokens: Number((v as TokenProviderEntry).cacheReadTokens) || 0,
-          });
-        }
-      }
+    const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    if (d.getTime() < cutoff) {
+      tokenDaily.delete(key);
     }
-
-    pruneOldDailyEntries();
-  } catch (error) {
-    warnSaveFailure(error, 'load');
   }
 }
 
@@ -165,6 +169,220 @@ function warnSaveFailure(error: unknown, phase: 'load' | 'save'): void {
   console.warn(
     `[token-stats] Failed to ${phase}: ${error instanceof Error ? error.message : String(error)}`
   );
+}
+
+function parsePersistedTokenStats(raw: string): Map<string, PersistedTokenSessionEntry> {
+  const out = new Map<string, PersistedTokenSessionEntry>();
+  const data: PersistedTokenStats = JSON.parse(raw);
+  if (!data || typeof data !== 'object') {
+    return out;
+  }
+
+  if (data.version >= 2 && data.sessions && typeof data.sessions === 'object') {
+    for (const [sessionId, value] of Object.entries(data.sessions)) {
+      if (!value || typeof value !== 'object') {
+        continue;
+      }
+      const row = value as PersistedTokenSessionEntry;
+      const daily: Record<string, TokenCounters> = {};
+      const providers: Record<string, TokenProviderEntry> = {};
+
+      if (row.daily && typeof row.daily === 'object') {
+        for (const [key, item] of Object.entries(row.daily)) {
+          daily[key] = readCounters(item);
+        }
+      }
+      if (row.providers && typeof row.providers === 'object') {
+        for (const [key, item] of Object.entries(row.providers)) {
+          const entry = readProviderEntry(item);
+          if (entry) {
+            providers[key] = entry;
+          }
+        }
+      }
+
+      out.set(sessionId, {
+        sessionId,
+        updatedAt: Number((row as { updatedAt?: unknown }).updatedAt) || 0,
+        alltime: readCounters(row.alltime),
+        daily,
+        providers
+      });
+    }
+    return out;
+  }
+
+  // Legacy v1 file: convert whole file into one synthetic foreign session.
+  const legacyDaily: Record<string, TokenCounters> = {};
+  const legacyProviders: Record<string, TokenProviderEntry> = {};
+  if (data.daily && typeof data.daily === 'object') {
+    for (const [key, item] of Object.entries(data.daily)) {
+      legacyDaily[key] = readCounters(item);
+    }
+  }
+  if (data.providers && typeof data.providers === 'object') {
+    for (const [key, item] of Object.entries(data.providers)) {
+      const entry = readProviderEntry(item);
+      if (entry) {
+        legacyProviders[key] = entry;
+      }
+    }
+  }
+  out.set('legacy-v1', {
+    sessionId: 'legacy-v1',
+    updatedAt: 0,
+    alltime: readCounters(data.alltime),
+    daily: legacyDaily,
+    providers: legacyProviders
+  });
+  return out;
+}
+
+function buildCurrentSessionEntry(): PersistedTokenSessionEntry {
+  return {
+    sessionId: currentSessionId,
+    updatedAt: Date.now(),
+    alltime: cloneCounters(tokenAlltime),
+    daily: cloneDailyMap(tokenDaily),
+    providers: cloneProviderMap(tokenByProvider)
+  };
+}
+
+function buildPersistedSnapshot(existingSessions?: Map<string, PersistedTokenSessionEntry>): PersistedTokenStats {
+  const sessions = new Map<string, PersistedTokenSessionEntry>(existingSessions ?? persistedSessions);
+  sessions.set(currentSessionId, buildCurrentSessionEntry());
+  const sessionsRecord: Record<string, PersistedTokenSessionEntry> = {};
+  for (const [key, value] of sessions.entries()) {
+    sessionsRecord[key] = {
+      sessionId: value.sessionId,
+      updatedAt: value.updatedAt,
+      alltime: cloneCounters(value.alltime),
+      daily: Object.fromEntries(
+        Object.entries(value.daily ?? {}).map(([dayKey, counters]) => [dayKey, cloneCounters(counters)])
+      ),
+      providers: Object.fromEntries(
+        Object.entries(value.providers ?? {}).map(([providerKey, entry]) => [providerKey, { ...entry, ...cloneCounters(entry) }])
+      )
+    };
+  }
+  return {
+    version: 2,
+    sessions: sessionsRecord
+  };
+}
+
+function refreshFromDiskIfNeeded(force = false): void {
+  if (!initialized) {
+    return;
+  }
+  const now = Date.now();
+  if (!force && now - lastRefreshAtMs < REFRESH_THROTTLE_MS) {
+    return;
+  }
+  lastRefreshAtMs = now;
+  try {
+    const filePath = getFilePath();
+    if (!fsSync.existsSync(filePath)) {
+      persistedSessions.clear();
+      return;
+    }
+    const raw = fsSync.readFileSync(filePath, 'utf-8');
+    persistedSessions = parsePersistedTokenStats(raw);
+  } catch (error) {
+    warnSaveFailure(error, 'load');
+  }
+}
+
+function mergeExternalSessionsForWrite(): Map<string, PersistedTokenSessionEntry> {
+  refreshFromDiskIfNeeded(true);
+  const merged = new Map<string, PersistedTokenSessionEntry>();
+  for (const [key, value] of persistedSessions.entries()) {
+    if (key === currentSessionId) {
+      continue;
+    }
+    merged.set(key, value);
+  }
+  return merged;
+}
+
+function aggregateSnapshot(): TokenStatsSnapshot {
+  const today = getTodayKey();
+  const alltime = emptyCounters();
+  const daily = emptyCounters();
+  const providers = new Map<string, TokenProviderEntry>();
+
+  const mergeProviders = (source: Record<string, TokenProviderEntry> | Map<string, TokenProviderEntry>): void => {
+    const entries = source instanceof Map ? Array.from(source.entries()) : Object.entries(source);
+    for (const [key, rawValue] of entries) {
+      const value = source instanceof Map ? rawValue : readProviderEntry(rawValue);
+      if (!value) {
+        continue;
+      }
+      const existing = providers.get(key) ?? {
+        providerKey: value.providerKey,
+        model: value.model,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        cacheReadTokens: 0
+      };
+      accumulateCounters(existing, value);
+      providers.set(key, existing);
+    }
+  };
+
+  for (const [sessionId, entry] of persistedSessions.entries()) {
+    if (sessionId === currentSessionId) {
+      continue;
+    }
+    accumulateCounters(alltime, entry.alltime);
+    if (entry.daily?.[today]) {
+      accumulateCounters(daily, entry.daily[today]!);
+    }
+    mergeProviders(entry.providers ?? {});
+  }
+
+  accumulateCounters(alltime, tokenAlltime);
+  const currentDaily = tokenDaily.get(today);
+  if (currentDaily) {
+    accumulateCounters(daily, currentDaily);
+  }
+  mergeProviders(tokenByProvider);
+
+  return {
+    alltime,
+    daily,
+    dailyDate: today,
+    providers: Array.from(providers.values()).sort((a, b) => b.totalTokens - a.totalTokens)
+  };
+}
+
+function buildLegacySnapshotForTests(): PersistedTokenStats {
+  const aggregate = aggregateSnapshot();
+  return {
+    version: 1,
+    alltime: cloneCounters(aggregate.alltime),
+    daily: {
+      [aggregate.dailyDate]: cloneCounters(aggregate.daily)
+    },
+    providers: Object.fromEntries(
+      aggregate.providers.map((entry) => [
+        providerMapKey(entry.providerKey, entry.model),
+        { ...entry, ...cloneCounters(entry) }
+      ])
+    )
+  };
+}
+
+// ── Load / Save ────────────────────────────────────────────────────
+
+function ensureLoaded(): void {
+  if (initialized) {
+    return;
+  }
+  initialized = true;
+  refreshFromDiskIfNeeded(true);
+  pruneOldDailyEntries();
 }
 
 async function writeSnapshotToDiskAsync(payload: PersistedTokenStats): Promise<void> {
@@ -251,11 +469,12 @@ async function saveToDiskAsync(force = false): Promise<void> {
     return;
   }
   clearFlushTimer();
-  const payload = buildPersistedSnapshot();
+  const payload = buildPersistedSnapshot(mergeExternalSessionsForWrite());
   dirty = false;
   flushInFlight = writeSnapshotToDiskAsync(payload)
     .then(() => {
       lastSaveAtMs = Date.now();
+      persistedSessions = parsePersistedTokenStats(JSON.stringify(payload));
     })
     .catch(() => {
       dirty = true;
@@ -276,11 +495,12 @@ function saveToDiskSync(force = false): void {
     return;
   }
   clearFlushTimer();
-  const payload = buildPersistedSnapshot();
+  const payload = buildPersistedSnapshot(mergeExternalSessionsForWrite());
   try {
     writeSnapshotToDiskSync(payload);
     dirty = false;
     lastSaveAtMs = Date.now();
+    persistedSessions = parsePersistedTokenStats(JSON.stringify(payload));
   } catch (error) {
     dirty = true;
     warnSaveFailure(error, 'save');
@@ -310,15 +530,15 @@ export function recordTokens(
   const c = Math.max(0, Math.floor(completionTokens));
   const t = Math.max(0, Math.floor(totalTokens > 0 ? totalTokens : (promptTokens + completionTokens)));
   const cr = Math.max(0, Math.floor(cacheReadTokens ?? 0));
-  if (p === 0 && c === 0 && t === 0) return;
+  if (p === 0 && c === 0 && t === 0) {
+    return;
+  }
 
-  // Alltime
   tokenAlltime.promptTokens += p;
   tokenAlltime.completionTokens += c;
   tokenAlltime.totalTokens += t;
   tokenAlltime.cacheReadTokens += cr;
 
-  // Daily
   const today = getTodayKey();
   const day = tokenDaily.get(today) ?? emptyCounters();
   day.promptTokens += p;
@@ -327,7 +547,6 @@ export function recordTokens(
   day.cacheReadTokens += cr;
   tokenDaily.set(today, day);
 
-  // Per-provider
   const key = providerMapKey(pk, m);
   const entry = tokenByProvider.get(key) ?? {
     providerKey: pk,
@@ -335,7 +554,7 @@ export function recordTokens(
     promptTokens: 0,
     completionTokens: 0,
     totalTokens: 0,
-    cacheReadTokens: 0,
+    cacheReadTokens: 0
   };
   entry.promptTokens += p;
   entry.completionTokens += c;
@@ -356,11 +575,11 @@ export function recordTokens(
  */
 export function getTokenTotals(): { alltimeTokens: number; dailyTokens: number } {
   ensureLoaded();
-  const today = getTodayKey();
-  const daily = tokenDaily.get(today);
+  refreshFromDiskIfNeeded();
+  const snapshot = aggregateSnapshot();
   return {
-    alltimeTokens: tokenAlltime.totalTokens,
-    dailyTokens: daily?.totalTokens ?? 0,
+    alltimeTokens: snapshot.alltime.totalTokens,
+    dailyTokens: snapshot.daily.totalTokens
   };
 }
 
@@ -369,16 +588,8 @@ export function getTokenTotals(): { alltimeTokens: number; dailyTokens: number }
  */
 export function getTokenStatsSnapshot(): TokenStatsSnapshot {
   ensureLoaded();
-  const today = getTodayKey();
-  const daily = tokenDaily.get(today) ?? emptyCounters();
-  return {
-    alltime: { ...tokenAlltime },
-    daily: { ...daily },
-    dailyDate: today,
-    providers: Array.from(tokenByProvider.values()).sort(
-      (a, b) => b.totalTokens - a.totalTokens
-    ),
-  };
+  refreshFromDiskIfNeeded();
+  return aggregateSnapshot();
 }
 
 /**
@@ -389,15 +600,27 @@ export function flushTokenStats(): void {
 }
 
 /**
+ * Legacy test helper: returns an aggregated v1-shaped snapshot even though the
+ * persisted on-disk format is now v2 session-based.
+ */
+export function __dumpPersistedTokenStatsForTest(): PersistedTokenStats {
+  ensureLoaded();
+  refreshFromDiskIfNeeded(true);
+  return buildLegacySnapshotForTests();
+}
+
+/**
  * Reset all state (for tests only).
  */
 export function __resetTokenStatsForTest(): void {
   tokenAlltime = emptyCounters();
   tokenDaily.clear();
   tokenByProvider.clear();
+  persistedSessions.clear();
   initialized = false;
   dirty = false;
   lastSaveAtMs = 0;
+  lastRefreshAtMs = 0;
   clearFlushTimer();
   flushInFlight = null;
   pendingFlushAfterCurrent = false;

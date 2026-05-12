@@ -107,9 +107,9 @@
 
 ---
 
-## Historical Reference: V2 旧机制（待迁出/待删除）
+## Historical Reference: V2 旧机制（已废止）
 
-以下内容保留为历史参考，帮助识别旧实现；如与上文冲突，以**上文 Router Policy SSOT** 为准。
+> ⚠️ **已废止**：以下内容仅为历史参考，**不得作为当前设计依据**。如与上文冲突，以**上文 Router Policy SSOT** 为准。这些章节将在后续迭代中物理删除。
 
 ## H1. 统一流程
 

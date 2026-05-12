@@ -45,7 +45,7 @@ describe('HTTP SSE stream timeout', () => {
           }
         } as any,
         'req_test',
-        { forceSSE: true }
+        { forceSSE: true, sseTotalTimeoutMs: 50 }
       );
     });
 

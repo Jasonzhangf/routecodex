@@ -31,6 +31,7 @@ export type HubPipelineResult = {
     providerType: string;
     outboundProfile: string;
     runtimeKey?: string;
+    concurrencyScopeKey?: string;
     processMode?: string;
     compatibilityProfile?: string;
   };

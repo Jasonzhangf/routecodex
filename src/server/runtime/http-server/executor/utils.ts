@@ -59,9 +59,9 @@ export function extractStatusCodeFromError(err: unknown): number | undefined {
 /**
  * Resolve boolean from environment variable
  */
-export function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
+export function resolveBoolFromEnv(value: string | undefined, defaultValue: boolean): boolean {
   if (!value) {
-    return fallback;
+    return defaultValue;
   }
   const normalized = value.trim().toLowerCase();
   if (['1', 'true', 'yes', 'on'].includes(normalized)) {
@@ -70,5 +70,5 @@ export function resolveBoolFromEnv(value: string | undefined, fallback: boolean)
   if (['0', 'false', 'no', 'off'].includes(normalized)) {
     return false;
   }
-  return fallback;
+  return defaultValue;
 }

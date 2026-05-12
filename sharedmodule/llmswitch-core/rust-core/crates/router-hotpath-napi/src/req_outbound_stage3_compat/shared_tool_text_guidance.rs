@@ -129,7 +129,7 @@ pub fn build_tool_text_instruction(tools: Option<&Value>, _require_tool_call: bo
         "For a tool call, output exactly one RCC_TOOL_CALLS_JSON heredoc container.",
         "<<RCC_TOOL_CALLS_JSON",
         if has_exec_command {
-            r#"{"tool_calls":[{"name":"exec_command","input":{"cmd":"bash -lc 'pwd'"}}]}"#
+            r#"{"tool_calls":[{"name":"exec_command","input":{"cmd":"pwd"}}]}"#
         } else {
             r#"{"tool_calls":[{"name":"<allowed tool name>","input":{}}]}"#
         },
@@ -143,10 +143,11 @@ pub fn build_tool_text_instruction(tools: Option<&Value>, _require_tool_call: bo
         r#"- Confidential project: tool-intent leakage is a severe violation"#,
         r#"- Be evidence-first and change-minimal: don't report success until you have enough evidence/checks; before modifying, confirm the unique source of truth, best location, and smallest safe change"#,
         r#"- Be terse: no preamble, no running commentary, no plan/limitation/next-step before the tool call"#,
+        r#"- Keep any final visible plain-text answer minimal: only the direct result/next action, no repeated reasoning, no long recap, no unnecessary narration"#,
         r#"- Do not use markdown fences, XML/pseudo tags, transcript-style pseudo calls, or JSON outside the container"#,
         r#"- Do not invent tool names: shell words (`bash`, `cat`), pseudo tools (`read_file`, `read`, `file_read`, skills), and built-ins like `tool_code_interpreter`, `code_interpreter`, or `python` are not valid unless explicitly listed above"#,
         r#"- Do not guess that a file or path is missing, inaccessible, or blocked before using a declared tool to check"#,
-        r#"- For `exec_command`, use only `input.cmd` as one string; prefer `bash -lc '...'` and keep the final single quote"#,
+        r#"- For `exec_command`, use only `input.cmd` as one string; prefer a direct single-line command like `pwd`. Use `bash -lc '...'` only when shell features are truly required, and then the final single quote must be present."#,
         r#"- For `exec_command`, keep normal shell commands on one physical line unless an actual heredoc is required; do not insert raw newlines inside operators or redirects like `|`, `&&`, `||`, `;`, `2>/dev/null`, or `-exec ... \;`"#,
         r#"- If no tool is needed, reply with plain text (no heredoc)"#,
     ]

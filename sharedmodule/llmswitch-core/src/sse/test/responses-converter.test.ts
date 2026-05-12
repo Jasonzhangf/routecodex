@@ -1024,6 +1024,222 @@ describe('Responses协议转换器测试', () => {
     });
   });
 
+  describe('semantic stream timeout', () => {
+    it('returns immediately after response.required_action without waiting for trailing idle tail', async () => {
+      async function* requiredActionThenTail(): AsyncGenerator<string> {
+        yield `event: response.created
+data: {"response":{"id":"resp_required_fast","object":"response","created_at":1,"status":"in_progress","model":"gpt-5","output":[]}}
+
+`;
+        yield `event: response.required_action
+data: {"response":{"id":"resp_required_fast","status":"requires_action","required_action":{"type":"submit_tool_outputs","submit_tool_outputs":{"tool_calls":[{"id":"fc_1","type":"function_call","name":"exec_command","arguments":"{\\"cmd\\":\\"pwd\\"}"}]}}}}
+
+`;
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      }
+
+      const startedAt = Date.now();
+      const response = await sseToJsonConverter.convertSseToJson(requiredActionThenTail(), {
+        requestId: 'req_responses_required_action_fast_exit',
+        model: 'gpt-5',
+        noContentTimeoutMs: 1_000,
+        contentIdleTimeoutMs: 1_000
+      });
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(response.id).toBe('resp_required_fast');
+      expect(response.status).toBe('requires_action');
+      expect(elapsedMs).toBeLessThan(100);
+    });
+
+    it('returns immediately after response.completed without waiting for trailing idle tail', async () => {
+      async function* completedThenTail(): AsyncGenerator<string> {
+        yield `event: response.created
+data: {"response":{"id":"resp_completed_fast","object":"response","created_at":1,"status":"in_progress","model":"gpt-5","output":[]}}
+
+`;
+        yield `event: response.output_item.added
+data: {"item":{"index":0,"type":"message","id":"msg_completed_fast","role":"assistant","content":[]}}
+
+`;
+        yield `event: response.content_part.added
+data: {"item_id":"msg_completed_fast","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}
+
+`;
+        yield `event: response.output_text.delta
+data: {"item_id":"msg_completed_fast","output_index":0,"content_index":0,"delta":"ok"}
+
+`;
+        yield `event: response.completed
+data: {"response":{"id":"resp_completed_fast","status":"completed","usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}}
+
+`;
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      }
+
+      const startedAt = Date.now();
+      const response = await sseToJsonConverter.convertSseToJson(completedThenTail(), {
+        requestId: 'req_responses_completed_fast_exit',
+        model: 'gpt-5',
+        noContentTimeoutMs: 1_000,
+        contentIdleTimeoutMs: 1_000
+      });
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(response.id).toBe('resp_completed_fast');
+      expect(response.status).toBe('completed');
+      expect(elapsedMs).toBeLessThan(100);
+    });
+
+    it('fails fast with no-content timeout for responses SSE before total timeout', async () => {
+      async function* stalledSse(): AsyncGenerator<string> {
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+
+      await expect(
+        sseToJsonConverter.convertSseToJson(stalledSse(), {
+          requestId: 'req_responses_no_frame_timeout',
+          model: 'gpt-5',
+          firstFrameTimeoutMs: 50
+        })
+      ).rejects.toMatchObject({
+        code: 'SSE_TO_JSON_ERROR',
+        status: 504,
+        statusCode: 504,
+        retryable: true,
+        upstreamCode: 'UPSTREAM_STREAM_NO_FRAME_TIMEOUT',
+        requestExecutorProviderErrorStage: 'provider.sse_decode'
+      });
+    });
+
+    it('uses pre-anchor idle timeout after non-semantic frames but before semantic progress', async () => {
+      async function* createdThenIdle(): AsyncGenerator<string> {
+        yield `event: response.created
+data: {"response":{"id":"resp_pre_anchor_idle","object":"response","created_at":1,"status":"in_progress","model":"gpt-5","output":[]}}
+
+`;
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+
+      await expect(
+        sseToJsonConverter.convertSseToJson(createdThenIdle(), {
+          requestId: 'req_responses_pre_anchor_timeout',
+          model: 'gpt-5',
+          preAnchorIdleTimeoutMs: 50
+        })
+      ).rejects.toMatchObject({
+        code: 'SSE_TO_JSON_ERROR',
+        status: 504,
+        statusCode: 504,
+        retryable: true,
+        upstreamCode: 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT',
+        requestExecutorProviderErrorStage: 'provider.sse_decode'
+      });
+    });
+
+    it('switches to content-idle timeout after function-call deltas begin', async () => {
+      async function* reasoningThenIdle(): AsyncGenerator<string> {
+        yield `event: response.created
+data: {"response":{"id":"resp_reasoning_idle","object":"response","created_at":1,"status":"in_progress","model":"gpt-5","output":[]}}
+
+`;
+        yield `event: response.function_call_arguments.delta
+data: {"output_index":0,"item_id":"fc_1","delta":"{\\"cmd\\":\\"pwd"}
+
+`;
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+
+      await expect(
+        sseToJsonConverter.convertSseToJson(reasoningThenIdle(), {
+          requestId: 'req_responses_content_idle_timeout',
+          model: 'gpt-5',
+          noContentTimeoutMs: 30,
+          contentIdleTimeoutMs: 50
+        })
+      ).rejects.toMatchObject({
+        code: 'SSE_TO_JSON_ERROR',
+        status: 504,
+        statusCode: 504,
+        retryable: true,
+        upstreamCode: 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT',
+        requestExecutorProviderErrorStage: 'provider.sse_decode'
+      });
+    });
+
+    it('does not treat plain reasoning deltas as effective progress', async () => {
+      async function* reasoningOnlyThenIdle(): AsyncGenerator<string> {
+        yield `event: response.created
+data: {"response":{"id":"resp_reasoning_only_idle","object":"response","created_at":1,"status":"in_progress","model":"gpt-5","output":[]}}
+
+`;
+        yield `event: response.reasoning_text.delta
+data: {"output_index":0,"item_id":"reasoning_1","delta":"think"}
+
+`;
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+
+      await expect(
+        sseToJsonConverter.convertSseToJson(reasoningOnlyThenIdle(), {
+          requestId: 'req_responses_reasoning_not_progress',
+          model: 'gpt-5',
+          preAnchorIdleTimeoutMs: 30,
+          contentIdleTimeoutMs: 50
+        })
+      ).rejects.toMatchObject({
+        code: 'SSE_TO_JSON_ERROR',
+        status: 504,
+        statusCode: 504,
+        retryable: true,
+        upstreamCode: 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT',
+        requestExecutorProviderErrorStage: 'provider.sse_decode'
+      });
+    });
+
+    it('does not let non-semantic responses events endlessly extend no-content timeout', async () => {
+      async function* noisyButNonSemantic(): AsyncGenerator<string> {
+        yield `event: response.created
+data: {"response":{"id":"resp_non_semantic_timeout","object":"response","created_at":1,"status":"in_progress","model":"gpt-5","output":[]}}
+
+`;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        yield `event: response.in_progress
+data: {"response":{"id":"resp_non_semantic_timeout","object":"response","created_at":1,"status":"in_progress","model":"gpt-5","output":[]}}
+
+`;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        yield `event: response.in_progress
+data: {"response":{"id":"resp_non_semantic_timeout","object":"response","created_at":1,"status":"in_progress","model":"gpt-5","output":[]}}
+
+`;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        yield `event: response.in_progress
+data: {"response":{"id":"resp_non_semantic_timeout","object":"response","created_at":1,"status":"in_progress","model":"gpt-5","output":[]}}
+
+`;
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+
+      const startedAt = Date.now();
+      await expect(
+        sseToJsonConverter.convertSseToJson(noisyButNonSemantic(), {
+          requestId: 'req_responses_non_semantic_timeout',
+          model: 'gpt-5',
+          preAnchorIdleTimeoutMs: 50
+        })
+      ).rejects.toMatchObject({
+        code: 'SSE_TO_JSON_ERROR',
+        status: 504,
+        statusCode: 504,
+        retryable: true,
+        upstreamCode: 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT',
+        requestExecutorProviderErrorStage: 'provider.sse_decode'
+      });
+      expect(Date.now() - startedAt).toBeLessThan(110);
+    });
+  });
+
   describe('回环测试', () => {
     it('应该通过回环测试保持数据完整性', async () => {
       const originalResponse: ResponsesResponse = {

@@ -1,6 +1,7 @@
 mod bootstrap;
 mod config;
 mod direct_model;
+mod key_utils;
 mod metadata;
 mod selection;
 
@@ -22,7 +23,9 @@ pub(crate) use metadata::{
     is_server_tool_followup_request, resolve_session_scope, resolve_sticky_key,
     resolve_stop_message_scope,
 };
-#[allow(unused_imports)]
+pub(crate) use key_utils::{
+    extract_key_alias, extract_key_index, extract_provider_id,
+};
 pub(crate) use selection::{
     filter_candidates_by_state, resolve_instruction_process_mode_for_selection,
     resolve_instruction_target, InstructionTargetMatchMode,

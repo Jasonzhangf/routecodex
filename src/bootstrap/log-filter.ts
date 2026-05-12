@@ -12,9 +12,9 @@ type NodeGlobalWithRequire = typeof globalThis & {
 
 type UnknownRecord = Record<string, unknown>;
 
-function resolveBoolFromEnv(value: unknown, fallback: boolean): boolean {
+function resolveBoolFromEnv(value: unknown, defaultValue: boolean): boolean {
   if (typeof value !== 'string') {
-    return fallback;
+    return defaultValue;
   }
   const normalized = value.trim().toLowerCase();
   if (['1', 'true', 'yes', 'on'].includes(normalized)) {
@@ -23,7 +23,7 @@ function resolveBoolFromEnv(value: unknown, fallback: boolean): boolean {
   if (['0', 'false', 'no', 'off'].includes(normalized)) {
     return false;
   }
-  return fallback;
+  return defaultValue;
 }
 
 function isMinimalRuntimeLogEnabled(): boolean {

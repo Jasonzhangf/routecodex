@@ -1,5 +1,6 @@
 use super::super::instructions::{InstructionTarget, RoutingInstructionState};
 use super::super::provider_registry::{derive_model_id, ProviderRegistry};
+use super::key_utils::{extract_key_alias, extract_key_index, extract_provider_id};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InstructionTargetMatchMode {
@@ -237,27 +238,3 @@ pub(crate) fn resolve_instruction_process_mode_for_selection(
     None
 }
 
-fn extract_provider_id(provider_key: &str) -> Option<String> {
-    let value = provider_key.trim();
-    let first_dot = value.find('.')?;
-    if first_dot == 0 {
-        return None;
-    }
-    Some(value[..first_dot].to_string())
-}
-
-fn extract_key_alias(provider_key: &str) -> Option<String> {
-    let value = provider_key.trim();
-    let first_dot = value.find('.')?;
-    let remainder = &value[first_dot + 1..];
-    let second_dot = remainder.find('.')?;
-    if second_dot == 0 {
-        return None;
-    }
-    Some(remainder[..second_dot].to_string())
-}
-
-fn extract_key_index(provider_key: &str) -> Option<i64> {
-    let alias = extract_key_alias(provider_key)?;
-    alias.parse::<i64>().ok()
-}

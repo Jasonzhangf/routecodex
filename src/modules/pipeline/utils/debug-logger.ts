@@ -33,10 +33,10 @@ const DEFAULT_OPTIONS: Required<LoggerOptions> = {
 
 function resolveBoolFromEnv(
   value: string | undefined,
-  fallback: boolean,
+  defaultValue: boolean,
 ): boolean {
   if (!value) {
-    return fallback;
+    return defaultValue;
   }
   const normalized = value.trim().toLowerCase();
   if (["1", "true", "yes", "on"].includes(normalized)) {
@@ -45,7 +45,7 @@ function resolveBoolFromEnv(
   if (["0", "false", "no", "off"].includes(normalized)) {
     return false;
   }
-  return fallback;
+  return defaultValue;
 }
 
 function isPipelineConsoleLoggingEnabled(): boolean {

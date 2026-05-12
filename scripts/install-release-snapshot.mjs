@@ -11,6 +11,7 @@ const USER_DIR_ENV_KEYS = ['RCC_HOME', 'ROUTECODEX_USER_DIR', 'ROUTECODEX_HOME']
 const REQUIRED_COPY_PATHS = [
   'dist',
   'sharedmodule/llmswitch-core/dist',
+  'samples/mock-provider',
   'config',
   'configsamples',
   'package.json',

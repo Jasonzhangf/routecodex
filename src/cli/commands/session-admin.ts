@@ -171,7 +171,7 @@ async function callJson(
     },
     ...(body ? { body: JSON.stringify(body) } : {})
   });
-  const text = await response.text().catch(() => '');
+  const text = await response.text();
   let data: any = null;
   try {
     data = text ? JSON.parse(text) : null;
@@ -327,7 +327,7 @@ export function createSessionAdminCommand(program: Command, ctx: SessionAdminCom
         const response = await ctx.fetch(listUrl, {
           headers: apiKey ? { 'x-api-key': apiKey } : undefined
         });
-        const data = await response.json().catch(() => ({}));
+        const data = await response.json();
         if (!response.ok) {
           throw new Error(`list failed (${response.status})`);
         }

@@ -151,6 +151,7 @@ export interface ProviderRuntimeProfile {
   providerId: string;
   keyAlias: string;
   providerType: string;
+  providerModule?: string;
   endpoint: string;
   headers?: Record<string, string>;
   auth: ProviderAuthConfig;
@@ -569,6 +570,7 @@ export interface TargetMetadata {
   outboundProfile: string;
   compatibilityProfile?: string;
   runtimeKey?: string;
+  concurrencyScopeKey?: string;
   modelId: string;
   processMode?: "chat" | "passthrough";
   responsesConfig?: ResponsesProviderConfig;

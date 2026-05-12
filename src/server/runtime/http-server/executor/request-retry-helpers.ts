@@ -100,7 +100,9 @@ export function isSseDecodeRetryableNetworkError(error: unknown, status: number 
     message.includes('service unavailable') ||
     message.includes('temporarily unavailable') ||
     message.includes('connection reset') ||
-    message.includes('timeout')
+    message.includes('timeout') ||
+    upstreamCode.includes('upstream_stream_no_content_timeout') ||
+    upstreamCode.includes('upstream_stream_content_idle_timeout')
   );
 }
 

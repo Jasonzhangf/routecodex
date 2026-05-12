@@ -57,6 +57,8 @@ struct ProviderRuntimeProfileJson {
     provider_id: String,
     key_alias: String,
     provider_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_module: Option<String>,
     endpoint: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     headers: Option<BTreeMap<String, String>>,
@@ -179,6 +181,7 @@ struct ProviderProfilesBootstrapOutput {
 #[derive(Debug, Clone)]
 struct NormalizedProvider {
     provider_type: String,
+    provider_module: Option<String>,
     endpoint: String,
     headers: Option<BTreeMap<String, String>>,
     enabled: Option<bool>,
@@ -365,6 +368,7 @@ fn build_provider_runtime_entries(
                     provider_id: provider_id.clone(),
                     key_alias: entry.key_alias,
                     provider_type: normalized_provider.provider_type.clone(),
+                    provider_module: normalized_provider.provider_module.clone(),
                     endpoint: normalized_provider.endpoint.clone(),
                     headers: normalized_provider.headers.clone(),
                     auth: runtime_auth,
@@ -536,6 +540,8 @@ fn normalize_provider(
 ) -> Result<NormalizedProvider, String> {
     let enabled = normalize_enabled(provider.get("enabled"));
     let provider_type = detect_provider_type(provider);
+    let provider_module = read_optional_string(provider.get("type"))
+        .or_else(|| read_optional_string(provider.get("module")));
     let endpoint = read_optional_string(provider.get("endpoint"))
         .or_else(|| read_optional_string(provider.get("baseURL")))
         .or_else(|| read_optional_string(provider.get("baseUrl")))
@@ -589,6 +595,7 @@ fn normalize_provider(
 
     Ok(NormalizedProvider {
         provider_type: provider_type.clone(),
+        provider_module,
         endpoint,
         headers,
         enabled,

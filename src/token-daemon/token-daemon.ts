@@ -817,7 +817,7 @@ async function maybeMarkTokenFileNoRefresh(filePath: string): Promise<void> {
     if (!filePath) {
       return;
     }
-    const raw = await fs.readFile(filePath, 'utf8').catch(() => '');
+    const raw = await fs.readFile(filePath, 'utf8')
     if (!raw.trim()) {
       return;
     }

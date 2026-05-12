@@ -76,6 +76,7 @@ import { allowSnapshotLocalDiskWrite } from '../../../utils/snapshot-local-disk-
 import { writeProviderSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 import {
   hasRequestedToolsInSemantics,
+  isRequiredToolCallTurn,
   isToolResultFollowupTurn
 } from './executor/request-executor-request-semantics.js';
 import {
@@ -264,6 +265,53 @@ function applySendFailureState(
   };
 }
 
+const WEB_PROVIDER_TRAFFIC_SOFT_WAIT_TIMEOUT_MS = 1_500;
+
+function isWebLikeRuntimeForTraffic(args: {
+  runtime: ReturnType<typeof resolveRequestExecutorTrafficRuntimeProfile>;
+  compatibilityProfile?: string;
+}): boolean {
+  const { runtime } = args;
+  const tokens = [
+    args.compatibilityProfile,
+    runtime.compatibilityProfile,
+    runtime.providerId,
+    runtime.providerKey,
+    runtime.providerFamily,
+    runtime.runtimeKey,
+    runtime.endpoint,
+    runtime.baseUrl
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim().toLowerCase());
+
+  if (args.compatibilityProfile === 'chat:deepseek-web' || args.compatibilityProfile === 'chat:qwenchat-web') {
+    return true;
+  }
+
+  if (runtime.compatibilityProfile === 'chat:deepseek-web' || runtime.compatibilityProfile === 'chat:qwenchat-web') {
+    return true;
+  }
+
+  return tokens.some((value) => value === 'deepseek-web' || value.startsWith('deepseek-web.') || value === 'qwenchat' || value.startsWith('qwenchat.') || value === 'mimoweb' || value.startsWith('mimoweb.'));
+}
+
+function resolveProviderTrafficSoftWaitTimeoutMs(args: {
+  runtimeKey: string;
+  handle: ProviderHandle;
+  providerKey?: string;
+  compatibilityProfile?: string;
+}): number | undefined {
+  const runtime = resolveRequestExecutorTrafficRuntimeProfile(args.runtimeKey, args.handle, args.providerKey);
+  if (!isWebLikeRuntimeForTraffic({
+    runtime,
+    compatibilityProfile: args.compatibilityProfile
+  })) {
+    return undefined;
+  }
+  return WEB_PROVIDER_TRAFFIC_SOFT_WAIT_TIMEOUT_MS;
+}
+
 const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
 const RECOVERABLE_BACKOFF_TTL_MS = 5 * 60_000;
 const recoverableErrorBackoffState = new Map<string, { consecutive: number; updatedAtMs: number }>();
@@ -297,6 +345,7 @@ export class HubRequestExecutor implements RequestExecutor {
   constructor(private readonly deps: RequestExecutorDeps) {
     if (deps.trafficGovernor) {
       this.trafficGovernor = deps.trafficGovernor;
+      this.installTrafficGovernorConcurrencyCallback();
       return;
     }
     if (process.env.NODE_ENV === 'test') {
@@ -311,12 +360,19 @@ export class HubRequestExecutor implements RequestExecutor {
       return;
     }
     this.trafficGovernor = getSharedProviderTrafficGovernor();
-    this.trafficGovernor.setConcurrencyBusyCallback?.((runtimeKey, busy) => {
+    this.installTrafficGovernorConcurrencyCallback();
+  }
+
+  private installTrafficGovernorConcurrencyCallback(): void {
+    this.trafficGovernor.setConcurrencyBusyCallback?.((scopeKey, busy) => {
       try {
         const vr = this.deps.getHubPipeline()?.getVirtualRouter?.();
         if (vr) {
-          if (busy) vr.markProviderConcurrencyBusy(runtimeKey);
-          else vr.markProviderConcurrencyIdle(runtimeKey);
+          if (typeof scopeKey !== 'string' || !scopeKey.trim()) {
+            return;
+          }
+          if (busy) vr.markConcurrencyScopeBusy(scopeKey);
+          else vr.markConcurrencyScopeIdle(scopeKey);
         }
       } catch { /* non-blocking */ }
     });
@@ -547,6 +603,10 @@ export class HubRequestExecutor implements RequestExecutor {
           providerPayload,
           target
         } = resolvedPipelineAttempt;
+        const concurrencyScopeKey =
+          typeof target.concurrencyScopeKey === 'string' && target.concurrencyScopeKey.trim()
+            ? target.concurrencyScopeKey.trim()
+            : undefined;
 
         let runtimeKey: string = typeof target.runtimeKey === 'string' ? target.runtimeKey : '';
         let handle: ProviderHandle;
@@ -788,14 +848,18 @@ export class HubRequestExecutor implements RequestExecutor {
               runtimeKey,
               attempt
             });
+            const trafficRuntimeProfile = resolveRequestExecutorTrafficRuntimeProfile(runtimeKey, handle, target.providerKey);
             const trafficAcquired = await this.trafficGovernor.acquire({
               runtimeKey,
               providerKey: target.providerKey,
               requestId: input.requestId,
-              runtime: resolveRequestExecutorTrafficRuntimeProfile(runtimeKey, handle, target.providerKey),
-              // Hard rule (2026-04): local traffic saturation must block-wait/backoff instead of
-              // switch storm. Do not use soft timeout here.
-              softWaitTimeoutMs: undefined
+              runtime: trafficRuntimeProfile,
+              softWaitTimeoutMs: resolveProviderTrafficSoftWaitTimeoutMs({
+                runtimeKey,
+                handle,
+                providerKey: target.providerKey,
+                compatibilityProfile: target.compatibilityProfile
+              })
             });
             trafficPermit = trafficAcquired.permit;
             trafficPolicyMaxInFlight = trafficAcquired.policy.concurrency.maxInFlight;
@@ -812,6 +876,7 @@ export class HubRequestExecutor implements RequestExecutor {
             logStage('provider.traffic.acquire.completed', input.requestId, {
               providerKey: target.providerKey,
               runtimeKey,
+              concurrencyScopeKey,
               maxInFlight: trafficAcquired.policy.concurrency.maxInFlight,
               requestsPerMinute: trafficAcquired.policy.rpm.requestsPerMinute,
               activeInFlight: trafficAcquired.activeInFlight,
@@ -1213,6 +1278,7 @@ export const __requestExecutorTestables = {
   peekProviderTransportBackoffWaitMs,
   clearProviderTransportBackoff,
   hasRequestedToolsInSemantics,
+  isRequiredToolCallTurn,
   isToolResultFollowupTurn,
   bodyContainsReasoningStopFinalizedMarker,
   detectStoplessTerminationWithoutFinalization,

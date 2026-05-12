@@ -302,6 +302,18 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
       sessionReuseTtlMs: options.sessionReuseTtlMs,
       powTimeoutMs: options.powTimeoutMs,
       powMaxAttempts: options.powMaxAttempts,
+      postJsonImpl: async ({ endpoint, body, headers }) => {
+        const response = await this.httpClient.post(endpoint, body, headers);
+        return {
+          status: response.status,
+          data: response.data
+        };
+      },
+      refreshAuth: this.authProvider?.refreshCredentials
+        ? async () => {
+            await this.authProvider?.refreshCredentials?.();
+          }
+        : undefined,
       logger: this.dependencies.logger,
       logId: this.id
     });

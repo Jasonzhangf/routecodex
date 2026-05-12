@@ -103,7 +103,7 @@ async function scanApiKeyAuthFiles(): Promise<ApiKeyMatch[]> {
         continue;
       }
       const filePath = path.join(authDir, entry);
-      const content = await fs.readFile(filePath, 'utf8').catch(() => '');
+      const content = await fs.readFile(filePath, 'utf8');
       const hasApiKey = Boolean(content && content.trim());
       matches.push({
         filePath,

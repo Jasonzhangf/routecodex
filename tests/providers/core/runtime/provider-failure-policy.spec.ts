@@ -89,6 +89,50 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
+  it('classifies DeepSeek file upload failure as unrecoverable direct-return', () => {
+    const error = Object.assign(new Error('DeepSeek file upload returned non-JSON payload'), {
+      code: 'DEEPSEEK_FILE_UPLOAD_FAILED',
+      upstreamCode: 'DEEPSEEK_FILE_UPLOAD_FAILED',
+      statusCode: 502
+    });
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 502,
+      errorCode: 'DEEPSEEK_FILE_UPLOAD_FAILED',
+      upstreamCode: 'DEEPSEEK_FILE_UPLOAD_FAILED',
+      reason: 'DeepSeek file upload returned non-JSON payload'
+    });
+
+    expect(classification).toBe('unrecoverable');
+    expect(isProviderFailureHealthNeutral({
+      stage: 'provider.send',
+      errorCode: 'DEEPSEEK_FILE_UPLOAD_FAILED',
+      upstreamCode: 'DEEPSEEK_FILE_UPLOAD_FAILED',
+      statusCode: 502,
+      classification
+    })).toBe(false);
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 502,
+      errorCode: 'DEEPSEEK_FILE_UPLOAD_FAILED',
+      upstreamCode: 'DEEPSEEK_FILE_UPLOAD_FAILED',
+      reason: 'DeepSeek file upload returned non-JSON payload',
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'unrecoverable',
+      affectsHealth: true,
+      shouldRetry: false,
+      action: 'direct_return',
+      decisionLabel: 'direct_return',
+      backoff: expect.objectContaining({
+        scope: 'none'
+      })
+    }));
+  });
+
   it('classifies context overflow as special_400', () => {
     const error = Object.assign(new Error('Request input tokens exceeds the model maximum context length'), {
       code: 'CONTEXT_LENGTH_EXCEEDED',

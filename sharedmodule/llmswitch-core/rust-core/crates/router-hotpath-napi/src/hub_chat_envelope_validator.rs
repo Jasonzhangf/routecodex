@@ -188,16 +188,6 @@ fn validate_tools(
             .unwrap_or(false)
     }
 
-    fn has_gemini_builtin_tool_shape(row: &Map<String, Value>) -> bool {
-        row.get("googleSearch")
-            .map(|value| value.is_object())
-            .unwrap_or(false)
-            || row
-                .get("googleSearchRetrieval")
-                .map(|value| value.is_object())
-                .unwrap_or(false)
-    }
-
     fn has_function_node_with_name(row: &Map<String, Value>) -> bool {
         row.get("function")
             .and_then(|v| v.as_object())
@@ -329,11 +319,9 @@ fn validate_tools(
         let raw_type = row.get("type");
         let is_function = is_function_tool_type(raw_type);
         let is_builtin_web_search = has_builtin_web_search_type(raw_type);
-        let has_builtin_gemini_shape = has_gemini_builtin_tool_shape(row);
         let is_namespace_tool = has_namespace_tool_shape(row);
         if !is_function
             && !is_builtin_web_search
-            && !has_builtin_gemini_shape
             && !is_namespace_tool
             && !has_function_node_with_name(row)
         {
@@ -686,5 +674,27 @@ mod tests {
         });
         let result = validate_chat_envelope(&chat, "req_inbound", "request", Some("test"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_chat_envelope_rejects_provider_specific_gemini_tool_shape() {
+        let chat = json!({
+          "messages": [
+            { "role": "user", "content": "hello" }
+          ],
+          "tools": [
+            { "googleSearch": {} }
+          ],
+          "parameters": {
+            "model": "gemini-2.5-pro"
+          },
+          "metadata": {
+            "context": {}
+          }
+        });
+        let result = validate_chat_envelope(&chat, "req_inbound", "request", Some("test"));
+        assert!(result.is_err());
+        let reason = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(reason.contains("[tools_type]"));
     }
 }

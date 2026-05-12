@@ -63,6 +63,70 @@ export function hasRequestedToolsInSemantics(requestSemantics?: Record<string, u
   return candidates.some((candidate) => Array.isArray(candidate) && candidate.length > 0);
 }
 
+function readToolChoiceCandidate(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const row = value as Record<string, unknown>;
+  return row.tool_choice ?? row.toolChoice;
+}
+
+function isRequiredToolChoiceValue(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.trim().toLowerCase() === 'required';
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const row = value as Record<string, unknown>;
+  const type = readString(row.type)?.toLowerCase() ?? '';
+  if (type === 'function') {
+    return true;
+  }
+  const functionNode =
+    row.function && typeof row.function === 'object' && !Array.isArray(row.function)
+      ? (row.function as Record<string, unknown>)
+      : undefined;
+  return typeof functionNode?.name === 'string' && functionNode.name.trim().length > 0;
+}
+
+export function isRequiredToolCallTurn(requestSemantics?: Record<string, unknown>): boolean {
+  if (!hasRequestedToolsInSemantics(requestSemantics)) {
+    return false;
+  }
+
+  if (isRequiredToolChoiceValue(readToolChoiceCandidate(requestSemantics))) {
+    return true;
+  }
+
+  const responses =
+    requestSemantics?.responses && typeof requestSemantics.responses === 'object' && !Array.isArray(requestSemantics.responses)
+      ? (requestSemantics.responses as Record<string, unknown>)
+      : undefined;
+  if (isRequiredToolChoiceValue(readToolChoiceCandidate(responses))) {
+    return true;
+  }
+
+  const requestParameters =
+    responses?.requestParameters && typeof responses.requestParameters === 'object' && !Array.isArray(responses.requestParameters)
+      ? (responses.requestParameters as Record<string, unknown>)
+      : undefined;
+  if (isRequiredToolChoiceValue(readToolChoiceCandidate(requestParameters))) {
+    return true;
+  }
+
+  const metadata =
+    requestSemantics?.metadata && typeof requestSemantics.metadata === 'object' && !Array.isArray(requestSemantics.metadata)
+      ? (requestSemantics.metadata as Record<string, unknown>)
+      : undefined;
+  if (isRequiredToolChoiceValue(readToolChoiceCandidate(metadata))) {
+    return true;
+  }
+
+  const source = readServerToolFollowupSource(requestSemantics);
+  return source === 'servertool.reasoning_stop_continue';
+}
+
 export function isToolResultFollowupTurn(requestSemantics?: Record<string, unknown>): boolean {
   if (isReasoningStopFollowupTurn(requestSemantics)) {
     return false;

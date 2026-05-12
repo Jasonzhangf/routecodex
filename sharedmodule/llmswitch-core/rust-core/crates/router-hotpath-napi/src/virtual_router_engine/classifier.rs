@@ -7,7 +7,6 @@ pub(crate) struct ClassificationResult {
     pub route_name: String,
     pub confidence: f64,
     pub reasoning: String,
-    pub fallback: bool,
     pub candidates: Vec<String>,
 }
 
@@ -84,19 +83,15 @@ impl RoutingClassifier {
         let coding_continuation = last_tool_category == "coding";
         let search_continuation = last_tool_category == "search";
         let tools_continuation = last_tool_category == "other";
-        let has_remote_video_attachment =
-            features.has_video_attachment && features.has_remote_video_attachment;
+        let has_visual =
+            features.has_image_attachment
+            || (features.has_video_attachment && features.has_remote_video_attachment);
 
         let mut evaluation: Vec<(String, bool, String)> = Vec::new();
         evaluation.push((
-            "video".to_string(),
-            has_remote_video_attachment,
-            "video:remote-video-detected".to_string(),
-        ));
-        evaluation.push((
             "multimodal".to_string(),
-            features.has_image_attachment,
-            "multimodal:media-detected".to_string(),
+            has_visual,
+            "multimodal:visual-content".to_string(),
         ));
         evaluation.push((
             "thinking".to_string(),
@@ -181,7 +176,6 @@ fn build_classification(
         route_name: route.to_string(),
         confidence: 0.9,
         reasoning: reasoning_parts.join("|"),
-        fallback: route == DEFAULT_ROUTE,
         candidates,
     }
 }
@@ -205,8 +199,7 @@ fn contains_keywords(text: &str, keywords: &[String]) -> bool {
 
 pub(crate) const DEFAULT_ROUTE: &str = "default";
 
-pub(crate) const ROUTE_PRIORITY: [&str; 10] = [
-    "video",
+pub(crate) const ROUTE_PRIORITY: [&str; 9] = [
     "multimodal",
     "longcontext",
     "web_search",

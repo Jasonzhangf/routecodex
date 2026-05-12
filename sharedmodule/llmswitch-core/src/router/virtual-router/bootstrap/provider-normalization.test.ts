@@ -200,4 +200,22 @@ describe('normalizeProvider anthropic thinking config', () => {
       contextFileEnabled: true
     });
   });
+
+  it('preserves provider module override such as mock-provider', () => {
+    const normalized = normalizeProvider('mock', {
+      id: 'mock',
+      type: 'mock-provider',
+      providerType: 'responses',
+      baseURL: 'https://mock.local/mock',
+      auth: { type: 'apikey', apiKey: 'test-key' },
+      models: {
+        'gpt-5.1': {
+          supportsStreaming: true
+        }
+      }
+    });
+
+    expect(normalized.providerType).toBe('responses');
+    expect(normalized.providerModule).toBe('mock-provider');
+  });
 });

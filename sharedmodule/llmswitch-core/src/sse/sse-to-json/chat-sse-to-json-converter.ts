@@ -35,6 +35,23 @@ type DeepSeekWebErrorInfo = {
 
 type DeepSeekPatchAppendTarget = 'content' | 'reasoning';
 
+const hasExplicitToolWrapperProgress = (text: string): boolean => {
+  if (!text) {
+    return false;
+  }
+  return (
+    /<tool_call\b/i.test(text)
+    || /<function_calls?\b/i.test(text)
+    || /<<\s*RCC_TOOL_CALLS(?:_JSON)?/i.test(text)
+    || /<use_mcp_tool\b/i.test(text)
+  );
+};
+
+const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 15_000;
+const DEFAULT_NO_CONTENT_TIMEOUT_MS = 120_000;
+const DEFAULT_PRE_ANCHOR_IDLE_TIMEOUT_MS = 45_000;
+const DEFAULT_CONTENT_IDLE_TIMEOUT_MS = 300_000;
+
 type DeepSeekWebPayloadAnalysis = {
   path: string;
   op: string;
@@ -309,7 +326,7 @@ export class ChatSseToJsonConverter {
 
     try {
       // 处理SSE流
-      for await (const event of this.ensureEventStream(sseStream)) {
+      for await (const event of this.ensureEventStream(sseStream, context)) {
         await this.processSseEvent(event, context);
       }
 
@@ -329,7 +346,7 @@ export class ChatSseToJsonConverter {
         }
       }
       options.onError?.(error as Error);
-      throw ErrorUtils.wrapError(error, 'SSE to JSON conversion failed');
+      throw this.wrapSseError(error, 'SSE to JSON conversion failed');
     } finally {
       this.cleanup(options.requestId);
     }
@@ -346,7 +363,7 @@ export class ChatSseToJsonConverter {
     this.contexts.set(options.requestId, context);
 
     try {
-      for await (const event of this.ensureEventStream(sseStream)) {
+      for await (const event of this.ensureEventStream(sseStream, context)) {
         await this.processSseEvent(event, context);
 
         // 每处理完一个chunk就生成部分响应
@@ -376,7 +393,7 @@ export class ChatSseToJsonConverter {
         }
       }
       options.onError?.(error as Error);
-      throw ErrorUtils.wrapError(error, 'SSE stream aggregation failed');
+      throw this.wrapSseError(error, 'SSE stream aggregation failed');
     } finally {
       this.cleanup(options.requestId);
     }
@@ -386,11 +403,17 @@ export class ChatSseToJsonConverter {
    * 确保输入流转换为 ChatSseEvent 流
    */
   private async *ensureEventStream(
-    source: AsyncIterable<ChatSseEvent> | AsyncIterable<string | Buffer>
+    source: AsyncIterable<ChatSseEvent> | AsyncIterable<string | Buffer>,
+    context?: SseToChatJsonContext
   ): AsyncGenerator<ChatSseEvent> {
     let tailBuffer = '';
-
-    for await (const chunk of source) {
+    const iterator = source[Symbol.asyncIterator]() as AsyncIterator<ChatSseEvent | string | Buffer>;
+    while (true) {
+      const next = await this.readNextStreamChunk(iterator, context);
+      if (next.done) {
+        break;
+      }
+      const chunk = next.value;
       if (typeof chunk === 'string' || Buffer.isBuffer(chunk)) {
         const raw = typeof chunk === 'string' ? chunk : chunk.toString();
         const normalized = raw.replace(/\r\n/g, '\n');
@@ -425,6 +448,116 @@ export class ChatSseToJsonConverter {
         yield parsed;
       }
     }
+  }
+
+  private async readNextStreamChunk<T>(
+    iterator: AsyncIterator<T>,
+    context?: SseToChatJsonContext
+  ): Promise<IteratorResult<T>> {
+    if (!context) {
+      return iterator.next();
+    }
+    return this.raceWithTimeoutState(iterator.next(), context);
+  }
+
+  private resolveTimeoutState(context: SseToChatJsonContext): {
+    timeoutMs: number;
+    anchorMs: number;
+    code: 'UPSTREAM_STREAM_NO_FRAME_TIMEOUT' | 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT' | 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT';
+  } {
+    if (context.eventStats.firstFrameAtMs === undefined) {
+      const configured = Number(context.options.firstFrameTimeoutMs);
+      return {
+        timeoutMs: Number.isFinite(configured) && configured > 0
+          ? Math.floor(configured)
+          : DEFAULT_FIRST_FRAME_TIMEOUT_MS,
+        anchorMs: context.startTime,
+        code: 'UPSTREAM_STREAM_NO_FRAME_TIMEOUT'
+      };
+    }
+    if (context.eventStats.firstContentAtMs === undefined) {
+      const configured = Number(context.options.preAnchorIdleTimeoutMs ?? context.options.noContentTimeoutMs);
+      return {
+        timeoutMs: Number.isFinite(configured) && configured > 0
+          ? Math.floor(configured)
+          : DEFAULT_PRE_ANCHOR_IDLE_TIMEOUT_MS,
+        anchorMs: context.eventStats.lastFrameAtMs ?? context.eventStats.firstFrameAtMs ?? context.startTime,
+        code: 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT'
+      };
+    }
+    const configured = Number(context.options.contentIdleTimeoutMs);
+    return {
+      timeoutMs: Number.isFinite(configured) && configured > 0
+        ? Math.floor(configured)
+        : DEFAULT_CONTENT_IDLE_TIMEOUT_MS,
+      anchorMs: context.eventStats.lastContentAtMs ?? context.eventStats.firstContentAtMs ?? context.startTime,
+      code: 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'
+    };
+  }
+
+  private markSemanticContentSeen(context: SseToChatJsonContext): void {
+    const now = TimeUtils.now();
+    context.eventStats.firstContentAtMs ??= now;
+    context.eventStats.lastContentAtMs = now;
+  }
+
+  private async raceWithTimeoutState<T>(
+    pending: Promise<IteratorResult<T>>,
+    context: SseToChatJsonContext
+  ): Promise<IteratorResult<T>> {
+    let timer: NodeJS.Timeout | null = null;
+    const timeoutState = this.resolveTimeoutState(context);
+    const remainingTimeoutMs = Math.max(1, timeoutState.anchorMs + Math.max(1, timeoutState.timeoutMs) - TimeUtils.now());
+    try {
+      return await Promise.race([
+        pending,
+        new Promise<IteratorResult<T>>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(this.createSemanticTimeoutError(timeoutState));
+          }, remainingTimeoutMs);
+          timer.unref?.();
+        })
+      ]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
+  private createSemanticTimeoutError(timeoutState: {
+    timeoutMs: number;
+    code: 'UPSTREAM_STREAM_NO_FRAME_TIMEOUT' | 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT' | 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT';
+  }): Error & {
+    code?: string;
+    status?: number;
+    statusCode?: number;
+    retryable?: boolean;
+    upstreamCode?: string;
+    requestExecutorProviderErrorStage?: string;
+  } {
+    const { code, timeoutMs } = timeoutState;
+    const message =
+      code === 'UPSTREAM_STREAM_NO_FRAME_TIMEOUT'
+        ? `Upstream stream produced no frame within ${timeoutMs}ms`
+        : code === 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT'
+          ? `Upstream stream produced frames but no semantic progress within ${timeoutMs}ms`
+          : `Upstream stream idle after semantic content for ${timeoutMs}ms`;
+    const error = new Error(message) as Error & {
+      code?: string;
+      status?: number;
+      statusCode?: number;
+      retryable?: boolean;
+      upstreamCode?: string;
+      requestExecutorProviderErrorStage?: string;
+    };
+    error.code = code;
+    error.status = 504;
+    error.statusCode = 504;
+    error.retryable = true;
+    error.upstreamCode = code;
+    error.requestExecutorProviderErrorStage = 'provider.sse_decode';
+    return error;
   }
 
   /**
@@ -579,6 +712,9 @@ export class ChatSseToJsonConverter {
       }
 
       context.eventStats.totalChunks++;
+      const now = TimeUtils.now();
+      context.eventStats.firstFrameAtMs ??= now;
+      context.eventStats.lastFrameAtMs = now;
       context.options.onEvent?.(event);
 
       switch (event.event) {
@@ -794,6 +930,9 @@ export class ChatSseToJsonConverter {
     const appendToTarget = (target: DeepSeekPatchAppendTarget, text: string): void => {
       if (!text) {
         return;
+      }
+      if (target === 'content' || hasExplicitToolWrapperProgress(text)) {
+        this.markSemanticContentSeen(context);
       }
       deepseekState.patchAppendTarget = target;
       if (target === 'reasoning') {
@@ -1014,15 +1153,16 @@ export class ChatSseToJsonConverter {
     // 处理reasoning
     if (delta.reasoning_content || delta.reasoning) {
       const chunk = delta.reasoning_content || delta.reasoning || '';
+      if (hasExplicitToolWrapperProgress(chunk)) {
+        this.markSemanticContentSeen(context);
+      }
       messageBuilder.reasoningContent = (messageBuilder.reasoningContent || '') + chunk;
       choiceBuilder.accumulatedContent += chunk;
     }
 
     // 处理content
     if (delta.content) {
-      const now = TimeUtils.now();
-      context.eventStats.firstContentAtMs ??= now;
-      context.eventStats.lastContentAtMs = now;
+      this.markSemanticContentSeen(context);
       messageBuilder.content += delta.content;
       choiceBuilder.accumulatedContent += delta.content;
     }
@@ -1376,6 +1516,8 @@ export class ChatSseToJsonConverter {
         chunkCount: context.eventStats.totalChunks,
         totalEvents: context.eventStats.totalChunks,
         contentBlocks: context.eventStats.totalChoices,
+        firstFrameAtMs: context.eventStats.firstFrameAtMs,
+        lastFrameAtMs: context.eventStats.lastFrameAtMs,
         firstContentAtMs: context.eventStats.firstContentAtMs,
         lastContentAtMs: context.eventStats.lastContentAtMs,
         streamMs:
@@ -1405,9 +1547,52 @@ export class ChatSseToJsonConverter {
       normalizedMessage.includes('terminated') ||
       normalizedCode.includes('upstream_stream_idle_timeout') ||
       normalizedMessage.includes('upstream_stream_idle_timeout') ||
+      normalizedCode.includes('upstream_stream_content_idle_timeout') ||
+      normalizedMessage.includes('upstream_stream_content_idle_timeout') ||
+      normalizedCode.includes('upstream_stream_no_content_timeout') ||
+      normalizedMessage.includes('upstream_stream_no_content_timeout') ||
       normalizedCode.includes('upstream_stream_timeout') ||
       normalizedMessage.includes('upstream_stream_timeout')
     );
+  }
+
+  private wrapSseError(error: unknown, contextMessage: string): Error {
+    const wrapped = ErrorUtils.wrapError(error, contextMessage) as Error & {
+      code?: string;
+      status?: number;
+      statusCode?: number;
+      retryable?: boolean;
+      upstreamCode?: string;
+      requestExecutorProviderErrorStage?: string;
+    };
+    const source = error as Record<string, unknown> | undefined;
+    const code = typeof source?.code === 'string' ? source.code : undefined;
+    const statusCode =
+      typeof source?.statusCode === 'number'
+        ? source.statusCode
+        : typeof source?.status === 'number'
+          ? source.status
+          : undefined;
+    const retryable = typeof source?.retryable === 'boolean' ? source.retryable : undefined;
+    const upstreamCode =
+      typeof source?.upstreamCode === 'string'
+        ? source.upstreamCode
+        : code;
+    if (code) {
+      wrapped.code = code === 'CHAT_STREAM_ERROR' ? 'SSE_DECODE_ERROR' : code;
+    }
+    if (typeof statusCode === 'number') {
+      wrapped.status = statusCode;
+      wrapped.statusCode = statusCode;
+    }
+    if (typeof retryable === 'boolean') {
+      wrapped.retryable = retryable;
+    }
+    if (upstreamCode) {
+      wrapped.upstreamCode = upstreamCode;
+    }
+    wrapped.requestExecutorProviderErrorStage = 'provider.sse_decode';
+    return wrapped;
   }
 
   private trySalvageResponse(context: SseToChatJsonContext): ChatCompletionResponse | null {

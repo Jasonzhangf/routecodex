@@ -16,10 +16,7 @@ pub(crate) struct ProviderProfile {
     pub streaming: Option<Value>,
     pub max_context_tokens: Option<i64>,
     pub server_tools_disabled: bool,
-    pub deepseek: Option<Value>,
-    pub anthropic_thinking_config: Option<Value>,
-    pub anthropic_thinking: Option<String>,
-    pub anthropic_thinking_budgets: Option<Value>,
+    pub provider_specific_config: HashMap<String, Value>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -137,7 +134,11 @@ impl ProviderRegistry {
             target.insert("compatibilityProfile".to_string(), Value::String(comp));
         }
         if let Some(runtime) = profile.runtime_key.clone() {
-            target.insert("runtimeKey".to_string(), Value::String(runtime));
+            target.insert("runtimeKey".to_string(), Value::String(runtime.clone()));
+            target.insert(
+                "concurrencyScopeKey".to_string(),
+                Value::String(runtime),
+            );
         }
         target.insert("modelId".to_string(), Value::String(model_id));
         target.insert(
@@ -164,23 +165,8 @@ impl ProviderRegistry {
         if profile.server_tools_disabled {
             target.insert("serverToolsDisabled".to_string(), Value::Bool(true));
         }
-        if let Some(deepseek) = profile.deepseek.clone() {
-            target.insert("deepseek".to_string(), deepseek);
-        }
-        if let Some(config) = profile.anthropic_thinking_config.clone() {
-            if !config.is_null() {
-                target.insert("anthropicThinkingConfig".to_string(), config);
-            }
-        }
-        if let Some(thinking) = profile.anthropic_thinking.clone() {
-            if !thinking.trim().is_empty() {
-                target.insert("anthropicThinking".to_string(), Value::String(thinking));
-            }
-        }
-        if let Some(budgets) = profile.anthropic_thinking_budgets.clone() {
-            if !budgets.is_null() {
-                target.insert("anthropicThinkingBudgets".to_string(), budgets);
-            }
+        for (key, value) in &profile.provider_specific_config {
+            target.insert(key.clone(), value.clone());
         }
         Some(Value::Object(target))
     }
@@ -243,20 +229,19 @@ impl ProviderRegistry {
             .get("serverToolsDisabled")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let deepseek = map.get("deepseek").cloned();
-        let anthropic_thinking_config = map
-            .get("anthropicThinkingConfig")
-            .cloned()
-            .filter(|v| !v.is_null());
-        let anthropic_thinking = map
-            .get("anthropicThinking")
-            .and_then(|v| v.as_str())
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty());
-        let anthropic_thinking_budgets = map
-            .get("anthropicThinkingBudgets")
-            .cloned()
-            .filter(|v| !v.is_null());
+        // Collect provider-specific config keys (everything not in the common schema)
+        let common_keys: &[&str] = &[
+            "providerKey", "providerType", "enabled", "modelId", "runtimeKey",
+            "outboundProfile", "compatibilityProfile", "processMode",
+            "responsesConfig", "streaming", "modelCapabilities",
+            "maxContextTokens", "serverToolsDisabled",
+        ];
+        let mut provider_specific_config: HashMap<String, Value> = HashMap::new();
+        for (k, v) in map {
+            if !common_keys.contains(&k.as_str()) && !v.is_null() {
+                provider_specific_config.insert(k.clone(), v.clone());
+            }
+        }
         Some(ProviderProfile {
             provider_key,
             provider_type,
@@ -271,10 +256,7 @@ impl ProviderRegistry {
             streaming,
             max_context_tokens,
             server_tools_disabled,
-            deepseek,
-            anthropic_thinking_config,
-            anthropic_thinking,
-            anthropic_thinking_budgets,
+            provider_specific_config,
         })
     }
 }

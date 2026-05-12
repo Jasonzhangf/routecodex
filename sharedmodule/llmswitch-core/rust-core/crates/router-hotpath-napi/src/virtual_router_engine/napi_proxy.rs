@@ -2,7 +2,7 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi::{Env, JsObject, JsUnknown, ValueType};
 use napi_derive::napi;
 use serde_json::Value;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use super::engine::VirtualRouterEngineCore;
 use super::instructions::with_rcc_user_dir_override;
@@ -15,7 +15,7 @@ struct RuntimePathOverrides {
 
 #[napi]
 pub struct VirtualRouterEngineProxy {
-    core: Arc<Mutex<VirtualRouterEngineCore>>,
+    core: Arc<RwLock<VirtualRouterEngineCore>>,
 }
 
 #[napi]
@@ -24,7 +24,7 @@ impl VirtualRouterEngineProxy {
     pub fn new(env: Env, _engine: Option<JsObject>) -> Self {
         let _ = env;
         Self {
-            core: Arc::new(Mutex::new(VirtualRouterEngineCore::new())),
+            core: Arc::new(RwLock::new(VirtualRouterEngineCore::new())),
         }
     }
 
@@ -32,7 +32,7 @@ impl VirtualRouterEngineProxy {
     pub fn initialize(&self, _env: Env, config_json: String) -> NapiResult<()> {
         let config_value: Value = serde_json::from_str(&config_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-        let mut core = self.core.lock().expect("core lock");
+        let mut core = self.core.write().expect("core write lock");
         core.initialize(&config_value)
             .map_err(|e| napi::Error::from_reason(e))?;
         Ok(())
@@ -41,13 +41,13 @@ impl VirtualRouterEngineProxy {
     #[napi]
     pub fn update_deps(&self, env: Env, deps: JsUnknown) -> NapiResult<()> {
         if is_js_null_or_undefined(&deps) {
-            let mut core = self.core.lock().expect("core lock");
+            let mut core = self.core.write().expect("core write lock");
             core.update_quota_view(None);
             return Ok(());
         }
         let obj = deps.coerce_to_object()?;
         let quota_view_value: JsUnknown = obj.get_named_property("quotaView")?;
-        let mut core = self.core.lock().expect("core lock");
+        let mut core = self.core.write().expect("core write lock");
         if matches!(quota_view_value.get_type(), Ok(ValueType::Null)) {
             core.update_quota_view(None);
             return Ok(());
@@ -66,7 +66,7 @@ impl VirtualRouterEngineProxy {
     pub fn update_virtual_router_config(&self, _env: Env, config_json: String) -> NapiResult<()> {
         let config_value: Value = serde_json::from_str(&config_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-        let mut core = self.core.lock().expect("core lock");
+        let mut core = self.core.write().expect("core write lock");
         core.initialize(&config_value)
             .map_err(|e| napi::Error::from_reason(e))?;
         Ok(())
@@ -84,7 +84,7 @@ impl VirtualRouterEngineProxy {
         let metadata_value: Value = serde_json::from_str(&metadata_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
         let overrides = resolve_runtime_path_overrides(&metadata_value);
-        let mut core = self.core.lock().expect("core lock");
+        let mut core = self.core.write().expect("core write lock");
         let result = with_rcc_user_dir_override(overrides.rcc_user_dir.as_deref(), || {
             with_session_dir_override(overrides.session_dir.as_deref(), || {
                 core.route(env, &request_value, &metadata_value)
@@ -99,7 +99,7 @@ impl VirtualRouterEngineProxy {
         let metadata_value: Value = serde_json::from_str(&metadata_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
         let overrides = resolve_runtime_path_overrides(&metadata_value);
-        let mut core = self.core.lock().expect("core lock");
+        let mut core = self.core.write().expect("core write lock");
         let result = with_rcc_user_dir_override(overrides.rcc_user_dir.as_deref(), || {
             with_session_dir_override(overrides.session_dir.as_deref(), || {
                 core.get_stop_message_state(&metadata_value)
@@ -113,7 +113,7 @@ impl VirtualRouterEngineProxy {
         let metadata_value: Value = serde_json::from_str(&metadata_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
         let overrides = resolve_runtime_path_overrides(&metadata_value);
-        let mut core = self.core.lock().expect("core lock");
+        let mut core = self.core.write().expect("core write lock");
         let result = with_rcc_user_dir_override(overrides.rcc_user_dir.as_deref(), || {
             with_session_dir_override(overrides.session_dir.as_deref(), || {
                 core.get_pre_command_state(&metadata_value)
@@ -126,7 +126,7 @@ impl VirtualRouterEngineProxy {
     pub fn handle_provider_failure(&self, _env: Env, event_json: String) -> NapiResult<()> {
         let event_value: Value = serde_json::from_str(&event_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-        let mut core = self.core.lock().expect("core lock");
+        let mut core = self.core.write().expect("core write lock");
         core.handle_provider_failure(&event_value);
         Ok(())
     }
@@ -135,7 +135,7 @@ impl VirtualRouterEngineProxy {
     pub fn handle_provider_error(&self, _env: Env, event_json: String) -> NapiResult<()> {
         let event_value: Value = serde_json::from_str(&event_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-        let mut core = self.core.lock().expect("core lock");
+        let mut core = self.core.write().expect("core write lock");
         core.handle_provider_error(&event_value);
         Ok(())
     }
@@ -144,14 +144,14 @@ impl VirtualRouterEngineProxy {
     pub fn handle_provider_success(&self, env: Env, event_json: String) -> NapiResult<()> {
         let event_value: Value = serde_json::from_str(&event_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-        let mut core = self.core.lock().expect("core lock");
+        let mut core = self.core.write().expect("core write lock");
         core.handle_provider_success(&event_value);
         Ok(())
     }
 
     #[napi]
     pub fn get_status(&self, _env: Env) -> NapiResult<String> {
-        let core = self.core.lock().expect("core lock");
+        let core = self.core.read().expect("core read lock");
         serde_json::to_string(&core.get_status())
             .map_err(|e| napi::Error::from_reason(e.to_string()))
     }
@@ -163,7 +163,7 @@ impl VirtualRouterEngineProxy {
         provider_key: String,
         cooldown_ms: Option<i64>,
     ) -> NapiResult<()> {
-        let mut core = self.core.lock().expect("core lock");
+        let mut core = self.core.write().expect("core write lock");
         core.health_manager.cooldown_provider(
             &provider_key,
             None,
@@ -175,22 +175,22 @@ impl VirtualRouterEngineProxy {
 
     #[napi]
     pub fn clear_provider_cooldown(&self, provider_key: String) -> NapiResult<()> {
-        let mut core = self.core.lock().expect("core lock");
+        let mut core = self.core.write().expect("core write lock");
         core.health_manager.record_success(&provider_key);
         Ok(())
     }
 
     #[napi]
-    pub fn mark_provider_concurrency_busy(&self, provider_key: String) -> NapiResult<()> {
-        let mut core = self.core.lock().expect("core lock");
-        core.mark_concurrency_busy(&provider_key);
+    pub fn mark_concurrency_scope_busy(&self, scope_key: String) -> NapiResult<()> {
+        let mut core = self.core.write().expect("core write lock");
+        core.mark_concurrency_scope_busy(&scope_key);
         Ok(())
     }
 
     #[napi]
-    pub fn mark_provider_concurrency_idle(&self, provider_key: String) -> NapiResult<()> {
-        let mut core = self.core.lock().expect("core lock");
-        core.mark_concurrency_idle(&provider_key);
+    pub fn mark_concurrency_scope_idle(&self, scope_key: String) -> NapiResult<()> {
+        let mut core = self.core.write().expect("core write lock");
+        core.mark_concurrency_scope_idle(&scope_key);
         Ok(())
     }
 }

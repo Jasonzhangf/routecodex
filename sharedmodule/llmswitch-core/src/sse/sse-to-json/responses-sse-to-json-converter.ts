@@ -16,6 +16,23 @@ import { ErrorUtils } from '../shared/utils.js';
 import { createSseParser } from './parsers/sse-parser.js';
 import { createResponseBuilder } from './builders/response-builder.js';
 
+const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 15_000;
+const DEFAULT_NO_CONTENT_TIMEOUT_MS = 120_000;
+const DEFAULT_PRE_ANCHOR_IDLE_TIMEOUT_MS = 45_000;
+const DEFAULT_CONTENT_IDLE_TIMEOUT_MS = 300_000;
+
+const hasExplicitToolWrapperProgress = (text: string): boolean => {
+  if (!text) {
+    return false;
+  }
+  return (
+    /<tool_call\b/i.test(text)
+    || /<function_calls?\b/i.test(text)
+    || /<<\s*RCC_TOOL_CALLS(?:_JSON)?/i.test(text)
+    || /<use_mcp_tool\b/i.test(text)
+  );
+};
+
 /**
  * 重构后的Responses SSE到JSON转换器
  * 采用函数化架构，专注于编排而非具体业务逻辑
@@ -75,7 +92,7 @@ export class ResponsesSseToJsonConverterRefactored {
 
       // 5. 流式处理SSE数据（按增量缓冲解析，避免跨 chunk 的事件被截断）
       // 注意：不要对每个 chunk 独立 parse；必须使用一个持续的 async 解析器维持缓冲区。
-      for await (const parseResult of parser.parseStreamAsync(this.chunkStrings(readableStream))) {
+      for await (const parseResult of parser.parseStreamAsync(this.chunkStrings(readableStream, context))) {
         if (context.isCompleted) {
           break;
         }
@@ -102,6 +119,15 @@ export class ResponsesSseToJsonConverterRefactored {
           if (options.onEvent) {
             options.onEvent(event);
           }
+
+          // 一旦 builder 已进入 completed（例如 response.required_action / response.completed），
+          // 必须立即结束读取，不能继续等待上游自己关闭连接。
+          // 否则 DeepSeek Web 这类上游会把已可恢复的 tool_calls / completed 长时间挂住，
+          // 导致 decode.sse 虚高甚至命中后续超时。
+          if (responseBuilder.getState() === 'completed') {
+            context.isCompleted = true;
+            break;
+          }
         } else if (!parseResult.success && this.config.strictMode) {
           throw new Error(`Failed to parse SSE event: ${parseResult.error}`);
         }
@@ -117,6 +143,7 @@ export class ResponsesSseToJsonConverterRefactored {
         if (seenCompleted) {
           const maybe = responseBuilder.getResult();
           if (maybe.success && maybe.response) {
+            this.attachDecodeStats(maybe.response, context);
             return maybe.response;
           }
         }
@@ -133,6 +160,7 @@ export class ResponsesSseToJsonConverterRefactored {
         options.onCompletion(result.response);
       }
 
+      this.attachDecodeStats(result.response, context);
       return result.response;
 
     } catch (error) {
@@ -145,11 +173,12 @@ export class ResponsesSseToJsonConverterRefactored {
             context.isCompleted = true;
             context.endTime = Date.now();
             context.duration = context.endTime - context.startTime;
-            if (options.onCompletion) {
-              options.onCompletion(salvaged.response);
-            }
-            return salvaged.response;
+          if (options.onCompletion) {
+            options.onCompletion(salvaged.response);
           }
+          this.attachDecodeStats(salvaged.response, context);
+          return salvaged.response;
+        }
         } catch {
           // ignore salvage failure, fall through to normal error path
         }
@@ -174,14 +203,20 @@ export class ResponsesSseToJsonConverterRefactored {
   private isTerminatedError(error: unknown): boolean {
     if (!error || typeof error !== 'object') return false;
     const msg = (error as { message?: unknown }).message;
-    if (typeof msg !== 'string') {
-      return false;
-    }
-    const normalized = msg.toLowerCase();
+    const code = (error as { code?: unknown }).code;
+    const normalized = typeof msg === 'string' ? msg.toLowerCase() : '';
+    const normalizedCode = typeof code === 'string' ? code.toLowerCase() : '';
     return (
       normalized.includes('terminated') ||
+      normalizedCode.includes('terminated') ||
       normalized.includes('upstream_stream_idle_timeout') ||
-      normalized.includes('upstream_stream_timeout')
+      normalizedCode.includes('upstream_stream_idle_timeout') ||
+      normalized.includes('upstream_stream_no_content_timeout') ||
+      normalizedCode.includes('upstream_stream_no_content_timeout') ||
+      normalized.includes('upstream_stream_content_idle_timeout') ||
+      normalizedCode.includes('upstream_stream_content_idle_timeout') ||
+      normalized.includes('upstream_stream_timeout') ||
+      normalizedCode.includes('upstream_stream_timeout')
     );
   }
 
@@ -232,6 +267,12 @@ export class ResponsesSseToJsonConverterRefactored {
     }
     if (errorCode === 'UPSTREAM_STREAM_IDLE_TIMEOUT' || normalized.includes('upstream_stream_idle_timeout')) {
       return { upstreamCode: 'UPSTREAM_STREAM_IDLE_TIMEOUT', statusCode: 504, retryable: true };
+    }
+    if (errorCode === 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT' || normalized.includes('upstream_stream_no_content_timeout')) {
+      return { upstreamCode: 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT', statusCode: 504, retryable: true };
+    }
+    if (errorCode === 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT' || normalized.includes('upstream_stream_content_idle_timeout')) {
+      return { upstreamCode: 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT', statusCode: 504, retryable: true };
     }
     if (errorCode === 'UPSTREAM_STREAM_TIMEOUT' || normalized.includes('upstream_stream_timeout')) {
       return { upstreamCode: 'UPSTREAM_STREAM_TIMEOUT', statusCode: 504, retryable: true };
@@ -286,8 +327,17 @@ export class ResponsesSseToJsonConverterRefactored {
     return `event: ${type}\ndata: ${data}\n\n`;
   }
 
-  private async *chunkStrings(stream: Readable): AsyncGenerator<string> {
-    for await (const chunk of stream) {
+  private async *chunkStrings(stream: Readable, context: SseToResponsesJsonContext): AsyncGenerator<string> {
+    const iterator = stream[Symbol.asyncIterator]();
+    while (true) {
+      const next = await this.readNextStreamChunk(iterator, context);
+      if (next.done) {
+        break;
+      }
+      const chunk = next.value;
+      const now = Date.now();
+      context.eventStats.firstFrameAtMs ??= now;
+      context.eventStats.lastFrameAtMs = now;
       if (typeof chunk === 'string') {
         yield chunk;
         continue;
@@ -298,6 +348,114 @@ export class ResponsesSseToJsonConverterRefactored {
       }
       yield this.serializeEventToSSE(chunk as Partial<ResponsesSseEvent> | Record<string, unknown>);
     }
+  }
+
+  private async readNextStreamChunk<T>(
+    iterator: AsyncIterator<T>,
+    context: SseToResponsesJsonContext
+  ): Promise<IteratorResult<T>> {
+    return this.raceWithTimeoutState(iterator.next(), context);
+  }
+
+  private resolveTimeoutState(context: SseToResponsesJsonContext): {
+    timeoutMs: number;
+    anchorMs: number;
+    code: 'UPSTREAM_STREAM_NO_FRAME_TIMEOUT' | 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT' | 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT';
+  } {
+    if (context.eventStats.firstFrameAtMs === undefined) {
+      const configured = Number(context.options.firstFrameTimeoutMs);
+      return {
+        timeoutMs: Number.isFinite(configured) && configured > 0
+          ? Math.floor(configured)
+          : DEFAULT_FIRST_FRAME_TIMEOUT_MS,
+        anchorMs: context.startTime,
+        code: 'UPSTREAM_STREAM_NO_FRAME_TIMEOUT'
+      };
+    }
+    if (context.eventStats.firstContentAtMs === undefined) {
+      const configured = Number(context.options.preAnchorIdleTimeoutMs ?? context.options.noContentTimeoutMs);
+      return {
+        timeoutMs: Number.isFinite(configured) && configured > 0
+          ? Math.floor(configured)
+          : DEFAULT_PRE_ANCHOR_IDLE_TIMEOUT_MS,
+        anchorMs: context.eventStats.lastFrameAtMs ?? context.eventStats.firstFrameAtMs ?? context.startTime,
+        code: 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT'
+      };
+    }
+    const configured = Number(context.options.contentIdleTimeoutMs);
+    return {
+      timeoutMs: Number.isFinite(configured) && configured > 0
+        ? Math.floor(configured)
+        : DEFAULT_CONTENT_IDLE_TIMEOUT_MS,
+      anchorMs: context.eventStats.lastContentAtMs ?? context.eventStats.firstContentAtMs ?? context.startTime,
+      code: 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'
+    };
+  }
+
+  private async raceWithTimeoutState<T>(
+    pending: Promise<IteratorResult<T>>,
+    context: SseToResponsesJsonContext
+  ): Promise<IteratorResult<T>> {
+    let timer: NodeJS.Timeout | null = null;
+    const timeoutState = this.resolveTimeoutState(context);
+    const remainingTimeoutMs = Math.max(1, timeoutState.anchorMs + Math.max(1, timeoutState.timeoutMs) - Date.now());
+    try {
+      return await Promise.race([
+        pending,
+        new Promise<IteratorResult<T>>((_, reject) => {
+          timer = setTimeout(
+            () => reject(this.createSemanticTimeoutError(timeoutState)),
+            remainingTimeoutMs
+          );
+          timer.unref?.();
+        })
+      ]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
+  private createSemanticTimeoutError(timeoutState: {
+    timeoutMs: number;
+    code: 'UPSTREAM_STREAM_NO_FRAME_TIMEOUT' | 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT' | 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT';
+  }): Error & {
+    code?: string;
+    status?: number;
+    statusCode?: number;
+    retryable?: boolean;
+    upstreamCode?: string;
+    requestExecutorProviderErrorStage?: string;
+  } {
+    const { code, timeoutMs } = timeoutState;
+    const message =
+      code === 'UPSTREAM_STREAM_NO_FRAME_TIMEOUT'
+        ? `Upstream stream produced no frame within ${timeoutMs}ms`
+        : code === 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT'
+          ? `Upstream stream produced frames but no semantic progress within ${timeoutMs}ms`
+          : `Upstream stream idle after semantic content for ${timeoutMs}ms`;
+    const error = new Error(message) as Error & {
+      code?: string;
+      status?: number;
+      statusCode?: number;
+      retryable?: boolean;
+      upstreamCode?: string;
+      requestExecutorProviderErrorStage?: string;
+    };
+    error.code = code;
+    error.status = 504;
+    error.statusCode = 504;
+    error.retryable = true;
+    error.upstreamCode = code;
+    error.requestExecutorProviderErrorStage = 'provider.sse_decode';
+    return error;
+  }
+
+  private markSemanticContentSeen(context: SseToResponsesJsonContext): void {
+    const now = Date.now();
+    context.eventStats.firstContentAtMs ??= now;
+    context.eventStats.lastContentAtMs = now;
   }
 
   /**
@@ -324,6 +482,39 @@ export class ResponsesSseToJsonConverterRefactored {
   private updateStats(context: SseToResponsesJsonContext, event: ResponsesSseEvent): void {
     context.eventStats.totalEvents++;
     context.eventStats.eventTypes[event.type] = (context.eventStats.eventTypes[event.type] || 0) + 1;
+
+    switch (event.type) {
+      case 'response.output_text.delta': {
+        const delta = typeof (event.data as { delta?: unknown } | undefined)?.delta === 'string'
+          ? String((event.data as { delta?: string }).delta)
+          : '';
+        if (delta.length > 0) {
+          this.markSemanticContentSeen(context);
+        }
+        break;
+      }
+      case 'response.reasoning_text.delta':
+      case 'response.reasoning_summary_text.delta': {
+        const delta = typeof (event.data as { delta?: unknown } | undefined)?.delta === 'string'
+          ? String((event.data as { delta?: string }).delta)
+          : '';
+        if (delta.length > 0 && hasExplicitToolWrapperProgress(delta)) {
+          this.markSemanticContentSeen(context);
+        }
+        break;
+      }
+      case 'response.function_call_arguments.delta': {
+        const delta = typeof (event.data as { delta?: unknown } | undefined)?.delta === 'string'
+          ? String((event.data as { delta?: string }).delta)
+          : '';
+        if (delta.length > 0) {
+          this.markSemanticContentSeen(context);
+        }
+        break;
+      }
+      default:
+        break;
+    }
 
     // 根据事件类型更新特定统计
     switch (event.type) {
@@ -448,6 +639,21 @@ export class ResponsesSseToJsonConverterRefactored {
    */
   getActiveContexts(): Map<string, SseToResponsesJsonContext> {
     return new Map(this.contexts);
+  }
+
+  private attachDecodeStats(response: ResponsesResponse, context: SseToResponsesJsonContext): void {
+    Object.defineProperty(response, '__rccDecodeStats', {
+      value: {
+        ...context.eventStats,
+        firstFrameAtMs: context.eventStats.firstFrameAtMs,
+        lastFrameAtMs: context.eventStats.lastFrameAtMs,
+        firstContentAtMs: context.eventStats.firstContentAtMs,
+        lastContentAtMs: context.eventStats.lastContentAtMs
+      },
+      configurable: true,
+      enumerable: false,
+      writable: false
+    });
   }
 }
 

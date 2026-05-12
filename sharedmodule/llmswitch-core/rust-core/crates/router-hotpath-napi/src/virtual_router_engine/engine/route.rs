@@ -1,5 +1,6 @@
 use napi::Env;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 
 use super::selection::build_provider_not_available_error;
 use super::types::SelectionResult;
@@ -18,7 +19,7 @@ use crate::virtual_router_engine::instructions::{
 };
 use crate::virtual_router_engine::provider_registry::ProviderRegistry;
 use crate::virtual_router_engine::routing::{
-    extract_excluded_provider_keys,
+    extract_excluded_provider_keys, extract_key_alias,
     filter_candidates_by_state, parse_direct_provider_model,
     resolve_instruction_process_mode_for_selection, resolve_instruction_target,
     resolve_session_scope, resolve_sticky_key, resolve_stop_message_scope,
@@ -27,17 +28,6 @@ use crate::virtual_router_engine::routing::{
 use crate::virtual_router_engine::routing_state_store::{
     load_routing_instruction_state, persist_routing_instruction_state,
 };
-
-fn extract_key_alias_from_provider_key(provider_key: &str) -> Option<String> {
-    let trimmed = provider_key.trim();
-    let first_dot = trimmed.find('.')?;
-    let remainder = &trimmed[first_dot + 1..];
-    let second_dot = remainder.find('.')?;
-    if second_dot == 0 {
-        return None;
-    }
-    Some(remainder[..second_dot].to_string())
-}
 
 fn normalize_instruction_target_against_registry(
     target: &crate::virtual_router_engine::instructions::InstructionTarget,
@@ -59,7 +49,7 @@ fn normalize_instruction_target_against_registry(
         return target.clone();
     }
     for provider_key in registry.list_provider_keys(&provider) {
-        let Some(alias) = extract_key_alias_from_provider_key(&provider_key) else {
+        let Some(alias) = extract_key_alias(&provider_key) else {
             continue;
         };
         let Some(profile) = registry.get(&provider_key) else {
@@ -411,14 +401,15 @@ impl VirtualRouterEngineCore {
                         &self.provider_registry,
                     );
                     let cooldown_candidate_keys = eligible.clone();
-                    let excluded_keys = extract_excluded_provider_keys(metadata);
-                    let mut available: Vec<String> = eligible
+                    let excluded_keys: HashSet<String> = extract_excluded_provider_keys(metadata)
                         .into_iter()
-                        .filter(|key| self.is_provider_available(env, key))
                         .collect();
-                    if !excluded_keys.is_empty() {
-                        available.retain(|key| !excluded_keys.contains(key));
-                    }
+                    let available: Vec<String> = self.apply_standard_filters(
+                        env,
+                        &eligible,
+                        &routing_state_for_selection,
+                        &excluded_keys,
+                    );
                     if available.is_empty() {
                         return Err(build_provider_not_available_error(
                             self,
@@ -457,7 +448,6 @@ impl VirtualRouterEngineCore {
                             &format!("direct_model:{}.{}", provider_id, model_id),
                             marker_reason.clone(),
                         ),
-                        fallback: false,
                         candidates: vec!["direct".to_string()],
                     };
                     let selection = SelectionResult::new(

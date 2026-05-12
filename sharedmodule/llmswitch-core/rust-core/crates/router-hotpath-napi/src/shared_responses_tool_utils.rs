@@ -332,22 +332,32 @@ fn prune_private_extra_fields(target: &mut Map<String, Value>) {
     }
 }
 
+fn prune_internal_tooling_fields(target: &mut Map<String, Value>) {
+    let keys: Vec<String> = target.keys().cloned().collect();
+    for key in keys {
+        if key == "contextFile" || key == "contextFileEnabled" {
+            target.remove(key.as_str());
+            continue;
+        }
+        let remove_empty = if let Some(Value::Object(child)) = target.get_mut(key.as_str()) {
+            prune_internal_tooling_fields(child);
+            child.is_empty()
+        } else {
+            false
+        };
+        if remove_empty {
+            target.remove(key.as_str());
+        }
+    }
+}
+
 pub(crate) fn strip_internal_tooling_metadata_impl(metadata: &mut Value) {
     let Some(record) = metadata.as_object_mut() else {
         return;
     };
     record.remove("toolCallIdStyle");
     record.remove(RAW_SYSTEM_SENTINEL);
-    let remove_deepseek = if let Some(Value::Object(deepseek)) = record.get_mut("deepseek") {
-        deepseek.remove("contextFile");
-        deepseek.remove("contextFileEnabled");
-        deepseek.is_empty()
-    } else {
-        false
-    };
-    if remove_deepseek {
-        record.remove("deepseek");
-    }
+    prune_internal_tooling_fields(record);
     let remove_extra = if let Some(Value::Object(extra_fields)) = record.get_mut("extraFields") {
         prune_private_extra_fields(extra_fields);
         extra_fields.is_empty()
@@ -422,14 +432,14 @@ mod tests {
     #[test]
     fn strips_internal_tooling_metadata_fields() {
         let mut metadata = serde_json::json!({
-            "toolCallIdStyle": "fc",
-            "__rcc_raw_system": "keep out",
-            "deepseek": {
-                "toolCallState": "text_tool_calls",
-                "contextFileEnabled": true,
-                "contextFile": {
-                    "filename": "RCC_HISTORY.txt",
-                    "content": "# RCC_HISTORY.txt"
+                "toolCallIdStyle": "fc",
+                "__rcc_raw_system": "keep out",
+                "providerA": {
+                    "toolCallState": "text_tool_calls",
+                    "contextFileEnabled": true,
+                    "contextFile": {
+                    "filename": "context.txt",
+                    "content": "# context"
                 }
             },
             "extraFields": {
@@ -440,10 +450,10 @@ mod tests {
         strip_internal_tooling_metadata_impl(&mut metadata);
         assert!(metadata.get("toolCallIdStyle").is_none());
         assert!(metadata.get("__rcc_raw_system").is_none());
-        assert!(metadata["deepseek"].get("contextFileEnabled").is_none());
-        assert!(metadata["deepseek"].get("contextFile").is_none());
+        assert!(metadata["providerA"].get("contextFileEnabled").is_none());
+        assert!(metadata["providerA"].get("contextFile").is_none());
         assert_eq!(
-            metadata["deepseek"]["toolCallState"],
+            metadata["providerA"]["toolCallState"],
             Value::String("text_tool_calls".to_string())
         );
         assert!(metadata["extraFields"].get("__rcc_private").is_none());

@@ -294,6 +294,10 @@ export interface SseToResponsesJsonOptions {
   requestId: string;
   model: string;
   timeoutMs?: number;
+  firstFrameTimeoutMs?: number;
+  noContentTimeoutMs?: number;
+  preAnchorIdleTimeoutMs?: number;
+  contentIdleTimeoutMs?: number;
   validateEvents?: boolean;
   enableSequenceValidation?: boolean;
   accumulateOutputItems?: boolean;
@@ -319,6 +323,14 @@ export interface ResponsesEventStats {
   messageEventsCount: number;
   errorCount: number;
   lastEventTime?: number;
+  // wall clock ms of first semantic content / activity observed in stream
+  firstContentAtMs?: number;
+  // wall clock ms of latest semantic content / activity observed in stream
+  lastContentAtMs?: number;
+  // wall clock ms of first upstream frame / chunk observed in stream
+  firstFrameAtMs?: number;
+  // wall clock ms of latest upstream frame / chunk observed in stream
+  lastFrameAtMs?: number;
 }
 
 // 输出项处理状态

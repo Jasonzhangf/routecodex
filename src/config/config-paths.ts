@@ -18,9 +18,3 @@ export function resolveRouteCodexConfigPath(preferredPath?: string): string {
   });
   return result.resolvedPath;
 }
-
-/**
- * Legacy configuration path resolution (kept for emergency fallback)
- * @deprecated Use UnifiedConfigPathResolver instead
- */
-// Legacy resolver removed: unified resolver is the single source of truth

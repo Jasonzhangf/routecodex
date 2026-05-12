@@ -69,7 +69,7 @@ const CONFIG_FILE_PREFERENCES = [
   'qwen.json',         // Qwen provider configuration
 ];
 
-function safeProcessCwd(fallback?: string): string {
+function safeProcessCwd(defaultValue?: string): string {
   try {
     const cwd = process.cwd();
     if (typeof cwd === 'string' && cwd.trim()) {
@@ -78,9 +78,9 @@ function safeProcessCwd(fallback?: string): string {
   } catch {
     // current working directory may no longer exist
   }
-  const fallbackValue = String(fallback || '').trim();
-  if (fallbackValue) {
-    return path.resolve(fallbackValue);
+  const defaultValuePath = String(defaultValue || '').trim();
+  if (defaultValuePath) {
+    return path.resolve(defaultValuePath);
   }
   const home = homedir();
   if (typeof home === 'string' && home.trim()) {

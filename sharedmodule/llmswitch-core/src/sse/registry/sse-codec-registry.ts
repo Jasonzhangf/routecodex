@@ -23,6 +23,10 @@ export interface SseToJsonContext {
   requestId: string;
   model?: string;
   direction?: 'request' | 'response';
+  firstFrameTimeoutMs?: number;
+  noContentTimeoutMs?: number;
+  preAnchorIdleTimeoutMs?: number;
+  contentIdleTimeoutMs?: number;
 }
 
 export interface NormalizeSseContext {
@@ -99,7 +103,11 @@ function createChatCodec(): SseCodec {
     async convertSseToJson(stream: SseStreamInput, context: SseToJsonContext): Promise<unknown> {
       return chatConverters.sseToJson.convertSseToJson(stream, {
         requestId: context.requestId,
-        model: context.model ?? 'unknown'
+        model: context.model ?? 'unknown',
+        firstFrameTimeoutMs: context.firstFrameTimeoutMs,
+        noContentTimeoutMs: context.noContentTimeoutMs,
+        preAnchorIdleTimeoutMs: context.preAnchorIdleTimeoutMs,
+        contentIdleTimeoutMs: context.contentIdleTimeoutMs
       });
     },
     async normalize(stream: SseStreamInput): Promise<SseStreamInput> {
@@ -123,7 +131,11 @@ function createResponsesCodec(): SseCodec {
     async convertSseToJson(stream: SseStreamInput, context: SseToJsonContext): Promise<unknown> {
       return responsesConverters.sseToJson.convertSseToJson(stream, {
         requestId: context.requestId,
-        model: context.model ?? 'unknown'
+        model: context.model ?? 'unknown',
+        firstFrameTimeoutMs: context.firstFrameTimeoutMs,
+        noContentTimeoutMs: context.noContentTimeoutMs,
+        preAnchorIdleTimeoutMs: context.preAnchorIdleTimeoutMs,
+        contentIdleTimeoutMs: context.contentIdleTimeoutMs
       });
     },
     async normalize(stream: SseStreamInput): Promise<SseStreamInput> {
@@ -145,7 +157,12 @@ function createAnthropicCodec(): SseCodec {
     },
     async convertSseToJson(stream: SseStreamInput, context: SseToJsonContext): Promise<unknown> {
       return anthropicConverters.sseToJson.convertSseToJson(stream, {
-        requestId: context.requestId
+        requestId: context.requestId,
+        model: context.model,
+        firstFrameTimeoutMs: context.firstFrameTimeoutMs,
+        noContentTimeoutMs: context.noContentTimeoutMs,
+        preAnchorIdleTimeoutMs: context.preAnchorIdleTimeoutMs,
+        contentIdleTimeoutMs: context.contentIdleTimeoutMs
       });
     },
     async normalize(stream: SseStreamInput): Promise<SseStreamInput> {

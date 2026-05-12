@@ -50,7 +50,7 @@ fn build_tool_followup_instruction(root: &Map<String, Value>) -> Option<String> 
 
     let mut lines = vec![super::history_context::RCC_HISTORY_TOOL_RESUME_PROMPT.to_string()];
     lines.push(
-        "Treat any prior assistant tool call in RCC_HISTORY.txt as already executed when its result is present there.".to_string(),
+        "Treat any prior assistant tool call in context as already executed when its result is present there.".to_string(),
     );
     lines.push(
         "Only emit a fresh tool call if a new next-step tool action is still necessary after consuming that submitted result.".to_string(),
@@ -63,7 +63,7 @@ fn build_tool_followup_instruction(root: &Map<String, Value>) -> Option<String> 
     }
     if !resume_outputs.is_empty() {
         lines.push(
-            "The latest submitted tool outputs are already part of the working state in RCC_HISTORY.txt.".to_string(),
+            "The latest submitted tool outputs are already part of the working state in context.".to_string(),
         );
     }
     Some(lines.join(" "))

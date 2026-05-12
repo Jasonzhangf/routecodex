@@ -3,6 +3,7 @@ import { __requestExecutorTestables, createRequestExecutor } from '../../../../s
 import { getServerToolRuntimeState, setServerToolEnabled } from '../../../../src/server/runtime/http-server/servertool-admin-state';
 import type { ProviderHandle } from '../../../../src/server/runtime/http-server/types';
 import { StatsManager } from '../../../../src/server/runtime/http-server/stats-manager';
+import type { ProviderTrafficGovernorLike } from '../../../../src/server/runtime/http-server/provider-traffic-governor.js';
 
 function normalizeMinimalSuccessResponse(result: unknown): unknown {
   if (!result || typeof result !== 'object') {
@@ -80,6 +81,66 @@ describe('HubRequestExecutor failover', () => {
 
   afterEach(() => {
     setServerToolEnabled(previousServerToolState.enabled, previousServerToolState.updatedBy);
+  });
+
+  test('propagates concurrency busy state by runtime/alias scope instead of provider target key', async () => {
+    let busyCallback: ((scopeKey: string, busy: boolean) => void) | null = null;
+    const fakeTrafficGovernor: ProviderTrafficGovernorLike = {
+      setConcurrencyBusyCallback(cb) {
+        busyCallback = cb;
+      },
+      async acquire() {
+        return {
+          permit: {
+            runtimeKey: 'deepseek-web.2',
+            providerKey: 'deepseek-web.2.deepseek-v4-pro',
+            requestId: 'req-1',
+            leaseId: 'lease-1',
+            stateKey: 'deepseek-web.2',
+            maxInFlight: 1
+          },
+          policy: {
+            concurrency: { maxInFlight: 1, acquireTimeoutMs: 100, staleLeaseMs: 1000 },
+            rpm: { requestsPerMinute: 10, acquireTimeoutMs: 100, windowMs: 60000 }
+          },
+          waitedMs: 0,
+          activeInFlight: 1,
+          rpmInWindow: 1
+        };
+      },
+      async release() {
+        return { released: true, activeInFlight: 0 };
+      },
+      async isProviderAtConcurrencyCapacity() { return false; },
+      isProviderAtConcurrencyCapacitySync() { return false; },
+      async observeOutcome() {}
+    };
+    const marks: string[] = [];
+    createRequestExecutor({
+      runtimeManager: {
+        resolveRuntimeKey: jest.fn(),
+        getHandleByRuntimeKey: jest.fn()
+      },
+      getHubPipeline: () => ({
+        getVirtualRouter: () => ({
+          markConcurrencyScopeBusy(key: string) {
+            marks.push(`busy:${key}`);
+          },
+          markConcurrencyScopeIdle(key: string) {
+            marks.push(`idle:${key}`);
+          }
+        })
+      } as any),
+      getModuleDependencies: () => ({}) as any,
+      logStage: jest.fn(),
+      shouldLogStageEvent: () => false,
+      stats: new StatsManager(),
+      trafficGovernor: fakeTrafficGovernor
+    });
+    expect(busyCallback).not.toBeNull();
+    busyCallback?.('deepseek-web.2', true);
+    busyCallback?.('deepseek-web.2', false);
+    expect(marks).toEqual(['busy:deepseek-web.2', 'idle:deepseek-web.2']);
   });
 
   test('covers request-executor helper snapshots and truncation utilities', async () => {
@@ -421,6 +482,34 @@ describe('HubRequestExecutor failover', () => {
       }
     })).toBe(true);
 
+    expect(__requestExecutorTestables.isRequiredToolCallTurn({
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      },
+      responses: {
+        toolChoice: 'required'
+      }
+    })).toBe(true);
+
+    expect(__requestExecutorTestables.isRequiredToolCallTurn({
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      },
+      responses: {
+        toolChoice: 'auto'
+      }
+    })).toBe(false);
+
     expect(__requestExecutorTestables.isToolResultFollowupTurn({
       messages: [
         {
@@ -474,6 +563,9 @@ describe('HubRequestExecutor failover', () => {
             function: { name: 'exec_command' }
           }
         ]
+      },
+      responses: {
+        toolChoice: 'required'
       }
     })).toMatchObject({
       marker: 'chat_missing_required_tool_call'
@@ -601,6 +693,9 @@ describe('HubRequestExecutor failover', () => {
           }
         ]
       },
+      responses: {
+        toolChoice: 'auto'
+      },
       messages: [
         {
           role: 'tool',
@@ -633,6 +728,9 @@ describe('HubRequestExecutor failover', () => {
           }
         ]
       },
+      responses: {
+        toolChoice: 'required'
+      },
       messages: [
         {
           role: 'user',
@@ -642,6 +740,38 @@ describe('HubRequestExecutor failover', () => {
     })).toMatchObject({
       marker: 'responses_missing_required_tool_call'
     });
+
+    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+      status: 'completed',
+      output_text: '我已经完成审计，下面是结果。',
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            { type: 'output_text', text: '我已经完成审计，下面是结果。' }
+          ]
+        }
+      ]
+    }, {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      },
+      responses: {
+        toolChoice: 'auto'
+      },
+      messages: [
+        {
+          role: 'user',
+          content: '继续执行'
+        }
+      ]
+    })).toBeNull();
 
     const malformedToolWrapperText = `<tool_call>
 {"arguments":{"cmd":"bash -lc 'pwd'","justification":"check"}}
@@ -675,6 +805,9 @@ describe('HubRequestExecutor failover', () => {
           }
         ]
       },
+      responses: {
+        toolChoice: 'required'
+      },
       messages: [
         {
           role: 'user',
@@ -705,6 +838,9 @@ describe('HubRequestExecutor failover', () => {
             function: { name: 'exec_command' }
           }
         ]
+      },
+      responses: {
+        toolChoice: 'auto'
       },
       continuation: {
         toolContinuation: {
@@ -754,6 +890,9 @@ describe('HubRequestExecutor failover', () => {
           }
         ]
       },
+      responses: {
+        toolChoice: 'required'
+      },
       messages: [
         {
           role: 'user',
@@ -788,6 +927,9 @@ describe('HubRequestExecutor failover', () => {
             function: { name: 'exec_command' }
           }
         ]
+      },
+      responses: {
+        toolChoice: 'required'
       },
       messages: [
         {

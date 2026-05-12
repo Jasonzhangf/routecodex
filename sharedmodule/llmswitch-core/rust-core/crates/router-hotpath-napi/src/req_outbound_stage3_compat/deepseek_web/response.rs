@@ -217,6 +217,7 @@ fn detect_forbidden_hidden_tool_transport_text(value: &str) -> bool {
     let patterns = [
         r"(?is)<\s*use_mcp_tool\s*>[\s\S]*?<\s*/\s*use_mcp_tool\s*>",
         r"(?is)<\s*previous_tool_call\s*>[\s\S]*?<\s*/\s*previous_tool_call\s*>",
+        r"(?is)<\s*\|\s*DSML\s*\|\s*interrupt\s*\|\s*reason\s*>[\s\S]*?<\s*/\s*\|\s*DSML\s*\|\s*interrupt\s*\|\s*reason\s*>",
         r#"(?is)<\s*invoke(?:\s+[^>]*)?>[\s\S]*?<\s*/\s*invoke\s*>"#,
         r#"(?is)<\s*parameter(?:\s+[^>]*)?>[\s\S]*?<\s*/\s*parameter\s*>"#,
         r"(?is)<\s*server_name\s*>[\s\S]*?<\s*/\s*server_name\s*>",
@@ -275,9 +276,24 @@ fn detect_forbidden_hidden_tool_transport_payload(payload: &Value) -> bool {
 fn sanitize_deepseek_meta_leakage_text(value: &str) -> (String, bool) {
     let mut text = value.to_string();
     let mut detected = false;
+
+    let final_wrapper_re =
+        Regex::new(r"(?is)^\s*<\s*final\s*>\s*([\s\S]*?)\s*<\s*/\s*final\s*>\s*$").ok();
+    if let Some(re) = final_wrapper_re {
+        if let Some(caps) = re.captures(&text) {
+            let inner = caps
+                .get(1)
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
+            detected = true;
+            text = inner;
+        }
+    }
+
     let paired_patterns = [
         r"(?is)<\s*use_mcp_tool\s*>[\s\S]*?<\s*/\s*use_mcp_tool\s*>",
         r"(?is)<\s*previous_tool_call\s*>[\s\S]*?<\s*/\s*previous_tool_call\s*>",
+        r"(?is)<\s*\|\s*DSML\s*\|\s*interrupt\s*\|\s*reason\s*>[\s\S]*?<\s*/\s*\|\s*DSML\s*\|\s*interrupt\s*\|\s*reason\s*>",
         r#"(?is)<\s*invoke(?:\s+[^>]*)?>[\s\S]*?<\s*/\s*invoke\s*>"#,
         r#"(?is)<\s*parameter(?:\s+[^>]*)?>[\s\S]*?<\s*/\s*parameter\s*>"#,
         r"(?is)<\s*server_name\s*>[\s\S]*?<\s*/\s*server_name\s*>",
@@ -298,6 +314,8 @@ fn sanitize_deepseek_meta_leakage_text(value: &str) -> (String, bool) {
 
     let meta_line_patterns = [
         r"(?im)^[ \t]*<?[^>\r\n]*(?:tool-call block|system prompt|exact format)[^>\r\n]*>?\s*\r?\n?",
+        r"(?im)^[ \t]*<\s*\|\s*DSML\s*\|\s*interrupt\s*\|\s*reason\s*>.*$",
+        r"(?im)^.*</\s*\|\s*DSML\s*\|\s*interrupt\s*\|\s*reason\s*>\s*$",
         r"(?im)^[ \t]*<\s*(?:server_name|tool_name|arguments)\s*>[\s\S]*?<\s*/\s*(?:server_name|tool_name|arguments)\s*>\s*\r?\n?",
         r"(?im)^[ \t]*<\s*/?\s*(?:server_name|tool_name|arguments)\s*>\s*\r?\n?",
     ];
@@ -469,16 +487,17 @@ fn strip_rcc_text(raw: &str) -> String {
     if trimmed.is_empty() {
         return String::new();
     }
-    let patterns = [
-        "Continue from the latest state in the attached RCC_HISTORY.txt context. Treat it as the current working state and answer the latest user request directly.",
-        "# RCC_HISTORY.txt",
-        "RCC_HISTORY.txt",
-    ];
-    let mut text = raw.to_string();
-    for pattern in patterns {
-        text = text.replace(pattern, "");
+    let prompt_line =
+        "Continue from the latest state in the attached context. Treat it as the current working state and answer the latest user request directly.";
+    let mut kept: Vec<&str> = Vec::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed == prompt_line || trimmed == "# context" || trimmed == "context" {
+            continue;
+        }
+        kept.push(line);
     }
-    text.trim().to_string()
+    kept.join("\n").trim().to_string()
 }
 
 fn scrub_rcc_from_deepseek_payload(payload: &mut Value) {

@@ -20,42 +20,6 @@ interface ErrorContext {
   context: unknown;
 }
 
-interface DeferredHandler {
-  resolve: (value: unknown) => void;
-  reject: (reason?: unknown) => void;
-}
-
-export interface RateLimitPipelineDescriptor {
-  pipelineId: string;
-  [key: string]: unknown;
-}
-
-export interface RateLimitHookTelemetryEvent {
-  type: '429-backoff' | '429-final-fail';
-  timestamp: number;
-  pipelineId?: string;
-  delay?: number;
-  requestId?: string;
-  message?: string;
-}
-
-export interface RateLimitHandlerHooks {
-  getAvailablePipelines?(exclude: Set<string>): RateLimitPipelineDescriptor[];
-  selectNextRoundRobin?(candidates: RateLimitPipelineDescriptor[]): RateLimitPipelineDescriptor;
-  processWithPipeline?(pipeline: RateLimitPipelineDescriptor): Promise<unknown>;
-  getPipelineById?(pipelineId: string): RateLimitPipelineDescriptor | undefined;
-  errorCenter?: {
-    handleError?(event: RateLimitHookTelemetryEvent): Promise<void>;
-  };
-}
-
-export interface RateLimitHandlerContext {
-  hooks?: RateLimitHandlerHooks;
-  schedule?: number[];
-  attemptedPipelineIds?: string[];
-  deferred?: DeferredHandler;
-  request?: { route?: { requestId?: string } };
-}
 
 /**
  * Error handler function type
@@ -509,218 +473,24 @@ export class ErrorHandlerRegistry {
       description: 'Handle network connectivity errors',
     });
 
-    // Provider error handler
+    // Provider error handler (strategy delegated to Virtual Router policy; log only)
     this.registerErrorHandler({
       errorCode: 'provider_error',
       handler: async (context: ErrorContext) => {
-        try {
-          const handlerContext = (context.context as RateLimitHandlerContext | undefined) ?? {};
-          const hooks = handlerContext.hooks ?? {};
-          const deferred: DeferredHandler = handlerContext.deferred ?? {
-            resolve: () => { },
-            reject: () => { }
-          };
-
-          // Basic logging
-          console.error(`Provider Error in ${context.source}: ${context.error}`);
-
-          // Try pipeline switch/failover if hooks provided
-          const attempted: string[] = Array.isArray(handlerContext.attemptedPipelineIds)
-            ? handlerContext.attemptedPipelineIds
-            : [];
-          const exclude = new Set<string>(attempted);
-
-          let candidates: RateLimitPipelineDescriptor[] = [];
-          try {
-            // Ask for candidates excluding the ones we already tried
-            candidates = hooks.getAvailablePipelines ? hooks.getAvailablePipelines(exclude) : [];
-          } catch (candidateError) {
-            logErrorHandlerRegistryNonBlocking('provider_error_handler.getAvailablePipelines', candidateError, {
-              source: context.source
-            });
-            candidates = [];
-          }
-
-          if (Array.isArray(candidates) && candidates.length > 0) {
-            try {
-              // Select next candidate (default to first available if no selector)
-              const next = hooks.selectNextRoundRobin ? hooks.selectNextRoundRobin(candidates) : candidates[0];
-
-              // Notify error center about the switch (optional telemetry)
-              try {
-                await hooks.errorCenter?.handleError?.({
-                  type: '429-backoff', // Reuse existing event type or add 'provider-failover'
-                  timestamp: Date.now(),
-                  pipelineId: next.pipelineId,
-                  requestId: handlerContext.request?.route?.requestId,
-                  message: `Failover triggered by ${context.error}`
-                } as any);
-              } catch (telemetryError) {
-                logErrorHandlerRegistryNonBlocking('provider_error_handler.errorCenter.handleError', telemetryError, {
-                  source: context.source
-                });
-              }
-
-              // Execute retry
-              const resp = await (hooks.processWithPipeline
-                ? hooks.processWithPipeline(next)
-                : Promise.reject(new Error('processWithPipeline not provided')));
-
-              deferred.resolve(resp);
-              return;
-            } catch (e) {
-              // If retry fails, reject (or recursively handle? For now reject context to bubble up)
-              deferred.reject(e);
-              return;
-            }
-          }
-
-          // No candidates or hooks -> reject with original error to bubble up
-          deferred.reject(context.error);
-        } catch (e) {
-          // Fallback if handler logic fails
-          try {
-            (context.context as RateLimitHandlerContext | undefined)?.deferred?.reject?.(context.error);
-          } catch (rejectError) {
-            logErrorHandlerRegistryNonBlocking('provider_error_handler.defer_reject', rejectError, {
-              source: context.source
-            });
-          }
-        }
+        console.error(`Provider Error in ${context.source}: ${context.error}`);
       },
       priority: 2,
-      description: 'Handle AI provider errors',
+      description: 'Log provider errors',
     });
 
-    // Critical error handler
-    this.registerErrorHandler({
-      errorCode: 'initialization_error',
-      handler: async (context: ErrorContext) => {
-        console.error(`Critical Error in ${context.source}: ${context.error}`);
-        // Could implement service restart logic here
-      },
-      priority: 0,
-      description: 'Handle critical system errors',
-    });
-
-    // 429 rate limit handler (delegates strategy to provided hooks; no hardcoded logic in caller)
+    // Rate limit error handler (strategy delegated to Virtual Router policy; log only)
     this.registerErrorHandler({
       errorCode: 'rate_limit_error',
       handler: async (context: ErrorContext) => {
-        try {
-          const rateLimitContext = (context.context as RateLimitHandlerContext | undefined) ?? {};
-          const hooks = rateLimitContext.hooks ?? {};
-          const schedule: number[] =
-            Array.isArray(rateLimitContext.schedule) && rateLimitContext.schedule.length
-              ? rateLimitContext.schedule
-              : [10000, 30000, 60000];
-          const attempted: string[] = Array.isArray(rateLimitContext.attemptedPipelineIds)
-            ? rateLimitContext.attemptedPipelineIds
-            : [];
-          const deferred: DeferredHandler =
-            rateLimitContext.deferred ?? {
-              resolve: () => { },
-              reject: () => { }
-            };
-
-          // Try pipeline switch first if available
-          const exclude = new Set<string>(attempted);
-          let candidates: RateLimitPipelineDescriptor[] = [];
-          try {
-            candidates = hooks.getAvailablePipelines ? hooks.getAvailablePipelines(exclude) : [];
-          } catch (candidateError) {
-            logErrorHandlerRegistryNonBlocking('rate_limit_handler.getAvailablePipelines', candidateError, {
-              source: context.source
-            });
-            candidates = [];
-          }
-
-          if (Array.isArray(candidates) && candidates.length > 0) {
-            try {
-              const next = hooks.selectNextRoundRobin ? hooks.selectNextRoundRobin(candidates) : candidates[0];
-              const resp = await (hooks.processWithPipeline
-                ? hooks.processWithPipeline(next)
-                : Promise.reject(new Error('processWithPipeline not provided')));
-              deferred.resolve(resp);
-              return;
-            } catch (e) {
-              deferred.reject(e);
-              return;
-            }
-          }
-
-          // No candidates: backoff on last attempted pipeline
-          const lastId = attempted.length ? attempted[attempted.length - 1] : undefined;
-          const pipeline = lastId && hooks.getPipelineById ? hooks.getPipelineById(lastId) : undefined;
-          if (!pipeline) {
-            deferred.reject(context.error || new Error('No available pipelines for 429 handling'));
-            return;
-          }
-
-          for (const delay of schedule) {
-            try {
-              // notify error center about backoff event (best-effort)
-              try {
-                await hooks.errorCenter?.handleError?.({
-                  type: '429-backoff',
-                  timestamp: Date.now(),
-                  pipelineId: pipeline.pipelineId,
-                  delay,
-                  requestId: rateLimitContext.request?.route?.requestId
-                });
-              } catch (telemetryError) {
-                logErrorHandlerRegistryNonBlocking('rate_limit_handler.errorCenter.backoff', telemetryError, {
-                  source: context.source,
-                  pipelineId: pipeline.pipelineId
-                });
-              }
-              const resp = await (hooks.processWithPipeline
-                ? hooks.processWithPipeline(pipeline)
-                : Promise.reject(new Error('processWithPipeline not provided')));
-              deferred.resolve(resp);
-              return;
-            } catch (e) {
-              const errorObject = (typeof e === 'object' && e !== null ? e : {}) as Record<string, unknown>;
-              const statusCode = typeof errorObject['statusCode'] === 'number' ? Number(errorObject['statusCode']) : undefined;
-              const code = errorObject['code'];
-              const is429 = statusCode === 429 || String(code ?? '').toUpperCase() === 'HTTP_429';
-              if (!is429) {
-                deferred.reject(e);
-                return;
-              }
-              // else continue next delay
-            }
-          }
-
-          // exhausted
-          try {
-            await hooks.errorCenter?.handleError?.({
-              type: '429-final-fail',
-              timestamp: Date.now(),
-              pipelineId: pipeline.pipelineId,
-              requestId: rateLimitContext.request?.route?.requestId,
-              message: context.error instanceof Error ? context.error.message : undefined
-            });
-          } catch (telemetryError) {
-            logErrorHandlerRegistryNonBlocking('rate_limit_handler.errorCenter.final', telemetryError, {
-              source: context.source,
-              pipelineId: pipeline.pipelineId
-            });
-          }
-          deferred.reject(context.error || new Error('429 handling exhausted'));
-        } catch (e) {
-          // If the handler itself fails, reject via deferred if present
-          try {
-            (context.context as RateLimitHandlerContext | undefined)?.deferred?.reject?.(e);
-          } catch (rejectError) {
-            logErrorHandlerRegistryNonBlocking('rate_limit_handler.deferredReject', rejectError, {
-              source: context.source
-            });
-          }
-        }
+        console.error(`Rate Limit Error in ${context.source}: ${context.error}`);
       },
       priority: 1,
-      description: 'Handle 429 rate limit via ErrorHandlingCenter hooks (switch or backoff)'
+      description: 'Log rate limit errors',
     });
   }
 

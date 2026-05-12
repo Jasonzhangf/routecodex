@@ -19,7 +19,11 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
   const raw = await fs.readFile(configPath, 'utf-8');
   const format = detectUserConfigFormat(configPath);
   const userConfig = parseUserConfigText(raw, format);
-  const { userConfig: materializedUserConfig, providerProfiles } = await materializeRouteCodexConfig(userConfig);
+  const providerRootDir = resolveProviderRootDirFromEnv();
+  const { userConfig: materializedUserConfig, providerProfiles } = await materializeRouteCodexConfig(
+    userConfig,
+    providerRootDir
+  );
 
   return {
     configPath,
@@ -29,6 +33,19 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
 }
 
 export { collectV2ConfigSourceErrors } from './user-config-loader.js';
+
+function resolveProviderRootDirFromEnv(): string | undefined {
+  const candidates = [
+    process.env.ROUTECODEX_PROVIDER_DIR,
+    process.env.RCC_PROVIDER_DIR
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return path.resolve(candidate.trim());
+    }
+  }
+  return undefined;
+}
 
 async function resolveConfigPath(explicit?: string): Promise<string> {
   if (explicit && explicit.trim()) {

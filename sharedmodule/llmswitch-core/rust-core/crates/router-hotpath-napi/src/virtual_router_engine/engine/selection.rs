@@ -19,9 +19,9 @@ use crate::virtual_router_engine::instructions::RoutingInstructionState;
 use crate::virtual_router_engine::quota::{call_quota_view, QuotaViewEntry};
 use crate::virtual_router_engine::routing::{
     build_route_queue, default_pool_supports_capability,
-    extract_excluded_provider_keys, extract_runtime_now_ms, filter_candidates_by_state,
-    filter_pools_by_capability, resolve_instruction_target, route_has_targets,
-    InstructionTargetMatchMode,
+    extract_excluded_provider_keys, extract_provider_id, extract_runtime_now_ms,
+    filter_candidates_by_state, filter_pools_by_capability, resolve_instruction_target,
+    route_has_targets, InstructionTargetMatchMode,
 };
 use crate::virtual_router_engine::time_utils::now_ms;
 
@@ -52,6 +52,27 @@ fn order_instruction_keys_by_default_route(
 }
 
 impl VirtualRouterEngineCore {
+    /// Apply standard candidate filters: routing state, excluded keys, and provider availability.
+    /// This is the single filter chain used by all selection paths (forced, sticky, prefer, pool).
+    pub(crate) fn apply_standard_filters(
+        &mut self,
+        env: Env,
+        candidates: &[String],
+        routing_state: &RoutingInstructionState,
+        excluded_keys: &HashSet<String>,
+    ) -> Vec<String> {
+        let filtered = filter_candidates_by_state(
+            candidates,
+            routing_state,
+            &self.provider_registry,
+        );
+        filtered
+            .into_iter()
+            .filter(|key| !excluded_keys.contains(key))
+            .filter(|key| self.is_provider_available(env, key))
+            .collect()
+    }
+
     pub(crate) fn select_provider(
         &mut self,
         requested_route: &str,
@@ -62,19 +83,16 @@ impl VirtualRouterEngineCore {
         bound_alias_prefix: Option<&str>,
         env: Env,
     ) -> Result<SelectionResult, String> {
-        let excluded_keys = extract_excluded_provider_keys(metadata);
+        let excluded_keys: HashSet<String> = extract_excluded_provider_keys(metadata).into_iter().collect();
 
         if let Some(target) = &routing_state.forced_target {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
-                let available: Vec<String> = filter_candidates_by_state(
+                let available = self.apply_standard_filters(
+                    env,
                     &resolved.keys,
                     routing_state,
-                    &self.provider_registry,
-                )
-                .into_iter()
-                .filter(|key| !excluded_keys.contains(key))
-                .filter(|key| self.is_provider_available(env, key))
-                .collect();
+                    &excluded_keys,
+                );
                 if let Some(forced_key) = available.into_iter().next() {
                     return Ok(SelectionResult::new(
                         forced_key.clone(),
@@ -90,15 +108,12 @@ impl VirtualRouterEngineCore {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
                 let ordered_keys =
                     order_instruction_keys_by_default_route(&resolved.keys, &self.routing);
-                let available: Vec<String> = filter_candidates_by_state(
+                let available = self.apply_standard_filters(
+                    env,
                     &ordered_keys,
                     routing_state,
-                    &self.provider_registry,
-                )
-                .into_iter()
-                .filter(|key| !excluded_keys.contains(key))
-                .filter(|key| self.is_provider_available(env, key))
-                .collect();
+                    &excluded_keys,
+                );
                 let available_set: HashSet<String> = available.iter().cloned().collect();
                 let sticky_key = match resolved.mode {
                     InstructionTargetMatchMode::Exact => available.into_iter().next(),
@@ -123,15 +138,12 @@ impl VirtualRouterEngineCore {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
                 let ordered_keys =
                     order_instruction_keys_by_default_route(&resolved.keys, &self.routing);
-                let available: Vec<String> = filter_candidates_by_state(
+                let available = self.apply_standard_filters(
+                    env,
                     &ordered_keys,
                     routing_state,
-                    &self.provider_registry,
-                )
-                .into_iter()
-                .filter(|key| !excluded_keys.contains(key))
-                .filter(|key| self.is_provider_available(env, key))
-                .collect();
+                    &excluded_keys,
+                );
                 let available_set: HashSet<String> = available.iter().cloned().collect();
                 let mutation_only = metadata
                     .get("routingInstructionMutationOnly")
@@ -255,18 +267,12 @@ impl VirtualRouterEngineCore {
                 if pool.targets.is_empty() {
                     continue;
                 }
-                let filtered = filter_candidates_by_state(
+                let mut available = self.apply_standard_filters(
+                    env,
                     &pool.targets,
                     routing_state,
-                    &self.provider_registry,
+                    &excluded_keys,
                 );
-                let mut available: Vec<String> = filtered
-                    .into_iter()
-                    .filter(|key| self.is_provider_available(env, key))
-                    .collect();
-                if !excluded_keys.is_empty() {
-                    available.retain(|key| !excluded_keys.contains(key));
-                }
                 if let Some(prefix) = bound_alias_prefix {
                     let alias_candidates: Vec<String> = available
                         .iter()
@@ -451,8 +457,14 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn is_provider_available(&mut self, env: Env, provider_key: &str) -> bool {
-        if self.is_concurrency_busy(provider_key) {
-            return false;
+        let runtime_key = self
+            .provider_registry
+            .get(provider_key)
+            .and_then(|profile| profile.runtime_key.clone());
+        if let Some(runtime_key) = runtime_key.as_deref() {
+            if self.is_concurrency_busy(runtime_key) {
+                return false;
+            }
         }
         if let Some(profile) = self.provider_registry.get(provider_key) {
             if !profile.enabled {
@@ -476,6 +488,8 @@ impl VirtualRouterEngineCore {
                     }
                 }
             }
+            // quota_view is the authoritative availability source; skip health_manager cooldown.
+            return true;
         }
         self.health_manager.is_available(provider_key, now)
     }
@@ -520,7 +534,7 @@ fn build_primary_target_groups(
     let mut groups: HashMap<String, Vec<String>> = HashMap::new();
 
     for key in candidates {
-        let provider_id = key.split('.').next().unwrap_or("").trim();
+        let provider_id = extract_provider_id(key).unwrap_or_default();
         if provider_id.is_empty() {
             continue;
         }

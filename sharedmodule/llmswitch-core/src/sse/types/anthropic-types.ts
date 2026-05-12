@@ -70,6 +70,10 @@ export interface AnthropicEventStats {
   lastChunkAtMs?: number;
   firstEventAtMs?: number;
   lastEventAtMs?: number;
+  firstFrameAtMs?: number;
+  lastFrameAtMs?: number;
+  firstContentAtMs?: number;
+  lastContentAtMs?: number;
   messageStopSeen?: boolean;
   startTime: number;
   endTime?: number;
@@ -87,6 +91,7 @@ export interface AnthropicJsonToSseContext {
 export interface SseToAnthropicJsonContext {
   requestId: string;
   model?: string;
+  options?: SseToAnthropicJsonOptions;
   startTime: number;
   eventStats: AnthropicEventStats;
   isCompleted: boolean;
@@ -106,6 +111,10 @@ export interface AnthropicJsonToSseOptions {
 export interface SseToAnthropicJsonOptions {
   requestId: string;
   model?: string;
+  firstFrameTimeoutMs?: number;
+  noContentTimeoutMs?: number;
+  preAnchorIdleTimeoutMs?: number;
+  contentIdleTimeoutMs?: number;
   reasoningMode?: ChatReasoningMode;
   reasoningTextPrefix?: string;
 }

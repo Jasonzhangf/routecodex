@@ -56,7 +56,7 @@ describe('deepseek-web request compat', () => {
     expect((result as any).prompt).not.toContain('This turn is tool-required');
   });
 
-  it('serializes tool history with mimoweb-style tool_call wrappers', () => {
+  it('serializes tool history with DSML tool-call wrappers', () => {
     const result = applyDeepSeekWebRequestTransform(
       {
         model: 'deepseek-chat',
@@ -101,9 +101,41 @@ describe('deepseek-web request compat', () => {
       } as any
     );
 
-    expect((result as any).prompt).toContain('<tool_call>');
-    expect((result as any).prompt).toContain('"name":"exec_command"');
-    expect((result as any).prompt).toContain('"arguments":{"cmd":"bash -lc');
+    expect((result as any).prompt).toContain('<|DSML|tool_calls>');
+    expect((result as any).prompt).toContain('<|DSML|invoke name="exec_command">');
+    expect((result as any).prompt).toContain('<![CDATA[bash -lc \'pwd\']]>');
     expect((result as any).prompt).not.toContain('<<RCC_TOOL_CALLS_JSON');
+  });
+
+  it('uses direct exec_command example instead of forcing bash wrapper in prompt guidance', () => {
+    const result = applyDeepSeekWebRequestTransform(
+      {
+        model: 'deepseek-chat',
+        messages: [{ role: 'user', content: '请检查当前目录' }],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              description: 'run shell',
+              parameters: {
+                type: 'object',
+                properties: { cmd: { type: 'string' } },
+                required: ['cmd']
+              }
+            }
+          }
+        ]
+      } as any,
+      {
+        providerProtocol: 'openai-chat',
+        compatibilityProfile: 'chat:deepseek-web',
+        routeId: 'coding/coding-deepseek-web-primary'
+      } as any
+    );
+
+    expect((result as any).prompt).toContain('<![CDATA[pwd]]>');
+    expect((result as any).prompt).toContain('prefer a direct single-line command like `pwd`');
+    expect((result as any).prompt).toContain("Use bash -lc '...' only when shell features are truly required");
   });
 });

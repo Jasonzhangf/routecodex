@@ -19,6 +19,8 @@ type DeepSeekSessionResponse = {
   msg?: string;
   message?: string;
   data?: {
+    biz_code?: number;
+    biz_msg?: string;
     biz_data?: {
       id?: string;
       chat_session?: {
@@ -44,6 +46,10 @@ type DeepSeekSessionCache = {
   expiresAt: number;
 };
 type FetchLike = typeof fetch;
+type PostJsonResult = {
+  status: number;
+  data: unknown;
+};
 
 export interface DeepSeekSessionPowManagerOptions {
   baseUrl: string;
@@ -59,6 +65,13 @@ export interface DeepSeekSessionPowManagerOptions {
   solverPath?: string;
   wasmPath?: string;
   fetchImpl?: FetchLike;
+  postJsonImpl?: (args: {
+    endpoint: string;
+    body: Record<string, unknown>;
+    headers: Record<string, string>;
+    timeoutMs: number;
+  }) => Promise<PostJsonResult>;
+  refreshAuth?: () => Promise<void>;
   solvePow?: (input: {
     algorithm: string;
     challenge: string;
@@ -84,12 +97,93 @@ const DEFAULT_SESSION_MAX_ATTEMPTS = 3;
 const DEFAULT_SESSION_RETRY_DELAY_MS = 1_000;
 const DEFAULT_SESSION_REUSE_TTL_MS = 30 * 60 * 1000;
 
+type DeepSeekResponseStatus = {
+  apiCode: number;
+  bizCode: number;
+  msg: string;
+  bizMsg: string;
+};
+
 function extractDeepSeekSessionId(response: DeepSeekSessionResponse): string | undefined {
   const directSessionId = normalizeString(response.data?.biz_data?.id);
   if (directSessionId) {
     return directSessionId;
   }
   return normalizeString(response.data?.biz_data?.chat_session?.id);
+}
+
+function extractResponseStatus(response: DeepSeekSessionResponse | undefined): DeepSeekResponseStatus {
+  const apiCode = typeof response?.code === 'number' ? response.code : 0;
+  const msg = normalizeString(response?.msg) || normalizeString(response?.message) || '';
+  const bizCode = typeof response?.data?.biz_code === 'number' ? response.data.biz_code : 0;
+  const bizMsg =
+    normalizeString(response?.data?.biz_msg) ||
+    normalizeString(response?.data?.biz_data && 'msg' in response.data.biz_data ? (response.data.biz_data as Record<string, unknown>).msg : undefined) ||
+    '';
+  return { apiCode, bizCode, msg, bizMsg };
+}
+
+function isAuthIndicativeBizFailure(msg: string, bizMsg: string): boolean {
+  const combined = `${msg || ''} ${bizMsg || ''}`.trim().toLowerCase();
+  if (!combined) {
+    return false;
+  }
+  const authKeywords = [
+    'auth',
+    'authorization',
+    'credential',
+    'expired',
+    'invalid jwt',
+    'jwt',
+    'login',
+    'not login',
+    'session expired',
+    'token',
+    'unauthorized',
+    '登录',
+    '未登录',
+    '认证',
+    '凭证',
+    '会话过期',
+    '令牌'
+  ];
+  return authKeywords.some((keyword) => combined.includes(keyword));
+}
+
+function isTokenInvalidStatus(status: number | undefined, apiCode: number, bizCode: number, msg: string, bizMsg: string): boolean {
+  const combined = `${msg || ''} ${bizMsg || ''}`.trim().toLowerCase();
+  if (status === 401 || status === 403) {
+    return true;
+  }
+  if ([40001, 40002, 40003].includes(apiCode) || [40001, 40002, 40003].includes(bizCode)) {
+    return true;
+  }
+  return (
+    combined.includes('token') ||
+    combined.includes('unauthorized') ||
+    combined.includes('expired') ||
+    combined.includes('not login') ||
+    combined.includes('login required') ||
+    combined.includes('invalid jwt')
+  );
+}
+
+function shouldAttemptAuthRefresh(status: number | undefined, apiCode: number, bizCode: number, msg: string, bizMsg: string): boolean {
+  if (isTokenInvalidStatus(status, apiCode, bizCode, msg, bizMsg)) {
+    return true;
+  }
+  return status === 200 && apiCode === 0 && bizCode !== 0 && isAuthIndicativeBizFailure(msg, bizMsg);
+}
+
+function errorShouldAttemptAuthRefresh(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const details = (error as { details?: unknown }).details;
+  if (details && typeof details === 'object' && (details as Record<string, unknown>).refreshSuggested === true) {
+    return true;
+  }
+  return false;
 }
 
 export class DeepSeekSessionPowManager {
@@ -106,6 +200,8 @@ export class DeepSeekSessionPowManager {
   private readonly solverPath?: string;
   private readonly wasmPath?: string;
   private readonly fetchImpl: FetchLike;
+  private readonly postJsonImpl?: DeepSeekSessionPowManagerOptions['postJsonImpl'];
+  private readonly refreshAuth?: DeepSeekSessionPowManagerOptions['refreshAuth'];
   private readonly solvePowOverride?: DeepSeekSessionPowManagerOptions['solvePow'];
   private readonly logger?: DeepSeekSessionPowManagerOptions['logger'];
   private readonly logId: string;
@@ -137,6 +233,8 @@ export class DeepSeekSessionPowManager {
     this.solverPath = resolvePathWithFallback(preferredSolverPath, resolveBuiltInPowSolverPath(import.meta.url));
     this.wasmPath = resolvePathWithFallback(preferredWasmPath, resolveBuiltInPowWasmPath(import.meta.url));
     this.fetchImpl = options.fetchImpl || fetch;
+    this.postJsonImpl = options.postJsonImpl;
+    this.refreshAuth = options.refreshAuth;
     this.solvePowOverride = options.solvePow;
     this.logger = options.logger;
     this.logId = normalizeString(options.logId) || 'provider:deepseek';
@@ -149,6 +247,7 @@ export class DeepSeekSessionPowManager {
     }
 
     let lastError: unknown = undefined;
+    let refreshed = false;
 
     for (let attempt = 1; attempt <= this.sessionMaxAttempts; attempt += 1) {
       try {
@@ -176,6 +275,17 @@ export class DeepSeekSessionPowManager {
         return sessionId;
       } catch (error) {
         lastError = error;
+        if (!refreshed && this.refreshAuth && errorShouldAttemptAuthRefresh(error)) {
+          this.log('deepseek-session-auth-refresh', {
+            attempt,
+            maxAttempts: this.sessionMaxAttempts,
+            message: error instanceof Error ? error.message : String(error)
+          });
+          await this.refreshAuth();
+          refreshed = true;
+          this.cachedSession = null;
+          continue;
+        }
         if (attempt < this.sessionMaxAttempts) {
           this.log('deepseek-session-retry', {
             attempt,
@@ -203,6 +313,7 @@ export class DeepSeekSessionPowManager {
 
   async createPowResponse(authHeaders: Record<string, string>, targetPath?: string): Promise<string> {
     let lastError: unknown = undefined;
+    let refreshed = false;
 
     for (let attempt = 1; attempt <= this.powMaxAttempts; attempt += 1) {
       try {
@@ -231,6 +342,16 @@ export class DeepSeekSessionPowManager {
         return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64').trim();
       } catch (error) {
         lastError = error;
+        if (!refreshed && this.refreshAuth && errorShouldAttemptAuthRefresh(error)) {
+          this.log('deepseek-pow-auth-refresh', {
+            attempt,
+            maxAttempts: this.powMaxAttempts,
+            message: error instanceof Error ? error.message : String(error)
+          });
+          await this.refreshAuth();
+          refreshed = true;
+          continue;
+        }
         this.log('deepseek-pow-attempt-failed', {
           attempt,
           message: error instanceof Error ? error.message : String(error)
@@ -301,6 +422,10 @@ export class DeepSeekSessionPowManager {
     authHeaders: Record<string, string>,
     errorCode: DeepSeekErrorCode
   ): Promise<DeepSeekSessionResponse> {
+    if (this.postJsonImpl) {
+      return this.postJsonViaTransport(endpoint, body, authHeaders, errorCode);
+    }
+
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -318,6 +443,8 @@ export class DeepSeekSessionPowManager {
 
       const responseText = await response.text();
       const parsed = safeParseJson(responseText) as DeepSeekSessionResponse | undefined;
+      const { apiCode, bizCode, msg, bizMsg } = extractResponseStatus(parsed);
+      const refreshSuggested = shouldAttemptAuthRefresh(response.status, apiCode, bizCode, msg, bizMsg);
 
       if (!response.ok) {
         throw createDeepSeekSessionPowError({
@@ -328,12 +455,15 @@ export class DeepSeekSessionPowManager {
           details: {
             endpoint,
             response: parsed,
-            responseText: responseText.slice(0, 500)
+            responseText: responseText.slice(0, 500),
+            refreshSuggested,
+            bizCode,
+            bizMsg,
+            msg
           }
         });
       }
 
-      const apiCode = typeof parsed?.code === 'number' ? parsed.code : 0;
       if (apiCode !== 0) {
         throw createDeepSeekSessionPowError({
           code: errorCode,
@@ -343,7 +473,29 @@ export class DeepSeekSessionPowManager {
           details: {
             endpoint,
             response: parsed,
-            responseText: responseText.slice(0, 500)
+            responseText: responseText.slice(0, 500),
+            refreshSuggested,
+            bizCode,
+            bizMsg,
+            msg
+          }
+        });
+      }
+
+      if (bizCode !== 0) {
+        throw createDeepSeekSessionPowError({
+          code: errorCode,
+          message: `DeepSeek endpoint ${endpoint} returned biz_code=${bizCode}${bizMsg ? ` (${bizMsg})` : ''}`,
+          statusCode: 502,
+          upstreamCode: String(bizCode),
+          details: {
+            endpoint,
+            response: parsed,
+            responseText: responseText.slice(0, 500),
+            refreshSuggested,
+            bizCode,
+            bizMsg,
+            msg
           }
         });
       }
@@ -369,6 +521,91 @@ export class DeepSeekSessionPowManager {
       });
     } finally {
       clearTimeout(timeoutHandle);
+    }
+  }
+
+  private async postJsonViaTransport(
+    endpoint: string,
+    body: Record<string, unknown>,
+    authHeaders: Record<string, string>,
+    errorCode: DeepSeekErrorCode
+  ): Promise<DeepSeekSessionResponse> {
+    try {
+      const response = await this.postJsonImpl!({
+        endpoint,
+        body,
+        headers: {
+          ...authHeaders,
+          Accept: 'application/json',
+          'Content-Type': 'application/json'
+        },
+        timeoutMs: this.timeoutMs
+      });
+      const parsed = (response.data || {}) as DeepSeekSessionResponse;
+      const { apiCode, bizCode, msg, bizMsg } = extractResponseStatus(parsed);
+      const refreshSuggested = shouldAttemptAuthRefresh(response.status, apiCode, bizCode, msg, bizMsg);
+
+      if (response.status < 200 || response.status >= 300) {
+        throw createDeepSeekSessionPowError({
+          code: errorCode,
+          message: `DeepSeek endpoint ${endpoint} failed with HTTP ${response.status}`,
+          statusCode: response.status,
+          upstreamCode: parsed?.code !== undefined ? String(parsed.code) : undefined,
+          details: {
+            endpoint,
+            response: parsed,
+            refreshSuggested,
+            bizCode,
+            bizMsg,
+            msg
+          }
+        });
+      }
+
+      if (apiCode !== 0) {
+        throw createDeepSeekSessionPowError({
+          code: errorCode,
+          message: `DeepSeek endpoint ${endpoint} returned code=${apiCode}`,
+          statusCode: 502,
+          upstreamCode: String(apiCode),
+          details: {
+            endpoint,
+            response: parsed,
+            refreshSuggested,
+            bizCode,
+            bizMsg,
+            msg
+          }
+        });
+      }
+
+      if (bizCode !== 0) {
+        throw createDeepSeekSessionPowError({
+          code: errorCode,
+          message: `DeepSeek endpoint ${endpoint} returned biz_code=${bizCode}${bizMsg ? ` (${bizMsg})` : ''}`,
+          statusCode: 502,
+          upstreamCode: String(bizCode),
+          details: {
+            endpoint,
+            response: parsed,
+            refreshSuggested,
+            bizCode,
+            bizMsg,
+            msg
+          }
+        });
+      }
+
+      return parsed;
+    } catch (error) {
+      if (error instanceof Error && (error as DeepSeekSessionPowError).code) {
+        throw error;
+      }
+      throw createDeepSeekSessionPowError({
+        code: errorCode,
+        message: `DeepSeek endpoint ${endpoint} request failed: ${error instanceof Error ? error.message : String(error)}`,
+        statusCode: 502
+      });
     }
   }
 
@@ -460,6 +697,7 @@ export class DeepSeekSessionPowManager {
       });
 
       child.on('error', (error) => {
+        child.kill('SIGKILL');
         finish(
           createDeepSeekSessionPowError({
             code: DEEPSEEK_ERROR_CODES.POW_SOLVE_FAILED,
@@ -521,6 +759,7 @@ export class DeepSeekSessionPowManager {
         child.stdin.write(JSON.stringify(payload));
         child.stdin.end();
       } catch (error) {
+        child.kill('SIGKILL');
         finish(
           createDeepSeekSessionPowError({
             code: DEEPSEEK_ERROR_CODES.POW_SOLVE_FAILED,
