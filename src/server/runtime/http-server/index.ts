@@ -41,6 +41,7 @@ import { isTmuxSessionAlive } from './tmux-session-probe.js';
 import { shouldLogStageEvent } from './http-server-bootstrap.js';
 import { canonicalizeServerId } from './server-id.js';
 import { StatsManager } from './stats-manager.js';
+import { PortRegistry } from './port-registry.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
@@ -155,6 +156,7 @@ export class RouteCodexHttpServer {
   private readonly sessionDaemonCleanupLogByKey: Map<string, number> = new Map();
   private lastSessionDaemonCleanupAtMs = 0;
   private readonly requestActivityTracker = new RequestActivityTracker();
+  private readonly portRegistry = new PortRegistry();
   private readonly requestExecutor: RequestExecutor;
 
   constructor(config: ServerConfigV2) {
@@ -365,6 +367,22 @@ export class RouteCodexHttpServer {
 
   private async restartRuntimeFromDisk(): Promise<{ reloadedAt: number; configPath: string; warnings?: string[] }> {
     return await restartRuntimeFromDisk(this);
+  }
+
+  /**
+   * Get the port registry for multi-port management.
+   */
+  public getPortRegistry(): PortRegistry {
+    return this.portRegistry;
+  }
+
+  /**
+   * Get port configurations from the server config.
+   */
+  public getPortConfigs(): import('./port-config-types.js').PortConfig[] {
+    const { normalizePortsConfig } = require('./port-config-validator.js');
+    const rawHttpserver = (this.userConfig as any)?.httpserver ?? {};
+    return normalizePortsConfig(rawHttpserver);
   }
 
   public async start(): Promise<void> {

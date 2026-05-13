@@ -1,6 +1,7 @@
 import type { Readable } from 'node:stream';
 import type { PipelineExecutionInput } from '../../handlers/types.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
+import type { PortConfig } from './port-config-types.js';
 
 export interface ServerConfigV2 {
   /**
@@ -31,6 +32,13 @@ export interface ServerConfigV2 {
     enableHooks?: boolean;
     hookStages?: string[];
   };
+  /**
+   * Multi-port configuration.
+   * When present, the server manages multiple listeners independently.
+   * Each port can be either 'router' (full routing) or 'provider' (direct binding).
+   * Backward compat: if absent, httpserver.port is used as a single router-mode port.
+   */
+  ports?: PortConfig[];
 }
 
 export interface ServerStatusV2 {

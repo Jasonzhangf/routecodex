@@ -10,11 +10,9 @@ function extractMessageText(content: unknown): string {
   if (typeof content === 'string') {
     return content.trim();
   }
-  if (!Array.isArray(content)) {
-    return '';
-  }
+  const rows = Array.isArray(content) ? content : content && typeof content === 'object' ? [content] : [];
   const parts: string[] = [];
-  for (const item of content) {
+  for (const item of rows) {
     if (typeof item === 'string') {
       if (item.trim()) {
         parts.push(item.trim());
@@ -25,11 +23,11 @@ function extractMessageText(content: unknown): string {
       continue;
     }
     const row = item as Record<string, unknown>;
-    const directKeys = ['text', 'output_text', 'input_text', 'content'] as const;
+    const directKeys = ['text', 'output_text', 'input_text', 'content', 'thinking', 'reasoning', 'reasoning_content'] as const;
     for (const key of directKeys) {
-      const value = row[key];
-      if (typeof value === 'string' && value.trim()) {
-        parts.push(value.trim());
+      const text = readNonEmptyString(row[key]);
+      if (text) {
+        parts.push(text);
       }
     }
   }
@@ -79,6 +77,101 @@ function isTemplateAssistantText(text: string): boolean {
   return TEMPLATE_ASSISTANT_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
+function isMeaninglessDotOnlyText(text: string): boolean {
+  const normalized = text.trim();
+  return normalized === '.' || normalized === '..' || normalized === '...';
+}
+
+function messageContainsBlockType(content: unknown, type: string): boolean {
+  const rows = Array.isArray(content) ? content : content && typeof content === 'object' ? [content] : [];
+  for (const item of rows) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      continue;
+    }
+    const blockType = readNonEmptyString((item as Record<string, unknown>).type)?.toLowerCase();
+    if (blockType === type) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function readAssistantMirrorTexts(message: StandardizedMessage): { text: string; reasoningText: string } | null {
+  const messageRecord = message as unknown as Record<string, unknown>;
+  const text = extractMessageText(message.content);
+  const reasoningText = extractMessageText(
+    messageRecord.reasoning_content ?? messageRecord.reasoningContent ?? messageRecord.reasoning
+  );
+  const normalizedText = isMeaninglessDotOnlyText(text) ? '' : text;
+  const normalizedReasoningText = isMeaninglessDotOnlyText(reasoningText) ? '' : reasoningText;
+  if (!normalizedText || !normalizedReasoningText) {
+    return null;
+  }
+  return {
+    text: normalizedText,
+    reasoningText: normalizedReasoningText
+  };
+}
+
+function isAssistantMirrorTurn(message: StandardizedMessage): boolean {
+  const texts = readAssistantMirrorTexts(message);
+  return Boolean(texts && texts.text === texts.reasoningText);
+}
+
+function isStructuredToolBoundaryMessage(message: StandardizedMessage): boolean {
+  if (!message || typeof message !== 'object') {
+    return false;
+  }
+  const role = typeof message.role === 'string' ? message.role.toLowerCase().trim() : '';
+  if (role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+    return true;
+  }
+  if (role === 'assistant' && messageContainsBlockType(message.content, 'tool_use')) {
+    return true;
+  }
+  if ((role === 'user' || role === 'tool') && messageContainsBlockType(message.content, 'tool_result')) {
+    return true;
+  }
+  return role === 'tool';
+}
+
+function collectDuplicateMirrorAssistantIndices(messages: StandardizedMessage[]): Set<number> {
+  const duplicateIndices = new Set<number>();
+  let hasBoundary = false;
+  let segmentMirrorIndices: number[] = [];
+
+  const flushSegment = () => {
+    if (segmentMirrorIndices.length >= 2) {
+      for (const index of segmentMirrorIndices) {
+        duplicateIndices.add(index);
+      }
+    }
+    segmentMirrorIndices = [];
+  };
+
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message || typeof message !== 'object') {
+      continue;
+    }
+    if (isStructuredToolBoundaryMessage(message)) {
+      hasBoundary = true;
+      flushSegment();
+      continue;
+    }
+    if (!hasBoundary) {
+      continue;
+    }
+    const role = typeof message.role === 'string' ? message.role.toLowerCase().trim() : '';
+    if (role === 'assistant' && isAssistantMirrorTurn(message)) {
+      segmentMirrorIndices.push(index);
+    }
+  }
+
+  flushSegment();
+  return duplicateIndices;
+}
+
 export function sanitizeChatProcessRequest(
   request: StandardizedRequest
 ): StandardizedRequest {
@@ -87,8 +180,14 @@ export function sanitizeChatProcessRequest(
     return sanitized;
   }
 
+  const duplicateMirrorAssistantIndices = collectDuplicateMirrorAssistantIndices(
+    sanitized.messages as StandardizedMessage[]
+  );
+
   let removedEmptyAssistantTurns = 0;
   let removedTemplateAssistantTurns = 0;
+  let removedDuplicateMirrorAssistantTurns = 0;
+  let didMutateMessageShapes = false;
   const pendingToolCallIds: string[] = [];
 
   const messages: StandardizedMessage[] = [];
@@ -110,19 +209,39 @@ export function sanitizeChatProcessRequest(
         if (ids.length > 0) {
           pendingToolCallIds.push(...ids);
         }
+        didMutateMessageShapes = true;
         messages.push({
           ...message,
           tool_calls: normalized
         });
         return;
       }
-      const text = extractMessageText(message.content);
-      if (!text) {
+      if (messageContainsBlockType(message.content, 'tool_use')) {
+        messages.push(message);
+        return;
+      }
+      const mirrorTexts = readAssistantMirrorTexts(message);
+      const normalizedText = mirrorTexts?.text ?? (() => {
+        const text = extractMessageText(message.content);
+        return isMeaninglessDotOnlyText(text) ? '' : text;
+      })();
+      const normalizedReasoningText = mirrorTexts?.reasoningText ?? (() => {
+        const messageRecord = message as unknown as Record<string, unknown>;
+        const reasoningText = extractMessageText(
+          messageRecord.reasoning_content ?? messageRecord.reasoningContent ?? messageRecord.reasoning
+        );
+        return isMeaninglessDotOnlyText(reasoningText) ? '' : reasoningText;
+      })();
+      if (!normalizedText && !normalizedReasoningText) {
         removedEmptyAssistantTurns += 1;
         return;
       }
-      if (isTemplateAssistantText(text)) {
+      if (isTemplateAssistantText(normalizedText)) {
         removedTemplateAssistantTurns += 1;
+        return;
+      }
+      if (duplicateMirrorAssistantIndices.has(index)) {
+        removedDuplicateMirrorAssistantTurns += 1;
         return;
       }
       messages.push(message);
@@ -140,6 +259,9 @@ export function sanitizeChatProcessRequest(
           pendingToolCallIds.splice(pendingIndex, 1);
         }
       }
+      if (toolCallId && message.tool_call_id !== toolCallId) {
+        didMutateMessageShapes = true;
+      }
       messages.push(
         toolCallId
           ? {
@@ -153,27 +275,32 @@ export function sanitizeChatProcessRequest(
     messages.push(message);
   });
 
-  const removedAssistantTurns = removedEmptyAssistantTurns + removedTemplateAssistantTurns;
-  if (removedAssistantTurns <= 0) {
+  const removedAssistantTurns =
+    removedEmptyAssistantTurns
+    + removedTemplateAssistantTurns
+    + removedDuplicateMirrorAssistantTurns;
+  if (removedAssistantTurns <= 0 && !didMutateMessageShapes) {
     return sanitized;
   }
 
-  const metadata: typeof sanitized.metadata = {
-    ...sanitized.metadata,
-    chatProcessSanitizer: {
-      removedAssistantTurns,
-      removedEmptyAssistantTurns,
-      removedTemplateAssistantTurns,
-      removedToolTurns: 0,
-      removedEmptyToolTurns: 0,
-      removedOrphanToolTurns: 0,
-      backfilledToolCallIds: 0
-    }
-  };
-
-  return {
+  const nextRequest: StandardizedRequest = {
     ...sanitized,
-    messages,
-    metadata
+    messages
   };
+  if (removedAssistantTurns > 0) {
+    nextRequest.metadata = {
+      ...sanitized.metadata,
+      chatProcessSanitizer: {
+        removedAssistantTurns,
+        removedEmptyAssistantTurns,
+        removedTemplateAssistantTurns,
+        removedDuplicateMirrorAssistantTurns,
+        removedToolTurns: 0,
+        removedEmptyToolTurns: 0,
+        removedOrphanToolTurns: 0,
+        backfilledToolCallIds: 0
+      }
+    };
+  }
+  return nextRequest;
 }

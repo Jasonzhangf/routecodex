@@ -140,6 +140,32 @@ function containsToolRegistryMissingText(value: unknown): boolean {
   return Object.values(value).some((entry) => containsToolRegistryMissingText(entry));
 }
 
+function isMeaninglessDotOnlyText(text: string): boolean {
+  const normalized = text.trim();
+  return normalized === '.' || normalized === '..' || normalized === '...';
+}
+
+function valueHasMeaningfulVisibleAssistantText(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.trim().length > 0 && !isMeaninglessDotOnlyText(value);
+  }
+  if (Array.isArray(value)) {
+    return value.some((entry) => valueHasMeaningfulVisibleAssistantText(entry));
+  }
+  if (!isRecord(value)) {
+    return false;
+  }
+  const entryType = readString(value.type)?.toLowerCase();
+  if (entryType === 'reasoning' || entryType === 'thinking') {
+    return false;
+  }
+  return (
+    valueHasMeaningfulVisibleAssistantText(value.text)
+    || valueHasMeaningfulVisibleAssistantText(value.output_text)
+    || valueHasMeaningfulVisibleAssistantText(value.content)
+  );
+}
+
 
 function containsEmptyAssistantSanitizedPlaceholder(value: unknown): boolean {
   if (typeof value === 'string') {
@@ -176,10 +202,10 @@ export function detectRetryableEmptyAssistantResponse(
     const message = isRecord(firstChoice.message) ? firstChoice.message : undefined;
     const hasToolCalls = hasNonEmptyToolCalls(message?.tool_calls);
     const hasText =
-      valueHasVisibleAssistantText(message?.content)
-      || valueHasVisibleAssistantText(firstChoice.content);
+      valueHasMeaningfulVisibleAssistantText(message?.content)
+      || valueHasMeaningfulVisibleAssistantText(firstChoice.content);
     const combinedText = [message?.content, firstChoice.content]
-      .filter((item) => valueHasVisibleAssistantText(item))
+      .filter((item) => valueHasMeaningfulVisibleAssistantText(item))
       .map((item) => String(item))
       .join('\n');
     if ((finishReason === 'stop' || finishReason === 'tool_calls' || !finishReason) && !hasToolCalls && !hasText) {
@@ -217,8 +243,8 @@ export function detectRetryableEmptyAssistantResponse(
     const hasRequiredActionToolCalls = hasNonEmptyToolCalls(submitToolOutputs?.tool_calls);
     const hasFunctionCalls = hasOutputFunctionCalls(effectiveBody.output);
     const hasText =
-      valueHasVisibleAssistantText(effectiveBody.output_text)
-      || valueHasVisibleAssistantText(effectiveBody.output);
+      valueHasMeaningfulVisibleAssistantText(effectiveBody.output_text)
+      || valueHasMeaningfulVisibleAssistantText(effectiveBody.output);
     const hasReasoningOnly =
       valueHasReasoningOnlyContent(effectiveBody.output)
       || valueHasReasoningOnlyContent(effectiveBody.reasoning);

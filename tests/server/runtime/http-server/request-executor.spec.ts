@@ -903,6 +903,21 @@ describe('HubRequestExecutor failover', () => {
       marker: 'responses_missing_required_tool_call'
     });
 
+    expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+      status: 'completed',
+      output_text: '.',
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            { type: 'output_text', text: '.' }
+          ]
+        }
+      ]
+    })).toMatchObject({
+      marker: 'responses_empty_output'
+    });
 
     expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       status: 'completed',

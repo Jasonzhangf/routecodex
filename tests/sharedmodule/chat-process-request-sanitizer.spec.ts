@@ -1,6 +1,17 @@
+import fs from 'node:fs';
+
 import { sanitizeChatProcessRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-request-sanitizer.js';
 
+const REAL_SAMPLE_PATH =
+  '/Volumes/extension/.rcc/codex-samples/openai-responses/mimo.key1.mimo-v2.5-pro/req_1778669500982_9b5b55f1/provider-request.json';
+
 describe('sanitizeChatProcessRequest', () => {
+  it('returns the original envelope when messages are missing', () => {
+    const input: any = { model: 'gpt-5.4', metadata: { traceId: 'x' } };
+    const out: any = sanitizeChatProcessRequest(input);
+    expect(out).toBe(input);
+  });
+
   it('does not inject synthetic thinking parameters', () => {
     const input: any = {
       messages: [
@@ -47,6 +58,7 @@ describe('sanitizeChatProcessRequest', () => {
       removedAssistantTurns: 2,
       removedEmptyAssistantTurns: 1,
       removedTemplateAssistantTurns: 1,
+      removedDuplicateMirrorAssistantTurns: 0,
       removedToolTurns: 0,
       removedEmptyToolTurns: 0,
       removedOrphanToolTurns: 0,
@@ -76,6 +88,167 @@ describe('sanitizeChatProcessRequest', () => {
     expect(out.metadata?.chatProcessSanitizer?.removedTemplateAssistantTurns).toBe(1);
   });
 
+  it('removes repeated mirror assistant turns after the last tool boundary', () => {
+    const input: any = {
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'call_1',
+              name: 'exec_command',
+              input: { cmd: 'pwd' }
+            }
+          ],
+          reasoning_content: '.'
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'call_1',
+              content: '/tmp'
+            }
+          ]
+        },
+        {
+          role: 'assistant',
+          content: 'The daemon is running. Let me run the receipt now.',
+          reasoning_content: 'The daemon is running. Let me run the receipt now.'
+        },
+        {
+          role: 'user',
+          content: 'Continue working toward the active thread goal.'
+        },
+        {
+          role: 'assistant',
+          content: 'I keep saying I will run the receipt, but I am not making a tool call.',
+          reasoning_content: 'I keep saying I will run the receipt, but I am not making a tool call.'
+        },
+        {
+          role: 'user',
+          content: 'Continue working toward the active thread goal.'
+        },
+        {
+          role: 'assistant',
+          content: 'I need to run the qqbot-live-receipt command NOW. No more analysis.',
+          reasoning_content: 'I need to run the qqbot-live-receipt command NOW. No more analysis.'
+        },
+        {
+          role: 'user',
+          content: 'next delta'
+        }
+      ]
+    };
+
+    const out: any = sanitizeChatProcessRequest(input);
+
+    expect(out.messages).toHaveLength(5);
+    expect(out.messages[0].content?.[0]?.type).toBe('tool_use');
+    expect(out.messages[1].content?.[0]?.type).toBe('tool_result');
+    expect(out.messages[2]).toMatchObject({
+      role: 'user',
+      content: 'Continue working toward the active thread goal.'
+    });
+    expect(out.messages[3]).toMatchObject({
+      role: 'user',
+      content: 'Continue working toward the active thread goal.'
+    });
+    expect(out.messages[4]).toMatchObject({
+      role: 'user',
+      content: 'next delta'
+    });
+    expect(out.metadata?.chatProcessSanitizer).toMatchObject({
+      removedAssistantTurns: 3,
+      removedDuplicateMirrorAssistantTurns: 3
+    });
+  });
+
+  it('keeps a single mirror assistant turn when no repeated polluted suffix exists', () => {
+    const input: any = {
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'call_1',
+              name: 'exec_command',
+              input: { cmd: 'pwd' }
+            }
+          ],
+          reasoning_content: '.'
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'call_1',
+              content: '/tmp'
+            }
+          ]
+        },
+        {
+          role: 'assistant',
+          content: 'I will run the receipt now.',
+          reasoning_content: 'I will run the receipt now.'
+        }
+      ]
+    };
+
+    const out: any = sanitizeChatProcessRequest(input);
+
+    expect(out.messages).toHaveLength(3);
+    expect(out.messages[2].content).toBe('I will run the receipt now.');
+    expect(out.metadata?.chatProcessSanitizer).toBeUndefined();
+  });
+
+  it('keeps reasoning-only assistant turns', () => {
+    const input: any = {
+      messages: [
+        { role: 'user', content: '继续分析' },
+        {
+          role: 'assistant',
+          content: '',
+          reasoning_content: '我已经确认工作目录，接下来继续分析锁恢复链路。'
+        },
+        {
+          role: 'assistant',
+          content: [],
+          reasoning: [{ type: 'thinking', thinking: '最终结论：继续排查 provider busy 恢复逻辑。' }]
+        }
+      ]
+    };
+
+    const out: any = sanitizeChatProcessRequest(input);
+
+    expect(out.messages).toHaveLength(3);
+    expect(out.messages[1].reasoning_content).toBe('我已经确认工作目录，接下来继续分析锁恢复链路。');
+    expect(out.messages[2].reasoning?.[0]?.thinking).toBe('最终结论：继续排查 provider busy 恢复逻辑。');
+    expect(out.metadata?.chatProcessSanitizer).toBeUndefined();
+  });
+
+  it('does not over-strip ordinary assistant execution text', () => {
+    const input: any = {
+      messages: [
+        { role: 'user', content: '继续' },
+        {
+          role: 'assistant',
+          content: 'I will execute commands after I inspect the latest logs.'
+        }
+      ]
+    };
+
+    const out: any = sanitizeChatProcessRequest(input);
+
+    expect(out.messages).toHaveLength(2);
+    expect(out.messages[1].content).toBe('I will execute commands after I inspect the latest logs.');
+    expect(out.metadata?.chatProcessSanitizer).toBeUndefined();
+  });
+
   it('does not backfill tool_call_id or drop orphan tool turns', () => {
     const input: any = {
       messages: [
@@ -102,5 +275,88 @@ describe('sanitizeChatProcessRequest', () => {
     expect(out.messages[2].tool_call_id).toBeUndefined();
     expect(out.messages[3].role).toBe('tool');
     expect(out.metadata?.chatProcessSanitizer).toBeUndefined();
+  });
+
+  it('preserves assistant tool_calls when id normalization would otherwise drop malformed entries', () => {
+    const input: any = {
+      messages: [
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+            },
+            {
+              type: 'function',
+              function: { name: 'exec_command', arguments: '{"cmd":"ls"}' }
+            }
+          ]
+        }
+      ]
+    };
+
+    const out: any = sanitizeChatProcessRequest(input);
+    expect(out.messages[0].tool_calls).toHaveLength(2);
+    expect(out.messages[0].tool_calls[1].id).toBeUndefined();
+    expect(out.metadata?.chatProcessSanitizer).toBeUndefined();
+  });
+
+  it('normalizes tool role call id aliases without deleting the tool turn', () => {
+    const input: any = {
+      messages: [
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+            }
+          ]
+        },
+        {
+          role: 'tool',
+          call_id: 'call_1',
+          content: [{ type: 'text', text: 'ok' }]
+        },
+        {
+          role: 'tool',
+          id: 'call_2',
+          content: [{ type: 'text', text: 'orphan' }]
+        }
+      ]
+    };
+
+    const out: any = sanitizeChatProcessRequest(input);
+    expect(out.messages[1].tool_call_id).toBe('call_1');
+    expect(out.messages[2].tool_call_id).toBe('call_2');
+  });
+
+  (fs.existsSync(REAL_SAMPLE_PATH) ? it : it.skip)('replays the real save/restore loop sample and strips mirrored polluted turns', () => {
+    const providerRequest = JSON.parse(fs.readFileSync(REAL_SAMPLE_PATH, 'utf8'));
+    const messages = providerRequest?.body?.messages;
+    const out: any = sanitizeChatProcessRequest({
+      model: 'mimo-v2.5-pro',
+      messages,
+      metadata: {}
+    });
+
+    const lastAssistantMessages = out.messages.slice(-12);
+    const mirrorTail = lastAssistantMessages.filter((message: any) =>
+      message?.role === 'assistant'
+      && typeof message?.content === 'string'
+      && typeof message?.reasoning_content === 'string'
+      && message.content.trim()
+      && message.content === message.reasoning_content
+    );
+
+    expect(Array.isArray(messages)).toBe(true);
+    expect(messages.length).toBeGreaterThan(out.messages.length);
+    expect(mirrorTail).toHaveLength(0);
+    expect(out.metadata?.chatProcessSanitizer?.removedDuplicateMirrorAssistantTurns).toBeGreaterThan(0);
   });
 });

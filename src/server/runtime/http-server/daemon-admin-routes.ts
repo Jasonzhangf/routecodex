@@ -7,6 +7,9 @@ import { registerProviderRoutes } from './daemon-admin/providers-handler.js';
 import { registerRestartRoutes } from './daemon-admin/restart-handler.js';
 import { registerStatsRoutes } from './daemon-admin/stats-handler.js';
 import { registerControlRoutes } from './daemon-admin/control-handler.js';
+import { registerPortsRoutes } from './daemon-admin/ports-handler.js';
+import type { PortConfig } from './port-config-types.js';
+import type { PortRegistry } from './port-registry.js';
 import type { HistoricalPeriodsSnapshot, HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 import { isDaemonSessionAuthenticated } from './daemon-admin/auth-session.js';
 import { resolveEnvSecretReference } from './middleware.js';
@@ -56,6 +59,22 @@ export interface DaemonAdminRouteOptions {
     historical: HistoricalStatsSnapshot;
     periods?: HistoricalPeriodsSnapshot;
   };
+  /**
+   * Lazily resolve PortRegistry 实例；多端口模式时可用。
+   */
+  getPortRegistry?: () => PortRegistry | null;
+  /**
+   * 返回当前端口配置列表。
+   */
+  getPortConfigs?: () => PortConfig[];
+  /**
+   * 应用端口配置变更：add/update/remove，热生效。
+   */
+  applyPortConfig?: (action: 'add' | 'update' | 'remove', port: number, config?: PortConfig) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * 返回当前可用 provider 列表（供 WebUI 下拉）。
+   */
+  getAvailableProviders?: () => Array<{ key: string; family?: string; protocol?: string }>;
 }
 
 export function isLocalRequest(req: Request): boolean {
@@ -239,6 +258,17 @@ export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): voi
 
   // Reload / restart runtime (reload config from disk)
   registerRestartRoutes(app, options);
+
+  // Unified control-plane endpoints (single entry for WebUI)
+  // Ports management (multi-port mode)
+  if (options.getPortRegistry && options.getPortConfigs && options.applyPortConfig) {
+    registerPortsRoutes(app, {
+      getPortRegistry: options.getPortRegistry,
+      getPortConfigs: options.getPortConfigs,
+      applyPortConfig: options.applyPortConfig,
+      getAvailableProviders: options.getAvailableProviders ?? (() => []),
+    });
+  }
 
   // Unified control-plane endpoints (single entry for WebUI)
   registerControlRoutes(app, options);
