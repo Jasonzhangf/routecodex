@@ -419,52 +419,142 @@ export function collectConvertedProviderToolCalls(payload: unknown): Array<{
   return result;
 }
 
+export function collectValidatedConvertedProviderToolCallsOrThrow(
+  payload: unknown,
+  declaredToolNames?: Set<string>
+): Array<{
+  name: string;
+  path: string;
+  normalizedInput: Record<string, unknown>;
+  normalizedArgsText: string;
+}> {
+  const toolCalls = collectConvertedProviderToolCalls(payload);
+  const normalized: Array<{
+    name: string;
+    path: string;
+    normalizedInput: Record<string, unknown>;
+    normalizedArgsText: string;
+  }> = [];
+
+  for (const toolCall of toolCalls) {
+    const validation = validateCanonicalClientToolCall(toolCall.name, toolCall.argumentsText, declaredToolNames);
+    if (!validation.ok) {
+      const err = new Error(
+        validation.message
+          ? `Converted provider tool call has invalid client arguments at ${toolCall.path}: ${toolCall.name}. ${validation.message}`
+          : `Converted provider tool call has invalid client arguments at ${toolCall.path}: ${toolCall.name} (${validation.reason || 'invalid_tool_arguments'})`
+      ) as Error & {
+        code?: string;
+        status?: number;
+        statusCode?: number;
+        retryable?: boolean;
+        toolName?: string;
+        validationReason?: string;
+        validationMessage?: string;
+        missingFields?: string[];
+        upstreamCode?: string;
+        details?: Record<string, unknown>;
+      };
+      err.code = 'CLIENT_TOOL_ARGS_INVALID';
+      err.status = 502;
+      err.statusCode = 502;
+      err.retryable = false;
+      err.upstreamCode = 'CLIENT_TOOL_ARGS_INVALID';
+      err.toolName = toolCall.name;
+      err.validationReason = validation.reason || 'invalid_tool_arguments';
+      err.validationMessage = validation.message;
+      if (validation.missingFields?.length) {
+        err.missingFields = validation.missingFields;
+      }
+      err.details = {
+        ...(err.details ?? {}),
+        toolName: toolCall.name,
+        validationReason: validation.reason || 'invalid_tool_arguments',
+        ...(validation.message ? { validationMessage: validation.message } : {}),
+        ...(validation.missingFields?.length ? { missingFields: validation.missingFields } : {})
+      };
+      throw err;
+    }
+
+    let normalizedInput = asFlatRecord(tryParseJsonLikeString(toolCall.argumentsText)) ?? {};
+    if (typeof validation.normalizedArgs === 'string') {
+      const parsed = tryParseJsonLikeString(validation.normalizedArgs);
+      const parsedRecord = asFlatRecord(parsed);
+      if (parsedRecord) {
+        normalizedInput = parsedRecord;
+      }
+    }
+    normalized.push({
+      name: toolCall.name,
+      path: toolCall.path,
+      normalizedInput,
+      normalizedArgsText: typeof validation.normalizedArgs === 'string'
+        ? validation.normalizedArgs
+        : JSON.stringify(normalizedInput)
+    });
+  }
+
+  return normalized;
+}
+
+export function normalizeValidatedConvertedProviderToolCallsInPlace(
+  payload: unknown,
+  declaredToolNames?: Set<string>
+): Array<{
+  name: string;
+  path: string;
+  normalizedInput: Record<string, unknown>;
+  normalizedArgsText: string;
+}> {
+  const validated = collectValidatedConvertedProviderToolCallsOrThrow(payload, declaredToolNames);
+  const record = asFlatRecord(payload);
+  if (!record) {
+    return validated;
+  }
+
+  let index = 0;
+  const applyNormalizedArgs = (toolCall: Record<string, unknown> | undefined) => {
+    if (!toolCall) {
+      return;
+    }
+    const entry = validated[index];
+    index += 1;
+    if (!entry) {
+      return;
+    }
+    const fn = asFlatRecord(toolCall.function);
+    if (fn) {
+      fn.arguments = entry.normalizedArgsText;
+    }
+    toolCall.arguments = entry.normalizedArgsText;
+    toolCall.input = entry.normalizedInput;
+  };
+
+  const choices = Array.isArray(record.choices) ? record.choices : [];
+  for (const choiceRow of choices) {
+    const choice = asFlatRecord(choiceRow);
+    const message = asFlatRecord(choice?.message);
+    const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+    for (const toolCallRow of toolCalls) {
+      applyNormalizedArgs(asFlatRecord(toolCallRow) ?? undefined);
+    }
+  }
+
+  const requiredAction = asFlatRecord(record.required_action);
+  const submitToolOutputs = asFlatRecord(requiredAction?.submit_tool_outputs);
+  const submitToolCalls = Array.isArray(submitToolOutputs?.tool_calls) ? submitToolOutputs.tool_calls : [];
+  for (const toolCallRow of submitToolCalls) {
+    applyNormalizedArgs(asFlatRecord(toolCallRow) ?? undefined);
+  }
+
+  return validated;
+}
+
 export function validateConvertedProviderToolCallsOrThrow(
   payload: unknown,
   declaredToolNames?: Set<string>
 ): void {
-  const toolCalls = collectConvertedProviderToolCalls(payload);
-  for (const toolCall of toolCalls) {
-    const validation = validateCanonicalClientToolCall(toolCall.name, toolCall.argumentsText, declaredToolNames);
-    if (validation.ok) {
-      continue;
-    }
-    const err = new Error(
-      validation.message
-        ? `Converted provider tool call has invalid client arguments at ${toolCall.path}: ${toolCall.name}. ${validation.message}`
-        : `Converted provider tool call has invalid client arguments at ${toolCall.path}: ${toolCall.name} (${validation.reason || 'invalid_tool_arguments'})`
-    ) as Error & {
-      code?: string;
-      status?: number;
-      statusCode?: number;
-      retryable?: boolean;
-      toolName?: string;
-      validationReason?: string;
-      validationMessage?: string;
-      missingFields?: string[];
-      upstreamCode?: string;
-      details?: Record<string, unknown>;
-    };
-    err.code = 'CLIENT_TOOL_ARGS_INVALID';
-    err.status = 502;
-    err.statusCode = 502;
-    err.retryable = false;
-    err.upstreamCode = 'CLIENT_TOOL_ARGS_INVALID';
-    err.toolName = toolCall.name;
-    err.validationReason = validation.reason || 'invalid_tool_arguments';
-    err.validationMessage = validation.message;
-    if (validation.missingFields?.length) {
-      err.missingFields = validation.missingFields;
-    }
-    err.details = {
-      ...(err.details ?? {}),
-      toolName: toolCall.name,
-      validationReason: validation.reason || 'invalid_tool_arguments',
-      ...(validation.message ? { validationMessage: validation.message } : {}),
-      ...(validation.missingFields?.length ? { missingFields: validation.missingFields } : {})
-    };
-    throw err;
-  }
+  collectValidatedConvertedProviderToolCallsOrThrow(payload, declaredToolNames);
 }
 
 // ---------------------------------------------------------------------------

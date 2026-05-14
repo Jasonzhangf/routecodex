@@ -1,9 +1,11 @@
+use crate::virtual_router_engine::rcc_fence::StoplessGoalState;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RoutingInstructionState {
+    pub stopless_goal_state: Option<StoplessGoalState>,
     pub forced_target: Option<InstructionTarget>,
     pub sticky_target: Option<InstructionTarget>,
     pub prefer_target: Option<InstructionTarget>,

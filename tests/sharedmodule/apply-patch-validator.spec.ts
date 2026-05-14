@@ -83,6 +83,52 @@ describe('apply_patch validator', () => {
     expect(String(parsed.patch)).toContain('+x');
   });
 
+  it('accepts provider payloads that place unified diff under raw', () => {
+    const rawDiff = [
+      '--- a/src/raw.ts',
+      '+++ b/src/raw.ts',
+      '@@ -1,1 +1,1 @@',
+      '-const a = 1;',
+      '+const a = 2;'
+    ].join('\n');
+    const result = validateToolCall('apply_patch', JSON.stringify({ raw: rawDiff }));
+    expect(result.ok).toBe(true);
+    const parsed = toArgsObject(result);
+    expect(String(parsed.patch)).toContain('*** Update File: src/raw.ts');
+    expect(String(parsed.patch)).toContain('+const a = 2;');
+  });
+
+  it('accepts provider payloads that place unified diff under raw_patch', () => {
+    const rawDiff = [
+      '--- a/src/raw-patch.ts',
+      '+++ b/src/raw-patch.ts',
+      '@@ -1,1 +1,1 @@',
+      '-const a = 1;',
+      '+const a = 2;'
+    ].join('\n');
+    const result = validateToolCall('apply_patch', JSON.stringify({ raw_patch: rawDiff }));
+    expect(result.ok).toBe(true);
+    const parsed = toArgsObject(result);
+    expect(String(parsed.patch)).toContain('*** Update File: src/raw-patch.ts');
+    expect(String(parsed.patch)).toContain('+const a = 2;');
+  });
+
+  it('accepts canonical shell-wrapped apply_patch heredoc without extra commands', () => {
+    const result = validateToolCall(
+      'apply_patch',
+      `bash -lc 'apply_patch <<'\"'\"'PATCH'\"'\"'
+*** Begin Patch
+*** Add File: src/from-shell.ts
++export const shell = true;
+*** End Patch
+PATCH'`
+    );
+    expect(result.ok).toBe(true);
+    const parsed = toArgsObject(result);
+    expect(String(parsed.patch)).toContain('*** Add File: src/from-shell.ts');
+    expect(String(parsed.patch)).toContain('+export const shell = true;');
+  });
+
   it('rejects irrecoverable malformed json with broken <arg_key>/<arg_value> artifacts', () => {
     const unrecoverable =
       '{"file":"a.ts","changes":[{"kind":"create_file","lines":["x"],"file</arg_key><arg_value>a.ts}]}';

@@ -1,3 +1,5 @@
+import type { Request } from 'express';
+import type { PortConfig } from './port-config-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { HandlerContext } from '../../handlers/types.js';
 import { registerHttpRoutes } from './routes.js';
@@ -69,7 +71,7 @@ export async function initializeHttpServer(server: any): Promise<void> {
     registerHttpRoutes({
       app: server.app,
       config: server.config,
-      buildHandlerContext: () => server.buildHandlerContext(),
+      buildHandlerContext: (req: Request) => server.buildHandlerContext(req),
       getPipelineReady: () => server.isPipelineReady(),
       waitForPipelineReady: async () => await server.waitForRuntimeReady(),
       handleError: (error: Error, context: string) => server.handleError(error, context),
@@ -94,6 +96,11 @@ export async function initializeHttpServer(server: any): Promise<void> {
         historical: server.stats.snapshotHistorical(),
         periods: server.stats.snapshotHistoricalPeriods()
       }),
+      getPortRegistry: () => server.getPortRegistry(),
+      getPortConfigs: () => server.getPortConfigs(),
+      applyPortConfig: (action: 'add' | 'update' | 'remove', port: number, config?: Record<string, unknown>) =>
+        server.applyPortConfig(action, port, config),
+      getAvailableProviders: () => server.getAvailableProviders(),
       getServerId: () => canonicalizeServerId(server.config.server.host, server.config.server.port)
     });
 
@@ -159,41 +166,29 @@ export async function startHttpServer(server: any): Promise<void> {
     await server.initialize();
   }
 
-  await new Promise<void>((resolve, reject) => {
-    server.server = server.app.listen(server.config.server.port, server.config.server.host, () => {
-      server._isRunning = true;
-
-      const boundAddress = server.server?.address();
-      const resolvedPort =
-        boundAddress && typeof boundAddress === 'object' && typeof boundAddress.port === 'number'
-          ? boundAddress.port
-          : server.config.server.port;
-      process.env.ROUTECODEX_SERVER_PORT = String(resolvedPort);
-
-      console.log(`[RouteCodexHttpServer] Server started on ${server.config.server.host}:${resolvedPort}`);
-      resolve();
-    });
-
-    if (process.env.JEST_WORKER_ID || process.env.NODE_ENV === 'test') {
-      try {
-        (server.server as unknown as { unref?: () => void }).unref?.();
-      } catch (error) {
-        logLifecycleNonBlockingError('start.server_unref', error);
-      }
+  const portConfigs = server.getPortConfigs() as PortConfig[];
+  try {
+    for (const portConfig of portConfigs) {
+      await server.startPortListener(portConfig);
     }
-
-    server.server.on('connection', (socket: any) => {
-      server.activeSockets.add(socket);
-      socket.on('close', () => {
-        server.activeSockets.delete(socket);
-      });
-    });
-
-    server.server.on('error', async (error: Error) => {
-      await server.handleError(error, 'server_start');
-      reject(error);
-    });
-  });
+  } catch (error) {
+    try {
+      await server.getPortRegistry().stopAll();
+    } catch (cleanupError) {
+      logLifecycleNonBlockingError('start.cleanup_partial_listeners', cleanupError);
+    }
+    await server.handleError(error as Error, 'server_start');
+    throw error;
+  }
+  server._isRunning = true;
+  const listeners = server.getPortRegistry().snapshot();
+  if (listeners.length === 1) {
+    console.log(`[RouteCodexHttpServer] Server started on ${listeners[0].host}:${listeners[0].port}`);
+  } else {
+    console.log(
+      `[RouteCodexHttpServer] Server started on ${listeners.map((item: { host: string; port: number }) => `${item.host}:${item.port}`).join(', ')}`
+    );
+  }
 }
 
 export async function stopHttpServer(server: any): Promise<void> {
@@ -210,7 +205,7 @@ export async function stopHttpServer(server: any): Promise<void> {
   } catch (error) {
     logShutdownNonBlocking('shutdown_camoufox_launchers', error);
   }
-  if (!server.server) {
+  if (!server.server && server.getPortRegistry().size === 0) {
     return;
   }
 
@@ -239,58 +234,58 @@ export async function stopHttpServer(server: any): Promise<void> {
     logShutdownNonBlocking('close_idle_or_all_connections', error);
   }
 
-  await new Promise<void>((resolve) => {
-    server.server?.close(async () => {
-      server._isRunning = false;
+  try {
+    await server.getPortRegistry().stopAll();
+  } catch (error) {
+    logShutdownNonBlocking('port_registry.stop_all', error);
+  }
+  server._isRunning = false;
 
-      try {
-        await server.disposeProviders();
-      } catch (error) {
-        logShutdownNonBlocking('dispose_providers', error);
-      }
-      try {
-        if (server.managerDaemon) {
-          await server.managerDaemon.stop();
-          server.managerDaemon = null;
-        }
-      } catch (error) {
-        logShutdownNonBlocking('stop_manager_daemon', error);
-      }
-      try {
-        server.server?.removeAllListeners();
-      } catch (error) {
-        logShutdownNonBlocking('remove_server_listeners', error);
-      }
-      server.server = undefined;
-      await server.errorHandling.destroy();
+  try {
+    await server.disposeProviders();
+  } catch (error) {
+    logShutdownNonBlocking('dispose_providers', error);
+  }
+  try {
+    if (server.managerDaemon) {
+      await server.managerDaemon.stop();
+      server.managerDaemon = null;
+    }
+  } catch (error) {
+    logShutdownNonBlocking('stop_manager_daemon', error);
+  }
+  try {
+    server.server?.removeAllListeners();
+  } catch (error) {
+    logShutdownNonBlocking('remove_server_listeners', error);
+  }
+  server.server = undefined;
+  await server.errorHandling.destroy();
 
-      try {
-        const uptimeMs = Math.round(process.uptime() * 1000);
-        const summary = server.stats.logFinalSummary(uptimeMs);
-        await server.stats.persistSnapshot(summary.session, { reason: 'server_shutdown' });
-      } catch (error) {
-        logShutdownNonBlocking('persist_stats_snapshot', error);
-      }
+  try {
+    const uptimeMs = Math.round(process.uptime() * 1000);
+    const summary = server.stats.logFinalSummary(uptimeMs);
+    await server.stats.persistSnapshot(summary.session, { reason: 'server_shutdown' });
+  } catch (error) {
+    logShutdownNonBlocking('persist_stats_snapshot', error);
+  }
 
-      console.log('[RouteCodexHttpServer] Server stopped');
-      try {
-        const cleanup = cleanupSessionStorageOnShutdown({ isTmuxSessionAlive });
-        if (
-          cleanup.removedLegacyScopeFiles > 0 ||
-          cleanup.removedDeadTmuxStateFiles > 0 ||
-          cleanup.removedHeartbeatStateFiles > 0 ||
-          cleanup.removedClockStateFiles > 0 ||
-          cleanup.prunedRegistryDirs > 0 ||
-          cleanup.removedRegistryDirs > 0
-        ) {
-          console.log('[session-storage-cleanup] shutdown cleanup', cleanup);
-        }
-      } catch (error) {
-        logShutdownNonBlocking('cleanup_session_storage', error);
-      }
-      resolve();
-    });
-  });
+  console.log('[RouteCodexHttpServer] Server stopped');
+  try {
+    const cleanup = cleanupSessionStorageOnShutdown({ isTmuxSessionAlive });
+    if (
+      cleanup.removedLegacyScopeFiles > 0 ||
+      cleanup.removedDeadTmuxStateFiles > 0 ||
+      cleanup.removedHeartbeatStateFiles > 0 ||
+      cleanup.removedClockStateFiles > 0 ||
+      cleanup.prunedRegistryDirs > 0 ||
+      cleanup.removedRegistryDirs > 0
+    ) {
+      console.log('[session-storage-cleanup] shutdown cleanup', cleanup);
+    }
+  } catch (error) {
+    logShutdownNonBlocking('cleanup_session_storage', error);
+  }
 }
 
 export function getHttpServerStatus(server: any): ServerStatusV2 {
@@ -377,9 +372,13 @@ export async function reloadHttpServerRuntime(
   }
 }
 
-export function buildHttpHandlerContext(server: any): HandlerContext {
+export function buildHttpHandlerContext(server: any, req: Request): HandlerContext {
+  const localPort =
+    typeof req.socket?.localPort === 'number' && Number.isFinite(req.socket.localPort)
+      ? req.socket.localPort
+      : undefined;
   return {
-    executePipeline: server.executePipeline.bind(server),
+    executePipeline: (input) => server.executePortAwarePipeline(localPort, input),
     errorHandling: server.errorHandling
   };
 }

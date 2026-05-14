@@ -663,12 +663,39 @@ export function attachProviderSseSnapshotStream(
   options: StreamSnapshotOptions
 ): NodeJS.ReadableStream {
   let flushed = false;
+  const chunks: Buffer[] = [];
+  let capturedBytes = 0;
+  const maxCaptureBytes = 256 * 1024;
+  const onData = (chunk: unknown) => {
+    try {
+      if (capturedBytes >= maxCaptureBytes) {
+        return;
+      }
+      const buf = Buffer.isBuffer(chunk)
+        ? chunk
+        : typeof chunk === 'string'
+          ? Buffer.from(chunk)
+          : chunk instanceof Uint8Array
+            ? Buffer.from(chunk)
+            : null;
+      if (!buf || buf.length === 0) {
+        return;
+      }
+      const remaining = maxCaptureBytes - capturedBytes;
+      const slice = buf.length > remaining ? buf.subarray(0, remaining) : buf;
+      chunks.push(slice);
+      capturedBytes += slice.length;
+    } catch (captureError) {
+      logSnapshotNonBlockingError(`stream.captureData:${options.requestId}`, captureError);
+    }
+  };
   const flushSnapshot = (error?: unknown) => {
     if (flushed) {
       return;
     }
     flushed = true;
     try {
+      stream.removeListener('data', onData);
       stream.removeListener('end', onEnd);
       stream.removeListener('close', onClose);
       stream.removeListener('error', onError);
@@ -678,6 +705,11 @@ export function attachProviderSseSnapshotStream(
     const payload: Record<string, unknown> = { mode: 'sse' };
     if (options.extra) {
       Object.assign(payload, options.extra);
+    }
+    if (chunks.length > 0) {
+      payload.bodyText = Buffer.concat(chunks).toString('utf8');
+      payload.captureBytes = capturedBytes;
+      payload.captureTruncated = capturedBytes >= maxCaptureBytes;
     }
     if (error) {
       payload.error = error instanceof Error ? error.message : String(error);
@@ -705,6 +737,7 @@ export function attachProviderSseSnapshotStream(
   const onClose = () => flushSnapshot();
   const onError = (error?: unknown) => handleError(error);
 
+  stream.on('data', onData);
   stream.on('end', onEnd);
   stream.on('close', onClose);
   stream.on('error', onError);

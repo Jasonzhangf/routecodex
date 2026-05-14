@@ -67,18 +67,21 @@ describe('provider-quota-center error handling', () => {
 
     state = applyErrorEvent(state, { providerKey, code: 'ETIMEDOUT' }, baseNow);
     expect(state.reason).toBe('cooldown');
+    expect(state.inPool).toBe(true);
     expect(state.cooldownUntil).toBe(baseNow + 3_000);
     expect(state.lastErrorSeries).toBe('ENET');
 
     const secondNow = baseNow + 10_000;
     state = applyErrorEvent(state, { providerKey, code: 'ETIMEDOUT' }, secondNow);
     expect(state.reason).toBe('cooldown');
-    expect(state.cooldownUntil).toBe(secondNow + 10_000);
+    expect(state.inPool).toBe(true);
+    expect(state.cooldownUntil).toBe(secondNow + 5_000);
     expect(state.lastErrorSeries).toBe('ENET');
 
     const thirdNow = secondNow + 10_000;
     state = applyErrorEvent(state, { providerKey, code: 'ETIMEDOUT' }, thirdNow);
     expect(state.reason).toBe('cooldown');
+    expect(state.inPool).toBe(false);
     expect(state.cooldownUntil).toBe(thirdNow + 31_000);
     expect(state.lastErrorSeries).toBe('ENET');
 
@@ -119,7 +122,7 @@ describe('provider-quota-center error handling', () => {
       { providerKey, code: 'HTTP_502', httpStatus: 502, message: 'Upstream SSE error event: Internal Network Failure' },
       secondNow
     );
-    expect(state.cooldownUntil).toBe(secondNow + 10_000);
+    expect(state.cooldownUntil).toBe(secondNow + 5_000);
     expect(state.lastErrorSeries).toBe('ENET');
 
     const thirdNow = secondNow + 10_000;
@@ -143,7 +146,7 @@ describe('provider-quota-center error handling', () => {
     const secondNow = baseNow + 10_000;
     state = applyErrorEvent(state, { providerKey, code: 'E_UNKNOWN' }, secondNow);
     expect(state.reason).toBe('cooldown');
-    expect(state.cooldownUntil).toBe(secondNow + 10_000);
+    expect(state.cooldownUntil).toBe(secondNow + 5_000);
 
     const thirdNow = secondNow + 10_000;
     state = applyErrorEvent(state, { providerKey, code: 'E_UNKNOWN' }, thirdNow);
@@ -171,6 +174,43 @@ describe('provider-quota-center error handling', () => {
       nextNow
     );
     expect(state.consecutiveErrorCount).toBe(1);
+  });
+
+  it('keeps 5xx providers in pool during the first two cooldown steps', () => {
+    const baseNow = 2_500_000;
+    let state = createInitialQuotaState(providerKey, undefined, baseNow);
+
+    state = applyErrorEvent(
+      state,
+      { providerKey, httpStatus: 500 },
+      baseNow
+    );
+    expect(state.reason).toBe('cooldown');
+    expect(state.inPool).toBe(true);
+    expect(state.cooldownUntil).toBe(baseNow + 3_000);
+    expect(state.lastErrorSeries).toBe('E5XX');
+
+    const secondNow = baseNow + 10_000;
+    state = applyErrorEvent(
+      state,
+      { providerKey, httpStatus: 500 },
+      secondNow
+    );
+    expect(state.reason).toBe('cooldown');
+    expect(state.inPool).toBe(true);
+    expect(state.cooldownUntil).toBe(secondNow + 5_000);
+    expect(state.consecutiveErrorCount).toBe(2);
+
+    const thirdNow = secondNow + 10_000;
+    state = applyErrorEvent(
+      state,
+      { providerKey, httpStatus: 500 },
+      thirdNow
+    );
+    expect(state.reason).toBe('cooldown');
+    expect(state.inPool).toBe(false);
+    expect(state.cooldownUntil).toBe(thirdNow + 31_000);
+    expect(state.consecutiveErrorCount).toBe(3);
   });
 
   it('treats fatal errors as escalating cooldown (no direct blacklist)', () => {
@@ -290,7 +330,7 @@ describe('provider-quota-center usage and window handling', () => {
     const nextWindowNow = baseNow + 70_000;
     state = tickQuotaStateTime(state, nextWindowNow);
     expect(state.inPool).toBe(false);
-    expect(state.reason).toBe('quotaDepleted');
+    expect(state.reason).toBe('cooldown');
     expect(state.cooldownUntil).toBe(baseNow + 5 * 60_000);
   });
 
@@ -305,6 +345,22 @@ describe('provider-quota-center usage and window handling', () => {
     };
     const ticked = tickQuotaStateTime(state, baseNow + 60_000);
     expect(ticked.inPool).toBe(false);
+    expect(ticked.reason).toBe('cooldown');
+    expect(ticked.cooldownUntil).toBe(cooldownUntil);
+  });
+
+  it('preserves keep-pool cooldown snapshots for early 5xx steps', () => {
+    const baseNow = 45_000;
+    const cooldownUntil = baseNow + 10 * 60_000;
+    const state: any = {
+      ...createInitialQuotaState(providerKey, {}, baseNow),
+      inPool: true,
+      reason: 'cooldown',
+      cooldownUntil,
+      cooldownKeepsPool: true
+    };
+    const ticked = tickQuotaStateTime(state, baseNow + 60_000);
+    expect(ticked.inPool).toBe(true);
     expect(ticked.reason).toBe('cooldown');
     expect(ticked.cooldownUntil).toBe(cooldownUntil);
   });

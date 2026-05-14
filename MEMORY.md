@@ -1495,3 +1495,32 @@ Tags: deepseek-web, file-upload, context.txt, unsupported-file-type, biz-code, n
 - 2026-05-12: `Provider runtime deepseek-web.key1 not found` 的真源不是 quota 脏数据，而是 **native Rust provider bootstrap** 会把 V2 provider 配置里的空 `auth.entries` 物化成默认 alias `key1`。可复用规则：排查 Virtual Router bootstrap/runtime alias 问题时，先看 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs`，不要误改 TS `bootstrap/auth-utils.ts`（当前无调用点）；对 `auth.entries` 空记录必须在 Rust `push_auth_entry_from_record` 入口直接忽略，避免生成幽灵 runtime。
 
 Tags: virtual-router, provider-bootstrap, deepseek-web, key1, empty-auth-entry, rust-ssot, no-ts-dead-fix, runtime-alias, 2026-05-12
+
+- 2026-05-12: Mimo `thinking` 400（`reasoning_content in the thinking mode must be passed back`）的真因不是上游误判，也不是 provider transport 问题，而是 **Anthropic 出站历史 assistant message 缺 reasoning_content**。可复用规则：先抓 `provider-request.json` 看上游实际收到的 `messages`；若坏形状已在 provider-request 中存在，唯一修复点应落在 **Rust `req_outbound_stage3_compat` 真源**。对 `anthropic-messages` + thinking 模式，assistant `tool_use` 历史必须补 `reasoning_content`（无文本时可用 `.`），纯文本 assistant 历史也必须回传 reasoning_content，否则上游会直接 400。
+
+Tags: mimo, anthropic-messages, thinking, reasoning_content, req-outbound-stage3-compat, rust-ssot, 2026-05-12
+
+- 2026-05-13: port-mode 收口确认两个 owner 边界。可复用规则：`/admin/ports` 的配置真值 owner 只能是 `RouteCodexHttpServer.getPortConfigs()`；若 live listener 已按 runtime bind port 启动，但 `/admin/ports` 仍回磁盘旧端口，先对照 `src`/`dist` 的 `getPortConfigs()` 顺序，确认是否把 `userConfig.httpserver.port` 错盖回 runtime port，禁止去 PortRegistry 或 handler 层补第二真源。另一个边界是 `provider-direct-pipeline.ts::convertProtocolForRelay()`：relay 只允许在**已显式实现的协议对**内工作（当前 `openai-chat ↔ anthropic-messages`），其余跨协议必须 fail-fast，不能把未实现 semantic map 静默透传给 provider。验证链：Jest `port-mode-routing/provider-direct-pipeline`、`build:min`、`install:global`、10000 live `/admin/ports`、临时 provider 端口 direct/auto/relay 回放全部通过。
+
+Tags: port-mode, admin-ports, getPortConfigs, runtime-bind-port, dist-drift, provider-direct, relay-boundary, fail-fast, live-10000, 2026-05-13
+
+- 2026-05-13: Mimo save/restore 自循环的真因不是 tools 定义丢失，而是 save/restore 历史混入了 **assistant mirror turns**。可复用规则：若 `provider-request.json` 里 tools 仍完整存在，但 live 行为反复自述“接下来调用工具/无需继续分析”却不真调工具，先查历史里是否有 `role=assistant`、纯文本 `content`、`reasoning_content === content`、且无 `tool_calls` 的重复镜像轮次。唯一修复点是 `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-request-sanitizer.ts`；必须做**shape-only** 清理，并按 **每个 tool boundary segment** 删除重复 mirror assistant cluster，而不是只看最后一个 boundary。
+
+Tags: mimo, save-restore, mirror-assistant, chat-process-request-sanitizer, shape-only, tool-boundary-segment, no-semantic-parse, 2026-05-13
+
+- 2026-05-13: Responses/Anthropic save-restore 清理还有两个边界。可复用规则：**(1)** Anthropic `assistant.content=[{type:"tool_use"}]` 不是 empty assistant，不能在 sanitizer/contract path 里误删；**(2)** message 形状归一即使在“本轮没删 assistant”时也必须返回更新后的 messages，不能只在发生删除时才回写。反模式：在 `request-executor-response-contract.ts` 或 save/restore 清理链里加“句子像计划/自言自语就删”的文案级规则；这会制造第二实现面，必须禁止。
+
+Tags: anthropic, tool_use, empty-assistant, request-executor-response-contract, shape-normalization, no-sentence-matching, no-second-surface, 2026-05-13
+
+## 2026-05-14 `/goal` transport vs stopless boundary
+
+- `/goal` 代理承接的唯一正确边界是 **goal-capable tools transport**：识别 `get_goal/create_goal/update_goal/request_user_input` 后，RouteCodex 只保真传输 tools / tool_calls / tool_outputs / followup payload；goal 生命周期、续轮与完成判定归 Codex runtime。禁止把 `reasoning.stop` 重命名或映射成 `/goal`。
+- llmswitch-core 的 goal-capable 判定真源在 Rust native（`router-hotpath-napi/src/hub_goal_tools.rs`）；TS 只允许薄壳调用。goal mode 下必须跳过 stopless seed、reasoning.stop 注入、reasoning_stop_guard、stopless finalization missing；旧 stopless 只能作为 non-goal legacy 保留并由回归测试覆盖。
+
+- 2026-05-14: client tool validator 边界必须固定为 **shape-only**。可复用规则：`provider-response-tool-validation-blocks.ts` 只允许检查 JSON object、required fields、基础 primitive type；禁止做 tool declared 审计、禁止修 shell wrapper、禁止把 `input.input/input.patches` 猜成 `apply_patch.patch`、禁止审 evidence/summary 质量。runtime 治理（连续错误/无进展/forced stopped）必须放在 goal state owner，不准塞回 validator。
+
+Tags: validator, shape-only, no-audit, no-compat-guess, goal-state-owner, 2026-05-14
+
+## 2026-05-14 validator边界纠偏
+- 用户再次明确：不要把 runtime/router/provider failure 收敛塞进 validator 或 converter 前置门。
+- 本次修正：provider-response-converter 只做合法 tool shape 投影，不再在 converter 内累计 validation failure / no_progress / irrecoverable followup 并强制 stopped。

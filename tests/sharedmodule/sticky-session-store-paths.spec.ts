@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
+  loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
 
@@ -62,7 +63,7 @@ describe('sticky session store paths', () => {
       disabledProviders: new Set<string>(),
       disabledKeys: new Map<string, number>(),
       disabledModels: new Map<string, number>(),
-      reasoningStopMode: 'off'
+      stopMessageText: 'override routing state'
     } as any;
 
     saveRoutingInstructionStateSync('session:override-routing', state);
@@ -72,5 +73,29 @@ describe('sticky session store paths', () => {
     expect(fs.existsSync(path.join(overrideDir, 'conversation-override-routing.json'))).toBe(true);
     expect(fs.existsSync(path.join(tempRoot, 'state', 'routing', 'session-override-routing.json'))).toBe(false);
     expect(fs.existsSync(path.join(tempRoot, 'state', 'routing', 'conversation-override-routing.json'))).toBe(false);
+  });
+
+  test('round-trips stopless goal state through persisted routing snapshots', () => {
+    const state = {
+      stoplessGoalState: {
+        status: 'active',
+        objective: '统一 RCC stopless goal lifecycle',
+        latestNote: 'waiting for host inbound wiring',
+        updatedAt: 456,
+        createdAt: 123
+      },
+      allowedProviders: new Set<string>(),
+      disabledProviders: new Set<string>(),
+      disabledKeys: new Map<string, number>(),
+      disabledModels: new Map<string, number>()
+    } as any;
+
+    saveRoutingInstructionStateSync('session:goal-state', state);
+
+    const restored = loadRoutingInstructionStateSync('session:goal-state');
+    expect(restored?.stoplessGoalState).toEqual(state.stoplessGoalState);
+    expect(
+      fs.existsSync(path.join(tempRoot, 'state', 'routing', 'session-goal-state.json'))
+    ).toBe(true);
   });
 });

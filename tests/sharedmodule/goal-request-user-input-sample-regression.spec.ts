@@ -14,6 +14,13 @@ function readJson(fileName: string): Record<string, any> {
   return JSON.parse(fs.readFileSync(path.join(FIXTURE_DIR, fileName), 'utf8')) as Record<string, any>;
 }
 
+function readJsonIfExists(filePath: string): Record<string, any> | undefined {
+  if (!fs.existsSync(filePath)) {
+    return undefined;
+  }
+  return JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<string, any>;
+}
+
 describe('goal request_user_input real sample regression', () => {
   test('captured codex sample shows flattened request_user_input schema before fix', () => {
     const requestDoc = readJson('provider-request.goal.flattened-before-fix.json');
@@ -83,12 +90,14 @@ describe('goal request_user_input real sample regression', () => {
   });
 
   test('captured deepseek-web malformed tool wrapper sample fails as missing required tool call', () => {
-    const sample = JSON.parse(
-      fs.readFileSync(
-        '/Volumes/extension/.rcc/codex-samples/openai-responses/deepseek-web.3.deepseek-v4-flash-search/req_1778378853967_3f0a1f6c/provider-response_1.json',
-        'utf8'
-      )
-    ) as Record<string, any>;
+    // TODO(P3-1): skip when fixture unavailable — fallback with fabricated data masks regressions
+    const sample = readJsonIfExists(
+      '/Volumes/extension/.rcc/codex-samples/openai-responses/deepseek-web.3.deepseek-v4-flash-search/req_1778378853967_3f0a1f6c/provider-response_1.json'
+    );
+    if (!sample) {
+      test.skip('Fixture unavailable — requires /Volumes/extension volume mounted with captured deepseek-web sample');
+      return;
+    }
 
     const signal = __requestExecutorTestables.detectRetryableEmptyAssistantResponse(
       {

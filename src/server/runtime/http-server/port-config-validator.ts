@@ -1,15 +1,15 @@
 /**
- * Port Config Validator
+ * Port Config Validator — Per-Port Authoritative Config
  *
- * 端口配置验证规则：
- * 1. Router 模式不允许设置 protocolBehavior / providerBinding
- * 2. Provider 模式必须设置 providerBinding
- * 3. Direct 模式跨协议时 fail-fast
- * 4. 端口号不重复
- * 5. 端口号范围 1024-65535
+ * Validation rules:
+ * 1. Router mode: MUST have routingPolicyGroup, MUST NOT have providerBinding/protocolBehavior
+ * 2. Provider mode: MUST have providerBinding + protocolBehavior, MUST NOT have routingPolicyGroup
+ * 3. routingPolicyGroup must reference an existing group (checked at loader level)
+ * 4. No duplicate port numbers
+ * 5. Port range 1024-65535
  */
 
-import type { PortConfig, PortMode, ProtocolBehavior } from './port-config-types.js';
+import type { PortConfig, ProtocolBehavior } from './port-config-types.js';
 import type { ProviderProtocol } from './types.js';
 
 export interface PortValidationError {
@@ -30,8 +30,9 @@ const VALID_BEHAVIORS: ReadonlySet<string> = new Set(['direct', 'relay', 'auto']
 
 function validatePortConfig(config: PortConfig): PortValidationError[] {
   const errors: PortValidationError[] = [];
-  const { port, host, mode, protocolBehavior, providerBinding } = config;
+  const { port, host, mode, protocolBehavior, providerBinding, routingPolicyGroup } = config;
 
+  // Port range
   if (typeof port !== 'number' || !Number.isInteger(port) || port < VALID_PORT_MIN || port > VALID_PORT_MAX) {
     errors.push({
       port: port ?? 0,
@@ -40,31 +41,46 @@ function validatePortConfig(config: PortConfig): PortValidationError[] {
     });
   }
 
+  // Host
   if (!host || typeof host !== 'string' || !host.trim()) {
     errors.push({ port: port ?? 0, field: 'host', message: 'Host must be a non-empty string' });
   }
 
+  // Mode
   if (!VALID_MODES.has(mode)) {
     errors.push({ port: port ?? 0, field: 'mode', message: `Mode must be "router" or "provider", got: "${mode}"` });
     return errors;
   }
 
   if (mode === 'router') {
-    if (protocolBehavior !== undefined && protocolBehavior !== null) {
-      errors.push({ port, field: 'protocolBehavior', message: `Router mode does not support protocolBehavior, got: "${protocolBehavior}"` });
+    // Router mode MUST have routingPolicyGroup
+    if (!routingPolicyGroup || typeof routingPolicyGroup !== 'string' || !routingPolicyGroup.trim()) {
+      errors.push({ port, field: 'routingPolicyGroup', message: 'Router mode requires a non-empty routingPolicyGroup' });
     }
+    // Router mode MUST NOT have providerBinding
     if (providerBinding !== undefined && providerBinding !== null && providerBinding !== '') {
-      errors.push({ port, field: 'providerBinding', message: `Router mode does not support providerBinding, got: "${providerBinding}"` });
+      errors.push({ port, field: 'providerBinding', message: 'Router mode does not support providerBinding' });
+    }
+    // Router mode MUST NOT have protocolBehavior
+    if (protocolBehavior !== undefined && protocolBehavior !== null) {
+      errors.push({ port, field: 'protocolBehavior', message: 'Router mode does not support protocolBehavior' });
     }
     return errors;
   }
 
+  // Provider mode
   if (mode === 'provider') {
+    // MUST have providerBinding
     if (!providerBinding || typeof providerBinding !== 'string' || !providerBinding.trim()) {
       errors.push({ port, field: 'providerBinding', message: 'Provider mode requires a non-empty providerBinding' });
     }
-    if (protocolBehavior !== undefined && protocolBehavior !== null && !VALID_BEHAVIORS.has(protocolBehavior)) {
-      errors.push({ port, field: 'protocolBehavior', message: `ProtocolBehavior must be "direct", "relay", or "auto", got: "${protocolBehavior}"` });
+    // MUST have protocolBehavior
+    if (!protocolBehavior || !VALID_BEHAVIORS.has(protocolBehavior)) {
+      errors.push({ port, field: 'protocolBehavior', message: 'Provider mode requires protocolBehavior: "direct", "relay", or "auto"' });
+    }
+    // Provider mode MUST NOT have routingPolicyGroup
+    if (routingPolicyGroup !== undefined && routingPolicyGroup !== null && routingPolicyGroup !== '') {
+      errors.push({ port, field: 'routingPolicyGroup', message: 'Provider mode does not support routingPolicyGroup' });
     }
   }
 
@@ -122,5 +138,6 @@ export function normalizePortsConfig(rawHttpserver: Record<string, unknown>): Po
     typeof rawHttpserver.host === 'string' && rawHttpserver.host.trim()
       ? rawHttpserver.host.trim()
       : '0.0.0.0';
-  return [{ port, host, mode: 'router' }];
+  // Fallback to router with default group (legacy compat for old configs without ports[])
+  return [{ port, host, mode: 'router', routingPolicyGroup: 'default' }];
 }

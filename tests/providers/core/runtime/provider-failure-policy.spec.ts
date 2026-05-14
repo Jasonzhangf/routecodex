@@ -326,10 +326,10 @@ describe('provider failure policy ssot', () => {
     })).toBeUndefined();
 
     expect(resolveProviderFailureClassification({
-      error: new Error('stopless contract violated'),
-      stage: 'host.stopless_contract',
+      error: new Error('response contract violated'),
+      stage: 'host.response_contract',
       statusCode: 502,
-      reason: 'stopless contract violated'
+      reason: 'response contract violated'
     })).toBeUndefined();
   });
 

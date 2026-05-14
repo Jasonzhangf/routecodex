@@ -70,11 +70,20 @@ export class AnthropicProtocolClient implements HttpProtocolClient<ProtocolReque
       bodyRecord.tool_choice = normalizedToolChoice;
     }
 
+    // Strip non-Anthropic top-level fields that leak from Claude-Code or OpenAI shapes.
+    delete bodyRecord.output_config;
+
     // Anthropic Messages supports top-level `metadata`. Some Claude-Code-gated proxies require it to exist.
-    // The OpenAI chat client deletes `metadata`, so restore it (after stripping internal "__*" keys).
+    // The OpenAI chat client deletes `metadata`, so restore it (after stripping internal "__*" keys
+    // and non-Anthropic sub-fields like `clientHeaders`).
     const rawMetadata = (rawPayload as Record<string, unknown>).metadata;
     if (rawMetadata && typeof rawMetadata === 'object' && !Array.isArray(rawMetadata)) {
-      bodyRecord.metadata = stripInternalKeysDeep(rawMetadata as Record<string, unknown>);
+      const cleaned = stripInternalKeysDeep(rawMetadata as Record<string, unknown>);
+      delete cleaned.clientHeaders;
+      delete cleaned.client_headers;
+      if (Object.keys(cleaned).length > 0) {
+        bodyRecord.metadata = cleaned;
+      }
     }
 
     return body;

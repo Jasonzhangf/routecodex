@@ -340,20 +340,14 @@ function pruneLegacySessionScopedStopAndPreCommandState(metadata: RouterMetadata
   state.preCommandUpdatedAt = undefined;
 
   const hasOtherRoutingState =
+    Boolean(state.stoplessGoalState) ||
     Boolean(state.forcedTarget) ||
     Boolean(state.stickyTarget) ||
     Boolean(state.preferTarget) ||
     state.allowedProviders.size > 0 ||
     state.disabledProviders.size > 0 ||
     state.disabledKeys.size > 0 ||
-    state.disabledModels.size > 0 ||
-    Boolean(state.reasoningStopMode && state.reasoningStopMode.trim()) ||
-    state.reasoningStopArmed === true ||
-    Boolean(state.reasoningStopSummary && state.reasoningStopSummary.trim()) ||
-    (typeof state.reasoningStopUpdatedAt === 'number' && Number.isFinite(state.reasoningStopUpdatedAt)) ||
-    (typeof state.reasoningStopFailCount === 'number' && Number.isFinite(state.reasoningStopFailCount)) ||
-    (typeof state.reasoningStopGuardTriggerCount === 'number' && Number.isFinite(state.reasoningStopGuardTriggerCount)) ||
-    (typeof state.reasoningStopGuardTriggerAt === 'number' && Number.isFinite(state.reasoningStopGuardTriggerAt));
+    state.disabledModels.size > 0;
 
   saveRoutingInstructionStateSync(legacyKey, hasOtherRoutingState ? state : null);
 }

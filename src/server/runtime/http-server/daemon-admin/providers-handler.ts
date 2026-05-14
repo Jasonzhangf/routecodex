@@ -101,6 +101,20 @@ function mapRoutingGroupErrorToStatus(error: unknown): number {
 export function registerProviderRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   const reject = (req: Request, res: Response) => rejectNonLocalOrUnauthorizedAdmin(req, res);
 
+  app.get('/admin/providers', (req: Request, res: Response) => {
+    if (reject(req, res)) {return;}
+    try {
+      const items =
+        typeof options.getAvailableProviders === 'function'
+          ? options.getAvailableProviders()
+          : [];
+      res.status(200).json({ providers: items });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message, code: 'internal_error' } });
+    }
+  });
+
   app.get('/providers/runtimes', (req: Request, res: Response) => {
     if (reject(req, res)) {return;}
     try {

@@ -62,7 +62,9 @@ describe('toml shadow codec', () => {
               ]
             },
             session: {
-              reasoningStopMode: 'on'
+              enabled: true,
+              tickMs: 1500,
+              retentionMs: 1200000
             }
           }
         }
@@ -81,7 +83,9 @@ port = 5555
 activeRoutingPolicyGroup = "default"
 
 [virtualrouter.routingPolicyGroups.default.session]
-reasoningStopMode = "on"
+enabled = true
+tickMs = 1500
+retentionMs = 1200000
 
 [[virtualrouter.routingPolicyGroups.default.routing.default]]
 id = "default-primary"

@@ -4,15 +4,13 @@ import {
   STREAM_CONTRACT_PROBE_BODY_KEY,
 } from './servertool-response-normalizer.js';
 import { readString } from './request-executor-error-shared.js';
-import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../../../utils/finish-reason.js';
+import { STREAM_LOG_FINISH_REASON_KEY } from '../../../utils/finish-reason.js';
 import {
   bodyContainsReasoningStopFinalizedMarker,
   valueContainsReasoningStopFinalizedMarker
 } from './reasoning-stop-finalization-visibility.js';
 export { bodyContainsReasoningStopFinalizedMarker } from './reasoning-stop-finalization-visibility.js';
 
-
-type StoplessLogMode = 'on' | 'off' | 'endless';
 type ProviderSnapshotWriteArgs = {
   phase:
     | 'provider-request'
@@ -369,76 +367,6 @@ export function detectAssistantSanitizationPlaceholder(body: unknown): PayloadCo
 
 function containsReasoningStopFinalizedMarker(value: unknown): boolean {
   return valueContainsReasoningStopFinalizedMarker(value);
-}
-
-function hasAnthropicToolUseSuccess(body: Record<string, unknown>): boolean {
-  const data = isRecord(body.data) ? body.data : body;
-  const stopReason = readString(data.stop_reason)?.toLowerCase() ?? '';
-  const content = Array.isArray(data.content) ? data.content : [];
-  const hasToolUseBlock = content.some((item) => isRecord(item) && readString(item.type) === 'tool_use');
-  return stopReason === 'tool_use' || hasToolUseBlock;
-}
-
-export function detectStoplessTerminationWithoutFinalization(
-  body: unknown,
-  stoplessMode?: StoplessLogMode
-): PayloadContractSignal | null {
-  if ((stoplessMode !== 'on' && stoplessMode !== 'endless') || !isRecord(body)) {
-    return null;
-  }
-  if (Object.prototype.hasOwnProperty.call(body, '__sse_responses')) {
-    return null;
-  }
-  if (bodyContainsReasoningStopFinalizedMarker(body)) {
-    return null;
-  }
-  if (hasAnthropicToolUseSuccess(body)) {
-    return null;
-  }
-  const derivedFinishReason = deriveFinishReason(body)?.trim().toLowerCase() ?? '';
-
-  const choices = Array.isArray(body.choices) ? body.choices : [];
-  if (choices.length > 0) {
-    const firstChoice = isRecord(choices[0]) ? choices[0] : undefined;
-    if (!firstChoice) {
-      return null;
-    }
-    const finishReason = readString(firstChoice.finish_reason)?.toLowerCase() ?? '';
-    const message = isRecord(firstChoice.message) ? firstChoice.message : undefined;
-    const hasToolCalls = hasNonEmptyToolCalls(message?.tool_calls);
-    if (finishReason === 'stop' && !hasToolCalls) {
-      return {
-        reason: `stopless=${stoplessMode} but chat completion stopped without reasoning.stop finalized marker`,
-        marker: 'chat_stopless_missing_reasoning_stop_finalization'
-      };
-    }
-  }
-
-  if (derivedFinishReason === 'stop') {
-    return {
-      reason: `stopless=${stoplessMode} but response resolved to finish_reason=stop without reasoning.stop finalized marker`,
-      marker: 'derived_stopless_missing_reasoning_stop_finalization'
-    };
-  }
-
-  const status = readString(body.status)?.toLowerCase() ?? '';
-  if (status === 'completed' || status === 'stop') {
-    const requiredAction = isRecord(body.required_action) ? body.required_action : undefined;
-    const submitToolOutputs =
-      requiredAction && isRecord(requiredAction.submit_tool_outputs)
-        ? requiredAction.submit_tool_outputs
-        : undefined;
-    const hasRequiredActionToolCalls = hasNonEmptyToolCalls(submitToolOutputs?.tool_calls);
-    const hasFunctionCalls = hasOutputFunctionCalls(body.output);
-    if (!hasRequiredActionToolCalls && !hasFunctionCalls) {
-      return {
-        reason: `stopless=${stoplessMode} but responses output completed without reasoning.stop finalized marker`,
-        marker: 'responses_stopless_missing_reasoning_stop_finalization'
-      };
-    }
-  }
-
-  return null;
 }
 
 export async function persistPayloadContractProviderSnapshots(args: {

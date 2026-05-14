@@ -32,7 +32,6 @@ const mockBridgeModule = () => ({
         ? metadata.conversationId
         : undefined
   }),
-  syncReasoningStopModeFromRequest: () => 'off',
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
 });
 

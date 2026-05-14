@@ -87,9 +87,7 @@ describe('servertool followup dispatch helper', () => {
 
     expect(mockRunClientInjectionFlowBeforeReenter).toHaveBeenCalledTimes(1);
     expect(executeNested).not.toHaveBeenCalled();
-    expect(result).toEqual({
-      body: { ok: true, mode: 'client_inject_only' }
-    });
+    expect(result).toEqual({});
   });
 
   it('client inject dispatch uses the same normalized metadata builder', async () => {
@@ -215,6 +213,78 @@ describe('servertool followup dispatch helper', () => {
       serverToolFollowupSource: 'servertool.reasoning_stop_continue'
     });
     expect(((result.body as Record<string, any>)?.tools ?? [])[0]?.function?.name).toBe('exec_command');
+  });
+
+  it('goal-capable followup restores full client goal tools instead of stale reasoning.stop-only tools', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: {
+        tools: input.body?.tools,
+        semantics: input.body?.semantics
+      }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    const goalTools = [
+      { type: 'function', function: { name: 'get_goal', parameters: { type: 'object' } } },
+      { type: 'function', function: { name: 'update_goal', parameters: { type: 'object' } } },
+      {
+        type: 'function',
+        function: {
+          name: 'request_user_input',
+          parameters: {
+            type: 'object',
+            properties: {
+              questions: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    options: {
+                      type: 'array',
+                      items: { type: 'object', properties: { label: { type: 'string' } } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ];
+
+    await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_goal_followup_tools',
+      body: {
+        input: 'continue',
+        tools: [{ type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }]
+      },
+      metadata: {
+        __rt: { serverToolFollowup: true, clientInjectSource: 'servertool.reasoning_stop_guard' }
+      },
+      requestSemantics: {
+        tools: {
+          clientToolsRaw: goalTools
+        }
+      },
+      executeNested
+    });
+
+    const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
+    expect(nestedInput?.body?.tools?.map((tool: any) => tool?.function?.name)).toEqual([
+      'get_goal',
+      'update_goal',
+      'request_user_input'
+    ]);
+    expect(JSON.stringify(nestedInput?.body?.tools)).not.toContain('reasoning.stop');
+    expect(nestedInput?.body?.tools?.[2]?.function?.parameters?.properties?.questions?.items?.properties?.options?.items)
+      .toEqual({ type: 'object', properties: { label: { type: 'string' } } });
   });
 
   it('reenter path strips stale responses output budget from servertool followup semantics', async () => {

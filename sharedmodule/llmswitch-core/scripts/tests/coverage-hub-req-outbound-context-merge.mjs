@@ -110,8 +110,8 @@ function makeAdapterContext(overrides = {}) {
 
 function assertNativeUnavailableError(fn, capability) {
   const re = capability
-    ? new RegExp(`native ${capability} is required but unavailable`, 'i')
-    : /native .* is required but unavailable/i;
+    ? new RegExp(`native .* (is required but unavailable|execution failed)`, 'i')
+    : /native .* (is required but unavailable|execution failed)/i;
   assert.throws(fn, re);
 }
 

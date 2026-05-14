@@ -121,6 +121,27 @@ export function resolvePoolCooldownWaitMs(pipelineError: unknown): number | unde
   return Math.max(50, candidate);
 }
 
+export function resolvePoolCooldownCandidateProviderCount(pipelineError: unknown): number | undefined {
+  if (!pipelineError || typeof pipelineError !== 'object') {
+    return undefined;
+  }
+  const details = (pipelineError as { details?: unknown }).details;
+  if (!details || typeof details !== 'object' || Array.isArray(details)) {
+    return undefined;
+  }
+  const raw = (details as Record<string, unknown>).candidateProviderCount;
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
+    return Math.floor(raw);
+  }
+  if (typeof raw === 'string' && raw.trim()) {
+    const parsed = Number.parseInt(raw.trim(), 10);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return Math.floor(parsed);
+    }
+  }
+  return undefined;
+}
+
 export function mergeMetadataPreservingDefined(
   base: Record<string, unknown>,
   overlay?: Record<string, unknown> | null

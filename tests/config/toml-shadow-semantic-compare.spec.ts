@@ -39,7 +39,6 @@ describe('toml shadow semantic compare', () => {
       virtualrouterMode: 'v2',
       httpserver: { host: '127.0.0.1', port: 5555 },
       virtualrouter: {
-        activeRoutingPolicyGroup: 'default',
         routingPolicyGroups: {
           default: {
             routing: {
@@ -48,7 +47,9 @@ describe('toml shadow semantic compare', () => {
               web_search: [{ id: 'manual-search', targets: ['ali-coding-plan.glm-5'] }]
             },
             session: {
-              reasoningStopMode: 'on'
+              enabled: true,
+              tickMs: 1500,
+              retentionMs: 1200000
             }
           }
         }
@@ -63,11 +64,10 @@ virtualrouterMode = "v2"
 host = "127.0.0.1"
 port = 5555
 
-[virtualrouter]
-activeRoutingPolicyGroup = "default"
-
 [virtualrouter.routingPolicyGroups.default.session]
-reasoningStopMode = "on"
+enabled = true
+tickMs = 1500
+retentionMs = 1200000
 
 [[virtualrouter.routingPolicyGroups.default.routing.default]]
 id = "default-primary"

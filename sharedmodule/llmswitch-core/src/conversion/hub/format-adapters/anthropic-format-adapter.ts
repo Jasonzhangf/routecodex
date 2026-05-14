@@ -18,6 +18,54 @@ interface AnthropicFormatPayload extends JsonObject {
   tools?: JsonValue[];
 }
 
+const ANTHROPIC_WIRE_TOP_LEVEL_FIELDS = new Set([
+  'model',
+  'messages',
+  'tools',
+  'system',
+  'stop_sequences',
+  'temperature',
+  'top_p',
+  'top_k',
+  'max_tokens',
+  'max_output_tokens',
+  'metadata',
+  'stream',
+  'tool_choice',
+  'thinking'
+]);
+
+const ANTHROPIC_METADATA_ALLOW_KEYS = new Set([
+  'user_id',
+  'user'
+]);
+
+function pruneAnthropicWirePayload(payload: AnthropicFormatPayload): AnthropicFormatPayload {
+  const record = payload as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(record)) {
+    if (ANTHROPIC_WIRE_TOP_LEVEL_FIELDS.has(key)) {
+      out[key] = record[key];
+    }
+  }
+  // Strip non-Anthropic metadata sub-fields
+  if (out.metadata && typeof out.metadata === 'object' && !Array.isArray(out.metadata)) {
+    const md = out.metadata as Record<string, unknown>;
+    const clean: Record<string, unknown> = {};
+    for (const k of Object.keys(md)) {
+      if (ANTHROPIC_METADATA_ALLOW_KEYS.has(k)) {
+        clean[k] = md[k];
+      }
+    }
+    if (Object.keys(clean).length > 0) {
+      out.metadata = clean;
+    } else {
+      delete out.metadata;
+    }
+  }
+  return out as unknown as AnthropicFormatPayload;
+}
+
 export class AnthropicFormatAdapter implements FormatAdapter {
   readonly protocol = 'anthropic-messages';
 
@@ -38,7 +86,7 @@ export class AnthropicFormatAdapter implements FormatAdapter {
   }
 
   async buildRequest(format: FormatEnvelope<AnthropicFormatPayload>, _ctx: AdapterContext): Promise<AnthropicFormatPayload> {
-    return format.payload as AnthropicFormatPayload;
+    return pruneAnthropicWirePayload(format.payload as AnthropicFormatPayload);
   }
 
   async parseResponse(original: JsonObject, _ctx: AdapterContext): Promise<FormatEnvelope<AnthropicFormatPayload>> {

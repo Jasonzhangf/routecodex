@@ -1,7 +1,6 @@
 /**
  * Port Mode & Protocol Routing — Configuration Types
  */
-import type { ProviderProtocol } from './types.js';
 
 export type PortMode = 'router' | 'provider';
 export type ProtocolBehavior = 'direct' | 'relay' | 'auto';
@@ -10,8 +9,12 @@ export interface PortConfig {
   port: number;
   host: string;
   mode: PortMode;
-  protocolBehavior?: ProtocolBehavior;
+  // router mode: must reference a virtualrouter.routingPolicyGroups key
+  routingPolicyGroup?: string;
+  // provider mode: must reference a provider key
   providerBinding?: string;
+  // provider mode: direct/relay/auto
+  protocolBehavior?: ProtocolBehavior;
   apikey?: string;
   timeout?: number;
   bodyLimit?: string;
@@ -24,6 +27,7 @@ export interface PortRuntimeState {
   host: string;
   mode: PortMode;
   protocolBehavior?: ProtocolBehavior;
+  routingPolicyGroup?: string;
   providerBinding?: string;
   status: PortStatus;
   activeConnections: number;
@@ -34,6 +38,7 @@ export interface PortRuntimeState {
 export interface PortCreateOrUpdateRequest {
   host?: string;
   mode: PortMode;
+  routingPolicyGroup?: string;
   protocolBehavior?: ProtocolBehavior;
   providerBinding?: string;
   apikey?: string;
@@ -46,6 +51,7 @@ export interface PortView {
   host: string;
   mode: PortMode;
   protocolBehavior?: ProtocolBehavior;
+  routingPolicyGroup?: string;
   providerBinding?: string;
   status: PortStatus;
   activeConnections: number;
@@ -56,8 +62,8 @@ export interface PortListView {
   ports: PortView[];
 }
 
-export function createDefaultRouterPort(port: number, host = '0.0.0.0'): PortConfig {
-  return { port, host, mode: 'router' };
+export function createDefaultRouterPort(port: number, host = '0.0.0.0', routingPolicyGroup = 'default'): PortConfig {
+  return { port, host, mode: 'router', routingPolicyGroup };
 }
 
 export function createDefaultProviderPort(

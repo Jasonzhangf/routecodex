@@ -65,9 +65,9 @@ type RequestExecutorProviderSendFailureArgs = {
   trafficPolicyMaxInFlight: number;
   providerTransportBackoffKey?: string;
   consumeProviderTransportBackoffMs: (key: string, args: { error: unknown; statusCode?: number }) => number;
-  sessionStormBackoffScope?: string;
+  sessionStormBackoffScopes?: string[];
   isSessionStormBackoffCandidate: (error: unknown) => boolean;
-  consumeSessionStormBackoffMs: (key: string) => number;
+  consumeSessionStormBackoffMs: (key: string, error?: unknown) => number;
   getSessionStormBackoffConsecutive: (key: string) => number;
   providerSendStartedAtMs: number;
   providerSendElapsedMs: number;
@@ -136,17 +136,19 @@ export async function processProviderSendFailure(
   const errorMessage = args.error instanceof Error ? args.error.message : String(args.error ?? 'Unknown error');
   const retryError = args.extractRetryErrorSnapshot(args.error);
 
-  if (args.sessionStormBackoffScope && args.isSessionStormBackoffCandidate(args.error)) {
-    const backoffMs = args.consumeSessionStormBackoffMs(args.sessionStormBackoffScope);
-    args.logStage('request.session_storm_backoff.recorded', args.requestId, {
-      scope: args.sessionStormBackoffScope,
-      backoffMs,
-      consecutive: args.getSessionStormBackoffConsecutive(args.sessionStormBackoffScope),
-      reason: retryError.reason,
-      errorCode: retryError.errorCode,
-      upstreamCode: retryError.upstreamCode,
-      statusCode: retryError.statusCode
-    });
+  if (args.sessionStormBackoffScopes?.length && args.isSessionStormBackoffCandidate(args.error)) {
+    for (const scope of args.sessionStormBackoffScopes) {
+      const backoffMs = args.consumeSessionStormBackoffMs(scope, args.error);
+      args.logStage('request.session_storm_backoff.recorded', args.requestId, {
+        scope,
+        backoffMs,
+        consecutive: args.getSessionStormBackoffConsecutive(scope),
+        reason: retryError.reason,
+        errorCode: retryError.errorCode,
+        upstreamCode: retryError.upstreamCode,
+        statusCode: retryError.statusCode
+      });
+    }
   }
 
   if (!args.bypassTrafficGovernor) {

@@ -11,9 +11,6 @@ import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import {
   extractSessionIdentifiersFromMetadataWithNative
 } from '../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/engine-selection/native-hub-pipeline-session-identifiers-semantics.js';
-import {
-  syncReasoningStopModeFromRequest as syncReasoningStopModeFromRequestFromCore
-} from '../../../../sharedmodule/llmswitch-core/dist/servertool/handlers/reasoning-stop-state.js';
 
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
@@ -110,14 +107,39 @@ export function saveRoutingInstructionStateSync(key: string, state: unknown | nu
   }
 }
 
-export function syncReasoningStopModeFromRequest(
-  adapterContext: unknown,
-  fallbackMode?: 'on' | 'off' | 'endless'
-): 'on' | 'off' | 'endless' {
+export function syncStoplessGoalStateFromRequest(adapterContext: unknown): unknown {
+  const stoplessGoalStateModule = requireCoreDist<{
+    syncStoplessGoalStateFromRequest?: (adapterContext: unknown) => unknown;
+  }>('servertool/handlers/stopless-goal-state');
+  const fn = stoplessGoalStateModule.syncStoplessGoalStateFromRequest;
+  if (typeof fn !== 'function') {
+    throw buildStateIntegrationFailure(
+      'stopless_goal_state.sync.api_unavailable',
+      'syncStoplessGoalStateFromRequest not available'
+    );
+  }
   try {
-    return syncReasoningStopModeFromRequestFromCore(adapterContext, fallbackMode);
+    return fn(adapterContext);
   } catch (error) {
-    throw buildStateIntegrationFailure('reasoning_stop_state.sync_mode.invoke', error, { fallbackMode });
+    throw buildStateIntegrationFailure('stopless_goal_state.sync.invoke', error);
+  }
+}
+
+export function persistStoplessGoalStateSnapshot(adapterContext: unknown, state: unknown): unknown {
+  const stoplessGoalStateModule = requireCoreDist<{
+    persistStoplessGoalStateSnapshot?: (adapterContext: unknown, state: unknown) => unknown;
+  }>('servertool/handlers/stopless-goal-state');
+  const fn = stoplessGoalStateModule.persistStoplessGoalStateSnapshot;
+  if (typeof fn !== 'function') {
+    throw buildStateIntegrationFailure(
+      'stopless_goal_state.persist.api_unavailable',
+      'persistStoplessGoalStateSnapshot not available'
+    );
+  }
+  try {
+    return fn(adapterContext, state);
+  } catch (error) {
+    throw buildStateIntegrationFailure('stopless_goal_state.persist.invoke', error);
   }
 }
 

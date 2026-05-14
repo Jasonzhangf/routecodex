@@ -7,6 +7,7 @@
 import type fs from 'node:fs';
 import type path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { parseTomlRecord } from '../../../config/toml-basic.js';
 
 function logLauncherUtilsNonBlocking(
   stage: string,
@@ -16,6 +17,29 @@ function logLauncherUtilsNonBlocking(
   const reason = error instanceof Error ? (error.stack || `${error.name}: ${error.message}`) : String(error);
   const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
   console.warn(`[launcher-utils] ${stage} failed (non-blocking): ${reason}${detailSuffix}`);
+}
+
+function parseLauncherConfigText(configPath: string, raw: string): Record<string, unknown> {
+  const trimmedPath = String(configPath || '').trim().toLowerCase();
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) {
+    return {};
+  }
+  if (trimmedPath.endsWith('.toml')) {
+    return parseTomlRecord(raw);
+  }
+  if (trimmedPath.endsWith('.json')) {
+    return JSON.parse(raw) as Record<string, unknown>;
+  }
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return parseTomlRecord(raw);
+  }
+}
+
+function readConfigRecordField(record: Record<string, unknown>, key: string): unknown {
+  return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
 }
 
 /**
@@ -158,8 +182,26 @@ export function readConfigApiKey(fsImpl: typeof fs, configPath: string): string 
       return null;
     }
     const txt = fsImpl.readFileSync(configPath, 'utf8');
-    const cfg = JSON.parse(txt);
-    const direct = cfg?.httpserver?.apikey ?? cfg?.modules?.httpserver?.config?.apikey ?? cfg?.server?.apikey;
+    const cfg = parseLauncherConfigText(configPath, txt);
+    const httpserver = readConfigRecordField(cfg, 'httpserver');
+    const modules = readConfigRecordField(cfg, 'modules');
+    const server = readConfigRecordField(cfg, 'server');
+    const direct = (
+      (typeof httpserver === 'object' && httpserver && readConfigRecordField(httpserver as Record<string, unknown>, 'apikey')) ??
+      (typeof modules === 'object' && modules &&
+        (() => {
+          const moduleHttpserver = readConfigRecordField(modules as Record<string, unknown>, 'httpserver');
+          if (typeof moduleHttpserver !== 'object' || !moduleHttpserver) {
+            return undefined;
+          }
+          const moduleConfig = readConfigRecordField(moduleHttpserver as Record<string, unknown>, 'config');
+          if (typeof moduleConfig !== 'object' || !moduleConfig) {
+            return undefined;
+          }
+          return readConfigRecordField(moduleConfig as Record<string, unknown>, 'apikey');
+        })()) ??
+      (typeof server === 'object' && server && readConfigRecordField(server as Record<string, unknown>, 'apikey'))
+    );
     const value = typeof direct === 'string' ? direct.trim() : '';
     if (!value) {
       return null;
@@ -224,9 +266,18 @@ export function tryReadConfigHostPort(
   }
   try {
     const configContent = fsImpl.readFileSync(configPath, 'utf8');
-    const config = JSON.parse(configContent);
-    const port = toIntegerPort(config?.httpserver?.port ?? config?.server?.port ?? config?.port);
-    const hostRaw = config?.httpserver?.host ?? config?.server?.host ?? config?.host;
+    const config = parseLauncherConfigText(configPath, configContent);
+    const httpserver = readConfigRecordField(config, 'httpserver');
+    const server = readConfigRecordField(config, 'server');
+    const port = toIntegerPort(
+      (typeof httpserver === 'object' && httpserver && readConfigRecordField(httpserver as Record<string, unknown>, 'port')) ??
+      (typeof server === 'object' && server && readConfigRecordField(server as Record<string, unknown>, 'port')) ??
+      readConfigRecordField(config, 'port')
+    );
+    const hostRaw =
+      (typeof httpserver === 'object' && httpserver && readConfigRecordField(httpserver as Record<string, unknown>, 'host')) ??
+      (typeof server === 'object' && server && readConfigRecordField(server as Record<string, unknown>, 'host')) ??
+      readConfigRecordField(config, 'host');
     const host = typeof hostRaw === 'string' && hostRaw.trim() ? hostRaw.trim() : null;
     return { host, port };
   } catch (error) {

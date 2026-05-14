@@ -39,7 +39,6 @@ export function isRequestExecutorProviderErrorStage(value: unknown): value is Re
     value === 'provider.runtime_resolve'
     || value === 'provider.send'
     || value === 'host.response_contract'
-    || value === 'host.stopless_contract'
     || value === 'provider.followup'
     || value === 'provider.sse_decode'
     || value === 'provider.http'
@@ -48,8 +47,8 @@ export function isRequestExecutorProviderErrorStage(value: unknown): value is Re
 
 export function isHostRequestExecutorErrorStage(
   stage: RequestExecutorProviderErrorStage
-): stage is 'host.stopless_contract' | 'host.response_contract' {
-  return stage === 'host.stopless_contract' || stage === 'host.response_contract';
+): stage is 'host.response_contract' {
+  return stage === 'host.response_contract';
 }
 
 export function normalizeRuntimeKey(value: unknown): string | undefined {

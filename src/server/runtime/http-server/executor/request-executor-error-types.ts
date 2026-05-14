@@ -12,7 +12,6 @@ export type RequestExecutorProviderErrorStage =
   | 'provider.runtime_resolve'
   | 'provider.send'
   | 'host.response_contract'
-  | 'host.stopless_contract'
   | 'provider.followup'
   | 'provider.sse_decode'
   | 'provider.http';

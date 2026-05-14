@@ -9,6 +9,11 @@ export function applyRoutingInstructions(
   currentState: RoutingInstructionState
 ): RoutingInstructionState {
   const newState: RoutingInstructionState = {
+    stoplessGoalState: currentState.stoplessGoalState
+      ? {
+          ...currentState.stoplessGoalState
+        }
+      : undefined,
     forcedTarget: currentState.forcedTarget ? { ...currentState.forcedTarget } : undefined,
     stickyTarget: currentState.stickyTarget ? { ...currentState.stickyTarget } : undefined,
     preferTarget: currentState.preferTarget ? { ...currentState.preferTarget } : undefined,
@@ -32,11 +37,6 @@ export function applyRoutingInstructions(
             : {}
         )
       : undefined,
-   reasoningStopMode: currentState.reasoningStopMode,
-   reasoningStopArmed: currentState.reasoningStopArmed,
-   reasoningStopSummary: currentState.reasoningStopSummary,
-   reasoningStopUpdatedAt: currentState.reasoningStopUpdatedAt,
-    reasoningStopFailCount: currentState.reasoningStopFailCount,
    preCommandSource: currentState.preCommandSource,
     preCommandScriptPath: currentState.preCommandScriptPath,
     preCommandUpdatedAt: currentState.preCommandUpdatedAt,
@@ -171,6 +171,7 @@ export function applyRoutingInstructions(
         break;
       }
       case 'clear':
+        newState.stoplessGoalState = undefined;
         newState.forcedTarget = undefined;
         newState.stickyTarget = undefined;
         newState.preferTarget = undefined;
@@ -179,11 +180,6 @@ export function applyRoutingInstructions(
         newState.disabledKeys.clear();
         newState.disabledModels.clear();
         applyStopMessageInstructionToState({ type: 'stopMessageClear' }, newState);
-       newState.reasoningStopMode = undefined;
-       newState.reasoningStopArmed = undefined;
-       newState.reasoningStopSummary = undefined;
-       newState.reasoningStopUpdatedAt = undefined;
-        newState.reasoningStopFailCount = undefined;
        clearPreCommandState(newState);
         break;
       case 'stopMessageSet':
@@ -203,6 +199,63 @@ export function applyRoutingInstructions(
 
 export function serializeRoutingInstructionState(state: RoutingInstructionState): Record<string, unknown> {
   return {
+    ...(state.stoplessGoalState &&
+    typeof state.stoplessGoalState === 'object' &&
+    typeof state.stoplessGoalState.status === 'string' &&
+    typeof state.stoplessGoalState.objective === 'string' &&
+    typeof state.stoplessGoalState.updatedAt === 'number' &&
+    Number.isFinite(state.stoplessGoalState.updatedAt) &&
+    typeof state.stoplessGoalState.createdAt === 'number' &&
+    Number.isFinite(state.stoplessGoalState.createdAt)
+      ? {
+          stoplessGoalState: {
+            status: state.stoplessGoalState.status,
+            objective: state.stoplessGoalState.objective,
+            ...(typeof state.stoplessGoalState.latestNote === 'string' && state.stoplessGoalState.latestNote.trim()
+              ? { latestNote: state.stoplessGoalState.latestNote.trim() }
+              : {}),
+            ...(typeof state.stoplessGoalState.completionEvidence === 'string' && state.stoplessGoalState.completionEvidence.trim()
+              ? { completionEvidence: state.stoplessGoalState.completionEvidence.trim() }
+              : {}),
+            ...(typeof state.stoplessGoalState.nextStep === 'string' && state.stoplessGoalState.nextStep.trim()
+              ? { nextStep: state.stoplessGoalState.nextStep.trim() }
+              : {}),
+            ...(typeof state.stoplessGoalState.userQuestion === 'string' && state.stoplessGoalState.userQuestion.trim()
+              ? { userQuestion: state.stoplessGoalState.userQuestion.trim() }
+              : {}),
+            ...(typeof state.stoplessGoalState.cannotContinueReason === 'string' && state.stoplessGoalState.cannotContinueReason.trim()
+              ? { cannotContinueReason: state.stoplessGoalState.cannotContinueReason.trim() }
+              : {}),
+            ...(typeof state.stoplessGoalState.blockingEvidence === 'string' && state.stoplessGoalState.blockingEvidence.trim()
+              ? { blockingEvidence: state.stoplessGoalState.blockingEvidence.trim() }
+              : {}),
+            ...(state.stoplessGoalState.attemptsExhausted === true ? { attemptsExhausted: true } : {}),
+            ...(typeof state.stoplessGoalState.errorClass === 'string' && state.stoplessGoalState.errorClass.trim()
+              ? { errorClass: state.stoplessGoalState.errorClass.trim() }
+              : {}),
+            ...(typeof state.stoplessGoalState.completionSummary === 'string' && state.stoplessGoalState.completionSummary.trim()
+              ? { completionSummary: state.stoplessGoalState.completionSummary.trim() }
+              : {}),
+            ...(typeof state.stoplessGoalState.ssotAssessment === 'string' && state.stoplessGoalState.ssotAssessment.trim()
+              ? { ssotAssessment: state.stoplessGoalState.ssotAssessment.trim() }
+              : {}),
+            ...(typeof state.stoplessGoalState.consecutiveIrrecoverableErrors === 'number' &&
+            Number.isFinite(state.stoplessGoalState.consecutiveIrrecoverableErrors)
+              ? { consecutiveIrrecoverableErrors: Math.max(0, Math.floor(state.stoplessGoalState.consecutiveIrrecoverableErrors)) }
+              : {}),
+            ...(typeof state.stoplessGoalState.consecutiveValidationFailures === 'number' &&
+            Number.isFinite(state.stoplessGoalState.consecutiveValidationFailures)
+              ? { consecutiveValidationFailures: Math.max(0, Math.floor(state.stoplessGoalState.consecutiveValidationFailures)) }
+              : {}),
+            ...(typeof state.stoplessGoalState.consecutiveNoProgress === 'number' &&
+            Number.isFinite(state.stoplessGoalState.consecutiveNoProgress)
+              ? { consecutiveNoProgress: Math.max(0, Math.floor(state.stoplessGoalState.consecutiveNoProgress)) }
+              : {}),
+            updatedAt: Math.max(0, Math.round(state.stoplessGoalState.updatedAt)),
+            createdAt: Math.max(0, Math.round(state.stoplessGoalState.createdAt))
+          }
+        }
+      : {}),
     forcedTarget: state.forcedTarget,
     stickyTarget: state.stickyTarget,
     preferTarget: state.preferTarget,
@@ -217,22 +270,6 @@ export function serializeRoutingInstructionState(state: RoutingInstructionState)
       models: Array.from(models)
     })),
     ...serializeStopMessageState(state),
-    ...(typeof state.reasoningStopMode === 'string'
-      && (state.reasoningStopMode === 'on' || state.reasoningStopMode === 'off' || state.reasoningStopMode === 'endless')
-      ? { reasoningStopMode: state.reasoningStopMode }
-      : {}),
-    ...(typeof state.reasoningStopArmed === 'boolean'
-      ? { reasoningStopArmed: state.reasoningStopArmed }
-      : {}),
-    ...(typeof state.reasoningStopSummary === 'string' && state.reasoningStopSummary.trim()
-      ? { reasoningStopSummary: state.reasoningStopSummary.trim() }
-      : {}),
-   ...(typeof state.reasoningStopUpdatedAt === 'number' && Number.isFinite(state.reasoningStopUpdatedAt)
-     ? { reasoningStopUpdatedAt: state.reasoningStopUpdatedAt }
-     : {}),
-    ...(typeof state.reasoningStopFailCount === 'number' && Number.isFinite(state.reasoningStopFailCount)
-      ? { reasoningStopFailCount: state.reasoningStopFailCount }
-      : {}),
    ...serializePreCommandState(state),
     ...(typeof state.chatProcessLastTotalTokens === 'number'
       ? { chatProcessLastTotalTokens: state.chatProcessLastTotalTokens }
@@ -251,6 +288,7 @@ export function serializeRoutingInstructionState(state: RoutingInstructionState)
 
 export function deserializeRoutingInstructionState(data: Record<string, unknown>): RoutingInstructionState {
   const state: RoutingInstructionState = {
+    stoplessGoalState: undefined,
     forcedTarget: undefined,
     stickyTarget: undefined,
     preferTarget: undefined,
@@ -266,11 +304,6 @@ export function deserializeRoutingInstructionState(data: Record<string, unknown>
     stopMessageAiMode: undefined,
     stopMessageAiSeedPrompt: undefined,
     stopMessageAiHistory: undefined,
-   reasoningStopMode: undefined,
-   reasoningStopArmed: undefined,
-   reasoningStopSummary: undefined,
-   reasoningStopUpdatedAt: undefined,
-    reasoningStopFailCount: undefined,
    preCommandSource: undefined,
     preCommandScriptPath: undefined,
     preCommandUpdatedAt: undefined,
@@ -279,6 +312,76 @@ export function deserializeRoutingInstructionState(data: Record<string, unknown>
     chatProcessLastMessageCount: undefined,
     chatProcessLastUpdatedAt: undefined
   };
+
+  if (data.stoplessGoalState && typeof data.stoplessGoalState === 'object' && !Array.isArray(data.stoplessGoalState)) {
+    const goal = data.stoplessGoalState as Record<string, unknown>;
+    const status =
+      typeof goal.status === 'string'
+        ? goal.status.trim().toLowerCase()
+        : '';
+    const objective =
+      typeof goal.objective === 'string'
+        ? goal.objective.trim()
+        : '';
+    const updatedAt =
+      typeof goal.updatedAt === 'number' && Number.isFinite(goal.updatedAt)
+        ? Math.max(0, Math.round(goal.updatedAt))
+        : undefined;
+    const createdAt =
+      typeof goal.createdAt === 'number' && Number.isFinite(goal.createdAt)
+        ? Math.max(0, Math.round(goal.createdAt))
+        : undefined;
+    if (
+      (status === 'idle' || status === 'active' || status === 'paused' || status === 'stopped' || status === 'completed') &&
+      objective &&
+      typeof updatedAt === 'number' &&
+      typeof createdAt === 'number'
+    ) {
+      state.stoplessGoalState = {
+        status,
+        objective,
+        ...(typeof goal.latestNote === 'string' && goal.latestNote.trim()
+          ? { latestNote: goal.latestNote.trim() }
+          : {}),
+        ...(typeof goal.completionEvidence === 'string' && goal.completionEvidence.trim()
+          ? { completionEvidence: goal.completionEvidence.trim() }
+          : {}),
+        ...(typeof goal.nextStep === 'string' && goal.nextStep.trim()
+          ? { nextStep: goal.nextStep.trim() }
+          : {}),
+        ...(typeof goal.userQuestion === 'string' && goal.userQuestion.trim()
+          ? { userQuestion: goal.userQuestion.trim() }
+          : {}),
+        ...(typeof goal.cannotContinueReason === 'string' && goal.cannotContinueReason.trim()
+          ? { cannotContinueReason: goal.cannotContinueReason.trim() }
+          : {}),
+        ...(typeof goal.blockingEvidence === 'string' && goal.blockingEvidence.trim()
+          ? { blockingEvidence: goal.blockingEvidence.trim() }
+          : {}),
+        ...(goal.attemptsExhausted === true ? { attemptsExhausted: true } : {}),
+        ...(typeof goal.errorClass === 'string' && goal.errorClass.trim()
+          ? { errorClass: goal.errorClass.trim() }
+          : {}),
+        ...(typeof goal.completionSummary === 'string' && goal.completionSummary.trim()
+          ? { completionSummary: goal.completionSummary.trim() }
+          : {}),
+        ...(typeof goal.ssotAssessment === 'string' && goal.ssotAssessment.trim()
+          ? { ssotAssessment: goal.ssotAssessment.trim() }
+          : {}),
+        ...(typeof goal.consecutiveIrrecoverableErrors === 'number' && Number.isFinite(goal.consecutiveIrrecoverableErrors)
+          ? { consecutiveIrrecoverableErrors: Math.max(0, Math.floor(goal.consecutiveIrrecoverableErrors)) }
+          : {}),
+        ...(typeof goal.consecutiveValidationFailures === 'number' && Number.isFinite(goal.consecutiveValidationFailures)
+          ? { consecutiveValidationFailures: Math.max(0, Math.floor(goal.consecutiveValidationFailures)) }
+          : {}),
+        ...(typeof goal.consecutiveNoProgress === 'number' && Number.isFinite(goal.consecutiveNoProgress)
+          ? { consecutiveNoProgress: Math.max(0, Math.floor(goal.consecutiveNoProgress)) }
+          : {}),
+        updatedAt,
+        createdAt
+      } as RoutingInstructionState['stoplessGoalState'];
+    }
+  }
 
   if (data.forcedTarget && typeof data.forcedTarget === 'object') {
     state.forcedTarget = data.forcedTarget as any;
@@ -311,21 +414,6 @@ export function deserializeRoutingInstructionState(data: Record<string, unknown>
   }
 
   deserializeStopMessageState(data, state);
-  if (typeof data.reasoningStopMode === 'string') {
-    const normalizedMode = data.reasoningStopMode.trim().toLowerCase();
-    if (normalizedMode === 'on' || normalizedMode === 'off' || normalizedMode === 'endless') {
-      state.reasoningStopMode = normalizedMode as 'on' | 'off' | 'endless';
-    }
-  }
-  if (typeof data.reasoningStopArmed === 'boolean') {
-    state.reasoningStopArmed = data.reasoningStopArmed;
-  }
-  if (typeof data.reasoningStopSummary === 'string' && data.reasoningStopSummary.trim()) {
-    state.reasoningStopSummary = data.reasoningStopSummary.trim();
-  }
-  if (typeof data.reasoningStopUpdatedAt === 'number' && Number.isFinite(data.reasoningStopUpdatedAt)) {
-    state.reasoningStopUpdatedAt = Math.max(0, Math.round(data.reasoningStopUpdatedAt));
-  }
   deserializePreCommandState(data, state);
   if (typeof data.chatProcessLastTotalTokens === 'number' && Number.isFinite(data.chatProcessLastTotalTokens)) {
     state.chatProcessLastTotalTokens = Math.max(0, Math.round(data.chatProcessLastTotalTokens));

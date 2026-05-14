@@ -325,6 +325,33 @@ fn process_message_blocks(
             reasoning_segments.extend(to_reasoning_segments(block_obj.get("reasoning_content")));
             continue;
         }
+        if matches!(block_type.as_str(), "reasoning_text" | "thinking" | "reasoning") {
+            // Extract from primary block-level text field (one source per block to avoid duplicates)
+            if let Some(text) = block_obj.get("text").and_then(Value::as_str) {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    reasoning_segments.push(trimmed.to_string());
+                }
+            } else if let Some(text) = block_obj.get("thinking").and_then(Value::as_str) {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    reasoning_segments.push(trimmed.to_string());
+                }
+            } else if let Some(text) = block_obj.get("content").and_then(Value::as_str) {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    reasoning_segments.push(trimmed.to_string());
+                }
+            }
+            // Only extend from reasoning_content if NO block-level text was found (avoid duplicates)
+            let has_block_text = block_obj.get("text").and_then(Value::as_str).map(|t| !t.trim().is_empty()).unwrap_or(false)
+                || block_obj.get("thinking").and_then(Value::as_str).map(|t| !t.trim().is_empty()).unwrap_or(false)
+                || block_obj.get("content").and_then(Value::as_str).map(|t| !t.trim().is_empty()).unwrap_or(false);
+            if !has_block_text {
+                reasoning_segments.extend(to_reasoning_segments(block_obj.get("reasoning_content")));
+            }
+            continue;
+        }
         if block_type == "message" {
             if let Some(content) = block_obj.get("content") {
                 if content.is_array() {
@@ -917,6 +944,19 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                             Some(combined)
                         },
                     );
+                } else if is_responses_mode && normalized_role == "assistant" {
+                    let combined = combine_reasoning_segments(
+                        consume_entry_reasoning().unwrap_or_default().as_slice(),
+                        nested.reasoning_segments.as_slice(),
+                    );
+                    if !combined.is_empty() {
+                        push_chat_message_without_reparse(
+                            &mut messages,
+                            normalized_role.as_str(),
+                            Some(""),
+                            Some(combined),
+                        );
+                    }
                 }
                 handled_via_explicit_message = true;
             }
@@ -1030,6 +1070,19 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                         } else {
                             Some(combined)
                         },
+                    );
+                }
+            } else if is_responses_mode && normalized_role == "assistant" {
+                let combined = combine_reasoning_segments(
+                    consume_entry_reasoning().unwrap_or_default().as_slice(),
+                    nested.reasoning_segments.as_slice(),
+                );
+                if !combined.is_empty() {
+                    push_chat_message_without_reparse(
+                        &mut messages,
+                        normalized_role.as_str(),
+                        Some(""),
+                        Some(combined),
                     );
                 }
             }

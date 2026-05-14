@@ -1828,7 +1828,7 @@ fn sync_responses_context_from_canonical_messages(request: &Value) -> Result<Val
     let bridge = build_bridge_history(BuildBridgeHistoryInput {
         messages,
         tools,
-        allow_pending_terminal_tool_call: None,
+        allow_pending_terminal_tool_call: Some(true),
     })?;
     let bridge_input = serde_json::to_value(bridge.input).unwrap_or_else(|_| Value::Array(vec![]));
     let original_system_messages = serde_json::to_value(bridge.original_system_messages)
@@ -5167,6 +5167,52 @@ mod tests {
         });
         let output = sync_responses_context_from_canonical_messages(&request).unwrap();
         assert_eq!(output, request);
+    }
+
+    #[test]
+    fn test_sync_responses_context_from_canonical_messages_allows_terminal_pending_tool_call() {
+        let request = json!({
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_keep_me",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"pwd\"}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": { "name": "exec_command", "parameters": { "type": "object" } }
+                }
+            ],
+            "semantics": {
+                "responses": {
+                    "context": {
+                        "existing": true
+                    }
+                }
+            }
+        });
+        let output = sync_responses_context_from_canonical_messages(&request).unwrap();
+        let input = output
+            .get("semantics")
+            .and_then(|v| v.get("responses"))
+            .and_then(|v| v.get("context"))
+            .and_then(|v| v.get("input"))
+            .and_then(|v| v.as_array())
+            .expect("responses context input");
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["type"], "function_call");
+        assert_eq!(input[0]["call_id"], "call_keep_me");
     }
 
     #[test]

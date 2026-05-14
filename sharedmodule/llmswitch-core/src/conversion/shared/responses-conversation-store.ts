@@ -126,10 +126,27 @@ class ResponsesConversationStore {
   }
 
   recordResponse(args: RecordResponseArgs): void {
-    const entry = args.requestId ? this.requestMap.get(args.requestId) : undefined;
-    if (!entry) return;
     const response = args.response;
     const responseId = typeof response.id === 'string' ? response.id : undefined;
+    const requestId = typeof args.requestId === 'string' ? args.requestId.trim() : '';
+    if (!requestId) {
+      // Silent return + log: preserves original fire-and-forget behavior while maintaining observability
+      console.error('[ResponsesConversationStore] recordResponse: missing requestId, skipping', {
+        context: 'responses-conversation-store.recordResponse',
+        responseId
+      });
+      return;
+    }
+    const entry = this.requestMap.get(requestId);
+    if (!entry) {
+      // Silent return + log: preserve existing caller contract (no unhandled exceptions)
+      console.error('[ResponsesConversationStore] recordResponse: request entry not found, skipping', {
+        context: 'responses-conversation-store.recordResponse',
+        requestId,
+        responseId
+      });
+      return;
+    }
     if (!responseId) return;
     const responseRouteHint = readScopeToken(args.routeHint);
     if (responseRouteHint) {

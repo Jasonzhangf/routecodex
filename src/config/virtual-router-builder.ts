@@ -50,34 +50,43 @@ function resolveReferencedProviderIdsFromRouting(routing: VirtualRouterRoutingCo
   return providerIds;
 }
 
+/**
+ * Per-port routing: collect ALL groups into global routing config.
+ * Per-port allowedProviders filter restricts routing at request time.
+ */
 function extractRoutingFromUserConfig(userConfig: UnknownRecord): VirtualRouterRoutingConfig {
   const vrNode = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : {};
   const groupsNode = isRecord(vrNode.routingPolicyGroups) ? (vrNode.routingPolicyGroups as UnknownRecord) : undefined;
-  if (groupsNode) {
-    const groupEntries = Object.entries(groupsNode)
-      .filter(([groupId, groupNode]) => Boolean(groupId.trim()) && isRecord(groupNode))
-      .map(([groupId, groupNode]) => [groupId, groupNode as UnknownRecord] as const);
-    if (groupEntries.length > 0) {
-      const activeCandidate = typeof vrNode.activeRoutingPolicyGroup === 'string' ? vrNode.activeRoutingPolicyGroup.trim() : '';
-      const activeEntry =
-        (activeCandidate ? groupEntries.find(([groupId]) => groupId === activeCandidate) : undefined)
-        ?? groupEntries.find(([groupId]) => groupId === 'default')
-        ?? groupEntries.sort((a, b) => a[0].localeCompare(b[0]))[0];
-      const activeRouting = activeEntry && isRecord(activeEntry[1].routing)
-        ? (activeEntry[1].routing as VirtualRouterRoutingConfig)
-        : undefined;
-      if (activeRouting) {
-        return activeRouting;
-      }
+  if (!groupsNode) {
+    throw new Error('[config] v2 config requires virtualrouter.routingPolicyGroups');
+  }
+  const groupEntries = Object.entries(groupsNode)
+    .filter(([, groupNode]) => isRecord(groupNode))
+    .map(([, groupNode]) => groupNode as UnknownRecord);
+  if (groupEntries.length === 0) {
+    throw new Error('[config] v2 config requires virtualrouter.routingPolicyGroups with at least one group');
+  }
+  // Collect routing from ALL groups into a flat RoutingPools config.
+  // Per-port allowedProviders filter will restrict routing at request time.
+  const routing: VirtualRouterRoutingConfig = {};
+  for (const groupNode of groupEntries) {
+    const groupRouting = isRecord(groupNode.routing) ? (groupNode.routing as VirtualRouterRoutingConfig) : undefined;
+    if (!groupRouting) continue;
+    for (const [routeType, routeEntry] of Object.entries(groupRouting)) {
+      if (!routeEntry || typeof routeEntry !== 'object') continue;
+      routing[routeType] = routeEntry as any;
     }
   }
-  throw new Error('[config] v2 config requires virtualrouter.routingPolicyGroups with routing for active policy group');
+  if (!Object.keys(routing).length) {
+    throw new Error('[config] v2 config requires virtualrouter.routingPolicyGroups group with routing field');
+  }
+  return routing;
 }
 
 /**
  * Build a VirtualRouterInput in "v2" mode by combining:
  * - Provider v2 configs loaded from ~/.rcc/provider (or a custom root)
- * - Routing configuration from the active virtualrouter.routingPolicyGroup
+ * - RoutingPools merged from ALL routingPolicyGroups; per-port allowedProviders filter restricts at runtime
  *
  * V2 config is the single source of truth: no legacy routing fallback and no
  * auto-synthesized capability routes are injected here.

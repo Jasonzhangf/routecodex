@@ -554,3 +554,43 @@ export async function initializeRouteErrorHub(server: any): Promise<void> {
     console.error('[RouteCodexHttpServer] Failed to initialize RouteErrorHub', error);
   }
 }
+
+/**
+ * Extract all target provider keys from a routingPolicyGroup.
+ * Used to inject allowedProviders per router port.
+ */
+export function extractProviderKeysForRoutingGroup(
+  userConfig: UnknownObject,
+  groupId: string,
+): string[] {
+  const groupsNode = (() => {
+    const vr = userConfig?.virtualrouter as Record<string, unknown> | undefined;
+    if (vr && typeof vr.routingPolicyGroups === 'object') {
+      return vr.routingPolicyGroups as Record<string, unknown>;
+    }
+    return null;
+  })();
+  if (!groupsNode) return [];
+  const groupNode =
+    groupsNode[groupId] && typeof groupsNode[groupId] === 'object'
+      ? (groupsNode[groupId] as Record<string, unknown>)
+      : null;
+  if (!groupNode) return [];
+  const routing =
+    groupNode.routing && typeof groupNode.routing === 'object'
+      ? (groupNode.routing as Record<string, unknown>)
+      : null;
+  if (!routing) return [];
+  const keys: string[] = [];
+  for (const [, routeEntry] of Object.entries(routing)) {
+    if (!routeEntry || typeof routeEntry !== 'object' || Array.isArray(routeEntry)) continue;
+    const entry = routeEntry as Record<string, unknown>;
+    const targets = entry.targets;
+    if (Array.isArray(targets)) {
+      for (const t of targets) {
+        if (typeof t === 'string' && t.trim()) keys.push(t.trim());
+      }
+    }
+  }
+  return [...new Set(keys)];
+}

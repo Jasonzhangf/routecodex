@@ -277,62 +277,6 @@ describe('HubRequestExecutor failover', () => {
       stageHint: 'provider.http'
     });
 
-    const stoplessContractReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
-      error: Object.assign(new Error('stopless contract violated'), {
-        code: 'STOPLESS_FINALIZATION_MISSING',
-        statusCode: 502,
-        requestExecutorProviderErrorStage: 'host.stopless_contract'
-      }),
-      retryError: {
-        statusCode: 502,
-        errorCode: 'STOPLESS_FINALIZATION_MISSING',
-        reason: 'stopless contract violated'
-      },
-      fallbackStage: 'provider.send'
-    });
-    expect(stoplessContractReportPlan).toEqual({
-      errorCode: 'STOPLESS_FINALIZATION_MISSING',
-      statusCode: 502,
-      stageHint: 'host.stopless_contract'
-    });
-
-    const stoplessExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
-      error: Object.assign(new Error('stopless contract violated'), {
-        code: 'STOPLESS_FINALIZATION_MISSING',
-        statusCode: 502,
-        retryable: true,
-        requestExecutorProviderErrorStage: 'host.stopless_contract'
-      }),
-      retryError: {
-        statusCode: 502,
-        errorCode: 'STOPLESS_FINALIZATION_MISSING',
-        reason: 'stopless contract violated'
-      },
-      attempt: 1,
-      maxAttempts: 6,
-      stage: 'host.stopless_contract',
-      providerKey: 'ali-coding-plan.key1.qwen3-coder-next',
-      runtimeKey: 'runtime:ali-coding-plan',
-      logicalRequestChainKey: 'req-stopless-host',
-      logicalChainRetryLimitStageRequestId: 'req-stopless-host',
-      routePool: ['ali-coding-plan.key1.qwen3-coder-next', 'crs.key2.gpt-5.3-codex'],
-      runtimeManager: {
-        resolveRuntimeKey: () => 'runtime:ali-coding-plan'
-      },
-      excludedProviderKeys: new Set<string>(),
-      recordAttempt: jest.fn(),
-      logStage: () => undefined,
-      status: 502
-    });
-    expect(stoplessExecutionPlan).toEqual({
-      shouldRetry: false,
-      blockingRecoverable: false,
-      excludedCurrentProvider: false,
-      holdOnLastAvailable429: false,
-      retryBackoffMs: 0,
-      recoverableBackoffMs: 0,
-    });
-
     const responseContractReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
       error: Object.assign(new Error('empty assistant payload'), {
         code: 'EMPTY_ASSISTANT_RESPONSE',
@@ -1004,48 +948,6 @@ describe('HubRequestExecutor failover', () => {
       ]
     })).toBe(false);
 
-    expect(__requestExecutorTestables.detectStoplessTerminationWithoutFinalization({
-      status: 'completed',
-      metadata: {
-        hidden: '[app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}'
-      },
-      output: [
-        {
-          type: 'message',
-          role: 'assistant',
-          content: [
-            {
-              type: 'output_text',
-              text: '普通文本，没有结束标记'
-            }
-          ]
-        }
-      ]
-    }, 'on')).toMatchObject({
-      marker: 'derived_stopless_missing_reasoning_stop_finalization'
-    });
-
-    expect(__requestExecutorTestables.detectStoplessTerminationWithoutFinalization({
-      __sse_responses: { pipe: () => undefined },
-      __routecodex_finish_reason: 'stop'
-    }, 'on')).toBeNull();
-
-    expect(__requestExecutorTestables.detectStoplessTerminationWithoutFinalization({
-      status: 'completed',
-      output: [
-        {
-          type: 'message',
-          role: 'assistant',
-          content: [
-            {
-              type: 'output_text',
-              output_text: '[reasoning.stop]\\n结束标记: [app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}'
-            }
-          ]
-        }
-      ]
-    }, 'on')).toBeNull();
-
     const longReason = 'x'.repeat(400);
     const truncated = __requestExecutorTestables.truncateReason(longReason, 50);
     expect(truncated.length).toBe(50);
@@ -1628,6 +1530,192 @@ describe('HubRequestExecutor failover', () => {
         (call) => call[0] === 'provider.route_pool_cooldown_wait' && typeof call[2]?.waitMs === 'number'
       )
     ).toBe(true);
+  });
+
+  test('waits for recoverable cooldown hint from concurrency.busy when route pool has only one provider', async () => {
+    const providerKey = 'mimo.key1.mimo-v2.5-pro';
+    const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-concurrency-wait' } }));
+
+    const runtimeManager = {
+      resolveRuntimeKey: (key: string) => key,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? (runtimeKey === providerKey ? handle : undefined) : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn()
+        .mockRejectedValueOnce(
+          Object.assign(new Error('No available providers after applying routing instructions'), {
+            code: 'PROVIDER_NOT_AVAILABLE',
+            details: {
+              routeName: 'thinking',
+              attempted: ['thinking:thinking-mimo-primary:health'],
+              recoverableCooldownHints: [
+                { providerKey, waitMs: 120, source: 'concurrency.busy' }
+              ]
+            }
+          })
+        )
+        .mockResolvedValueOnce({
+          requestId: 'req-singleton-concurrency-wait',
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
+            runtimeKey: providerKey
+          },
+          routingDecision: { routeName: 'thinking', pool: [providerKey] },
+          metadata: {}
+        }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const logStage = jest.fn();
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage,
+      stats: new StatsManager()
+    };
+
+    const executor = createRequestExecutor(deps);
+    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
+      status: 200,
+      body: {
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: 'ok'
+            }
+          }
+        ]
+      }
+    });
+    const startedAt = Date.now();
+    const result = await executor.execute({
+      requestId: 'req-singleton-concurrency-wait',
+      entryEndpoint: '/v1/responses',
+      body: {},
+      headers: {},
+      metadata: {}
+    });
+    const elapsed = Date.now() - startedAt;
+
+    expect(result).toEqual(expect.objectContaining({ status: 200 }));
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    expect(elapsed).toBeGreaterThanOrEqual(50);
+    expect(
+      logStage.mock.calls.some(
+        (call) =>
+          call[0] === 'provider.route_pool_cooldown_wait'
+          && typeof call[2]?.waitMs === 'number'
+          && call[2]?.reason === 'provider_pool_cooling_down'
+      )
+    ).toBe(true);
+  });
+
+  test('keeps blocking beyond the generic pool cooldown budget for a singleton recoverable pool', async () => {
+    jest.useFakeTimers();
+    const providerKey = 'dbittai.key1.MiniMax-M2.7';
+    const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-long-singleton-wait' } }));
+
+    const runtimeManager = {
+      resolveRuntimeKey: (key: string) => key,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? (runtimeKey === providerKey ? handle : undefined) : undefined)
+    };
+
+    let calls = 0;
+    const pipeline = {
+      execute: jest.fn(async () => {
+        calls += 1;
+        if (calls <= 61) {
+          throw Object.assign(new Error('No available providers after applying routing instructions'), {
+            code: 'PROVIDER_NOT_AVAILABLE',
+            details: {
+              routeName: 'coding',
+              minRecoverableCooldownMs: 1000,
+              candidateProviderCount: 1,
+              recoverableCooldownHints: [
+                { providerKey, waitMs: 1000, source: 'concurrency.busy' }
+              ]
+            }
+          });
+        }
+        return {
+          requestId: 'req-singleton-cooldown-budget',
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: 'anthropic',
+            outboundProfile: 'anthropic-messages',
+            runtimeKey: providerKey
+          },
+          routingDecision: { routeName: 'coding', pool: [providerKey] },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const logStage = jest.fn();
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage,
+      stats: new StatsManager()
+    };
+
+    const executor = createRequestExecutor(deps);
+    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
+      status: 200,
+      body: {
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: 'ok'
+            }
+          }
+        ]
+      }
+    });
+
+    try {
+      const execution = executor.execute({
+        requestId: 'req-singleton-cooldown-budget',
+        entryEndpoint: '/v1/responses',
+        body: {},
+        headers: {},
+        metadata: {}
+      });
+      await jest.advanceTimersByTimeAsync(61_500);
+      const result = await execution;
+
+      expect(result).toEqual(expect.objectContaining({ status: 200 }));
+      expect(pipeline.execute).toHaveBeenCalledTimes(62);
+      expect(
+        logStage.mock.calls.some(
+          (call) =>
+            call[0] === 'provider.route_pool_cooldown_wait'
+            && call[2]?.reason === 'single_provider_pool_recoverable'
+        )
+      ).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
 
@@ -3458,6 +3546,60 @@ describe('HubRequestExecutor session storm backoff', () => {
       __requestExecutorTestables.isSessionStormBackoffCandidate(new Error('boom'))
     ).toBe(false);
   });
+
+  test('shares storm backoff across sessions through workdir scope for client tool args invalid storms', () => {
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '30000';
+
+    const scopes = __requestExecutorTestables.resolveSessionStormBackoffScopes({
+      sessionId: 'session-a',
+      conversationId: 'conv-a',
+      clientWorkdir: '/tmp/rc-workdir'
+    });
+    expect(scopes).toEqual([
+      'session:session-a',
+      'conversation:conv-a',
+      'workdir:/tmp/rc-workdir'
+    ]);
+
+    const err = Object.assign(new Error('Converted provider tool call has invalid client arguments'), {
+      code: 'CLIENT_TOOL_ARGS_INVALID',
+      upstreamCode: 'CLIENT_TOOL_ARGS_INVALID',
+      statusCode: 502
+    });
+    expect(__requestExecutorTestables.isSessionStormBackoffCandidate(err)).toBe(true);
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/rc-workdir', err)).toBe(1000);
+    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs('workdir:/tmp/rc-workdir')).toBe(1000);
+
+    jest.setSystemTime(new Date('2026-04-22T12:00:01.000Z'));
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/rc-workdir', err)).toBe(2000);
+
+    jest.setSystemTime(new Date('2026-04-22T12:00:03.000Z'));
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/rc-workdir', err)).toBe(4000);
+
+    jest.setSystemTime(new Date('2026-04-22T12:00:07.000Z'));
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/rc-workdir', err)).toBe(5000);
+  });
+
+  test('treats deterministic malformed response contract errors as storm candidates and caps wait', () => {
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '30000';
+
+    const err = Object.assign(
+      new Error('[hub_response] Non-canonical response payload at chat_process.response.entry'),
+      { code: 'MALFORMED_RESPONSE' }
+    );
+    expect(__requestExecutorTestables.isSessionStormBackoffCandidate(err)).toBe(true);
+
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(1000);
+    jest.setSystemTime(new Date('2026-04-22T12:00:01.000Z'));
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(2000);
+    jest.setSystemTime(new Date('2026-04-22T12:00:03.000Z'));
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(4000);
+    jest.setSystemTime(new Date('2026-04-22T12:00:07.000Z'));
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(5000);
+  });
+
 });
 
 describe('HubRequestExecutor provider transport backoff', () => {

@@ -4,10 +4,16 @@ import { PassThrough } from 'node:stream';
 const mockConvertProviderResponse = jest.fn(async () => ({ body: { id: 'mock' } }));
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
 const mockSyncReasoningStopModeFromRequest = jest.fn(() => 'off');
+const mockSyncStoplessGoalStateFromRequest = jest.fn(() => ({
+  stickyKey: 'sticky_goal_test',
+  hadDirective: false,
+  directiveTypes: []
+}));
 const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
+  syncStoplessGoalStateFromRequest: mockSyncStoplessGoalStateFromRequest,
   sanitizeFollowupText: async (raw: unknown) => {
     const text = typeof raw === 'string' ? raw : '';
     return text
@@ -25,15 +31,21 @@ const mockUnbindSessionScope = jest.fn();
 const mockGetSessionClientRegistry = jest.fn(() => ({
   unbindSessionScope: mockUnbindSessionScope
 }));
+const mockLogPipelineStage = jest.fn();
 const mockSessionRegistryModule = () => ({
   injectSessionClientPromptWithResult: mockInjectSessionClientPromptWithResult,
   getSessionClientRegistry: mockGetSessionClientRegistry
+});
+const mockStageLoggerModule = () => ({
+  logPipelineStage: mockLogPipelineStage
 });
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
 jest.unstable_mockModule('../../../../../src/server/runtime/http-server/session-client-registry.js', mockSessionRegistryModule);
 jest.unstable_mockModule('../../../../../src/server/runtime/http-server/session-client-registry.ts', mockSessionRegistryModule);
+jest.unstable_mockModule('../../../../../src/server/utils/stage-logger.js', mockStageLoggerModule);
+jest.unstable_mockModule('../../../../../src/server/utils/stage-logger.ts', mockStageLoggerModule);
 
 describe('provider-response-converter servertool regressions', () => {
   it('maps SSE context-length overflow into CONTEXT_LENGTH_EXCEEDED', async () => {
@@ -41,6 +53,7 @@ describe('provider-response-converter servertool regressions', () => {
     mockConvertProviderResponse.mockClear();
     mockCreateSnapshotRecorder.mockClear();
     mockSyncReasoningStopModeFromRequest.mockClear();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { convertProviderResponseIfNeeded } = await import(
       '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
@@ -81,6 +94,7 @@ describe('provider-response-converter servertool regressions', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockClear();
     mockCreateSnapshotRecorder.mockClear();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
     mockConvertProviderResponse.mockImplementationOnce(async () => {
       const error = new Error(
         '[chat_process.resp.stage1.sse_decode] Failed to decode SSE payload for protocol openai-chat: 内容超长，请删减后再试'
@@ -139,6 +153,7 @@ describe('provider-response-converter servertool regressions', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockClear();
     mockCreateSnapshotRecorder.mockClear();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { convertProviderResponseIfNeeded } = await import(
       '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
@@ -186,6 +201,7 @@ describe('provider-response-converter servertool regressions', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockClear();
     mockCreateSnapshotRecorder.mockClear();
+    mockLogPipelineStage.mockClear();
     mockConvertProviderResponse.mockImplementationOnce(async () => {
       const error = new Error(
         '[chat_process.resp.stage1.sse_decode] Failed to decode SSE payload for protocol anthropic-messages: Anthropic SSE error event Internal Network Failure'
@@ -235,6 +251,19 @@ describe('provider-response-converter servertool regressions', () => {
       retryable: true,
       requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
+    expect(mockLogPipelineStage).toHaveBeenCalledWith(
+      'convert.bridge.recoverable',
+      'req_bridge_sse_network_failure',
+      expect.objectContaining({
+        code: 'HTTP_502',
+        upstreamCode: 'ANTHROPIC_SSE_TO_JSON_FAILED'
+      })
+    );
+    expect(mockLogPipelineStage).not.toHaveBeenCalledWith(
+      'convert.bridge.error',
+      'req_bridge_sse_network_failure',
+      expect.anything()
+    );
   });
 
   it('does not soft-skip servertool followup 429 failures', async () => {
@@ -563,7 +592,7 @@ describe('provider-response-converter servertool regressions', () => {
           tmuxSessionId: 'rcc_client_inject_1'
         }
       });
-      return { body: { mode: dispatchResult.ok ? 'client_inject_only' : 'failed' } };
+      return { body: dispatchResult.ok ? undefined : { mode: 'failed' } };
     });
 
     const { convertProviderResponseIfNeeded } = await import(
@@ -588,7 +617,7 @@ describe('provider-response-converter servertool regressions', () => {
       }
     );
 
-    expect((converted as any).body).toEqual({ mode: 'client_inject_only' });
+    expect((converted as any).body).toEqual({ id: 'upstream_body' });
     expect(executeNested).not.toHaveBeenCalled();
     expect(mockInjectSessionClientPromptWithResult).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -630,7 +659,7 @@ describe('provider-response-converter servertool regressions', () => {
           tmuxSessionId: 'rcc_client_inject_sanitize_1'
         }
       });
-      return { body: { mode: dispatchResult.ok ? 'client_inject_only' : 'failed' } };
+      return { body: dispatchResult.ok ? undefined : { mode: 'failed' } };
     });
 
     const { convertProviderResponseIfNeeded } = await import(
@@ -668,7 +697,7 @@ describe('provider-response-converter servertool regressions', () => {
       }
     );
 
-    expect((converted as any).body).toEqual({ mode: 'client_inject_only' });
+    expect((converted as any).body).toEqual({ id: 'upstream_body' });
     expect(executeNested).not.toHaveBeenCalled();
     expect(mockInjectSessionClientPromptWithResult).toHaveBeenCalledTimes(1);
     const injectArgs = mockInjectSessionClientPromptWithResult.mock.calls[0]?.[0] as Record<string, unknown>;
@@ -886,7 +915,7 @@ describe('provider-response-converter servertool regressions', () => {
       statusCode: 502,
       toolName: 'exec_command',
       validationReason: 'missing_cmd',
-      validationMessage: 'exec_command requires input.cmd as a non-empty string.',
+      validationMessage: 'exec_command requires input.cmd as a string.',
       missingFields: ['cmd']
     });
   });
@@ -950,12 +979,325 @@ describe('provider-response-converter servertool regressions', () => {
       statusCode: 502,
       toolName: 'reasoning.stop',
       validationReason: 'invalid_reasoning_stop_arguments',
-      validationMessage: 'reasoning.stop requires task_goal.',
+      validationMessage: 'reasoning.stop requires task_goal as a string.',
       missingFields: ['task_goal']
     });
   });
 
-  it('rejects converted exec_command calls with malformed shell wrapper shape', async () => {
+  it('accepts converted update_goal active calls without next_step and only normalizes shape', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementation(async () => ({
+      body: {
+        id: 'chatcmpl-invalid-update-goal-active',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_invalid_update_goal_active',
+                  type: 'function',
+                  function: {
+                    name: 'update_goal',
+                    arguments: JSON.stringify({ status: 'active' })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const result = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        requestId: 'req_invalid_update_goal_active_1',
+        wantsStream: false,
+        response: { body: { id: 'upstream_body' } } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+    expect(result.body).toBeTruthy();
+  });
+
+  it('does not accumulate converter-side validation ledgers for invalid update_goal transitions', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementation(async () => ({
+      body: {
+        id: 'chatcmpl-invalid-update-goal-status-ledger',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_invalid_update_goal_status_ledger',
+                  type: 'function',
+                  function: {
+                    name: 'update_goal',
+                    arguments: JSON.stringify({})
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const pipelineMetadata: Record<string, unknown> = {
+      stoplessGoalState: {
+        status: 'active',
+        objective: 'close stopless onto /goal lifecycle',
+        updatedAt: 1,
+        createdAt: 1
+      }
+    };
+
+    for (let i = 0; i < 2; i += 1) {
+      await expect(
+        convertProviderResponseIfNeeded(
+          {
+            entryEndpoint: '/v1/responses',
+            providerProtocol: 'openai-chat',
+            requestId: `req_invalid_update_goal_status_ledger_${i + 1}`,
+            wantsStream: false,
+            response: { body: { id: 'upstream_body' } } as any,
+            pipelineMetadata
+          },
+          {
+            runtimeManager: {
+              resolveRuntimeKey: () => undefined,
+              getHandleByRuntimeKey: () => undefined
+            },
+            executeNested: async () => ({ body: { ok: true } } as any)
+          }
+        )
+      ).rejects.toMatchObject({
+        code: 'CLIENT_TOOL_ARGS_INVALID',
+        validationReason: 'missing_status'
+      });
+
+      const state = pipelineMetadata.stoplessGoalState as Record<string, unknown>;
+      if (i === 0) {
+        expect(state?.status).toBe('active');
+        expect(state?.consecutiveValidationFailures).toBeUndefined();
+      }
+    }
+
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.status).toBe('active');
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.errorClass).toBeUndefined();
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.attemptsExhausted).toBeUndefined();
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveValidationFailures).toBeUndefined();
+  });
+
+  it('accepts converted update_goal paused calls without user_question and only normalizes shape', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementation(async () => ({
+      body: {
+        id: 'chatcmpl-invalid-update-goal-paused',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_invalid_update_goal_paused',
+                  type: 'function',
+                  function: {
+                    name: 'update_goal',
+                    arguments: JSON.stringify({
+                      status: 'paused',
+                      cannot_continue_reason: 'need user input'
+                    })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const result = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        requestId: 'req_invalid_update_goal_paused_1',
+        wantsStream: false,
+        response: { body: { id: 'upstream_body' } } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+    expect(result.body).toBeTruthy();
+  });
+
+  it('accepts converted update_goal stopped calls without attempts_exhausted=true and only normalizes shape', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementation(async () => ({
+      body: {
+        id: 'chatcmpl-invalid-update-goal-stopped',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_invalid_update_goal_stopped',
+                  type: 'function',
+                  function: {
+                    name: 'update_goal',
+                    arguments: JSON.stringify({
+                      status: 'stopped',
+                      blocking_evidence: 'same fatal error repeated',
+                      attempts_exhausted: false,
+                      error_class: 'irrecoverable_runtime_error'
+                    })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const result = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        requestId: 'req_invalid_update_goal_stopped_1',
+        wantsStream: false,
+        response: { body: { id: 'upstream_body' } } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+    expect(result.body).toBeTruthy();
+  });
+
+  it('accepts converted update_goal completed calls without completion evidence and only normalizes shape', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementation(async () => ({
+      body: {
+        id: 'chatcmpl-invalid-update-goal-completed',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_invalid_update_goal_completed',
+                  type: 'function',
+                  function: {
+                    name: 'update_goal',
+                    arguments: JSON.stringify({
+                      status: 'completed',
+                      completion_summary: 'done',
+                      ssot_assessment: 'matches docs'
+                    })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const result = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        requestId: 'req_invalid_update_goal_completed_1',
+        wantsStream: false,
+        response: { body: { id: 'upstream_body' } } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+    expect(result.body).toBeTruthy();
+  });
+
+  it('preserves converted exec_command cmd text without validator-side shell repair', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -992,30 +1334,139 @@ describe('provider-response-converter servertool regressions', () => {
       '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
     );
 
-    await expect(
-      convertProviderResponseIfNeeded(
-        {
-          entryEndpoint: '/v1/responses',
-          providerProtocol: 'openai-chat',
-          requestId: 'req_invalid_exec_shell_wrapper_1',
-          wantsStream: false,
-          response: { body: { id: 'upstream_body' } } as any,
-          pipelineMetadata: {}
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        requestId: 'req_invalid_exec_shell_wrapper_1',
+        wantsStream: false,
+        response: { body: { id: 'upstream_body' } } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
         },
-        {
-          runtimeManager: {
-            resolveRuntimeKey: () => undefined,
-            getHandleByRuntimeKey: () => undefined
-          },
-          executeNested: async () => ({ body: { ok: true } } as any)
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+    const toolCall = (converted?.body as any)?.choices?.[0]?.message?.tool_calls?.[0];
+    expect(JSON.parse(toolCall?.function?.arguments ?? '{}')).toEqual({
+      cmd: `bash -lc 'tail -50 ~/.fin/runtime/peers/qqbot/bridge.stderr.log 2>/dev/null || echo "No bridge log"`
+    });
+  });
+
+  it('accepts apply_patch when patch is present as an empty string shape', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementation(async () => ({
+      body: {
+        id: 'chatcmpl-apply-patch-empty-string',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_apply_patch_empty_string',
+                  type: 'function',
+                  function: {
+                    name: 'apply_patch',
+                    arguments: JSON.stringify({ patch: '' })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        requestId: 'req_apply_patch_empty_string_1',
+        wantsStream: false,
+        response: { body: { id: 'upstream_body' } } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    const toolCall = (converted?.body as any)?.choices?.[0]?.message?.tool_calls?.[0];
+    expect(JSON.parse(toolCall?.function?.arguments ?? '{}')).toEqual({ patch: '' });
+  });
+
+  it('accepts apply_patch when provider returns raw_patch string from real sample shape', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementation(async () => ({
+      body: {
+        id: 'chatcmpl-apply-patch-raw-patch',
+        required_action: {
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_apply_patch_raw_patch',
+                type: 'function',
+                function: {
+                  name: 'apply_patch',
+                  arguments: JSON.stringify({
+                    raw_patch: 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new'
+                  })
+                }
+              }
+            ]
+          }
         }
-      )
-    ).rejects.toMatchObject({
-      code: 'CLIENT_TOOL_ARGS_INVALID',
-      status: 502,
-      statusCode: 502,
-      toolName: 'exec_command',
-      validationReason: 'invalid_shell_wrapper_shape'
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        requestId: 'req_apply_patch_raw_patch_1',
+        wantsStream: false,
+        response: { body: { id: 'upstream_body' } } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    const toolCall = (converted?.body as any)?.required_action?.submit_tool_outputs?.tool_calls?.[0];
+    expect(JSON.parse(toolCall?.function?.arguments ?? '{}')).toEqual({
+      raw_patch: 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new',
+      patch: 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new'
     });
   });
 

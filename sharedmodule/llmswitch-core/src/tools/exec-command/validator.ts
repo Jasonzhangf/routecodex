@@ -87,6 +87,32 @@ function detectInvalidShellWrapperShape(command: string): PolicyViolation | null
   return null;
 }
 
+function repairZeroAmbiguityShellWrapper(command: string): string {
+  const trimmed = String(command || '').trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  const shellWrapperPrefixes = [
+    "bash -lc '",
+    "bash -c '",
+    "sh -lc '",
+    "sh -c '",
+    "zsh -lc '",
+    "zsh -c '"
+  ] as const;
+  for (const prefix of shellWrapperPrefixes) {
+    if (!trimmed.startsWith(prefix) || trimmed.endsWith("'")) {
+      continue;
+    }
+    const body = trimmed.slice(prefix.length);
+    if (body.includes("'")) {
+      return trimmed;
+    }
+    return `${trimmed}'`;
+  }
+  return trimmed;
+}
+
 function splitShellTokens(command: string): string[] {
   const tokens: string[] = [];
   let current = '';
@@ -339,11 +365,13 @@ export function validateExecCommandArgs(
     return { ok: false, reason: normalized.reason };
   }
 
-  const command = typeof normalized.normalized.cmd === 'string' ? normalized.normalized.cmd : '';
+  const command = repairZeroAmbiguityShellWrapper(
+    typeof normalized.normalized.cmd === 'string' ? normalized.normalized.cmd : ''
+  );
   const violation = detectPolicyViolation(command, options);
   if (violation) {
     return { ok: false, reason: violation.reason, message: violation.message };
   }
 
-  return { ok: true, normalizedArgs: toJson(normalized.normalized) };
+  return { ok: true, normalizedArgs: toJson({ ...normalized.normalized, cmd: command }) };
 }

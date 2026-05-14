@@ -12,6 +12,7 @@ mod napi_proxy;
 pub(crate) mod provider_bootstrap;
 mod provider_registry;
 mod quota;
+pub(crate) mod rcc_fence;
 pub(crate) mod routing;
 mod routing_state_store;
 mod time_utils;

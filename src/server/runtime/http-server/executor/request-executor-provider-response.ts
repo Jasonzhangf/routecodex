@@ -5,7 +5,6 @@ import type { ProviderTrafficGovernorLike } from '../provider-traffic-governor.j
 import {
   detectAssistantSanitizationPlaceholder,
   detectRetryableEmptyAssistantResponse,
-  detectStoplessTerminationWithoutFinalization,
   persistPayloadContractProviderSnapshots
 } from './request-executor-response-contract.js';
 import { extractUsageFromResult, mergeUsageMetrics } from './usage-aggregator.js';
@@ -137,8 +136,8 @@ function throwProviderHttpError(converted: PipelineExecutionResult): never {
 
 function createResponseContractError(args: {
   message: string;
-  code: 'EMPTY_ASSISTANT_RESPONSE' | 'MISSING_REQUIRED_TOOL_CALL' | 'STOPLESS_FINALIZATION_MISSING';
-  stage: 'host.response_contract' | 'host.stopless_contract';
+  code: 'EMPTY_ASSISTANT_RESPONSE' | 'MISSING_REQUIRED_TOOL_CALL';
+  stage: 'host.response_contract';
   body?: Record<string, unknown>;
 }): never {
   const errorToThrow: any = new Error(args.message);
@@ -172,7 +171,6 @@ export async function processSuccessfulProviderResponse(args: {
   converted: PipelineExecutionResult;
   requestSemantics?: Record<string, unknown>;
   mergedMetadata: Record<string, unknown>;
-  stoplessMode?: 'on' | 'off' | 'endless';
   bypassTrafficGovernor: boolean;
   trafficGovernor: ProviderTrafficGovernorLike;
   runtimeKey: string;
@@ -378,30 +376,6 @@ export async function processSuccessfulProviderResponse(args: {
       message: `Upstream returned assistant placeholder payload: ${assistantSanitizationPlaceholderSignal.reason}`,
       code: 'EMPTY_ASSISTANT_RESPONSE',
       stage: 'host.response_contract',
-      body: bodyForError
-    });
-  }
-
-  const stoplessTerminationSignal = detectStoplessTerminationWithoutFinalization(
-    args.converted.body,
-    args.stoplessMode
-  );
-  if (stoplessTerminationSignal) {
-    const bodyForError =
-      args.converted.body && typeof args.converted.body === 'object'
-        ? (args.converted.body as Record<string, unknown>)
-        : undefined;
-    args.logStage('host.stopless_finalization_missing', args.inputRequestId, {
-      providerKey: args.providerKey,
-      marker: stoplessTerminationSignal.marker,
-      reason: stoplessTerminationSignal.reason,
-      stoplessMode: args.stoplessMode,
-      attempt: args.attempt
-    });
-    createResponseContractError({
-      message: `Stopless contract violated: ${stoplessTerminationSignal.reason}`,
-      code: 'STOPLESS_FINALIZATION_MISSING',
-      stage: 'host.stopless_contract',
       body: bodyForError
     });
   }

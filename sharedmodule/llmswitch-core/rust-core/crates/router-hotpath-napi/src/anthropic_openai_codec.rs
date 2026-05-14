@@ -36,6 +36,23 @@ struct BuildAnthropicFromChatOptions {
     entry_endpoint: Option<String>,
 }
 
+const ANTHROPIC_REQUEST_TOP_LEVEL_FIELDS: &[&str] = &[
+    "model",
+    "messages",
+    "tools",
+    "system",
+    "stop_sequences",
+    "temperature",
+    "top_p",
+    "top_k",
+    "max_tokens",
+    "max_output_tokens",
+    "metadata",
+    "stream",
+    "tool_choice",
+    "thinking",
+];
+
 fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
     let raw = value.and_then(|v| v.as_str())?;
     let trimmed = raw.trim();
@@ -211,6 +228,315 @@ fn convert_anthropic_tools_to_chat(raw_tools: Option<&Value>) -> Option<Value> {
     Some(Value::Array(out))
 }
 
+fn map_chat_tools_to_anthropic_tools(raw_tools: Option<&Value>) -> Option<Value> {
+    let rows = raw_tools.and_then(|v| v.as_array())?;
+    if rows.is_empty() {
+        return None;
+    }
+
+    let mut out: Vec<Value> = Vec::new();
+    for entry in rows {
+        let Some(row) = entry.as_object() else {
+            continue;
+        };
+        let function_row = row
+            .get("function")
+            .and_then(|v| v.as_object())
+            .unwrap_or(row);
+        let Some(name) = read_trimmed_string(function_row.get("name")) else {
+            continue;
+        };
+        let input_schema = function_row
+            .get("parameters")
+            .cloned()
+            .unwrap_or_else(|| Value::Object(Map::new()));
+        let mut tool = Map::<String, Value>::new();
+        tool.insert("name".to_string(), Value::String(name));
+        tool.insert("input_schema".to_string(), input_schema);
+        if let Some(description) = function_row.get("description").cloned() {
+            tool.insert("description".to_string(), description);
+        }
+        out.push(Value::Object(tool));
+    }
+
+    if out.is_empty() {
+        return None;
+    }
+    Some(Value::Array(out))
+}
+
+fn collect_openai_chat_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Array(items) => items
+            .iter()
+            .map(collect_openai_chat_text)
+            .filter(|entry| !entry.is_empty())
+            .collect::<Vec<String>>()
+            .join(""),
+        Value::Object(row) => {
+            if let Some(text) = row.get("text").and_then(|v| v.as_str()) {
+                return text.to_string();
+            }
+            if let Some(text) = row.get("input_text").and_then(|v| v.as_str()) {
+                return text.to_string();
+            }
+            if let Some(text) = row.get("output_text").and_then(|v| v.as_str()) {
+                return text.to_string();
+            }
+            if let Some(text) = row.get("content").and_then(|v| v.as_str()) {
+                return text.to_string();
+            }
+            if let Some(content) = row.get("content") {
+                return collect_openai_chat_text(content);
+            }
+            String::new()
+        }
+        _ => String::new(),
+    }
+}
+
+fn is_request_like_openai_chat_payload(value: &Value) -> bool {
+    let Some(row) = value.as_object() else {
+        return false;
+    };
+    row.get("choices").is_none()
+        && row
+            .get("messages")
+            .and_then(|v| v.as_array())
+            .map(|rows| !rows.is_empty())
+            .unwrap_or(false)
+}
+
+fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value {
+    let Some(request_row) = chat_request.as_object() else {
+        return Value::Object(Map::new());
+    };
+
+    let model = read_trimmed_string(request_row.get("model")).unwrap_or_else(|| "unknown".to_string());
+    let messages_source = request_row
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut known_tool_call_ids: Vec<String> = Vec::new();
+    for entry in &messages_source {
+        let Some(row) = entry.as_object() else {
+            continue;
+        };
+        if !read_trimmed_string(row.get("role"))
+            .unwrap_or_else(|| "user".to_string())
+            .eq_ignore_ascii_case("assistant")
+        {
+            continue;
+        }
+        let tool_calls = row
+            .get("tool_calls")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        for tool_call in tool_calls {
+            let Some(tool_row) = tool_call.as_object() else {
+                continue;
+            };
+            if let Some(id) = read_trimmed_string(tool_row.get("id")) {
+                if !known_tool_call_ids.iter().any(|entry| entry == &id) {
+                    known_tool_call_ids.push(id);
+                }
+            }
+        }
+    }
+
+    let mut system_blocks: Vec<Value> = Vec::new();
+    if let Some(system_value) = request_row.get("system") {
+        match system_value {
+            Value::String(text) => {
+                if has_visible_text(text) {
+                    system_blocks.push(Value::Object(Map::from_iter([
+                        ("type".to_string(), Value::String("text".to_string())),
+                        ("text".to_string(), Value::String(text.clone())),
+                    ])));
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    let text = flatten_text(item);
+                    if has_visible_text(&text) {
+                        system_blocks.push(Value::Object(Map::from_iter([
+                            ("type".to_string(), Value::String("text".to_string())),
+                            ("text".to_string(), Value::String(text)),
+                        ])));
+                    }
+                }
+            }
+            Value::Object(_) => {
+                let text = flatten_text(system_value);
+                if has_visible_text(&text) {
+                    system_blocks.push(Value::Object(Map::from_iter([
+                        ("type".to_string(), Value::String("text".to_string())),
+                        ("text".to_string(), Value::String(text)),
+                    ])));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut messages: Vec<Value> = Vec::new();
+    for entry in messages_source {
+        let Some(row) = entry.as_object() else {
+            continue;
+        };
+        let role = read_trimmed_string(row.get("role")).unwrap_or_else(|| "user".to_string());
+        if role.eq_ignore_ascii_case("system") {
+            let text = collect_openai_chat_text(row.get("content").unwrap_or(&Value::Null));
+            if has_visible_text(&text) {
+                system_blocks.push(Value::Object(Map::from_iter([
+                    ("type".to_string(), Value::String("text".to_string())),
+                    ("text".to_string(), Value::String(text)),
+                ])));
+            }
+            continue;
+        }
+
+        if role.eq_ignore_ascii_case("tool") {
+            let tool_call_id = read_trimmed_string(row.get("tool_call_id"))
+                .or_else(|| read_trimmed_string(row.get("call_id")))
+                .or_else(|| read_trimmed_string(row.get("tool_use_id")))
+                .or_else(|| read_trimmed_string(row.get("id")));
+            let Some(tool_call_id) = tool_call_id else {
+                continue;
+            };
+            if !known_tool_call_ids.iter().any(|entry| entry == &tool_call_id) {
+                continue;
+            }
+            let content = collect_openai_chat_text(row.get("content").unwrap_or(&Value::Null));
+            messages.push(Value::Object(Map::from_iter([
+                ("role".to_string(), Value::String("user".to_string())),
+                (
+                    "content".to_string(),
+                    Value::Array(vec![Value::Object(Map::from_iter([
+                        ("type".to_string(), Value::String("tool_result".to_string())),
+                        ("tool_use_id".to_string(), Value::String(tool_call_id)),
+                        (
+                            "content".to_string(),
+                            Value::String(normalize_tool_result_text(content.as_str())),
+                        ),
+                    ]))]),
+                ),
+            ])));
+            continue;
+        }
+
+        let mut blocks: Vec<Value> = Vec::new();
+        let text = collect_openai_chat_text(row.get("content").unwrap_or(&Value::Null));
+        if has_visible_text(&text) {
+            blocks.push(Value::Object(Map::from_iter([
+                ("type".to_string(), Value::String("text".to_string())),
+                ("text".to_string(), Value::String(text)),
+            ])));
+        }
+
+        if role.eq_ignore_ascii_case("assistant") {
+            if let Some(reasoning_text) = read_trimmed_string(row.get("reasoning_content"))
+                .or_else(|| read_trimmed_string(row.get("reasoning")))
+            {
+                if has_visible_text(&reasoning_text) {
+                    blocks.push(Value::Object(Map::from_iter([
+                        ("type".to_string(), Value::String("thinking".to_string())),
+                        ("text".to_string(), Value::String(reasoning_text)),
+                    ])));
+                }
+            }
+
+            let tool_calls = row
+                .get("tool_calls")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            for (index, tool_call) in tool_calls.iter().enumerate() {
+                let Some(tool_row) = tool_call.as_object() else {
+                    continue;
+                };
+                let Some(function_row) = tool_row.get("function").and_then(|v| v.as_object()) else {
+                    continue;
+                };
+                let Some(name) = read_trimmed_string(function_row.get("name")) else {
+                    continue;
+                };
+                let id = read_trimmed_string(tool_row.get("id"))
+                    .unwrap_or_else(|| format!("call_{}", index));
+                let input = function_row
+                    .get("arguments")
+                    .and_then(|v| v.as_str())
+                    .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                    .unwrap_or_else(|| Value::Object(Map::new()));
+                blocks.push(Value::Object(Map::from_iter([
+                    ("type".to_string(), Value::String("tool_use".to_string())),
+                    ("id".to_string(), Value::String(id)),
+                    ("name".to_string(), Value::String(name)),
+                    ("input".to_string(), input),
+                ])));
+            }
+        }
+
+        if !blocks.is_empty() {
+            messages.push(Value::Object(Map::from_iter([
+                ("role".to_string(), Value::String(role)),
+                ("content".to_string(), Value::Array(blocks)),
+            ])));
+        }
+    }
+
+    let mut out = Map::<String, Value>::new();
+    out.insert("model".to_string(), Value::String(model));
+    out.insert("messages".to_string(), Value::Array(messages));
+    if !system_blocks.is_empty() {
+        out.insert("system".to_string(), Value::Array(system_blocks));
+    }
+    if let Some(tools) = map_chat_tools_to_anthropic_tools(request_row.get("tools")) {
+        out.insert("tools".to_string(), tools);
+    }
+    for key in [
+        "tool_choice",
+        "thinking",
+        "metadata",
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "max_output_tokens",
+        "stream",
+    ] {
+        if let Some(value) = request_row.get(key) {
+            out.insert(key.to_string(), value.clone());
+        }
+    }
+    if let Some(stop) = request_row.get("stop") {
+        match stop {
+            Value::String(text) if has_visible_text(text) => {
+                out.insert(
+                    "stop_sequences".to_string(),
+                    Value::Array(vec![Value::String(text.trim().to_string())]),
+                );
+            }
+            Value::Array(items) if !items.is_empty() => {
+                out.insert("stop_sequences".to_string(), Value::Array(items.clone()));
+            }
+            _ => {}
+        }
+    }
+
+    let mut pruned = Map::<String, Value>::new();
+    for key in ANTHROPIC_REQUEST_TOP_LEVEL_FIELDS {
+        if let Some(value) = out.get(*key) {
+            pruned.insert((*key).to_string(), value.clone());
+        }
+    }
+    Value::Object(pruned)
+}
+
 fn append_system_messages(raw_system: Option<&Value>, messages: &mut Vec<Value>) {
     let blocks: Vec<Value> = match raw_system {
         Some(Value::Array(items)) => items.clone(),
@@ -263,6 +589,11 @@ fn convert_anthropic_messages(
                     text.clone()
                 }),
             );
+            if let Some(rc) = row.get("reasoning_content") {
+                if !rc.is_null() {
+                    message.insert("reasoning_content".to_string(), rc.clone());
+                }
+            }
             if let Some(reasoning) = normalized_reasoning {
                 if let Some(reasoning_payload) =
                     build_message_reasoning_value(&[], &[reasoning], None)
@@ -415,7 +746,7 @@ fn convert_anthropic_messages(
 
 #[cfg(test)]
 mod tests {
-    use super::build_openai_chat_from_anthropic_json;
+    use super::{build_anthropic_from_openai_chat_json, build_openai_chat_from_anthropic_json};
     use serde_json::{json, Value};
 
     #[test]
@@ -562,6 +893,74 @@ mod tests {
         assert_eq!(messages[0]["tool_call_id"].as_str(), Some("call_1"));
         assert_eq!(messages[0]["content"].as_str(), Some("alpha\nbeta"));
     }
+
+    #[test]
+    fn build_anthropic_from_openai_chat_request_preserves_reasoning_only_assistant_turn() {
+        let payload = json!({
+            "model": "mimo-v2.5-pro",
+            "messages": [
+                { "role": "user", "content": "请调用 echo_json 工具，并传入 {\"message\":\"ping\"}。不要直接回答。" },
+                { "role": "assistant", "content": "", "reasoning_content": "The user wants me to call the echo_json tool with {\"message\":\"ping\"}." },
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_x",
+                            "type": "function",
+                            "function": {
+                                "name": "echo_json",
+                                "arguments": "{\"message\":\"ping\"}"
+                            }
+                        }
+                    ]
+                },
+                { "role": "tool", "tool_call_id": "call_x", "content": "{\"message\":\"ping\"}" }
+            ],
+            "thinking": { "type": "adaptive" },
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "echo_json",
+                        "description": "echo structured payload",
+                        "parameters": {
+                            "type": "object",
+                            "properties": { "message": { "type": "string" } },
+                            "required": ["message"],
+                            "additionalProperties": false
+                        }
+                    }
+                }
+            ]
+        });
+
+        let output: Value = serde_json::from_str(
+            &build_anthropic_from_openai_chat_json(payload.to_string(), None)
+                .expect("build success"),
+        )
+        .expect("json output");
+
+        let messages = output["messages"].as_array().expect("messages array");
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[1]["role"].as_str(), Some("assistant"));
+        let assistant_blocks = messages[1]["content"].as_array().expect("assistant content");
+        assert_eq!(assistant_blocks.len(), 1);
+        assert_eq!(assistant_blocks[0]["type"].as_str(), Some("thinking"));
+        assert_eq!(
+            assistant_blocks[0]["text"].as_str(),
+            Some("The user wants me to call the echo_json tool with {\"message\":\"ping\"}.")
+        );
+        let tool_use_blocks = messages[2]["content"].as_array().expect("assistant tool use content");
+        assert_eq!(messages[2]["role"].as_str(), Some("assistant"));
+        assert_eq!(tool_use_blocks[0]["type"].as_str(), Some("tool_use"));
+        assert_eq!(tool_use_blocks[0]["id"].as_str(), Some("call_x"));
+        assert_eq!(messages[3]["role"].as_str(), Some("user"));
+        assert_eq!(
+            messages[3]["content"][0]["tool_use_id"].as_str(),
+            Some("call_x")
+        );
+    }
 }
 
 pub(crate) fn build_openai_chat_from_anthropic_json(
@@ -633,6 +1032,11 @@ pub(crate) fn build_anthropic_from_openai_chat_json(
         }
         _ => BuildAnthropicFromChatOptions::default(),
     };
+
+    if is_request_like_openai_chat_payload(&chat_response) {
+        let output = build_anthropic_request_from_openai_chat_value(&chat_response);
+        return serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()));
+    }
 
     let unwrapped = chat_response
         .as_object()

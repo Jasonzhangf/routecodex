@@ -30,7 +30,7 @@ function logRoutesNonBlockingError(stage: string, error: unknown, details?: Reco
 interface RouteOptions {
   app: Application;
   config: ServerConfigV2;
-  buildHandlerContext: () => HandlerContext;
+  buildHandlerContext: (req: Request) => HandlerContext;
   getPipelineReady: () => boolean;
   waitForPipelineReady?: () => Promise<void>;
   handleError: (error: Error, context: string) => Promise<void>;
@@ -49,6 +49,14 @@ interface RouteOptions {
     configPath: string;
     warnings?: string[];
   }>;
+  getPortRegistry?: () => unknown | null;
+  getPortConfigs?: () => Array<Record<string, unknown>>;
+  applyPortConfig?: (
+    action: 'add' | 'update' | 'remove',
+    port: number,
+    config?: Record<string, unknown>,
+  ) => Promise<{ ok: boolean; error?: string }>;
+  getAvailableProviders?: () => Array<{ key: string; family?: string; protocol?: string }>;
 }
 
 /**
@@ -417,6 +425,10 @@ export function registerHttpRoutes(options: RouteOptions): void {
         };
     },
     restartRuntimeFromDisk: options.restartRuntimeFromDisk,
+    getPortRegistry: typeof options.getPortRegistry === 'function' ? options.getPortRegistry as any : undefined,
+    getPortConfigs: typeof options.getPortConfigs === 'function' ? options.getPortConfigs as any : undefined,
+    applyPortConfig: typeof options.applyPortConfig === 'function' ? options.applyPortConfig as any : undefined,
+    getAvailableProviders: typeof options.getAvailableProviders === 'function' ? options.getAvailableProviders : undefined,
     getServerId: () =>
       (typeof options.getServerId === 'function'
         ? options.getServerId()
@@ -590,27 +602,27 @@ export function registerHttpRoutes(options: RouteOptions): void {
 
   app.post('/v1/chat/completions', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
-    await handleChatCompletions(req, res, buildHandlerContext());
+    await handleChatCompletions(req, res, buildHandlerContext(req));
   });
   app.post('/v1/images/generations', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
-    await handleImageGenerations(req, res, buildHandlerContext());
+    await handleImageGenerations(req, res, buildHandlerContext(req));
   });
   app.post('/v1/images/edits', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
-    await handleImageEdits(req, res, buildHandlerContext());
+    await handleImageEdits(req, res, buildHandlerContext(req));
   });
   app.post('/v1/messages', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
-    await handleMessages(req, res, buildHandlerContext());
+    await handleMessages(req, res, buildHandlerContext(req));
   });
   app.post('/v1/responses', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
-    await handleResponses(req, res, buildHandlerContext());
+    await handleResponses(req, res, buildHandlerContext(req));
   });
   app.post('/v1/responses/:id/submit_tool_outputs', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
-    await handleResponses(req, res, buildHandlerContext(), {
+    await handleResponses(req, res, buildHandlerContext(req), {
       entryEndpoint: '/v1/responses.submit_tool_outputs',
       responseIdFromPath: req.params?.id
     });

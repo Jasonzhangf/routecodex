@@ -638,7 +638,6 @@ export interface StopMessageStateSnapshot {
   stopMessageAiMode?: "on" | "off";
   stopMessageAiSeedPrompt?: string;
   stopMessageAiHistory?: Array<Record<string, unknown>>;
-  reasoningStopMode?: "on" | "off" | "endless";
 }
 
 export interface PreCommandStateSnapshot {

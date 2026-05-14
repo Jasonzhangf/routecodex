@@ -225,6 +225,7 @@ function convertToolResultOutput(content: unknown, isError: boolean): LanguageMo
 function convertMessageContent(
   role: string,
   content: unknown,
+  reasoningContent: unknown,
   toolNameIndex: ToolNameIndex
 ): { role: 'system' | 'user' | 'assistant' | 'tool'; content: unknown }[] {
   if (role === 'system') {
@@ -241,6 +242,14 @@ function convertMessageContent(
   const assistantParts: unknown[] = [];
   const userParts: Array<LanguageModelV3TextPart | LanguageModelV3FilePart> = [];
   const toolParts: unknown[] = [];
+  const assistantReasoningText = role === 'assistant' ? pickString(reasoningContent) : undefined;
+
+  if (role === 'assistant' && assistantReasoningText) {
+    assistantParts.push({
+      type: 'reasoning',
+      text: assistantReasoningText
+    });
+  }
 
   for (const block of blocks) {
     const item = asRecord(block);
@@ -288,7 +297,7 @@ function convertMessageContent(
       if (role === 'assistant') {
         assistantParts.push({
           type: 'reasoning',
-          text: pickString(item.thinking) ?? '',
+          text: pickString(item.thinking ?? item.text) ?? '',
           providerOptions: item.signature
             ? { anthropic: { signature: item.signature } }
             : undefined
@@ -371,7 +380,7 @@ function convertPrompt(rawBody: UnknownRecord): LanguageModelV3Prompt {
     if (!role) {
       continue;
     }
-    for (const converted of convertMessageContent(role, bag.content, toolNameIndex)) {
+    for (const converted of convertMessageContent(role, bag.content, bag.reasoning_content ?? bag.reasoningContent, toolNameIndex)) {
       prompt.push(converted as LanguageModelV3Message);
     }
   }

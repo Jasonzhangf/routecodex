@@ -406,4 +406,281 @@ describe('ResponsesSemanticMapper submit tool outputs', () => {
 
     clearResponsesConversationByRequestId(reboundRequestId);
   });
+
+  it('fails fast when recording a responses response against an unknown request context', () => {
+    const requestId = `req-submit-missing-context-${Date.now()}`;
+    const reboundRequestId = `${requestId}-provider`;
+    const responseId = `resp-submit-missing-context-${Date.now()}`;
+
+    captureResponsesRequestContext({
+      requestId,
+      payload: { model: 'gpt-5.4', stream: false },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'text', text: 'hello' }]
+          }
+        ]
+      }
+    });
+
+    rebindResponsesConversationRequestId(requestId, reboundRequestId);
+    clearResponsesConversationByRequestId(reboundRequestId);
+
+    expect(() =>
+      recordResponsesResponse({
+        requestId: reboundRequestId,
+        response: {
+          id: responseId,
+          object: 'response',
+          output: []
+        }
+      })
+    ).toThrow(
+      expect.objectContaining({
+        name: 'ProviderProtocolError',
+        code: 'MALFORMED_RESPONSE',
+        details: expect.objectContaining({
+          context: 'responses-conversation-store.recordResponse',
+          reason: 'missing_request_context',
+          requestId: reboundRequestId,
+          responseId
+        })
+      })
+    );
+  });
+
+  it('preserves reasoning-only assistant history across responses resume back into chat request', () => {
+    const requestId = `req-submit-reasoning-${Date.now()}`;
+    const responseId = `resp-submit-reasoning-${Date.now()}`;
+    const callId = 'call_c367dbc1c78542d5ad004fcb';
+    const reasoningText =
+      'The user wants me to call echo_json with {"message":"ping"} and not output a regular answer.';
+
+    captureResponsesRequestContext({
+      requestId,
+      sessionId: requestId,
+      conversationId: requestId,
+      payload: {
+        model: 'gpt-5.4',
+        stream: false,
+        thinking: { type: 'enabled', budget_tokens: 1024 }
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '调用 echo_json，参数 {"message":"ping"}。不要输出普通答案。' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId,
+      response: {
+        id: responseId,
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'reasoning',
+            id: 'reasoning_1',
+            content: [{ type: 'reasoning_text', text: reasoningText }]
+          },
+          {
+            type: 'message',
+            id: 'message_1',
+            role: 'assistant',
+            content: []
+          },
+          {
+            type: 'function_call',
+            id: 'fc_c367dbc1c78542d5ad004fcb',
+            call_id: callId,
+            name: 'echo_json',
+            arguments: '{"message":"ping"}'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: callId,
+                type: 'function',
+                name: 'echo_json',
+                arguments: '{"message":"ping"}'
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    const resumed = resumeResponsesConversation(
+      responseId,
+      {
+        response_id: responseId,
+        tool_outputs: [
+          {
+            tool_call_id: callId,
+            output: '{"message":"ping"}'
+          }
+        ]
+      },
+      { requestId: `${requestId}-resume` }
+    );
+
+    const resumedContext = captureResponsesContext(resumed.payload as Record<string, unknown>, {
+      route: { requestId: `${requestId}-resume` }
+    });
+    const { request } = buildChatRequestFromResponses(
+      resumed.payload as Record<string, unknown>,
+      resumedContext as any
+    );
+
+    const messages = Array.isArray((request as any).messages) ? (request as any).messages : [];
+    const assistantReasoning = messages.find(
+      (entry: any) =>
+        entry?.role === 'assistant' &&
+        entry?.reasoning_content === reasoningText &&
+        !entry?.tool_calls
+    );
+    expect(assistantReasoning).toMatchObject({
+      role: 'assistant',
+      content: '',
+      reasoning_content: reasoningText
+    });
+
+    const assistantToolCall = messages.find(
+      (entry: any) => entry?.role === 'assistant' && Array.isArray(entry?.tool_calls)
+    );
+    expect(assistantToolCall?.tool_calls?.[0]?.id).toBe(callId);
+
+    const toolMessage = messages.find((entry: any) => entry?.role === 'tool');
+    expect(toolMessage).toMatchObject({
+      role: 'tool',
+      tool_call_id: callId,
+      content: '{"message":"ping"}'
+    });
+
+    clearResponsesConversationByRequestId(requestId);
+  });
+
+  it('preserves reasoning summary assistant history across responses resume back into chat request', () => {
+    const requestId = `req-submit-reasoning-summary-${Date.now()}`;
+    const responseId = `resp-submit-reasoning-summary-${Date.now()}`;
+    const callId = 'call_bb521efa13614e7b884b8050';
+    const reasoningText =
+      'The user wants me to call the echo_json tool with {"message":"ping"}.';
+
+    captureResponsesRequestContext({
+      requestId,
+      sessionId: requestId,
+      conversationId: requestId,
+      payload: {
+        model: 'mimo-v2.5-pro',
+        stream: false,
+        thinking: { type: 'enabled', budget_tokens: 1024 }
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '请调用 echo_json 工具，并传入 {"message":"ping"}。不要直接回答。' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId,
+      response: {
+        id: responseId,
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'reasoning',
+            id: 'rs_1',
+            summary: [{ type: 'summary_text', text: reasoningText }]
+          },
+          {
+            type: 'function_call',
+            id: 'fc_bb521efa13614e7b884b8050',
+            call_id: callId,
+            name: 'echo_json',
+            arguments: '{"message":"ping"}'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: callId,
+                type: 'function',
+                name: 'echo_json',
+                arguments: '{"message":"ping"}'
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    const resumed = resumeResponsesConversation(
+      responseId,
+      {
+        response_id: responseId,
+        tool_outputs: [
+          {
+            tool_call_id: callId,
+            output: '{"message":"ping"}'
+          }
+        ]
+      },
+      { requestId: `${requestId}-resume` }
+    );
+
+    const resumedContext = captureResponsesContext(resumed.payload as Record<string, unknown>, {
+      route: { requestId: `${requestId}-resume` }
+    });
+    const { request } = buildChatRequestFromResponses(
+      resumed.payload as Record<string, unknown>,
+      resumedContext as any
+    );
+
+    const messages = Array.isArray((request as any).messages) ? (request as any).messages : [];
+    const assistantReasoning = messages.find(
+      (entry: any) =>
+        entry?.role === 'assistant' &&
+        entry?.reasoning_content === reasoningText &&
+        !entry?.tool_calls
+    );
+    expect(assistantReasoning).toMatchObject({
+      role: 'assistant',
+      content: '',
+      reasoning_content: reasoningText
+    });
+
+    const assistantToolCall = messages.find(
+      (entry: any) => entry?.role === 'assistant' && Array.isArray(entry?.tool_calls)
+    );
+    expect(assistantToolCall?.tool_calls?.[0]?.id).toBe(callId);
+
+    const toolMessage = messages.find((entry: any) => entry?.role === 'tool');
+    expect(toolMessage).toMatchObject({
+      role: 'tool',
+      tool_call_id: callId,
+      content: '{"message":"ping"}'
+    });
+
+    clearResponsesConversationByRequestId(requestId);
+  });
 });

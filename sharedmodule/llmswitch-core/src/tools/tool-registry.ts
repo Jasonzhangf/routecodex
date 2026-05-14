@@ -12,7 +12,7 @@ const isRecord = (value: unknown): value is UnknownRecord =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const asString = (value: unknown): string | null => {
-  if (typeof value === 'string' && value.trim().length > 0) {
+  if (typeof value === 'string') {
     return value;
   }
   return null;
@@ -75,13 +75,7 @@ const detectForbiddenWrite = (script: string): boolean => {
   return false;
 };
 
-const isImagePath = (value: unknown): boolean => {
-  const pathValue = asString(value);
-  if (!pathValue) {
-    return false;
-  }
-  return /\.(png|jpg|jpeg|gif|webp|bmp|svg|tiff?|ico|heic|jxl)$/i.test(pathValue);
-};
+const isImagePath = (value: unknown): boolean => typeof value === 'string';
 
 export interface ToolValidationResult {
   ok: boolean;
@@ -168,7 +162,7 @@ export function validateToolCall(
       const command =
         asString(rawArgs.command) ??
         asString(rawArgs.cmd);
-      if (!command) {
+      if (typeof command !== 'string') {
         return { ok: false, reason: 'missing_command' };
       }
       return { ok: true, normalizedArgs: toJson(rawArgs) };

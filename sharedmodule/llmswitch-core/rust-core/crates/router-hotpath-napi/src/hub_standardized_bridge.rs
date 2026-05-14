@@ -157,6 +157,18 @@ fn normalize_chat_message(message: &Value) -> Value {
         }
     }
 
+    if let Some(reasoning_content) = message_row.get("reasoning_content") {
+        if !reasoning_content.is_null() {
+            out.insert("reasoning_content".to_string(), reasoning_content.clone());
+        }
+    }
+
+    if let Some(reasoning) = message_row.get("reasoning") {
+        if !reasoning.is_null() {
+            out.insert("reasoning".to_string(), reasoning.clone());
+        }
+    }
+
     Value::Object(out)
 }
 
@@ -1117,5 +1129,58 @@ mod tests {
             standardized["tools"][0]["function"]["name"],
             Value::String("web_search".to_string())
         );
+    }
+
+    #[test]
+    fn standardization_preserves_assistant_reasoning_only_history_fields() {
+        let chat = json!({
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "Need to call echo_json with ping.",
+                    "reasoning": {
+                        "summary": [
+                            { "type": "summary_text", "text": "Need to call echo_json with ping." }
+                        ]
+                    }
+                },
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "echo_json",
+                                "arguments": "{\"message\":\"ping\"}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "tools": [{ "type": "function", "function": { "name": "echo_json" } }],
+            "parameters": { "model": "mimo-v2.5-pro" },
+            "metadata": {}
+        });
+
+        let standardized = chat_envelope_to_standardized_impl(
+            &chat,
+            &json!({}),
+            "/v1/responses",
+            Some("req_reasoning_history"),
+        )
+        .expect("standardized");
+
+        assert_eq!(
+            standardized["messages"][0]["reasoning_content"],
+            Value::String("Need to call echo_json with ping.".to_string())
+        );
+        assert_eq!(
+            standardized["messages"][0]["reasoning"]["summary"][0]["text"],
+            Value::String("Need to call echo_json with ping.".to_string())
+        );
+        assert_eq!(standardized["messages"][1]["tool_calls"][0]["id"], "call_1");
     }
 }

@@ -55,8 +55,24 @@ describe('response-runtime anthropic hidden reasoning', () => {
     const reasoningItem = Array.isArray(responses?.output)
       ? responses.output.find((item: any) => item?.type === 'reasoning')
       : undefined;
+    expect(responses?.model).toBe('mimo-v2.5-pro');
     expect(reasoningItem?.content?.[0]?.text).toBe('The user says \"只回复 ok');
     expect(reasoningItem?.encrypted_content).toBe('sig_payload');
+  });
+
+  it('drops meaningless dot-only thinking blocks so they do not enter reasoning history', () => {
+    const chat = buildOpenAIChatFromAnthropicMessage({
+      id: 'msg_dot_only_thinking',
+      type: 'message',
+      role: 'assistant',
+      model: 'mimo-v2.5-pro',
+      stop_reason: 'end_turn',
+      content: [{ type: 'thinking', thinking: '.' }]
+    } as any);
+
+    expect((chat as any).choices?.[0]?.message?.reasoning).toBeUndefined();
+    expect((chat as any).choices?.[0]?.message?.reasoning_content).toBeUndefined();
+    expect((chat as any).choices?.[0]?.message?.content).toBe('');
   });
 
   it('prioritizes redacted_thinking encrypted content over thinking signature', () => {
@@ -129,5 +145,18 @@ describe('response-runtime anthropic hidden reasoning', () => {
 
     expect((chat as any).choices?.[0]?.finish_reason).toBe('length');
     expect((chat as any).choices?.[0]?.message?.content).toBe('partial output');
+  });
+
+  it('fails fast when upstream returns max_tokens with empty output', () => {
+    expect(() => {
+      buildOpenAIChatFromAnthropicMessage({
+        id: 'msg_empty_max_tokens',
+        type: 'message',
+        role: 'assistant',
+        model: 'mimo-v2.5-pro',
+        stop_reason: 'max_tokens',
+        content: []
+      } as any);
+    }).toThrow(/max_tokens/i);
   });
 });

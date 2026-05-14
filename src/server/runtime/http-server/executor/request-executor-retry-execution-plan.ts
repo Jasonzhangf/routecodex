@@ -49,7 +49,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
   logNonBlockingError: LogNonBlockingError;
 }): Promise<ProviderRetryExecutionPlan> {
   const hostContractFailure = isHostRequestExecutorErrorStage(args.stage ?? 'provider.send');
-  const rerouteHostContractFailure = args.stage === 'host.stopless_contract';
   const classification = resolveRequestExecutorProviderErrorClassification({
     error: args.error,
     retryError: args.retryError,
@@ -79,12 +78,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   }
   const exclusionPlan = hostContractFailure
     ? {
-      excludedCurrentProvider: rerouteHostContractFailure
-        ? applyRetryExclusionForCurrentProvider({
-          providerKey: args.providerKey,
-          excludedProviderKeys: args.excludedProviderKeys
-        })
-        : false
+      excludedCurrentProvider: false
     }
     : args.forceExcludeCurrentProviderOnRetry
       ? {

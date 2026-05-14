@@ -20,6 +20,9 @@ import {
 import {
   cloneErrorForReporting
 } from './request-executor-error-report.js';
+import {
+  resolveRequestExecutorProviderErrorClassification
+} from './request-executor-provider-failure.js';
 
 type RuntimeManager = {
   resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
@@ -64,13 +67,22 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     retryError: args.retryError,
     fallbackStage: args.stage
   });
+  const classification = resolveRequestExecutorProviderErrorClassification({
+    error: args.error,
+    retryError: args.retryError,
+    stage: reportPlan.stageHint as RequestExecutorProviderErrorStage
+  });
+  const suppressForceExclude =
+    classification === 'special_400'
+    || reportPlan.stageHint === 'host.response_contract'
+    || reportPlan.stageHint === 'provider.followup';
   const forceExcludeCurrentProviderOnRetry =
-    args.forceExcludeCurrentProviderOnRetry
+    suppressForceExclude
+      ? false
+      : args.forceExcludeCurrentProviderOnRetry
     ?? (
       args.stage === 'provider.send'
-      && reportPlan.stageHint !== 'host.response_contract'
-      && reportPlan.stageHint !== 'host.stopless_contract'
-      && reportPlan.stageHint !== 'provider.followup'
+      && !suppressForceExclude
       && (!Array.isArray(args.routePool) || args.routePool.length === 0)
     );
   const retryExecutionPlan = await resolveProviderRetryExecutionPlan({

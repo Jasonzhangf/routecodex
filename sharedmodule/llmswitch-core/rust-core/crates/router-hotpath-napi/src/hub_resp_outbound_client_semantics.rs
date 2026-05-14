@@ -2770,14 +2770,21 @@ fn build_responses_payload_from_chat_core(
             .and_then(|text| build_message_reasoning_value(&[], &[text], None))
     });
 
+    // has_text_reasoning: text-only (summary or content) — drives message emission
+    let has_text_reasoning = reasoning_payload.as_ref().and_then(Value::as_object).map_or(false, |rp| {
+        rp.get("summary").and_then(Value::as_array).map_or(false, |s| !s.is_empty())
+            || rp.get("content").and_then(Value::as_array).map_or(false, |c| !c.is_empty())
+    });
+
     let tool_calls = message
         .get("tool_calls")
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
     let has_tool_calls = !tool_calls.is_empty();
-    let should_emit_message =
-        !content_parts.is_empty() || reasoning_payload.is_some() || !has_tool_calls;
+    // Encrypted-only reasoning emits reasoning item but NOT message (P0 boundary fix)
+    // Only emit message if has real content OR visible text reasoning; not for tool-call-only or empty reasoning
+    let should_emit_message = !content_parts.is_empty() || has_text_reasoning;
 
     let response_id = read_object_string(response_row, "id")
         .unwrap_or_else(|| format!("resp-{}", now_unix_millis()));
@@ -2874,6 +2881,41 @@ fn build_responses_payload_from_chat_core(
             ("role".to_string(), Value::String(role)),
             ("content".to_string(), Value::Array(content_parts.clone())),
         ])));
+    }
+
+    // P0: dedup — if reasoning text matches message text, remove reasoning item
+    // Runs AFTER message push so len >= 2 and reasoning_idx = len-2 correctly points to reasoning
+    if output_items.len() >= 2 {
+        let reasoning_idx = output_items.len() - 2;
+        if let (Some(reasoning_row), Some(message_row)) = (
+            output_items.get(reasoning_idx).and_then(|v| v.as_object()),
+            output_items.last().and_then(|v| v.as_object()),
+        ) {
+            if reasoning_row.get("type").and_then(|v| v.as_str()) == Some("reasoning")
+                && message_row.get("type").and_then(|v| v.as_str()) == Some("message")
+            {
+                let reasoning_text = reasoning_row.get("content")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter().filter_map(|e| e.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>()
+                    })
+                    .filter(|t| !t.is_empty())
+                    .map(|t| t.join(""))
+                    .map(|t| t.trim().trim_start_matches("**Thinking**").trim().to_string())
+                    .unwrap_or_default();
+                let message_text = message_row.get("content")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter().filter_map(|e| e.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>()
+                    })
+                    .filter(|t| !t.is_empty())
+                    .map(|t| t.join(""))
+                    .unwrap_or_default();
+                if !reasoning_text.is_empty() && reasoning_text == message_text {
+                    output_items.remove(reasoning_idx);
+                }
+            }
+        }
     }
 
     let mut pending_calls: Vec<PendingToolCall> = Vec::new();
@@ -4612,6 +4654,107 @@ mod tests {
             }
         }))
         .is_none());
+    }
+
+    // P0: encrypted-only reasoning should emit reasoning item but NOT empty message
+    #[test]
+    fn build_responses_payload_encrypted_only_reasoning_no_message() {
+        let payload = serde_json::json!({
+            "id": "resp-enc-1",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "reasoning": { "encrypted_content": "opaque-sig-123" }
+                }
+            }]
+        });
+        let result = build_responses_payload_from_chat_core(
+            &payload, Some("test_req"), &serde_json::json!({ "toolsRaw": [] }),
+        ).expect("payload");
+        let items = result["output"].as_array().expect("output array");
+        let reasoning: Vec<_> = items.iter().filter(|i| i["type"] == "reasoning").collect();
+        let messages: Vec<_> = items.iter().filter(|i| i["type"] == "message").collect();
+        assert_eq!(reasoning.len(), 1, "encrypted-only should emit reasoning item");
+        assert_eq!(messages.len(), 0, "encrypted-only should NOT emit empty message");
+    }
+
+    // P0: reasoning + content both present -> both emitted
+    #[test]
+    fn build_responses_payload_emits_both_when_reasoning_and_content_differ() {
+        let payload = serde_json::json!({
+            "id": "resp-both-1",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "final answer"}],
+                    "reasoning": {
+                        "summary": [{"type": "summary_text", "text": "thinking..."}],
+                        "content": [{"type": "reasoning_text", "text": "processing..."}]
+                    }
+                }
+            }]
+        });
+        let result = build_responses_payload_from_chat_core(
+            &payload, Some("test_req"), &serde_json::json!({ "toolsRaw": [] }),
+        ).expect("payload");
+        let items = result["output"].as_array().expect("output array");
+        let reasoning: Vec<_> = items.iter().filter(|i| i["type"] == "reasoning").collect();
+        let messages: Vec<_> = items.iter().filter(|i| i["type"] == "message").collect();
+        assert_eq!(reasoning.len(), 1, "should emit reasoning");
+        assert_eq!(messages.len(), 1, "should emit message");
+    }
+
+    // P0: reasoning-only with text summary -> both reasoning and message emitted
+    #[test]
+    fn build_responses_payload_only_reasoning_with_summary_emits_both() {
+        let payload = serde_json::json!({
+            "id": "resp-reasoning-only-1",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                    "reasoning": {
+                        "summary": [{"type": "summary_text", "text": "thinking about this"}],
+                        "content": [{"type": "reasoning_text", "text": "processing step 1..."}]
+                    }
+                }
+            }]
+        });
+        let result = build_responses_payload_from_chat_core(
+            &payload, Some("test_req"), &serde_json::json!({ "toolsRaw": [] }),
+        ).expect("payload");
+        let items = result["output"].as_array().expect("output array");
+        let reasoning: Vec<_> = items.iter().filter(|i| i["type"] == "reasoning").collect();
+        let messages: Vec<_> = items.iter().filter(|i| i["type"] == "message").collect();
+        // reasoning.summary present = has_text_reasoning = true -> message emitted
+        assert_eq!(reasoning.len(), 1, "should emit reasoning item");
+        assert_eq!(messages.len(), 1, "reasoning with text summary should emit message too");
+    }
+
+    // P0: reasoning text matches message text -> dedup: only message, no reasoning item
+    #[test]
+    fn build_responses_payload_deduplicates_reasoning_and_message_when_text_matches() {
+        let payload = serde_json::json!({
+            "id": "resp-dedup-1",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "The answer is 42"}],
+                    "reasoning": {
+                        "summary": [{"type": "summary_text", "text": "The answer is 42"}],
+                        "content": [{"type": "reasoning_text", "text": "The answer is 42"}]
+                    }
+                }
+            }]
+        });
+        let result = build_responses_payload_from_chat_core(
+            &payload, Some("test_req"), &serde_json::json!({ "toolsRaw": [] }),
+        ).expect("payload");
+        let items = result["output"].as_array().expect("output array");
+        let reasoning: Vec<_> = items.iter().filter(|i| i["type"] == "reasoning").collect();
+        let messages: Vec<_> = items.iter().filter(|i| i["type"] == "message").collect();
+        assert_eq!(messages.len(), 1, "should emit message");
+        assert_eq!(reasoning.len(), 0, "matching reasoning+content should dedup reasoning");
     }
 }
 

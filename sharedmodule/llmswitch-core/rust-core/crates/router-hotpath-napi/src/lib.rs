@@ -41,6 +41,7 @@ mod hub_bridge_actions;
 mod hub_bridge_policies;
 mod hub_chat_envelope_validator;
 mod failure_policy;
+mod hub_goal_tools;
 mod hub_pipeline;
 mod hub_pipeline_session_identifiers;
 mod hub_pipeline_target_utils;
@@ -893,6 +894,24 @@ pub fn parse_routing_instruction_kinds_json(
     .map_err(|e| napi::Error::from_reason(e))?;
     let kinds: Vec<String> = parsed.into_iter().map(|entry| entry.kind).collect();
     serde_json::to_string(&kinds).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn parse_rcc_fence_document_json(text: String) -> NapiResult<String> {
+    let parsed = virtual_router_engine::rcc_fence::parse_rcc_fence_document(&text)
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&parsed).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn apply_stopless_goal_directive_json(payload_json: String) -> NapiResult<String> {
+    let payload = serde_json::from_str::<
+        virtual_router_engine::rcc_fence::StoplessGoalDirectiveTransitionInput,
+    >(&payload_json)
+    .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let next = virtual_router_engine::rcc_fence::apply_stopless_goal_directive(payload)
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&next).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi]

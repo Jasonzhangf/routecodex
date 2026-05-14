@@ -62,7 +62,7 @@ const BLOCKING_RECOVERABLE_CODE_SET = new Set([
 ]);
 
 function isHostFailureStage(stage?: string): boolean {
-  return stage === 'host.response_contract' || stage === 'host.stopless_contract';
+  return stage === 'host.response_contract';
 }
 
 export function normalizeProviderFailureCodeKey(value: unknown): string | undefined {
@@ -658,7 +658,7 @@ export function resolveProviderFailureExclusionDecision(args: {
       retryAction: 'reroute_explicit_alternative'
     };
   }
-  if (args.classification === 'recoverable') {
+  if (args.classification === 'special_400' || args.classification === 'recoverable') {
     return {
       excludeCurrentProvider: false,
       retryAction: 'retry_same_provider'

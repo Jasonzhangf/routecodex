@@ -29,6 +29,16 @@ export const DEFAULT_REASONING_STOP_MODE: ReasoningStopMode = 'off';
 export type { ReasoningStopReason } from './reasoning-stop-schema.js';
 export type { ReasoningStopMode } from './reasoning-stop-stopless-directive.js';
 
+type LegacyReasoningStopRoutingState = RoutingInstructionState & {
+  reasoningStopMode?: ReasoningStopMode;
+  reasoningStopArmed?: boolean;
+  reasoningStopSummary?: string;
+  reasoningStopUpdatedAt?: number;
+  reasoningStopFailCount?: number;
+  reasoningStopGuardTriggerCount?: number;
+  reasoningStopGuardTriggerAt?: number;
+};
+
 export const REASONING_STOP_TOOL_DEF: JsonObject = {
   type: 'function',
   function: {
@@ -43,7 +53,7 @@ export const REASONING_STOP_TOOL_DEF: JsonObject = {
   }
 } as const satisfies JsonObject;
 
-function createEmptyRoutingInstructionState(): RoutingInstructionState {
+function createEmptyRoutingInstructionState(): LegacyReasoningStopRoutingState {
   return {
     forcedTarget: undefined,
     stickyTarget: undefined,
@@ -97,11 +107,11 @@ function readNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : undefined;
 }
 
-function hasReasoningStopState(state: RoutingInstructionState | null | undefined): boolean {
+function hasReasoningStopState(state: LegacyReasoningStopRoutingState | null | undefined): boolean {
   if (!state) {
     return false;
   }
-  const mode = normalizeReasoningStopMode((state as RoutingInstructionState).reasoningStopMode);
+  const mode = normalizeReasoningStopMode(state.reasoningStopMode);
   if (mode) {
     return true;
   }
@@ -114,7 +124,7 @@ function hasReasoningStopState(state: RoutingInstructionState | null | undefined
   return typeof state.reasoningStopUpdatedAt === 'number' && Number.isFinite(state.reasoningStopUpdatedAt);
 }
 
-function isStateEmpty(state: RoutingInstructionState): boolean {
+function isStateEmpty(state: LegacyReasoningStopRoutingState): boolean {
   const noForced = !state.forcedTarget;
   const noSticky = !state.stickyTarget;
   const noPrefer = !state.preferTarget;
@@ -171,8 +181,7 @@ export function readReasoningStopMode(
   if (!stickyKey) {
     return resolvedFallback;
   }
-  let state: RoutingInstructionState | null = null;
-  state = loadRoutingInstructionStateSync(stickyKey);
+  let state = loadRoutingInstructionStateSync(stickyKey) as LegacyReasoningStopRoutingState | null;
   return normalizeReasoningStopMode(state?.reasoningStopMode) ?? resolvedFallback;
 }
 
@@ -189,8 +198,7 @@ export function syncReasoningStopModeFromRequest(
     return resolvedFallback;
   }
 
-  let state: RoutingInstructionState | null = null;
-  state = loadRoutingInstructionStateSync(stickyKey);
+  let state = loadRoutingInstructionStateSync(stickyKey) as LegacyReasoningStopRoutingState | null;
 
   if (!directiveMode) {
     const persistedMode = normalizeReasoningStopMode(state?.reasoningStopMode);
@@ -221,8 +229,7 @@ export function readReasoningStopState(adapterContext: unknown): {
   if (!stickyKey) {
     return { stickyKey: '', armed: false, summary: '' };
   }
-  let state: RoutingInstructionState | null = null;
-  state = loadRoutingInstructionStateSync(stickyKey);
+  let state = loadRoutingInstructionStateSync(stickyKey) as LegacyReasoningStopRoutingState | null;
   if (!hasReasoningStopState(state)) {
     return { stickyKey, armed: false, summary: '' };
   }
@@ -242,8 +249,7 @@ export function armReasoningStopState(adapterContext: unknown, summary: string):
   if (!stickyKey || !normalizedSummary) {
     return false;
   }
-  let state: RoutingInstructionState | null = null;
-  state = loadRoutingInstructionStateSync(stickyKey);
+  let state = loadRoutingInstructionStateSync(stickyKey) as LegacyReasoningStopRoutingState | null;
   const next = state ?? createEmptyRoutingInstructionState();
   next.reasoningStopArmed = true;
   next.reasoningStopSummary = normalizedSummary;
@@ -257,8 +263,7 @@ export function clearReasoningStopState(adapterContext: unknown): void {
   if (!stickyKey) {
     return;
   }
-  let state: RoutingInstructionState | null = null;
-  state = loadRoutingInstructionStateSync(stickyKey);
+  let state = loadRoutingInstructionStateSync(stickyKey) as LegacyReasoningStopRoutingState | null;
   if (!state) {
     return;
   }
@@ -278,8 +283,7 @@ export function readReasoningStopFailCount(adapterContext: unknown): number {
   if (!stickyKey) {
     return 0;
   }
-  let state: RoutingInstructionState | null = null;
-  state = loadRoutingInstructionStateSync(stickyKey);
+  let state = loadRoutingInstructionStateSync(stickyKey) as LegacyReasoningStopRoutingState | null;
   if (!state) {
     return 0;
   }
@@ -292,8 +296,7 @@ export function incrementReasoningStopFailCount(adapterContext: unknown): number
   if (!stickyKey) {
     return 0;
   }
-  let state: RoutingInstructionState | null = null;
-  state = loadRoutingInstructionStateSync(stickyKey);
+  let state = loadRoutingInstructionStateSync(stickyKey) as LegacyReasoningStopRoutingState | null;
   const next = state ?? createEmptyRoutingInstructionState();
   const currentCount = typeof next.reasoningStopFailCount === 'number' && Number.isFinite(next.reasoningStopFailCount)
     ? next.reasoningStopFailCount
@@ -309,8 +312,7 @@ export function resetReasoningStopFailCount(adapterContext: unknown): void {
   if (!stickyKey) {
     return;
   }
-  let state: RoutingInstructionState | null = null;
-  state = loadRoutingInstructionStateSync(stickyKey);
+  let state = loadRoutingInstructionStateSync(stickyKey) as LegacyReasoningStopRoutingState | null;
   if (!state) {
     return;
   }
@@ -328,8 +330,7 @@ export function readReasoningStopGuardTriggerCount(adapterContext: unknown): { c
   if (!stickyKey) {
     return { count: 0, lastTriggerAt: undefined };
   }
-  let state: RoutingInstructionState | null = null;
-  state = loadRoutingInstructionStateSync(stickyKey);
+  let state = loadRoutingInstructionStateSync(stickyKey) as LegacyReasoningStopRoutingState | null;
   if (!state) {
     return { count: 0, lastTriggerAt: undefined };
   }
@@ -346,8 +347,7 @@ export function incrementReasoningStopGuardTriggerCount(adapterContext: unknown)
   if (!stickyKey) {
     return 0;
   }
-  let state: RoutingInstructionState | null = null;
-  state = loadRoutingInstructionStateSync(stickyKey);
+  let state = loadRoutingInstructionStateSync(stickyKey) as LegacyReasoningStopRoutingState | null;
   const next = state ?? createEmptyRoutingInstructionState();
   const currentCount = typeof next.reasoningStopGuardTriggerCount === 'number' && Number.isFinite(next.reasoningStopGuardTriggerCount)
     ? next.reasoningStopGuardTriggerCount
@@ -364,8 +364,7 @@ export function resetReasoningStopGuardTriggerCount(adapterContext: unknown): vo
   if (!stickyKey) {
     return;
   }
-  let state: RoutingInstructionState | null = null;
-  state = loadRoutingInstructionStateSync(stickyKey);
+  let state = loadRoutingInstructionStateSync(stickyKey) as LegacyReasoningStopRoutingState | null;
   if (!state) {
     return;
   }

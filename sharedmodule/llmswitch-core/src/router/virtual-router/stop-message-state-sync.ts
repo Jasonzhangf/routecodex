@@ -2,6 +2,7 @@ import type { RoutingInstructionState } from './routing-instructions.js';
 
 type StopMessageSubset = Pick<
   RoutingInstructionState,
+  | 'stoplessGoalState'
   | 'stopMessageSource'
   | 'stopMessageText'
   | 'stopMessageMaxRepeats'
@@ -12,10 +13,6 @@ type StopMessageSubset = Pick<
   | 'stopMessageAiHistory'
   | 'stopMessageUpdatedAt'
   | 'stopMessageLastUsedAt'
-  | 'reasoningStopMode'
-  | 'reasoningStopArmed'
-  | 'reasoningStopSummary'
-  | 'reasoningStopUpdatedAt'
 >;
 
 function isFiniteNumber(value: unknown): value is number {
@@ -41,6 +38,44 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function goalUpdatedAtOf(state: StopMessageSubset | null | undefined): number | null {
+  if (!state?.stoplessGoalState) {
+    return null;
+  }
+  return isFiniteNumber(state.stoplessGoalState.updatedAt) ? state.stoplessGoalState.updatedAt : null;
+}
+
+function cloneGoalState(
+  goal: RoutingInstructionState['stoplessGoalState']
+): RoutingInstructionState['stoplessGoalState'] {
+  if (!goal) {
+    return undefined;
+  }
+  return {
+    ...goal
+  };
+}
+
+function mergeStoplessGoalState(
+  existing: StopMessageSubset | null | undefined,
+  persisted: StopMessageSubset | null | undefined
+): RoutingInstructionState['stoplessGoalState'] {
+  const existingGoal = existing?.stoplessGoalState;
+  const persistedGoal = persisted?.stoplessGoalState;
+  if (!existingGoal) {
+    return cloneGoalState(persistedGoal);
+  }
+  if (!persistedGoal) {
+    return cloneGoalState(existingGoal);
+  }
+  const existingUpdatedAt = goalUpdatedAtOf(existing);
+  const persistedUpdatedAt = goalUpdatedAtOf(persisted);
+  if (existingUpdatedAt !== null && persistedUpdatedAt !== null && existingUpdatedAt > persistedUpdatedAt) {
+    return cloneGoalState(existingGoal);
+  }
+  return cloneGoalState(persistedGoal);
+}
+
 function sameStopMessageConfig(existing: StopMessageSubset, persisted: StopMessageSubset): boolean {
   return normalizeText(existing.stopMessageText) === normalizeText(persisted.stopMessageText)
     && existing.stopMessageMaxRepeats === persisted.stopMessageMaxRepeats
@@ -51,14 +86,11 @@ function sameStopMessageConfig(existing: StopMessageSubset, persisted: StopMessa
 function overlayPersistedUsage(existing: StopMessageSubset, persisted: StopMessageSubset): StopMessageSubset {
   return {
     ...existing,
+    stoplessGoalState: mergeStoplessGoalState(existing, persisted),
     stopMessageUsed: persisted.stopMessageUsed,
     stopMessageLastUsedAt: persisted.stopMessageLastUsedAt,
     stopMessageAiSeedPrompt: persisted.stopMessageAiSeedPrompt,
-    stopMessageAiHistory: persisted.stopMessageAiHistory,
-    reasoningStopMode: persisted.reasoningStopMode,
-    reasoningStopArmed: persisted.reasoningStopArmed,
-    reasoningStopSummary: persisted.reasoningStopSummary,
-    reasoningStopUpdatedAt: persisted.reasoningStopUpdatedAt
+    stopMessageAiHistory: persisted.stopMessageAiHistory
   };
 }
 
@@ -106,6 +138,7 @@ export function mergeStopMessageFromPersisted(
 
   return {
     ...existing,
+    stoplessGoalState: mergeStoplessGoalState(existing, persisted),
     stopMessageSource: persisted.stopMessageSource,
     stopMessageText: persisted.stopMessageText,
     stopMessageMaxRepeats: persisted.stopMessageMaxRepeats,
@@ -115,10 +148,6 @@ export function mergeStopMessageFromPersisted(
     stopMessageAiSeedPrompt: persisted.stopMessageAiSeedPrompt,
     stopMessageAiHistory: persisted.stopMessageAiHistory,
     stopMessageUpdatedAt: persisted.stopMessageUpdatedAt,
-    stopMessageLastUsedAt: persisted.stopMessageLastUsedAt,
-    reasoningStopMode: persisted.reasoningStopMode,
-    reasoningStopArmed: persisted.reasoningStopArmed,
-    reasoningStopSummary: persisted.reasoningStopSummary,
-    reasoningStopUpdatedAt: persisted.reasoningStopUpdatedAt
+    stopMessageLastUsedAt: persisted.stopMessageLastUsedAt
   };
 }

@@ -29,7 +29,8 @@
 ## 权威文档
 - `docs/stop-message-auto.md`
 - `docs/design/servertool-stopmessage-lifecycle.md`
-- `docs/design/reasoning-stop-lifecycle.md`
+- `docs/design/rcc-unified-fence-marker-spec.md`
+- `docs/design/stopless-goal-runtime-refactor-plan.md`
 - `docs/design/servertool-unified-skeleton.md`
 - `docs/design/servertool-rust-only-architecture.md`
 - `docs/routing-instructions.md`

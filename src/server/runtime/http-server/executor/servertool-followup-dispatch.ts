@@ -7,6 +7,7 @@ import {
   getNestedFollowupAbortSignal,
   resolveServerToolNestedFollowupTimeoutMs
 } from './servertool-followup-fail-fast.js';
+import { isGoalCapableRequestSemantics } from './goal-capable-request.js';
 
 type ServerToolNestedExecute = (input: PipelineExecutionInput) => Promise<PipelineExecutionResult>;
 
@@ -108,13 +109,35 @@ function isServerToolFollowup(requestSemantics: Record<string, unknown> | undefi
   return routecodex?.serverToolFollowup === true;
 }
 
+function readManagedStoplessGoalStatusFromSemantics(
+  requestSemantics: Record<string, unknown> | undefined
+): string | undefined {
+  const routecodex =
+    requestSemantics?.__routecodex && typeof requestSemantics.__routecodex === 'object' && !Array.isArray(requestSemantics.__routecodex)
+      ? (requestSemantics.__routecodex as Record<string, unknown>)
+      : undefined;
+  const statusCandidate =
+    typeof routecodex?.stoplessGoalStatus === 'string'
+      ? routecodex.stoplessGoalStatus
+      : requestSemantics?.stoplessGoalState && typeof requestSemantics.stoplessGoalState === 'object' && !Array.isArray(requestSemantics.stoplessGoalState)
+        ? (requestSemantics.stoplessGoalState as Record<string, unknown>).status
+        : undefined;
+  const normalized = typeof statusCandidate === 'string' ? statusCandidate.trim().toLowerCase() : '';
+  return normalized || undefined;
+}
+
+function isManagedStoplessGoalRequestSemantics(requestSemantics: Record<string, unknown> | undefined): boolean {
+  const status = readManagedStoplessGoalStatusFromSemantics(requestSemantics);
+  return status === 'active' || status === 'paused' || status === 'stopped' || status === 'completed';
+}
+
 function readBooleanFlag(value: unknown): boolean {
   return value === true || (typeof value === 'string' && value.trim().toLowerCase() === 'true');
 }
 
 function readFollowupMarkerFromMetadata(
   metadata?: Record<string, unknown>
-): { serverToolFollowup: boolean; followupSource?: string } {
+): { serverToolFollowup: boolean; followupSource?: string; stoplessGoalStatus?: string } {
   const rt =
     metadata?.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
       ? (metadata.__rt as Record<string, unknown>)
@@ -130,6 +153,9 @@ function readFollowupMarkerFromMetadata(
       metadata?.isServerToolFollowup,
       rt?.serverToolFollowup
     ].some(readBooleanFlag),
+    ...(typeof rt?.stoplessGoalStatus === 'string' && rt.stoplessGoalStatus.trim()
+      ? { stoplessGoalStatus: rt.stoplessGoalStatus.trim().toLowerCase() }
+      : {}),
     ...(typeof sourceCandidate === 'string' && sourceCandidate.trim()
       ? { followupSource: sourceCandidate.trim() }
       : {})
@@ -148,13 +174,14 @@ function materializeFollowupRequestSemantics(args: {
     || fromMetadata.serverToolFollowup
     || fromBaseMetadata.serverToolFollowup;
   const followupSource = fromMetadata.followupSource ?? fromBaseMetadata.followupSource;
+  const stoplessGoalStatus = fromMetadata.stoplessGoalStatus ?? fromBaseMetadata.stoplessGoalStatus;
 
-  if (!args.requestSemantics && !serverToolFollowup && !followupSource) {
+  if (!args.requestSemantics && !serverToolFollowup && !followupSource && !stoplessGoalStatus) {
     return undefined;
   }
 
   const nextSemantics = cloneJsonRecord((args.requestSemantics ?? {}) as Record<string, unknown>);
-  if (!serverToolFollowup && !followupSource) {
+  if (!serverToolFollowup && !followupSource && !stoplessGoalStatus) {
     return nextSemantics;
   }
 
@@ -165,7 +192,8 @@ function materializeFollowupRequestSemantics(args: {
   nextSemantics.__routecodex = {
     ...routecodex,
     ...(serverToolFollowup ? { serverToolFollowup: true } : {}),
-    ...(followupSource ? { serverToolFollowupSource: followupSource } : {})
+    ...(followupSource ? { serverToolFollowupSource: followupSource } : {}),
+    ...(stoplessGoalStatus ? { stoplessGoalStatus } : {})
   };
   return nextSemantics;
 }
@@ -215,6 +243,12 @@ function restoreFollowupRootToolsIfNeeded(
     return body;
   }
   const rootTools = Array.isArray(body.tools) ? body.tools : undefined;
+  if (isGoalCapableRequestSemantics(requestSemantics) || isManagedStoplessGoalRequestSemantics(requestSemantics)) {
+    return {
+      ...body,
+      tools: clientToolsRaw
+    };
+  }
   if (rootTools && !isCollapsedReasoningStopOnlyTools(rootTools)) {
     return body;
   }
@@ -424,7 +458,7 @@ export async function executeServerToolReenterPipeline(args: {
       requestId: args.requestId
     });
     if (injectResult.clientInjectOnlyHandled) {
-      return { body: { ok: true, mode: 'client_inject_only' } };
+      return {};
     }
   }
 

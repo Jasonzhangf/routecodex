@@ -1064,6 +1064,227 @@ fn test_req_profile_chat_local_deepseek_keeps_pre_last_user_assistant_content_vi
 }
 
 #[test]
+fn test_req_profile_anthropic_thinking_history_injects_reasoning_content() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "thinking": { "type": "enabled", "budget_tokens": 1024 },
+            "messages": [
+                { "role": "user", "content": "继续分析" },
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call_1",
+                            "name": "exec_command",
+                            "input": { "cmd": "pwd" }
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "继续分析。我先理清从 session 创建到第一次建立 WebSocket 连接的完整链路。"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "call_1",
+                            "content": "ok"
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "最终结论：问题在 session 状态恢复链。"
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: None,
+            provider_protocol: Some("anthropic-messages".to_string()),
+            request_id: Some("req_anthropic_history_1".to_string()),
+            entry_endpoint: Some("/v1/messages".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: Some("high".to_string()),
+            estimated_input_tokens: None,
+            model_id: Some("mimo-v2.5-pro".to_string()),
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: Some("mimo".to_string()),
+            provider_key: Some("mimo.key1.mimo-v2.5-pro".to_string()),
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert_eq!(
+        result.payload["messages"][2]["reasoning_content"],
+        "继续分析。我先理清从 session 创建到第一次建立 WebSocket 连接的完整链路。"
+    );
+    assert_eq!(
+        result.payload["messages"][2]["content"],
+        "继续分析。我先理清从 session 创建到第一次建立 WebSocket 连接的完整链路。"
+    );
+    assert_eq!(
+        result.payload["messages"][4]["reasoning_content"],
+        "最终结论：问题在 session 状态恢复链。"
+    );
+    assert_eq!(result.payload["messages"][4]["content"], "");
+}
+
+#[test]
+fn test_req_profile_anthropic_claude_code_preserves_thinking_history_reasoning_content() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "thinking": { "type": "enabled", "budget_tokens": 1024 },
+            "messages": [
+                { "role": "user", "content": "继续分析" },
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call_1",
+                            "name": "exec_command",
+                            "input": { "cmd": "pwd" }
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "继续分析。我先理清从 session 创建到第一次建立 WebSocket 连接的完整链路。"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "call_1",
+                            "content": "ok"
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "最终结论：问题在 session 状态恢复链。"
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("anthropic:claude-code".to_string()),
+            provider_protocol: Some("anthropic-messages".to_string()),
+            request_id: Some("req_anthropic_claude_code_history_1".to_string()),
+            entry_endpoint: Some("/v1/messages".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: Some("high".to_string()),
+            estimated_input_tokens: None,
+            model_id: Some("mimo-v2.5-pro".to_string()),
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: Some("mimo".to_string()),
+            provider_key: Some("mimo.key1.mimo-v2.5-pro".to_string()),
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert_eq!(
+        result.applied_profile,
+        Some("anthropic:claude-code".to_string())
+    );
+    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
+    assert_eq!(
+        result.payload["messages"][2]["reasoning_content"],
+        "继续分析。我先理清从 session 创建到第一次建立 WebSocket 连接的完整链路。"
+    );
+    assert_eq!(
+        result.payload["messages"][2]["content"],
+        "继续分析。我先理清从 session 创建到第一次建立 WebSocket 连接的完整链路。"
+    );
+    assert_eq!(
+        result.payload["messages"][4]["reasoning_content"],
+        "最终结论：问题在 session 状态恢复链。"
+    );
+    assert_eq!(result.payload["messages"][4]["content"], "");
+}
+
+#[test]
+fn test_req_profile_anthropic_thinking_history_respects_disabled_thinking() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "thinking": { "type": "disabled" },
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call_1",
+                            "name": "exec_command",
+                            "input": { "cmd": "pwd" }
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "plain assistant history"
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: None,
+            provider_protocol: Some("anthropic-messages".to_string()),
+            request_id: Some("req_anthropic_history_disabled_1".to_string()),
+            entry_endpoint: Some("/v1/messages".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: Some("high".to_string()),
+            estimated_input_tokens: None,
+            model_id: Some("mimo-v2.5-pro".to_string()),
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: Some("mimo".to_string()),
+            provider_key: Some("mimo.key1.mimo-v2.5-pro".to_string()),
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert!(result.payload["messages"][0]["reasoning_content"].is_null());
+    assert!(result.payload["messages"][1]["reasoning_content"].is_null());
+    assert_eq!(result.payload["messages"][1]["content"], "plain assistant history");
+}
+
+#[test]
 fn test_req_profile_chat_iflow_replaces_historical_inline_media() {
     let input = ReqOutboundCompatInput {
         payload: json!({

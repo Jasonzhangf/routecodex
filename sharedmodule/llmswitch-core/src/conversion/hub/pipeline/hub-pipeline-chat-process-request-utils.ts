@@ -9,10 +9,6 @@ import {
   stripHistoricalVisualToolOutputs,
 } from "../process/chat-process-media.js";
 import { buildPassthroughAuditWithNative, resolveActiveProcessModeWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
-import {
-  prepareReasoningStopRequestTooling,
-} from "./hub-pipeline-reasoning-stop-request-tooling.js";
-export { prepareReasoningStopRequestTooling } from "./hub-pipeline-reasoning-stop-request-tooling.js";
 export { propagateApplyPatchToolModeToRequestMetadata } from "./hub-pipeline-request-metadata-blocks.js";
 export {
   deriveWorkingRequestFlags,

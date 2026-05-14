@@ -3,8 +3,13 @@ import { resolveStopMessageClientInjectReadiness } from './client-injection-flow
 import { extractClientModelId } from './provider-response-utils.js';
 import {
   backfillAdapterContextSessionIdentifiersFromOriginalRequest,
-  seedReasoningStopStateFromCapturedRequest
+  syncStoplessGoalStateFromCapturedRequest
 } from './servertool-request-normalizer.js';
+import {
+  hasGoalCapableTools,
+  isGoalCapableRequestPayload,
+  isGoalCapableRequestSemantics
+} from './goal-capable-request.js';
 
 function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -40,6 +45,7 @@ function shouldReplaceCapturedChatRequestTools(args: {
   baseContext: Record<string, unknown>;
   existingTools?: unknown[];
   clientToolsRaw?: unknown[];
+  goalCapable?: boolean;
 }): boolean {
   const existingTools = Array.isArray(args.existingTools) ? args.existingTools : undefined;
   const clientToolsRaw = Array.isArray(args.clientToolsRaw) ? args.clientToolsRaw : undefined;
@@ -48,6 +54,17 @@ function shouldReplaceCapturedChatRequestTools(args: {
   }
   if (!existingTools?.length) {
     return true;
+  }
+  if (args.goalCapable) {
+    if (!hasGoalCapableTools(args.clientToolsRaw)) {
+      return false;
+    }
+    if (!hasGoalCapableTools(args.existingTools)) {
+      return true;
+    }
+    const existingNames = existingTools.map(readToolName).filter(Boolean);
+    const clientNames = new Set(clientToolsRaw.map(readToolName).filter(Boolean));
+    return existingNames.length < clientNames.size && existingNames.every((name) => clientNames.has(name));
   }
 
   const rt = asFlatRecord(args.baseContext.__rt);
@@ -75,20 +92,38 @@ function shouldReplaceCapturedChatRequestTools(args: {
   return existingNames.length < clientNames.size && existingNames.every((name) => clientNames.has(name));
 }
 
-function hasStoplessDirectiveInRequestPayload(payload: unknown): boolean {
+function hasRccFenceInRequestPayload(payload: unknown): boolean {
   if (!payload || typeof payload !== 'object') {
     return false;
   }
   try {
-    return JSON.stringify(payload).toLowerCase().includes('<**stopless:');
+    return JSON.stringify(payload).includes('<**rcc**>');
   } catch {
     return false;
   }
 }
 
+function hasManagedStoplessGoalInContext(baseContext: Record<string, unknown>): boolean {
+  const directGoal =
+    baseContext.stoplessGoalState && typeof baseContext.stoplessGoalState === 'object' && !Array.isArray(baseContext.stoplessGoalState)
+      ? (baseContext.stoplessGoalState as Record<string, unknown>)
+      : undefined;
+  const directStatus =
+    typeof directGoal?.status === 'string' ? directGoal.status.trim().toLowerCase() : '';
+  if (directStatus === 'active' || directStatus === 'paused' || directStatus === 'stopped' || directStatus === 'completed') {
+    return true;
+  }
+  const rt = asFlatRecord(baseContext.__rt);
+  const rtStatus = typeof rt?.stoplessGoalStatus === 'string' ? rt.stoplessGoalStatus.trim().toLowerCase() : '';
+  return rtStatus === 'active' || rtStatus === 'paused' || rtStatus === 'stopped' || rtStatus === 'completed';
+}
+
 function backfillCapturedChatRequestToolsFromRequestSemantics(
   baseContext: Record<string, unknown>,
-  requestSemantics: unknown
+  requestSemantics: unknown,
+  options?: {
+    goalCapable?: boolean;
+  }
 ): void {
   const capturedChatRequest = asFlatRecord(baseContext.capturedChatRequest);
   const semanticsRecord = asFlatRecord(requestSemantics);
@@ -98,23 +133,41 @@ function backfillCapturedChatRequestToolsFromRequestSemantics(
     return;
   }
   const existingTools = Array.isArray(capturedChatRequest.tools) ? capturedChatRequest.tools : undefined;
-  if (!shouldReplaceCapturedChatRequestTools({ baseContext, existingTools, clientToolsRaw })) {
+  if (!shouldReplaceCapturedChatRequestTools({
+    baseContext,
+    existingTools,
+    clientToolsRaw,
+    goalCapable: options?.goalCapable
+  })) {
     return;
   }
   capturedChatRequest.tools = clientToolsRaw;
 }
 
-function preferOriginalRequestForReasoningStopSync(
+function preferOriginalRequestForStoplessGoalSync(
   baseContext: Record<string, unknown>,
   originalRequest: unknown
 ): void {
   if (!asFlatRecord(originalRequest)) {
     return;
   }
-  if (!hasStoplessDirectiveInRequestPayload(originalRequest)) {
+  if (!hasRccFenceInRequestPayload(originalRequest)) {
     return;
   }
-  if (hasStoplessDirectiveInRequestPayload(baseContext.capturedChatRequest)) {
+  if (hasRccFenceInRequestPayload(baseContext.capturedChatRequest)) {
+    return;
+  }
+  baseContext.capturedChatRequest = originalRequest as Record<string, unknown>;
+}
+
+function preferOriginalRequestForGoalTools(
+  baseContext: Record<string, unknown>,
+  originalRequest: unknown
+): void {
+  if (!isGoalCapableRequestPayload(originalRequest)) {
+    return;
+  }
+  if (isGoalCapableRequestPayload(baseContext.capturedChatRequest)) {
     return;
   }
   baseContext.capturedChatRequest = originalRequest as Record<string, unknown>;
@@ -150,10 +203,27 @@ export function buildServerToolAdapterContext(args: {
     baseContext.capturedChatRequest = args.originalRequest;
   }
 
-  preferOriginalRequestForReasoningStopSync(baseContext, args.originalRequest);
   backfillAdapterContextSessionIdentifiersFromOriginalRequest(baseContext, args.originalRequest);
-  backfillCapturedChatRequestToolsFromRequestSemantics(baseContext, args.requestSemantics);
-  seedReasoningStopStateFromCapturedRequest(baseContext, args.onReasoningStopSeedError);
+  const goalCapable =
+    isGoalCapableRequestPayload(args.originalRequest)
+    || isGoalCapableRequestPayload(baseContext.capturedChatRequest)
+    || isGoalCapableRequestSemantics(args.requestSemantics);
+  if (goalCapable) {
+    preferOriginalRequestForGoalTools(baseContext, args.originalRequest);
+  } else {
+    preferOriginalRequestForStoplessGoalSync(baseContext, args.originalRequest);
+  }
+  if (!goalCapable) {
+    syncStoplessGoalStateFromCapturedRequest(baseContext, args.onReasoningStopSeedError);
+  }
+  const managedStoplessGoal = !goalCapable && hasManagedStoplessGoalInContext(baseContext);
+  backfillCapturedChatRequestToolsFromRequestSemantics(
+    baseContext,
+    args.requestSemantics,
+    goalCapable || managedStoplessGoal
+      ? { goalCapable }
+      : undefined
+  );
 
   const routeName = readNonEmptyString(metadataBag.routeName);
   if (routeName) {
@@ -186,6 +256,7 @@ export function buildServerToolAdapterContext(args: {
   baseContext.__rt = {
     ...rt,
     ...(followupFlag ? { serverToolFollowup: true } : {}),
+    ...(goalCapable ? { goalMode: true } : {}),
     ...(clientProtocol ? { clientProtocol } : {}),
     stopMessageClientInjectReady: stopMessageInjectReadiness.ready,
     stopMessageClientInjectReason: stopMessageInjectReadiness.reason,

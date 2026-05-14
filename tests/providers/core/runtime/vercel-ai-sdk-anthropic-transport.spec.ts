@@ -5,8 +5,226 @@ import {
   resolveAnthropicRemoteImagePolicy,
   shouldRetryWithInlineRemoteImage
 } from '../../../../src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-transport.js';
+import { restoreAnthropicThinkingHistoryFromRawBody } from '../../../../src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-request-exec.js';
 
 describe('buildAnthropicSdkCallOptions', () => {
+  it('maps top-level assistant reasoning_content into AI SDK reasoning parts', () => {
+    const options = buildAnthropicSdkCallOptions(
+      {
+        model: 'mimo-v2.5-pro',
+        thinking: { type: 'enabled', budget_tokens: 1024 },
+        messages: [
+          {
+            role: 'user',
+            content: '继续分析'
+          },
+          {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'call_1',
+                name: 'exec_command',
+                input: { cmd: 'pwd' }
+              }
+            ],
+            reasoning_content: '.'
+          },
+          {
+            role: 'assistant',
+            content: '',
+            reasoning_content: '我已经确认工作目录，接下来继续分析锁恢复链路。'
+          }
+        ]
+      },
+      {
+        'anthropic-beta': 'claude-code'
+      }
+    );
+
+    expect(options.prompt).toEqual([
+      { role: 'user', content: [{ type: 'text', text: '继续分析' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'reasoning', text: '.' },
+          {
+            type: 'tool-call',
+            toolCallId: 'call_1',
+            toolName: 'exec_command',
+            input: { cmd: 'pwd' },
+            providerExecuted: undefined
+          }
+        ]
+      },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'reasoning',
+            text: '我已经确认工作目录，接下来继续分析锁恢复链路。'
+          }
+        ]
+      }
+    ]);
+  });
+
+  it('restores anthropic thinking blocks from raw assistant reasoning history', () => {
+    const rawBody = {
+      model: 'mimo-v2.5-pro',
+      thinking: { type: 'enabled', budget_tokens: 1024 },
+      messages: [
+        { role: 'user', content: '继续分析' },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'call_1',
+              name: 'exec_command',
+              input: { cmd: 'pwd' }
+            }
+          ],
+          reasoning_content: '.'
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'call_1',
+              content: 'ok'
+            }
+          ]
+        },
+        {
+          role: 'assistant',
+          content: '',
+          reasoning_content: '我已经确认工作目录，接下来继续分析锁恢复链路。'
+        },
+        {
+          role: 'assistant',
+          content: '',
+          reasoning_content: '最终结论：继续排查 provider busy 恢复逻辑。'
+        }
+      ]
+    };
+
+    const builtBody = {
+      model: 'mimo-v2.5-pro',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: '继续分析' }] },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'call_1',
+              name: 'exec_command',
+              input: { cmd: 'pwd' }
+            }
+          ]
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'call_1',
+              content: 'ok'
+            }
+          ]
+        },
+        {
+          role: 'assistant',
+          content: []
+        }
+      ]
+    };
+
+    const restored = restoreAnthropicThinkingHistoryFromRawBody(rawBody as any, builtBody as any) as any;
+    expect(restored.messages).toEqual([
+      { role: 'user', content: '继续分析' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '.' },
+          {
+            type: 'tool_use',
+            id: 'call_1',
+            name: 'exec_command',
+            input: { cmd: 'pwd' }
+          }
+        ]
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'call_1',
+            content: 'ok'
+          }
+        ]
+      },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '我已经确认工作目录，接下来继续分析锁恢复链路。' }
+        ]
+      },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '最终结论：继续排查 provider busy 恢复逻辑。' }
+        ]
+      }
+    ]);
+  });
+
+  it('canonicalizes assistant thinking blocks to anthropic thinking field before send', () => {
+    const rawBody = {
+      model: 'mimo-v2.5-pro',
+      thinking: { type: 'adaptive' },
+      messages: [
+        { role: 'user', content: '继续分析' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', text: '先确认工具结果是否已回填。', signature: 'sig_1' },
+            {
+              type: 'tool_use',
+              id: 'call_1',
+              name: 'echo_json',
+              input: { message: 'ping' }
+            }
+          ]
+        }
+      ]
+    };
+
+    const restored = restoreAnthropicThinkingHistoryFromRawBody(rawBody as any, {
+      model: 'mimo-v2.5-pro',
+      messages: []
+    } as any) as any;
+
+    expect(restored.messages).toEqual([
+      { role: 'user', content: '继续分析' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '先确认工具结果是否已回填。', signature: 'sig_1' },
+          {
+            type: 'tool_use',
+            id: 'call_1',
+            name: 'echo_json',
+            input: { message: 'ping' }
+          }
+        ]
+      }
+    ]);
+  });
+
   it('maps anthropic thinking, effort, tools, and tool results into AI SDK call options', () => {
     const options = buildAnthropicSdkCallOptions(
       {

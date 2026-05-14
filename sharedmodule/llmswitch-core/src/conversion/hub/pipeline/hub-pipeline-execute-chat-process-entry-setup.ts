@@ -5,7 +5,6 @@ import { coerceStandardizedRequestFromPayloadWithNative } from "../../../router/
 import { buildAdapterContextFromNormalized } from "./hub-pipeline-adapter-context.js";
 import {
   propagateApplyPatchToolModeToRequestMetadata,
-  prepareReasoningStopRequestTooling,
   resolveActiveProcessModeAndAudit,
   sanitizeStandardizedRequestMessages,
 } from "./hub-pipeline-chat-process-request-utils.js";
@@ -73,10 +72,6 @@ export function prepareChatProcessEntryExecutionContext(args: {
   propagateApplyPatchToolModeToRequestMetadata(metaBase, standardizedRequest);
 
   const adapterContext = buildAdapterContextFromNormalized(args.normalized);
-  prepareReasoningStopRequestTooling({
-    request: standardizedRequest,
-    adapterContext,
-  });
   const stageRecorder = createChatProcessSnapshotRecorder({
     normalized: args.normalized,
     adapterContext,

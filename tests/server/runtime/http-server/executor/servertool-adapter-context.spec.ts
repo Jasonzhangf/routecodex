@@ -1,12 +1,22 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
-const mockSyncReasoningStopModeFromRequest = jest.fn((baseContext: Record<string, unknown>) => {
-  baseContext.reasoningStopMode = 'on';
-  return 'on';
+const mockSyncStoplessGoalStateFromRequest = jest.fn((baseContext: Record<string, unknown>) => {
+  baseContext.stoplessGoalState = {
+    status: 'active',
+    objective: 'continue',
+    updatedAt: 1,
+    createdAt: 1
+  };
+  return {
+    stickyKey: 'session:test',
+    hadDirective: false,
+    directiveTypes: [],
+    state: baseContext.stoplessGoalState
+  };
 });
 
 const mockBridgeModule = () => ({
-  syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
+  syncStoplessGoalStateFromRequest: mockSyncStoplessGoalStateFromRequest,
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
 });
 
@@ -16,7 +26,7 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockB
 describe('servertool adapter context builder', () => {
   it('builds shared adapter context with request semantics and inject readiness', async () => {
     jest.resetModules();
-    mockSyncReasoningStopModeFromRequest.mockClear();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -65,12 +75,12 @@ describe('servertool adapter context builder', () => {
     expect((context.__rt as Record<string, unknown>).stopMessageClientInjectReady).toBe(true);
     expect((context.__rt as Record<string, unknown>).stopMessageClientInjectTmuxSessionId).toBe('tmux-1');
     expect(Array.isArray((context.capturedChatRequest as Record<string, unknown>).tools)).toBe(true);
-    expect(mockSyncReasoningStopModeFromRequest).toHaveBeenCalledTimes(1);
+    expect(mockSyncStoplessGoalStateFromRequest).toHaveBeenCalledTimes(1);
   });
 
   it('replaces followup-collapsed reasoning.stop-only captured tools with original clientToolsRaw', async () => {
     jest.resetModules();
-    mockSyncReasoningStopModeFromRequest.mockClear();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -122,7 +132,7 @@ describe('servertool adapter context builder', () => {
 
   it('recognizes anthropic-style top-level tool names when deciding whether to restore original client tools', async () => {
     jest.resetModules();
-    mockSyncReasoningStopModeFromRequest.mockClear();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -168,13 +178,62 @@ describe('servertool adapter context builder', () => {
     expect(toolNames).toEqual(['exec_command', 'reasoning.stop']);
   });
 
+  it('managed stopless goal followup still restores ordinary client tools instead of treating them as goal-only tools', async () => {
+    jest.resetModules();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata: {
+        capturedChatRequest: {
+          model: 'mimo-v2.5-pro',
+          messages: [{ role: 'user', content: '继续执行' }],
+          tools: [
+            {
+              type: 'function',
+              function: { name: 'reasoning.stop', parameters: { type: 'object' } }
+            }
+          ]
+        },
+        __rt: {
+          serverToolFollowup: true
+        }
+      },
+      requestSemantics: {
+        tools: {
+          clientToolsRaw: [
+            {
+              type: 'function',
+              function: { name: 'exec_command', parameters: { type: 'object' } }
+            },
+            {
+              type: 'function',
+              function: { name: 'apply_patch', parameters: { type: 'object' } }
+            }
+          ]
+        }
+      },
+      requestId: 'req-managed-goal-tools-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect((context.stoplessGoalState as Record<string, unknown>)?.status).toBe('active');
+    const toolNames = (((context.capturedChatRequest as Record<string, unknown>).tools as Array<any>) ?? [])
+      .map((tool) => tool?.function?.name);
+    expect(toolNames).toEqual(['exec_command', 'apply_patch']);
+  });
+
 
 
   it('fails fast when reasoning stop seed sync fails', async () => {
     jest.resetModules();
-    mockSyncReasoningStopModeFromRequest.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockImplementationOnce(() => {
-      throw new Error('reasoning-stop seed failed');
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+    mockSyncStoplessGoalStateFromRequest.mockImplementationOnce(() => {
+      throw new Error('stopless-goal seed failed');
     });
 
     const { buildServerToolAdapterContext } = await import(
@@ -184,24 +243,24 @@ describe('servertool adapter context builder', () => {
     expect(() => buildServerToolAdapterContext({
       metadata: {},
       originalRequest: {
-        messages: [{ role: 'user', content: '<**stopless:on**> 继续' }]
+        messages: [{ role: 'user', content: '<**rcc**>\nstopless start\n继续\n</rcc**>' }]
       },
       requestId: 'req-fail',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
-    })).toThrow('reasoning-stop seed failed');
+    })).toThrow('stopless-goal seed failed');
   });
 
-  it('prefers original request as captured chat request for stopless sync', async () => {
+  it('prefers original request as captured chat request for RCC stopless goal sync', async () => {
     jest.resetModules();
-    mockSyncReasoningStopModeFromRequest.mockClear();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
     );
 
     const originalRequest = {
-      messages: [{ role: 'user', content: '<**stopless:on**> 继续' }]
+      messages: [{ role: 'user', content: '<**rcc**>\nstopless start\n继续\n</rcc**>' }]
     };
     const existingCaptured = {
       messages: [{ role: 'user', content: '普通请求' }]
@@ -218,6 +277,82 @@ describe('servertool adapter context builder', () => {
     });
 
     expect(context.capturedChatRequest).toBe(originalRequest);
-    expect(mockSyncReasoningStopModeFromRequest).toHaveBeenCalledTimes(1);
+    expect(mockSyncStoplessGoalStateFromRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('goal-capable request keeps goal tools and skips reasoning.stop seed sync', async () => {
+    jest.resetModules();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+
+    const originalRequest = {
+      messages: [{ role: 'user', content: '<**rcc**>\nstopless start\ncontinue goal\n</rcc**>' }],
+      tools: [
+        { type: 'function', function: { name: 'get_goal', parameters: { type: 'object' } } },
+        { type: 'function', function: { name: 'request_user_input', parameters: { type: 'object' } } }
+      ]
+    };
+
+    const context = buildServerToolAdapterContext({
+      metadata: {
+        capturedChatRequest: {
+          messages: [{ role: 'user', content: 'stale stopless followup' }],
+          tools: [
+            { type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }
+          ]
+        }
+      },
+      originalRequest,
+      requestId: 'req-goal-tools-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(context.capturedChatRequest).toBe(originalRequest);
+    expect((context.__rt as Record<string, unknown>).goalMode).toBe(true);
+    expect(mockSyncStoplessGoalStateFromRequest).not.toHaveBeenCalled();
+  });
+
+  it('goal-capable semantics restores full client goal tools over stale reasoning.stop-only tools', async () => {
+    jest.resetModules();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata: {
+        capturedChatRequest: {
+          model: 'goal-model',
+          messages: [{ role: 'user', content: 'continue' }],
+          tools: [
+            { type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }
+          ]
+        },
+        __rt: { serverToolFollowup: true }
+      },
+      requestSemantics: {
+        tools: {
+          clientToolsRaw: [
+            { type: 'function', function: { name: 'get_goal', parameters: { type: 'object' } } },
+            { type: 'function', function: { name: 'update_goal', parameters: { type: 'object' } } },
+            { type: 'function', function: { name: 'request_user_input', parameters: { type: 'object' } } }
+          ]
+        }
+      },
+      requestId: 'req-goal-tools-2',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    const toolNames = (((context.capturedChatRequest as Record<string, unknown>).tools as Array<any>) ?? [])
+      .map((tool) => tool?.function?.name);
+    expect(toolNames).toEqual(['get_goal', 'update_goal', 'request_user_input']);
+    expect((context.__rt as Record<string, unknown>).goalMode).toBe(true);
+    expect(mockSyncStoplessGoalStateFromRequest).not.toHaveBeenCalled();
   });
 });

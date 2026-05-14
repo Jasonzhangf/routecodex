@@ -1,6 +1,7 @@
-import { syncReasoningStopModeFromRequest } from '../../../../modules/llmswitch/bridge.js';
+import { syncStoplessGoalStateFromRequest } from '../../../../modules/llmswitch/bridge.js';
+import { isGoalCapableRequestPayload } from './goal-capable-request.js';
 
-const STOPLESS_DIRECTIVE_PATTERN = /<\*\*stopless:(on|off|endless)\*\*>/i;
+const RCC_FENCE_OPEN = '<**rcc**>';
 
 function readSessionLikeToken(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -17,9 +18,9 @@ function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
-function extractStoplessDirectiveModeFromPayload(payload: unknown): 'on' | 'off' | 'endless' | undefined {
+function hasRccFenceInPayload(payload: unknown): boolean {
   if (!payload) {
-    return undefined;
+    return false;
   }
   const raw =
     typeof payload === 'string'
@@ -31,9 +32,7 @@ function extractStoplessDirectiveModeFromPayload(payload: unknown): 'on' | 'off'
             return '';
           }
         })();
-  const match = STOPLESS_DIRECTIVE_PATTERN.exec(raw);
-  const mode = match?.[1]?.trim().toLowerCase();
-  return mode === 'on' || mode === 'off' || mode === 'endless' ? mode : undefined;
+  return raw.includes(RCC_FENCE_OPEN);
 }
 
 export function backfillAdapterContextSessionIdentifiersFromOriginalRequest(
@@ -77,15 +76,15 @@ export function backfillAdapterContextSessionIdentifiersFromOriginalRequest(
   }
 }
 
-export function seedReasoningStopStateFromCapturedRequest(
+export function syncStoplessGoalStateFromCapturedRequest(
   baseContext: Record<string, unknown>,
   onError?: (error: unknown) => void
 ): void {
+  if (isGoalCapableRequestPayload(baseContext.capturedChatRequest)) {
+    return;
+  }
   try {
-    syncReasoningStopModeFromRequest(
-      baseContext,
-      extractStoplessDirectiveModeFromPayload(baseContext.capturedChatRequest)
-    );
+    syncStoplessGoalStateFromRequest(baseContext);
   } catch (error) {
     onError?.(error);
     throw error;

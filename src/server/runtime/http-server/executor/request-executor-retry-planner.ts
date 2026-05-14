@@ -30,8 +30,11 @@ import {
   peekSessionStormBackoffWaitMsForTests,
   resetSessionStormBackoffStateForTests,
   resolveSessionStormBackoffBaseMs,
+  resolveSessionStormBackoffBaseMsForError,
   resolveSessionStormBackoffMaxMs,
+  resolveSessionStormBackoffMaxMsForError,
   resolveSessionStormBackoffScope,
+  resolveSessionStormBackoffScopes,
   sessionStormBackoffGateState,
   waitSessionStormBackoffWithGate
 } from './request-executor-session-storm-backoff.js';
@@ -94,8 +97,11 @@ export {
   peekSessionStormBackoffWaitMs,
   peekSessionStormBackoffWaitMsForTests,
   resolveSessionStormBackoffBaseMs,
+  resolveSessionStormBackoffBaseMsForError,
   resolveSessionStormBackoffMaxMs,
+  resolveSessionStormBackoffMaxMsForError,
   resolveSessionStormBackoffScope,
+  resolveSessionStormBackoffScopes,
   sessionStormBackoffGateState,
   waitSessionStormBackoffWithGate
 };

@@ -96,6 +96,52 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.stop();
   });
 
+  it('keeps provider in pool for early recoverable 500 cooldown steps', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-13T21:25:51.000Z'));
+    const now = Date.now();
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    await mod.start();
+
+    await reportProviderErrorToRouterPolicy({
+      code: 'HTTP_500',
+      message: 'Internal Server Error',
+      stage: 'provider.send',
+      status: 500,
+      recoverable: true,
+      affectsHealth: false,
+      timestamp: now,
+      runtime: {
+        requestId: 'req_test_500',
+        providerKey: 'mimo.key1.mimo-v2.5-pro',
+        providerId: 'mimo'
+      },
+      details: {
+        errorClassification: 'recoverable',
+        errorCode: 'HTTP_500',
+        upstreamCode: 'HTTP_500',
+        reason: 'Internal Server Error',
+        attempt: 1
+      }
+    } as any);
+
+    await jest.advanceTimersByTimeAsync(5);
+
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot['mimo.key1.mimo-v2.5-pro']).toBeDefined();
+    expect(snapshot['mimo.key1.mimo-v2.5-pro'].reason).toBe('cooldown');
+    expect(snapshot['mimo.key1.mimo-v2.5-pro'].inPool).toBe(true);
+    expect(snapshot['mimo.key1.mimo-v2.5-pro'].cooldownUntil).toBe(now + 3_000);
+
+    const quotaView = mod.getQuotaView();
+    expect(quotaView).not.toBeNull();
+    expect(quotaView!('mimo.key1.mimo-v2.5-pro')?.inPool).toBe(true);
+
+    await mod.stop();
+  });
+
   it('canonicalizes legacy sequence-prefixed antigravity alias keys (1-foo -> foo)', async () => {
     const now = Date.now();
     const legacyKey = 'antigravity.1-geetasamodgeetasamoda.claude-sonnet-4-5-thinking';

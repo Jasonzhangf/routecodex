@@ -15,13 +15,6 @@ const ROUTING_POLICY_OPTIONAL_KEYS = [
   'session'
 ] as const;
 
-const REASONING_STOP_MODE_ENV_KEYS = [
-  'ROUTECODEX_REASONING_STOP_MODE',
-  'RCC_REASONING_STOP_MODE'
-] as const;
-
-type ReasoningStopMode = 'on' | 'off' | 'endless';
-
 export interface MaterializedRouteCodexConfig {
   userConfig: UnknownRecord;
   providerProfiles: ProviderProfileCollection;
@@ -34,7 +27,6 @@ export async function materializeRouteCodexConfig(
   const userConfig: UnknownRecord = structuredClone(userConfigInput);
   validateV2ConfigSources(userConfig);
   materializeActiveRoutingPolicyGroup(userConfig);
-  projectReasoningStopModeFromConfig(userConfig);
   const vrBase = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : {};
   const v2Input = await buildVirtualRouterInputV2(userConfig, providerRootDir);
   userConfig.virtualrouter = {
@@ -65,7 +57,7 @@ export function collectV2ConfigSourceErrors(userConfig: UnknownRecord): string[]
 
   const httpserver = isRecord(userConfig.httpserver) ? (userConfig.httpserver as UnknownRecord) : undefined;
   if (httpserver) {
-    const allowedHttp = new Set(['host', 'port', 'apikey']);
+    const allowedHttp = new Set(['host', 'port', 'apikey', 'ports']);
     for (const key of Object.keys(httpserver)) {
       if (!allowedHttp.has(key)) {
         errors.push(`v2 config disallows httpserver field "${key}" (only host/port/apikey allowed)`);
@@ -77,10 +69,10 @@ export function collectV2ConfigSourceErrors(userConfig: UnknownRecord): string[]
   if (!vr) {
     errors.push('v2 config requires virtualrouter.routingPolicyGroups');
   } else {
-    const allowedVr = new Set(['routingPolicyGroups', 'activeRoutingPolicyGroup']);
+    const allowedVr = new Set(['routingPolicyGroups']);
     for (const key of Object.keys(vr)) {
       if (!allowedVr.has(key)) {
-        errors.push(`v2 config disallows virtualrouter field "${key}" (routingPolicyGroups only)`);
+        errors.push(`v2 config disallows virtualrouter field "${key}" (routingPolicyGroups only); activeRoutingPolicyGroup is no longer supported`);
       }
     }
 
@@ -123,75 +115,10 @@ export function validateV2ConfigSources(userConfig: UnknownRecord): void {
   }
 }
 
-export function materializeActiveRoutingPolicyGroup(userConfig: UnknownRecord): void {
-  const vr = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : null;
-  if (!vr) {
-    return;
-  }
-
-  const groupsNode = vr.routingPolicyGroups;
-  if (!isRecord(groupsNode)) {
-    return;
-  }
-
-  const groups: Record<string, UnknownRecord> = {};
-  for (const [groupId, groupNode] of Object.entries(groupsNode)) {
-    if (!groupId.trim() || !isRecord(groupNode)) {
-      continue;
-    }
-    groups[groupId] = groupNode as UnknownRecord;
-  }
-  const groupIds = Object.keys(groups);
-  if (!groupIds.length) {
-    return;
-  }
-
-  const activeCandidate = typeof vr.activeRoutingPolicyGroup === 'string' ? vr.activeRoutingPolicyGroup.trim() : '';
-  const activeGroupId =
-    activeCandidate && groups[activeCandidate]
-      ? activeCandidate
-      : groups.default
-        ? 'default'
-        : groupIds.sort((a, b) => a.localeCompare(b))[0];
-
-  const activePolicy = groups[activeGroupId];
-  if (!isRecord(activePolicy.routing)) {
-    return;
-  }
-
-  vr.activeRoutingPolicyGroup = activeGroupId;
-  vr.routing = activePolicy.routing;
-
-  for (const key of ROUTING_POLICY_OPTIONAL_KEYS) {
-    const value = activePolicy[key];
-    if (isRecord(value)) {
-      vr[key] = value;
-      continue;
-    }
-    delete vr[key];
-  }
-}
-
-function normalizeReasoningStopMode(value: unknown): ReasoningStopMode | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'on' || normalized === 'off' || normalized === 'endless') {
-    return normalized;
-  }
-  return undefined;
-}
-
-function resolveReasoningStopModeFromConfig(userConfig: UnknownRecord): ReasoningStopMode {
-  const vr = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : null;
-  const session = vr && isRecord(vr.session) ? (vr.session as UnknownRecord) : null;
-  return normalizeReasoningStopMode(session?.reasoningStopMode) ?? 'off';
-}
-
-export function projectReasoningStopModeFromConfig(userConfig: UnknownRecord): void {
-  const mode = resolveReasoningStopModeFromConfig(userConfig);
-  for (const key of REASONING_STOP_MODE_ENV_KEYS) {
-    process.env[key] = mode;
-  }
+/**
+ * Per-port routing: routingGroup is resolved at request time per localPort.
+ * This function is now a no-op; the global active group no longer drives routing.
+ */
+export function materializeActiveRoutingPolicyGroup(_userConfig: UnknownRecord): void {
+  // No-op: per-port routingPolicyGroup in httpserver.ports[] replaces global active.
 }

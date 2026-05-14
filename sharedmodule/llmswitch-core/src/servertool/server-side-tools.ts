@@ -13,8 +13,8 @@ import { ProviderProtocolError } from '../conversion/provider-protocol-error.js'
 import './handlers/memory/cache-auto.js';
 import './handlers/stop-message-auto.js';
 import './handlers/reasoning-only-continue.js';
+import './handlers/stopless-goal-guard.js';
 import './handlers/reasoning-stop.js';
-import './handlers/reasoning-stop-guard.js';
 import './handlers/clock.js';
 import './handlers/clock-auto.js';
 import './handlers/exec-command-guard.js';

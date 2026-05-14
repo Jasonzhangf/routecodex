@@ -1237,6 +1237,35 @@ export class ResponsesResponseBuilder {
       error: new Error('Responses SSE stream incomplete before response.completed/response.done')
     };
   }
+
+  /**
+   * 获取可恢复结果：即使流中断（terminated/idle timeout），只要有已聚合的输出项，就返回可用的 response。
+   * 用于 converter 的 catch 块中 salvage 逻辑。
+   */
+  getSalvageResult(): { success: boolean; response?: ResponsesResponse; error?: Error } {
+    if (this.state === 'error') {
+      return { success: false, error: this.error };
+    }
+    // Only salvage if buildOutputItems produces actual output; otherwise return failure
+    let items: any[] = [];
+    try {
+      const cur = (this.response as any).output;
+      if (Array.isArray(cur) && cur.length > 0) {
+        items = cur;
+      } else {
+        items = this.buildOutputItems();
+      }
+    } catch {
+      items = this.buildOutputItems();
+    }
+    if (items.length === 0) {
+      // No output to salvage — return failure, do not overwrite status
+      return { success: false };
+    }
+    (this.response as any).output = items;
+    this.applyDerivedTopLevelOutputText(this.response as ResponsesResponse);
+    return { success: true, response: this.response as ResponsesResponse };
+  }
   /**
    * 获取当前状态
    */

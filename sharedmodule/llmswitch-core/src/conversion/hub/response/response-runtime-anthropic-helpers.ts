@@ -8,8 +8,14 @@ export interface MessageReasoningPayload {
   encrypted_content?: string;
 }
 
+function isMeaninglessDotOnlyText(text: string): boolean {
+  return /^\.\.?(?:\.)?$/.test(text.trim());
+}
+
 export function collapseReasoningSegments(segments: string[]): string[] {
-  const cleaned = segments.map((text) => text.trim()).filter((text) => text.length > 0);
+  const cleaned = segments
+    .map((text) => text.trim())
+    .filter((text) => text.length > 0 && !isMeaninglessDotOnlyText(text));
   const merged: string[] = [];
   for (const entry of cleaned) {
     if (merged.length === 0) {

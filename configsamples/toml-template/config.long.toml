@@ -1,0 +1,58 @@
+# RouteCodex 长上下文专用配置 (V2)
+# 路径: ~/.rcc/config.long.toml（可被 httpserver.port/ports[] 覆盖）
+# 说明: 长上下文端口优先 mimo + deepseek；thinking 使用 deepseek.v4-pro
+
+version = "2.0.0"
+
+[httpserver]
+port = 10000
+host = "127.0.0.1"
+
+virtualrouterMode = "v2"
+
+[virtualrouter]
+activeRoutingPolicyGroup = "longcontext"
+
+[virtualrouter.routingPolicyGroups."longcontext"]
+
+[[virtualrouter.routingPolicyGroups."longcontext".routing.default]]
+id = "default-longcontext"
+priority = 200
+mode = "weighted"
+targets = ["mimo.mimo-v2.5-pro", "deepseek.deepseek-chat"]
+[virtualrouter.routingPolicyGroups."longcontext".routing.default.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."longcontext".routing.default.loadBalancing.weights]
+"mimo.mimo-v2.5-pro" = 3
+"deepseek.deepseek-chat" = 2
+
+[[virtualrouter.routingPolicyGroups."longcontext".routing.longcontext]]
+id = "longcontext-primary"
+priority = 200
+mode = "weighted"
+targets = ["mimo.mimo-v2.5-pro", "deepseek.deepseek-chat"]
+[virtualrouter.routingPolicyGroups."longcontext".routing.longcontext.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."longcontext".routing.longcontext.loadBalancing.weights]
+"mimo.mimo-v2.5-pro" = 3
+"deepseek.deepseek-chat" = 2
+
+[[virtualrouter.routingPolicyGroups."longcontext".routing.thinking]]
+id = "thinking-longcontext"
+priority = 200
+mode = "priority"
+targets = ["deepseek.deepseek-v4-pro"]
+[virtualrouter.routingPolicyGroups."longcontext".routing.thinking.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."longcontext".routing.thinking.loadBalancing.weights]
+"deepseek.deepseek-v4-pro" = 5
+
+[[virtualrouter.routingPolicyGroups."longcontext".routing.tools]]
+id = "tools-longcontext"
+priority = 200
+mode = "weighted"
+targets = ["mimo.mimo-v2.5-pro"]
+[virtualrouter.routingPolicyGroups."longcontext".routing.tools.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."longcontext".routing.tools.loadBalancing.weights]
+"mimo.mimo-v2.5-pro" = 5

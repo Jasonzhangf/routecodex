@@ -1822,6 +1822,67 @@ function collectPassThroughArgs(args: {
   return merged;
 }
 
+function codexResumeMissingManagedTmuxTarget(passThroughArgs: string[]): boolean {
+  if (!Array.isArray(passThroughArgs) || passThroughArgs.length === 0) {
+    return false;
+  }
+  if (passThroughArgs[0] !== 'resume') {
+    return false;
+  }
+  const valueFlags = new Set<string>([
+    '-c',
+    '--config',
+    '--enable',
+    '--disable',
+    '--remote',
+    '--remote-auth-token-env',
+    '-i',
+    '--image',
+    '-m',
+    '--model',
+    '--local-provider',
+    '-p',
+    '--profile',
+    '-s',
+    '--sandbox',
+    '-C',
+    '--cd',
+    '--add-dir',
+    '-a',
+    '--ask-for-approval',
+  ]);
+  let sawLast = false;
+  let sawHelp = false;
+  let expectsValueForOption = false;
+  for (let index = 1; index < passThroughArgs.length; index += 1) {
+    const token = String(passThroughArgs[index] || '');
+    if (!token) {
+      continue;
+    }
+    if (expectsValueForOption) {
+      expectsValueForOption = false;
+      continue;
+    }
+    if (token === '--help' || token === '-h') {
+      sawHelp = true;
+      continue;
+    }
+    if (token === '--last') {
+      sawLast = true;
+      continue;
+    }
+    if (valueFlags.has(token)) {
+      expectsValueForOption = true;
+      continue;
+    }
+    if (token.startsWith('-')) {
+      continue;
+    }
+    return false;
+  }
+  return !sawLast && !sawHelp;
+}
+
 function normalizeOpenAiBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.replace(/\/+$/, '');
   if (trimmed.endsWith('/v1')) {
@@ -1955,6 +2016,11 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
 
       let managedTmuxSession: ManagedTmuxSession | null = null;
       const tmuxEnabled = isTmuxAvailable(spawnSyncImpl);
+      if (tmuxOnly && tmuxEnabled && codexResumeMissingManagedTmuxTarget(passThroughArgs)) {
+        throw new Error(
+          'Codex managed tmux resume requires an explicit SESSION_ID or --last; refusing to launch bare `codex resume` because it exits immediately in managed tmux panes.'
+        );
+      }
       if (!tmuxEnabled) {
         ctx.logger.warning('[session-advanced] tmux not found; advanced session client service disabled (launcher will continue).');
       }

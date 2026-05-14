@@ -118,6 +118,16 @@ function unwrapAnthropicMessagePayload(payload: JsonObject): JsonObject {
   return payload;
 }
 
+function hasVisibleAnthropicAssistantOutput(
+  textParts: string[],
+  reasoningParts: string[],
+  canonicalToolCalls: Array<Record<string, unknown>>
+): boolean {
+  return textParts.some((text) => text.trim().length > 0)
+    || reasoningParts.some((text) => text.trim().length > 0)
+    || canonicalToolCalls.length > 0;
+}
+
 export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options?: AnthropicResponseOptions): JsonObject {
   const messagePayload = unwrapAnthropicMessagePayload(payload);
   const content = Array.isArray(messagePayload?.content) ? messagePayload.content : [];
@@ -271,9 +281,27 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
   }
 
   const stopReason = typeof messagePayload['stop_reason'] === 'string' ? messagePayload['stop_reason'] : undefined;
-  const hasVisibleAssistantOutput = textParts.some((text) => text.trim().length > 0)
-    || reasoningParts.some((text) => text.trim().length > 0)
-    || canonicalToolCalls.length > 0;
+  const hasVisibleAssistantOutput = hasVisibleAnthropicAssistantOutput(
+    textParts,
+    reasoningParts,
+    canonicalToolCalls
+  );
+  if (!hasVisibleAssistantOutput && stopReason === 'max_tokens') {
+    throw new ProviderProtocolError(
+      'Anthropic upstream returned stop_reason=max_tokens with empty assistant output',
+      {
+        code: 'MALFORMED_RESPONSE',
+        protocol: 'anthropic-messages',
+        providerType: 'anthropic',
+        category: 'EXTERNAL_ERROR',
+        details: {
+          stop_reason: stopReason,
+          response_id: typeof messagePayload.id === 'string' ? messagePayload.id : undefined,
+          reason: 'empty_assistant_max_tokens'
+        }
+      }
+    );
+  }
   const outcome = resolveAnthropicChatCompletionOutcomeWithNative({
     stopReason,
     toolCallCount: canonicalToolCalls.length,

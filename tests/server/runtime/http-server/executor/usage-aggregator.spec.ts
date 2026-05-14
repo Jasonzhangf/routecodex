@@ -105,6 +105,29 @@ describe('usage log text', () => {
     });
   });
 
+  it('extracts cache hits from prompt_tokens_details.cached_tokens', () => {
+    const usage = extractUsageFromResult({
+      body: {
+        usage: {
+          prompt_tokens: 68992,
+          completion_tokens: 395,
+          total_tokens: 69387,
+          prompt_tokens_details: {
+            cached_tokens: 68539
+          }
+        }
+      }
+    });
+
+    expect(usage).toEqual({
+      prompt_tokens: 68992,
+      completion_tokens: 395,
+      total_tokens: 69387,
+      cache_read_input_tokens: 68539,
+      cache_creation_input_tokens: undefined
+    });
+  });
+
   it('extracts usage from body.payload.response.usage', () => {
     const usage = extractUsageFromResult({
       body: {

@@ -1,4 +1,8 @@
 use crate::hub_bridge_actions::utils::normalize_function_call_output_id;
+use crate::hub_reasoning_tool_normalizer::{
+    build_message_reasoning_value, collect_reasoning_content_segments,
+    collect_reasoning_summary_segments, project_message_reasoning_text,
+};
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 
@@ -169,7 +173,7 @@ fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
         .unwrap_or("")
         .to_string();
 
-    if item_type == "message" || item_type == "reasoning" {
+    if item_type == "message" {
         let role = row
             .get("role")
             .and_then(Value::as_str)
@@ -190,10 +194,57 @@ fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
           "type": "message",
           "role": role,
           "content": content,
-          "message": {
-            "role": role,
-            "content": content
-          }
+        }));
+    }
+
+    if item_type == "reasoning" {
+        // P1 fix: write reasoning at TOP LEVEL so collect_message_reasoning_state reads it
+        let role = row
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("assistant")
+            .to_string();
+        let content = row
+            .get("content")
+            .and_then(Value::as_array)
+            .cloned()
+            .map(Value::Array)
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        // collect_reasoning_summary_segments / content_segments expect a reasoning object with
+        // {summary, content} fields, not raw arrays — wrap the raw fields
+        let reasoning_wrapper = serde_json::json!({
+            "summary": row.get("summary"),
+            "content": row.get("content"),
+            "encrypted_content": row.get("encrypted_content"),
+        });
+        let summary_segments = collect_reasoning_summary_segments(Some(&reasoning_wrapper));
+        let content_segments = collect_reasoning_content_segments(Some(&reasoning_wrapper));
+        let encrypted = reasoning_wrapper
+            .get("encrypted_content")
+            .and_then(Value::as_str)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let reasoning_obj = build_message_reasoning_value(&summary_segments, &content_segments, encrypted.as_deref());
+        let reasoning_text = project_message_reasoning_text(reasoning_obj.as_ref().unwrap_or(&Value::Null));
+        let mut out = Map::new();
+        out.insert("type".to_string(), Value::String("message".to_string()));
+        out.insert("role".to_string(), Value::String(role.clone()));
+        out.insert("content".to_string(), content);
+        if let Some(reasoning) = reasoning_obj {
+            out.insert("reasoning".to_string(), reasoning);
+        }
+        if let Some(text) = reasoning_text {
+            out.insert("reasoning_content".to_string(), Value::String(text));
+        }
+        return Some(Value::Object(out));
+    }
+
+    // Fallback: unrecognized or edge-case reasoning shape → emit plain message
+    if item_type == "reasoning" {
+        return Some(serde_json::json!({
+            "type": "message",
+            "role": row.get("role").and_then(Value::as_str).unwrap_or("assistant"),
+            "content": row.get("content"),
         }));
     }
 
@@ -1239,5 +1290,53 @@ mod tests {
         assert_eq!(args["command"], "pwd");
         assert!(args.get("cmd").is_none());
         assert_eq!(args["workdir"], "/tmp");
+    }
+
+    // P1: reasoning output item writes reasoning object at top level (SSOT restore)
+    #[test]
+    fn converts_reasoning_item_writes_top_level_reasoning_object() {
+        let response = serde_json::json!({
+            "output": [{
+                "type": "reasoning",
+                "id": "reasoning-1",
+                "status": "completed",
+                "summary": [{"type": "summary_text", "text": "thinking step 1"}],
+                "content": [{"type": "reasoning_text", "text": "detailed reasoning here"}],
+                "encrypted_content": "opaque-sig-abc"
+            }]
+        });
+        let items = convert_responses_output_to_input_items(&response)
+            .as_array().cloned().unwrap_or_default();
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        // P1 fix: reasoning at top level for collect_message_reasoning_state to read
+        assert!(item.get("reasoning").is_some(), "reasoning object must be at top level");
+        let reasoning = item.get("reasoning").unwrap().as_object().unwrap();
+        assert!(reasoning.get("summary").is_some(), "summary must be in reasoning object");
+        assert!(reasoning.get("content").is_some(), "content must be in reasoning object");
+        assert_eq!(reasoning.get("encrypted_content").and_then(|v| v.as_str()), Some("opaque-sig-abc"));
+        // reasoning_content top-level also present for downstream consumers
+        assert!(item.get("reasoning_content").is_some(), "reasoning_content text must be at top level");
+    }
+
+    // P1: encrypted_content in reasoning item is preserved in top-level reasoning object
+    #[test]
+    fn converts_reasoning_item_preserves_encrypted_content_in_reasoning_object() {
+        let response = serde_json::json!({
+            "output": [{
+                "type": "reasoning",
+                "id": "reasoning-enc-1",
+                "status": "completed",
+                "encrypted_content": "encrypted-opaque-value"
+            }]
+        });
+        let items = convert_responses_output_to_input_items(&response)
+            .as_array().cloned().unwrap_or_default();
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        // encrypted_content must survive through the conversion
+        assert!(item.get("reasoning").is_some(), "reasoning object must exist");
+        let reasoning = item.get("reasoning").unwrap().as_object().unwrap();
+        assert_eq!(reasoning.get("encrypted_content").and_then(|v| v.as_str()), Some("encrypted-opaque-value"));
     }
 }

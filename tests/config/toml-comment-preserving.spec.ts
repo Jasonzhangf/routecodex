@@ -82,11 +82,13 @@ host = "127.0.0.1"
 activeRoutingPolicyGroup = "default"
 
 [virtualrouter.session]
-reasoningStopMode = "on"
+enabled = true
+tickMs = 1500
 `;
     const after = updateTomlStringScalarInTable(before, ['virtualrouter'], 'oauthBrowser', 'camoufox');
     expect(after).toContain('oauthBrowser = "camoufox"');
     expect(after).toContain('activeRoutingPolicyGroup = "default"');
-    expect(after).toContain('reasoningStopMode = "on"');
+    expect(after).toContain('enabled = true');
+    expect(after).toContain('tickMs = 1500');
   });
 });

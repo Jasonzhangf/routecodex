@@ -344,6 +344,17 @@ export function buildResponsesPayloadFromChatWithNative(
       return fail('empty result');
     }
     const parsed = parseRecord(raw);
+    const payloadRecord =
+      payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? (payload as Record<string, unknown>)
+        : undefined;
+    const sourceModel =
+      payloadRecord && typeof payloadRecord.model === 'string' && payloadRecord.model.trim().length
+        ? payloadRecord.model.trim()
+        : undefined;
+    if (parsed && sourceModel) {
+      parsed.model = sourceModel;
+    }
     return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

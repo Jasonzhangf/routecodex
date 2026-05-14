@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::instructions::{InstructionTarget, RoutingInstructionState};
+use super::rcc_fence::StoplessGoalState;
 
 const ROUTECODEX_SESSION_DIR_ENV: &str = "ROUTECODEX_SESSION_DIR";
 const RCC_HOME_ENV: &str = "RCC_HOME";
@@ -235,7 +236,8 @@ fn resolve_session_filepath(key: &str) -> Option<PathBuf> {
 }
 
 fn is_state_empty(state: &RoutingInstructionState) -> bool {
-    state.forced_target.is_none()
+    is_stopless_goal_empty(state)
+        && state.forced_target.is_none()
         && state.sticky_target.is_none()
         && state.prefer_target.is_none()
         && state.allowed_providers.is_empty()
@@ -244,6 +246,10 @@ fn is_state_empty(state: &RoutingInstructionState) -> bool {
         && state.disabled_models.is_empty()
         && is_stop_message_empty(state)
         && is_pre_command_empty(state)
+}
+
+fn is_stopless_goal_empty(state: &RoutingInstructionState) -> bool {
+    state.stopless_goal_state.is_none()
 }
 
 fn is_stop_message_empty(state: &RoutingInstructionState) -> bool {
@@ -268,6 +274,7 @@ fn is_pre_command_empty(state: &RoutingInstructionState) -> bool {
 
 fn serialize_routing_instruction_state(state: &RoutingInstructionState) -> Value {
     let mut out = Map::new();
+    serialize_stopless_goal_state(state, &mut out);
     if let Some(target) = &state.forced_target {
         out.insert(
             "forcedTarget".to_string(),
@@ -333,6 +340,31 @@ fn serialize_routing_instruction_state(state: &RoutingInstructionState) -> Value
     serialize_stop_message_state(state, &mut out);
     serialize_pre_command_state(state, &mut out);
     Value::Object(out)
+}
+
+fn serialize_stopless_goal_state(state: &RoutingInstructionState, out: &mut Map<String, Value>) {
+    let Some(goal) = &state.stopless_goal_state else {
+        return;
+    };
+    let mut goal_out = Map::new();
+    goal_out.insert("status".to_string(), Value::String(goal.status.clone()));
+    goal_out.insert("objective".to_string(), Value::String(goal.objective.clone()));
+    if let Some(value) = &goal.latest_note {
+        if !value.trim().is_empty() {
+            goal_out.insert("latestNote".to_string(), Value::String(value.trim().to_string()));
+        }
+    }
+    if let Some(value) = &goal.completion_evidence {
+        if !value.trim().is_empty() {
+            goal_out.insert(
+                "completionEvidence".to_string(),
+                Value::String(value.trim().to_string()),
+            );
+        }
+    }
+    goal_out.insert("updatedAt".to_string(), Value::Number(goal.updated_at.into()));
+    goal_out.insert("createdAt".to_string(), Value::Number(goal.created_at.into()));
+    out.insert("stoplessGoalState".to_string(), Value::Object(goal_out));
 }
 
 fn serialize_instruction_target(target: &InstructionTarget) -> Value {
@@ -438,6 +470,7 @@ fn serialize_pre_command_state(state: &RoutingInstructionState, out: &mut Map<St
 fn deserialize_routing_instruction_state(value: &Value) -> Option<RoutingInstructionState> {
     let obj = value.as_object()?;
     let mut state = RoutingInstructionState::default();
+    deserialize_stopless_goal_state(obj, &mut state);
     if let Some(target) = obj.get("forcedTarget") {
         state.forced_target = deserialize_instruction_target(target);
     }
@@ -508,6 +541,51 @@ fn deserialize_routing_instruction_state(value: &Value) -> Option<RoutingInstruc
     deserialize_stop_message_state(obj, &mut state);
     deserialize_pre_command_state(obj, &mut state);
     Some(state)
+}
+
+fn deserialize_stopless_goal_state(obj: &Map<String, Value>, state: &mut RoutingInstructionState) {
+    let Some(goal) = obj.get("stoplessGoalState").and_then(|v| v.as_object()) else {
+        return;
+    };
+    let status = goal
+        .get("status")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_ascii_lowercase());
+    let objective = goal
+        .get("objective")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string());
+    let updated_at = goal.get("updatedAt").and_then(|v| v.as_i64());
+    let created_at = goal.get("createdAt").and_then(|v| v.as_i64());
+    let Some(status) = status else { return };
+    let Some(objective) = objective else { return };
+    let Some(updated_at) = updated_at else { return };
+    let Some(created_at) = created_at else { return };
+    if objective.is_empty() {
+        return;
+    }
+    if !matches!(
+        status.as_str(),
+        "idle" | "active" | "paused" | "stopped" | "completed"
+    ) {
+        return;
+    }
+    state.stopless_goal_state = Some(StoplessGoalState {
+        status,
+        objective,
+        latest_note: goal
+            .get("latestNote")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        completion_evidence: goal
+            .get("completionEvidence")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        updated_at: updated_at.max(0),
+        created_at: created_at.max(0),
+    });
 }
 
 fn deserialize_instruction_target(value: &Value) -> Option<InstructionTarget> {

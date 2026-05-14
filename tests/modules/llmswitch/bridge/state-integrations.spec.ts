@@ -30,50 +30,18 @@ describe('llmswitch bridge state-integrations', () => {
     );
   });
 
-  it('fails fast when reasoning stop sync api is unavailable', async () => {
+  it('extracts session identifiers via native helper path', async () => {
     jest.resetModules();
-
-    jest.unstable_mockModule(
-      '../../../../src/modules/llmswitch/bridge/module-loader.js',
-      () => ({
-        importCoreDist: jest.fn(),
-        requireCoreDist: jest.fn((subpath: string) => {
-          if (subpath === 'servertool/handlers/reasoning-stop-state') {
-            return {};
-          }
-          throw new Error(`unexpected:${subpath}`);
-        })
-      })
-    );
-
     const mod = await import('../../../../src/modules/llmswitch/bridge/state-integrations.js');
-
-    expect(() => mod.syncReasoningStopModeFromRequest({}, 'off')).toThrow(
-      'reasoning_stop_state.sync_mode.api_unavailable failed: "syncReasoningStopModeFromRequest not available"'
-    );
-  });
-
-  it('fails fast when session identifier extraction api is unavailable', async () => {
-    jest.resetModules();
-
-    jest.unstable_mockModule(
-      '../../../../src/modules/llmswitch/bridge/module-loader.js',
-      () => ({
-        importCoreDist: jest.fn(),
-        requireCoreDist: jest.fn((subpath: string) => {
-          if (subpath === 'conversion/hub/pipeline/session-identifiers') {
-            return {};
-          }
-          throw new Error(`unexpected:${subpath}`);
-        })
+    expect(
+      mod.extractSessionIdentifiersFromMetadata({
+        sessionId: 'sess_1',
+        conversationId: 'conv_1'
       })
-    );
-
-    const mod = await import('../../../../src/modules/llmswitch/bridge/state-integrations.js');
-
-    expect(() => mod.extractSessionIdentifiersFromMetadata({})).toThrow(
-      'session_identifiers.extract.api_unavailable failed: "extractSessionIdentifiersFromMetadata not available"'
-    );
+    ).toEqual({
+      sessionId: 'sess_1',
+      conversationId: 'conv_1'
+    });
   });
 
   it('fails fast and does not fallback to legacy clock task-store modules when primary loader fails', async () => {
@@ -127,6 +95,29 @@ describe('llmswitch bridge state-integrations', () => {
 
     await expect(mod.buildHeartbeatInjectTextSnapshot()).rejects.toThrow(
       'heartbeat_task_store.build_inject_text.api_unavailable failed: "buildHeartbeatInjectText not available"'
+    );
+  });
+
+  it('fails fast when stopless goal persist api is unavailable', async () => {
+    jest.resetModules();
+
+    jest.unstable_mockModule(
+      '../../../../src/modules/llmswitch/bridge/module-loader.js',
+      () => ({
+        importCoreDist: jest.fn(),
+        requireCoreDist: jest.fn((subpath: string) => {
+          if (subpath === 'servertool/handlers/stopless-goal-state') {
+            return {};
+          }
+          throw new Error(`unexpected:${subpath}`);
+        })
+      })
+    );
+
+    const mod = await import('../../../../src/modules/llmswitch/bridge/state-integrations.js');
+
+    expect(() => mod.persistStoplessGoalStateSnapshot({}, {})).toThrow(
+      'stopless_goal_state.persist.api_unavailable failed: "persistStoplessGoalStateSnapshot not available"'
     );
   });
 

@@ -1,0 +1,32 @@
+{
+  "version": "2.0.0",
+  "providerId": "dbittai",
+  "provider": {
+    "id": "dbittai",
+    "enabled": true,
+    "type": "openai",
+    "baseURL": "https://dbittai.com/v1",
+    "auth": {
+      "type": "apikey",
+      "entries": [
+        {
+          "alias": "key1",
+          "apiKey": "${CRS_OAI_KEY1}"
+        }
+      ]
+    },
+    "models": {
+      "minimax": {
+        "supportsStreaming": true,
+        "maxTokens": 64000,
+        "maxContext": 200000
+      }
+    },
+    "transportBackend": "openai-sdk",
+    "concurrency": {
+      "maxInFlight": 4,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
+    }
+  }
+}

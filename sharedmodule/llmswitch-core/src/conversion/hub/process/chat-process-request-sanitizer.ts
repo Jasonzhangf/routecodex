@@ -135,19 +135,9 @@ function isStructuredToolBoundaryMessage(message: StandardizedMessage): boolean 
   return role === 'tool';
 }
 
-function collectDuplicateMirrorAssistantIndices(messages: StandardizedMessage[]): Set<number> {
+function collectMirrorAssistantIndicesAfterToolBoundary(messages: StandardizedMessage[]): Set<number> {
   const duplicateIndices = new Set<number>();
   let hasBoundary = false;
-  let segmentMirrorIndices: number[] = [];
-
-  const flushSegment = () => {
-    if (segmentMirrorIndices.length >= 2) {
-      for (const index of segmentMirrorIndices) {
-        duplicateIndices.add(index);
-      }
-    }
-    segmentMirrorIndices = [];
-  };
 
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
@@ -156,7 +146,6 @@ function collectDuplicateMirrorAssistantIndices(messages: StandardizedMessage[])
     }
     if (isStructuredToolBoundaryMessage(message)) {
       hasBoundary = true;
-      flushSegment();
       continue;
     }
     if (!hasBoundary) {
@@ -164,11 +153,9 @@ function collectDuplicateMirrorAssistantIndices(messages: StandardizedMessage[])
     }
     const role = typeof message.role === 'string' ? message.role.toLowerCase().trim() : '';
     if (role === 'assistant' && isAssistantMirrorTurn(message)) {
-      segmentMirrorIndices.push(index);
+      duplicateIndices.add(index);
     }
   }
-
-  flushSegment();
   return duplicateIndices;
 }
 
@@ -180,7 +167,7 @@ export function sanitizeChatProcessRequest(
     return sanitized;
   }
 
-  const duplicateMirrorAssistantIndices = collectDuplicateMirrorAssistantIndices(
+  const duplicateMirrorAssistantIndices = collectMirrorAssistantIndicesAfterToolBoundary(
     sanitized.messages as StandardizedMessage[]
   );
 

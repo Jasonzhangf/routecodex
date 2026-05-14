@@ -1,12 +1,16 @@
 /**
  * Shared pure functions: tool call validation and recovery.
  *
- * Extracted from provider-response-converter.ts to establish
- * single-responsibility block boundary for client tool call validation.
+ * Validator policy here is shape-only:
+ * - object shape
+ * - required field presence
+ * - primitive field type
+ *
+ * Do not perform semantic auditing, compatibility guessing, or content repair.
  */
 
 export function isImagePathLike(value: string): boolean {
-  return /\.(png|jpg|jpeg|gif|webp|bmp|svg|tiff?|ico|heic|jxl)$/i.test(value);
+  return typeof value === 'string';
 }
 
 export function parseToolArgsRecord(argsString: string): Record<string, unknown> | null {
@@ -47,24 +51,21 @@ export function buildToolValidationFailure(args: {
   };
 }
 
-export function readReasoningStopBoolean(value: unknown): boolean | undefined {
-  if (value === true) {
-    return true;
+function validateUpdateGoalArguments(parsed: Record<string, unknown> | null) {
+  if (!parsed) {
+    return buildToolValidationFailure({
+      reason: 'invalid_update_goal_arguments',
+      message: 'update_goal requires a JSON object arguments payload.'
+    });
   }
-  if (value === false) {
-    return false;
+  if (!Object.prototype.hasOwnProperty.call(parsed, 'status') || typeof parsed.status !== 'string') {
+    return buildToolValidationFailure({
+      reason: 'missing_status',
+      message: 'update_goal requires status as a string.',
+      missingFields: ['status']
+    });
   }
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'true') {
-    return true;
-  }
-  if (normalized === 'false') {
-    return false;
-  }
-  return undefined;
+  return { ok: true, normalizedArgs: JSON.stringify(parsed) };
 }
 
 export function containsBroadKillCommand(cmd: string): boolean {
@@ -275,54 +276,54 @@ export function validateCanonicalClientToolCall(
   const normalizedName = name.trim().toLowerCase();
   switch (normalizedName) {
     case 'exec_command': {
-      const cmd = typeof parsed?.cmd === 'string' ? parsed.cmd.trim() : '';
-      if (!cmd) {
+      if (!parsed || typeof parsed.cmd !== 'string') {
         return buildToolValidationFailure({
           reason: 'missing_cmd',
-          message: 'exec_command requires input.cmd as a non-empty string.',
+          message: 'exec_command requires input.cmd as a string.',
           missingFields: ['cmd']
         });
       }
+      const cmd = parsed.cmd;
       if (containsBroadKillCommand(cmd)) {
         return buildToolValidationFailure({
           reason: 'forbidden_broad_kill',
           message: 'exec_command contains a forbidden broad process-kill command. Use explicit PID- or service-scoped shutdown/restart only.'
         });
       }
-      if (hasInvalidShellWrapperShape(cmd)) {
-        return buildToolValidationFailure({
-          reason: 'invalid_shell_wrapper_shape',
-          message:
-            "exec_command contains a malformed shell wrapper: `bash/sh/zsh -c/-lc '...'` must keep the closing single quote. Tail-truncated wrappers are rejected."
-        });
-      }
       return { ok: true, normalizedArgs: JSON.stringify({ ...parsed, cmd }) };
     }
     case 'view_image': {
-      const pathValue = typeof parsed?.path === 'string' ? parsed.path.trim() : '';
-      if (!pathValue || !isImagePathLike(pathValue)) {
+      if (!parsed || typeof parsed.path !== 'string') {
         return buildToolValidationFailure({
-          reason: 'invalid_image_path',
-          message: 'view_image requires input.path pointing to an image file.'
+          reason: 'missing_path',
+          message: 'view_image requires input.path as a string.',
+          missingFields: ['path']
         });
       }
-      return { ok: true, normalizedArgs: JSON.stringify({ path: pathValue }) };
+      return { ok: true, normalizedArgs: JSON.stringify({ path: parsed.path }) };
     }
     case 'apply_patch': {
-      const patch =
-        typeof parsed?.patch === 'string' && parsed.patch.trim()
-          ? parsed.patch
-          : typeof parsed?.input === 'string' && parsed.input.trim()
-            ? parsed.input
-            : '';
-      if (!patch) {
+      if (!parsed) {
         return buildToolValidationFailure({
           reason: 'missing_patch',
-          message: 'apply_patch requires patch content in input.patch or input.input.',
+          message: 'apply_patch requires patch as a string.',
           missingFields: ['patch']
         });
       }
-      return { ok: true, normalizedArgs: JSON.stringify({ patch, input: patch }) };
+      const patch =
+        typeof parsed.patch === 'string' ? parsed.patch
+        : typeof parsed.raw_patch === 'string' ? parsed.raw_patch
+        : typeof parsed.raw === 'string' ? parsed.raw
+        : typeof parsed.input === 'string' ? parsed.input
+        : undefined;
+      if (typeof patch !== 'string') {
+        return buildToolValidationFailure({
+          reason: 'missing_patch',
+          message: 'apply_patch requires patch as a string.',
+          missingFields: ['patch']
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify({ ...parsed, patch }) };
     }
     case 'update_plan': {
       if (!Array.isArray(parsed?.plan)) {
@@ -334,13 +335,22 @@ export function validateCanonicalClientToolCall(
       }
       return { ok: true, normalizedArgs: JSON.stringify({ explanation: parsed?.explanation, plan: parsed.plan }) };
     }
+    case 'create_goal': {
+      if (!parsed || (typeof parsed.objective !== 'string' && typeof parsed.goal !== 'string')) {
+        return buildToolValidationFailure({
+          reason: 'missing_objective',
+          message: 'create_goal requires objective as a string.',
+          missingFields: ['objective']
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify(parsed) };
+    }
     case 'shell_command':
     case 'bash': {
-      const command = typeof parsed?.command === 'string' ? parsed.command.trim() : '';
-      if (!command) {
+      if (!parsed || typeof parsed.command !== 'string') {
         return buildToolValidationFailure({
           reason: 'missing_command',
-          message: `${normalizedName} requires input.command as a non-empty string.`,
+          message: `${normalizedName} requires input.command as a string.`,
           missingFields: ['command']
         });
       }
@@ -348,28 +358,26 @@ export function validateCanonicalClientToolCall(
     }
     case 'shell': {
       const command = parsed?.command;
-      if (!(Array.isArray(command) && command.every((entry) => typeof entry === 'string' && entry.trim().length > 0))) {
+      if (!(Array.isArray(command) && command.every((entry) => typeof entry === 'string'))) {
         return buildToolValidationFailure({
           reason: 'invalid_command',
-          message: 'shell requires input.command as a non-empty string array.'
+          message: 'shell requires input.command as a string array.'
         });
       }
       return { ok: true, normalizedArgs: JSON.stringify(parsed) };
     }
     case 'read_mcp_resource': {
-      const server = typeof parsed?.server === 'string' ? parsed.server.trim() : '';
-      const uri = typeof parsed?.uri === 'string' ? parsed.uri.trim() : '';
-      if (!server || !uri) {
+      if (!parsed || typeof parsed.server !== 'string' || typeof parsed.uri !== 'string') {
         return buildToolValidationFailure({
           reason: 'missing_server_or_uri',
-          message: 'read_mcp_resource requires both input.server and input.uri.',
+          message: 'read_mcp_resource requires input.server and input.uri as strings.',
           missingFields: buildMissingFields([
-            !server ? 'server' : undefined,
-            !uri ? 'uri' : undefined
+            !parsed || typeof parsed.server !== 'string' ? 'server' : undefined,
+            !parsed || typeof parsed.uri !== 'string' ? 'uri' : undefined
           ])
         });
       }
-      return { ok: true, normalizedArgs: JSON.stringify({ server, uri }) };
+      return { ok: true, normalizedArgs: JSON.stringify({ server: parsed.server, uri: parsed.uri }) };
     }
     case 'reasoning.stop': {
       if (!parsed) {
@@ -378,22 +386,19 @@ export function validateCanonicalClientToolCall(
           message: 'reasoning.stop requires a JSON object arguments payload.'
         });
       }
-      const taskGoal = typeof parsed.task_goal === 'string'
-        ? parsed.task_goal.trim()
-        : typeof parsed.taskGoal === 'string'
-          ? parsed.taskGoal.trim()
-          : typeof parsed.goal === 'string'
-            ? parsed.goal.trim()
-            : '';
-      if (!taskGoal) {
+      if (
+        typeof parsed.task_goal !== 'string'
+        && typeof parsed.taskGoal !== 'string'
+        && typeof parsed.goal !== 'string'
+      ) {
         return buildToolValidationFailure({
           reason: 'invalid_reasoning_stop_arguments',
-          message: 'reasoning.stop requires task_goal.',
+          message: 'reasoning.stop requires task_goal as a string.',
           missingFields: ['task_goal']
         });
       }
-      const completed = readReasoningStopBoolean(parsed.is_completed ?? parsed.isCompleted ?? parsed.completed);
-      if (typeof completed !== 'boolean') {
+      const completedValue = parsed.is_completed ?? parsed.isCompleted ?? parsed.completed;
+      if (typeof completedValue !== 'boolean') {
         return buildToolValidationFailure({
           reason: 'invalid_reasoning_stop_arguments',
           message: 'reasoning.stop requires is_completed(boolean).',
@@ -402,27 +407,18 @@ export function validateCanonicalClientToolCall(
       }
       return { ok: true, normalizedArgs: JSON.stringify(parsed) };
     }
+    case 'update_goal':
+      return validateUpdateGoalArguments(parsed);
     case 'list_mcp_resources':
     case 'list_mcp_resource_templates':
       return { ok: true, normalizedArgs: JSON.stringify(parsed ?? {}) };
     default:
-      if (declaredToolNames?.has(normalizedName)) {
-        if (!parsed) {
-          return buildToolValidationFailure({
-            reason: 'invalid_declared_tool_arguments',
-            message: `Tool "${name.trim()}" requires JSON object arguments.`
-          });
-        }
-        return { ok: true, normalizedArgs: JSON.stringify(parsed) };
+      if (!parsed) {
+        return buildToolValidationFailure({
+          reason: 'invalid_tool_arguments',
+          message: `Tool "${name.trim()}" requires JSON object arguments.`
+        });
       }
-      const declaredList = declaredToolNames && declaredToolNames.size > 0
-        ? Array.from(declaredToolNames).sort().join(', ')
-        : '';
-      return buildToolValidationFailure({
-        reason: 'unknown_tool',
-        message: declaredList
-          ? `Tool "${name.trim()}" is not declared for this request. Declared tools: ${declaredList}.`
-          : `Tool "${name.trim()}" is not declared for this request.`
-      });
+      return { ok: true, normalizedArgs: JSON.stringify(parsed) };
   }
 }

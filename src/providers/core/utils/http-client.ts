@@ -200,8 +200,12 @@ export class HttpClient {
     const timeout = Number.isFinite(streamConfig?.timeoutMs) && Number(streamConfig?.timeoutMs) > 0
       ? Number(streamConfig?.timeoutMs)
       : this.defaultConfig.timeout;
-    // NOTE: stream 请求如果在拿到 response body 后立刻清除 timeout，会导致“流式卡死不返回”。
-    // 这里维持一个全局 timeout + idle timeout，直到上游流结束或被消费者关闭。
+    // NOTE:
+    // - 在收到响应 headers 之前，需要一个绝对超时来暴露“上游完全不返回”。
+    // - 一旦 headers/body 已经到手，就必须切换为“有锚点的流式超时”：
+    //   headers timeout / byte idle timeout / 下游语义超时。
+    //   继续保留全局 absolute timeout 会把长流硬砍成 UPSTREAM_STREAM_TIMEOUT，
+    //   破坏基于语义锚点的超时设计。
     const overrideIdle = Number(streamConfig?.idleTimeoutMs);
     const cfgIdle = this.defaultConfig.streamIdleTimeoutMs;
     const idleTimeoutMs = Number.isFinite(overrideIdle) && overrideIdle > 0
@@ -241,8 +245,8 @@ export class HttpClient {
 
       const response = await fetch(fullUrl, fetchOptions);
       clearTimeout(headersTimeoutId);
+      clearTimeout(timeoutId);
       if (!response.ok) {
-        clearTimeout(timeoutId);
         // 与非流式 request 保持一致：在错误中包含上游返回体，但对 message 进行截断，避免控制台刷屏。
         const errorText = await response.text();
         const headersObj: Record<string, string> = {};
@@ -271,7 +275,6 @@ export class HttpClient {
           return this.wrapStreamWithTimeouts(
             body,
             controller,
-            timeoutId,
             idleTimeoutMs,
             abortWithReason,
             detachExternalAbort
@@ -286,7 +289,6 @@ export class HttpClient {
                 return this.wrapStreamWithTimeouts(
                   nodeStream,
                   controller,
-                  timeoutId,
                   idleTimeoutMs,
                   abortWithReason,
                   detachExternalAbort
@@ -316,7 +318,6 @@ export class HttpClient {
   private wrapStreamWithTimeouts(
     upstream: NodeJS.ReadableStream,
     controller: AbortController,
-    timeoutId: NodeJS.Timeout,
     idleTimeoutMs: number,
     abortWithReason: (reason: string) => void,
     detachExternalAbort: () => void
@@ -352,7 +353,6 @@ export class HttpClient {
         clearInterval(idleWatchdog);
         idleWatchdog = null;
       }
-      clearTimeout(timeoutId);
     };
 
     const cleanup = () => {

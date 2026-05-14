@@ -4,6 +4,8 @@ import { sanitizeChatProcessRequest } from '../../sharedmodule/llmswitch-core/sr
 
 const REAL_SAMPLE_PATH =
   '/Volumes/extension/.rcc/codex-samples/openai-responses/mimo.key1.mimo-v2.5-pro/req_1778669500982_9b5b55f1/provider-request.json';
+const REAL_SINGLETON_MIRROR_SAMPLE_PATH =
+  '/Volumes/extension/.rcc/codex-samples/openai-responses/mimo.key1.mimo-v2.5-pro/req_1778676798002_98daac0b/provider-request.json';
 
 describe('sanitizeChatProcessRequest', () => {
   it('returns the original envelope when messages are missing', () => {
@@ -166,7 +168,7 @@ describe('sanitizeChatProcessRequest', () => {
     });
   });
 
-  it('keeps a single mirror assistant turn when no repeated polluted suffix exists', () => {
+  it('removes a single mirror assistant turn after a tool boundary', () => {
     const input: any = {
       messages: [
         {
@@ -201,9 +203,100 @@ describe('sanitizeChatProcessRequest', () => {
 
     const out: any = sanitizeChatProcessRequest(input);
 
-    expect(out.messages).toHaveLength(3);
-    expect(out.messages[2].content).toBe('I will run the receipt now.');
+    expect(out.messages).toHaveLength(2);
+    expect(out.metadata?.chatProcessSanitizer).toMatchObject({
+      removedAssistantTurns: 1,
+      removedDuplicateMirrorAssistantTurns: 1
+    });
+  });
+
+  it('does not remove mirror assistant text before any tool boundary exists', () => {
+    const input: any = {
+      messages: [
+        {
+          role: 'assistant',
+          content: 'I will run the receipt now.',
+          reasoning_content: 'I will run the receipt now.'
+        }
+      ]
+    };
+
+    const out: any = sanitizeChatProcessRequest(input);
+
+    expect(out.messages).toHaveLength(1);
+    expect(out.messages[0].content).toBe('I will run the receipt now.');
     expect(out.metadata?.chatProcessSanitizer).toBeUndefined();
+  });
+
+  it('removes mirrored assistant text across multiple tool-boundary segments', () => {
+    const repeatedMirror = 'Jason，我来检查编译构建、全局安装、daemon 重启的脚本链路。';
+    const input: any = {
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'call_1',
+              name: 'exec_command',
+              input: { cmd: 'pwd' }
+            }
+          ]
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'call_1',
+              content: '/tmp'
+            }
+          ]
+        },
+        {
+          role: 'assistant',
+          content: repeatedMirror,
+          reasoning_content: repeatedMirror
+        },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'call_2',
+              name: 'exec_command',
+              input: { cmd: 'ls' }
+            }
+          ]
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_2',
+          content: [{ type: 'text', text: 'ok' }]
+        },
+        {
+          role: 'assistant',
+          content: repeatedMirror,
+          reasoning_content: repeatedMirror
+        }
+      ]
+    };
+
+    const out: any = sanitizeChatProcessRequest(input);
+
+    expect(out.messages).toHaveLength(4);
+    expect(
+      out.messages.some(
+        (message: any) =>
+          message?.role === 'assistant'
+          && message?.content === repeatedMirror
+          && message?.reasoning_content === repeatedMirror
+      )
+    ).toBe(false);
+    expect(out.metadata?.chatProcessSanitizer).toMatchObject({
+      removedAssistantTurns: 2,
+      removedDuplicateMirrorAssistantTurns: 2
+    });
   });
 
   it('keeps reasoning-only assistant turns', () => {
@@ -357,6 +450,28 @@ describe('sanitizeChatProcessRequest', () => {
     expect(Array.isArray(messages)).toBe(true);
     expect(messages.length).toBeGreaterThan(out.messages.length);
     expect(mirrorTail).toHaveLength(0);
+    expect(out.metadata?.chatProcessSanitizer?.removedDuplicateMirrorAssistantTurns).toBeGreaterThan(0);
+  });
+
+  (fs.existsSync(REAL_SINGLETON_MIRROR_SAMPLE_PATH) ? it : it.skip)('replays the singleton mirror sample and removes mirrored assistant planning text after tool boundaries', () => {
+    const providerRequest = JSON.parse(fs.readFileSync(REAL_SINGLETON_MIRROR_SAMPLE_PATH, 'utf8'));
+    const messages = providerRequest?.body?.messages;
+    const out: any = sanitizeChatProcessRequest({
+      model: 'mimo-v2.5-pro',
+      messages,
+      metadata: {}
+    });
+
+    const pollutedMirror = (out.messages || []).filter((message: any) =>
+      message?.role === 'assistant'
+      && message?.content === message?.reasoning_content
+      && typeof message?.content === 'string'
+      && message.content.includes('The curl test returns 200 now!')
+    );
+
+    expect(Array.isArray(messages)).toBe(true);
+    expect(messages.length).toBeGreaterThan(out.messages.length);
+    expect(pollutedMirror).toHaveLength(0);
     expect(out.metadata?.chatProcessSanitizer?.removedDuplicateMirrorAssistantTurns).toBeGreaterThan(0);
   });
 });

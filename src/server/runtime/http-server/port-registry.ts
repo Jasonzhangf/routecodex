@@ -6,7 +6,7 @@
  * Hot-add/remove/update ports without restarting other ports.
  */
 
-import express, { type Application } from 'express';
+import type { Application } from 'express';
 import type { Server } from 'http';
 import type { Socket } from 'node:net';
 import type { PortConfig, PortRuntimeState, PortStatus } from './port-config-types.js';

@@ -1,6 +1,6 @@
 use napi::Ref;
 use serde_json::{Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::super::classifier::RoutingClassifier;
 use super::super::health::{ProviderHealthConfig, ProviderHealthManager};
@@ -104,6 +104,34 @@ impl VirtualRouterEngineCore {
         match self.concurrency_busy_keys.get(provider_key) {
             Some(expires_at) => *expires_at > now,
             None => false,
+        }
+    }
+
+    pub(crate) fn concurrency_busy_remaining_ms(&self, provider_key: &str, now_ms: i64) -> Option<i64> {
+        let expires_at = *self.concurrency_busy_keys.get(provider_key)?;
+        if expires_at <= now_ms {
+            return None;
+        }
+        Some((expires_at - now_ms).max(1))
+    }
+
+    pub(crate) fn concurrency_busy_remaining_for_provider(
+        &self,
+        provider_key: &str,
+        now_ms: i64,
+    ) -> Option<i64> {
+        let direct = self.concurrency_busy_remaining_ms(provider_key, now_ms);
+        let runtime = self
+            .provider_registry
+            .get(provider_key)
+            .and_then(|profile| profile.runtime_key.as_deref())
+            .filter(|runtime_key| !runtime_key.is_empty() && *runtime_key != provider_key)
+            .and_then(|runtime_key| self.concurrency_busy_remaining_ms(runtime_key, now_ms));
+        match (direct, runtime) {
+            (Some(left), Some(right)) => Some(left.min(right)),
+            (Some(left), None) => Some(left),
+            (None, Some(right)) => Some(right),
+            (None, None) => None,
         }
     }
 }

@@ -120,6 +120,7 @@ export class AnthropicSseToJsonConverter {
           if (salvaged.success && salvaged.response) {
             context.isCompleted = true;
             context.eventStats.endTime = Date.now();
+            this.attachDecodeStats(salvaged.response, context);
             return salvaged.response;
           }
         } catch {
@@ -379,7 +380,7 @@ export class AnthropicSseToJsonConverter {
       if (
         text.length > 0
         || partialJson.length > 0
-        || (thinking.length > 0 && hasExplicitToolWrapperProgress(thinking))
+        || thinking.length > 0
       ) {
         this.markSemanticContentSeen(context);
       }

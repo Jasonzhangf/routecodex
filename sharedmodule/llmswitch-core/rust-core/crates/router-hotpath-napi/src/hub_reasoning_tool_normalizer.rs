@@ -372,7 +372,9 @@ pub(crate) fn normalize_message_reasoning_ssot(message: &mut Map<String, Value>)
     let Some(reasoning) = build_message_reasoning_value(&summary, &content, encrypted.as_deref())
     else {
         message.remove("reasoning");
-        message.remove("reasoning_content");
+        if content.is_empty() {
+            message.remove("reasoning_content");
+        }
         return;
     };
 
@@ -3113,7 +3115,7 @@ pub fn normalize_assistant_text_to_tool_calls_json(
         obj.insert("tool_calls".to_string(), Value::Array(mapped_calls));
         obj.insert("content".to_string(), Value::String("".to_string()));
         for field in emptied_fields {
-            if field != "content" {
+            if field != "content" && field != "reasoning_content" {
                 obj.remove(field);
             }
         }

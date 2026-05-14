@@ -71,6 +71,11 @@ export type NativeServertoolFollowupRuntimePlan = ReturnType<typeof parseServert
   ? Exclude<T, null>
   : never;
 
+export type NativeGoalCapableRequestPlan = {
+  requestGoalCapable: boolean;
+  adapterContextGoalCapable: boolean;
+};
+
 export type NativeServertoolSkeletonDocument = Record<string, unknown>;
 
 const NON_BLOCKING_SERVERTOOL_ORCHESTRATION_LOG_THROTTLE_MS = 60_000;
@@ -689,6 +694,33 @@ export function planServertoolFollowupRuntimeWithNative(
     const raw = invokeNativeStringCapability(capability, [String(flowId || '')]);
     const parsed = parseServertoolFollowupRuntimePlanPayload(raw);
     return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function resolveGoalCapableRequestWithNative(input: {
+  request?: unknown;
+  adapterContext?: unknown;
+}): NativeGoalCapableRequestPlan {
+  const capability = 'resolveGoalCapableRequestJson';
+  const fail = (reason?: string) => failNativeRequired<NativeGoalCapableRequestPlan>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseJson('parseGoalCapableRequestPayload', raw);
+    if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    const row = parsed as Record<string, unknown>;
+    if (typeof row.requestGoalCapable !== 'boolean' || typeof row.adapterContextGoalCapable !== 'boolean') {
+      return fail('invalid payload');
+    }
+    return {
+      requestGoalCapable: row.requestGoalCapable,
+      adapterContextGoalCapable: row.adapterContextGoalCapable
+    };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

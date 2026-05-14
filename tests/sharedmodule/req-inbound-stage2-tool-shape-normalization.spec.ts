@@ -163,4 +163,70 @@ PATCH"`
       '__rcc_apply_patch_validation_error__/reason-missing-changes'
     );
   });
+
+  it('preserves assistant reasoning-only history into standardizedRequest', async () => {
+    const adapterContext = {
+      requestId: 'req-stage2-reasoning-history',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    };
+
+    const stage2 = await runReqInboundStage2SemanticMap({
+      adapterContext: adapterContext as any,
+      formatEnvelope: {
+        protocol: 'openai-responses',
+        direction: 'request',
+        payload: {
+          model: 'mimo-v2.5-pro',
+          input: [{ role: 'user', content: 'continue' }]
+        }
+      } as any,
+      semanticMapper: {
+        async toChat() {
+          return {
+            messages: [
+              { role: 'user', content: 'continue' },
+              {
+                role: 'assistant',
+                content: '',
+                reasoning_content: 'Need to call echo_json with ping.',
+                reasoning: {
+                  summary: [{ type: 'summary_text', text: 'Need to call echo_json with ping.' }]
+                }
+              },
+              {
+                role: 'assistant',
+                content: '',
+                tool_calls: [
+                  {
+                    id: 'call_echo_1',
+                    type: 'function',
+                    function: {
+                      name: 'echo_json',
+                      arguments: JSON.stringify({ message: 'ping' })
+                    }
+                  }
+                ]
+              },
+              {
+                role: 'tool',
+                tool_call_id: 'call_echo_1',
+                content: '{"message":"ping"}'
+              }
+            ],
+            tools: [{ type: 'function', function: { name: 'echo_json' } }],
+            parameters: { model: 'mimo-v2.5-pro' },
+            metadata: { context: adapterContext }
+          } as any;
+        }
+      }
+    });
+
+    const standardizedMessages = (stage2.standardizedRequest.messages as any[]);
+    expect(standardizedMessages[1].reasoning_content).toBe('Need to call echo_json with ping.');
+    expect(standardizedMessages[1].reasoning.summary[0].text).toBe(
+      'Need to call echo_json with ping.'
+    );
+    expect(standardizedMessages[2].tool_calls[0].id).toBe('call_echo_1');
+  });
 });

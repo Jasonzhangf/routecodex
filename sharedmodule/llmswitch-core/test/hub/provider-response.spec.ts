@@ -56,6 +56,46 @@ describe('Hub provider response pipeline', () => {
     expect(result.body?.choices?.[0]?.message?.content).toBe('Hub response pipeline rocks.');
   });
 
+  test('openai-chat provider unwraps nested data envelope before canonical chat validation', async () => {
+    const chatResponse = buildChatResponse();
+    const result = await convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: { data: chatResponse } as JsonObject,
+      context: baseContext,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: false
+    });
+    expect(result.body?.choices?.[0]?.message?.content).toBe('Hub response pipeline rocks.');
+  });
+
+  test('openai-chat structured provider business error preserves context-length signal instead of non-canonical storm', async () => {
+    await expect(convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        data: {
+          id: 'minimax_ctx_limit',
+          object: 'chat.completion',
+          choices: null,
+          base_resp: {
+            status_code: 2013,
+            status_msg: 'invalid params, context window exceeds limit'
+          }
+        }
+      } as unknown as JsonObject,
+      context: baseContext,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: false
+    })).rejects.toMatchObject({
+      code: 'MALFORMED_RESPONSE',
+      details: {
+        detected: 'provider_business_error',
+        reason: 'context_length_exceeded',
+        upstreamCode: 'context_length_exceeded',
+        providerStatusCode: 2013
+      }
+    });
+  });
+
   test('openai-chat provider emits SSE stream when requested', async () => {
     const chatResponse = buildChatResponse();
     const result = await convertProviderResponse({

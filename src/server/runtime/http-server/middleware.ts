@@ -54,6 +54,28 @@ function normalizeString(value: unknown): string {
   return value.trim();
 }
 
+function resolveExpectedApiKeyForRequest(req: Request, config: ServerConfigV2): string {
+  try {
+    const server = (req.app?.locals as Record<string, unknown> | undefined)?.routecodexServer as
+      | { getPortConfigForLocalPort?: (port?: number) => { apikey?: string } | undefined }
+      | undefined;
+    const localPort =
+      typeof req.socket?.localPort === 'number' && Number.isFinite(req.socket.localPort)
+        ? req.socket.localPort
+        : undefined;
+    const portApiKey =
+      typeof server?.getPortConfigForLocalPort === 'function'
+        ? normalizeString(server.getPortConfigForLocalPort(localPort)?.apikey)
+        : '';
+    if (portApiKey) {
+      return portApiKey;
+    }
+  } catch (error) {
+    logMiddlewareNonBlockingError('resolveExpectedApiKeyForRequest', error);
+  }
+  return normalizeString(config?.server?.apikey);
+}
+
 function resolveJsonBodyLimit(config?: ServerConfigV2): string {
   const envLimit = normalizeString(process.env.ROUTECODEX_HTTP_BODY_LIMIT || process.env.RCC_HTTP_BODY_LIMIT);
   if (envLimit) return envLimit;
@@ -211,7 +233,7 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
       tmuxSessionId: parsedTmuxSessionId
     });
 
-    const expectedResolved = resolveEnvSecretReference(normalizeString(config?.server?.apikey));
+    const expectedResolved = resolveEnvSecretReference(resolveExpectedApiKeyForRequest(req, config));
     if (!expectedResolved.ok) {
       res.status(500).json({
         error: {
@@ -250,7 +272,9 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
     // Daemon admin JSON APIs are intentionally not under /daemon/* (legacy); they are still admin-only and
     // must be protected by the daemon password session, not by apikey.
     if (
-      path.startsWith('/providers/')
+      path.startsWith('/admin/')
+      || path === '/admin'
+      || path.startsWith('/providers/')
       || path.startsWith('/quota/')
       || path === '/quota/summary'
       || path === '/quota/providers'

@@ -1,16 +1,16 @@
 {
-  "generatedAt": "2026-05-11T12:04:10.182Z",
+  "generatedAt": "2026-05-12T15:05:28.233Z",
   "scope": "sharedmodule/llmswitch-core/src",
   "metrics": {
     "prodTsFileCount": 660,
-    "prodTsLocTotal": 105101,
+    "prodTsLocTotal": 105377,
     "nonNativeFileCount": 373,
-    "nonNativeLocTotal": 63958
+    "nonNativeLocTotal": 64145
   },
   "byTopDir": {
     "conversion": {
       "prodTsFiles": 326,
-      "prodTsLoc": 32724,
+      "prodTsLoc": 32813,
       "nonNativeFiles": 133,
       "nonNativeLoc": 12550
     },
@@ -28,9 +28,9 @@
     },
     "sse": {
       "prodTsFiles": 44,
-      "prodTsLoc": 14383,
+      "prodTsLoc": 14570,
       "nonNativeFiles": 43,
-      "nonNativeLoc": 14006
+      "nonNativeLoc": 14193
     },
     "tools": {
       "prodTsFiles": 25,
@@ -1224,7 +1224,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_inbound/resp_inbound_stage1_sse_decode/index.ts",
-      "loc": 296,
+      "loc": 374,
       "nativeLinked": true,
       "topDir": "conversion"
     },
@@ -2052,7 +2052,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/snapshot-utils.ts",
-      "loc": 432,
+      "loc": 443,
       "nativeLinked": true,
       "topDir": "conversion"
     },
@@ -3714,7 +3714,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts",
-      "loc": 184,
+      "loc": 201,
       "nativeLinked": false,
       "topDir": "sse"
     },
@@ -3798,7 +3798,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts",
-      "loc": 420,
+      "loc": 484,
       "nativeLinked": false,
       "topDir": "sse"
     },
@@ -3810,13 +3810,13 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts",
-      "loc": 1276,
+      "loc": 1300,
       "nativeLinked": false,
       "topDir": "sse"
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts",
-      "loc": 1686,
+      "loc": 1709,
       "nativeLinked": false,
       "topDir": "sse"
     },
@@ -3840,19 +3840,19 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts",
-      "loc": 619,
+      "loc": 662,
       "nativeLinked": false,
       "topDir": "sse"
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/types/anthropic-types.ts",
-      "loc": 208,
+      "loc": 212,
       "nativeLinked": false,
       "topDir": "sse"
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/types/chat-types.ts",
-      "loc": 430,
+      "loc": 436,
       "nativeLinked": false,
       "topDir": "sse"
     },
@@ -3882,7 +3882,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/sse/types/responses-types.ts",
-      "loc": 456,
+      "loc": 462,
       "nativeLinked": false,
       "topDir": "sse"
     },

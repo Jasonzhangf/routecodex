@@ -457,14 +457,11 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn is_provider_available(&mut self, env: Env, provider_key: &str) -> bool {
-        let runtime_key = self
-            .provider_registry
-            .get(provider_key)
-            .and_then(|profile| profile.runtime_key.clone());
-        if let Some(runtime_key) = runtime_key.as_deref() {
-            if self.is_concurrency_busy(runtime_key) {
-                return false;
-            }
+        if self
+            .concurrency_busy_remaining_for_provider(provider_key, now_ms())
+            .is_some()
+        {
+            return false;
         }
         if let Some(profile) = self.provider_registry.get(provider_key) {
             if !profile.enabled {
@@ -624,6 +621,16 @@ fn collect_recoverable_cooldown_for_key(
     min_recoverable_cooldown_ms: &mut Option<i64>,
     hints: &mut Vec<RecoverableCooldownHint>,
 ) {
+    if let Some(wait_ms) = core.concurrency_busy_remaining_for_provider(provider_key, now_ms) {
+        record_recoverable_cooldown(
+            provider_key,
+            wait_ms,
+            "concurrency.busy",
+            min_recoverable_cooldown_ms,
+            hints,
+        );
+    }
+
     if let Some(ref quota_view) = core.quota_view {
         if let Some(entry) = call_quota_view(env, quota_view, provider_key) {
             if let Some(blacklist_until) = entry.blacklist_until {
@@ -686,6 +693,7 @@ pub(crate) fn build_provider_not_available_error(
         sorted_hints.sort_by_key(|item| item.wait_ms);
         let details = json!({
             "minRecoverableCooldownMs": min_wait_ms,
+            "candidateProviderCount": candidate_keys.len(),
             "recoverableCooldownHints": sorted_hints
                 .into_iter()
                 .take(8)

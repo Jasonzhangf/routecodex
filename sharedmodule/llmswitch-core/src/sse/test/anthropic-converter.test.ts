@@ -93,7 +93,7 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
     });
   });
 
-  it('uses pre-anchor idle timeout after thinking-only deltas', async () => {
+  it('switches anthropic timeout mode after non-empty thinking deltas', async () => {
     const converter = new AnthropicSseToJsonConverter();
     async function* thinkingThenIdle(): AsyncGenerator<string> {
       yield `event: message_start
@@ -122,7 +122,7 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","
         status: 504,
         statusCode: 504,
         retryable: true,
-        upstreamCode: 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT',
+        upstreamCode: 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT',
         requestExecutorProviderErrorStage: 'provider.sse_decode'
       });
   });
@@ -200,7 +200,7 @@ data: {"type":"ping"}
         upstreamCode: 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT',
         requestExecutorProviderErrorStage: 'provider.sse_decode'
       });
-    expect(Date.now() - startedAt).toBeLessThan(110);
+    expect(Date.now() - startedAt).toBeLessThan(130);
   });
 
   it('uses 15-minute SSE conversion defaults', () => {

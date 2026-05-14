@@ -28,8 +28,15 @@ describe('servertool skeleton config', () => {
     expect(buildServertoolPendingInjectionConfig()).toEqual({
       messageKinds: ['assistant_tool_calls', 'tool_outputs']
     });
-    expect(buildServertoolFollowupConfig()).toEqual({
-      genericInjectionOps: ['append_assistant_message', 'append_tool_messages_from_tool_outputs']
+    expect(buildServertoolFollowupConfig()).toMatchObject({
+      genericInjectionOps: ['append_assistant_message', 'append_tool_messages_from_tool_outputs'],
+      flowPolicy: {
+        profilesByFlowId: {
+          stopless_goal_continue_flow: {
+            stickyProvider: true
+          }
+        }
+      }
     });
   });
 
@@ -64,6 +71,7 @@ describe('servertool skeleton config', () => {
 
     const toolSpecs = listServertoolToolSpecs();
     expect(toolSpecs.some((entry) => entry.name === 'reasoning_stop_guard')).toBe(true);
+    expect(toolSpecs.some((entry) => entry.name === 'stopless_goal_guard')).toBe(true);
   });
 
   test('native auto hook planner respects config primary order', () => {

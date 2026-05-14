@@ -7,7 +7,7 @@
  * - Auto:    automatic resolution based on protocol match
  */
 
-import type { ProtocolBehavior, PortConfig } from './port-config-types.js';
+import type { PortConfig } from './port-config-types.js';
 import { checkDirectProtocolMatch, resolveActualBehavior } from './port-config-validator.js';
 import type { ProviderHandle, ProviderProtocol } from './types.js';
 
@@ -15,6 +15,10 @@ export interface ProviderDirectPipelineOptions {
   portConfig: PortConfig;
   resolveProvider: (bindingKey: string) => ProviderHandle | undefined;
   detectInboundProtocol: (req: { path?: string; headers?: Record<string, string | string[] | undefined> }) => ProviderProtocol;
+  preparePayload?: (
+    payload: Record<string, unknown>,
+    context: { port: number; providerKey: string; protocol: ProviderProtocol; actualBehavior: 'direct' | 'relay' },
+  ) => void;
   onSnapshotBefore?: (payload: Record<string, unknown>, context: { port: number; providerKey: string; protocol: ProviderProtocol }) => void;
   onSnapshotAfter?: (result: unknown, context: { port: number; providerKey: string; protocol: ProviderProtocol }) => void;
 }
@@ -69,6 +73,12 @@ export async function executeProviderDirectPipeline(
       providerHandle.providerProtocol,
     );
   }
+  options.preparePayload?.(payloadToSend, {
+    port: portConfig.port,
+    providerKey: providerBinding,
+    protocol: inboundProtocol,
+    actualBehavior,
+  });
 
   const response = await providerHandle.instance.processIncoming(payloadToSend);
 
@@ -95,7 +105,35 @@ async function convertProtocolForRelay(
   if (inboundProtocol === providerProtocol) {
     return payload;
   }
+  if (!isSupportedRelayPair(inboundProtocol, providerProtocol)) {
+    throw new Error(
+      `Provider mode relay only supports openai-chat <-> anthropic-messages today: inbound=${inboundProtocol}, provider=${providerProtocol}`,
+    );
+  }
   return remapPayloadFields(payload, inboundProtocol, providerProtocol);
+}
+
+/**
+ * Supported relay pairs for provider-direct pipeline.
+ * Covers all 4 major protocol families. Unsupported pairs must fail-fast.
+ */
+function isSupportedRelayPair(from: ProviderProtocol, to: ProviderProtocol): boolean {
+  if (from === to) return true;
+  const pairs: [ProviderProtocol, ProviderProtocol][] = [
+    ['openai-chat', 'anthropic-messages'],
+    ['anthropic-messages', 'openai-chat'],
+    ['openai-chat', 'openai-responses'],
+    ['openai-responses', 'openai-chat'],
+    ['anthropic-messages', 'openai-responses'],
+    ['openai-responses', 'anthropic-messages'],
+    ['openai-chat', 'gemini-chat'],
+    ['gemini-chat', 'openai-chat'],
+    ['anthropic-messages', 'gemini-chat'],
+    ['gemini-chat', 'anthropic-messages'],
+    ['openai-responses', 'gemini-chat'],
+    ['gemini-chat', 'openai-responses'],
+  ];
+  return pairs.some(([a, b]) => a === from && b === to);
 }
 
 function remapPayloadFields(

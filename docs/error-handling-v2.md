@@ -21,8 +21,6 @@
 - **RouteErrorHub / ErrorHandlingCenter 现阶段只保留 Host 边界职责**
   - 适用：HTTP / server / CLI / 外层错误映射与统一返回
   - 不再承担 provider runtime retry/reroute/backoff 主决策
-- **stopless 静默停已加硬校验**
-  - 若 `stopless=on/endless` 且响应完成时缺少 `reasoning.stop` finalized marker，直接抛 `STOPLESS_FINALIZATION_MISSING`（502、retryable）
 - **429 止血已落地**
   - `RequestExecutor` 不再因为“当前 tier 是 singleton”就抱着当前 provider 死重试
   - 当前 provider 出错会优先被排除并 reroute

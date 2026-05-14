@@ -20,8 +20,7 @@ import {
   shouldDisableServerToolTimeoutForClockHold
 } from './orchestration-policy-block.js';
 import {
-  runPrimaryServerToolEngineSelection,
-  runReasoningStopGuardPrepass
+  runPrimaryServerToolEngineSelection
 } from './engine-selection-block.js';
 import { persistPendingServerToolInjection } from './pending-injection-block.js';
 import { runFollowupMainline } from './followup-mainline-block.js';
@@ -183,19 +182,9 @@ export async function runServerToolOrchestration(
     serverToolTimeoutMs,
     requestId: options.requestId
   });
-  const guardPrepassResult = await runReasoningStopGuardPrepass({
-    chat: options.chat,
-    adapterContext: options.adapterContext,
-    stopSignal,
-    runEngine,
-    logProgress,
-    logStopEntry
+  const engineResult = await runPrimaryServerToolEngineSelection({
+    runEngine
   });
-  if (guardPrepassResult) {
-    return guardPrepassResult;
-  }
-
-  const engineResult = await runPrimaryServerToolEngineSelection({ runEngine });
   if (engineResult.mode === 'passthrough' || !engineResult.execution) {
     const skipReason = engineResult.mode === 'passthrough' ? 'passthrough' : 'no_execution';
     if (stopSignal.observed) {

@@ -1,4 +1,8 @@
-export type { RoutingInstruction, RoutingInstructionState } from './routing-instructions/types.js';
+export type {
+  RoutingInstruction,
+  RoutingInstructionState,
+  StoplessGoalStateSnapshot
+} from './routing-instructions/types.js';
 export {
   ROUTING_INSTRUCTION_MARKER_PATTERN,
   ROUTING_INSTRUCTION_MARKER_GLOBAL_PATTERN

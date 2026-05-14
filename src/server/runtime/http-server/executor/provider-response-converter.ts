@@ -40,6 +40,8 @@ import {
 
 import {
   asFlatRecord,
+  collectValidatedConvertedProviderToolCallsOrThrow,
+  normalizeValidatedConvertedProviderToolCallsInPlace,
   tryParseJsonLikeString,
   hasStoplessDirectiveInRequestPayload,
   collectDeclaredToolNames,
@@ -47,7 +49,6 @@ import {
   findNestedErrorMarker,
   normalizeRecoveredToolCalls,
   stringifyToolCallArgumentsForValidation,
-  validateConvertedProviderToolCallsOrThrow,
   isGenericBridgeResponseContractError,
   isContextLengthExceededError,
   isRetryableNetworkSseWrapperError,
@@ -56,6 +57,238 @@ import {
   FATAL_CONVERSION_ERROR_CODES,
   STOPLESS_DIRECTIVE_PATTERN
 } from './provider-response-shared-pure-blocks.js';
+
+type StoplessGoalProjection = {
+  status: 'active' | 'paused' | 'stopped' | 'completed';
+  objective: string;
+  latestNote?: string;
+  completionEvidence?: string;
+  nextStep?: string;
+  userQuestion?: string;
+  cannotContinueReason?: string;
+  blockingEvidence?: string;
+  attemptsExhausted?: boolean;
+  errorClass?: string;
+  completionSummary?: string;
+  ssotAssessment?: string;
+  consecutiveIrrecoverableErrors?: number;
+  consecutiveValidationFailures?: number;
+  consecutiveNoProgress?: number;
+  updatedAt: number;
+  createdAt: number;
+};
+
+function readNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function readFiniteNonNegativeNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : undefined;
+}
+
+function readCurrentGoalState(args: {
+  adapterContext: Record<string, unknown>;
+  pipelineMetadata?: Record<string, unknown>;
+}): StoplessGoalProjection | undefined {
+  const direct = asFlatRecord(args.adapterContext.stoplessGoalState);
+  if (direct && typeof direct.status === 'string' && typeof direct.objective === 'string') {
+    return direct as StoplessGoalProjection;
+  }
+  const meta = asFlatRecord(args.pipelineMetadata?.stoplessGoalState);
+  if (meta && typeof meta.status === 'string' && typeof meta.objective === 'string') {
+    return meta as StoplessGoalProjection;
+  }
+  return undefined;
+}
+
+function writeProjectedGoalState(args: {
+  adapterContext: Record<string, unknown>;
+  pipelineMetadata?: Record<string, unknown>;
+  state: StoplessGoalProjection;
+}): StoplessGoalProjection {
+  args.adapterContext.stoplessGoalState = args.state;
+  const rt = asFlatRecord(args.adapterContext.__rt) ?? {};
+  args.adapterContext.__rt = {
+    ...rt,
+    stoplessGoalStatus: args.state.status
+  };
+  syncAdapterContextRuntimeBackToPipelineMetadata({
+    pipelineMetadata: args.pipelineMetadata,
+    adapterContext: args.adapterContext
+  });
+  return args.state;
+}
+
+function projectValidatedGoalStateFromConvertedBody(args: {
+  payload: unknown;
+  adapterContext: Record<string, unknown>;
+  pipelineMetadata?: Record<string, unknown>;
+  declaredToolNames?: Set<string>;
+}): StoplessGoalProjection | undefined {
+  const toolCalls = collectValidatedConvertedProviderToolCallsOrThrow(args.payload, args.declaredToolNames);
+  let lastCreateGoalArgs: Record<string, unknown> | undefined;
+  let lastUpdateGoalArgs: Record<string, unknown> | undefined;
+  for (const toolCall of toolCalls) {
+    if (toolCall.name.trim().toLowerCase() === 'create_goal') {
+      if (toolCall.normalizedInput && typeof toolCall.normalizedInput === 'object' && !Array.isArray(toolCall.normalizedInput)) {
+        lastCreateGoalArgs = toolCall.normalizedInput;
+      }
+      continue;
+    }
+    if (toolCall.name.trim().toLowerCase() !== 'update_goal') {
+      continue;
+    }
+    if (toolCall.normalizedInput && typeof toolCall.normalizedInput === 'object' && !Array.isArray(toolCall.normalizedInput)) {
+      lastUpdateGoalArgs = toolCall.normalizedInput;
+    }
+  }
+
+  const existingGoal = readCurrentGoalState({
+    adapterContext: args.adapterContext,
+    pipelineMetadata: args.pipelineMetadata
+  });
+  if (!lastUpdateGoalArgs && !lastCreateGoalArgs) {
+    return undefined;
+  }
+
+  if (lastUpdateGoalArgs) {
+    const status = readNonEmptyString(lastUpdateGoalArgs.status)?.toLowerCase();
+    if (status !== 'active' && status !== 'paused' && status !== 'stopped' && status !== 'completed') {
+      return undefined;
+    }
+
+    const objective =
+      readNonEmptyString(lastUpdateGoalArgs.objective)
+      ?? readNonEmptyString(lastUpdateGoalArgs.goal)
+      ?? readNonEmptyString(existingGoal?.objective);
+    if (!objective) {
+      return undefined;
+    }
+
+    const createdAt =
+      readFiniteNonNegativeNumber(existingGoal?.createdAt)
+      ?? Date.now();
+    const updatedAt = Date.now();
+
+    const nextState: StoplessGoalProjection = {
+      status,
+      objective,
+      updatedAt,
+      createdAt,
+    };
+
+    switch (status) {
+      case 'active': {
+        const nextStep = readNonEmptyString(lastUpdateGoalArgs.next_step) ?? readNonEmptyString(lastUpdateGoalArgs.nextStep);
+        if (nextStep) {
+          nextState.nextStep = nextStep;
+          nextState.latestNote = nextStep;
+        }
+        return nextState;
+      }
+      case 'paused': {
+        const userQuestion =
+          readNonEmptyString(lastUpdateGoalArgs.user_question) ?? readNonEmptyString(lastUpdateGoalArgs.userQuestion);
+        const cannotContinueReason =
+          readNonEmptyString(lastUpdateGoalArgs.cannot_continue_reason)
+          ?? readNonEmptyString(lastUpdateGoalArgs.cannotContinueReason);
+        if (userQuestion) {
+          nextState.userQuestion = userQuestion;
+        }
+        if (cannotContinueReason) {
+          nextState.cannotContinueReason = cannotContinueReason;
+          nextState.latestNote = cannotContinueReason;
+        }
+        return nextState;
+      }
+      case 'stopped': {
+        const blockingEvidence =
+          readNonEmptyString(lastUpdateGoalArgs.blocking_evidence)
+          ?? readNonEmptyString(lastUpdateGoalArgs.blockingEvidence);
+        const errorClass =
+          readNonEmptyString(lastUpdateGoalArgs.error_class)
+          ?? readNonEmptyString(lastUpdateGoalArgs.errorClass);
+        const attemptsExhausted = lastUpdateGoalArgs.attempts_exhausted === true || lastUpdateGoalArgs.attemptsExhausted === true;
+        if (blockingEvidence) {
+          nextState.blockingEvidence = blockingEvidence;
+          nextState.latestNote = blockingEvidence;
+        }
+        if (errorClass) {
+          nextState.errorClass = errorClass;
+        }
+        if (attemptsExhausted === true) {
+          nextState.attemptsExhausted = true;
+        }
+        return nextState;
+      }
+      case 'completed': {
+        const completionEvidence =
+          readNonEmptyString(lastUpdateGoalArgs.completion_evidence)
+          ?? readNonEmptyString(lastUpdateGoalArgs.completionEvidence);
+        const completionSummary =
+          readNonEmptyString(lastUpdateGoalArgs.completion_summary)
+          ?? readNonEmptyString(lastUpdateGoalArgs.completionSummary);
+        const ssotAssessment =
+          readNonEmptyString(lastUpdateGoalArgs.ssot_assessment)
+          ?? readNonEmptyString(lastUpdateGoalArgs.ssotAssessment);
+        if (completionEvidence) {
+          nextState.completionEvidence = completionEvidence;
+        }
+        if (completionSummary) {
+          nextState.completionSummary = completionSummary;
+          nextState.latestNote = completionSummary;
+        }
+        if (ssotAssessment) {
+          nextState.ssotAssessment = ssotAssessment;
+        }
+        return nextState;
+      }
+    }
+    return nextState;
+  }
+
+  const createObjective =
+    readNonEmptyString(lastCreateGoalArgs?.objective)
+    ?? readNonEmptyString(lastCreateGoalArgs?.goal);
+  if (!createObjective) {
+    return undefined;
+  }
+  const nowMs = Date.now();
+  return {
+    status: 'active',
+    objective: createObjective,
+    latestNote: createObjective,
+    updatedAt: nowMs,
+    createdAt: nowMs,
+  };
+}
+
+function syncProjectedGoalStateBackToPipelineMetadata(args: {
+  payload: unknown;
+  adapterContext: Record<string, unknown>;
+  pipelineMetadata?: Record<string, unknown>;
+  declaredToolNames?: Set<string>;
+}): StoplessGoalProjection | undefined {
+  const projected = projectValidatedGoalStateFromConvertedBody({
+    payload: args.payload,
+    adapterContext: args.adapterContext,
+    pipelineMetadata: args.pipelineMetadata,
+    declaredToolNames: args.declaredToolNames
+  });
+  if (!projected) {
+    return undefined;
+  }
+  return writeProjectedGoalState({
+    adapterContext: args.adapterContext,
+    pipelineMetadata: args.pipelineMetadata,
+    state: projected
+  });
+}
+
 function logProviderResponseConverterNonBlockingError(
   stage: string,
   error: unknown,
@@ -68,6 +301,10 @@ function logProviderResponseConverterNonBlockingError(
     details,
     throttleKey: stage
   });
+}
+
+function isRecoverableSseDecodeBridgeError(error: Record<string, unknown>): boolean {
+  return error.requestExecutorProviderErrorStage === 'provider.sse_decode' && error.retryable === true;
 }
 
 function shouldEnableHubStageRecorder(): boolean {
@@ -121,7 +358,7 @@ function remapBridgeSseErrorToHttp(error: Record<string, unknown>, message: stri
   }
 }
 
-function syncHubStageTopBackToPipelineMetadata(options: {
+function syncAdapterContextRuntimeBackToPipelineMetadata(options: {
   pipelineMetadata?: Record<string, unknown>;
   adapterContext: Record<string, unknown>;
 }): void {
@@ -130,14 +367,28 @@ function syncHubStageTopBackToPipelineMetadata(options: {
     return;
   }
   const adapterRt = asRecord((options.adapterContext as Record<string, unknown>).__rt);
-  if (!adapterRt || !Array.isArray(adapterRt.hubStageTop) || adapterRt.hubStageTop.length === 0) {
+  const adapterGoalState = asRecord((options.adapterContext as Record<string, unknown>).stoplessGoalState);
+  if (
+    !adapterRt
+    && !adapterGoalState
+  ) {
     return;
   }
   const metadataRt = asRecord((pipelineMetadata as Record<string, unknown>).__rt) ?? {};
   (pipelineMetadata as Record<string, unknown>).__rt = {
     ...metadataRt,
-    hubStageTop: adapterRt.hubStageTop
+    ...(Array.isArray(adapterRt?.hubStageTop) && adapterRt.hubStageTop.length > 0
+      ? { hubStageTop: adapterRt.hubStageTop }
+      : {}),
+    ...(typeof adapterRt?.goalMode === 'boolean' ? { goalMode: adapterRt.goalMode } : {}),
+    ...(typeof adapterRt?.stoplessGoalStatus === 'string' && adapterRt.stoplessGoalStatus.trim()
+      ? { stoplessGoalStatus: adapterRt.stoplessGoalStatus.trim() }
+      : {}),
+    ...(Array.isArray(adapterRt?.stoplessGoalDirectiveTypes) ? { stoplessGoalDirectiveTypes: adapterRt.stoplessGoalDirectiveTypes } : {})
   };
+  if (adapterGoalState) {
+    (pipelineMetadata as Record<string, unknown>).stoplessGoalState = adapterGoalState;
+  }
 }
 
 export type ConvertProviderResponseOptions = {
@@ -472,7 +723,7 @@ export async function convertProviderResponseIfNeeded(
       reenterPipeline: serverToolsEnabled ? reenterPipeline : undefined,
       clientInjectDispatch: serverToolsEnabled ? clientInjectDispatch : undefined
     });
-    syncHubStageTopBackToPipelineMetadata({
+    syncAdapterContextRuntimeBackToPipelineMetadata({
       pipelineMetadata: options.pipelineMetadata,
       adapterContext
     });
@@ -483,7 +734,14 @@ export async function convertProviderResponseIfNeeded(
       hasBody: converted.body !== undefined && converted.body !== null,
       elapsedMs: Date.now() - bridgeStartMs
     });
-    validateConvertedProviderToolCallsOrThrow(converted.body ?? body, collectDeclaredToolNames(baseContext));
+    const declaredToolNames = collectDeclaredToolNames(baseContext);
+    normalizeValidatedConvertedProviderToolCallsInPlace(converted.body ?? body, declaredToolNames);
+    syncProjectedGoalStateBackToPipelineMetadata({
+      payload: converted.body ?? body,
+      adapterContext,
+      pipelineMetadata: options.pipelineMetadata,
+      declaredToolNames
+    });
     if (converted.__sse_responses) {
       const usage = converted.body
         ? extractUsageFromResult({ body: converted.body })
@@ -513,6 +771,10 @@ export async function convertProviderResponseIfNeeded(
     const errCode = typeof errRecord.code === 'string' ? errRecord.code : undefined;
     const upstreamCode = typeof errRecord.upstreamCode === 'string' ? errRecord.upstreamCode : undefined;
     const errName = typeof errRecord.name === 'string' ? errRecord.name : undefined;
+    const requestExecutorProviderErrorStage =
+      typeof errRecord.requestExecutorProviderErrorStage === 'string'
+        ? errRecord.requestExecutorProviderErrorStage
+        : undefined;
     const detailRecord = asRecord(errRecord.details);
     const detailUpstreamCode =
       typeof (detailRecord as Record<string, unknown> | undefined)?.upstreamCode === 'string'
@@ -529,6 +791,7 @@ export async function convertProviderResponseIfNeeded(
       (typeof errCode === 'string' && FATAL_CONVERSION_ERROR_CODES.has(errCode) ? errCode : undefined)
       ?? (typeof upstreamCode === 'string' && FATAL_CONVERSION_ERROR_CODES.has(upstreamCode) ? upstreamCode : undefined)
       ?? (typeof detailUpstreamCode === 'string' && FATAL_CONVERSION_ERROR_CODES.has(detailUpstreamCode) ? detailUpstreamCode : undefined);
+
     if (fatalConversionCode) {
       logPipelineStage('convert.bridge.error', options.requestId, {
         code: errCode,
@@ -567,7 +830,7 @@ export async function convertProviderResponseIfNeeded(
       detailReason
     });
     const isServerToolFollowupFailure = convertErrorPlan.handled
-      && (errRecord as { requestExecutorProviderErrorStage?: unknown }).requestExecutorProviderErrorStage === 'provider.followup';
+      && requestExecutorProviderErrorStage === 'provider.followup';
     const followupLogDetails = isServerToolFollowupFailure
       ? extractServerToolFollowupErrorLogDetails(error)
       : undefined;
@@ -576,15 +839,21 @@ export async function convertProviderResponseIfNeeded(
       if (isSseDecodeError || isContextLengthExceeded) {
         remapBridgeSseErrorToHttp(errRecord, message);
       }
-      logPipelineStage('convert.bridge.error', options.requestId, {
+      const nonFollowupStageDetails = {
+        ...(convertErrorPlan.stageDetails ?? {}),
+        code: followupLogDetails?.code || (typeof errRecord.code === 'string' ? errRecord.code : errCode),
+        upstreamCode: followupLogDetails?.upstreamCode
+          || (typeof errRecord.upstreamCode === 'string' ? errRecord.upstreamCode : upstreamCode || detailUpstreamCode),
+        reason: followupLogDetails?.reason || compactFollowupLogReason(detailReason),
+        message
+      };
+      const bridgeErrorStage = isRecoverableSseDecodeBridgeError(errRecord)
+        ? 'convert.bridge.recoverable'
+        : 'convert.bridge.error';
+      logPipelineStage(bridgeErrorStage, options.requestId, {
         ...(isServerToolFollowupFailure
           ? (convertErrorPlan.stageDetails ?? {})
-          : (convertErrorPlan.stageDetails ?? {
-              code: followupLogDetails?.code || (typeof errRecord.code === 'string' ? errRecord.code : errCode),
-              upstreamCode: followupLogDetails?.upstreamCode || upstreamCode || detailUpstreamCode,
-              reason: followupLogDetails?.reason || compactFollowupLogReason(detailReason),
-              message
-            }))
+          : nonFollowupStageDetails)
       });
       if (isVerboseErrorLoggingEnabled()) {
         console.error(
@@ -607,4 +876,3 @@ export async function convertProviderResponseIfNeeded(
     throw error;
   }
 }
-

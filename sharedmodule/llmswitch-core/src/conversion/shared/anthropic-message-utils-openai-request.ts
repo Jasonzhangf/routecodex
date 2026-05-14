@@ -363,7 +363,14 @@ export function buildAnthropicRequestFromOpenAIChat(
 
   try {
     if (requestBody.metadata && typeof requestBody.metadata === 'object') {
-      out.metadata = JSON.parse(JSON.stringify(requestBody.metadata));
+      const base = JSON.parse(JSON.stringify(requestBody.metadata));
+      if (base && typeof base === 'object') {
+        delete base.clientHeaders;
+        delete base.client_headers;
+      }
+      if (base && typeof base === 'object' && Object.keys(base).length > 0) {
+        out.metadata = base;
+      }
     }
   } catch {
     // best-effort metadata clone

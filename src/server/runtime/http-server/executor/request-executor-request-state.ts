@@ -6,7 +6,7 @@ import { bindSessionConversationSession } from './request-retry-helpers.js';
 import { writeInboundClientSnapshot } from './request-executor-core-utils.js';
 import {
   peekSessionStormBackoffWaitMs,
-  resolveSessionStormBackoffScope,
+  resolveSessionStormBackoffScopes,
   waitSessionStormBackoffWithGate
 } from './request-executor-retry-planner.js';
 
@@ -15,7 +15,7 @@ export type RequestExecutorInitialRequestState = {
   inboundClientHeaders: Record<string, string> | undefined;
   providerRequestId: string;
   clientRequestId: string;
-  sessionStormBackoffScope?: string;
+  sessionStormBackoffScopes?: string[];
 };
 
 export async function initializeRequestExecutorRequestState(args: {
@@ -36,25 +36,26 @@ export async function initializeRequestExecutorRequestState(args: {
   const inboundClientHeaders = cloneClientHeaders(initialMetadata?.clientHeaders);
   const providerRequestId = args.input.requestId;
   const clientRequestId = resolveClientRequestId(initialMetadata, providerRequestId);
-  const sessionStormBackoffScope = resolveSessionStormBackoffScope(initialMetadata);
-  if (sessionStormBackoffScope) {
-    const pendingSessionStormWaitMs = peekSessionStormBackoffWaitMs(sessionStormBackoffScope);
-    if (pendingSessionStormWaitMs > 0) {
-      args.logStage('request.session_storm_backoff_wait', providerRequestId, {
-        scope: sessionStormBackoffScope,
-        waitMs: pendingSessionStormWaitMs
-      });
-      await waitSessionStormBackoffWithGate(
-        sessionStormBackoffScope,
-        pendingSessionStormWaitMs,
-        getClientConnectionAbortSignal(initialMetadata),
-        args.logNonBlockingError
-      );
-      args.logStage('request.session_storm_backoff_wait.completed', providerRequestId, {
-        scope: sessionStormBackoffScope,
-        waitMs: pendingSessionStormWaitMs
-      });
+  const sessionStormBackoffScopes = resolveSessionStormBackoffScopes(initialMetadata);
+  for (const scope of sessionStormBackoffScopes) {
+    const pendingSessionStormWaitMs = peekSessionStormBackoffWaitMs(scope);
+    if (!(pendingSessionStormWaitMs > 0)) {
+      continue;
     }
+    args.logStage('request.session_storm_backoff_wait', providerRequestId, {
+      scope,
+      waitMs: pendingSessionStormWaitMs
+    });
+    await waitSessionStormBackoffWithGate(
+      scope,
+      pendingSessionStormWaitMs,
+      getClientConnectionAbortSignal(initialMetadata),
+      args.logNonBlockingError
+    );
+    args.logStage('request.session_storm_backoff_wait.completed', providerRequestId, {
+      scope,
+      waitMs: pendingSessionStormWaitMs
+    });
   }
 
   args.logStage('request.received', providerRequestId, {
@@ -74,6 +75,6 @@ export async function initializeRequestExecutorRequestState(args: {
     inboundClientHeaders,
     providerRequestId,
     clientRequestId,
-    ...(sessionStormBackoffScope ? { sessionStormBackoffScope } : {})
+    ...(sessionStormBackoffScopes.length ? { sessionStormBackoffScopes } : {})
   };
 }

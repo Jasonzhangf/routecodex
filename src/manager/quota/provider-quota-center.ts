@@ -54,6 +54,7 @@ export interface QuotaState {
   totalTokensUsed: number;
 
   cooldownUntil: number | null;
+  cooldownKeepsPool?: boolean;
   blacklistUntil: number | null;
   lastErrorSeries: ErrorSeries | null;
   lastErrorCode: string | null;
@@ -109,6 +110,12 @@ const COOLDOWN_SCHEDULE_NETWORK_502_MS = [
   10_000,
   60_000,
   60_000
+] as const;
+const COOLDOWN_SCHEDULE_TRANSIENT_KEEP_POOL_MS = [
+  3_000,
+  5_000,
+  10_000,
+  31_000
 ] as const;
 const ERROR_CHAIN_WINDOW_MS = 10 * 60_000;
 
@@ -256,6 +263,21 @@ function resolveCooldownScheduleForEvent(
   return COOLDOWN_SCHEDULE_DEFAULT_MS;
 }
 
+function shouldKeepProviderInPoolDuringCooldown(series: ErrorSeries, consecutive: number): boolean {
+  if (consecutive <= 0) {
+    return false;
+  }
+  return (series === 'ENET' || series === 'E5XX' || series === 'EOTHER') && consecutive <= 2;
+}
+
+function computeTransientKeepPoolCooldownMs(series: ErrorSeries, consecutive: number): number | null {
+  if (!shouldKeepProviderInPoolDuringCooldown(series, consecutive)) {
+    return null;
+  }
+  const idx = Math.min(consecutive - 1, COOLDOWN_SCHEDULE_TRANSIENT_KEEP_POOL_MS.length - 1);
+  return COOLDOWN_SCHEDULE_TRANSIENT_KEEP_POOL_MS[idx] ?? null;
+}
+
 export function applyErrorEvent(
   state: QuotaState,
   event: ErrorEventForQuota,
@@ -283,13 +305,15 @@ export function applyErrorEvent(
   // Never wrap cooldown back to the first step within the same error-chain window.
   // Wrapping causes repeated short retries (hammering) and makes cooldowns appear to "loop".
   const nextCount = Math.min(rawNextCount, schedule.length);
-  const cooldownMs = ((): number | null => {
-    if (nextCount <= 0) {
-      return null;
-    }
-    const idx = Math.min(nextCount - 1, schedule.length - 1);
-    return schedule[idx] ?? null;
-  })();
+  const cooldownMs =
+    computeTransientKeepPoolCooldownMs(series, nextCount)
+    ?? (() => {
+      if (nextCount <= 0) {
+        return null;
+      }
+      const idx = Math.min(nextCount - 1, schedule.length - 1);
+      return schedule[idx] ?? null;
+    })();
   const nextUntil = cooldownMs ? nowMs + cooldownMs : null;
   const existingUntil =
     sameErrorKey && typeof state.cooldownUntil === 'number' ? state.cooldownUntil : null;
@@ -299,12 +323,17 @@ export function applyErrorEvent(
         ? existingUntil
         : nextUntil
       : existingUntil;
+  const inCooldown = typeof cooldownUntil === 'number' && cooldownUntil > nowMs;
+  const inBlacklist = typeof state.blacklistUntil === 'number' && state.blacklistUntil > nowMs;
+  const cooldownKeepsPool = shouldKeepProviderInPoolDuringCooldown(series, nextCount);
+  const inPool = !inBlacklist && (!inCooldown || cooldownKeepsPool);
 
   return {
     ...state,
-    inPool: false,
-    reason: 'cooldown',
+    inPool,
+    reason: inBlacklist ? 'blacklist' : inCooldown ? 'cooldown' : 'ok',
     cooldownUntil,
+    cooldownKeepsPool: inCooldown ? cooldownKeepsPool : undefined,
     lastErrorSeries: series,
     lastErrorCode: errorKey,
     lastErrorAtMs: nowMs,
@@ -350,6 +379,7 @@ export function applySuccessEvent(
     reason: nextReason,
     inPool: nextInPool,
     cooldownUntil: nextCooldownUntil,
+    cooldownKeepsPool: undefined,
     ...(nextReason === 'ok' ? { authIssue: null } : {}),
     lastErrorSeries: null,
     lastErrorCode: null,
@@ -415,44 +445,52 @@ export function applyUsageEvent(
 export function tickQuotaStateTime(state: QuotaState, nowMs: number): QuotaState {
   let next = state;
 
+  if (next.cooldownUntil !== null && nowMs >= next.cooldownUntil) {
+    next = { ...next, cooldownUntil: null, cooldownKeepsPool: undefined };
+  }
+  if (next.blacklistUntil !== null && nowMs >= next.blacklistUntil) {
+    next = { ...next, blacklistUntil: null };
+  }
+  if (next.authIssue) {
+    if (next.inPool !== false || next.reason !== 'authVerify') {
+      next = { ...next, inPool: false, reason: 'authVerify' };
+    }
+    return next;
+  }
+
   // Guard: persisted snapshots may carry inconsistent flags (e.g. `inPool: true` while cooldown is still active)
   // due to legacy window reset behavior. Ensure active cooldown/blacklist always removes the provider from pool.
   const withinBlacklist = next.blacklistUntil !== null && nowMs < next.blacklistUntil;
   const withinCooldown = next.cooldownUntil !== null && nowMs < next.cooldownUntil;
-  if ((withinBlacklist || withinCooldown) && next.inPool) {
-    next = {
-      ...next,
-      inPool: false,
-      reason:
-        withinBlacklist
-          ? 'blacklist'
-          : withinCooldown && next.reason === 'ok'
-          ? 'cooldown'
-          : next.reason
-    };
+  if (withinBlacklist) {
+    if (next.inPool !== false || next.reason !== 'blacklist') {
+      next = {
+        ...next,
+        inPool: false,
+        reason: 'blacklist'
+      };
+    }
+    return next;
+  }
+  if (withinCooldown) {
+    const keepInPool = next.cooldownKeepsPool === true;
+    if (next.inPool !== keepInPool || next.reason !== 'cooldown') {
+      next = {
+        ...next,
+        inPool: keepInPool,
+        reason: 'cooldown'
+      };
+    }
+    return next;
   }
 
   // 冷却与黑名单窗口到期处理。
-  if (next.blacklistUntil !== null && nowMs >= next.blacklistUntil) {
+  if (next.reason === 'cooldown' || next.reason === 'blacklist') {
     next = {
       ...next,
-      blacklistUntil: null,
-      cooldownUntil: null,
       inPool: true,
       reason: 'ok',
-      authIssue: null,
-      lastErrorSeries: null,
-      lastErrorCode: null,
-      lastErrorAtMs: null,
-      consecutiveErrorCount: 0
-    };
-  } else if (next.cooldownUntil !== null && nowMs >= next.cooldownUntil) {
-    next = {
-      ...next,
-      cooldownUntil: null,
-      inPool: true,
-      reason: next.reason === 'cooldown' || next.reason === 'quotaDepleted' ? 'ok' : next.reason,
-      ...(next.reason === 'cooldown' || next.reason === 'quotaDepleted' ? { authIssue: null } : {})
+      cooldownKeepsPool: undefined
     };
   }
 

@@ -1,0 +1,44 @@
+{
+  "version": "2.0.0",
+  "providerId": "deepseek",
+  "provider": {
+    "id": "deepseek",
+    "enabled": true,
+    "type": "openai",
+    "baseURL": "https://api.deepseek.com",
+    "compatibilityProfile": "chat:deepseek",
+    "auth": {
+      "type": "apikey",
+      "entries": [
+        {
+          "alias": "key1",
+          "apiKey": "${DEEPSEEK_API_KEY}"
+        }
+      ]
+    },
+    "models": {
+      "deepseek-chat": {
+        "supportsStreaming": true,
+        "maxTokens": 64000,
+        "maxContext": 512000,
+        "capabilities": [
+          "web_search"
+        ]
+      },
+      "deepseek-v4-pro": {
+        "supportsStreaming": true,
+        "maxTokens": 64000,
+        "maxContext": 512000,
+        "capabilities": [
+          "web_search"
+        ]
+      }
+    },
+    "transportBackend": "openai-sdk",
+    "concurrency": {
+      "maxInFlight": 4,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
+    }
+  }
+}

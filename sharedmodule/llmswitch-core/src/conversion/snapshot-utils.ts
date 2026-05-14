@@ -26,7 +26,12 @@ interface SnapshotPayload {
 
 const DEFAULT_SNAPSHOT_ALLOWED_STAGES = Object.freeze([
   'provider-request',
-  'provider-response'
+  'provider-response',
+  'chat_process.resp.stage1.sse_decode',
+  'chat_process.resp.stage4.semantic_map_to_chat.chat',
+  'chat_process.resp.stage6.canonicalize_chat_completion',
+  'chat_process.resp.stage7.tool_governance',
+  'chat_process.resp.stage8.finalize'
 ]);
 
 type SnapshotStagePolicy = {
@@ -199,7 +204,13 @@ function shouldPreserveFullSnapshotPayload(stage: string): boolean {
     return true;
   }
   const normalized = String(stage || '').trim().toLowerCase();
-  return normalized.startsWith('provider-request') || normalized.startsWith('provider-response');
+  return normalized.startsWith('provider-request')
+    || normalized.startsWith('provider-response')
+    || normalized === 'chat_process.resp.stage1.sse_decode'
+    || normalized === 'chat_process.resp.stage4.semantic_map_to_chat.chat'
+    || normalized === 'chat_process.resp.stage6.canonicalize_chat_completion'
+    || normalized === 'chat_process.resp.stage7.tool_governance'
+    || normalized === 'chat_process.resp.stage8.finalize';
 }
 
 function resolveSnapshotPayloadMaxBytes(): number {

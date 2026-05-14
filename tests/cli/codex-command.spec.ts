@@ -907,8 +907,8 @@ describe('cli codex command', () => {
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: {},
-      rawArgv: ['codex', 'resume', '--dangerously-bypass-approvals-and-sandbox', '--profile', 'tcm'],
+      env: { ROUTECODEX_HTTP_APIKEY: 'sk-test-key' },
+      rawArgv: ['codex', 'resume', '--dangerously-bypass-approvals-and-sandbox', '--profile', 'tcm', '--url', 'http://localhost:5520/proxy'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',
       sleep: async () => {},
@@ -927,7 +927,7 @@ describe('cli codex command', () => {
     });
 
     await program.parseAsync(
-      ['node', 'routecodex', 'codex', 'resume', '--dangerously-bypass-approvals-and-sandbox', '--profile', 'tcm'],
+      ['node', 'routecodex', 'codex', 'resume', '--dangerously-bypass-approvals-and-sandbox', '--profile', 'tcm', '--url', 'http://localhost:5520/proxy'],
       { from: 'node' }
     );
 
@@ -935,6 +935,142 @@ describe('cli codex command', () => {
     expect(spawnCalls[0].command).toBe('codex');
     expect(spawnCalls[0].args).toEqual(['--profile', 'tcm', 'resume', '--dangerously-bypass-approvals-and-sandbox']);
     expect(spawnCalls[0].options?.env?.OPENAI_BASE_URL).toBeUndefined();
+  });
+
+  it('preserves an explicit resume session id when launching codex inside managed tmux', async () => {
+    const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
+    const tmuxCalls: Array<{ command: string; args: string[] }> = [];
+    const program = new Command();
+    const sessionId = '019e15c0-d49f-7431-a4bc-8b1ccce57b9f';
+
+    createCodexCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5555,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {
+        ROUTECODEX_HTTP_APIKEY: 'sk-test-key'
+      },
+      rawArgv: ['codex', 'resume', sessionId, '--dangerously-bypass-approvals-and-sandbox', '-p', 'long', '--url', 'http://localhost:5520/proxy'],
+      fsImpl: createStubFs(),
+      homedir: () => '/home/test',
+      cwd: () => '/home/test/workspace-a',
+      sleep: async () => {},
+      fetch: (async (url: string) => {
+        if (url.endsWith('/ready') || url.endsWith('/health')) {
+          return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
+        }
+        return { ok: true, status: 200, json: async () => ({ ok: true }) } as any;
+      }) as any,
+      spawnSyncImpl: (command: string, args: string[]) => {
+        tmuxCalls.push({ command, args });
+        if (command !== 'tmux') {
+          return { status: 1, stdout: '', stderr: 'unknown command' } as any;
+        }
+        if (args[0] === '-V') {
+          return { status: 0, stdout: 'tmux 3.4', stderr: '' } as any;
+        }
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
+        }
+        if (args[0] === 'new-session' || args[0] === 'respawn-pane' || args[0] === 'send-keys') {
+          return { status: 0, stdout: '', stderr: '' } as any;
+        }
+        return { status: 0, stdout: '', stderr: '' } as any;
+      },
+      spawn: (command, args, options) => {
+        spawnCalls.push({ command, args, options });
+        return { on: () => {}, kill: () => true } as any;
+      },
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(
+      ['node', 'routecodex', 'codex', 'resume', sessionId, '--dangerously-bypass-approvals-and-sandbox', '-p', 'long', '--url', 'http://localhost:5520/proxy'],
+      { from: 'node' }
+    );
+
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].command).toBe('tmux');
+    expect(spawnCalls[0].args).toEqual(expect.arrayContaining(['attach-session']));
+    const launchCall = findTmuxLaunchCall(tmuxCalls);
+    expect(launchCall).toBeDefined();
+    const shellCommand = extractTmuxLaunchShellCommand(launchCall);
+    expect(shellCommand).toContain(`'resume' '${sessionId}' '--dangerously-bypass-approvals-and-sandbox' '-p' 'long'`);
+  });
+
+  it('fails fast when managed tmux codex resume is missing both session id and --last', async () => {
+    const errors: string[] = [];
+    const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
+    const tmuxCalls: Array<{ command: string; args: string[] }> = [];
+    const program = new Command();
+
+    createCodexCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5555,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: (msg) => errors.push(String(msg)) },
+      env: {
+        ROUTECODEX_HTTP_APIKEY: 'sk-test-key'
+      },
+      rawArgv: ['codex', 'resume', '--dangerously-bypass-approvals-and-sandbox', '-p', 'long', '--url', 'http://localhost:5520/proxy'],
+      fsImpl: createStubFs(),
+      homedir: () => '/home/test',
+      cwd: () => '/home/test/workspace-a',
+      sleep: async () => {},
+      fetch: (async (url: string) => {
+        if (url.endsWith('/ready') || url.endsWith('/health')) {
+          return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
+        }
+        return { ok: true, status: 200, json: async () => ({ ok: true }) } as any;
+      }) as any,
+      spawnSyncImpl: (command: string, args: string[]) => {
+        tmuxCalls.push({ command, args });
+        if (command !== 'tmux') {
+          return { status: 1, stdout: '', stderr: 'unknown command' } as any;
+        }
+        if (args[0] === '-V') {
+          return { status: 0, stdout: 'tmux 3.4', stderr: '' } as any;
+        }
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
+        }
+        if (args[0] === 'new-session' || args[0] === 'respawn-pane' || args[0] === 'send-keys') {
+          return { status: 0, stdout: '', stderr: '' } as any;
+        }
+        return { status: 0, stdout: '', stderr: '' } as any;
+      },
+      spawn: (command, args, options) => {
+        spawnCalls.push({ command, args, options });
+        return { on: () => {}, kill: () => true } as any;
+      },
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(
+      program.parseAsync(
+        ['node', 'routecodex', 'codex', 'resume', '--dangerously-bypass-approvals-and-sandbox', '-p', 'long', '--url', 'http://localhost:5520/proxy'],
+        { from: 'node' }
+      )
+    ).rejects.toThrow('exit:1');
+
+    expect(spawnCalls).toHaveLength(0);
+    expect(tmuxCalls.some((call) => call.args[0] === 'new-session')).toBe(false);
+    expect(errors.some((line) => line.includes('requires an explicit SESSION_ID or --last'))).toBe(true);
   });
 
 

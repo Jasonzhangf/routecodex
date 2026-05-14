@@ -23,6 +23,9 @@
     "openrouter",
     "qwen",
     "tab",
-    "tabglm"
+    "tabglm",
+    "dbittai",
+    "dbittai-gpt",
+    "deepseek"
   ]
 }

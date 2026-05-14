@@ -177,6 +177,13 @@ export function normalizeUsage(value: unknown): UsageMetrics | undefined {
       cacheRead = cached;
     }
   }
+  if (cacheRead === undefined && usageRecord.prompt_tokens_details && typeof usageRecord.prompt_tokens_details === 'object') {
+    const details = usageRecord.prompt_tokens_details as Record<string, unknown>;
+    const cached = readNumeric(details.cached_tokens);
+    if (cached !== undefined) {
+      cacheRead = cached;
+    }
+  }
 
   const cacheCreation: number | undefined =
     readNumeric(usageRecord.cache_creation_input_tokens);

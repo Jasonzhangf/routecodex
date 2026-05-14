@@ -35,6 +35,7 @@ export function mergeQuotaStates(providerKey: string, states: QuotaState[]): Quo
 
   let worstReason = base.reason;
   let cooldownUntil: number | null = base.cooldownUntil ?? null;
+  let cooldownKeepsPool = base.cooldownKeepsPool === true;
   let blacklistUntil: number | null = base.blacklistUntil ?? null;
   let authType: QuotaAuthType = base.authType ?? 'unknown';
   let priorityTier = typeof base.priorityTier === 'number' ? base.priorityTier : 100;
@@ -60,6 +61,7 @@ export function mergeQuotaStates(providerKey: string, states: QuotaState[]): Quo
     const c = typeof s.cooldownUntil === 'number' && Number.isFinite(s.cooldownUntil) ? s.cooldownUntil : null;
     const b = typeof s.blacklistUntil === 'number' && Number.isFinite(s.blacklistUntil) ? s.blacklistUntil : null;
     cooldownUntil = c !== null ? (cooldownUntil !== null ? Math.max(cooldownUntil, c) : c) : cooldownUntil;
+    cooldownKeepsPool = cooldownKeepsPool || s.cooldownKeepsPool === true;
     blacklistUntil = b !== null ? (blacklistUntil !== null ? Math.max(blacklistUntil, b) : b) : blacklistUntil;
 
     if (s.authType === 'oauth' || authType === 'oauth') {
@@ -130,6 +132,7 @@ export function mergeQuotaStates(providerKey: string, states: QuotaState[]): Quo
     priorityTier,
     totalTokensUsed,
     cooldownUntil,
+    cooldownKeepsPool,
     blacklistUntil,
     lastErrorSeries,
     ...(lastErrorCode !== null ? { lastErrorCode } : { lastErrorCode: null }),
@@ -146,8 +149,8 @@ export function mergeQuotaStates(providerKey: string, states: QuotaState[]): Quo
   if (activeBlacklist) {
     merged.inPool = false;
     merged.reason = 'blacklist';
-  } else if (activeCooldown && merged.reason === 'ok') {
-    merged.inPool = false;
+  } else if (activeCooldown) {
+    merged.inPool = merged.cooldownKeepsPool === true;
     merged.reason = 'cooldown';
   }
 

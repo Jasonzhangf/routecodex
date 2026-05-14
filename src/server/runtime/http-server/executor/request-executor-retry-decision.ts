@@ -247,9 +247,7 @@ export function resolveProviderRetryEligibilityPlan(args: {
     contextOverflowRetries: args.contextOverflowRetries,
     maxContextOverflowRetries: args.maxContextOverflowRetries ?? MAX_CONTEXT_OVERFLOW_RETRIES,
     allowNonPolicyRetry: false,
-    stageOutsideProviderFailurePolicy:
-      args.stage === 'host.stopless_contract'
-      || args.stage === 'host.response_contract'
+    stageOutsideProviderFailurePolicy: args.stage === 'host.response_contract'
   });
   return {
     shouldRetry: eligibility.shouldRetry,

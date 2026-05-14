@@ -61,6 +61,7 @@ import {
 import {
   isPoolExhaustedPipelineError,
   mergeMetadataPreservingDefined,
+  resolvePoolCooldownCandidateProviderCount,
   resolvePoolCooldownWaitMs,
   writeInboundClientSnapshot
 } from './executor/request-executor-core-utils.js';
@@ -102,7 +103,6 @@ import {
   detectAssistantSanitizationPlaceholder,
   detectEmptyProviderRequestPayload,
   detectRetryableEmptyAssistantResponse,
-  detectStoplessTerminationWithoutFinalization,
   persistPayloadContractProviderSnapshots
 } from './executor/request-executor-response-contract.js';
 import { processProviderResolveFailure } from './executor/request-executor-provider-resolve-failure.js';
@@ -148,6 +148,7 @@ import {
   resolveProviderRetryExecutionPlan,
   resolveProviderRetryExclusionPlan,
   resolveSessionStormBackoffScope,
+  resolveSessionStormBackoffScopes,
   sessionStormBackoffGateState,
   waitProviderTransportBackoffWithGate,
   waitRecoverableBackoffWithGlobalGate,
@@ -448,7 +449,7 @@ export class HubRequestExecutor implements RequestExecutor {
         inboundClientHeaders,
         providerRequestId,
         clientRequestId,
-        sessionStormBackoffScope
+        sessionStormBackoffScopes
       } = await initializeRequestExecutorRequestState({
         input,
         logStage,
@@ -466,6 +467,7 @@ export class HubRequestExecutor implements RequestExecutor {
         let lastError: unknown;
         let initialRoutePool: string[] | null = null;
         let poolCooldownWaitBudgetMs = 60 * 1000;
+        let blockingSingletonRecoverablePoolCooldown = false;
         let forcedRouteHint: string | undefined;
         let contextOverflowRetries = 0;
         let blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null = null;
@@ -504,6 +506,9 @@ export class HubRequestExecutor implements RequestExecutor {
         } catch (pipelineError) {
           if (isPoolExhaustedPipelineError(pipelineError)) {
             const cooldownWaitMs = resolvePoolCooldownWaitMs(pipelineError);
+            const candidateProviderCount = resolvePoolCooldownCandidateProviderCount(pipelineError);
+            const singletonRecoverablePoolCandidate =
+              cooldownWaitMs !== undefined && candidateProviderCount === 1;
             if (
               blockingRecoverableRouteHoldState?.holdOnLastAvailable429
               && blockingRecoverableRouteHoldState.explicitSingletonPool
@@ -540,6 +545,21 @@ export class HubRequestExecutor implements RequestExecutor {
               attempt = Math.max(0, attempt - 1);
               continue;
             }
+            if (singletonRecoverablePoolCandidate) {
+              blockingSingletonRecoverablePoolCooldown = true;
+              logStage('provider.route_pool_cooldown_wait', providerRequestId, {
+                attempt,
+                waitMs: cooldownWaitMs,
+                reason: 'single_provider_pool_recoverable'
+              });
+              await waitWithClientAbortSignal(
+                cooldownWaitMs,
+                clientAbortSignal,
+                logRequestExecutorNonBlockingError
+              );
+              attempt = Math.max(0, attempt - 1);
+              continue;
+            }
             if (
               cooldownWaitMs &&
               attempt < maxAttempts &&
@@ -567,12 +587,16 @@ export class HubRequestExecutor implements RequestExecutor {
               attempt = Math.max(0, attempt - 1);
               continue;
             }
+            if (blockingSingletonRecoverablePoolCooldown && lastError) {
+              throw lastError;
+            }
             if (lastError) {
               throw lastError;
             }
           }
           throw pipelineError;
         }
+        blockingSingletonRecoverablePoolCooldown = false;
         blockingRecoverableRouteHoldState = null;
         const resolvedPipelineAttempt = resolveRequestExecutorPipelineAttempt({
           inputRequestId: input.requestId,
@@ -1108,7 +1132,6 @@ export class HubRequestExecutor implements RequestExecutor {
             converted,
             requestSemantics,
             mergedMetadata,
-            stoplessMode: stoplessLogState.mode,
             bypassTrafficGovernor,
             trafficGovernor: this.trafficGovernor,
             runtimeKey,
@@ -1127,8 +1150,8 @@ export class HubRequestExecutor implements RequestExecutor {
           aggregatedUsage = providerResponseResult.aggregatedUsage;
 
           recordAttempt({ usage: aggregatedUsage, error: false });
-          if (sessionStormBackoffScope) {
-            clearSessionStormBackoff(sessionStormBackoffScope);
+          for (const scope of sessionStormBackoffScopes ?? []) {
+            clearSessionStormBackoff(scope);
           }
           return buildProviderExecutionSuccessResult({
             converted,
@@ -1182,7 +1205,7 @@ export class HubRequestExecutor implements RequestExecutor {
             trafficPolicyMaxInFlight,
             providerTransportBackoffKey,
             consumeProviderTransportBackoffMs,
-            sessionStormBackoffScope,
+            sessionStormBackoffScopes,
             isSessionStormBackoffCandidate,
             consumeSessionStormBackoffMs,
             getSessionStormBackoffConsecutive: peekSessionStormBackoffConsecutiveForTests,
@@ -1281,10 +1304,10 @@ export const __requestExecutorTestables = {
   isRequiredToolCallTurn,
   isToolResultFollowupTurn,
   bodyContainsReasoningStopFinalizedMarker,
-  detectStoplessTerminationWithoutFinalization,
   detectRetryableEmptyAssistantResponse,
   deriveLogicalRequestChainKey,
   resolveSessionStormBackoffScope,
+  resolveSessionStormBackoffScopes,
   isSessionStormBackoffCandidate,
   consumeSessionStormBackoffMs,
   peekSessionStormBackoffWaitMs,

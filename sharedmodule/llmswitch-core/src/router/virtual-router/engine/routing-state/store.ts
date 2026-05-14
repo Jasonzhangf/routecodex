@@ -105,6 +105,9 @@ export function getRoutingInstructionState(
     try {
       const persisted = routingStateStore.loadSync(key);
       const merged = mergeStopMessageFromPersisted(existing, persisted);
+      existing.stoplessGoalState = merged.stoplessGoalState
+        ? { ...merged.stoplessGoalState }
+        : undefined;
       existing.stopMessageSource = merged.stopMessageSource;
       existing.stopMessageText = merged.stopMessageText;
       existing.stopMessageMaxRepeats = merged.stopMessageMaxRepeats;
@@ -115,10 +118,6 @@ export function getRoutingInstructionState(
       existing.stopMessageAiMode = merged.stopMessageAiMode;
       existing.stopMessageAiSeedPrompt = merged.stopMessageAiSeedPrompt;
       existing.stopMessageAiHistory = merged.stopMessageAiHistory;
-      existing.reasoningStopMode = merged.reasoningStopMode;
-      existing.reasoningStopArmed = merged.reasoningStopArmed;
-      existing.reasoningStopSummary = merged.reasoningStopSummary;
-      existing.reasoningStopUpdatedAt = merged.reasoningStopUpdatedAt;
       if (persisted) {
         existing.preCommandSource = persisted.preCommandSource;
         existing.preCommandScriptPath = persisted.preCommandScriptPath;
@@ -139,8 +138,10 @@ export function getRoutingInstructionState(
 
   if (!initial) {
     initial = {
+      stoplessGoalState: undefined,
       forcedTarget: undefined,
       stickyTarget: undefined,
+      preferTarget: undefined,
       allowedProviders: new Set(),
       disabledProviders: new Set(),
       disabledKeys: new Map(),
@@ -155,10 +156,6 @@ export function getRoutingInstructionState(
       stopMessageAiMode: undefined,
       stopMessageAiSeedPrompt: undefined,
       stopMessageAiHistory: undefined,
-      reasoningStopMode: undefined,
-      reasoningStopArmed: undefined,
-      reasoningStopSummary: undefined,
-      reasoningStopUpdatedAt: undefined,
       preCommandSource: undefined,
       preCommandScriptPath: undefined,
       preCommandUpdatedAt: undefined
@@ -180,17 +177,13 @@ function isRoutingStateEmpty(state: RoutingInstructionState): boolean {
   const noDisabledProviders = state.disabledProviders.size === 0;
   const noDisabledKeys = state.disabledKeys.size === 0;
   const noDisabledModels = state.disabledModels.size === 0;
+  const noStoplessGoal = !state.stoplessGoalState;
   const noStopMessage =
     (!state.stopMessageText || !state.stopMessageText.trim()) &&
     (typeof state.stopMessageMaxRepeats !== 'number' || !Number.isFinite(state.stopMessageMaxRepeats)) &&
     (typeof state.stopMessageUsed !== 'number' || !Number.isFinite(state.stopMessageUsed)) &&
     (typeof state.stopMessageStageMode !== 'string' || !state.stopMessageStageMode.trim()) &&
     (typeof state.stopMessageAiMode !== 'string' || !state.stopMessageAiMode.trim());
-  const noReasoningStop =
-    (typeof state.reasoningStopMode !== 'string' || !state.reasoningStopMode.trim()) &&
-    state.reasoningStopArmed !== true &&
-    (typeof state.reasoningStopSummary !== 'string' || !state.reasoningStopSummary.trim()) &&
-    (typeof state.reasoningStopUpdatedAt !== 'number' || !Number.isFinite(state.reasoningStopUpdatedAt));
   const noPreCommand =
     (!state.preCommandScriptPath || !state.preCommandScriptPath.trim()) &&
     (typeof state.preCommandUpdatedAt !== 'number' || !Number.isFinite(state.preCommandUpdatedAt));
@@ -202,8 +195,8 @@ function isRoutingStateEmpty(state: RoutingInstructionState): boolean {
     noDisabledProviders &&
     noDisabledKeys &&
     noDisabledModels &&
+    noStoplessGoal &&
     noStopMessage &&
-    noReasoningStop &&
     noPreCommand
   );
 }
@@ -228,14 +221,11 @@ export function persistRoutingInstructionState(
       || key.startsWith('tmux:')
     ) &&
     (Boolean(state.stopMessageText && state.stopMessageText.trim()) ||
+      Boolean(state.stoplessGoalState) ||
       (typeof state.stopMessageMaxRepeats === 'number' && Number.isFinite(state.stopMessageMaxRepeats)) ||
     (typeof state.stopMessageUsed === 'number' && Number.isFinite(state.stopMessageUsed)) ||
     Boolean(state.stopMessageStageMode && state.stopMessageStageMode.trim()) ||
     Boolean(state.stopMessageAiMode && state.stopMessageAiMode.trim()) ||
-    Boolean(state.reasoningStopMode && state.reasoningStopMode.trim()) ||
-    state.reasoningStopArmed === true ||
-    Boolean(state.reasoningStopSummary && state.reasoningStopSummary.trim()) ||
-    (typeof state.reasoningStopUpdatedAt === 'number' && Number.isFinite(state.reasoningStopUpdatedAt)) ||
     Boolean(state.preCommandScriptPath && state.preCommandScriptPath.trim()) ||
     (typeof state.preCommandUpdatedAt === 'number' && Number.isFinite(state.preCommandUpdatedAt)));
   if (isRoutingStateEmpty(state)) {

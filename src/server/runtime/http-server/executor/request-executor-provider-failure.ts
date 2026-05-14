@@ -99,13 +99,11 @@ export function resolveRequestExecutorProviderErrorReportPlan(args: {
           ? 'provider.http'
           : (args.fallbackStage === 'host.response_contract'
             ? 'host.response_contract'
-            : (args.fallbackStage === 'host.stopless_contract'
-              ? 'host.stopless_contract'
-              : (isSseDecodeRateLimitError(args.error, statusCode) || isSseDecodeRetryableNetworkError(args.error, statusCode)
-                ? 'provider.sse_decode'
-                : (isServerToolFollowupErrorCode(errorCode) || isServerToolFollowupErrorCode(upstreamCode)
-                  ? 'provider.followup'
-                  : args.fallbackStage))))));
+            : (isSseDecodeRateLimitError(args.error, statusCode) || isSseDecodeRetryableNetworkError(args.error, statusCode)
+              ? 'provider.sse_decode'
+              : (isServerToolFollowupErrorCode(errorCode) || isServerToolFollowupErrorCode(upstreamCode)
+                ? 'provider.followup'
+                : args.fallbackStage)))));
   return {
     ...(errorCode ? { errorCode } : {}),
     ...(upstreamCode ? { upstreamCode } : {}),

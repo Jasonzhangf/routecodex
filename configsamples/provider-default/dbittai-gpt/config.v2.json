@@ -1,0 +1,45 @@
+{
+  "version": "2.0.0",
+  "providerId": "dbittai-gpt",
+  "provider": {
+    "id": "dbittai-gpt",
+    "enabled": true,
+    "type": "responses",
+    "baseURL": "https://dbittai.com/v1",
+    "auth": {
+      "type": "apikey",
+      "entries": [
+        {
+          "alias": "key1",
+          "apiKey": "${CRS_OAI_KEY1}"
+        }
+      ]
+    },
+    "models": {
+      "gpt-5.4": {
+        "supportsStreaming": true,
+        "maxTokens": 64000,
+        "maxContext": 256000,
+        "capabilities": [
+          "web_search"
+        ]
+      }
+    },
+    "responses": {
+      "process": "chat",
+      "streaming": "always"
+    },
+    "config": {
+      "responses": {
+        "process": "chat",
+        "streaming": "always"
+      }
+    },
+    "transportBackend": "openai-sdk",
+    "concurrency": {
+      "maxInFlight": 4,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
+    }
+  }
+}

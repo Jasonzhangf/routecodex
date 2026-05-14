@@ -108,7 +108,7 @@ pub fn is_blocking_recoverable(
     stage: Option<&str>,
 ) -> bool {
     if classification == FailureClassification::Recoverable {
-        if stage == Some("host.response_contract") || stage == Some("host.stopless_contract") {
+        if stage == Some("host.response_contract") {
             return false;
         }
         return true;

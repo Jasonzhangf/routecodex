@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { buildSingleGroupV2VirtualRouter } from './verification/build-v2-routing-config.mjs';
 
 const REQUESTED_PORT = Number(process.env.ROUTECODEX_INSTALL_VERIFY_PORT || process.env.RCC_INSTALL_VERIFY_PORT || 5560);
 const HOST = process.env.ROUTECODEX_INSTALL_VERIFY_HOST || '127.0.0.1';
@@ -370,27 +371,20 @@ async function writeVerifyConfig(baseUrl, host, port) {
       host,
       port
     },
-    virtualrouter: {
-      activeRoutingPolicyGroup: 'default',
-      routingPolicyGroups: {
-        default: {
-          routing: {
-            default: [
-              {
-                id: 'verify-default',
-                targets: ['verify.verify-mock']
-              }
-            ],
-            anthropic: [
-              {
-                id: 'verify-anthropic',
-                targets: ['verify.verify-mock']
-              }
-            ]
-          }
+    virtualrouter: buildSingleGroupV2VirtualRouter({
+      default: [
+        {
+          id: 'verify-default',
+          targets: ['verify.verify-mock']
         }
-      }
-    }
+      ],
+      anthropic: [
+        {
+          id: 'verify-anthropic',
+          targets: ['verify.verify-mock']
+        }
+      ]
+    })
   };
 
   await fs.promises.writeFile(

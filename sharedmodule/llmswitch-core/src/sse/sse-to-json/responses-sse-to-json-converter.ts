@@ -168,7 +168,7 @@ export class ResponsesSseToJsonConverterRefactored {
       // undici 会抛出 "terminated"。若此时已聚合出可用 response，则应优先返回而不是把它当作致命错误。
       if (responseBuilder && this.isTerminatedError(error)) {
         try {
-          const salvaged = responseBuilder.getResult();
+          const salvaged = responseBuilder.getSalvageResult();
           if (salvaged.success && salvaged.response) {
             context.isCompleted = true;
             context.endTime = Date.now();

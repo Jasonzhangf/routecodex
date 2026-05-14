@@ -1718,6 +1718,68 @@ fn convert_bridge_input_preserves_mixed_media_order() {
 }
 
 #[test]
+fn convert_bridge_input_responses_reasoning_only_message_restores_assistant_reasoning_content() {
+    let output = convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
+        input: vec![
+            json!({
+              "type": "message",
+              "role": "user",
+              "content": [{ "type": "input_text", "text": "调用 echo_json，参数 {\"message\":\"ping\"}。不要输出普通答案。" }]
+            }),
+            json!({
+              "type": "message",
+              "role": "assistant",
+              "content": [{ "type": "reasoning_text", "text": "The user wants me to call echo_json with {\"message\":\"ping\"} and not output a regular answer." }]
+            }),
+            json!({
+              "type": "function_call",
+              "id": "fc_c367dbc1c78542d5ad004fcb",
+              "call_id": "call_c367dbc1c78542d5ad004fcb",
+              "name": "echo_json",
+              "arguments": "{\"message\":\"ping\"}"
+            }),
+            json!({
+              "type": "function_call_output",
+              "call_id": "call_c367dbc1c78542d5ad004fcb",
+              "output": "{\"message\":\"ping\"}"
+            })
+        ],
+        tools: None,
+        normalize_function_name: Some("responses".to_string()),
+        tool_result_fallback_text: Some(String::new()),
+        allow_pending_terminal_tool_call: Some(true),
+    })
+    .unwrap();
+
+    let messages = output.messages;
+    assert_eq!(messages.len(), 4);
+    let assistant_reasoning = messages[1].as_object().unwrap();
+    assert_eq!(
+        assistant_reasoning.get("role").and_then(Value::as_str),
+        Some("assistant")
+    );
+    assert_eq!(
+        assistant_reasoning.get("content").and_then(Value::as_str),
+        Some("")
+    );
+    assert_eq!(
+        assistant_reasoning
+            .get("reasoning_content")
+            .and_then(Value::as_str),
+        Some("The user wants me to call echo_json with {\"message\":\"ping\"} and not output a regular answer.")
+    );
+    let tool_call = messages[2].as_object().unwrap();
+    assert_eq!(tool_call.get("role").and_then(Value::as_str), Some("assistant"));
+    assert!(tool_call.get("tool_calls").is_some());
+    let tool_result = messages[3].as_object().unwrap();
+    assert_eq!(tool_result.get("role").and_then(Value::as_str), Some("tool"));
+    assert_eq!(
+        tool_result.get("tool_call_id").and_then(Value::as_str),
+        Some("call_c367dbc1c78542d5ad004fcb")
+    );
+}
+
+#[test]
 fn bridge_message_utils_append_local_image_block_on_latest_user_input_json() {
     let temp_dir =
         std::env::temp_dir().join(format!("llmswitch-local-image-rust-{}", std::process::id()));

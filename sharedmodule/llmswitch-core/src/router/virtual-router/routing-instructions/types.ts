@@ -1,6 +1,26 @@
 export const ROUTING_INSTRUCTION_MARKER_PATTERN = /<\*\*[\s\S]*?\*\*>/;
 export const ROUTING_INSTRUCTION_MARKER_GLOBAL_PATTERN = /<\*\*[\s\S]*?\*\*>/g;
 
+export interface StoplessGoalStateSnapshot {
+  status: 'idle' | 'active' | 'paused' | 'stopped' | 'completed';
+  objective: string;
+  latestNote?: string;
+  completionEvidence?: string;
+  nextStep?: string;
+  userQuestion?: string;
+  cannotContinueReason?: string;
+  blockingEvidence?: string;
+  attemptsExhausted?: boolean;
+  errorClass?: string;
+  completionSummary?: string;
+  ssotAssessment?: string;
+  consecutiveIrrecoverableErrors?: number;
+  consecutiveValidationFailures?: number;
+  consecutiveNoProgress?: number;
+  updatedAt: number;
+  createdAt: number;
+}
+
 export interface RoutingInstruction {
   type:
     | 'force'
@@ -35,6 +55,7 @@ export interface RoutingInstruction {
 }
 
 export interface RoutingInstructionState {
+  stoplessGoalState?: StoplessGoalStateSnapshot;
   forcedTarget?: {
     provider?: string;
     keyAlias?: string;
@@ -78,13 +99,6 @@ export interface RoutingInstructionState {
   stopMessageAiMode?: 'on' | 'off';
   stopMessageAiSeedPrompt?: string;
   stopMessageAiHistory?: Array<Record<string, unknown>>;
- reasoningStopMode?: 'on' | 'off' | 'endless';
- reasoningStopArmed?: boolean;
- reasoningStopSummary?: string;
- reasoningStopUpdatedAt?: number;
-  reasoningStopFailCount?: number;
-  reasoningStopGuardTriggerCount?: number; // Storm protection: guard trigger count
-  reasoningStopGuardTriggerAt?: number; // Storm protection: last guard trigger timestamp
   preCommandSource?: string;
   preCommandScriptPath?: string;
   preCommandUpdatedAt?: number;

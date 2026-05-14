@@ -122,6 +122,46 @@ function collectUpstreamErrorSources(ev: ProviderErrorEvent): string[] {
   return sources;
 }
 
+function readErrorClassification(ev: ProviderErrorEvent): string {
+  const details = ev.details && typeof ev.details === 'object' && !Array.isArray(ev.details)
+    ? (ev.details as Record<string, unknown>)
+    : null;
+  const raw = details && typeof details.errorClassification === 'string'
+    ? details.errorClassification
+    : '';
+  return raw.trim().toLowerCase();
+}
+
+function isHealthNeutralQuotaEvent(ev: ProviderErrorEvent): boolean {
+  if ((ev as { affectsHealth?: unknown }).affectsHealth === false) {
+    return true;
+  }
+  const stage = typeof ev.stage === 'string' ? ev.stage.trim().toLowerCase() : '';
+  if (stage === 'provider.followup' || stage === 'host.response_contract') {
+    return true;
+  }
+  const classification = readErrorClassification(ev);
+  if (classification === 'special_400' || classification === 'recoverable') {
+    return true;
+  }
+  const code = safeTrim(ev.code).toUpperCase();
+  return code === 'CLIENT_TOOL_ARGS_INVALID' || code === 'MALFORMED_REQUEST';
+}
+
+function shouldClearPersistedCooldownOnHydrate(state: QuotaState): boolean {
+  if (state.reason !== 'cooldown') {
+    return false;
+  }
+  const lastErrorCode = safeTrim(state.lastErrorCode).toUpperCase();
+  if (lastErrorCode === 'CLIENT_TOOL_ARGS_INVALID' || lastErrorCode === 'MALFORMED_REQUEST') {
+    return true;
+  }
+  if (lastErrorCode === 'HTTP_400') {
+    return true;
+  }
+  return /^HTTP_4\d\d$/.test(lastErrorCode) && lastErrorCode !== 'HTTP_402' && lastErrorCode !== 'HTTP_429' && lastErrorCode !== 'HTTP_434';
+}
+
 function extractFirstUrl(sources: string[]): string | null {
   for (const source of sources) {
     const m = String(source || '').match(/https?:\/\/\S+/);
@@ -161,7 +201,11 @@ export class QuotaManager {
       const key = safeTrim(providerKey) || safeTrim((raw as any).providerKey);
       if (!key) continue;
       const state = raw as QuotaState;
-      this.states.set(key, tickQuotaStateTime({ ...state, providerKey: key }, nowMs));
+      const hydrated = { ...state, providerKey: key };
+      const normalized = shouldClearPersistedCooldownOnHydrate(hydrated)
+        ? { ...hydrated, inPool: true, reason: 'ok' as const, cooldownUntil: null, cooldownKeepsPool: undefined }
+        : hydrated;
+      this.states.set(key, tickQuotaStateTime(normalized, nowMs));
     }
   }
 
@@ -234,6 +278,9 @@ export class QuotaManager {
   onProviderError(ev: ProviderErrorEvent): void {
     const providerKey = parseProviderKey(ev.runtime as any) || safeTrim((ev as any)?.runtime?.providerKey) || safeTrim((ev as any)?.providerKey);
     if (!providerKey) return;
+    if (isHealthNeutralQuotaEvent(ev)) {
+      return;
+    }
     const nowMs = typeof ev.timestamp === 'number' && Number.isFinite(ev.timestamp) ? ev.timestamp : Date.now();
     const status = parseHttpStatus(ev);
     const code = safeTrim(ev.code) || safeTrim((ev as any)?.runtime?.errorCode);

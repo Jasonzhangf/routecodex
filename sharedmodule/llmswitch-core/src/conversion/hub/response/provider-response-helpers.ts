@@ -60,6 +60,53 @@ export function resolveProviderResponseContextSignals(
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function unwrapOpenaiChatDataEnvelope(payload: ChatCompletionLike): ChatCompletionLike {
+  const row = asRecord(payload);
+  const nested = asRecord(row?.data);
+  return (nested as ChatCompletionLike | null) ?? payload;
+}
+
+function readStructuredProviderBusinessError(payload: ChatCompletionLike): {
+  statusCode?: number;
+  statusMessage?: string;
+  contextLengthExceeded: boolean;
+} | null {
+  const candidates = [asRecord(payload), asRecord(asRecord(payload)?.data)].filter(Boolean) as Array<Record<string, unknown>>;
+  for (const candidate of candidates) {
+    const baseResp = asRecord(candidate.base_resp) ?? asRecord(candidate.baseResp);
+    const statusCodeRaw = baseResp?.status_code ?? baseResp?.statusCode;
+    const statusMessageRaw = baseResp?.status_msg ?? baseResp?.statusMessage;
+    const statusCode =
+      typeof statusCodeRaw === 'number' && Number.isFinite(statusCodeRaw)
+        ? Math.trunc(statusCodeRaw)
+        : typeof statusCodeRaw === 'string' && statusCodeRaw.trim()
+          ? Number.parseInt(statusCodeRaw.trim(), 10)
+          : undefined;
+    const statusMessage =
+      typeof statusMessageRaw === 'string' && statusMessageRaw.trim()
+        ? statusMessageRaw.trim()
+        : '';
+    if ((statusCode !== undefined && statusCode !== 0) || statusMessage) {
+      const normalizedMessage = statusMessage.toLowerCase();
+      return {
+        ...(statusCode !== undefined ? { statusCode } : {}),
+        ...(statusMessage ? { statusMessage } : {}),
+        contextLengthExceeded:
+          normalizedMessage.includes('context window exceeds limit')
+          || normalizedMessage.includes('context_length_exceeded')
+          || normalizedMessage.includes('input exceeds limit')
+      };
+    }
+  }
+  return null;
+}
+
 export async function coerceClientPayloadToCanonicalChatCompletionOrThrow(args: {
   payload: ChatCompletionLike;
   scope: string;
@@ -68,22 +115,49 @@ export async function coerceClientPayloadToCanonicalChatCompletionOrThrow(args: 
   registry: Record<ProviderProtocol, ProviderResponsePlan>;
 }): Promise<ChatCompletionLike> {
   const { payload, scope, context, requestSemantics, registry } = args;
-  if (isCanonicalChatCompletionPayloadWithNative(payload)) {
-    return payload;
+  const normalizedPayload = unwrapOpenaiChatDataEnvelope(payload);
+  if (isCanonicalChatCompletionPayloadWithNative(normalizedPayload)) {
+    return normalizedPayload;
   }
-  const detected = detectProviderResponseShapeWithNative(payload);
+  const detected = detectProviderResponseShapeWithNative(normalizedPayload);
   if (detected === 'unknown') {
     const protocol = context?.providerProtocol;
+    const structuredError = readStructuredProviderBusinessError(payload);
+    if (structuredError) {
+      const providerStatusMessage = structuredError.statusMessage || 'provider business error';
+      throw new ProviderProtocolError(
+        `[hub_response] Upstream provider returned structured business error at ${scope}: ${providerStatusMessage}`,
+        {
+          code: 'MALFORMED_RESPONSE',
+          protocol,
+          providerType: resolveProviderTypeFromProtocolWithNative(protocol),
+          details: {
+            detected: 'provider_business_error',
+            reason: structuredError.contextLengthExceeded ? 'context_length_exceeded' : 'provider_business_error',
+            upstreamCode: structuredError.contextLengthExceeded
+              ? 'context_length_exceeded'
+              : (structuredError.statusCode !== undefined ? `provider_status_${structuredError.statusCode}` : 'provider_business_error'),
+            ...(structuredError.statusCode !== undefined ? { providerStatusCode: structuredError.statusCode } : {}),
+            ...(structuredError.statusMessage ? { providerStatusMessage: structuredError.statusMessage } : {}),
+            payloadType: typeof (normalizedPayload as any),
+            payloadKeys:
+              normalizedPayload && typeof normalizedPayload === 'object' && !Array.isArray(normalizedPayload)
+                ? Object.keys(normalizedPayload as any).slice(0, 20)
+                : undefined
+          }
+        }
+      );
+    }
     throw new ProviderProtocolError(`[hub_response] Non-canonical response payload at ${scope}`, {
       code: 'MALFORMED_RESPONSE',
       protocol,
       providerType: resolveProviderTypeFromProtocolWithNative(protocol),
       details: {
         detected,
-        payloadType: typeof (payload as any),
+        payloadType: typeof (normalizedPayload as any),
         payloadKeys:
-          payload && typeof payload === 'object' && !Array.isArray(payload)
-            ? Object.keys(payload as any).slice(0, 20)
+          normalizedPayload && typeof normalizedPayload === 'object' && !Array.isArray(normalizedPayload)
+            ? Object.keys(normalizedPayload as any).slice(0, 20)
             : undefined
       }
     });
@@ -91,7 +165,7 @@ export async function coerceClientPayloadToCanonicalChatCompletionOrThrow(args: 
   const detectedPlan = registry[detected];
   const mapper = detectedPlan.createMapper();
   const coerced = await mapper.toChatCompletion(
-    { payload } as any,
+    { payload: normalizedPayload } as any,
     context,
     { requestSemantics } as any
   );
