@@ -76,22 +76,11 @@ export function buildClientPayloadForProtocol(options: ClientRemapProtocolSwitch
       aliasMap: resolveAliasMapFromRespSemanticsWithNative(options.requestSemantics)
     });
   } else {
-    if (shouldLogDebug) {
-      console.log('[CLIENT-REMAP:DEBUG] input payload choices[0].finish_reason:', (options.payload as any)?.choices?.[0]?.finish_reason);
-      console.log('[CLIENT-REMAP:DEBUG] input payload choices[0].message.tool_calls count:', (options.payload as any)?.choices?.[0]?.message?.tool_calls?.length);
-    }
     clientPayload = buildResponsesPayloadFromChatWithNative(options.payload, {
       requestId: options.requestId,
       responseSemantics: options.responseSemantics,
       ...(toolsRaw ? { toolsRaw } : {})
     }) as JsonObject;
-  }
-
-  if (shouldLogDebug) {
-    console.log('[CLIENT-REMAP:DEBUG] responsesPayload status:', (clientPayload as any)?.status);
-    console.log('[CLIENT-REMAP:DEBUG] responsesPayload output count:', (clientPayload as any)?.output?.length);
-    console.log('[CLIENT-REMAP:DEBUG] responsesPayload output types:', (clientPayload as any)?.output?.map((o: any) => o.type));
-    console.log('[CLIENT-REMAP:DEBUG] responsesPayload required_action:', JSON.stringify((clientPayload as any)?.required_action)?.slice(0, 200));
   }
   const patchedPayload = applyClientPassthroughPatchWithNative(
     clientPayload,

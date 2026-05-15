@@ -2,6 +2,7 @@ import type { JsonObject } from '../types/json.js';
 import { extractToolCallsFromReasoningText } from '../../shared/reasoning-tool-parser.js';
 import {
   buildAnthropicResponseFromChatWithNative,
+  buildAnthropicResponseFromChatFullWithNative,
   resolveAnthropicChatCompletionOutcomeWithNative
 } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
 import { buildChatResponseFromResponsesWithNative } from '../../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
@@ -382,51 +383,24 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
 }
 
 export function buildAnthropicResponseFromChat(chatResponse: JsonObject, options?: AnthropicResponseOptions): JsonObject {
-  const choice = Array.isArray(chatResponse?.choices) ? chatResponse.choices[0] as JsonObject | undefined : undefined;
-  const message = choice && typeof choice === 'object' ? (choice as Record<string, unknown>).message : undefined;
   const aliasMap = options?.aliasMap;
-  if (message) {
-    applyAnthropicResponseOutboundBridgePolicy(
-      message as Record<string, unknown>,
-      chatResponse as Record<string, unknown>
-    );
-  }
-  const sanitized = buildAnthropicResponseFromChatWithNative(
-    chatResponse as Record<string, unknown>,
-    aliasMap
-  ) as JsonObject;
-  const contentBlocks = Array.isArray((sanitized as any).content)
-    ? ((sanitized as any).content as Array<Record<string, unknown>>)
-    : [];
-  for (const block of contentBlocks) {
-    if (!block || block.type !== 'tool_use' || typeof block.name !== 'string') {
-      continue;
-    }
-    block.input = normalizeShellLikeToolInput(block.name, block.input);
-  }
-  if ((chatResponse as any)?.__responses_reasoning) {
-    registerResponsesReasoning(sanitized.id, (chatResponse as any).__responses_reasoning);
-  }
-  if ((chatResponse as any)?.__responses_output_text_meta) {
-    registerResponsesOutputTextMeta(sanitized.id, (chatResponse as any).__responses_output_text_meta);
-  }
-  const retainedSnapshot = (chatResponse as any)?.__responses_payload_snapshot;
-  if (retainedSnapshot && typeof retainedSnapshot === 'object' && !Array.isArray(retainedSnapshot)) {
-    for (const candidate of new Set(
-      [sanitized.id, (sanitized as any)?.request_id, (chatResponse as any)?.id, (chatResponse as any)?.request_id]
-        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    )) {
-      registerResponsesPayloadSnapshot(candidate, retainedSnapshot as Record<string, unknown>, { clone: false });
-    }
-  }
-  const retainedPassthrough = (chatResponse as any)?.__responses_passthrough;
-  if (retainedPassthrough && typeof retainedPassthrough === 'object' && !Array.isArray(retainedPassthrough)) {
-    for (const candidate of new Set(
-      [sanitized.id, (sanitized as any)?.request_id, (chatResponse as any)?.id, (chatResponse as any)?.request_id]
-        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    )) {
-      registerResponsesPassthrough(candidate, retainedPassthrough as Record<string, unknown>, { clone: false });
-    }
-  }
-  return sanitized;
+  const input = {
+    chat_response: JSON.stringify(chatResponse),
+    alias_map: aliasMap ? JSON.stringify(aliasMap) : undefined,
+    responses_reasoning: (chatResponse as any)?.__responses_reasoning
+      ? JSON.stringify((chatResponse as any).__responses_reasoning)
+      : undefined,
+    responses_output_text_meta: (chatResponse as any)?.__responses_output_text_meta
+      ? JSON.stringify((chatResponse as any).__responses_output_text_meta)
+      : undefined,
+    responses_payload_snapshot: (chatResponse as any)?.__responses_payload_snapshot
+      ? JSON.stringify((chatResponse as any).__responses_payload_snapshot)
+      : undefined,
+    responses_passthrough: (chatResponse as any)?.__responses_passthrough
+      ? JSON.stringify((chatResponse as any).__responses_passthrough)
+      : undefined,
+  };
+  const output = buildAnthropicResponseFromChatFullWithNative(input);
+  const parsed = JSON.parse(output);
+  return JSON.parse(parsed.result);
 }

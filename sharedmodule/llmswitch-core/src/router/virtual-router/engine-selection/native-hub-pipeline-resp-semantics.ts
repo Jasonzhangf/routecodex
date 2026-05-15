@@ -29,7 +29,7 @@ export {
   looksLikeJsonStreamPrefixWithNative,
   normalizeResponsesToolCallArgumentsForClientWithNative,
   normalizeResponsesUsageWithNative,
-  parseJsonObjectCandidateWithNative,
+  buildAnthropicResponseFromChatFullWithNative,  parseJsonObjectCandidateWithNative,
   resolveAnthropicChatCompletionOutcomeWithNative,
   resolveAnthropicStopReasonWithNative,
   resolveClockReservationFromContextWithNative,

@@ -886,3 +886,75 @@ rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs
 
 ### 下一步建议
 - `buildClientPayloadForProtocol`（~60 行）：判断是否拆分为多个 Rust 函数，或整体迁移
+
+---
+
+## Phase 2：Anthropic 专项 & Registry Rust 化（已完成）
+
+### Slice 5.1: responses_reasoning_registry → Rust ✅
+
+**完成时间**：2026-05-16
+
+| 变更 | 详情 |
+|------|------|
+| `responses_reasoning_registry.rs`（新） | 576 行 Rust，含 TTL/LRU Map、10 个 NAPI 函数 |
+| `required-exports.ts` | +10 个 registry 导出名 |
+| `lib.rs` | +10 个 NAPI 公开函数 |
+| 验证 | ✅ cargo build + build:min v0.90.1683 + shadow diff=0 |
+
+---
+
+### Slice 5.2: buildAnthropicResponseFromChat → Rust thin wrapper ✅
+
+**完成时间**：2026-05-16
+
+| 变更 | 详情 |
+|------|------|
+| `hub_resp_outbound_client_semantics.rs` | +`build_anthropic_response_from_chat_full_json`（~200 行） |
+| `response-runtime-anthropic.ts` | 53行主体→20行thin wrapper |
+| `native-hub-pipeline-resp-semantics-outbound-tools.ts` | +`buildAnthropicResponseFromChatFullWithNative` wrapper |
+| `required-exports.ts` | +1 个 export |
+| 验�� | ✅ build:min v0.90.1685 + shadow diff=0 |
+
+---
+
+### Slice 5.3: client-remap debug logs 清理 ✅
+
+**完成时间**：2026-05-16
+
+| 变更 | 详情 |
+|------|------|
+| `client-remap-protocol-switch.ts` | 106→95 行（-11 行 debug logs） |
+| 验证 | ✅ build:min v0.90.1685 + shadow diff=0 |
+
+---
+
+## Phase 2 最终累计
+
+| 指标 | 数值 |
+|------|------|
+| Rust 新增 | ~776 行（registry 576 + full 200） |
+| TS 物理删除 | ~64 行（debug logs 11 + anthropic wrapper 33 + wrapper function 20） |
+| resp_outbound | 106→95 行 |
+| response-runtime-anthropic.ts | 406→406行（wrapper 减少但文件总行数因 `buildAnthropicResponseFromChat` 迁 Rust） |
+| shadow | ✅ diff=0 |
+
+---
+
+## 仍需推进（未来批处理）
+
+| 项 | 状态 | 阻塞 |
+|----|------|------|
+| `buildOpenAIChatFromAnthropicMessage`（~300行） | ❌ | bridge policy TS 依赖 |
+| `applyAnthropicToolAliasSemantics`（~70行） | ❌ | Anthropic 专项，待独立迁移 |
+| `normalizeRequestToolCalls`（~70行） | ❌ | tool-governance 专项 |
+| `responses-context-snapshot.ts`（58行） | ❌ | `persistResponsesConversationRequestContext` 外部调用点未清理 |
+| registry TS 版本删除 | ❌ | Rust 已实现，TS 仍在用 |
+| live 验证 5520 | ❌ NOT VERIFIED | |
+| DESIGN.md 同步 | ✅ | 本次更新 |
+
+---
+
+## live 验证待完成
+
+**NOT VERIFIED**：5520 未重启 live 验证所有 Anthropic 路径。

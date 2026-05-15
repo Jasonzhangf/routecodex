@@ -357,4 +357,14 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "isProviderFailureBlockingRecoverableJson",
   "shouldRetryProviderFailureJson",
   "computeProviderBackoffMsJson",
- ] as const;
+  "registerResponsesReasoningJson",
+    "consumeResponsesReasoningJson",
+    "registerResponsesOutputTextMetaJson",
+    "consumeResponsesOutputTextMetaJson",
+    "registerResponsesPayloadSnapshotJson",
+    "consumeResponsesPayloadSnapshotJson",
+    "consumeResponsesPayloadSnapshotByAliasesJson",
+    "registerResponsesPassthroughJson",
+    "consumeResponsesPassthroughJson",
+    "consumeResponsesPassthroughByAliasesJson",
+] as const;

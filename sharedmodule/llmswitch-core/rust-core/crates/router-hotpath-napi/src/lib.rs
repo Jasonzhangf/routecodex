@@ -87,6 +87,7 @@ mod shared_payload_budget;
 mod shared_provider_errors;
 mod shared_response_compat;
 mod shared_responses_conversation_utils;
+mod responses_reasoning_registry;
 mod shared_responses_response_utils;
 mod shared_tool_result_text_normalizer;
 mod shared_responses_tool_utils;
@@ -1362,3 +1363,16 @@ pub fn compute_provider_backoff_ms_json(
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     Ok(failure_policy::compute_backoff(classification, attempt, base_ms as u64, max_ms as u64) as i64)
 }
+
+pub use responses_reasoning_registry::{
+    register_responses_reasoning_json,
+    consume_responses_reasoning_json,
+    register_responses_output_text_meta_json,
+    consume_responses_output_text_meta_json,
+    register_responses_payload_snapshot_json,
+    consume_responses_payload_snapshot_json,
+    consume_responses_payload_snapshot_by_aliases_json,
+    register_responses_passthrough_json,
+    consume_responses_passthrough_json,
+    consume_responses_passthrough_by_aliases_json,
+};
