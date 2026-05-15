@@ -163,6 +163,20 @@ export function normalizeChatRequest(request: any): any {
           }
         });
       }
+      const historyViolation = inspectOpenAiChatToolHistory((normalized as any).messages);
+      if (historyViolation) {
+        const detailMessage = `Tool history contract violated: ${historyViolation.code} at index ${historyViolation.index}${
+          historyViolation.callId ? ` (call_id=${historyViolation.callId})` : ''
+        } — ${historyViolation.reason}`;
+        throw new ProviderProtocolError(detailMessage, {
+          code: 'MALFORMED_REQUEST',
+          details: {
+            context: 'openai-message-normalize.normalizeChatRequest',
+            sourceShape: 'chat_messages',
+            toolHistoryContractViolation: historyViolation
+          }
+        });
+      }
     }
   } catch (error) {
     if (error instanceof ProviderProtocolError) {

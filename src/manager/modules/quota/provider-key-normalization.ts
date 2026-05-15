@@ -9,7 +9,20 @@ function normalizeErrorCode(value: unknown): string | null {
 }
 
 export function canonicalizeProviderKey(providerKey: string): string {
-  return typeof providerKey === 'string' ? providerKey.trim() : '';
+  const raw = typeof providerKey === 'string' ? providerKey.trim() : '';
+  if (!raw) {
+    return '';
+  }
+  // Legacy antigravity snapshots may contain sequence-prefixed aliases like:
+  // antigravity.1-foo.model -> antigravity.foo.model
+  if (raw.startsWith('antigravity.')) {
+    const [head, alias, ...rest] = raw.split('.');
+    if (head === 'antigravity' && alias && rest.length > 0) {
+      const normalizedAlias = alias.replace(/^\d+-/, '');
+      return ['antigravity', normalizedAlias, ...rest].join('.');
+    }
+  }
+  return raw;
 }
 
 export function mergeQuotaStates(providerKey: string, states: QuotaState[]): QuotaState {

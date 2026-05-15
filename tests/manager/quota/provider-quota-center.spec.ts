@@ -19,7 +19,7 @@ describe('provider-quota-center error handling', () => {
       { providerKey, httpStatus: 429 },
       baseNow
     );
-    expect(state.inPool).toBe(false);
+    expect(state.inPool).toBe(true);
     expect(state.reason).toBe('cooldown');
     expect(state.cooldownUntil).toBe(baseNow + 3_000);
     expect(state.blacklistUntil).toBeNull();
@@ -45,7 +45,7 @@ describe('provider-quota-center error handling', () => {
       thirdNow
     );
     expect(state.reason).toBe('cooldown');
-    expect(state.inPool).toBe(false);
+    expect(state.inPool).toBe(true);
     expect(state.blacklistUntil).toBeNull();
     expect(state.cooldownUntil).toBe(thirdNow + 31_000);
     expect(state.consecutiveErrorCount).toBe(3);
@@ -81,7 +81,7 @@ describe('provider-quota-center error handling', () => {
     const thirdNow = secondNow + 10_000;
     state = applyErrorEvent(state, { providerKey, code: 'ETIMEDOUT' }, thirdNow);
     expect(state.reason).toBe('cooldown');
-    expect(state.inPool).toBe(false);
+    expect(state.inPool).toBe(true);
     expect(state.cooldownUntil).toBe(thirdNow + 31_000);
     expect(state.lastErrorSeries).toBe('ENET');
 
@@ -208,7 +208,7 @@ describe('provider-quota-center error handling', () => {
       thirdNow
     );
     expect(state.reason).toBe('cooldown');
-    expect(state.inPool).toBe(false);
+    expect(state.inPool).toBe(true);
     expect(state.cooldownUntil).toBe(thirdNow + 31_000);
     expect(state.consecutiveErrorCount).toBe(3);
   });

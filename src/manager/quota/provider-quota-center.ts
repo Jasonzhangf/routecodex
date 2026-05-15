@@ -267,11 +267,13 @@ function shouldKeepProviderInPoolDuringCooldown(series: ErrorSeries, consecutive
   if (consecutive <= 0) {
     return false;
   }
-  return (series === 'ENET' || series === 'E5XX' || series === 'EOTHER') && consecutive <= 2;
+  return series === 'E429' || series === 'ENET' || series === 'E5XX' || series === 'EOTHER';
 }
 
 function computeTransientKeepPoolCooldownMs(series: ErrorSeries, consecutive: number): number | null {
-  if (!shouldKeepProviderInPoolDuringCooldown(series, consecutive)) {
+  const useTransientSchedule =
+    (series === 'ENET' || series === 'E5XX' || series === 'EOTHER') && consecutive <= 2;
+  if (!useTransientSchedule) {
     return null;
   }
   const idx = Math.min(consecutive - 1, COOLDOWN_SCHEDULE_TRANSIENT_KEEP_POOL_MS.length - 1);

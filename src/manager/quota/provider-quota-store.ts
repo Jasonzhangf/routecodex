@@ -61,18 +61,8 @@ function shouldDropCooldownPersistence(state: QuotaState): boolean {
   if (!state || typeof state !== 'object') {
     return false;
   }
-  if (state.reason !== 'cooldown') {
-    return false;
-  }
-  if (state.lastErrorSeries === 'E5XX') {
-    return true;
-  }
-  if (state.lastErrorSeries === 'EOTHER') {
-    const status = parseHttpStatusFromCode(state.lastErrorCode);
-    if (typeof status === 'number' && status >= 400 && status < 600 && status !== 429) {
-      return true;
-    }
-  }
+  // Cooldown persistence is required for restart-stable backoff semantics.
+  // Do not silently clear runtime cooldown windows during snapshot save.
   return false;
 }
 

@@ -1,4 +1,5 @@
 import {
+  isSyntheticRouteCodexToolCallId,
   readTrimmedString,
   type ToolHistoryContractViolation
 } from './openai-message-normalize-contract.js';
@@ -74,13 +75,15 @@ function validateToolResultShape(
 
 export function inspectOpenAiChatToolHistory(
   messages: unknown,
-  _options?: {
+  options?: {
     allowDanglingToolCalls?: boolean;
   }
 ): ToolHistoryContractViolation | null {
   if (!Array.isArray(messages) || messages.length === 0) {
     return null;
   }
+  const seenToolCalls = new Set<string>();
+  const pendingToolCalls = new Map<string, { index: number; role: string; itemType: string }>();
   for (const [index, rawMessage] of messages.entries()) {
     if (!rawMessage || typeof rawMessage !== 'object' || Array.isArray(rawMessage)) {
       continue;
@@ -98,6 +101,31 @@ export function inspectOpenAiChatToolHistory(
       if (violation) {
         return violation;
       }
+      for (const rawToolCall of message.tool_calls) {
+        if (!rawToolCall || typeof rawToolCall !== 'object' || Array.isArray(rawToolCall)) {
+          continue;
+        }
+        const toolCall = rawToolCall as Record<string, unknown>;
+        const callId =
+          readTrimmedString(toolCall.id) ??
+          readTrimmedString(toolCall.call_id) ??
+          readTrimmedString(toolCall.tool_call_id);
+        if (!callId) {
+          continue;
+        }
+        if (isSyntheticRouteCodexToolCallId(callId)) {
+          return {
+            code: 'synthetic_tool_call_id',
+            index,
+            callId,
+            role,
+            itemType: 'tool_call',
+            reason: `assistant tool_call uses synthetic RouteCodex fallback id: ${callId}`
+          };
+        }
+        seenToolCalls.add(callId);
+        pendingToolCalls.set(callId, { index, role, itemType: 'tool_call' });
+      }
       continue;
     }
     if (role !== 'tool') {
@@ -106,6 +134,48 @@ export function inspectOpenAiChatToolHistory(
     const violation = validateToolResultShape(message, index, role, 'tool_result', 'tool message');
     if (violation) {
       return violation;
+    }
+    const callId =
+      readTrimmedString(message.tool_call_id) ??
+      readTrimmedString(message.call_id) ??
+      readTrimmedString(message.id);
+    if (!callId) {
+      continue;
+    }
+    if (isSyntheticRouteCodexToolCallId(callId)) {
+      return {
+        code: 'synthetic_tool_call_id',
+        index,
+        callId,
+        role,
+        itemType: 'tool_result',
+        reason: `tool message uses synthetic RouteCodex fallback id: ${callId}`
+      };
+    }
+    if (!seenToolCalls.has(callId) || !pendingToolCalls.has(callId)) {
+      return {
+        code: 'orphan_tool_result',
+        index,
+        callId,
+        role,
+        itemType: 'tool_result',
+        reason: `tool message references unknown or already-consumed tool_call_id: ${callId}`
+      };
+    }
+    pendingToolCalls.delete(callId);
+  }
+  if (pendingToolCalls.size > 0 && options?.allowDanglingToolCalls !== true) {
+    const firstPending = pendingToolCalls.entries().next();
+    if (!firstPending.done) {
+      const [callId, meta] = firstPending.value;
+      return {
+        code: 'dangling_tool_call',
+        index: meta.index,
+        callId,
+        role: meta.role,
+        itemType: meta.itemType,
+        reason: `tool call ${callId} does not have a matching tool result in history`
+      };
     }
   }
   return null;

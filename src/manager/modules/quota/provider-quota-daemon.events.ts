@@ -177,9 +177,10 @@ export async function handleProviderQuotaErrorEvent(
     const applied = applyQuotaErrorEvent(previous, errorForQuota, nowMs);
     const nextState: QuotaState = {
       ...applied,
-      inPool: false,
+      inPool: true,
       reason: 'cooldown',
-      cooldownUntil
+      cooldownUntil,
+      cooldownKeepsPool: true
     };
     ctx.quotaStates.set(providerKey, nextState);
     ctx.schedulePersist(nowMs);
@@ -253,18 +254,18 @@ export async function handleProviderQuotaErrorEvent(
         typeof existingCooldownUntil === 'number' && existingCooldownUntil > until
           ? existingCooldownUntil
           : until;
-	      const nextState: QuotaState = {
-	        ...previous,
-	        inPool: false,
-	        reason: isCapacityCooldown ? 'cooldown' : 'quotaDepleted',
-	        cooldownUntil,
-	        lastErrorSeries: null,
-	        lastErrorCode: null,
-	        lastErrorAtMs: null,
-	        consecutiveErrorCount: 0,
-	        ...(isCapacityCooldown
-	          ? {}
-	          : {
+      const nextState: QuotaState = {
+        ...previous,
+        inPool: isCapacityCooldown ? true : false,
+        reason: isCapacityCooldown ? 'cooldown' : 'quotaDepleted',
+        cooldownUntil,
+        lastErrorSeries: null,
+        lastErrorCode: null,
+        lastErrorAtMs: null,
+        consecutiveErrorCount: 0,
+        ...(isCapacityCooldown
+          ? { cooldownKeepsPool: true }
+          : {
               blacklistUntil: null,
               // deterministic quota signals should clear blacklist to avoid sticky long locks
               // when upstream provides explicit reset delay.
@@ -328,13 +329,18 @@ export async function handleProviderQuotaErrorEvent(
     && routePoolSize > 1;
   const nextState: QuotaState =
     shouldEvictFromPool
-      ? appliedState
+      ? {
+          ...appliedState,
+          inPool: false,
+          reason: 'cooldown',
+          cooldownKeepsPool: undefined
+        }
       : {
-        ...appliedState,
-        inPool: true,
-        reason: appliedState.reason === 'ok' ? 'ok' : 'cooldown',
-        cooldownKeepsPool: appliedState.reason === 'ok' ? undefined : true
-      };
+          ...appliedState,
+          inPool: true,
+          reason: appliedState.reason === 'ok' ? 'ok' : 'cooldown',
+          cooldownKeepsPool: appliedState.reason === 'ok' ? undefined : true
+        };
   ctx.quotaStates.set(providerKey, nextState);
 
   const tsIso = new Date(nowMs).toISOString();

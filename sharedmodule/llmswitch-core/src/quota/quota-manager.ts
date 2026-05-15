@@ -400,7 +400,9 @@ export class QuotaManager {
         typeof normalized.blacklistUntil === 'number' && normalized.blacklistUntil > nowMs;
       const withinCooldown =
         typeof normalized.cooldownUntil === 'number' && normalized.cooldownUntil > nowMs;
-      const inPool = normalized.inPool && !withinBlacklist && !withinCooldown;
+      // Cooldown means temporary admission backoff, not permanent pool eviction.
+      // Rust selection consumes `cooldownUntil` directly to block dispatch during the window.
+      const inPool = normalized.inPool && !withinBlacklist;
 
       const hasRecentError =
         typeof normalized.lastErrorAtMs === 'number' &&

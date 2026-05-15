@@ -2,8 +2,8 @@
  * QuotaManager SSOT Adapter (RouteCodex-X7E Phase 1)
  *
  * Provides a unified facade over the core QuotaManager for all quota operations.
- * - Routes all quota state mutations through core QuotaManager when available
- * - Falls back to legacy ProviderQuotaDaemonModule when core is unavailable
+ * - Routes all quota state mutations through a single selected backend
+ * - No per-call fallback switching between core and legacy
  * - Ensures admin snapshot reads return consistent unified view
  *
  * This is the **only** entry point for quota operations in the new path.
@@ -98,6 +98,8 @@ export function createQuotaManagerAdapter(options: {
   const core = options.coreManager;
   const legacy = options.legacyDaemon;
   const hasCore = core !== null && x7eGate.phase1UnifiedQuota;
+  const backend: 'core' | 'legacy' | 'none' =
+    hasCore ? 'core' : legacy ? 'legacy' : 'none';
   const quotaRoutingEnabled = options.quotaRoutingEnabled !== false;
 
   // Track provider static configs for bootstrap
@@ -124,26 +126,6 @@ export function createQuotaManagerAdapter(options: {
     }
   }
 
-  function withFallback<T>(
-    coreFn: () => T | undefined | Promise<T>,
-    legacyFn: () => T | undefined | Promise<T>,
-    defaultValue: T
-  ): T | Promise<T> {
-    if (hasCore) {
-      const result = coreFn();
-      if (result !== undefined && result !== null) {
-        return result;
-      }
-    }
-    if (legacy) {
-      const result = legacyFn();
-      if (result !== undefined && result !== null) {
-        return result;
-      }
-    }
-    return defaultValue;
-  }
-
   async function disableProvider(options: {
     providerKey: string;
     mode: 'cooldown' | 'blacklist';
@@ -157,7 +139,7 @@ export function createQuotaManagerAdapter(options: {
     const mode = options.mode;
     const durationMs = options.durationMs;
 
-    if (hasCore && core?.disableProvider) {
+    if (backend === 'core' && core?.disableProvider) {
       core.disableProvider({ providerKey, mode, durationMs, reason: mode === 'blacklist' ? 'operator' : 'auto' });
       if (core.persistNow) {
         await core.persistNow().catch((error) => {
@@ -167,7 +149,7 @@ export function createQuotaManagerAdapter(options: {
       return { ok: true, providerKey, mode, source: 'core' };
     }
 
-    if (legacy?.disableProvider) {
+    if (backend === 'legacy' && legacy?.disableProvider) {
       return await legacy.disableProvider({ providerKey, mode, durationMs });
     }
 
@@ -179,7 +161,7 @@ export function createQuotaManagerAdapter(options: {
       return { ok: false, reason: 'quota_routing_disabled' };
     }
 
-    if (hasCore && core?.recoverProvider) {
+    if (backend === 'core' && core?.recoverProvider) {
       core.recoverProvider(providerKey);
       if (core.persistNow) {
         await core.persistNow().catch((error) => {
@@ -189,7 +171,7 @@ export function createQuotaManagerAdapter(options: {
       return { ok: true, providerKey, source: 'core' };
     }
 
-    if (legacy?.recoverProvider) {
+    if (backend === 'legacy' && legacy?.recoverProvider) {
       return await legacy.recoverProvider(providerKey);
     }
 
@@ -201,7 +183,7 @@ export function createQuotaManagerAdapter(options: {
       return { ok: false, reason: 'quota_routing_disabled' };
     }
 
-    if (hasCore && core?.resetProvider) {
+    if (backend === 'core' && core?.resetProvider) {
       core.resetProvider(providerKey);
       if (core.persistNow) {
         await core.persistNow().catch((error) => {
@@ -211,7 +193,7 @@ export function createQuotaManagerAdapter(options: {
       return { ok: true, providerKey, source: 'core' };
     }
 
-    if (legacy?.resetProvider) {
+    if (backend === 'legacy' && legacy?.resetProvider) {
       return await legacy.resetProvider(providerKey);
     }
 
@@ -241,7 +223,7 @@ export function createQuotaManagerAdapter(options: {
       return { ok: false, reason: 'providerKey_and_quota_required' };
     }
 
-    if (hasCore) {
+    if (backend === 'core') {
       if (core?.recoverProvider) {
         core.recoverProvider(providerKey);
       }
@@ -252,9 +234,6 @@ export function createQuotaManagerAdapter(options: {
           inPool,
           reason: inPool ? 'ok' : depletedReason
         });
-      } else if (!inPool && core?.disableProvider) {
-        // Fallback for older core manager signatures.
-        core.disableProvider({ providerKey, mode: 'cooldown', durationMs: 60_000, reason: depletedReason });
       }
       if (core?.persistNow) {
         await core.persistNow().catch((error) => {
@@ -264,11 +243,11 @@ export function createQuotaManagerAdapter(options: {
       return { ok: true, providerKey, quota, inPool, reason: inPool ? 'ok' : depletedReason, source: 'core' };
     }
 
-    if (legacy?.recoverProvider && quota > 0) {
+    if (backend === 'legacy' && legacy?.recoverProvider && quota > 0) {
       const result = await legacy.recoverProvider(providerKey);
       return { ok: true, providerKey, quota, inPool: true, reason: 'ok', source: 'legacy', result };
     }
-    if (legacy?.disableProvider && quota <= 0) {
+    if (backend === 'legacy' && legacy?.disableProvider && quota <= 0) {
       const result = await legacy.disableProvider({ providerKey, mode: 'cooldown', durationMs: 5 * 60_000 });
       return { ok: true, providerKey, quota, inPool: false, reason: depletedReason, source: 'legacy', result };
     }
@@ -283,7 +262,7 @@ export function createQuotaManagerAdapter(options: {
 
     staticConfigRegistry.set(providerKey, config);
 
-    if (hasCore && core?.registerProviderStaticConfig) {
+    if (backend === 'core' && core?.registerProviderStaticConfig) {
       try {
         core.registerProviderStaticConfig(providerKey, config);
       } catch (error) {
@@ -292,7 +271,7 @@ export function createQuotaManagerAdapter(options: {
       return;
     }
 
-    if (legacy?.registerProviderStaticConfig) {
+    if (backend === 'legacy' && legacy?.registerProviderStaticConfig) {
       legacy.registerProviderStaticConfig(providerKey, config);
     }
   }
@@ -302,7 +281,7 @@ export function createQuotaManagerAdapter(options: {
       return;
     }
 
-    if (hasCore && core?.onProviderError) {
+    if (backend === 'core' && core?.onProviderError) {
       try {
         core.onProviderError(event);
       } catch (error) {
@@ -311,7 +290,7 @@ export function createQuotaManagerAdapter(options: {
       return;
     }
 
-    if (legacy?.onProviderError) {
+    if (backend === 'legacy' && legacy?.onProviderError) {
       legacy.onProviderError(event);
     }
   }
@@ -321,7 +300,7 @@ export function createQuotaManagerAdapter(options: {
       return;
     }
 
-    if (hasCore && core?.onProviderSuccess) {
+    if (backend === 'core' && core?.onProviderSuccess) {
       try {
         core.onProviderSuccess(event);
       } catch (error) {
@@ -330,7 +309,7 @@ export function createQuotaManagerAdapter(options: {
       return;
     }
 
-    if (legacy?.onProviderSuccess) {
+    if (backend === 'legacy' && legacy?.onProviderSuccess) {
       legacy.onProviderSuccess(event);
     }
   }
@@ -340,13 +319,13 @@ export function createQuotaManagerAdapter(options: {
       return;
     }
 
-    if (hasCore) {
+    if (backend === 'core') {
       // Core handles usage internally via success/error events
       // This hook is for explicit usage tracking if needed
       return;
     }
 
-    if (legacy?.recordProviderUsage) {
+    if (backend === 'legacy' && legacy?.recordProviderUsage) {
       legacy.recordProviderUsage(event);
     }
   }
@@ -356,7 +335,7 @@ export function createQuotaManagerAdapter(options: {
       return () => null;
     }
 
-    if (hasCore && core?.getQuotaView) {
+    if (backend === 'core' && core?.getQuotaView) {
       const coreView = core.getQuotaView();
       return (providerKey: string) => {
         const raw = coreView(providerKey);
@@ -378,7 +357,7 @@ export function createQuotaManagerAdapter(options: {
       };
     }
 
-    if (legacy?.getQuotaView) {
+    if (backend === 'legacy' && legacy?.getQuotaView) {
       return legacy.getQuotaView();
     }
 
@@ -389,7 +368,7 @@ export function createQuotaManagerAdapter(options: {
     const result: Record<string, QuotaViewEntry> = {};
 
     // Prefer core snapshot
-    if (hasCore && core?.getSnapshot) {
+    if (backend === 'core' && core?.getSnapshot) {
       const snap = core.getSnapshot();
       if (snap && typeof snap === 'object') {
         const providers = (snap as Record<string, unknown>).providers;
@@ -417,7 +396,7 @@ export function createQuotaManagerAdapter(options: {
     }
 
     // Fall back to legacy
-    if (legacy?.getAdminSnapshot) {
+    if (backend === 'legacy' && legacy?.getAdminSnapshot) {
       const legacySnap = legacy.getAdminSnapshot();
       for (const [key, state] of Object.entries(legacySnap)) {
         result[key] = {
@@ -438,7 +417,7 @@ export function createQuotaManagerAdapter(options: {
   }
 
   async function refreshNow(): Promise<{ refreshedAt: number; tokenCount: number; recordCount: number }> {
-    if (legacy?.refreshNow) {
+    if (backend === 'legacy' && legacy?.refreshNow) {
       return await legacy.refreshNow();
     }
 
@@ -452,7 +431,7 @@ export function createQuotaManagerAdapter(options: {
 
   return {
     get isUnified() {
-      return hasCore;
+      return backend === 'core';
     },
     init,
     start,

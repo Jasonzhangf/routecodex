@@ -83,9 +83,9 @@ describe('ProviderQuotaDaemonModule', () => {
 
     const snapshot1 = mod.getAdminSnapshot();
     expect(snapshot1['antigravity.alias1.gemini-3-pro-high']).toBeDefined();
-    expect(snapshot1['antigravity.alias1.gemini-3-pro-high'].inPool).toBe(false);
-    expect(snapshot1['antigravity.alias1.gemini-3-pro-high'].reason).toBe('quotaDepleted');
-    expect(snapshot1['antigravity.alias1.gemini-3-pro-high'].cooldownUntil).toBe(now + 1000);
+    expect(snapshot1['antigravity.alias1.gemini-3-pro-high'].inPool).toBe(true);
+    expect(snapshot1['antigravity.alias1.gemini-3-pro-high'].reason).toBe('cooldown');
+    expect(snapshot1['antigravity.alias1.gemini-3-pro-high'].cooldownUntil).toBe(now + 3_000);
 
     await jest.advanceTimersByTimeAsync(1_100);
     const quotaView = mod.getQuotaView();
@@ -138,6 +138,149 @@ describe('ProviderQuotaDaemonModule', () => {
     const quotaView = mod.getQuotaView();
     expect(quotaView).not.toBeNull();
     expect(quotaView!('mimo.key1.mimo-v2.5-pro')?.inPool).toBe(true);
+
+    await mod.stop();
+  });
+
+  it('single-provider recoverable 502 burst stays in pool (backoff only, no eviction)', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-15T20:00:00.000Z'));
+    const baseNow = Date.now();
+    const providerKey = 'mini27.key1.MiniMax-M2.7';
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    await mod.start();
+
+    for (let i = 0; i < 4; i += 1) {
+      const ts = baseNow + i * 2_000;
+      await reportProviderErrorToRouterPolicy({
+        code: 'HTTP_502',
+        message: 'Upstream SSE error event: Internal Network Failure',
+        stage: 'provider.send',
+        status: 502,
+        recoverable: true,
+        affectsHealth: false,
+        timestamp: ts,
+        runtime: {
+          requestId: `req_single_502_${i}`,
+          providerKey,
+          providerId: 'mini27'
+        },
+        details: {
+          errorClassification: 'recoverable',
+          errorCode: 'HTTP_502',
+          upstreamCode: 'HTTP_502',
+          reason: 'Internal Network Failure',
+          attempt: i + 1,
+          routePoolSize: 1
+        }
+      } as any);
+      await jest.advanceTimersByTimeAsync(5);
+    }
+
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot[providerKey]).toBeDefined();
+    expect(snapshot[providerKey].reason).toBe('cooldown');
+    expect(snapshot[providerKey].inPool).toBe(true);
+    expect(snapshot[providerKey].cooldownUntil).toBeGreaterThan(baseNow);
+    expect(snapshot[providerKey].consecutiveErrorCount).toBeGreaterThanOrEqual(1);
+
+    const quotaView = mod.getQuotaView();
+    expect(quotaView).not.toBeNull();
+    expect(quotaView!(providerKey)?.inPool).toBe(true);
+
+    await mod.stop();
+  });
+
+  it('single-provider unrecoverable 3x still does not evict (no alternate route)', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-15T20:05:00.000Z'));
+    const baseNow = Date.now();
+    const providerKey = 'mini27.key1.MiniMax-M2.7';
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    await mod.start();
+
+    for (let i = 0; i < 3; i += 1) {
+      const ts = baseNow + i * 1_000;
+      await reportProviderErrorToRouterPolicy({
+        code: 'HTTP_401',
+        message: 'Invalid API key',
+        stage: 'provider.send',
+        status: 401,
+        recoverable: false,
+        affectsHealth: true,
+        timestamp: ts,
+        runtime: {
+          requestId: `req_single_unrecoverable_${i}`,
+          providerKey,
+          providerId: 'mini27'
+        },
+        details: {
+          errorClassification: 'unrecoverable',
+          errorCode: 'HTTP_401',
+          upstreamCode: 'HTTP_401',
+          reason: 'invalid_api_key',
+          attempt: i + 1,
+          routePoolSize: 1
+        }
+      } as any);
+      await jest.advanceTimersByTimeAsync(5);
+    }
+
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot[providerKey]).toBeDefined();
+    expect(snapshot[providerKey].reason).toBe('cooldown');
+    expect(snapshot[providerKey].inPool).toBe(true);
+    expect(snapshot[providerKey].consecutiveErrorCount).toBe(3);
+
+    await mod.stop();
+  });
+
+  it('unrecoverable 3x evicts only when alternate routes exist', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-15T20:10:00.000Z'));
+    const baseNow = Date.now();
+    const providerKey = 'mini27.key1.MiniMax-M2.7';
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    await mod.start();
+
+    for (let i = 0; i < 3; i += 1) {
+      const ts = baseNow + i * 1_000;
+      await reportProviderErrorToRouterPolicy({
+        code: 'HTTP_401',
+        message: 'Invalid API key',
+        stage: 'provider.send',
+        status: 401,
+        recoverable: false,
+        affectsHealth: true,
+        timestamp: ts,
+        runtime: {
+          requestId: `req_multi_unrecoverable_${i}`,
+          providerKey,
+          providerId: 'mini27'
+        },
+        details: {
+          errorClassification: 'unrecoverable',
+          errorCode: 'HTTP_401',
+          upstreamCode: 'HTTP_401',
+          reason: 'invalid_api_key',
+          attempt: i + 1,
+          routePoolSize: 2
+        }
+      } as any);
+      await jest.advanceTimersByTimeAsync(5);
+    }
+
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot[providerKey]).toBeDefined();
+    expect(snapshot[providerKey].inPool).toBe(false);
+    expect(snapshot[providerKey].reason).toBe('cooldown');
+    expect(snapshot[providerKey].consecutiveErrorCount).toBe(3);
 
     await mod.stop();
   });
@@ -225,12 +368,12 @@ describe('ProviderQuotaDaemonModule', () => {
     const snapshot = mod.getAdminSnapshot();
     expect(snapshot['antigravity.alias1.gemini-3-pro-high']).toBeDefined();
     expect(snapshot['antigravity.alias1.claude-sonnet-4-5-thinking']).toBeDefined();
-    expect(snapshot['antigravity.alias1.gemini-3-pro-high'].inPool).toBe(false);
-    expect(snapshot['antigravity.alias1.claude-sonnet-4-5-thinking'].inPool).toBe(false);
+    expect(snapshot['antigravity.alias1.gemini-3-pro-high'].inPool).toBe(true);
+    expect(snapshot['antigravity.alias1.claude-sonnet-4-5-thinking'].inPool).toBe(true);
     expect(snapshot['antigravity.alias1.gemini-3-pro-high'].reason).toBe('cooldown');
-    expect(snapshot['antigravity.alias1.claude-sonnet-4-5-thinking'].reason).toBe('cooldown');
-    expect(snapshot['antigravity.alias1.gemini-3-pro-high'].cooldownUntil).toBe(now + 30 * 60_000);
-    expect(snapshot['antigravity.alias1.claude-sonnet-4-5-thinking'].cooldownUntil).toBe(now + 30 * 60_000);
+    expect(snapshot['antigravity.alias1.claude-sonnet-4-5-thinking'].reason).toBe('ok');
+    expect(snapshot['antigravity.alias1.gemini-3-pro-high'].cooldownUntil).toBe(now + 5 * 60_000);
+    expect(snapshot['antigravity.alias1.claude-sonnet-4-5-thinking'].cooldownUntil).toBeNull();
 
     await mod.stop();
   });
@@ -272,7 +415,7 @@ describe('ProviderQuotaDaemonModule', () => {
 
     const snapshot1 = mod.getAdminSnapshot();
     expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking']).toBeDefined();
-    expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking'].inPool).toBe(false);
+    expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking'].inPool).toBe(true);
     expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking'].reason).toBe('cooldown');
     expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking'].cooldownUntil).toBe(now + 15_000);
 
@@ -300,7 +443,7 @@ describe('ProviderQuotaDaemonModule', () => {
     await jest.advanceTimersByTimeAsync(5);
 
     const snapshot2 = mod.getAdminSnapshot();
-    expect(snapshot2['antigravity.alias1.claude-sonnet-4-5-thinking'].inPool).toBe(false);
+    expect(snapshot2['antigravity.alias1.claude-sonnet-4-5-thinking'].inPool).toBe(true);
     expect(snapshot2['antigravity.alias1.claude-sonnet-4-5-thinking'].reason).toBe('cooldown');
 
     await jest.advanceTimersByTimeAsync(15_100);
@@ -311,7 +454,7 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.stop();
   });
 
-  it('keeps antigravity oauth providers out of pool until quota recovery signal arrives', async () => {
+  it('keeps antigravity oauth providers available by default and preserves availability on quota recovery signal', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-01-16T00:00:00.000Z'));
     const now = Date.now();
@@ -323,7 +466,7 @@ describe('ProviderQuotaDaemonModule', () => {
 
     const view1 = mod.getQuotaView();
     expect(view1).not.toBeNull();
-    expect(view1!('antigravity.alias1.claude-sonnet-4-5-thinking')?.inPool).toBe(false);
+    expect(view1!('antigravity.alias1.claude-sonnet-4-5-thinking')?.inPool).toBe(true);
 
     await reportProviderErrorToRouterPolicy({
       code: 'QUOTA_RECOVERY',
@@ -386,7 +529,7 @@ describe('ProviderQuotaDaemonModule', () => {
     const snapshot = mod.getAdminSnapshot();
     const state = snapshot['tab.default.gpt-5.1'];
     expect(state).toBeDefined();
-    expect(state.inPool).toBe(false);
+    expect(state.inPool).toBe(true);
     expect(state.reason).toBe('cooldown');
     expect(state.blacklistUntil).toBeNull();
     expect(state.cooldownUntil).toBe(baseNow + 2_000 + 31_000);
@@ -478,7 +621,7 @@ describe('ProviderQuotaDaemonModule', () => {
     const snapshot = mod.getAdminSnapshot();
     const state = snapshot['tab.default.gpt-5.1'];
     expect(state).toBeDefined();
-    expect(state.inPool).toBe(false);
+    expect(state.inPool).toBe(true);
     expect(state.reason).toBe('cooldown');
     expect(state.blacklistUntil).toBeNull();
     expect(state.cooldownUntil).toBe(baseNow + (eventCount - 1) * 1000 + 61_000);
