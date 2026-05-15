@@ -232,6 +232,7 @@ describe('port mode routing admin integration', () => {
         body: JSON.stringify({
           mode: 'router',
           host: '127.0.0.1',
+          routingPolicyGroup: 'default',
         }),
       });
       const createBody = await create.json();

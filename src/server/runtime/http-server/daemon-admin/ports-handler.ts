@@ -62,6 +62,7 @@ export function registerPortsRoutes(app: Application, options: PortsHandlerOptio
       port: portNum,
       host: typeof body.host === 'string' && body.host.trim() ? body.host.trim() : '0.0.0.0',
       mode: body.mode,
+      routingPolicyGroup: body.routingPolicyGroup,
       protocolBehavior: body.protocolBehavior,
       providerBinding: body.providerBinding,
       apikey: body.apikey,

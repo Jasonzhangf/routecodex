@@ -87,14 +87,13 @@ describe('provider-direct-pipeline', () => {
   });
 
   it('fails fast when relay would require an unsupported cross-protocol semantic map', async () => {
-    const { handle } = createHandle('anthropic-messages');
+    const { handle } = createHandle('openai-chat');
     await expect(
       executeProviderDirectPipeline(
         {
-          model: 'mimo-v2.5-pro',
-          input: 'hello',
+          messages: [{ role: 'user', content: 'hello' }],
         },
-        { path: '/v1/responses', headers: {} },
+        { path: '/v1/chat/completions', headers: {} },
         {
           portConfig: {
             port: 5002,
@@ -104,9 +103,79 @@ describe('provider-direct-pipeline', () => {
             providerBinding: 'mock.model',
           },
           resolveProvider: () => handle,
-          detectInboundProtocol: detectInboundProtocolFromRequest,
+          detectInboundProtocol: () => 'unknown-protocol' as any,
         },
       ),
     ).rejects.toThrow(/relay only supports openai-chat <-> anthropic-messages today/i);
+  });
+
+  it('keeps openai-responses same-protocol requests on direct path in auto mode', async () => {
+    const { handle, processIncoming } = createHandle('openai-responses');
+    const requestPayload = {
+      model: 'mimo-v2.5-pro',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      reasoning: { effort: 'high' },
+    } as Record<string, unknown>;
+    const beforeSnapshots: Array<Record<string, unknown>> = [];
+    const afterSnapshots: unknown[] = [];
+
+    const result = await executeProviderDirectPipeline(
+      requestPayload,
+      { path: '/v1/responses', headers: {} },
+      {
+        portConfig: {
+          port: 5003,
+          host: '127.0.0.1',
+          mode: 'provider',
+          protocolBehavior: 'auto',
+          providerBinding: 'mock.model',
+        },
+        resolveProvider: () => handle,
+        detectInboundProtocol: detectInboundProtocolFromRequest,
+        onSnapshotBefore: (payload) => beforeSnapshots.push(payload),
+        onSnapshotAfter: (response) => afterSnapshots.push(response),
+      },
+    );
+
+    expect(result.actualBehavior).toBe('direct');
+    expect(processIncoming).toHaveBeenCalledTimes(1);
+    expect(processIncoming).toHaveBeenCalledWith(requestPayload);
+    expect(beforeSnapshots).toHaveLength(1);
+    expect(beforeSnapshots[0]).toBe(requestPayload);
+    expect(afterSnapshots).toHaveLength(1);
+  });
+
+  it('allows provider-mode direct path to apply lightweight thinking overrides without relay conversion', async () => {
+    const { handle, processIncoming } = createHandle('openai-responses');
+    const requestPayload = {
+      model: 'mimo-v2.5-pro',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      reasoning: { effort: 'low' },
+    } as Record<string, unknown>;
+
+    const result = await executeProviderDirectPipeline(
+      requestPayload,
+      { path: '/v1/responses', headers: {} },
+      {
+        portConfig: {
+          port: 5004,
+          host: '127.0.0.1',
+          mode: 'provider',
+          protocolBehavior: 'auto',
+          providerBinding: 'mock.model',
+        },
+        resolveProvider: () => handle,
+        detectInboundProtocol: detectInboundProtocolFromRequest,
+        preparePayload: (payload) => {
+          payload.reasoning = { effort: 'high' };
+        },
+      },
+    );
+
+    expect(result.actualBehavior).toBe('direct');
+    const sentPayload = processIncoming.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(sentPayload.input).toEqual(requestPayload.input);
+    expect(sentPayload.reasoning).toEqual({ effort: 'high' });
+    expect((sentPayload as { messages?: unknown }).messages).toBeUndefined();
   });
 });
