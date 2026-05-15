@@ -113,6 +113,13 @@ import {
   waitWithClientAbortSignal
 } from './executor/request-executor-abort.js';
 import {
+  peekGlobalErrorBackoffWaitMs,
+  recordGlobalErrorBackoff,
+  resetGlobalErrorBackoff,
+  resetGlobalErrorBackoffStateForTests,
+  waitGlobalErrorBackoffWithGate
+} from './executor/request-executor-global-error-backoff.js';
+import {
   bodyContainsReasoningStopFinalizedMarker,
   detectAssistantSanitizationPlaceholder,
   detectEmptyProviderRequestPayload,
@@ -261,6 +268,7 @@ export type { SseWrapperErrorInfo };
 function resetRequestExecutorInternalStateForTests(): void {
   resetErrorReportStateForTests();
   resetRequestExecutorRetryPlannerState();
+  resetGlobalErrorBackoffStateForTests();
   providerSwitchLogState.clear();
 }
 
@@ -367,6 +375,16 @@ export class HubRequestExecutor implements RequestExecutor {
       recordedAnyAttempt = true;
     };
     try {
+      const pendingGlobalErrorWaitMs = peekGlobalErrorBackoffWaitMs();
+      if (pendingGlobalErrorWaitMs > 0) {
+        logStage('server.global_error_backoff_wait', executorRequestId, {
+          waitMs: pendingGlobalErrorWaitMs
+        });
+        await waitGlobalErrorBackoffWithGate(getClientConnectionAbortSignal(input.metadata));
+        logStage('server.global_error_backoff_wait.completed', executorRequestId, {
+          waitMs: pendingGlobalErrorWaitMs
+        });
+      }
       const hubPipeline = ensureHubPipeline(this.deps.getHubPipeline);
       const {
         initialMetadata,
@@ -1077,6 +1095,7 @@ export class HubRequestExecutor implements RequestExecutor {
           for (const scope of sessionStormBackoffScopes ?? []) {
             clearSessionStormBackoff(scope);
           }
+          resetGlobalErrorBackoff();
           return buildProviderExecutionSuccessResult({
             converted,
             providerKey: target.providerKey,
@@ -1181,6 +1200,7 @@ export class HubRequestExecutor implements RequestExecutor {
         releaseLogicalRequestChainIfNeeded();
       }
     } catch (error: unknown) {
+      recordGlobalErrorBackoff(error);
       // If we failed before selecting a provider (no bindProvider/recordAttempt),
       // at least record one error sample for this request.
       if (!recordedAnyAttempt) {
@@ -1236,7 +1256,10 @@ export const __requestExecutorTestables = {
   buildSessionStormHardBlockError,
   consumeSessionStormBackoffMs,
   peekSessionStormBackoffWaitMs,
+  peekGlobalErrorBackoffWaitMs,
   clearSessionStormBackoff,
+  recordGlobalErrorBackoff,
+  resetGlobalErrorBackoff,
   prepareRequestPayloadRetrySeed,
   resolveOriginalRequestForResponseConversion,
   resolveRequestExecutorProviderErrorClassification,

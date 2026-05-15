@@ -284,12 +284,6 @@ export function validateCanonicalClientToolCall(
         });
       }
       const cmd = parsed.cmd;
-      if (containsBroadKillCommand(cmd)) {
-        return buildToolValidationFailure({
-          reason: 'forbidden_broad_kill',
-          message: 'exec_command contains a forbidden broad process-kill command. Use explicit PID- or service-scoped shutdown/restart only.'
-        });
-      }
       return { ok: true, normalizedArgs: JSON.stringify({ ...parsed, cmd }) };
     }
     case 'view_image': {
