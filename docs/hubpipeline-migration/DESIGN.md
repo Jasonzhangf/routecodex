@@ -630,7 +630,7 @@ rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs
 
 ### 语义状态
 - **Rust 唯一真源**：`buildSlimResponsesContextWithNative`（TS thin wrapper）
-- **TS 调用点**：`req_inbound_stage2_semantic_map/index.ts` 中 `buildSlimResponsesContextForSemantics` 仍保留，待替换
+- **TS 调用点**：`req_inbound_stage2_semantic_map/index.ts` 中 `buildSlimResponsesContextForSemantics` 已替换为 Rust 调用 ✅
 
 ### 标注
 - **live 测试**：5520 未重启验证 ⚠️

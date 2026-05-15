@@ -6,7 +6,7 @@ Phase 1 按 slice 逐个推进，详见 `docs/hubpipeline-migration/DESIGN.md`
 **Phase 0 ✅**：P0-1 ~ P0-4 全部完成
 **Phase 1 Slice 2 ✅**：`client-remap-protocol-switch.ts`（524→106 行，-80%）
 **Phase 1 Slice 3.1 ✅**：`shouldNormalizeReasoningPayload` → Rust predicate
-**Phase 1 Slice 3.2 ✅**：`buildSlimResponsesContext` → Rust
+**Phase 1 Slice 3.2 ✅**：`buildSlimResponsesContext` → Rust（wrapper + 调用点）
 
 ## 当前进展（2026-05-15）
 | Slice | 文件 | 状态 |
@@ -14,7 +14,7 @@ Phase 1 按 slice 逐个推进，详见 `docs/hubpipeline-migration/DESIGN.md`
 | Slice 1 | `resolveProtocolToken` | ✅ 完成 |
 | Slice 2 | `client-remap-protocol-switch.ts` | ✅ 完成（418 行迁移） |
 | Slice 3.1 | `shouldNormalizeReasoningPayload` | ✅ 完成 |
-| Slice 3.2 | `buildSlimResponsesContext` | ✅ 完成（Rust 就绪） |
+| Slice 3.2 | `buildSlimResponsesContext` | ✅ 完成（Rust wrapper + 调用点替换） |
 | Slice 3.3 | `normalizeReqInboundReasoningPayload` responses fast-path | ⏳ 待启动 |
 
 ## 设计文档
