@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import type { Command } from 'commander';
 import { LOCAL_HOSTS } from '../../constants/index.js';
 import { resolveRccConfigFile, resolveRccUserDir } from '../../config/user-data-paths.js';
+import { resolvePortGroupFromConfig } from './port-group-resolver.js';
 import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
 import { writeDaemonStopIntent } from '../../utils/daemon-stop-intent.js';
 import type { GuardianLifecycleEvent, GuardianStopResult } from '../guardian/types.js';
@@ -25,6 +26,7 @@ type LoggerLike = {
 
 interface StopCommandOptions {
   password?: string;
+  port?: string;
 }
 
 interface StopCallerAudit {
@@ -232,6 +234,7 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
     .command('stop')
     .description('Stop the RouteCodex server')
     .option('--password <password>', 'Password required to stop server')
+    .option('-p, --port <port>', 'RouteCodex server port')
     .action(async (options: StopCommandOptions) => {
       const spinner = await ctx.createSpinner('Stopping RouteCodex server...');
       const callerAudit = buildCallerAudit();
@@ -239,14 +242,20 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
         const expectedPassword = resolveStopPassword(ctx);
         enforceStopPassword(options?.password, expectedPassword, spinner, ctx);
 
-        const resolvedPort = resolveStopPort(ctx, spinner);
+        const explicitPort = typeof options?.port === 'string' && options.port.trim() ? Number(options.port.trim()) : NaN;
+        const basePort = Number.isFinite(explicitPort) && explicitPort > 0 ? explicitPort : resolveStopPort(ctx, spinner);
+        const grouped = ctx.isDevPackage ? null : resolvePortGroupFromConfig(ctx, { targetPort: basePort });
+        const targetPorts = grouped?.ports?.length ? grouped.ports : [basePort];
+        if (targetPorts.length > 1) {
+          ctx.logger.info(`[stop] resolved config port-group: ${targetPorts.join(', ')}`);
+        }
         const reportLifecycle = async (event: GuardianLifecycleEvent): Promise<void> => {
           const ok = await ctx.reportGuardianLifecycle?.(event);
           if (ctx.reportGuardianLifecycle && ok !== true) {
             throw new Error(`guardian lifecycle apply rejected (${event.action})`);
           }
         };
-        const finalizeStop = async (): Promise<void> => {
+        const finalizeStop = async (resolvedPort: number): Promise<void> => {
           await reportLifecycle({
             action: 'stop_finalize',
             source: 'cli.stop',
@@ -258,83 +267,89 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
           }
           await ctx.stopGuardianDaemon?.();
         };
-        logProcessLifecycleSync({
-          event: 'stop_command',
-          source: 'cli.stop',
-          details: {
-            result: 'requested',
-            port: resolvedPort,
-            ...callerAudit
-          }
-        });
-
-        try {
-          const pathImpl = ctx.pathImpl ?? path;
-          const home = ctx.getHomeDir ?? (() => homedir());
-          writeDaemonStopIntent(resolvedPort, {
-            source: 'cli.stop',
-            routeCodexHomeDir: resolveRccUserDir(home()),
-            pid: process.pid
-          });
-        } catch {
-          /* ignore */
-        }
-
-        const pids = ctx.findListeningPids(resolvedPort);
-        if (!pids.length) {
-          spinner.succeed(`No server listening on ${resolvedPort}.`);
+        for (const resolvedPort of targetPorts) {
           logProcessLifecycleSync({
             event: 'stop_command',
             source: 'cli.stop',
             details: {
-              result: 'no_server',
+              result: 'requested',
               port: resolvedPort,
               ...callerAudit
             }
           });
-          await finalizeStop();
-          return;
-        }
 
-        await reportLifecycle({
-          action: 'stop_http_shutdown_request',
-          source: 'cli.stop',
-          actorPid: process.pid,
-          metadata: { port: resolvedPort }
-        });
-        const httpShutdownAccepted = await attemptHttpShutdown(ctx, resolvedPort, callerAudit);
-        const gracefulDeadline = Date.now() + 3000;
-        while (Date.now() < gracefulDeadline) {
-          if (ctx.findListeningPids(resolvedPort).length === 0) {
-            spinner.succeed(`Stopped server on ${resolvedPort}.`);
+          try {
+            const home = ctx.getHomeDir ?? (() => homedir());
+            writeDaemonStopIntent(resolvedPort, {
+              source: 'cli.stop',
+              routeCodexHomeDir: resolveRccUserDir(home()),
+              pid: process.pid
+            });
+          } catch {
+            /* ignore */
+          }
+
+          const pids = ctx.findListeningPids(resolvedPort);
+          if (!pids.length) {
+            spinner.succeed(`No server listening on ${resolvedPort}.`);
             logProcessLifecycleSync({
               event: 'stop_command',
               source: 'cli.stop',
               details: {
-                result: httpShutdownAccepted ? 'stopped_via_http_shutdown' : 'stopped_after_wait',
+                result: 'no_server',
                 port: resolvedPort,
                 ...callerAudit
               }
             });
-            await finalizeStop();
-            return;
+            await finalizeStop(resolvedPort);
+            continue;
           }
-          await ctx.sleep(100);
-        }
 
-        const remain = ctx.findListeningPids(resolvedPort);
-        spinner.fail(`Graceful stop timed out on ${resolvedPort}; direct signal fallback is disabled.`);
-        logProcessLifecycleSync({
-          event: 'stop_command',
-          source: 'cli.stop',
-          details: {
-            result: 'graceful_timeout_no_fallback',
-            port: resolvedPort,
-            remainingPids: remain,
-            ...callerAudit
+          await reportLifecycle({
+            action: 'stop_http_shutdown_request',
+            source: 'cli.stop',
+            actorPid: process.pid,
+            metadata: { port: resolvedPort }
+          });
+          const httpShutdownAccepted = await attemptHttpShutdown(ctx, resolvedPort, callerAudit);
+          const gracefulDeadline = Date.now() + 3000;
+          let stopped = false;
+          while (Date.now() < gracefulDeadline) {
+            if (ctx.findListeningPids(resolvedPort).length === 0) {
+              spinner.succeed(`Stopped server on ${resolvedPort}.`);
+              logProcessLifecycleSync({
+                event: 'stop_command',
+                source: 'cli.stop',
+                details: {
+                  result: httpShutdownAccepted ? 'stopped_via_http_shutdown' : 'stopped_after_wait',
+                  port: resolvedPort,
+                  ...callerAudit
+                }
+              });
+              await finalizeStop(resolvedPort);
+              stopped = true;
+              break;
+            }
+            await ctx.sleep(100);
           }
-        });
-        ctx.exit(1);
+          if (stopped) {
+            continue;
+          }
+
+          const remain = ctx.findListeningPids(resolvedPort);
+          spinner.fail(`Graceful stop timed out on ${resolvedPort}; direct signal fallback is disabled.`);
+          logProcessLifecycleSync({
+            event: 'stop_command',
+            source: 'cli.stop',
+            details: {
+              result: 'graceful_timeout_no_fallback',
+              port: resolvedPort,
+              remainingPids: remain,
+              ...callerAudit
+            }
+          });
+          ctx.exit(1);
+        }
       } catch (e) {
         logProcessLifecycleSync({
           event: 'stop_command',

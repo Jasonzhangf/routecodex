@@ -5,6 +5,7 @@ import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { resolveRccConfigFile, resolveRccSessionsDir, resolveRccUserDir } from '../../config/user-data-paths.js';
+import { resolvePortGroupFromConfig } from './port-group-resolver.js';
 import type { GuardianLifecycleEvent, GuardianRegistration } from '../guardian/types.js';
 import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 import {
@@ -362,29 +363,42 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
   const explicitHost = typeof options.host === 'string' && options.host.trim() ? options.host.trim() : null;
 
   if (explicitPort) {
-    const host = explicitHost || LOCAL_HOSTS.LOCALHOST;
-    const pids = ctx.findListeningPids(explicitPort);
-    if (!pids.length) {
-      spinner.fail(`No RouteCodex server found on ${host}:${explicitPort}`);
-      ctx.exit(1);
-    }
-    const primaryProbe = await probeRouteCodexServer(
-      ctx,
-      host === LOCAL_HOSTS.LOCALHOST ? LOCAL_HOSTS.IPV4 : host,
-      explicitPort
-    );
-    const secondaryProbe =
-      primaryProbe.ok || host === LOCAL_HOSTS.IPV4
-        ? primaryProbe
-        : await probeRouteCodexServer(ctx, host, explicitPort);
-    if (!secondaryProbe.ok) {
-      // Allow explicit-port restart when managed PIDs are present but health probe
-      // is timing out; SIGUSR2 restart is used as recovery in this degraded state.
-      spinner.warn(
-        `Health probe degraded on ${host}:${explicitPort} (${describeHealthProbeFailure(secondaryProbe)}); sending in-place restart signal to managed pid(s).`
+    const grouped = ctx.isDevPackage
+      ? null
+      : resolvePortGroupFromConfig(ctx, {
+          configPath: options.config,
+          targetPort: explicitPort
+        });
+    const portsToRestart = grouped?.ports?.length ? grouped.ports : [explicitPort];
+    const host = explicitHost || grouped?.host || LOCAL_HOSTS.LOCALHOST;
+    const targets: RestartTarget[] = [];
+    for (const port of portsToRestart) {
+      const pids = ctx.findListeningPids(port);
+      if (!pids.length) {
+        spinner.fail(`No RouteCodex server found on ${host}:${port}`);
+        ctx.exit(1);
+      }
+      const primaryProbe = await probeRouteCodexServer(
+        ctx,
+        host === LOCAL_HOSTS.LOCALHOST ? LOCAL_HOSTS.IPV4 : host,
+        port
       );
+      const secondaryProbe =
+        primaryProbe.ok || host === LOCAL_HOSTS.IPV4
+          ? primaryProbe
+          : await probeRouteCodexServer(ctx, host, port);
+      if (!secondaryProbe.ok) {
+        spinner.warn(
+          `Health probe degraded on ${host}:${port} (${describeHealthProbeFailure(secondaryProbe)}); sending in-place restart signal to managed pid(s).`
+        );
+      }
+      targets.push({ host, port, oldPids: pids });
     }
-    return [{ host, port: explicitPort, oldPids: pids }];
+    targets.sort((a, b) => a.port - b.port);
+    if (targets.length > 1) {
+      ctx.logger.info(`[restart] resolved config port-group: ${targets.map((t) => t.port).join(', ')}`);
+    }
+    return targets;
   }
 
   const candidatePorts = new Set<number>();

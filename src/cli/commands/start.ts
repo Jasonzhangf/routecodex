@@ -5,6 +5,7 @@ import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { resolveRccConfigFile, resolveRccUserDir } from '../../config/user-data-paths.js';
+import { resolvePortGroupFromConfig } from './port-group-resolver.js';
 import { detectUserConfigFormat, parseUserConfigText } from '../../config/user-config-codec.js';
 import { describeHealthProbeFailure, probeRouteCodexHealth } from '../../utils/http-health-probe.js';
 import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
@@ -301,7 +302,19 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         // Ensure port state aligns with requested behavior.
         // Default behavior is takeover/restart; pass --no-restart for legacy non-disruptive mode.
         const shouldRestart = options.restart !== false || options.exclusive === true;
-        await ctx.ensurePortAvailable(resolvedPort, spinner, { restart: shouldRestart });
+        const grouped = ctx.isDevPackage
+          ? null
+          : resolvePortGroupFromConfig(ctx, {
+              configPath,
+              targetPort: resolvedPort
+            });
+        const portGroup = grouped?.ports?.length ? grouped.ports : [resolvedPort];
+        if (portGroup.length > 1) {
+          spinner.info(`[start] resolved config port-group: ${portGroup.join(', ')}`);
+        }
+        for (const p of portGroup) {
+          await ctx.ensurePortAvailable(p, spinner, { restart: shouldRestart });
+        }
 
         const resolveServerHost = (): string => {
           if (typeof config?.httpserver?.host === 'string' && config.httpserver.host.trim()) {return config.httpserver.host;}
