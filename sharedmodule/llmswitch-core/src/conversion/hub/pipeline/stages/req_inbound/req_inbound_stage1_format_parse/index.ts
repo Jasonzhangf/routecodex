@@ -6,6 +6,7 @@ import { valueMayContainReasoningMarkup } from "../../../../../shared/reasoning-
 import { recordStage } from "../../../stages/utils.js";
 import {
   normalizeReqInboundReasoningPayloadWithNative,
+  shouldNormalizeReasoningPayloadWithNative,
   sanitizeReqInboundFormatEnvelopeWithNative,
 } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js";
 import { parseReqInboundFormatEnvelopeWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js";
@@ -32,7 +33,6 @@ interface ReqInboundReasoningNormalizeResult {
 function resolveProtocolToken(adapterContext: AdapterContext): string {
   return resolveHubProviderProtocolWithNative(adapterContext.providerProtocol);
 }
-
 function shouldNormalizeReqInboundReasoningPayload(
   payload: JsonObject,
   protocol: string,
@@ -40,27 +40,10 @@ function shouldNormalizeReqInboundReasoningPayload(
   if (!payload || typeof payload !== "object") {
     return false;
   }
-  switch (protocol) {
-    case "openai-chat":
-      return (
-        valueMayContainReasoningMarkup(payload.messages) ||
-        valueMayContainReasoningMarkup(payload.choices)
-      );
-    case "openai-responses":
-      return responsesPayloadMayContainReasoningMarkup(payload);
-    case "anthropic-messages":
-      return (
-        valueMayContainReasoningMarkup(payload.messages) ||
-        valueMayContainReasoningMarkup(payload.content)
-      );
-    case "gemini-chat":
-      return (
-        valueMayContainReasoningMarkup(payload.contents) ||
-        valueMayContainReasoningMarkup(payload.candidates)
-      );
-    default:
-      return valueMayContainReasoningMarkup(payload);
-  }
+  return shouldNormalizeReasoningPayloadWithNative(
+    payload as unknown as Record<string, unknown>,
+    protocol
+  );
 }
 
 function responsesPayloadMayContainReasoningMarkup(payload: JsonObject): boolean {

@@ -64,6 +64,7 @@ export interface RoutePoolTier {
    * use different strategies/weights without mutating the global policy.
    */
   loadBalancing?: RoutePoolLoadBalancingPolicy;
+  routeParams?: Record<string, unknown>;
 }
 
 export type RoutingPools = Record<string, RoutePoolTier[]>;

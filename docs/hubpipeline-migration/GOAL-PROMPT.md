@@ -1,29 +1,37 @@
-/goal HubPipeline TS→Rust 迁移
+/goal HubPipeline TS→Rust Phase 1 深化迁移
 
 ## 目标
-分阶段执行（详见 docs/hubpipeline-migration/DESIGN.md）
+Phase 1 按 slice 逐个推进，详见 `docs/hubpipeline-migration/DESIGN.md`
 
-**Phase 0（已完成 ✅）**：
-- ✅ P0-1 ~ P0-4 全部完成
-- ✅ 验证: unified-hub-shadow diff=0, stopless-goal-state 2/2, goal-regression 4/5, build:min v0.90.1628
+**Phase 0 ✅**：P0-1 ~ P0-4 全部完成
+**Phase 1 Slice 2 ✅**：`client-remap-protocol-switch.ts`（524→106 行，-80%）
+**Phase 1 Slice 3.1 ✅**：`shouldNormalizeReasoningPayload` → Rust predicate
+**Phase 1 Slice 3.2 ✅**：`buildSlimResponsesContext` → Rust
 
-**Phase 1（需 Jason 决策）**：
-- ⚠️ 关键发现：Rust `run_hub_pipeline` 当前仅 119 行 metadata 增强，不包含语义映射/tool governance/routing 核心逻辑
-- ⚠️ Phase 1 真实工作 = 逐 stage 深化 Rust 实现，而非"接管道"
-- 待 Jason 决策从哪个 Slice 开始（建议 Slice 1 或 Slice 3）
+## 当前进展（2026-05-15）
+| Slice | 文件 | 状态 |
+|-------|------|------|
+| Slice 1 | `resolveProtocolToken` | ✅ 完成 |
+| Slice 2 | `client-remap-protocol-switch.ts` | ✅ 完成（418 行迁移） |
+| Slice 3.1 | `shouldNormalizeReasoningPayload` | ✅ 完成 |
+| Slice 3.2 | `buildSlimResponsesContext` | ✅ 完成（Rust 就绪） |
+| Slice 3.3 | `normalizeReqInboundReasoningPayload` responses fast-path | ⏳ 待启动 |
 
-## 约束
-- Rust 是唯一真源；TS 仅 thin wrapper
-- 禁止 fallback / 降级 / 双路径常驻
-- 真实 payload 不可裁剪或改写语义
-- 每个 Slice：深化 Rust → same-shape replay 对比 TS → 物理删除 TS
+## 设计文档
+- 主设计：`docs/hubpipeline-migration/DESIGN.md`
+- 入口路由：`docs/agent-routing/10-runtime-ssot-routing.md`
 
-## 验收标准
-| 阶段 | 门 |
-|------|------|
-| Phase 0 | P0-1 ~ P0-4 完成 ✅ |
-| Phase 1 each Slice | Rust stage 通过 same-shape replay；TS 功能代码删除 |
-| 全局 | tsc + cargo check + build:min ✅ + unified-hub-shadow ✅ + 5520 live |
+## 执行规范
+- **单一真源**：Rust 是唯一真源；TS 仅 thin wrapper
+- **禁止 fallback**：不允许双路径 / 降级 / 静默降级
+- **物理删除**：每 slice 完成后物理删除对应 TS 功能代码
+- **same-shape replay**：Rust vs TS 输出 diff=0 才可继续
 
-## 执行
-按 DESIGN.md 分阶段执行，每阶段回报：变更+证据+缺口+下一步。
+## 验收
+- `build:min` ✅
+- `unified-hub-shadow` diff=0
+- 文档同步更新 DESIGN.md
+- 未做 live 的部分必须标注**未验证**
+
+## 下一步
+Slice 3.3：`normalizeReqInboundReasoningPayload` responses fast-path 迁 Rust（`normalizeLatestResponsesReasoningTarget` ~100 行）

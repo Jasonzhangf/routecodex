@@ -15,6 +15,7 @@ export interface NormalizedRoutePoolConfig {
   mode?: 'round-robin' | 'priority';
   force?: boolean;
   loadBalancing?: RoutePoolLoadBalancingPolicy;
+  routeParams?: Record<string, unknown>;
 }
 
 export function normalizeRouting(source: Record<string, unknown>): Record<string, NormalizedRoutePoolConfig[]> {
@@ -28,6 +29,11 @@ export function normalizeRouting(source: Record<string, unknown>): Record<string
     if (allStrings) {
       const targets = normalizeTargetList(entries);
       routing[routeName] = targets.length ? [buildLegacyRoutePool(routeName, targets)] : [];
+      continue;
+    }
+    const simplifiedPool = normalizeSimplifiedWeightedRoute(routeName, entries);
+    if (simplifiedPool) {
+      routing[routeName] = [simplifiedPool];
       continue;
     }
     const normalized: NormalizedRoutePoolConfig[] = [];
@@ -131,7 +137,8 @@ export function expandRoutingTable(
           targets: sortedTargets,
           ...(pool.mode ? { mode: pool.mode } : {}),
           ...(pool.force ? { force: true } : {}),
-          ...(pool.loadBalancing ? { loadBalancing: pool.loadBalancing } : {})
+          ...(pool.loadBalancing ? { loadBalancing: pool.loadBalancing } : {}),
+          ...(pool.routeParams ? { routeParams: pool.routeParams } : {})
         });
       }
     }
@@ -170,6 +177,24 @@ function normalizeRoutePoolEntry(
     return null;
   }
   const record = entry as Record<string, unknown>;
+  const simplified = normalizeSimplifiedWeightedTarget(record);
+  if (simplified) {
+    return {
+      id:
+        readOptionalString(record.id as string | undefined) ??
+        readOptionalString((record as any).poolId) ??
+        `${routeName}:pool${index + 1}`,
+      priority: normalizePriorityValue(record.priority, total - index),
+      backup: false,
+      targets: [simplified.target],
+      mode: 'priority',
+      loadBalancing: {
+        strategy: 'weighted',
+        weights: { [simplified.target]: simplified.weight }
+      },
+      ...(simplified.routeParams ? { routeParams: simplified.routeParams } : {})
+    };
+  }
   const id =
     readOptionalString(record.id as string | undefined) ??
     readOptionalString((record as any).poolId) ??
@@ -188,6 +213,7 @@ function normalizeRoutePoolEntry(
   const force =
     record.force === true ||
     (typeof record.force === 'string' && record.force.trim().toLowerCase() === 'true');
+  const routeParams = normalizeRouteParams(record);
   return targets.length
     ? {
         id,
@@ -196,9 +222,65 @@ function normalizeRoutePoolEntry(
         targets,
         ...(mode ? { mode } : {}),
         ...(force ? { force: true } : {}),
-        ...(loadBalancing ? { loadBalancing } : {})
+        ...(loadBalancing ? { loadBalancing } : {}),
+        ...(routeParams ? { routeParams } : {})
       }
     : null;
+}
+
+
+function normalizeSimplifiedWeightedRoute(routeName: string, entries: unknown[]): NormalizedRoutePoolConfig | null {
+  const targets: string[] = [];
+  const weights: Record<string, number> = {};
+  let routeParams: Record<string, unknown> | undefined;
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return null;
+    }
+    const simplified = normalizeSimplifiedWeightedTarget(entry as Record<string, unknown>);
+    if (!simplified) {
+      return null;
+    }
+    if (!targets.includes(simplified.target)) {
+      targets.push(simplified.target);
+    }
+    weights[simplified.target] = simplified.weight;
+    routeParams ??= simplified.routeParams;
+  }
+  return targets.length
+    ? {
+        id: `${routeName}:weighted`,
+        priority: targets.length,
+        backup: false,
+        targets,
+        loadBalancing: { strategy: 'weighted', weights },
+        ...(routeParams ? { routeParams } : {})
+      }
+    : null;
+}
+
+function normalizeSimplifiedWeightedTarget(record: Record<string, unknown>): { target: string; weight: number; routeParams?: Record<string, unknown> } | null {
+  const target = normalizeTargetList(record.target ?? record.provider)[0];
+  if (!target) {
+    return null;
+  }
+  const rawWeight = record.weight ?? record.weights;
+  const weight = typeof rawWeight === 'number' && Number.isFinite(rawWeight) && rawWeight > 0 ? rawWeight : 1;
+  return { target, weight, ...(normalizeRouteParams(record) ? { routeParams: normalizeRouteParams(record) } : {}) };
+}
+
+function normalizeRouteParams(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  const raw = record.routeParams ?? record.params ?? record.parameters;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return { ...(raw as Record<string, unknown>) };
+  }
+  const params: Record<string, unknown> = {};
+  for (const key of ['reasoning_effort', 'reasoningEffort', 'thinking', 'thinking_enabled', 'anthropicThinking', 'anthropicThinkingConfig']) {
+    if (record[key] !== undefined) {
+      params[key] = record[key];
+    }
+  }
+  return Object.keys(params).length ? params : undefined;
 }
 
 function inferRoutePoolModeFromConfig(

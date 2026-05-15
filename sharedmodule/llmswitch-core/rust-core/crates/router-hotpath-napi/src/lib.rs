@@ -720,6 +720,41 @@ pub fn normalize_req_inbound_reasoning_payload_json(input_json: String) -> NapiR
     hub_bridge_actions::normalize_req_inbound_reasoning_payload_json(input_json)
 }
 
+
+#[napi]
+pub fn should_normalize_reasoning_payload_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::should_normalize_reasoning_payload_json(input_json)
+}
+
+#[napi]
+pub fn build_slim_responses_context_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::build_slim_responses_context_json(input_json)
+}
+
+#[napi(js_name = "shouldLogClientRemapDebugJson")]
+pub fn should_log_client_remap_debug_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::should_log_client_remap_debug_json(input_json)
+}
+
+#[napi(js_name = "extractClientToolIndexJson")]
+pub fn extract_client_tool_index_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::extract_client_tool_index_json(input_json)
+}
+
+#[napi(js_name = "resolveClientToolFromIndexJson")]
+pub fn resolve_client_tool_from_index_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::resolve_client_tool_from_index_json(input_json)
+}
+
+#[napi(js_name = "remapChatToolCallsJson")]
+pub fn remap_chat_tool_calls_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::remap_chat_tool_calls_json(input_json)
+}
+
+#[napi(js_name = "remapResponsesToolCallsJson")]
+pub fn remap_responses_tool_calls_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::remap_responses_tool_calls_json(input_json)
+}
 #[napi]
 pub fn normalize_resp_inbound_reasoning_payload_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::normalize_resp_inbound_reasoning_payload_json(input_json)

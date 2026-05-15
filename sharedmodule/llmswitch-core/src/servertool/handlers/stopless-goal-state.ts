@@ -49,7 +49,6 @@ type LegacyReasoningStopRoutingState = RoutingInstructionState & {
 
 const RCC_FENCE_OPEN = '<**rcc**>';
 const STOPLESS_GOAL_RUNTIME_SCOPE_REQUIRED = 'STOPLESS_GOAL_RUNTIME_SCOPE_REQUIRED';
-const STOPLESS_GOAL_MULTIPART_USER_CONTENT_UNSUPPORTED = 'STOPLESS_GOAL_MULTIPART_USER_CONTENT_UNSUPPORTED';
 
 function createEmptyRoutingInstructionState(): LegacyReasoningStopRoutingState {
   return {
@@ -165,10 +164,19 @@ function findTextHolderInContent(content: unknown): TextHolder | null {
     return null;
   }
   const holdersWithFence = textualEntries.filter((entry) => entry.getText().includes(RCC_FENCE_OPEN));
-  if (holdersWithFence.length > 1 || (holdersWithFence.length === 0 && textualEntries.length > 1)) {
-    throw new Error(STOPLESS_GOAL_MULTIPART_USER_CONTENT_UNSUPPORTED);
+  if (holdersWithFence.length > 1) {
+    const holder = holdersWithFence[0];
+    return {
+      text: holder.getText(),
+      setText(next: string) {
+        holder.setText(next);
+        for (const entry of holdersWithFence.slice(1)) {
+          entry.setText('');
+        }
+      }
+    };
   }
-  const holder = holdersWithFence[0] ?? textualEntries[0];
+  const holder = holdersWithFence[0] ?? textualEntries[textualEntries.length - 1];
   return {
     text: holder.getText(),
     setText: holder.setText

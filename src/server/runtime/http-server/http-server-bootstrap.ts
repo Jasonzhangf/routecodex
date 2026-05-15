@@ -582,13 +582,25 @@ export function extractProviderKeysForRoutingGroup(
       : null;
   if (!routing) return [];
   const keys: string[] = [];
-  for (const [, routeEntry] of Object.entries(routing)) {
-    if (!routeEntry || typeof routeEntry !== 'object' || Array.isArray(routeEntry)) continue;
-    const entry = routeEntry as Record<string, unknown>;
-    const targets = entry.targets;
-    if (Array.isArray(targets)) {
-      for (const t of targets) {
-        if (typeof t === 'string' && t.trim()) keys.push(t.trim());
+  const collectTarget = (value: unknown): void => {
+    if (typeof value === 'string' && value.trim()) keys.push(value.trim());
+  };
+  for (const routeEntry of Object.values(routing)) {
+    const pools = Array.isArray(routeEntry) ? routeEntry : [routeEntry];
+    for (const pool of pools) {
+      if (!pool || typeof pool !== 'object' || Array.isArray(pool)) continue;
+      const entry = pool as Record<string, unknown>;
+      if (Array.isArray(entry.targets)) {
+        for (const target of entry.targets) collectTarget(target);
+      }
+      collectTarget(entry.target);
+      collectTarget(entry.provider);
+      const weights =
+        entry.loadBalancing && typeof entry.loadBalancing === 'object' && !Array.isArray(entry.loadBalancing)
+          ? (entry.loadBalancing as Record<string, unknown>).weights
+          : undefined;
+      if (weights && typeof weights === 'object' && !Array.isArray(weights)) {
+        for (const target of Object.keys(weights)) collectTarget(target);
       }
     }
   }

@@ -105,6 +105,8 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "normalizeReasoningInGeminiPayloadJson",
   "normalizeReasoningInAnthropicPayloadJson",
   "normalizeReqInboundReasoningPayloadJson",
+  "shouldNormalizeReasoningPayloadJson",
+  "buildSlimResponsesContextJson",
   "normalizeRespInboundReasoningPayloadJson",
   "normalizeReasoningInOpenAIPayloadJson",
   "buildContinueExecutionOperationsJson",

@@ -16,7 +16,10 @@ import { applyHubOperationTableInbound } from "../../../../operation-table/opera
 import { recordStage } from "../../../stages/utils.js";
 import { liftReqInboundSemantics } from "./semantic-lift.js";
 import { validateChatEnvelopeWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js";
-import { chatEnvelopeToStandardizedWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js";
+import {
+  chatEnvelopeToStandardizedWithNative,
+  buildSlimResponsesContextWithNative,
+} from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js";
 import { normalizeReqInboundShellLikeToolCallsWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics-tools.js";
 import { normalizeRequestToolCalls } from "../../../../../../conversion/shared/tool-governor.js";
 import {
@@ -48,30 +51,14 @@ export interface ReqInboundStage2SemanticMapResult {
   standardizedRequest: StandardizedRequest;
   responsesContext?: JsonObject;
 }
-
 function buildSlimResponsesContextForSemantics(
   context: JsonObject | undefined,
 ): JsonObject | undefined {
   if (!context || typeof context !== "object" || Array.isArray(context)) {
     return undefined;
   }
-  // Keep semantic essentials only; avoid carrying full `input` history through
-  // chat_process and req_process stages (it can be huge and is not required for
-  // non-responses outbound paths).
-  //
-  // IMPORTANT:
-  // Do not spread-clone first and then delete heavy keys. For large /v1/responses
-  // payloads that would deep-copy gigantic arrays/strings into a temporary object.
-  // Build a filtered object directly to keep this step O(selected fields).
-  const src = context as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(src)) {
-    if (key === "input" || key === "__captured_tool_results") {
-      continue;
-    }
-    out[key] = value;
-  }
-  return out as JsonObject;
+  const result = buildSlimResponsesContextWithNative(context as Record<string, unknown>);
+  return (result as JsonObject) ?? undefined;
 }
 
 export async function runReqInboundStage2SemanticMap(

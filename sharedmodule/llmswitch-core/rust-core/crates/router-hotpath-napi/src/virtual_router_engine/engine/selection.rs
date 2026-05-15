@@ -314,7 +314,7 @@ impl VirtualRouterEngineCore {
                                     route_name.to_string(),
                                     pool.targets.clone(),
                                     Some(pool.id.clone()),
-                                ));
+                                ).with_route_params(pool.route_params.clone()));
                             }
                         }
                         dynamic_weight_map = Some(weights);
@@ -421,7 +421,7 @@ impl VirtualRouterEngineCore {
                         route_name.to_string(),
                         pool.targets.clone(),
                         Some(pool.id.clone()),
-                    ));
+                    ).with_route_params(pool.route_params.clone()));
                 }
             }
         }

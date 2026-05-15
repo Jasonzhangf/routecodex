@@ -20,6 +20,8 @@ pub(crate) struct RoutePoolTier {
     pub force: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub load_balancing: Option<LoadBalancingPolicy>,
+    #[serde(rename = "routeParams", skip_serializing_if = "Option::is_none")]
+    pub route_params: Option<Map<String, Value>>,
 }
 
 #[derive(Debug, Clone, Default)]

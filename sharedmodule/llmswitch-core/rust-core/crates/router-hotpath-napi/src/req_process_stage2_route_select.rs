@@ -107,28 +107,9 @@ fn apply_target_metadata(
             Value::String(route_trimmed.clone()),
         );
 
-        if let Some(existing_effort) = normalized_metadata
-            .get("reasoning_effort")
-            .and_then(|v| v.as_str())
-        {
-            let trimmed = existing_effort.trim();
-            if !trimmed.is_empty() {
-                normalized_metadata.insert(
-                    "originalReasoningEffort".to_string(),
-                    Value::String(trimmed.to_string()),
-                );
-            }
-        }
-
-        let reasoning_effort = match route_trimmed.to_lowercase().as_str() {
-            "coding" | "thinking" => "high",
-            _ => "medium",
-        };
-        normalized_metadata.insert(
-            "reasoning_effort".to_string(),
-            Value::String(reasoning_effort.to_string()),
-        );
     }
+
+    apply_route_params(normalized_metadata, target_map);
 
     if let Some(provider_key) = read_trimmed_string(target_map, "providerKey") {
         normalized_metadata.insert(
@@ -192,6 +173,38 @@ fn apply_target_metadata(
         original_model_trimmed.clone(),
     );
     write_if_missing_non_empty(normalized_metadata, "clientModelId", original_model_trimmed);
+}
+
+fn apply_route_params(normalized_metadata: &mut Map<String, Value>, target_map: &Map<String, Value>) {
+    let Some(route_params) = target_map.get("routeParams").and_then(Value::as_object) else {
+        return;
+    };
+    if let Some(value) = route_params
+        .get("reasoning_effort")
+        .or_else(|| route_params.get("reasoningEffort"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if let Some(existing_effort) = normalized_metadata
+            .get("reasoning_effort")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            normalized_metadata.insert(
+                "originalReasoningEffort".to_string(),
+                Value::String(existing_effort.to_string()),
+            );
+        }
+        normalized_metadata.insert("reasoning_effort".to_string(), Value::String(value.to_string()));
+    }
+    if let Some(value) = route_params.get("thinking_enabled").and_then(Value::as_bool) {
+        normalized_metadata.insert("thinking_enabled".to_string(), Value::Bool(value));
+    }
+    if let Some(value) = route_params.get("thinking") {
+        normalized_metadata.insert("thinking".to_string(), value.clone());
+    }
 }
 
 fn apply_target_to_subject(

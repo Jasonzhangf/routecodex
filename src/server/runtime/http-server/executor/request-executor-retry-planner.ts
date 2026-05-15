@@ -22,6 +22,7 @@ import {
   waitRecoverableBackoffWithGlobalGate
 } from './request-executor-retry-state.js';
 import {
+  buildSessionStormHardBlockError,
   clearSessionStormBackoff,
   consumeSessionStormBackoffMs,
   isSessionStormBackoffCandidate,
@@ -90,6 +91,7 @@ export function resetRequestExecutorRetryPlannerState(): void {
 }
 
 export {
+  buildSessionStormHardBlockError,
   clearSessionStormBackoff,
   consumeSessionStormBackoffMs,
   isSessionStormBackoffCandidate,

@@ -1,8 +1,12 @@
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 
+function toNapiExportName(name: string): string {
+  return name.replace(/_([a-z])/g, (_match, char: string) => char.toUpperCase());
+}
+
 export function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
-  const fn = binding?.[name];
+  const fn = binding?.[name] ?? binding?.[toNapiExportName(name)];
   return typeof fn === 'function' ? (fn as (...args: unknown[]) => unknown) : null;
 }
 

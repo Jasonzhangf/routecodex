@@ -48,6 +48,28 @@ function safeStringify(value: unknown): string | undefined {
   }
 }
 
+export function buildSlimResponsesContextWithNative(
+  context: Record<string, unknown> | null | undefined
+): Record<string, unknown> | null {
+  if (!context) return null;
+  const capability = 'buildSlimResponsesContextJson';
+  const fail = () => { throw new Error(`[buildSlimResponsesContext] ${capability} unavailable`); };
+  if (isNativeDisabledByEnv()) return fail();
+  const fn = readNativeFunction(capability);
+  if (!fn) return fail();
+  const inputJson = safeStringify(context);
+  if (!inputJson) return fail();
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) return fail();
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch (error: unknown) {
+    return fail();
+  }
+}
+
 export function pruneChatRequestPayloadWithNative(
   payload: Record<string, unknown>,
   preserveStreamField = false
@@ -111,6 +133,28 @@ export function normalizeReqInboundReasoningPayloadWithNative(
     }
     return parsed as Record<string, unknown>;
   } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function shouldNormalizeReasoningPayloadWithNative(
+  payload: Record<string, unknown>,
+  protocol: string
+): boolean {
+  const capability = 'shouldNormalizeReasoningPayloadJson';
+  const fail = (reason?: string) => { throw new Error(`[shouldNormalizeReasoningPayload] ${reason ?? 'native unavailable'}`); };
+  if (isNativeDisabledByEnv()) return fail('native disabled');
+  const fn = readNativeFunction(capability);
+  if (!fn) return fail();
+  const inputJson = safeStringify({ payload, protocol });
+  if (!inputJson) return fail('json stringify failed');
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) return fail('empty result');
+    const parsed = JSON.parse(raw);
+    return parsed === true;
+  } catch (error: unknown) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }

@@ -3570,15 +3570,16 @@ describe('HubRequestExecutor session storm backoff', () => {
     expect(__requestExecutorTestables.isSessionStormBackoffCandidate(err)).toBe(true);
     expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/rc-workdir', err)).toBe(1000);
     expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs('workdir:/tmp/rc-workdir')).toBe(1000);
+    expect(__requestExecutorTestables.buildSessionStormHardBlockError('workdir:/tmp/rc-workdir')).toMatchObject({
+      code: 'CLIENT_TOOL_ARGS_BLOCKED',
+      upstreamCode: 'CLIENT_TOOL_ARGS_INVALID',
+      statusCode: 429,
+      retryable: false
+    });
 
     jest.setSystemTime(new Date('2026-04-22T12:00:01.000Z'));
-    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/rc-workdir', err)).toBe(2000);
-
-    jest.setSystemTime(new Date('2026-04-22T12:00:03.000Z'));
-    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/rc-workdir', err)).toBe(4000);
-
-    jest.setSystemTime(new Date('2026-04-22T12:00:07.000Z'));
-    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/rc-workdir', err)).toBe(5000);
+    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs('workdir:/tmp/rc-workdir')).toBe(0);
+    expect(__requestExecutorTestables.buildSessionStormHardBlockError('workdir:/tmp/rc-workdir')).toBeUndefined();
   });
 
   test('treats deterministic malformed response contract errors as storm candidates and caps wait', () => {

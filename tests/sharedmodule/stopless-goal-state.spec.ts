@@ -162,6 +162,71 @@ describe('syncStoplessGoalStateFromRequest', () => {
     expect(persisted?.reasoningStopSummary).toBeUndefined();
   });
 
+
+  test('rewrites RCC fence inside multipart user content without rejecting non-fence text parts', async () => {
+    const { loadRoutingInstructionStateSync } = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js');
+    const { syncStoplessGoalStateFromRequest } = await import('../../sharedmodule/llmswitch-core/src/servertool/handlers/stopless-goal-state.js');
+    const adapterContext = {
+      sessionId: 'goal-sync-multipart',
+      capturedChatRequest: {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: '普通文本块' },
+              { type: 'text', text: '<**rcc**>\nstopless start\n多段输入目标\n</rcc**>' },
+              { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } }
+            ]
+          }
+        ]
+      }
+    };
+
+    const result = syncStoplessGoalStateFromRequest(adapterContext);
+
+    expect(result.hadDirective).toBe(true);
+    expect(result.state).toMatchObject({ status: 'active', objective: '多段输入目标' });
+    expect((adapterContext.capturedChatRequest as any).messages[0].content[1].text).toBe('多段输入目标');
+    expect(loadRoutingInstructionStateSync('session:goal-sync-multipart')?.stoplessGoalState).toMatchObject({
+      status: 'active',
+      objective: '多段输入目标'
+    });
+  });
+
+
+  test('uses first RCC fence text part and clears duplicate fence parts without throwing', async () => {
+    const { loadRoutingInstructionStateSync } = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js');
+    const { syncStoplessGoalStateFromRequest } = await import('../../sharedmodule/llmswitch-core/src/servertool/handlers/stopless-goal-state.js');
+    const adapterContext = {
+      sessionId: 'goal-sync-multipart-multi-fence',
+      capturedChatRequest: {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: '<**rcc**>\nstopless start\n多 fence 目标\n</rcc**>' },
+              { type: 'text', text: '<**rcc**>\nstopless progress\n继续推进\n</rcc**>' },
+              { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } }
+            ]
+          }
+        ]
+      }
+    };
+
+    const result = syncStoplessGoalStateFromRequest(adapterContext);
+
+    expect(result.hadDirective).toBe(true);
+    expect(result.directiveTypes).toEqual(['stopless.start']);
+    expect(result.state).toMatchObject({ status: 'active', objective: '多 fence 目标' });
+    const content = (adapterContext.capturedChatRequest as any).messages[0].content;
+    expect(content[0].text).toBe('多 fence 目标');
+    expect(content[1].text).toBe('');
+    expect(loadRoutingInstructionStateSync('session:goal-sync-multipart-multi-fence')?.stoplessGoalState).toMatchObject({
+      status: 'active',
+      objective: '多 fence 目标'
+    });
+  });
+
   test('applies private-only pause directive without leaking RCC fence to upstream content', async () => {
     const { loadRoutingInstructionStateSync } = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js');
     const { syncStoplessGoalStateFromRequest } = await import('../../sharedmodule/llmswitch-core/src/servertool/handlers/stopless-goal-state.js');

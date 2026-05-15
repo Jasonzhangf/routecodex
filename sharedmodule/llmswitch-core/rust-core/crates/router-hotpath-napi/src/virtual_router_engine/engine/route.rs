@@ -532,6 +532,9 @@ impl VirtualRouterEngineCore {
             .ok_or("failed to build target")?;
         let mut target_obj = target;
         if let Value::Object(ref mut map) = target_obj {
+            if let Some(route_params) = selection.route_params.clone() {
+                map.insert("routeParams".to_string(), Value::Object(route_params));
+            }
             if self.web_search_force {
                 map.insert("forceWebSearch".to_string(), Value::Bool(true));
             }

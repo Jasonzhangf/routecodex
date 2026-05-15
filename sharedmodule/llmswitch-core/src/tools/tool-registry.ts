@@ -2,6 +2,7 @@
 
 import { parseToolArgsJson } from './args-json.js';
 import { validateExecCommandArgs } from './exec-command/validator.js';
+import { validateApplyPatchArgs } from './apply-patch/validator.js';
 import { captureExecCommandRegression } from './exec-command/regression-capturer.js';
 
 type UnknownRecord = Record<string, unknown>;
@@ -97,6 +98,7 @@ export function getAllowedToolNames(): string[] {
     'shell_command',
     'bash',
     'exec_command',
+    'apply_patch',
     'update_plan',
     'view_image',
     'list_mcp_resources',
@@ -130,6 +132,17 @@ export function validateToolCall(
   const rawArgsAny = parseToolArgsJson(typeof argsString === 'string' ? argsString : '{}');
 
   switch (normalizedName) {
+    case 'apply_patch': {
+      const validation = validateApplyPatchArgs(argsString, rawArgsAny);
+      if (!validation.ok) {
+        return {
+          ok: false,
+          reason: validation.reason || 'invalid_apply_patch_args',
+          message: validation.message
+        };
+      }
+      return { ok: true, normalizedArgs: validation.normalizedArgs };
+    }
     case 'exec_command': {
       const guard = options?.execCommandGuard;
       const validation = validateExecCommandArgs(

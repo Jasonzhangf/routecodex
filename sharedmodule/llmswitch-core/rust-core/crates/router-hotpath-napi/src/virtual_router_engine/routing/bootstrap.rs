@@ -21,6 +21,8 @@ pub(crate) struct NormalizedRoutePoolConfig {
     pub force: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub load_balancing: Option<LoadBalancingPolicy>,
+    #[serde(rename = "routeParams", skip_serializing_if = "Option::is_none")]
+    pub route_params: Option<Map<String, Value>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -107,6 +109,11 @@ fn normalize_routing(
                 vec![build_legacy_route_pool(route_name, targets)]
             };
             routing.insert(route_name.clone(), pools);
+            continue;
+        }
+
+        if let Some(pool) = normalize_simplified_weighted_route(route_name, entries) {
+            routing.insert(route_name.clone(), vec![pool]);
             continue;
         }
 
@@ -247,6 +254,7 @@ fn expand_routing_table(
                 backup: Some(pool.backup),
                 force: pool.force,
                 load_balancing: pool.load_balancing.clone(),
+                route_params: pool.route_params.clone(),
             });
         }
         routing.insert(route_name.clone(), expanded_pools);
@@ -262,9 +270,10 @@ fn build_legacy_route_pool(route_name: &str, targets: Vec<String>) -> Normalized
         backup: false,
         targets,
         mode: None,
-        force: None,
-        load_balancing: None,
-    }
+            force: None,
+            load_balancing: None,
+            route_params: None,
+        }
 }
 
 fn normalize_route_pool_entry(
@@ -286,11 +295,30 @@ fn normalize_route_pool_entry(
                 mode: None,
                 force: None,
                 load_balancing: None,
+                route_params: None,
             })
         };
     }
 
     let record = entry.as_object()?;
+    if let Some((target, weight, route_params)) = normalize_simplified_weighted_target(record) {
+        return Some(NormalizedRoutePoolConfig {
+            id: read_optional_string(record.get("id"))
+                .or_else(|| read_optional_string(record.get("poolId")))
+                .unwrap_or_else(|| format!("{}:pool{}", route_name, index + 1)),
+            priority: normalize_priority_value(record.get("priority"), (total.saturating_sub(index)) as i64),
+            backup: false,
+            targets: vec![target.clone()],
+            mode: Some("priority".to_string()),
+            force: None,
+            load_balancing: Some(LoadBalancingPolicy {
+                strategy: Some("weighted".to_string()),
+                weights: Some(HashMap::from([(target, weight)])),
+                health_weighted: None,
+            }),
+            route_params,
+        });
+    }
     let id = read_optional_string(record.get("id"))
         .or_else(|| read_optional_string(record.get("poolId")))
         .unwrap_or_else(|| format!("{}:pool{}", route_name, index + 1));
@@ -320,6 +348,7 @@ fn normalize_route_pool_entry(
     let mode = explicit_mode
         .or_else(|| infer_route_pool_mode_from_config(record, &targets, load_balancing.as_ref()));
     let force = record.get("force").and_then(parse_bool_like);
+    let route_params = normalize_route_params(record);
 
     if targets.is_empty() {
         return None;
@@ -337,7 +366,86 @@ fn normalize_route_pool_entry(
             None
         },
         load_balancing,
+        route_params,
     })
+}
+
+
+fn normalize_simplified_weighted_route(
+    route_name: &str,
+    entries: &[Value],
+) -> Option<NormalizedRoutePoolConfig> {
+    let mut targets: Vec<String> = Vec::new();
+    let mut weights: HashMap<String, i64> = HashMap::new();
+    let mut route_params: Option<Map<String, Value>> = None;
+    for entry in entries {
+        let record = entry.as_object()?;
+        let (target, weight, params) = normalize_simplified_weighted_target(record)?;
+        if !targets.contains(&target) {
+            targets.push(target.clone());
+        }
+        weights.insert(target, weight);
+        if route_params.is_none() {
+            route_params = params;
+        }
+    }
+    if targets.is_empty() {
+        return None;
+    }
+    Some(NormalizedRoutePoolConfig {
+        id: format!("{}:weighted", route_name),
+        priority: targets.len() as i64,
+        backup: false,
+        targets,
+        mode: None,
+        force: None,
+        load_balancing: Some(LoadBalancingPolicy {
+            strategy: Some("weighted".to_string()),
+            weights: Some(weights),
+            health_weighted: None,
+        }),
+        route_params,
+    })
+}
+
+fn normalize_simplified_weighted_target(
+    record: &Map<String, Value>,
+) -> Option<(String, i64, Option<Map<String, Value>>)> {
+    let target = record
+        .get("target")
+        .or_else(|| record.get("provider"))
+        .map(normalize_target_list)?
+        .into_iter()
+        .next()?;
+    let weight = record
+        .get("weight")
+        .or_else(|| record.get("weights"))
+        .and_then(Value::as_i64)
+        .filter(|v| *v > 0)
+        .unwrap_or(1);
+    Some((target, weight, normalize_route_params(record)))
+}
+
+fn normalize_route_params(record: &Map<String, Value>) -> Option<Map<String, Value>> {
+    for key in ["routeParams", "params", "parameters"] {
+        if let Some(map) = record.get(key).and_then(Value::as_object) {
+            return Some(map.clone());
+        }
+    }
+    let mut params = Map::new();
+    for key in [
+        "reasoning_effort",
+        "reasoningEffort",
+        "thinking",
+        "thinking_enabled",
+        "anthropicThinking",
+        "anthropicThinkingConfig",
+    ] {
+        if let Some(value) = record.get(key) {
+            params.insert(key.to_string(), value.clone());
+        }
+    }
+    if params.is_empty() { None } else { Some(params) }
 }
 
 fn infer_route_pool_mode_from_config(

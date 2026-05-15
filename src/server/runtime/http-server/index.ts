@@ -835,6 +835,7 @@ export class RouteCodexHttpServer {
           if (!handle) {
             throw new Error(`Provider not found for binding: ${context.providerKey}`);
           }
+          applyRouteParamsToProviderPayload(providerPayload, input.metadata);
           attachProviderRuntimeMetadata(providerPayload, {
             requestId: input.requestId,
             providerId: handle.providerId,
@@ -917,5 +918,18 @@ export class RouteCodexHttpServer {
 
   private async initializeRouteErrorHub(): Promise<void> {
     await initializeRouteErrorHub(this);
+  }
+}
+function applyRouteParamsToProviderPayload(payload: Record<string, unknown>, metadata?: Record<string, unknown>): void {
+  const routeParams = metadata?.routeParams;
+  if (!routeParams || typeof routeParams !== 'object' || Array.isArray(routeParams)) {
+    return;
+  }
+  for (const [key, value] of Object.entries(routeParams as Record<string, unknown>)) {
+    if (key === 'reasoningEffort') {
+      payload.reasoning_effort = value;
+      continue;
+    }
+    payload[key] = value;
   }
 }
