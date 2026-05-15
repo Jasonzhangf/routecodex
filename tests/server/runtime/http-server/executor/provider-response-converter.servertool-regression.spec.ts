@@ -9,11 +9,23 @@ const mockSyncStoplessGoalStateFromRequest = jest.fn(() => ({
   hadDirective: false,
   directiveTypes: []
 }));
+const mockPersistStoplessGoalStateSnapshot = jest.fn();
+const mockLoadRoutingInstructionStateSync = jest.fn(() => null);
+const mockReadStoplessGoalState = jest.fn((adapterContext: Record<string, unknown>) => {
+  const sessionId = typeof adapterContext?.sessionId === 'string' ? adapterContext.sessionId : undefined;
+  return {
+    ...(sessionId ? { stickyKey: `session:${sessionId}` } : {}),
+    state: mockLoadRoutingInstructionStateSync(sessionId ? `session:${sessionId}` : '')?.stoplessGoalState
+  };
+});
 const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
   syncStoplessGoalStateFromRequest: mockSyncStoplessGoalStateFromRequest,
+  persistStoplessGoalStateSnapshot: mockPersistStoplessGoalStateSnapshot,
+  loadRoutingInstructionStateSync: mockLoadRoutingInstructionStateSync,
+  readStoplessGoalState: mockReadStoplessGoalState,
   sanitizeFollowupText: async (raw: unknown) => {
     const text = typeof raw === 'string' ? raw : '';
     return text
@@ -54,6 +66,8 @@ describe('provider-response-converter servertool regressions', () => {
     mockCreateSnapshotRecorder.mockClear();
     mockSyncReasoningStopModeFromRequest.mockClear();
     mockSyncStoplessGoalStateFromRequest.mockClear();
+    mockLoadRoutingInstructionStateSync.mockReset();
+    mockLoadRoutingInstructionStateSync.mockReturnValue(null);
 
     const { convertProviderResponseIfNeeded } = await import(
       '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
@@ -95,6 +109,8 @@ describe('provider-response-converter servertool regressions', () => {
     mockConvertProviderResponse.mockClear();
     mockCreateSnapshotRecorder.mockClear();
     mockSyncStoplessGoalStateFromRequest.mockClear();
+    mockLoadRoutingInstructionStateSync.mockReset();
+    mockLoadRoutingInstructionStateSync.mockReturnValue(null);
     mockConvertProviderResponse.mockImplementationOnce(async () => {
       const error = new Error(
         '[chat_process.resp.stage1.sse_decode] Failed to decode SSE payload for protocol openai-chat: 内容超长，请删减后再试'
@@ -984,7 +1000,7 @@ describe('provider-response-converter servertool regressions', () => {
     });
   });
 
-  it('accepts converted update_goal active calls without next_step and only normalizes shape', async () => {
+  it('rejects converted update_goal active calls without next_step via host transition contract', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -1019,27 +1035,43 @@ describe('provider-response-converter servertool regressions', () => {
       '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
     );
 
-    const result = await convertProviderResponseIfNeeded(
-      {
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-chat',
-        requestId: 'req_invalid_update_goal_active_1',
-        wantsStream: false,
-        response: { body: { id: 'upstream_body' } } as any,
-        pipelineMetadata: {}
-      },
-      {
-        runtimeManager: {
-          resolveRuntimeKey: () => undefined,
-          getHandleByRuntimeKey: () => undefined
-        },
-        executeNested: async () => ({ body: { ok: true } } as any)
+    const pipelineMetadata: Record<string, unknown> = {
+      stoplessGoalState: {
+        status: 'active',
+        objective: 'close stopless onto /goal lifecycle',
+        updatedAt: 1,
+        createdAt: 1
       }
-    );
-    expect(result.body).toBeTruthy();
+    };
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-chat',
+          requestId: 'req_invalid_update_goal_active_1',
+          wantsStream: false,
+          response: { body: { id: 'upstream_body' } } as any,
+          pipelineMetadata
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'CLIENT_TOOL_ARGS_INVALID',
+      toolName: 'update_goal',
+      validationReason: 'missing_next_step'
+    });
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.status).toBe('active');
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveValidationFailures).toBe(1);
   });
 
-  it('does not accumulate converter-side validation ledgers for invalid update_goal transitions', async () => {
+  it('forces stopped after two invalid update_goal transitions', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -1110,20 +1142,107 @@ describe('provider-response-converter servertool regressions', () => {
       const state = pipelineMetadata.stoplessGoalState as Record<string, unknown>;
       if (i === 0) {
         expect(state?.status).toBe('active');
-        expect(state?.consecutiveValidationFailures).toBeUndefined();
+        expect(state?.consecutiveValidationFailures).toBe(1);
       }
     }
 
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.status).toBe('active');
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.errorClass).toBeUndefined();
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.attemptsExhausted).toBeUndefined();
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveValidationFailures).toBeUndefined();
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.status).toBe('stopped');
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.errorClass).toBe('repeated_validation_failure');
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.attemptsExhausted).toBe(true);
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveValidationFailures).toBe(2);
   });
 
-  it('accepts converted update_goal paused calls without user_question and only normalizes shape', async () => {
+  it('uses persisted goal ledger counters when adapter metadata is stale', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
+    mockLoadRoutingInstructionStateSync.mockReset();
+    mockLoadRoutingInstructionStateSync.mockReturnValue({
+      stoplessGoalState: {
+        status: 'active',
+        objective: 'close stopless onto /goal lifecycle',
+        latestNote: 'prior validation failure',
+        consecutiveValidationFailures: 1,
+        updatedAt: 10,
+        createdAt: 1
+      }
+    });
+
+    mockConvertProviderResponse.mockImplementation(async () => ({
+      body: {
+        id: 'chatcmpl-invalid-update-goal-status-stale-metadata',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_invalid_update_goal_status_stale_metadata',
+                  type: 'function',
+                  function: {
+                    name: 'update_goal',
+                    arguments: JSON.stringify({})
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const pipelineMetadata: Record<string, unknown> = {
+      sessionId: 'goal-stale-ledger-session',
+      stoplessGoalState: {
+        status: 'active',
+        objective: 'close stopless onto /goal lifecycle',
+        updatedAt: 1,
+        createdAt: 1
+      }
+    };
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-chat',
+          requestId: 'req_invalid_update_goal_status_stale_metadata_1',
+          wantsStream: false,
+          response: { body: { id: 'upstream_body' } } as any,
+          pipelineMetadata
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'CLIENT_TOOL_ARGS_INVALID',
+      validationReason: 'missing_status'
+    });
+
+    expect(mockLoadRoutingInstructionStateSync).toHaveBeenCalledWith('session:goal-stale-ledger-session');
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.status).toBe('stopped');
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.errorClass).toBe('repeated_validation_failure');
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveValidationFailures).toBe(2);
+  });
+
+  it('rejects converted update_goal paused calls without user_question via host transition contract', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+    mockLoadRoutingInstructionStateSync.mockReset();
+    mockLoadRoutingInstructionStateSync.mockReturnValue(null);
 
     mockConvertProviderResponse.mockImplementation(async () => ({
       body: {
@@ -1158,30 +1277,47 @@ describe('provider-response-converter servertool regressions', () => {
       '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
     );
 
-    const result = await convertProviderResponseIfNeeded(
-      {
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-chat',
-        requestId: 'req_invalid_update_goal_paused_1',
-        wantsStream: false,
-        response: { body: { id: 'upstream_body' } } as any,
-        pipelineMetadata: {}
-      },
-      {
-        runtimeManager: {
-          resolveRuntimeKey: () => undefined,
-          getHandleByRuntimeKey: () => undefined
-        },
-        executeNested: async () => ({ body: { ok: true } } as any)
+    const pipelineMetadata: Record<string, unknown> = {
+      stoplessGoalState: {
+        status: 'active',
+        objective: 'close stopless onto /goal lifecycle',
+        updatedAt: 1,
+        createdAt: 1
       }
-    );
-    expect(result.body).toBeTruthy();
+    };
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-chat',
+          requestId: 'req_invalid_update_goal_paused_1',
+          wantsStream: false,
+          response: { body: { id: 'upstream_body' } } as any,
+          pipelineMetadata
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'CLIENT_TOOL_ARGS_INVALID',
+      toolName: 'update_goal',
+      validationReason: 'missing_pause_reason_or_question'
+    });
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveValidationFailures).toBe(1);
   });
 
-  it('accepts converted update_goal stopped calls without attempts_exhausted=true and only normalizes shape', async () => {
+  it('rejects converted update_goal stopped calls without attempts_exhausted=true via host transition contract', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
+    mockLoadRoutingInstructionStateSync.mockReset();
+    mockLoadRoutingInstructionStateSync.mockReturnValue(null);
 
     mockConvertProviderResponse.mockImplementation(async () => ({
       body: {
@@ -1218,30 +1354,47 @@ describe('provider-response-converter servertool regressions', () => {
       '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
     );
 
-    const result = await convertProviderResponseIfNeeded(
-      {
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-chat',
-        requestId: 'req_invalid_update_goal_stopped_1',
-        wantsStream: false,
-        response: { body: { id: 'upstream_body' } } as any,
-        pipelineMetadata: {}
-      },
-      {
-        runtimeManager: {
-          resolveRuntimeKey: () => undefined,
-          getHandleByRuntimeKey: () => undefined
-        },
-        executeNested: async () => ({ body: { ok: true } } as any)
+    const pipelineMetadata: Record<string, unknown> = {
+      stoplessGoalState: {
+        status: 'active',
+        objective: 'close stopless onto /goal lifecycle',
+        updatedAt: 1,
+        createdAt: 1
       }
-    );
-    expect(result.body).toBeTruthy();
+    };
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-chat',
+          requestId: 'req_invalid_update_goal_stopped_1',
+          wantsStream: false,
+          response: { body: { id: 'upstream_body' } } as any,
+          pipelineMetadata
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'CLIENT_TOOL_ARGS_INVALID',
+      toolName: 'update_goal',
+      validationReason: 'missing_stop_evidence'
+    });
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveValidationFailures).toBe(1);
   });
 
-  it('accepts converted update_goal completed calls without completion evidence and only normalizes shape', async () => {
+  it('rejects converted update_goal completed calls without completion evidence via host transition contract', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
+    mockLoadRoutingInstructionStateSync.mockReset();
+    mockLoadRoutingInstructionStateSync.mockReturnValue(null);
 
     mockConvertProviderResponse.mockImplementation(async () => ({
       body: {
@@ -1277,24 +1430,39 @@ describe('provider-response-converter servertool regressions', () => {
       '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
     );
 
-    const result = await convertProviderResponseIfNeeded(
-      {
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-chat',
-        requestId: 'req_invalid_update_goal_completed_1',
-        wantsStream: false,
-        response: { body: { id: 'upstream_body' } } as any,
-        pipelineMetadata: {}
-      },
-      {
-        runtimeManager: {
-          resolveRuntimeKey: () => undefined,
-          getHandleByRuntimeKey: () => undefined
-        },
-        executeNested: async () => ({ body: { ok: true } } as any)
+    const pipelineMetadata: Record<string, unknown> = {
+      stoplessGoalState: {
+        status: 'active',
+        objective: 'close stopless onto /goal lifecycle',
+        updatedAt: 1,
+        createdAt: 1
       }
-    );
-    expect(result.body).toBeTruthy();
+    };
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-chat',
+          requestId: 'req_invalid_update_goal_completed_1',
+          wantsStream: false,
+          response: { body: { id: 'upstream_body' } } as any,
+          pipelineMetadata
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'CLIENT_TOOL_ARGS_INVALID',
+      toolName: 'update_goal',
+      validationReason: 'missing_completion_evidence'
+    });
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveValidationFailures).toBe(1);
   });
 
   it('preserves converted exec_command cmd text without validator-side shell repair', async () => {
@@ -1412,62 +1580,6 @@ describe('provider-response-converter servertool regressions', () => {
 
     const toolCall = (converted?.body as any)?.choices?.[0]?.message?.tool_calls?.[0];
     expect(JSON.parse(toolCall?.function?.arguments ?? '{}')).toEqual({ patch: '' });
-  });
-
-  it('accepts apply_patch when provider returns raw_patch string from real sample shape', async () => {
-    jest.resetModules();
-    mockConvertProviderResponse.mockReset();
-    mockCreateSnapshotRecorder.mockClear();
-
-    mockConvertProviderResponse.mockImplementation(async () => ({
-      body: {
-        id: 'chatcmpl-apply-patch-raw-patch',
-        required_action: {
-          submit_tool_outputs: {
-            tool_calls: [
-              {
-                id: 'call_apply_patch_raw_patch',
-                type: 'function',
-                function: {
-                  name: 'apply_patch',
-                  arguments: JSON.stringify({
-                    raw_patch: 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new'
-                  })
-                }
-              }
-            ]
-          }
-        }
-      }
-    }));
-
-    const { convertProviderResponseIfNeeded } = await import(
-      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
-    );
-
-    const converted = await convertProviderResponseIfNeeded(
-      {
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-chat',
-        requestId: 'req_apply_patch_raw_patch_1',
-        wantsStream: false,
-        response: { body: { id: 'upstream_body' } } as any,
-        pipelineMetadata: {}
-      },
-      {
-        runtimeManager: {
-          resolveRuntimeKey: () => undefined,
-          getHandleByRuntimeKey: () => undefined
-        },
-        executeNested: async () => ({ body: { ok: true } } as any)
-      }
-    );
-
-    const toolCall = (converted?.body as any)?.required_action?.submit_tool_outputs?.tool_calls?.[0];
-    expect(JSON.parse(toolCall?.function?.arguments ?? '{}')).toEqual({
-      raw_patch: 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new',
-      patch: 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new'
-    });
   });
 
   it('rejects converted broad-kill exec_command calls before servertool guard can swallow them', async () => {

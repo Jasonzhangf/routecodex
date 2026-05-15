@@ -10,7 +10,9 @@ import {
 } from './provider-response-tool-validation-blocks.js';
 import {
   convertProviderResponse as bridgeConvertProviderResponse,
-  createSnapshotRecorder as bridgeCreateSnapshotRecorder
+  createSnapshotRecorder as bridgeCreateSnapshotRecorder,
+  persistStoplessGoalStateSnapshot,
+  readStoplessGoalState
 } from '../../../../modules/llmswitch/bridge.js';
 import {
   normalizeProviderResponse
@@ -78,6 +80,11 @@ type StoplessGoalProjection = {
   createdAt: number;
 };
 
+const GOAL_IRRECOVERABLE_ERROR_STOP_THRESHOLD = 2;
+const GOAL_VALIDATION_FAILURE_STOP_THRESHOLD = 2;
+const REPEATED_VALIDATION_FAILURE_ERROR_CLASS = 'repeated_validation_failure';
+const REPEATED_IRRECOVERABLE_ERROR_CLASS = 'repeated_irrecoverable_error';
+
 function readNonEmptyString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -90,19 +97,140 @@ function readFiniteNonNegativeNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : undefined;
 }
 
+function normalizeGoalCounter(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function buildGoalToolTransitionError(args: {
+  toolName: string;
+  validationReason: string;
+  validationMessage: string;
+  missingFields?: string[];
+}): never {
+  const err = new Error(args.validationMessage) as Error & {
+    code?: string;
+    status?: number;
+    statusCode?: number;
+    retryable?: boolean;
+    toolName?: string;
+    validationReason?: string;
+    validationMessage?: string;
+    missingFields?: string[];
+    upstreamCode?: string;
+    details?: Record<string, unknown>;
+  };
+  err.code = 'CLIENT_TOOL_ARGS_INVALID';
+  err.status = 502;
+  err.statusCode = 502;
+  err.retryable = false;
+  err.upstreamCode = 'CLIENT_TOOL_ARGS_INVALID';
+  err.toolName = args.toolName;
+  err.validationReason = args.validationReason;
+  err.validationMessage = args.validationMessage;
+  if (args.missingFields?.length) {
+    err.missingFields = args.missingFields;
+  }
+  err.details = {
+    ...(err.details ?? {}),
+    toolName: args.toolName,
+    validationReason: args.validationReason,
+    validationMessage: args.validationMessage,
+    ...(args.missingFields?.length ? { missingFields: args.missingFields } : {})
+  };
+  throw err;
+}
+
+function buildHostForcedStoppedGoalState(args: {
+  currentGoal: StoplessGoalProjection;
+  errorClass: string;
+  blockingEvidence: string;
+  counterField: 'consecutiveIrrecoverableErrors' | 'consecutiveValidationFailures' | 'consecutiveNoProgress';
+  counterValue: number;
+}): StoplessGoalProjection {
+  const nowMs = Date.now();
+  return {
+    status: 'stopped',
+    objective: args.currentGoal.objective,
+    blockingEvidence: args.blockingEvidence,
+    latestNote: args.blockingEvidence,
+    attemptsExhausted: true,
+    errorClass: args.errorClass,
+    updatedAt: nowMs,
+    createdAt:
+      readFiniteNonNegativeNumber(args.currentGoal.createdAt)
+      ?? nowMs,
+    [args.counterField]: args.counterValue
+  };
+}
+
 function readCurrentGoalState(args: {
   adapterContext: Record<string, unknown>;
   pipelineMetadata?: Record<string, unknown>;
 }): StoplessGoalProjection | undefined {
-  const direct = asFlatRecord(args.adapterContext.stoplessGoalState);
-  if (direct && typeof direct.status === 'string' && typeof direct.objective === 'string') {
-    return direct as StoplessGoalProjection;
+  const persisted = readPersistedGoalState(args.adapterContext);
+  const metadataState = asGoalProjection(args.pipelineMetadata?.stoplessGoalState);
+  const adapterState = asGoalProjection(args.adapterContext.stoplessGoalState);
+  const candidates = [persisted, metadataState, adapterState].filter((candidate): candidate is StoplessGoalProjection => Boolean(candidate));
+  if (!candidates.length) {
+    return undefined;
   }
-  const meta = asFlatRecord(args.pipelineMetadata?.stoplessGoalState);
-  if (meta && typeof meta.status === 'string' && typeof meta.objective === 'string') {
-    return meta as StoplessGoalProjection;
+  return mergeGoalStateCandidates(candidates);
+}
+
+function asGoalProjection(value: unknown): StoplessGoalProjection | undefined {
+  const record = asFlatRecord(value);
+  return record && typeof record.status === 'string' && typeof record.objective === 'string'
+    ? (record as StoplessGoalProjection)
+    : undefined;
+}
+
+function readPersistedGoalState(adapterContext: Record<string, unknown>): StoplessGoalProjection | undefined {
+  const persisted = asFlatRecord(readStoplessGoalState(adapterContext) as Record<string, unknown> | null);
+  return asGoalProjection(persisted?.state);
+}
+
+function resolveGoalPersistenceScopeKey(adapterContext: Record<string, unknown>): string | undefined {
+  const explicitScope = readNonEmptyString(adapterContext.stopMessageClientInjectSessionScope)
+    ?? readNonEmptyString(adapterContext.stopMessageClientInjectScope);
+  if (explicitScope) {
+    return explicitScope;
+  }
+  const sessionId = readNonEmptyString(adapterContext.sessionId);
+  if (sessionId) {
+    return `session:${sessionId}`;
+  }
+  const conversationId = readNonEmptyString(adapterContext.conversationId);
+  if (conversationId) {
+    return `conversation:${conversationId}`;
   }
   return undefined;
+}
+
+function mergeGoalStateCandidates(candidates: StoplessGoalProjection[]): StoplessGoalProjection {
+  const canonical = [...candidates].sort((a, b) => {
+    const updatedDiff =
+      (readFiniteNonNegativeNumber(b.updatedAt) ?? 0)
+      - (readFiniteNonNegativeNumber(a.updatedAt) ?? 0);
+    if (updatedDiff !== 0) {
+      return updatedDiff;
+    }
+    return (readFiniteNonNegativeNumber(b.createdAt) ?? 0) - (readFiniteNonNegativeNumber(a.createdAt) ?? 0);
+  })[0]!;
+
+  return {
+    ...canonical,
+    createdAt: candidates.reduce((min, candidate) => {
+      const createdAt = readFiniteNonNegativeNumber(candidate.createdAt);
+      return typeof createdAt === 'number' ? Math.min(min, createdAt) : min;
+    }, readFiniteNonNegativeNumber(canonical.createdAt) ?? Date.now()),
+    updatedAt: candidates.reduce((max, candidate) => {
+      const updatedAt = readFiniteNonNegativeNumber(candidate.updatedAt);
+      return typeof updatedAt === 'number' ? Math.max(max, updatedAt) : max;
+    }, readFiniteNonNegativeNumber(canonical.updatedAt) ?? Date.now()),
+    consecutiveIrrecoverableErrors: Math.max(...candidates.map((candidate) => normalizeGoalCounter(candidate.consecutiveIrrecoverableErrors))),
+    consecutiveValidationFailures: Math.max(...candidates.map((candidate) => normalizeGoalCounter(candidate.consecutiveValidationFailures))),
+    consecutiveNoProgress: Math.max(...candidates.map((candidate) => normalizeGoalCounter(candidate.consecutiveNoProgress)))
+  };
 }
 
 function writeProjectedGoalState(args: {
@@ -116,11 +244,130 @@ function writeProjectedGoalState(args: {
     ...rt,
     stoplessGoalStatus: args.state.status
   };
+  if (hasGoalPersistenceScope(args.adapterContext)) {
+    persistStoplessGoalStateSnapshot(args.adapterContext, args.state);
+  }
   syncAdapterContextRuntimeBackToPipelineMetadata({
     pipelineMetadata: args.pipelineMetadata,
     adapterContext: args.adapterContext
   });
   return args.state;
+}
+
+function hasGoalPersistenceScope(adapterContext: Record<string, unknown>): boolean {
+  const directScope = readNonEmptyString(adapterContext.stopMessageClientInjectSessionScope)
+    ?? readNonEmptyString(adapterContext.stopMessageClientInjectScope);
+  if (directScope) {
+    return true;
+  }
+  return Boolean(
+    readNonEmptyString(adapterContext.clientTmuxSessionId)
+    ?? readNonEmptyString(adapterContext.client_tmux_session_id)
+    ?? readNonEmptyString(adapterContext.tmuxSessionId)
+    ?? readNonEmptyString(adapterContext.tmux_session_id)
+    ?? readNonEmptyString(adapterContext.sessionId)
+    ?? readNonEmptyString(adapterContext.conversationId)
+  );
+}
+
+function persistGoalValidationLedger(args: {
+  adapterContext: Record<string, unknown>;
+  pipelineMetadata?: Record<string, unknown>;
+  currentGoal: StoplessGoalProjection;
+  requestId: string;
+  validationReason?: string;
+  validationMessage?: string;
+  missingFields?: string[];
+}): StoplessGoalProjection {
+  const nextCount = normalizeGoalCounter(args.currentGoal.consecutiveValidationFailures) + 1;
+  const details = [
+    'Goal update was rejected by host transition contract validation.',
+    `request_id=${args.requestId}`,
+    ...(args.validationReason ? [`validation_reason=${args.validationReason}`] : []),
+    ...(args.validationMessage ? [`validation_message=${args.validationMessage}`] : []),
+    ...(args.missingFields?.length ? [`missing_fields=${args.missingFields.join(',')}`] : [])
+  ].join('\n');
+  const state =
+    nextCount >= GOAL_VALIDATION_FAILURE_STOP_THRESHOLD
+      ? buildHostForcedStoppedGoalState({
+          currentGoal: args.currentGoal,
+          errorClass: REPEATED_VALIDATION_FAILURE_ERROR_CLASS,
+          blockingEvidence: details,
+          counterField: 'consecutiveValidationFailures',
+          counterValue: nextCount
+        })
+      : ({
+          ...args.currentGoal,
+          status: 'active',
+          latestNote: details,
+          consecutiveValidationFailures: nextCount,
+          consecutiveIrrecoverableErrors: undefined,
+          consecutiveNoProgress: undefined,
+          updatedAt: Date.now(),
+          createdAt: readFiniteNonNegativeNumber(args.currentGoal.createdAt) ?? Date.now()
+        } as StoplessGoalProjection);
+  return writeProjectedGoalState({
+    adapterContext: args.adapterContext,
+    pipelineMetadata: args.pipelineMetadata,
+    state
+  });
+}
+
+function persistGoalIrrecoverableErrorLedger(args: {
+  adapterContext: Record<string, unknown>;
+  pipelineMetadata?: Record<string, unknown>;
+  currentGoal: StoplessGoalProjection;
+  requestId: string;
+  code?: string;
+  upstreamCode?: string;
+  reason?: string;
+  message?: string;
+}): StoplessGoalProjection {
+  const nextCount = normalizeGoalCounter(args.currentGoal.consecutiveIrrecoverableErrors) + 1;
+  const details = [
+    'Goal followup failed irrecoverably and host stopped automatic continuation.',
+    `request_id=${args.requestId}`,
+    ...(args.code ? [`code=${args.code}`] : []),
+    ...(args.upstreamCode ? [`upstream_code=${args.upstreamCode}`] : []),
+    ...(args.reason ? [`reason=${args.reason}`] : []),
+    ...(args.message ? [`message=${args.message}`] : [])
+  ].join('\n');
+  const state =
+    nextCount >= GOAL_IRRECOVERABLE_ERROR_STOP_THRESHOLD
+      ? buildHostForcedStoppedGoalState({
+          currentGoal: args.currentGoal,
+          errorClass: REPEATED_IRRECOVERABLE_ERROR_CLASS,
+          blockingEvidence: details,
+          counterField: 'consecutiveIrrecoverableErrors',
+          counterValue: nextCount
+        })
+      : ({
+          ...args.currentGoal,
+          status: 'active',
+          latestNote: details,
+          consecutiveIrrecoverableErrors: nextCount,
+          consecutiveValidationFailures: undefined,
+          consecutiveNoProgress: undefined,
+          updatedAt: Date.now(),
+          createdAt: readFiniteNonNegativeNumber(args.currentGoal.createdAt) ?? Date.now()
+        } as StoplessGoalProjection);
+  return writeProjectedGoalState({
+    adapterContext: args.adapterContext,
+    pipelineMetadata: args.pipelineMetadata,
+    state
+  });
+}
+
+function applyGoalLedgersToValidatedProjection(args: {
+  existingGoal?: StoplessGoalProjection;
+  nextState: StoplessGoalProjection;
+}): StoplessGoalProjection {
+  return {
+    ...args.nextState,
+    consecutiveIrrecoverableErrors: undefined,
+    consecutiveValidationFailures: undefined,
+    consecutiveNoProgress: undefined
+  };
 }
 
 function projectValidatedGoalStateFromConvertedBody(args: {
@@ -184,11 +431,20 @@ function projectValidatedGoalStateFromConvertedBody(args: {
     switch (status) {
       case 'active': {
         const nextStep = readNonEmptyString(lastUpdateGoalArgs.next_step) ?? readNonEmptyString(lastUpdateGoalArgs.nextStep);
-        if (nextStep) {
-          nextState.nextStep = nextStep;
-          nextState.latestNote = nextStep;
+        if (!nextStep) {
+          buildGoalToolTransitionError({
+            toolName: 'update_goal',
+            validationReason: 'missing_next_step',
+            validationMessage: 'update_goal status=active requires next_step as a non-empty string.',
+            missingFields: ['next_step']
+          });
         }
-        return nextState;
+        nextState.nextStep = nextStep;
+        nextState.latestNote = nextStep;
+        return applyGoalLedgersToValidatedProjection({
+          existingGoal,
+          nextState
+        });
       }
       case 'paused': {
         const userQuestion =
@@ -196,13 +452,21 @@ function projectValidatedGoalStateFromConvertedBody(args: {
         const cannotContinueReason =
           readNonEmptyString(lastUpdateGoalArgs.cannot_continue_reason)
           ?? readNonEmptyString(lastUpdateGoalArgs.cannotContinueReason);
-        if (userQuestion) {
-          nextState.userQuestion = userQuestion;
+        const missingFields = buildMissingFields([
+          userQuestion ? undefined : 'user_question',
+          cannotContinueReason ? undefined : 'cannot_continue_reason'
+        ]);
+        if (missingFields?.length) {
+          buildGoalToolTransitionError({
+            toolName: 'update_goal',
+            validationReason: 'missing_pause_reason_or_question',
+            validationMessage: 'update_goal status=paused requires user_question and cannot_continue_reason.',
+            missingFields
+          });
         }
-        if (cannotContinueReason) {
-          nextState.cannotContinueReason = cannotContinueReason;
-          nextState.latestNote = cannotContinueReason;
-        }
+        nextState.userQuestion = userQuestion;
+        nextState.cannotContinueReason = cannotContinueReason;
+        nextState.latestNote = cannotContinueReason;
         return nextState;
       }
       case 'stopped': {
@@ -213,16 +477,23 @@ function projectValidatedGoalStateFromConvertedBody(args: {
           readNonEmptyString(lastUpdateGoalArgs.error_class)
           ?? readNonEmptyString(lastUpdateGoalArgs.errorClass);
         const attemptsExhausted = lastUpdateGoalArgs.attempts_exhausted === true || lastUpdateGoalArgs.attemptsExhausted === true;
-        if (blockingEvidence) {
-          nextState.blockingEvidence = blockingEvidence;
-          nextState.latestNote = blockingEvidence;
+        const missingFields = buildMissingFields([
+          blockingEvidence ? undefined : 'blocking_evidence',
+          attemptsExhausted === true ? undefined : 'attempts_exhausted',
+          errorClass ? undefined : 'error_class'
+        ]);
+        if (missingFields?.length) {
+          buildGoalToolTransitionError({
+            toolName: 'update_goal',
+            validationReason: 'missing_stop_evidence',
+            validationMessage: 'update_goal status=stopped requires blocking_evidence, attempts_exhausted=true, and error_class.',
+            missingFields
+          });
         }
-        if (errorClass) {
-          nextState.errorClass = errorClass;
-        }
-        if (attemptsExhausted === true) {
-          nextState.attemptsExhausted = true;
-        }
+        nextState.blockingEvidence = blockingEvidence;
+        nextState.latestNote = blockingEvidence;
+        nextState.errorClass = errorClass;
+        nextState.attemptsExhausted = true;
         return nextState;
       }
       case 'completed': {
@@ -235,16 +506,23 @@ function projectValidatedGoalStateFromConvertedBody(args: {
         const ssotAssessment =
           readNonEmptyString(lastUpdateGoalArgs.ssot_assessment)
           ?? readNonEmptyString(lastUpdateGoalArgs.ssotAssessment);
-        if (completionEvidence) {
-          nextState.completionEvidence = completionEvidence;
+        const missingFields = buildMissingFields([
+          completionEvidence ? undefined : 'completion_evidence',
+          completionSummary ? undefined : 'completion_summary',
+          ssotAssessment ? undefined : 'ssot_assessment'
+        ]);
+        if (missingFields?.length) {
+          buildGoalToolTransitionError({
+            toolName: 'update_goal',
+            validationReason: 'missing_completion_evidence',
+            validationMessage: 'update_goal status=completed requires completion_evidence, completion_summary, and ssot_assessment.',
+            missingFields
+          });
         }
-        if (completionSummary) {
-          nextState.completionSummary = completionSummary;
-          nextState.latestNote = completionSummary;
-        }
-        if (ssotAssessment) {
-          nextState.ssotAssessment = ssotAssessment;
-        }
+        nextState.completionEvidence = completionEvidence;
+        nextState.completionSummary = completionSummary;
+        nextState.latestNote = completionSummary;
+        nextState.ssotAssessment = ssotAssessment;
         return nextState;
       }
     }
@@ -258,13 +536,16 @@ function projectValidatedGoalStateFromConvertedBody(args: {
     return undefined;
   }
   const nowMs = Date.now();
-  return {
+  return applyGoalLedgersToValidatedProjection({
+    existingGoal,
+    nextState: {
     status: 'active',
     objective: createObjective,
     latestNote: createObjective,
     updatedAt: nowMs,
     createdAt: nowMs,
-  };
+    }
+  });
 }
 
 function syncProjectedGoalStateBackToPipelineMetadata(args: {
@@ -786,6 +1067,23 @@ export async function convertProviderResponseIfNeeded(
         : typeof (detailRecord as Record<string, unknown> | undefined)?.error === 'string'
           ? String((detailRecord as Record<string, unknown>).error)
         : undefined;
+    const validationReason =
+      typeof errRecord.validationReason === 'string'
+        ? errRecord.validationReason
+        : typeof detailRecord?.validationReason === 'string'
+          ? detailRecord.validationReason
+          : undefined;
+    const validationMessage =
+      typeof errRecord.validationMessage === 'string'
+        ? errRecord.validationMessage
+        : typeof detailRecord?.validationMessage === 'string'
+          ? detailRecord.validationMessage
+          : undefined;
+    const missingFields = Array.isArray(errRecord.missingFields)
+      ? (errRecord.missingFields.filter((value): value is string => typeof value === 'string' && value.trim().length > 0))
+      : Array.isArray(detailRecord?.missingFields)
+        ? ((detailRecord.missingFields as unknown[]).filter((value): value is string => typeof value === 'string' && value.trim().length > 0))
+        : undefined;
     const normalizedUpstreamCode = (upstreamCode || detailUpstreamCode || '').trim().toLowerCase();
     const fatalConversionCode =
       (typeof errCode === 'string' && FATAL_CONVERSION_ERROR_CODES.has(errCode) ? errCode : undefined)
@@ -793,6 +1091,23 @@ export async function convertProviderResponseIfNeeded(
       ?? (typeof detailUpstreamCode === 'string' && FATAL_CONVERSION_ERROR_CODES.has(detailUpstreamCode) ? detailUpstreamCode : undefined);
 
     if (fatalConversionCode) {
+      if (adapterContext && fatalConversionCode === 'CLIENT_TOOL_ARGS_INVALID') {
+        const currentGoal = readCurrentGoalState({
+          adapterContext,
+          pipelineMetadata: options.pipelineMetadata
+        });
+        if (currentGoal?.status === 'active') {
+          persistGoalValidationLedger({
+            adapterContext,
+            pipelineMetadata: options.pipelineMetadata,
+            currentGoal,
+            requestId: options.requestId,
+            validationReason,
+            validationMessage,
+            missingFields
+          });
+        }
+      }
       logPipelineStage('convert.bridge.error', options.requestId, {
         code: errCode,
         upstreamCode: upstreamCode || detailUpstreamCode,
@@ -861,7 +1176,54 @@ export async function convertProviderResponseIfNeeded(
           error
         );
       }
+      const effectiveGoalState = adapterContext
+        ? readCurrentGoalState({
+            adapterContext,
+            pipelineMetadata: options.pipelineMetadata
+          })
+        : undefined;
+      const effectiveErrorStage =
+        typeof errRecord.requestExecutorProviderErrorStage === 'string'
+          ? errRecord.requestExecutorProviderErrorStage
+          : typeof detailRecord?.requestExecutorProviderErrorStage === 'string'
+            ? detailRecord.requestExecutorProviderErrorStage
+            : requestExecutorProviderErrorStage;
+      if (
+        effectiveGoalState?.status === 'active'
+        && effectiveErrorStage === 'provider.followup'
+        && errRecord.retryable !== true
+        && adapterContext
+      ) {
+        persistGoalIrrecoverableErrorLedger({
+          adapterContext,
+          pipelineMetadata: options.pipelineMetadata,
+          currentGoal: effectiveGoalState,
+          requestId: options.requestId,
+          code: followupLogDetails?.code || errCode,
+          upstreamCode: followupLogDetails?.upstreamCode || upstreamCode || detailUpstreamCode,
+          reason: followupLogDetails?.reason || detailReason,
+          message
+        });
+      }
       throw error;
+    }
+
+    if (adapterContext && errCode === 'CLIENT_TOOL_ARGS_INVALID') {
+      const currentGoal = readCurrentGoalState({
+        adapterContext,
+        pipelineMetadata: options.pipelineMetadata
+      });
+      if (currentGoal?.status === 'active') {
+        persistGoalValidationLedger({
+          adapterContext,
+          pipelineMetadata: options.pipelineMetadata,
+          currentGoal,
+          requestId: options.requestId,
+          validationReason,
+          validationMessage,
+          missingFields
+        });
+      }
     }
 
     logPipelineStage('convert.bridge.error', options.requestId, {

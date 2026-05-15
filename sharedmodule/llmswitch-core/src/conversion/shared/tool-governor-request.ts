@@ -1,6 +1,6 @@
 import { augmentOpenAITools } from '../../guidance/index.js';
 import { validateToolCall } from '../../tools/tool-registry.js';
-import { captureApplyPatchRegression } from '../../tools/patch-regression-capturer.js';
+import { captureApplyPatchRegression } from '../../tools/apply-patch/regression-capturer.js';
 import { normalizeExecCommandArgs } from '../../tools/exec-command/normalize.js';
 import {
   buildBlockedApplyPatchArgs,
@@ -71,6 +71,10 @@ export function processChatRequestTools(request: Unknown, opts?: ToolGovernanceO
 }
 
 export function normalizeApplyPatchToolCallsOnRequest(request: Unknown): Unknown {
+  return normalizeSpecialToolCallsOnRequest(request);
+}
+
+export function normalizeRequestToolCalls(request: Unknown): Unknown {
   return normalizeSpecialToolCallsOnRequest(request);
 }
 

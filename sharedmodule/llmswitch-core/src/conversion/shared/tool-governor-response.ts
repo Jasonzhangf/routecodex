@@ -1,6 +1,6 @@
 import { validateToolCall } from '../../tools/tool-registry.js';
 import { repairFindMeta } from './tooling.js';
-import { captureApplyPatchRegression } from '../../tools/patch-regression-capturer.js';
+import { captureApplyPatchRegression } from '../../tools/apply-patch/regression-capturer.js';
 import { normalizeExecCommandArgs } from '../../tools/exec-command/normalize.js';
 import {
   buildBlockedApplyPatchArgs,
@@ -54,6 +54,10 @@ export function normalizeApplyPatchToolCallsOnResponse(chat: Unknown): Unknown {
     logToolGovernorNonBlocking('normalize_apply_patch_tool_calls_on_response', error);
     return chat;
   }
+}
+
+export function normalizeResponseToolCalls(chat: Unknown): Unknown {
+  return normalizeApplyPatchToolCallsOnResponse(chat);
 }
 
 export function processChatResponseTools(resp: Unknown): Unknown {

@@ -5,10 +5,28 @@ import path from 'node:path';
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
 const mockSyncReasoningStopModeFromRequest = jest.fn(() => 'off');
+const mockSyncStoplessGoalStateFromRequest = jest.fn(() => ({
+  stickyKey: 'session:test',
+  hadDirective: false,
+  directiveTypes: []
+}));
+const mockPersistStoplessGoalStateSnapshot = jest.fn();
+const mockLoadRoutingInstructionStateSync = jest.fn(() => null);
+const mockReadStoplessGoalState = jest.fn((adapterContext: Record<string, unknown>) => {
+  const sessionId = typeof adapterContext?.sessionId === 'string' ? adapterContext.sessionId : undefined;
+  return {
+    ...(sessionId ? { stickyKey: `session:${sessionId}` } : {}),
+    state: mockLoadRoutingInstructionStateSync(sessionId ? `session:${sessionId}` : '')?.stoplessGoalState
+  };
+});
 const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
+  syncStoplessGoalStateFromRequest: mockSyncStoplessGoalStateFromRequest,
+  persistStoplessGoalStateSnapshot: mockPersistStoplessGoalStateSnapshot,
+  loadRoutingInstructionStateSync: mockLoadRoutingInstructionStateSync,
+  readStoplessGoalState: mockReadStoplessGoalState,
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
 });
 
