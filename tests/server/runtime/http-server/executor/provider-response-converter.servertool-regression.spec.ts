@@ -1000,7 +1000,7 @@ describe('provider-response-converter servertool regressions', () => {
     });
   });
 
-  it('rejects converted update_goal active calls without next_step via host transition contract', async () => {
+  it('auto-fills converted update_goal active calls without next_step', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -1062,13 +1062,9 @@ describe('provider-response-converter servertool regressions', () => {
           executeNested: async () => ({ body: { ok: true } } as any)
         }
       )
-    ).rejects.toMatchObject({
-      code: 'CLIENT_TOOL_ARGS_INVALID',
-      toolName: 'update_goal',
-      validationReason: 'missing_next_step'
-    });
+    ).resolves.toBeDefined();
     expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.status).toBe('active');
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveValidationFailures).toBe(1);
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.nextStep).toBe('continue_with_next_action');
   });
 
   it('forces stopped after two invalid update_goal transitions', async () => {

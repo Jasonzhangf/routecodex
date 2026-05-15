@@ -389,6 +389,19 @@ function applyRccStoplessLedger(args: {
   };
 }
 
+function deriveDefaultActiveNextStep(args: {
+  updateGoalArgs: Record<string, unknown>;
+  existingGoal?: StoplessGoalProjection;
+}): string {
+  return (
+    readNonEmptyString(args.updateGoalArgs.latest_note)
+    ?? readNonEmptyString(args.updateGoalArgs.latestNote)
+    ?? readNonEmptyString(args.updateGoalArgs.note)
+    ?? readNonEmptyString(args.existingGoal?.nextStep)
+    ?? 'continue_with_next_action'
+  );
+}
+
 function projectValidatedGoalStateFromConvertedBody(args: {
   payload: unknown;
   adapterContext: Record<string, unknown>;
@@ -450,16 +463,12 @@ function projectValidatedGoalStateFromConvertedBody(args: {
     switch (status) {
       case 'active': {
         const nextStep = readNonEmptyString(lastUpdateGoalArgs.next_step) ?? readNonEmptyString(lastUpdateGoalArgs.nextStep);
-        if (!nextStep) {
-          buildGoalToolTransitionError({
-            toolName: 'update_goal',
-            validationReason: 'missing_next_step',
-            validationMessage: 'update_goal status=active requires next_step as a non-empty string.',
-            missingFields: ['next_step']
-          });
-        }
-        nextState.nextStep = nextStep;
-        nextState.latestNote = nextStep;
+        const resolvedNextStep = nextStep ?? deriveDefaultActiveNextStep({
+          updateGoalArgs: lastUpdateGoalArgs,
+          existingGoal
+        });
+        nextState.nextStep = resolvedNextStep;
+        nextState.latestNote = resolvedNextStep;
         // 清零 Codex counters
         const afterCodex = applyCodexGoalLedgers({ existingGoal, nextState });
         // 清零 RCC counter
