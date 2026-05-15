@@ -196,7 +196,7 @@ export function parseVirtualRouterNativeErrorPayload(message) {
     const fallbackMessage = rawPayload || "Virtual router error";
     if (!rawPayload.startsWith("{")) {
         return {
-            code,
+            code: code,
             message: fallbackMessage,
         };
     }
@@ -204,7 +204,7 @@ export function parseVirtualRouterNativeErrorPayload(message) {
         const parsed = JSON.parse(rawPayload);
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
             return {
-                code,
+                code: code,
                 message: fallbackMessage,
             };
         }
@@ -215,14 +215,14 @@ export function parseVirtualRouterNativeErrorPayload(message) {
             ? parsed.details
             : undefined;
         return {
-            code,
+            code: code,
             message: parsedMessage,
             ...(details ? { details } : {}),
         };
     }
     catch {
         return {
-            code,
+            code: code,
             message: fallbackMessage,
         };
     }
@@ -234,4 +234,3 @@ export function parseVirtualRouterNativeError(error) {
     }
     return new VirtualRouterError(parsed.message, parsed.code, parsed.details);
 }
-//# sourceMappingURL=native-router-hotpath-loader.js.map

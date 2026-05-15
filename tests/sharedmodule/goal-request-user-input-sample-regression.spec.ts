@@ -89,15 +89,15 @@ describe('goal request_user_input real sample regression', () => {
     });
   });
 
-  test('captured deepseek-web malformed tool wrapper sample fails as missing required tool call', () => {
+  const deepseekMalformedWrapperSamplePath =
+    '/Volumes/extension/.rcc/codex-samples/openai-responses/deepseek-web.3.deepseek-v4-flash-search/req_1778378853967_3f0a1f6c/provider-response_1.json';
+  const deepseekMalformedWrapperSample = readJsonIfExists(deepseekMalformedWrapperSamplePath);
+
+  (deepseekMalformedWrapperSample ? test : test.skip)(
+    'captured deepseek-web malformed tool wrapper sample fails as missing required tool call',
+    () => {
     // TODO(P3-1): skip when fixture unavailable — fallback with fabricated data masks regressions
-    const sample = readJsonIfExists(
-      '/Volumes/extension/.rcc/codex-samples/openai-responses/deepseek-web.3.deepseek-v4-flash-search/req_1778378853967_3f0a1f6c/provider-response_1.json'
-    );
-    if (!sample) {
-      test.skip('Fixture unavailable — requires /Volumes/extension volume mounted with captured deepseek-web sample');
-      return;
-    }
+    const sample = deepseekMalformedWrapperSample!;
 
     const signal = __requestExecutorTestables.detectRetryableEmptyAssistantResponse(
       {
@@ -139,7 +139,8 @@ describe('goal request_user_input real sample regression', () => {
       marker: 'responses_missing_required_tool_call',
       reason: 'responses status=completed with declared request tools but no function_call output'
     });
-  });
+    }
+  );
 
   test('captured chat empty assistant errorsample still classifies as chat_empty_assistant', () => {
     const sample = readJson('errorsample.chat-empty-assistant.json');

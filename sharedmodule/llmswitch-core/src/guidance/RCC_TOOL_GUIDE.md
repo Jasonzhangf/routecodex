@@ -1,4 +1,4 @@
-# CCR 对齐的工具引导与处理设计（llmswitch-core v2）
+# RCC 工具引导与处理设计（llmswitch-core v2）
 
 > 目标：在不精简（不改写/不删除）现有系统提示词正文的前提下，单独注入一条规范化的“系统工具指引”消息；并将三端（Chat / Responses / Messages）的工具治理统一到 llmswitch-core v2 的唯一入口，保证幂等、可观测、可配置、无兜底。
 

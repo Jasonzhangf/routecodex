@@ -32,6 +32,17 @@ export function persistStopMessageState(stickyKey: string | undefined, state: Ro
   if (!stickyKey) {
     return;
   }
+  const hasNonStopMessageState =
+    Boolean(state.stoplessGoalState) ||
+    Boolean(state.forcedTarget) ||
+    Boolean(state.stickyTarget) ||
+    Boolean(state.preferTarget) ||
+    state.allowedProviders.size > 0 ||
+    state.disabledProviders.size > 0 ||
+    state.disabledKeys.size > 0 ||
+    state.disabledModels.size > 0 ||
+    Boolean(state.preCommandScriptPath && state.preCommandScriptPath.trim()) ||
+    (typeof state.preCommandUpdatedAt === 'number' && Number.isFinite(state.preCommandUpdatedAt));
   const hasLifecycleStamp =
     (typeof state.stopMessageUpdatedAt === 'number' && Number.isFinite(state.stopMessageUpdatedAt)) ||
     (typeof state.stopMessageLastUsedAt === 'number' && Number.isFinite(state.stopMessageLastUsedAt));
@@ -41,7 +52,8 @@ export function persistStopMessageState(stickyKey: string | undefined, state: Ro
     (typeof state.stopMessageUsed !== 'number' || !Number.isFinite(state.stopMessageUsed)) &&
     (typeof state.stopMessageStageMode !== 'string' || !state.stopMessageStageMode.trim()) &&
     (typeof state.stopMessageAiMode !== 'string' || !state.stopMessageAiMode.trim()) &&
-    !hasLifecycleStamp;
+    !hasLifecycleStamp &&
+    !hasNonStopMessageState;
   if (empty) {
     saveRoutingInstructionStateSync(stickyKey, null);
     return;

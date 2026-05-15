@@ -18,8 +18,7 @@ import { liftReqInboundSemantics } from "./semantic-lift.js";
 import { validateChatEnvelopeWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js";
 import { chatEnvelopeToStandardizedWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js";
 import { normalizeReqInboundShellLikeToolCallsWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics-tools.js";
-import { fixApplyPatchToolCallsWithNative } from "../../../../../../router/virtual-router/engine-selection/native-compat-action-semantics.js";
-import { normalizeApplyPatchToolCallsOnRequest } from "../../../../../../conversion/shared/tool-governor.js";
+import { normalizeRequestToolCalls } from "../../../../../../conversion/shared/tool-governor.js";
 import {
   applyAnthropicToolAliasSemantics,
   normalizeAnthropicToolAliasMap
@@ -178,19 +177,13 @@ export async function runReqInboundStage2SemanticMap(
     }
   }
   // openai-responses path already ran request_inbound bridge policy in
-  // buildChatRequestFromResponses (including call-id/apply-patch compat actions).
+  // buildChatRequestFromResponses.
   // Skip duplicate message-wide normalization passes here to reduce heavy-input cost.
   if (options.formatEnvelope.protocol !== "openai-responses") {
     normalizeReqInboundShellLikeToolCallsWithNative(
       chatEnvelope as unknown as Record<string, unknown>,
     );
-    const fixedApplyPatch = fixApplyPatchToolCallsWithNative({
-      messages: (Array.isArray(chatEnvelope.messages)
-        ? chatEnvelope.messages
-        : []) as Array<Record<string, unknown>>,
-    });
-    chatEnvelope.messages = fixedApplyPatch.messages as unknown as ChatEnvelope["messages"];
-    const normalizedSpecialTools = normalizeApplyPatchToolCallsOnRequest({
+    const normalizedSpecialTools = normalizeRequestToolCalls({
       messages: Array.isArray(chatEnvelope.messages) ? chatEnvelope.messages : []
     }) as { messages?: ChatEnvelope["messages"] };
     if (Array.isArray(normalizedSpecialTools?.messages)) {

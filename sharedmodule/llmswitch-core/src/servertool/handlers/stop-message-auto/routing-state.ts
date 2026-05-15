@@ -114,24 +114,58 @@ export function createStopMessageState(snapshot: {
   aiSeedPrompt?: string;
   aiHistory?: Array<Record<string, unknown>>;
 }): RoutingInstructionState {
-  return {
+  return applyStopMessageSnapshotToState(null, snapshot);
+}
+
+export function applyStopMessageSnapshotToState(
+  state: RoutingInstructionState | null | undefined,
+  snapshot: {
+    text: string;
+    maxRepeats: number;
+    used: number;
+    source?: string;
+    updatedAt?: number;
+    lastUsedAt?: number;
+    stageMode?: 'on' | 'off' | 'auto';
+    aiMode?: 'on' | 'off';
+    aiSeedPrompt?: string;
+    aiHistory?: Array<Record<string, unknown>>;
+  }
+): RoutingInstructionState {
+  const next = state ?? {
+    stoplessGoalState: undefined,
     forcedTarget: undefined,
     stickyTarget: undefined,
+    preferTarget: undefined,
     allowedProviders: new Set<string>(),
     disabledProviders: new Set<string>(),
     disabledKeys: new Map<string, Set<string | number>>(),
     disabledModels: new Map<string, Set<string>>(),
-    stopMessageSource: snapshot.source && snapshot.source.trim() ? snapshot.source.trim() : 'explicit',
-    stopMessageText: snapshot.text,
-    stopMessageMaxRepeats: snapshot.maxRepeats,
-    stopMessageUsed: snapshot.used,
-    stopMessageUpdatedAt: snapshot.updatedAt,
-    stopMessageLastUsedAt: snapshot.lastUsedAt,
-    stopMessageStageMode: snapshot.stageMode,
-    stopMessageAiMode: snapshot.aiMode || 'on',
-    stopMessageAiSeedPrompt: snapshot.aiSeedPrompt,
-    stopMessageAiHistory: Array.isArray(snapshot.aiHistory) ? snapshot.aiHistory : undefined
+    stopMessageSource: undefined,
+    stopMessageText: undefined,
+    stopMessageMaxRepeats: undefined,
+    stopMessageUsed: undefined,
+    stopMessageUpdatedAt: undefined,
+    stopMessageLastUsedAt: undefined,
+    stopMessageStageMode: undefined,
+    stopMessageAiMode: undefined,
+    stopMessageAiSeedPrompt: undefined,
+    stopMessageAiHistory: undefined,
+    preCommandSource: undefined,
+    preCommandScriptPath: undefined,
+    preCommandUpdatedAt: undefined
   };
+  next.stopMessageSource = snapshot.source && snapshot.source.trim() ? snapshot.source.trim() : 'explicit';
+  next.stopMessageText = snapshot.text;
+  next.stopMessageMaxRepeats = snapshot.maxRepeats;
+  next.stopMessageUsed = snapshot.used;
+  next.stopMessageUpdatedAt = snapshot.updatedAt;
+  next.stopMessageLastUsedAt = snapshot.lastUsedAt;
+  next.stopMessageStageMode = snapshot.stageMode;
+  next.stopMessageAiMode = snapshot.aiMode || 'on';
+  next.stopMessageAiSeedPrompt = snapshot.aiSeedPrompt;
+  next.stopMessageAiHistory = Array.isArray(snapshot.aiHistory) ? snapshot.aiHistory : undefined;
+  return next;
 }
 
 export function clearStopMessageState(state: RoutingInstructionState, _now: number): void {

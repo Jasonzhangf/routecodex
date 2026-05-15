@@ -26,7 +26,7 @@ use crate::virtual_router_engine::routing::{
     should_fallback_direct_model_for_media,
 };
 use crate::virtual_router_engine::routing_state_store::{
-    load_routing_instruction_state, persist_routing_instruction_state,
+    is_state_empty, load_routing_instruction_state, persist_routing_instruction_state,
 };
 
 fn normalize_instruction_target_against_registry(
@@ -150,6 +150,24 @@ fn has_only_routing_state_mutation_instructions(instructions: &[RoutingInstructi
 }
 
 impl VirtualRouterEngineCore {
+    fn should_reload_persisted_routing_state(
+        existing: &RoutingInstructionState,
+        loaded: &RoutingInstructionState,
+        key: &str,
+    ) -> bool {
+        if is_state_empty(existing) {
+            return true;
+        }
+        if !(key.starts_with("session:") || key.starts_with("conversation:")) {
+            return false;
+        }
+        match (&existing.stopless_goal_state, &loaded.stopless_goal_state) {
+            (None, Some(_)) => true,
+            (Some(existing_goal), Some(loaded_goal)) => loaded_goal.updated_at > existing_goal.updated_at,
+            _ => false,
+        }
+    }
+
     fn should_auto_clear_prefer_target(
         &mut self,
         env: Env,
@@ -172,6 +190,22 @@ impl VirtualRouterEngineCore {
 
     fn load_routing_state_for_scope(&mut self, key: &str) -> RoutingInstructionState {
         if let Some(existing) = self.routing_instruction_state.get(key) {
+            if key.starts_with("session:") || key.starts_with("conversation:") {
+                if let Some(loaded) = load_routing_instruction_state(key) {
+                    if Self::should_reload_persisted_routing_state(existing, &loaded, key) {
+                        self.routing_instruction_state
+                            .insert(key.to_string(), loaded.clone());
+                        return loaded;
+                    }
+                }
+            }
+            if is_state_empty(existing) {
+                if let Some(loaded) = load_routing_instruction_state(key) {
+                    self.routing_instruction_state
+                        .insert(key.to_string(), loaded.clone());
+                    return loaded;
+                }
+            }
             return existing.clone();
         }
         if let Some(loaded) = load_routing_instruction_state(key) {
@@ -194,16 +228,7 @@ impl VirtualRouterEngineCore {
         let session_scope = resolve_session_scope(metadata);
         let stop_message_scope = resolve_stop_message_scope(metadata);
         let routing_state_key = session_scope.clone().unwrap_or_else(|| sticky_key.clone());
-        let base_state =
-            if let Some(existing) = self.routing_instruction_state.get(&routing_state_key) {
-                existing.clone()
-            } else if let Some(loaded) = load_routing_instruction_state(&routing_state_key) {
-                self.routing_instruction_state
-                    .insert(routing_state_key.clone(), loaded.clone());
-                loaded
-            } else {
-                RoutingInstructionState::default()
-            };
+        let base_state = self.load_routing_state_for_scope(&routing_state_key);
         let mut persisted_routing_state = strip_stop_message_fields(&base_state);
         let mut selection_routing_state = strip_stop_message_fields(&base_state);
         let metadata_instructions = build_metadata_instructions(metadata);
@@ -336,15 +361,7 @@ impl VirtualRouterEngineCore {
         if let Some(scope) = stop_message_scope.as_ref() {
             if !stop_instructions.is_empty() {
                 let session_state =
-                    if let Some(existing) = self.routing_instruction_state.get(scope) {
-                        existing.clone()
-                    } else if let Some(loaded) = load_routing_instruction_state(scope) {
-                        self.routing_instruction_state
-                            .insert(scope.clone(), loaded.clone());
-                        loaded
-                    } else {
-                        RoutingInstructionState::default()
-                    };
+                    self.load_routing_state_for_scope(scope);
                 let mut next_state = session_state;
                 apply_routing_instructions(&stop_instructions, &mut next_state)?;
                 self.routing_instruction_state
@@ -594,6 +611,13 @@ impl VirtualRouterEngineCore {
 mod tests {
     use super::*;
     use crate::virtual_router_engine::instructions::{InstructionTarget, RoutingInstructionState};
+    use crate::virtual_router_engine::rcc_fence::StoplessGoalState;
+    use crate::virtual_router_engine::routing_state_store::{
+        persist_routing_instruction_state, with_session_dir_override,
+    };
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn disable_sticky_routes_clears_forced_and_sticky_targets_for_selection() {
@@ -624,5 +648,120 @@ mod tests {
         assert!(state.forced_target.is_none());
         assert!(state.sticky_target.is_none());
         assert!(state.prefer_target.is_none());
+    }
+
+    #[test]
+    fn load_routing_state_for_scope_reloads_disk_when_session_cache_is_stale_empty() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("rcc-route-state-reload-{unique}"));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        with_session_dir_override(temp_dir.to_str(), || {
+            let key = "session:goal-reload";
+            let mut persisted = RoutingInstructionState::default();
+            persisted.stopless_goal_state = Some(StoplessGoalState {
+                status: "active".to_string(),
+                objective: "reload goal from disk".to_string(),
+                latest_note: Some("persisted after first turn".to_string()),
+                completion_evidence: None,
+                next_step: None,
+                user_question: None,
+                cannot_continue_reason: None,
+                blocking_evidence: None,
+                attempts_exhausted: None,
+                error_class: None,
+                completion_summary: None,
+                ssot_assessment: None,
+                consecutive_irrecoverable_errors: None,
+                consecutive_validation_failures: Some(1),
+                consecutive_no_progress: None,
+                updated_at: 123,
+                created_at: 123,
+            });
+            persist_routing_instruction_state(key, Some(&persisted));
+
+            let mut engine = VirtualRouterEngineCore::new();
+            engine
+                .routing_instruction_state
+                .insert(key.to_string(), RoutingInstructionState::default());
+
+            let loaded = engine.load_routing_state_for_scope(key);
+            let goal = loaded.stopless_goal_state.expect("goal should reload from disk");
+            assert_eq!(goal.status, "active");
+            assert_eq!(goal.objective, "reload goal from disk");
+        });
+
+        let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
+    }
+
+    #[test]
+    fn load_routing_state_for_scope_reloads_disk_when_session_cache_goal_state_is_stale() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("rcc-route-goal-freshness-{unique}"));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        with_session_dir_override(temp_dir.to_str(), || {
+            let key = "session:goal-freshness";
+            let mut persisted = RoutingInstructionState::default();
+            persisted.stopless_goal_state = Some(StoplessGoalState {
+                status: "active".to_string(),
+                objective: "reload richer goal state from disk".to_string(),
+                latest_note: Some("persisted validation failure".to_string()),
+                completion_evidence: None,
+                next_step: None,
+                user_question: None,
+                cannot_continue_reason: None,
+                blocking_evidence: None,
+                attempts_exhausted: None,
+                error_class: None,
+                completion_summary: None,
+                ssot_assessment: None,
+                consecutive_irrecoverable_errors: None,
+                consecutive_validation_failures: Some(1),
+                consecutive_no_progress: None,
+                updated_at: 200,
+                created_at: 100,
+            });
+            persist_routing_instruction_state(key, Some(&persisted));
+
+            let mut cached = RoutingInstructionState::default();
+            cached.stopless_goal_state = Some(StoplessGoalState {
+                status: "active".to_string(),
+                objective: "reload richer goal state from disk".to_string(),
+                latest_note: Some("stale cache".to_string()),
+                completion_evidence: None,
+                next_step: None,
+                user_question: None,
+                cannot_continue_reason: None,
+                blocking_evidence: None,
+                attempts_exhausted: None,
+                error_class: None,
+                completion_summary: None,
+                ssot_assessment: None,
+                consecutive_irrecoverable_errors: None,
+                consecutive_validation_failures: None,
+                consecutive_no_progress: None,
+                updated_at: 100,
+                created_at: 100,
+            });
+
+            let mut engine = VirtualRouterEngineCore::new();
+            engine
+                .routing_instruction_state
+                .insert(key.to_string(), cached);
+
+            let loaded = engine.load_routing_state_for_scope(key);
+            let goal = loaded.stopless_goal_state.expect("goal should reload from disk");
+            assert_eq!(goal.updated_at, 200);
+            assert_eq!(goal.consecutive_validation_failures, Some(1));
+        });
+
+        let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
     }
 }

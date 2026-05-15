@@ -229,10 +229,8 @@ export function loadRoutingInstructionStateSync(key: string | undefined): Routin
     if (!loaded) {
       continue;
     }
-
     return loaded;
   }
-
   return null;
 }
 

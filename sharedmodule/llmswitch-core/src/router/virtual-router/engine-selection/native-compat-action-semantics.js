@@ -96,24 +96,6 @@ export function applyFieldMappingsWithNative(payload, mappings) {
 export function sanitizeToolSchemaGlmShellWithNative(payload) {
     return invokeRecordCapability('sanitizeToolSchemaGlmShellJson', [payload]);
 }
-export function fixApplyPatchToolCallsWithNative(payload) {
-    const parsed = invokeRecordCapability('fixApplyPatchToolCallsJson', [
-        {
-            messages: Array.isArray(payload?.messages) ? payload.messages : [],
-            ...(Array.isArray(payload?.input) ? { input: payload.input } : {})
-        },
-    ]);
-    const messages = Array.isArray(parsed.messages)
-        ? parsed.messages.filter((entry) => !!entry && typeof entry === 'object' && !Array.isArray(entry))
-        : [];
-    const input = Array.isArray(parsed.input)
-        ? parsed.input.filter((entry) => !!entry && typeof entry === 'object' && !Array.isArray(entry))
-        : undefined;
-    return {
-        messages,
-        ...(input ? { input } : {})
-    };
-}
 export function applyResponseBlacklistWithNative(payload, config) {
     return invokeRecordCapability('applyResponseBlacklistJson', [
         payload,
@@ -138,13 +120,6 @@ export function applyGeminiWebSearchRequestCompatWithNative(payload, adapterCont
     return invokeRecordCapability('applyGeminiWebSearchRequestCompatJson', [
         payload,
         adapterContext ?? {},
-    ]);
-}
-export function applyIflowToolTextFallbackWithNative(payload, adapterContext, models) {
-    return invokeRecordCapability('applyIflowToolTextFallbackJson', [
-        payload,
-        adapterContext ?? {},
-        Array.isArray(models) ? models : [],
     ]);
 }
 export function applyLmstudioResponsesInputStringifyWithNative(payload, adapterContext) {
@@ -232,4 +207,3 @@ export function runGeminiFromOpenAIChatCodecWithNative(payload, options) {
         options ?? {},
     ]);
 }
-//# sourceMappingURL=native-compat-action-semantics.js.map

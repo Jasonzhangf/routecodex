@@ -173,4 +173,3 @@ export function normalizeOpenaiToolWithNative(tool) {
         return fail(reason);
     }
 }
-//# sourceMappingURL=native-shared-conversion-semantics-openai.js.map

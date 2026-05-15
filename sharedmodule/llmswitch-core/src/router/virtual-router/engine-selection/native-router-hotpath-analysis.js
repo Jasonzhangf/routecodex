@@ -1,17 +1,7 @@
-const NON_BLOCKING_PARSE_LOG_THROTTLE_MS = 60000;
+import { formatUnknownError } from '../../../shared/common-utils.js';
+const NON_BLOCKING_PARSE_LOG_THROTTLE_MS = 60_000;
 const nonBlockingParseLogState = new Map();
 const JSON_PARSE_FAILED = Symbol('native-router-hotpath-analysis.parse-failed');
-function formatUnknownError(error) {
-    if (error instanceof Error) {
-        return error.stack || `${error.name}: ${error.message}`;
-    }
-    try {
-        return JSON.stringify(error);
-    }
-    catch {
-        return String(error ?? 'unknown');
-    }
-}
 function logNativeRouterHotpathAnalysisNonBlocking(stage, error) {
     const now = Date.now();
     const last = nonBlockingParseLogState.get(stage) ?? 0;
@@ -35,11 +25,12 @@ export function parsePendingToolSyncPayload(raw) {
     if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed.ready !== 'boolean') {
         return null;
     }
-    const insertAt = typeof parsed.insertAt === 'number' && Number.isFinite(parsed.insertAt)
-        ? Math.floor(parsed.insertAt)
+    const payload = parsed;
+    const insertAt = typeof payload.insertAt === 'number' && Number.isFinite(payload.insertAt)
+        ? Math.floor(payload.insertAt)
         : -1;
     return {
-        ready: parsed.ready,
+        ready: payload.ready,
         insertAt
     };
 }
@@ -349,4 +340,3 @@ export function parseServertoolFollowupRuntimePlanPayload(raw) {
             : {})
     };
 }
-//# sourceMappingURL=native-router-hotpath-analysis.js.map

@@ -1,11 +1,14 @@
 import type { JsonObject } from '../../../conversion/hub/types/json.js';
+import { isGoalCapableAdapterContext } from '../../../conversion/hub/pipeline/hub-pipeline-goal-tools.js';
 import { stripChatProcessHistoricalImages } from '../../../router/virtual-router/engine-selection/native-router-hotpath.js';
 import { cloneJson } from '../../server-side-tools.js';
 import type { ServerToolFollowupInjectionPlan } from '../../types.js';
+import { hasManagedStoplessGoalState } from '../stopless-goal-state.js';
 import {
   applyFollowupInjectionOps,
   hasReasoningStopTool,
-  shouldIncludeReasoningStopToolFromOps
+  shouldIncludeReasoningStopToolFromOps,
+  stripToolsByCanonicalName
 } from './op-blocks.js';
 import type { CapturedChatSeed } from './seed.js';
 import {
@@ -49,11 +52,17 @@ function materializeFollowupChatPayload(args: {
   let messages: JsonObject[] = Array.isArray(args.seed.messages) ? (cloneJson(args.seed.messages) as JsonObject[]) : [];
   messages = stripChatProcessHistoricalImages(messages, '[Image omitted]').messages as JsonObject[];
   const ops = Array.isArray(args.injection?.ops) ? args.injection.ops : [];
+  const goalManagedContext =
+    isGoalCapableAdapterContext(args.adapterContext as any)
+    || hasManagedStoplessGoalState(args.adapterContext);
   const tools = Array.isArray(args.seed.tools) ? (cloneJson(args.seed.tools) as JsonObject[]) : undefined;
+  const sanitizedTools = goalManagedContext
+    ? stripToolsByCanonicalName(tools, ['reasoning.stop', 'reasoning_stop', 'reasoning-stop'])
+    : tools;
   const result = applyFollowupInjectionOps({
     state: {
       messages,
-      tools,
+      tools: sanitizedTools,
       parameters: sanitizeFollowupParametersForResolvedModel({
         parameters: args.seed.parameters ? (cloneJson(args.seed.parameters) as Record<string, unknown>) : undefined,
         seedModel: args.seed.model,
@@ -63,7 +72,9 @@ function materializeFollowupChatPayload(args: {
     ops,
     context: {
       chatResponse: args.chatResponse,
-      includeReasoningStopTool: shouldIncludeReasoningStopToolFromOps(ops) || hasReasoningStopTool(tools)
+      includeReasoningStopTool:
+        !goalManagedContext
+        && (shouldIncludeReasoningStopToolFromOps(ops) || hasReasoningStopTool(sanitizedTools))
     }
   });
   if (!result) {

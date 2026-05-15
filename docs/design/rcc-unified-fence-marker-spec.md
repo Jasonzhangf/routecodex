@@ -174,6 +174,11 @@ export type RccDirective =
 | `stopless stop` | 可选 | `private-only` | body 作为人工终止原因 |
 | `stopless done` | 建议必填 | `private-only` | body 作为完成证据摘要 |
 
+补充约束：
+
+- RCC fence 只负责写入 goal lifecycle 指令，不得再反向映射回 legacy `reasoning.stop` 注入合同。
+- 是否允许 stop / continue，只能看后续 **校验后的 goal state**，不能看模型口头文本。
+
 ### 2. clock
 
 支持动作：

@@ -1,5 +1,5 @@
 import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-policy.js';
-import { parseArray, parseJson, parseRecord, parseString, parseStringArray, readNativeFunction, safeStringify } from './native-shared-conversion-semantics-core.js';
+import { parseArray, parseJson, parseRecord, parseString, readNativeFunction, safeStringify } from './native-shared-conversion-semantics-core.js';
 export { clampResponsesInputItemIdWithNative, normalizeFunctionCallIdWithNative, normalizeFunctionCallOutputIdWithNative, normalizeResponsesCallIdWithNative } from './native-shared-conversion-semantics-call-id.js';
 export { cloneRuntimeMetadataWithNative, encodeMetadataPassthroughWithNative, ensureProtocolStateWithNative, ensureRuntimeMetadataCarrierWithNative, extractMetadataPassthroughWithNative, getProtocolStateWithNative, readRuntimeMetadataWithNative } from './native-shared-conversion-semantics-metadata.js';
 export { convertResponsesOutputToInputItemsWithNative, enforceChatBudgetWithNative, materializeResponsesContinuationPayloadWithNative, pickResponsesPersistedFieldsWithNative, prepareResponsesConversationEntryWithNative, resolveBudgetForModelWithNative, restoreResponsesContinuationPayloadWithNative, resumeResponsesConversationPayloadWithNative } from './native-shared-conversion-semantics-responses.js';
@@ -235,4 +235,3 @@ export function extractOutputSegmentsWithNative(source, itemsKey = 'output') {
         return fail(reason);
     }
 }
-//# sourceMappingURL=native-shared-conversion-semantics.js.map

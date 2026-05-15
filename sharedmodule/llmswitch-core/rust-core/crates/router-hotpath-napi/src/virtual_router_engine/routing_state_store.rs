@@ -235,7 +235,7 @@ fn resolve_session_filepath(key: &str) -> Option<PathBuf> {
     Some(dir.join(Path::new(&filename)))
 }
 
-fn is_state_empty(state: &RoutingInstructionState) -> bool {
+pub(crate) fn is_state_empty(state: &RoutingInstructionState) -> bool {
     is_stopless_goal_empty(state)
         && state.forced_target.is_none()
         && state.sticky_target.is_none()
@@ -361,6 +361,77 @@ fn serialize_stopless_goal_state(state: &RoutingInstructionState, out: &mut Map<
                 Value::String(value.trim().to_string()),
             );
         }
+    }
+    if let Some(value) = &goal.next_step {
+        if !value.trim().is_empty() {
+            goal_out.insert("nextStep".to_string(), Value::String(value.trim().to_string()));
+        }
+    }
+    if let Some(value) = &goal.user_question {
+        if !value.trim().is_empty() {
+            goal_out.insert(
+                "userQuestion".to_string(),
+                Value::String(value.trim().to_string()),
+            );
+        }
+    }
+    if let Some(value) = &goal.cannot_continue_reason {
+        if !value.trim().is_empty() {
+            goal_out.insert(
+                "cannotContinueReason".to_string(),
+                Value::String(value.trim().to_string()),
+            );
+        }
+    }
+    if let Some(value) = &goal.blocking_evidence {
+        if !value.trim().is_empty() {
+            goal_out.insert(
+                "blockingEvidence".to_string(),
+                Value::String(value.trim().to_string()),
+            );
+        }
+    }
+    if goal.attempts_exhausted == Some(true) {
+        goal_out.insert("attemptsExhausted".to_string(), Value::Bool(true));
+    }
+    if let Some(value) = &goal.error_class {
+        if !value.trim().is_empty() {
+            goal_out.insert("errorClass".to_string(), Value::String(value.trim().to_string()));
+        }
+    }
+    if let Some(value) = &goal.completion_summary {
+        if !value.trim().is_empty() {
+            goal_out.insert(
+                "completionSummary".to_string(),
+                Value::String(value.trim().to_string()),
+            );
+        }
+    }
+    if let Some(value) = &goal.ssot_assessment {
+        if !value.trim().is_empty() {
+            goal_out.insert(
+                "ssotAssessment".to_string(),
+                Value::String(value.trim().to_string()),
+            );
+        }
+    }
+    if let Some(value) = goal.consecutive_irrecoverable_errors {
+        goal_out.insert(
+            "consecutiveIrrecoverableErrors".to_string(),
+            Value::Number(value.max(0).into()),
+        );
+    }
+    if let Some(value) = goal.consecutive_validation_failures {
+        goal_out.insert(
+            "consecutiveValidationFailures".to_string(),
+            Value::Number(value.max(0).into()),
+        );
+    }
+    if let Some(value) = goal.consecutive_no_progress {
+        goal_out.insert(
+            "consecutiveNoProgress".to_string(),
+            Value::Number(value.max(0).into()),
+        );
     }
     goal_out.insert("updatedAt".to_string(), Value::Number(goal.updated_at.into()));
     goal_out.insert("createdAt".to_string(), Value::Number(goal.created_at.into()));
@@ -583,6 +654,54 @@ fn deserialize_stopless_goal_state(obj: &Map<String, Value>, state: &mut Routing
             .and_then(|v| v.as_str())
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty()),
+        next_step: goal
+            .get("nextStep")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        user_question: goal
+            .get("userQuestion")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        cannot_continue_reason: goal
+            .get("cannotContinueReason")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        blocking_evidence: goal
+            .get("blockingEvidence")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        attempts_exhausted: goal.get("attemptsExhausted").and_then(|v| v.as_bool()),
+        error_class: goal
+            .get("errorClass")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        completion_summary: goal
+            .get("completionSummary")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        ssot_assessment: goal
+            .get("ssotAssessment")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        consecutive_irrecoverable_errors: goal
+            .get("consecutiveIrrecoverableErrors")
+            .and_then(|v| v.as_i64())
+            .map(|v| v.max(0)),
+        consecutive_validation_failures: goal
+            .get("consecutiveValidationFailures")
+            .and_then(|v| v.as_i64())
+            .map(|v| v.max(0)),
+        consecutive_no_progress: goal
+            .get("consecutiveNoProgress")
+            .and_then(|v| v.as_i64())
+            .map(|v| v.max(0)),
         updated_at: updated_at.max(0),
         created_at: created_at.max(0),
     });

@@ -33,7 +33,6 @@ mod chat_servertool_orchestration;
 mod chat_tool_normalization;
 mod chat_web_search_tool_schema;
 mod compat_field_mapping;
-mod compat_fix_apply_patch;
 mod compat_harvest_tool_calls_from_text;
 mod compat_tool_schema;
 mod gemini_openai_codec;
@@ -1117,10 +1116,6 @@ pub fn apply_field_mappings_json_bridge(
     compat_field_mapping::apply_field_mappings_json(payload_json, mappings_json)
 }
 
-#[napi(js_name = "fixApplyPatchToolCallsJson")]
-pub fn fix_apply_patch_tool_calls_json_bridge(payload_json: String) -> NapiResult<String> {
-    compat_fix_apply_patch::fix_apply_patch_tool_calls_json(payload_json)
-}
 
 #[napi(js_name = "sanitizeToolSchemaGlmShellJson")]
 pub fn sanitize_tool_schema_glm_shell_json_bridge(payload_json: String) -> NapiResult<String> {

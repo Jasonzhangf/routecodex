@@ -83,4 +83,3 @@ export function getNativeRouterHotpathSource() {
 export function resolveNativeModuleUrlFromEnv() {
     return resolveNativeModuleUrlFromEnvInLoader();
 }
-//# sourceMappingURL=native-router-hotpath-quota-buckets.js.map

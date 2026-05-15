@@ -1,4 +1,4 @@
-use crate::compat_fix_apply_patch::fix_apply_patch_tool_calls_json;
+
 use crate::hub_req_inbound_tool_call_normalization::normalize_shell_like_tool_calls_before_governance;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
@@ -428,13 +428,7 @@ fn hub_state_context_populated(state: &Map<String, Value>) -> bool {
 pub(crate) fn normalize_chat_envelope_tool_calls(chat: &Value) -> Value {
     let mut chat_normalized = chat.clone();
     normalize_shell_like_tool_calls_before_governance(&mut chat_normalized);
-    let Ok(raw_json) = serde_json::to_string(&chat_normalized) else {
-        return chat_normalized;
-    };
-    let Ok(fixed_json) = fix_apply_patch_tool_calls_json(raw_json) else {
-        return chat_normalized;
-    };
-    serde_json::from_str::<Value>(&fixed_json).unwrap_or(chat_normalized)
+    chat_normalized
 }
 
 fn chat_envelope_to_standardized_impl(
@@ -1027,7 +1021,12 @@ mod tests {
                             "type": "function",
                             "function": {
                                 "name": "apply_patch",
-                                "arguments": "apply_patch *** Begin Patch\n*** Add File: src/demo.ts\n+console.log('ok');\n*** End Patch"
+                                "arguments": serde_json::json!({
+                                    "patch": "*** Begin Patch
+*** Add File: src/demo.ts
++console.log('ok');
+*** End Patch"
+                                }).to_string()
                             }
                         }
                     ]
@@ -1050,10 +1049,10 @@ mod tests {
             .as_str()
             .expect("arguments text");
         let args: Value = serde_json::from_str(args_text).expect("arguments json");
-        let patch = args["input"].as_str().expect("normalized patch input");
+        let patch = args["patch"].as_str().expect("normalized patch");
         assert!(patch.starts_with("*** Begin Patch"));
         assert!(patch.contains("*** Add File: src/demo.ts"));
-        assert!(!patch.starts_with("apply_patch "));
+        assert!(args.get("input").is_none());
     }
 
     #[test]

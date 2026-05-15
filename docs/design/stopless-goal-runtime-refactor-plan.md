@@ -253,13 +253,15 @@ TS 只允许做薄壳：
 
 - goal runtime ledger
 - irrecoverable / validation / no-progress 收敛阈值
-- 当前落点：`src/server/runtime/http-server/executor/provider-response-converter.ts`
+- 当前落点：
+  - `src/server/runtime/http-server/executor/provider-response-converter.ts`：validated transition / validation ledger / followup irrecoverable ledger
+  - `sharedmodule/llmswitch-core/src/servertool/handlers/stopless-goal-guard.ts`：plain-stop 缺 goal control block 的错误引导与 3 次收敛停机
 
 完成标准：
 
 - 连续不可逆错误 >= 2 时强制 `stopped`
 - 连续校验失败 >= 2 时强制 `stopped`
-- 连续无进展 >= 3 时强制 `stopped` 或 `paused`（默认 `stopped`）
+- 连续无进展 >= 3 时强制 `stopped`（仅限 plain-stop 且连续缺 goal control block 的停止 claim 路径）
 
 ### Slice 7：文档与指令面收敛
 
@@ -342,6 +344,8 @@ TS 只允许做薄壳：
 3. `stopless resume` 后恢复推进
 4. `stopless stop` 后永久停止
 5. `stopless done` 后完成收口
+
+当前状态：代码/单测/构建已经覆盖 host ledger 与 goal-mode followup 收口；**本轮仍未完成 live 验证**。
 
 未做 live，不得宣称 stopless 改造完成。
 

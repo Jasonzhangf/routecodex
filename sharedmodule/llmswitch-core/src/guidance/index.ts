@@ -37,77 +37,47 @@ function buildApplyPatchGuidanceText(): { marker: string; text: string } {
   const marker = '[Codex ApplyPatch Guidance]';
   const text = [
     marker,
-    'Send ONLY patch text (do not describe tools in prose).',
     '',
-    '✅ Supported patch text formats:',
-    '  A) Internal patch format: "*** Begin Patch" / "*** End Patch" + "*** Update/Add/Delete File"',
-    '  B) GNU unified diff: "diff --git", "---/+++", "@@" hunks, /dev/null for new files',
-    '  - Choose ONE format per patch. Do NOT mix "*** Begin Patch" blocks with "diff --git" / "---/+++" headers in the same payload.',
-    '  - If you use internal patch format, the FIRST line must literally be "*** Begin Patch" (no prose, no code fence, no leading blank line).',
-    '  - If you use GNU unified diff, send raw diff text directly; do NOT wrap it inside "*** Begin Patch".',
+    'Canonical templates (copy exactly):',
     '',
-    '✅ Create vs update:',
-    '  - "*** Update File" MUST target an existing file (no implicit create).',
-    '  - To create a file, use "*** Add File:" (or GNU diff with --- /dev/null).',
+    '  *** Begin Patch',
+    '  *** Add File: path/to/new.txt',
+    '  +line one',
+    '  +line two',
+    '  *** End Patch',
     '',
-    '✅ Common pitfalls:',
-    '  - In "*** Add File", EVERY content line must start with "+".',
-    '  - In "*** Update File" hunks, EVERY line must start with one of: " " (context), "-" (remove), "+" (add), or "@@" (hunk header).',
-    '  - NEVER guess file names/paths. Use the exact path from latest file read/list result.',
-    '  - NEVER send empty "*** Add File" blocks. Empty file creation is forbidden unless explicitly requested.',
-    '  - "*** Update File" MUST include at least one "@@" hunk. Without hunk headers, the patch will be rejected.',
-    '  - Raw markdown/frontmatter lines (e.g. "---", "title: ...") cannot appear directly after "*** Update File:"; wrap them in @@ hunks with proper prefixes.',
-    '  - Keep real newlines/tabs; CRLF/LF and "\\t" separators are accepted, but do not collapse lines into one line.',
+    '  *** Begin Patch',
+    '  *** Update File: path/to/file.ts',
+    '  @@',
+    '   line before',
+    '  -old line',
+    '  +new line',
+    '   line after',
+    '  *** End Patch',
     '',
-    '✅ High-success preflight for "*** Update File":',
-    '  - First inspect current file lines (including blank lines) with: `nl -ba <file>` (or `sed -n`).',
-    '  - Build hunks from the LATEST file content you just read (do not rely on stale line numbers).',
-    '  - If you see "Failed to find expected lines", re-read file and retry with smaller/unique context.',
-    '  - If you see context-mismatch errors, do NOT keep guessing `@@` syntax or GNU line-number ranges; re-read the file first, then regenerate the patch from real current content.',
-    '  - If multiple edits are far apart, split them into multiple smaller apply_patch calls only AFTER re-reading the latest file content.',
+    '  *** Begin Patch',
+    '  *** Delete File: path/to/obsolete.txt',
+    '  *** End Patch',
     '',
-    '✅ High-success templates (patch text):',
+    'Rules:',
+    '  - First line MUST be "*** Begin Patch". Last line MUST be "*** End Patch".',
+    '  - Use "*** Add File:" / "*** Update File:" / "*** Delete File:" for each operation.',
+    '  - For Update File, "@@" must appear before the +/- lines.',
+    '  - Paths must be workspace-relative ONLY (no leading "/" or drive letters).',
     '',
-    '1) Create a new file',
-    '```patch',
-    '*** Begin Patch',
-    '*** Add File: path/to/new.txt',
-    '+Line 1',
-    '+Line 2',
-    '*** End Patch',
-    '```',
+    'REJECTED formats (will fail immediately):',
+    '  - Merge conflict markers (======= / >>>>>>> / <<<<<<<) inside Update File block',
+    '  - GNU/git unified diff headers ("--- a/", "+++ b/") inside *** Begin Patch envelope',
+    '  - Markdown code fences (```) around the patch',
+    '  - Shell heredoc wrapping ("cat > file <<EOF" or "apply_patch <<PATCH")',
+    '  - Plain text or code without *** Begin/End Patch markers',
+    '  - Natural-language instructions ("replace line X with Y")',
     '',
-    '2) Replace one line in an existing file (keep surrounding context)',
-    '```patch',
-    '*** Begin Patch',
-    '*** Update File: path/to/existing.txt',
-    '@@',
-    ' Line 1',
-    '-Line 2',
-    '+Modified Line 2',
-    ' Line 3',
-    '*** End Patch',
-    '```',
-    '',
-    '2b) Append lines below an anchor line (copy anchor from `nl -ba` output)',
-    '```patch',
-    '*** Begin Patch',
-    '*** Update File: path/to/existing.txt',
-    '@@',
-    ' Anchor line from current file',
-    '+New line 1',
-    '+New line 2',
-    '*** End Patch',
-    '```',
-    '',
-    '3) Delete a file',
-    '```patch',
-    '*** Begin Patch',
-    '*** Delete File: path/to/obsolete.txt',
-    '*** End Patch',
-    '```',
-    '',
-    'Paths must be workspace-relative ONLY (no leading "/" or drive letters). Absolute paths will be rejected by the sandbox.'
+    'Troubleshooting:',
+    '  - Before Update File, run `nl -ba <file>` to see numbered lines.',
+    '  - If "Failed to find expected lines": re-read the file and regenerate with smaller unique context.',
+    '  - Do NOT guess GNU line numbers. Use @@ + unique context lines instead.',
+    '  - Do NOT mix GNU diff headers inside *** Begin/End Patch. Pick one format.',
   ].join('\n');
   return { marker, text };
 }
@@ -173,11 +143,11 @@ function augmentApplyPatch(fn: Unknown): void {
   (props as any).patch = {
     type: 'string',
     description:
-      'Patch text. Supports "*** Begin Patch" format or GNU unified diff. Paths must be workspace-relative (absolute paths are rejected).'
+      'Raw patch text only. Must use the special "*** Begin Patch ... *** End Patch" grammar. Do not use JSON, prose, Markdown fences, or git/unified diff syntax. Paths must be workspace-relative.'
   } as Unknown;
   (props as any).input = {
     type: 'string',
-    description: 'Alias of patch (patch text). Prefer using patch.'
+    description: 'Alias of patch. Same patch text grammar as patch; prefer using patch.'
   } as Unknown;
   (params as any).required = Array.isArray((params as any).required) ? (params as any).required : [];
   if (!(params as any).required.includes('patch')) {
@@ -242,8 +212,6 @@ export function augmentOpenAITools(tools: unknown[]): unknown[] {
         if (n === 'shell') augmentShell(fn);
         else if (n === 'exec_command') augmentExecCommand(fn);
         else if (n === 'apply_patch') {
-          const { marker, text } = buildApplyPatchGuidanceText();
-          (fn as any).description = appendOnce(((fn as any).description as string | undefined), text, marker);
           augmentApplyPatch(fn);
         }
         else if (n === 'update_plan') augmentUpdatePlan(fn);
@@ -277,11 +245,11 @@ export function augmentAnthropicTools(tools: unknown[]): unknown[] {
         if (n === 'apply_patch') {
           ((schema as any).properties as any).patch = {
             type: 'string',
-            description: 'Patch text (*** Begin Patch / *** End Patch or GNU unified diff).'
+            description: 'Raw patch text only. Must use the special "*** Begin Patch ... *** End Patch" grammar. Do not use JSON, prose, Markdown fences, or git/unified diff syntax. Paths must be workspace-relative.'
           } as Unknown;
           ((schema as any).properties as any).input = {
             type: 'string',
-            description: 'Alias of patch (patch text). Prefer patch.'
+            description: 'Alias of patch. Same patch text grammar as patch; prefer patch.'
           } as Unknown;
           if (!Array.isArray((schema as any).required)) (schema as any).required = [];
           if (!((schema as any).required as string[]).includes('patch')) ((schema as any).required as string[]).push('patch');
@@ -322,13 +290,12 @@ export function buildSystemToolGuidance(): string {
   lines.push('Tool usage guidance (OpenAI tool_calls) / 工具使用指引（OpenAI 标准）');
   lines.push(bullet('Always use assistant.tool_calls[].function.{name,arguments}; never embed tool calls in plain text. / 一律通过 tool_calls 调用工具，不要把工具调用写进普通文本。'));
   lines.push(bullet('function.arguments must be a single JSON string. / arguments 必须是单个 JSON 字符串。'));
-  lines.push(bullet('shell: Place ALL intent into the command argv array only; do not invent extra keys. / shell 所有意图写入 command 数组，不要添加额外键名。'));
   lines.push(bullet('File writes are FORBIDDEN via shell (no redirection, no here-doc, no sed -i, no ed -s, no tee). Use apply_patch ONLY. / 通过 shell 写文件一律禁止（不得使用重定向、heredoc、sed -i、ed -s、tee）；必须使用 apply_patch。'));
   lines.push(bullet('NEVER wrap apply_patch inside exec_command/shell. Direct apply_patch tool call only. / 严禁在 exec_command/shell 中嵌套 apply_patch，必须直接调用 apply_patch。'));
   lines.push(bullet('apply_patch: Before writing, always read the target file first and compute changes against the latest content using appropriate tools. / apply_patch 在写入前必须先通过合适的工具读取目标文件最新内容，并基于该内容生成变更。'));
   lines.push(bullet('apply_patch: For "*** Update File", run `nl -ba <file>` first (keeps blank lines numbered), then build hunks from the latest content; if "Failed to find expected lines" occurs, re-read and retry with smaller unique context. / apply_patch 在 "*** Update File" 前先 `nl -ba <file>`（空行也编号），按最新内容生成 hunk；若出现 "Failed to find expected lines"，先重读文件再用更小且唯一的上下文重试。'));
   lines.push(bullet('apply_patch: If you see "Failed to find expected lines" or "Failed to find context", do NOT keep guessing `@@` hunk syntax or GNU line-number ranges. Re-read the target file first, then rebuild the patch from the latest real content. / apply_patch：如果出现 "Failed to find expected lines" 或 "Failed to find context"，不要继续猜 `@@` hunk 语法或 GNU 行号范围；第一步必须先重读目标文件，再基于最新真实内容重建补丁。'));
-  lines.push(bullet('apply_patch: Send patch text only. Supported formats: (A) internal "*** Begin Patch" grammar OR (B) raw GNU unified diff. NEVER mix them in one payload; if you start with "*** Begin Patch", do not include "--- a/..." or "+++ b/..." inside that block. / apply_patch：仅发送补丁文本，只能二选一：A. internal "*** Begin Patch" 语法；B. 原始 GNU unified diff；严禁混用。若已使用 "*** Begin Patch"，块内不要再写 "--- a/..." 或 "+++ b/...".'));
+  lines.push(bullet('apply_patch: Call with schema arguments {"patch": "*** Begin Patch\n...\n*** End Patch"}. The patch string must use *** Add/Update/Delete File markers. Do NOT use raw tool input, GNU/git diff headers (--- a/, +++ b/), shell heredoc, Markdown fences, or prose. / apply_patch：必须用 schema 参数 {"patch": "*** Begin Patch\n...\n*** End Patch"}；patch 字符串使用 *** Add/Update/Delete File 标记。禁止 raw tool input、GNU/git diff 头、shell heredoc、Markdown fences 或正文解释。'));
   lines.push(bullet('apply_patch: Never guess file names/paths; use exact file paths from latest reads. Empty Add File blocks are forbidden; Update File without "@@" hunk is rejected. / apply_patch：禁止猜测文件名/路径；必须使用最新读取到的精确路径。禁止空 Add File；没有 "@@" hunk 的 Update File 会被拒绝。'));
   lines.push(bullet('apply_patch: Minimal valid internal templates: Add File = "*** Begin Patch\\n*** Add File: path\\n+line\\n*** End Patch"; Update File = "*** Begin Patch\\n*** Update File: path\\n@@\\n-old\\n+new\\n*** End Patch". / apply_patch 最小合法模板：Add File 与 Update File 必须按上述模板发送。'));
   lines.push(bullet('apply_patch: Do not emit conflict markers (`=======`, `>>>>>>>`, `<<<<<<<`) or raw markdown/frontmatter as an Update File body. Update File requires at least one "@@" hunk with context or +/- lines. / apply_patch：禁止输出冲突标记或把原始 markdown/frontmatter 直接塞进 Update File；Update File 至少要有一个 "@@" hunk。'));

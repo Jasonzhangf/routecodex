@@ -176,4 +176,3 @@ export function collectToolCallsFromResponsesWithNative(response) {
         return fail(reason);
     }
 }
-//# sourceMappingURL=native-shared-conversion-semantics-tool-definitions.js.map

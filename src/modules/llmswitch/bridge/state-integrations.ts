@@ -143,6 +143,24 @@ export function persistStoplessGoalStateSnapshot(adapterContext: unknown, state:
   }
 }
 
+export function readStoplessGoalState(adapterContext: unknown): unknown {
+  const stoplessGoalStateModule = requireCoreDist<{
+    readStoplessGoalState?: (adapterContext: unknown) => unknown;
+  }>('servertool/handlers/stopless-goal-state');
+  const fn = stoplessGoalStateModule.readStoplessGoalState;
+  if (typeof fn !== 'function') {
+    throw buildStateIntegrationFailure(
+      'stopless_goal_state.read.api_unavailable',
+      'readStoplessGoalState not available'
+    );
+  }
+  try {
+    return fn(adapterContext);
+  } catch (error) {
+    throw buildStateIntegrationFailure('stopless_goal_state.read.invoke', error);
+  }
+}
+
 type SessionIdentifiers = { sessionId?: string; conversationId?: string };
 
 export function extractSessionIdentifiersFromMetadata(meta: Record<string, unknown> | undefined): SessionIdentifiers {

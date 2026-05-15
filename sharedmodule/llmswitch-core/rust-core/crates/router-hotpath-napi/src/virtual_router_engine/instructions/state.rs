@@ -274,14 +274,14 @@ fn apply_stop_message_instruction_to_state(
         .map_err(|e| format!("stopMessage instruction serialize failed: {}", e))?;
     let state_json = serde_json::to_string(&Value::Object(stop_message_state_to_map(state)))
         .map_err(|e| format!("stopMessage state serialize failed: {}", e))?;
-    let raw_patch =
+    let patch_json =
         crate::virtual_router_stop_message_actions::apply_stop_message_instruction_json(
             instruction_json,
             state_json,
             now_ms,
         )
         .map_err(|e| e.to_string())?;
-    let patch: StopMessagePatchOutput = serde_json::from_str(&raw_patch)
+    let patch: StopMessagePatchOutput = serde_json::from_str(&patch_json)
         .map_err(|e| format!("stopMessage patch parse failed: {}", e))?;
     if patch.applied {
         apply_stop_message_patch(state, patch);

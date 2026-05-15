@@ -43,3 +43,22 @@ export {
   isUsageLoggingEnabled,
   isVerboseErrorLoggingEnabled
 } from './env-config.js';
+
+// Failure state
+export {
+  type RequestExecutorFailureState,
+  applyResolveFailureState,
+  applySendFailureState
+} from './request-executor-failure-state.js';
+
+// Traffic soft-wait
+export {
+  isWebLikeRuntimeForTraffic,
+  resolveProviderTrafficSoftWaitTimeoutMs
+} from './request-executor-traffic-soft-wait.js';
+
+// Goal state persistence
+export {
+  asFlatRecord,
+  persistGoalStateFromMergedMetadata
+} from './goal-state-persistence.js';

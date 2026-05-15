@@ -45,6 +45,7 @@ import {
 } from './stop-message-auto/runtime-utils.js';
 import { loadRoutingInstructionStateSync } from '../../router/virtual-router/sticky-session-store.js';
 import {
+  applyStopMessageSnapshotToState,
   clearStopMessageState,
   createStopMessageState,
   resolveStopMessageSnapshot
@@ -367,11 +368,11 @@ const handler: ServerToolHandler = async (
       }
       snapshot = fallback;
       if (stickyKey) {
-        stickyState = createStopMessageState(snapshot);
+        stickyState = applyStopMessageSnapshotToState(stickyState, snapshot);
         persistStopMessageState(stickyKey, stickyState);
       }
     } else if (!stickyState && stickyKey && snapshot) {
-      stickyState = createStopMessageState(snapshot);
+      stickyState = applyStopMessageSnapshotToState(stickyState, snapshot);
       persistStopMessageState(stickyKey, stickyState);
     }
 

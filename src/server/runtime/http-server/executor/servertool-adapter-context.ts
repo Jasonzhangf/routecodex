@@ -213,9 +213,7 @@ export function buildServerToolAdapterContext(args: {
   } else {
     preferOriginalRequestForStoplessGoalSync(baseContext, args.originalRequest);
   }
-  if (!goalCapable) {
-    syncStoplessGoalStateFromCapturedRequest(baseContext, args.onReasoningStopSeedError);
-  }
+  syncStoplessGoalStateFromCapturedRequest(baseContext, args.onReasoningStopSeedError);
   const managedStoplessGoal = !goalCapable && hasManagedStoplessGoalInContext(baseContext);
   backfillCapturedChatRequestToolsFromRequestSemantics(
     baseContext,

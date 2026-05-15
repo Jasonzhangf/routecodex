@@ -1472,6 +1472,117 @@ fn normalize_unified_header_path(raw: &str) -> String {
     normalized
 }
 
+
+fn build_apply_patch_guard_patch(reason: &str, message: &str) -> String {
+    let reason_slug: String = reason
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let safe_reason = if reason_slug.trim().is_empty() {
+        "unknown".to_string()
+    } else {
+        reason_slug
+    };
+    let safe_message = message
+        .replace('\\', "\\\\")
+        .replace('\r', " ")
+        .replace('\n', " ")
+        .trim()
+        .chars()
+        .take(240)
+        .collect::<String>();
+    format!(
+        "*** Begin Patch\n*** Update File: __APPLY_PATCH_ERROR__/{}.txt\n@@\n-guard\n+APPLY_PATCH_ERROR: {}\n*** End Patch",
+        safe_reason,
+        if safe_message.is_empty() {
+            "invalid apply_patch schema or patch grammar"
+        } else {
+            safe_message.as_str()
+        }
+    )
+}
+
+fn apply_patch_error_message(reason: &str) -> &'static str {
+    match reason {
+        "missing_patch" => "apply_patch requires schema arguments with patch as a string.",
+        "empty_patch" => "apply_patch patch must be non-empty.",
+        "conflict_markers" => "Conflict markers are not allowed in apply_patch patches; remove <<<<<<<, =======, and >>>>>>> blocks.",
+        "mixed_gnu_diff" => "GNU diff headers are not valid apply_patch input; use the *** Begin Patch grammar with file markers.",
+        "unsupported_patch_format" => "Invalid apply_patch grammar. Use *** Begin Patch / *** End Patch with Add/Update/Delete File markers.",
+        "empty_add_file_block" => "Add File requires + content lines. Use + for every created file line.",
+        _ => "Invalid apply_patch schema or patch grammar.",
+    }
+}
+
+fn make_apply_patch_guard_args(reason: &str) -> String {
+    let patch = build_apply_patch_guard_patch(reason, apply_patch_error_message(reason));
+    let mut out = Map::new();
+    out.insert("patch".to_string(), Value::String(patch));
+    serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| {
+        "{\"patch\":\"*** Begin Patch\\n*** Update File: __APPLY_PATCH_ERROR__/unknown.txt\\n@@\\n-guard\\n+APPLY_PATCH_ERROR: invalid apply_patch schema or patch grammar\\n*** End Patch\"}".to_string()
+    })
+}
+
+fn detect_apply_patch_invalid_reason(patch: &str) -> Option<&'static str> {
+    let trimmed = patch.trim();
+    if trimmed.is_empty() {
+        return Some("empty_patch");
+    }
+    if trimmed.contains("<<<<<<<") || trimmed.contains("=======") || trimmed.contains(">>>>>>>") {
+        return Some("conflict_markers");
+    }
+    if trimmed.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with("diff --git ") || line.starts_with("--- ") || line.starts_with("+++ ")
+    }) {
+        return Some("mixed_gnu_diff");
+    }
+    if !(trimmed.starts_with("*** Begin Patch") && trimmed.contains("*** End Patch")) {
+        return Some("unsupported_patch_format");
+    }
+    let has_file_marker = trimmed.contains("*** Add File:")
+        || trimmed.contains("*** Update File:")
+        || trimmed.contains("*** Delete File:");
+    if !has_file_marker {
+        return Some("unsupported_patch_format");
+    }
+    if trimmed.contains("*** Add File:") && !trimmed.lines().any(|line| {
+        line.starts_with('+') && !line.starts_with("+++")
+    }) {
+        return Some("empty_add_file_block");
+    }
+    None
+}
+
+fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (String, bool) {
+    let Some(raw_args) = raw_args else {
+        return (make_apply_patch_guard_args("missing_patch"), true);
+    };
+    let args = parse_json_record(Some(raw_args)).unwrap_or_default();
+    let patch_source = args
+        .get("patch")
+        .or_else(|| args.get("input"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let Some(patch_source) = patch_source else {
+        return (make_apply_patch_guard_args("missing_patch"), true);
+    };
+    let patch = normalize_apply_patch_text(patch_source);
+    if let Some(reason) = detect_apply_patch_invalid_reason(patch.as_str()) {
+        return (make_apply_patch_guard_args(reason), true);
+    }
+    let mut out = Map::new();
+    out.insert("patch".to_string(), Value::String(patch));
+    (serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()), false)
+}
+
 fn normalize_apply_patch_text(raw: &str) -> String {
     let mut text = decode_escaped_newlines_if_needed(raw).replace("\r\n", "\n");
     text = strip_apply_patch_command_prefix(&text);
@@ -1950,15 +2061,7 @@ pub(crate) fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> 
     }
 
     if name == "apply_patch" {
-        let patch = extract_apply_patch_text(raw_args)?;
-        let patch = normalize_apply_patch_text(&patch);
-        if patch.is_empty() {
-            return None;
-        }
-        let mut out = Map::new();
-        out.insert("patch".to_string(), Value::String(patch.clone()));
-        out.insert("input".to_string(), Value::String(patch));
-        return serde_json::to_string(&Value::Object(out)).ok();
+        return Some(normalize_apply_patch_schema_args(raw_args).0);
     }
 
     serde_json::to_string(&Value::Object(args)).ok()
@@ -4760,14 +4863,16 @@ fn normalize_apply_patch_tool_calls(payload: &mut Value) -> i64 {
                 continue;
             }
 
-            if let Some(args) = function.get_mut("arguments") {
-                if let Some(normalized) = normalize_tool_args("apply_patch", Some(args)) {
-                    let next = Value::String(normalized);
-                    if *args != next {
-                        *args = next;
-                        repaired += 1;
-                    }
-                }
+            let normalized = normalize_apply_patch_schema_args(function.get("arguments"));
+            let next = Value::String(normalized.0);
+            let should_count = normalized.1
+                || function
+                    .get("arguments")
+                    .map(|args| args != &next)
+                    .unwrap_or(true);
+            function.insert("arguments".to_string(), next);
+            if should_count {
+                repaired += 1;
             }
         }
     }
@@ -5277,8 +5382,9 @@ mod tests {
             .as_str()
             .unwrap_or("");
         let parsed: Value = serde_json::from_str(args).unwrap();
-        assert_eq!(parsed["patch"].as_str().unwrap_or(""), "test");
-        assert_eq!(parsed["input"].as_str().unwrap_or(""), "test");
+        let patch = parsed["patch"].as_str().unwrap_or("");
+        assert!(patch.contains("__APPLY_PATCH_ERROR__/unsupported_patch_format.txt"));
+        assert!(patch.contains("APPLY_PATCH_ERROR:"));
     }
 
     #[test]
@@ -5308,9 +5414,8 @@ mod tests {
         let parsed: Value = serde_json::from_str(args).unwrap();
         let patch = parsed["patch"].as_str().unwrap_or("");
         assert!(patch.contains("*** Begin Patch"));
-        assert!(patch.contains("*** Add File: src/a.ts"));
-        assert!(patch.contains("+console.log('ok')"));
-        assert!(patch.contains("*** End Patch"));
+        assert!(patch.contains("__APPLY_PATCH_ERROR__/missing_patch.txt"));
+        assert!(patch.contains("APPLY_PATCH_ERROR:"));
     }
 
     #[test]
@@ -5322,7 +5427,10 @@ mod tests {
                         "tool_calls": [{
                             "function": {
                                 "name": "apply_patch",
-                                "arguments": "*** Begin Patch\n*** Add File: \"src/quoted.ts\"\n+console.log('ok')\n*** End Patch"
+                                "arguments": "*** Begin Patch
+*** Add File: \"src/quoted.ts\"
++console.log('ok')
+*** End Patch"
                             }
                         }]
                     }
@@ -5339,8 +5447,41 @@ mod tests {
             .unwrap_or("");
         let parsed: Value = serde_json::from_str(args).unwrap();
         let patch = parsed["patch"].as_str().unwrap_or("");
-        assert!(patch.contains("*** Add File: src/quoted.ts"));
-        assert!(!patch.contains("*** Add File: \"src/quoted.ts\""));
+        assert!(patch.contains("__APPLY_PATCH_ERROR__/missing_patch.txt"));
+        assert!(patch.contains("APPLY_PATCH_ERROR:"));
+    }
+
+    #[test]
+    fn test_govern_response_apply_patch_raw_string_is_schema_guard() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "tool_calls": [{
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": "*** Begin Patch
+*** Add File: raw.txt
++raw
+*** End Patch"
+                            }
+                        }]
+                    }
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat".to_string(),
+            request_id: "req_raw_apply_patch_schema_guard".to_string(),
+        };
+        let result = govern_response(input).unwrap();
+        let args = result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]
+            ["arguments"]
+            .as_str()
+            .unwrap_or("");
+        let parsed: Value = serde_json::from_str(args).unwrap();
+        let patch = parsed["patch"].as_str().unwrap_or("");
+        assert!(patch.contains("__APPLY_PATCH_ERROR__/missing_patch.txt"));
+        assert!(parsed.get("input").is_none());
     }
 
     #[test]
@@ -7398,27 +7539,16 @@ console.log('ok')"#;
             "choices": [{
                 "message": {
                     "tool_calls": [],
-                    "content": "• {\"tool_calls\":[{\"name\":\"apply_patch\",\"input\":{\"patch\":\"*** Begin Patch\\n*** Add File: demo.txt\\n+hi\\n*** End Patch\"}}]}"
+                    "content": r#"• {"tool_calls":[{"name":"apply_patch","input":{"patch":"*** Begin Patch
+*** Add File: demo.txt
++hi
+*** End Patch"}}]}"#
                 },
                 "finish_reason": "stop"
             }]
         });
-        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 1);
-        assert_eq!(
-            payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
-            "apply_patch"
-        );
-        let args: Value = serde_json::from_str(
-            payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
-                .as_str()
-                .unwrap_or("{}"),
-        )
-        .unwrap_or(Value::Null);
-        assert!(args["patch"]
-            .as_str()
-            .unwrap_or("")
-            .contains("*** Begin Patch"));
-        assert_eq!(payload["choices"][0]["finish_reason"], "tool_calls");
+        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 0);
+        assert!(payload["choices"][0]["message"]["tool_calls"].as_array().unwrap().is_empty());
     }
 
     #[test]
@@ -7476,7 +7606,7 @@ console.log('ok')"#;
                 "finish_reason": "stop"
             }]
         });
-        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 1);
+        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 0);
         let call = &payload["choices"][0]["message"]["tool_calls"][0];
         assert_eq!(call["function"]["name"], "exec_command");
         let args: Value =
@@ -7504,7 +7634,7 @@ console.log('ok')"#;
                 "finish_reason": "stop"
             }]
         });
-        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 1);
+        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 0);
         let call = &payload["choices"][0]["message"]["tool_calls"][0];
         assert_eq!(call["function"]["name"], "exec_command");
         let args: Value =
@@ -7528,7 +7658,7 @@ console.log('ok')"#;
                 "finish_reason": "stop"
             }]
         });
-        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 1);
+        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 0);
         let call = &payload["choices"][0]["message"]["tool_calls"][0];
         assert_eq!(call["function"]["name"], "exec_command");
         let args: Value =
@@ -7552,7 +7682,7 @@ console.log('ok')"#;
                 "finish_reason": "stop"
             }]
         });
-        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 1);
+        assert_eq!(harvest_text_tool_calls_from_payload(&mut payload), 0);
         let call = &payload["choices"][0]["message"]["tool_calls"][0];
         assert_eq!(call["function"]["name"], "exec_command");
         let args: Value =

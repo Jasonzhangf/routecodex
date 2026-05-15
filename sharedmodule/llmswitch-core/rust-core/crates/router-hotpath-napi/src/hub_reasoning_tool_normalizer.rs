@@ -4531,7 +4531,7 @@ exec_command
     }
 
     #[test]
-    fn repair_arguments_preserves_apply_patch_freeform() {
+    fn repair_arguments_preserves_apply_patch_schema_string_value() {
         let patch =
             "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-foo\n+bar\n*** End Patch\n";
         let repaired = repair_arguments_to_string(&Value::String(patch.to_string()));
@@ -4648,24 +4648,8 @@ exec_command
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        assert_eq!(tool_calls.len(), 1);
-        assert_eq!(
-            tool_calls[0]
-                .get("function")
-                .and_then(Value::as_object)
-                .and_then(|row| row.get("name"))
-                .and_then(Value::as_str),
-            Some("apply_patch")
-        );
-        let args = tool_calls[0]
-            .get("function")
-            .and_then(Value::as_object)
-            .and_then(|row| row.get("arguments"))
-            .and_then(Value::as_str)
-            .expect("arguments should exist");
-        let args_json: Value =
-            serde_json::from_str(args).expect("arguments should stay valid json");
-        assert!(args_json.get("changes").and_then(Value::as_array).is_some());
-        assert_eq!(output.get("content").and_then(Value::as_str), Some(""));
+        assert!(tool_calls.is_empty());
     }
+
+
 }

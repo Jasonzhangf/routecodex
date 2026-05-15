@@ -1,4 +1,7 @@
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
+use crate::shared_tool_mapping::{
+    enforce_builtin_tool_schema, rewrite_builtin_tool_description,
+};
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
@@ -131,11 +134,8 @@ fn read_bool(value: Option<&Value>) -> Option<bool> {
     }
 }
 
-fn normalize_tool_parameters(value: Option<&Value>) -> Option<Value> {
-    match value {
-        Some(Value::Object(v)) => Some(Value::Object(v.clone())),
-        _ => None,
-    }
+fn normalize_tool_parameters(name: &str, value: Option<&Value>) -> Option<Value> {
+    enforce_builtin_tool_schema(name, value)
 }
 
 fn responses_input_contains_tool_history(items: &[Value]) -> bool {
@@ -379,8 +379,12 @@ pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
                             let mut child_out = Map::new();
                             child_out
                                 .insert("type".to_string(), Value::String("function".to_string()));
-                            child_out.insert("name".to_string(), Value::String(child_name));
-                            if let Some(description) = read_trimmed_string(
+                            child_out.insert(
+                                "name".to_string(),
+                                Value::String(child_name.clone()),
+                            );
+                            if let Some(description) = rewrite_builtin_tool_description(
+                                child_name.as_str(),
                                 child_function
                                     .and_then(|v| v.get("description"))
                                     .or_else(|| child_row.get("description")),
@@ -389,6 +393,7 @@ pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
                                     .insert("description".to_string(), Value::String(description));
                             }
                             if let Some(parameters) = normalize_tool_parameters(
+                                child_name.as_str(),
                                 child_function
                                     .and_then(|v| v.get("parameters"))
                                     .or_else(|| child_row.get("parameters")),
@@ -452,8 +457,9 @@ pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
         };
 
         let mut function_out = Map::new();
-        function_out.insert("name".to_string(), Value::String(name_value));
-        if let Some(description) = read_trimmed_string(
+        function_out.insert("name".to_string(), Value::String(name_value.clone()));
+        if let Some(description) = rewrite_builtin_tool_description(
+            name_value.as_str(),
             function_row
                 .and_then(|v| v.get("description"))
                 .or_else(|| tool_row.get("description")),
@@ -461,6 +467,7 @@ pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
             function_out.insert("description".to_string(), Value::String(description));
         }
         if let Some(parameters) = normalize_tool_parameters(
+            name_value.as_str(),
             function_row
                 .and_then(|v| v.get("parameters"))
                 .or_else(|| tool_row.get("parameters")),
@@ -1331,5 +1338,29 @@ mod tests {
         assert_eq!(mapped[0]["name"], "mcp__computer_use");
         assert_eq!(mapped[0]["tools"][0]["name"], "get_app_state");
         assert_eq!(mapped[0]["tools"][0]["defer_loading"], Value::Bool(true));
+    }
+
+    #[test]
+    fn map_bridge_tools_to_chat_enforces_apply_patch_schema_contract() {
+        let raw_tools = vec![json!({
+          "description": "Use the `apply_patch` tool to edit files.",
+          "name": "apply_patch",
+          "parameters": { "type": "object", "properties": {} }
+        })];
+
+        let mapped = map_bridge_tools_to_chat(raw_tools.as_slice());
+        assert_eq!(mapped.len(), 1);
+        let function = mapped[0]["function"].as_object().unwrap();
+        let description = function
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert!(description.contains("schema arguments"));
+        assert!(description.contains("*** Begin Patch"));
+        assert!(!description.to_ascii_lowercase().contains("freeform"));
+        let parameters = function.get("parameters").and_then(Value::as_object).unwrap();
+        let properties = parameters.get("properties").and_then(Value::as_object).unwrap();
+        assert!(properties.contains_key("patch"));
+        assert!(properties.contains_key("input"));
     }
 }

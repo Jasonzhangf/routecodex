@@ -157,3 +157,6 @@ export function mergeMetadataPreservingDefined(
   }
   return merged;
 }
+
+// Re-export asFlatRecord from goal-state-persistence for shared use
+export { asFlatRecord } from './goal-state-persistence.js';

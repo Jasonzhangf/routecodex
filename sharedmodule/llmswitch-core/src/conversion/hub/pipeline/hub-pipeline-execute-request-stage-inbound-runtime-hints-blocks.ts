@@ -1,13 +1,10 @@
 import type { JsonObject } from "../types/json.js";
 import { isCompactionRequest } from "../../compaction-detect.js";
-import {
-  resolveApplyPatchToolModeFromEnvWithNative,
-  resolveApplyPatchToolModeFromToolsWithNative,
-} from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
+import { resolveApplyPatchToolModeFromToolsWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
 import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 import type { NormalizedRequest } from "./hub-pipeline.js";
 
-type ApplyPatchToolMode = "schema" | "freeform";
+type ApplyPatchToolMode = "schema";
 
 function resolveApplyPatchToolMode(
   rawRequest: JsonObject,
@@ -15,14 +12,9 @@ function resolveApplyPatchToolMode(
   const toolsRaw = Array.isArray((rawRequest as any)?.tools)
     ? ((rawRequest as any).tools as unknown[])
     : null;
-  return (
-    (resolveApplyPatchToolModeFromEnvWithNative() as
-      | ApplyPatchToolMode
-      | undefined) ??
-    (resolveApplyPatchToolModeFromToolsWithNative(toolsRaw) as
-      | ApplyPatchToolMode
-      | undefined)
-  );
+  return resolveApplyPatchToolModeFromToolsWithNative(toolsRaw) as
+    | ApplyPatchToolMode
+    | undefined;
 }
 
 export function applyApplyPatchToolModeRuntimeHint(

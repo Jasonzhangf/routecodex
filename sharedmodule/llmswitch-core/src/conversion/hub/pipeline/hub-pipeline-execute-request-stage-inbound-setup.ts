@@ -16,17 +16,7 @@ export function applyInboundRuntimeHints(
   normalized: NormalizedRequest,
   rawRequest: JsonObject,
 ): void {
-  try {
-    applyApplyPatchToolModeRuntimeHint(normalized, rawRequest);
-  } catch (toolScanError) {
-    console.warn(
-      `[hub-pipeline] applyPatchToolMode scan failed (non-blocking): ${
-        toolScanError instanceof Error
-          ? toolScanError.message
-          : String(toolScanError)
-      }`,
-    );
-  }
+  applyApplyPatchToolModeRuntimeHint(normalized, rawRequest);
   applyCompactionRuntimeHint(normalized, rawRequest);
 }
 

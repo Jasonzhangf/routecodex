@@ -55,4 +55,3 @@ export function chunkString(s, minParts = 3, maxParts = 12, targetChunk = 12) {
     assertToolingNativeAvailable();
     return chunkStringWithNative(s, minParts, maxParts, targetChunk);
 }
-//# sourceMappingURL=tooling.js.map

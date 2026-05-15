@@ -1,8 +1,10 @@
 import type { JsonObject } from '../../../conversion/hub/types/json.js';
+import { isGoalCapableAdapterContext } from '../../../conversion/hub/pipeline/hub-pipeline-goal-tools.js';
 import { buildServertoolGenericFollowupPayloadWithNative } from '../../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 import { buildServertoolFollowupConfig } from '../../skeleton-config.js';
 import type { ServerToolFollowupInjectionPlan } from '../../types.js';
-import { resolveFollowupInjectionOpsForNative } from './op-blocks.js';
+import { hasManagedStoplessGoalState } from '../stopless-goal-state.js';
+import { resolveFollowupInjectionOpsForNative, stripToolsByCanonicalName } from './op-blocks.js';
 import {
   extractCapturedChatSeed,
   resolveFollowupModel,
@@ -33,6 +35,9 @@ export function buildNativeFollowupPayloadFromInjection(args: {
   if (!seed) {
     return null;
   }
+  const goalManagedContext =
+    isGoalCapableAdapterContext(args.adapterContext as any)
+    || hasManagedStoplessGoalState(args.adapterContext);
   const followupModel = resolveFollowupModel(seed.model, args.adapterContext);
   if (!followupModel) {
     return null;
@@ -58,7 +63,9 @@ export function buildNativeFollowupPayloadFromInjection(args: {
   return buildServertoolGenericFollowupPayloadWithNative({
     model: followupModel,
     messages: seed.messages,
-    tools: seed.tools,
+    tools: goalManagedContext
+      ? stripToolsByCanonicalName(seed.tools, ['reasoning.stop', 'reasoning_stop', 'reasoning-stop'])
+      : seed.tools,
     parameters: sanitizeFollowupParametersForResolvedModel({
       parameters: seed.parameters,
       seedModel: seed.model,
@@ -68,7 +75,8 @@ export function buildNativeFollowupPayloadFromInjection(args: {
     toolOutputs,
     followupInjectionOps: resolveFollowupInjectionOpsForNative({
       ops: injectionOps,
-      seed
+      seed,
+      allowReasoningStopTool: !goalManagedContext
     })
   }) as JsonObject;
 }

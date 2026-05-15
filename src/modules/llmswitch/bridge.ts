@@ -62,6 +62,7 @@ export {
   saveRoutingInstructionStateSync,
   syncStoplessGoalStateFromRequest,
   persistStoplessGoalStateSnapshot,
+  readStoplessGoalState,
   extractSessionIdentifiersFromMetadata,
   getStatsCenterSafe,
   getLlmsStatsSnapshot,

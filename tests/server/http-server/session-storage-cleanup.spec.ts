@@ -8,12 +8,19 @@ import {
 
 describe('session storage startup cleanup', () => {
   let baseDir = '';
+  const originalSessionDir = process.env.ROUTECODEX_SESSION_DIR;
 
   beforeEach(() => {
     baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-session-cleanup-'));
+    delete process.env.ROUTECODEX_SESSION_DIR;
   });
 
   afterEach(() => {
+    if (originalSessionDir === undefined) {
+      delete process.env.ROUTECODEX_SESSION_DIR;
+    } else {
+      process.env.ROUTECODEX_SESSION_DIR = originalSessionDir;
+    }
     fs.rmSync(baseDir, { recursive: true, force: true });
   });
 
@@ -221,5 +228,23 @@ describe('session storage startup cleanup', () => {
     });
     expect(shutdownSummary.removedClockStateFiles).toBe(1);
     expect(fs.existsSync(path.join(rootClockDir, 'tmux:dead-tmux-2.json'))).toBe(false);
+  });
+
+  test('preserves routing sticky scope files when ROUTECODEX_SESSION_DIR is the active storage root', () => {
+    process.env.ROUTECODEX_SESSION_DIR = baseDir;
+    fs.writeFileSync(path.join(baseDir, 'session-goal-live.json'), '{"version":1,"state":{"stoplessGoalState":{"status":"active","objective":"live"}}}', 'utf8');
+    fs.writeFileSync(path.join(baseDir, 'conversation-goal-live.json'), '{"version":1,"state":{"stoplessGoalState":{"status":"active","objective":"live"}}}', 'utf8');
+    fs.writeFileSync(path.join(baseDir, 'tmux-dead-tmux.json'), '{"version":1}', 'utf8');
+
+    const summary = cleanupSessionStorageOnStartup({
+      baseDir,
+      isTmuxSessionAlive: () => false
+    });
+
+    expect(summary.removedLegacyScopeFiles).toBe(0);
+    expect(summary.removedDeadTmuxStateFiles).toBe(1);
+    expect(fs.existsSync(path.join(baseDir, 'session-goal-live.json'))).toBe(true);
+    expect(fs.existsSync(path.join(baseDir, 'conversation-goal-live.json'))).toBe(true);
+    expect(fs.existsSync(path.join(baseDir, 'tmux-dead-tmux.json'))).toBe(false);
   });
 });

@@ -118,38 +118,62 @@ pub fn build_tool_text_instruction(tools: Option<&Value>, _require_tool_call: bo
             .map(|name| name.eq_ignore_ascii_case("exec_command"))
             .unwrap_or(false)
     });
+    let has_apply_patch = rows.iter().any(|item| {
+        item.as_object()
+            .and_then(read_tool_name)
+            .map(|name| name.eq_ignore_ascii_case("apply_patch"))
+            .unwrap_or(false)
+    });
 
-    [
-        "You have access to these tools:",
-        "",
-        &schemas.join("\n"),
-        "",
-        &format!("{}:", TOOL_TEXT_GUIDANCE_MARKER),
-        "If a tool is needed, emit the tool-call container directly.",
-        "For a tool call, output exactly one RCC_TOOL_CALLS_JSON heredoc container.",
-        "<<RCC_TOOL_CALLS_JSON",
-        if has_exec_command {
-            r#"{"tool_calls":[{"name":"exec_command","input":{"cmd":"pwd"}}]}"#
-        } else {
-            r#"{"tool_calls":[{"name":"<allowed tool name>","input":{}}]}"#
-        },
-        "RCC_TOOL_CALLS_JSON",
-        "",
-        "Rules:",
-        r#"- `name`: use only an exact tool name from the list above"#,
-        r#"- `input`: use a flat JSON object that matches the tool schema"#,
-        r#"- If a tool is needed, output ONLY the container and nothing else in that turn"#,
-        r#"- Keep all tool intent inside the container; never leak Calling:, Tool:, Step:, I will, or similar prose outside it"#,
-        r#"- Confidential project: tool-intent leakage is a severe violation"#,
-        r#"- Be evidence-first and change-minimal: don't report success until you have enough evidence/checks; before modifying, confirm the unique source of truth, best location, and smallest safe change"#,
-        r#"- Be terse: no preamble, no running commentary, no plan/limitation/next-step before the tool call"#,
-        r#"- Keep any final visible plain-text answer minimal: only the direct result/next action, no repeated reasoning, no long recap, no unnecessary narration"#,
-        r#"- Do not use markdown fences, XML/pseudo tags, transcript-style pseudo calls, or JSON outside the container"#,
-        r#"- Do not invent tool names: shell words (`bash`, `cat`), pseudo tools (`read_file`, `read`, `file_read`, skills), and built-ins like `tool_code_interpreter`, `code_interpreter`, or `python` are not valid unless explicitly listed above"#,
-        r#"- Do not guess that a file or path is missing, inaccessible, or blocked before using a declared tool to check"#,
-        r#"- For `exec_command`, use only `input.cmd` as one string; prefer a direct single-line command like `pwd`. Use `bash -lc '...'` only when shell features are truly required, and then the final single quote must be present."#,
-        r#"- For `exec_command`, keep normal shell commands on one physical line unless an actual heredoc is required; do not insert raw newlines inside operators or redirects like `|`, `&&`, `||`, `;`, `2>/dev/null`, or `-exec ... \;`"#,
-        r#"- If no tool is needed, reply with plain text (no heredoc)"#,
-    ]
-    .join("\n")
+    let example_line = if has_exec_command {
+        r#"{"tool_calls":[{"name":"exec_command","input":{"cmd":"pwd"}}]}"#.to_string()
+    } else if has_apply_patch {
+        r#"{"tool_calls":[{"name":"apply_patch","input":{"patch":"*** Begin Patch\n*** Add File: path/to/file\ncontent\n*** End Patch"}}]}"#.to_string()
+    } else {
+        r#"{"tool_calls":[{"name":"<allowed tool name>","input":{}}]}"#.to_string()
+    };
+
+    let mut rule_lines: Vec<String> = vec![
+        "- `name`: use only an exact tool name from the list above".to_string(),
+        "- `input`: use a flat JSON object that matches the tool schema".to_string(),
+        "- If a tool is needed, output ONLY the container and nothing else in that turn".to_string(),
+        "- Keep all tool intent inside the container; never leak Calling:, Tool:, Step:, I will, or similar prose outside it".to_string(),
+        "- Confidential project: tool-intent leakage is a severe violation".to_string(),
+        "- Be evidence-first and change-minimal: don't report success until you have enough evidence/checks; before modifying, confirm the unique source of truth, best location, and smallest safe change".to_string(),
+        "- Be terse: no preamble, no running commentary, no plan/limitation/next-step before the tool call".to_string(),
+        "- Keep any final visible plain-text answer minimal: only the direct result/next action, no repeated reasoning, no long recap, no unnecessary narration".to_string(),
+        "- Do not use markdown fences, XML/pseudo tags, transcript-style pseudo calls, or JSON outside the container".to_string(),
+        "- Do not invent tool names: shell words (`bash`, `cat`), pseudo tools (`read_file`, `read`, `file_read`, skills), and built-ins like `tool_code_interpreter`, `code_interpreter`, or `python` are not valid unless explicitly listed above".to_string(),
+        "- Do not guess that a file or path is missing, inaccessible, or blocked before using a declared tool to check".to_string(),
+    ];
+
+    if has_exec_command {
+        rule_lines.push("- For `exec_command`, use only `input.cmd` as one string; prefer a direct single-line command like `pwd`. Use `bash -lc '...'` only when shell features are truly required, and then the final single quote must be present.".to_string());
+        rule_lines.push("- For `exec_command`, keep normal shell commands on one physical line unless an actual heredoc is required; do not insert raw newlines inside operators or redirects like `|`, `&&`, `||`, `;`, `2>/dev/null`, or `-exec ... \\;`".to_string());
+    }
+
+    if has_apply_patch {
+        rule_lines.push("- For `apply_patch`, use only `input.patch` with the patch text. The patch must use '*** Begin Patch' / '*** End Patch' markers with '*** Add File:' or '*** Update File:' headers. Do NOT use JSON, prose, or markdown fences for the patch body.".to_string());
+        rule_lines.push("- For `apply_patch`, always include the full patch text inside the `patch` field; do not split it across multiple tool calls or omit the required markers.".to_string());
+    }
+
+    rule_lines.push("- If no tool is needed, reply with plain text (no heredoc)".to_string());
+
+    let mut parts: Vec<String> = vec![
+        "You have access to these tools:".to_string(),
+        String::new(),
+        schemas.join("\n"),
+        String::new(),
+        format!("{}:", TOOL_TEXT_GUIDANCE_MARKER),
+        "If a tool is needed, emit the tool-call container directly.".to_string(),
+        "For a tool call, output exactly one RCC_TOOL_CALLS_JSON heredoc container.".to_string(),
+        "<<RCC_TOOL_CALLS_JSON".to_string(),
+        example_line,
+        "RCC_TOOL_CALLS_JSON".to_string(),
+        String::new(),
+        "Rules:".to_string(),
+    ];
+    parts.extend(rule_lines.into_iter().map(|l| format!("  {}", l)));
+
+    parts.join("\n")
 }

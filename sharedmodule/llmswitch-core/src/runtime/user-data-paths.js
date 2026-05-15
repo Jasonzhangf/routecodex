@@ -75,4 +75,3 @@ export function resolveRccSnapshotsDirFromEnv(homeDir) {
 export function resolveRccPathForRead(...segments) {
     return resolveRccPath(...segments);
 }
-//# sourceMappingURL=user-data-paths.js.map

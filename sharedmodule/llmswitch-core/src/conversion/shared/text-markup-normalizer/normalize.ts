@@ -14,5 +14,6 @@ export function normalizeAssistantTextToToolCalls(
   options?: TextMarkupNormalizeOptions
 ): Record<string, any> {
   if (!enabled()) return message;
-  return normalizeAssistantTextToToolCallsWithNative(message, options) as Record<string, any>;
+  const normalized = normalizeAssistantTextToToolCallsWithNative(message, options) as Record<string, any>;
+  return normalized;
 }

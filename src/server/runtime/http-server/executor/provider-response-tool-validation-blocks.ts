@@ -312,8 +312,6 @@ export function validateCanonicalClientToolCall(
       }
       const patch =
         typeof parsed.patch === 'string' ? parsed.patch
-        : typeof parsed.raw_patch === 'string' ? parsed.raw_patch
-        : typeof parsed.raw === 'string' ? parsed.raw
         : typeof parsed.input === 'string' ? parsed.input
         : undefined;
       if (typeof patch !== 'string') {

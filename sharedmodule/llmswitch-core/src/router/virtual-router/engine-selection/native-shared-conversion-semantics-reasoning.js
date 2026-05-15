@@ -51,13 +51,17 @@ function normalizeToolCallEntries(raw) {
             : typeof row.name === 'string'
                 ? row.name
                 : '').trim();
-        const argsCandidate = typeof functionRow?.arguments === 'string'
-            ? functionRow.arguments
-            : typeof row.args === 'string'
-                ? row.args
-                : typeof row.arguments === 'string'
-                    ? row.arguments
-                    : '';
+        const rawArgsCandidate = functionRow?.arguments ??
+            row.args ??
+            row.arguments ??
+            functionRow?.input ??
+            row.input ??
+            null;
+        const argsCandidate = typeof rawArgsCandidate === 'string'
+            ? rawArgsCandidate
+            : rawArgsCandidate && typeof rawArgsCandidate === 'object'
+                ? JSON.stringify(rawArgsCandidate)
+                : '';
         if (!name) {
             return null;
         }
@@ -331,4 +335,3 @@ export function sanitizeReasoningTaggedTextWithNative(text) {
         return fail(reason);
     }
 }
-//# sourceMappingURL=native-shared-conversion-semantics-reasoning.js.map

@@ -282,6 +282,7 @@ export function cleanupSessionStorageOnStartup(options?: {
   nowMs?: number;
   staleAfterMs?: number;
   isTmuxSessionAlive?: (tmuxSessionId: string) => boolean;
+  preserveRoutingScopeFiles?: boolean;
 }): CleanupSummary {
   const baseDir = path.resolve(options?.baseDir || resolveRccSessionsDir());
   const nowMs = Number.isFinite(options?.nowMs as number) ? Math.floor(options?.nowMs as number) : Date.now();
@@ -290,6 +291,12 @@ export function cleanupSessionStorageOnStartup(options?: {
       ? Math.floor(Number(options?.staleAfterMs))
       : resolveHeartbeatTtlMs();
   const isTmuxSessionAlive = options?.isTmuxSessionAlive || (() => true);
+  const configuredSessionDir = normalizeString(
+    process.env.ROUTECODEX_SESSION_DIR
+      ?? process.env.RCC_SESSION_DIR
+  );
+  const preserveRoutingScopeFiles = options?.preserveRoutingScopeFiles === true
+    || (!!configuredSessionDir && path.resolve(configuredSessionDir) === baseDir);
   const tmuxLivenessCache = new Map<string, boolean>();
   const isTmuxSessionAliveMemoized = (tmuxSessionId: string): boolean => {
     const normalized = normalizeString(tmuxSessionId);
@@ -331,6 +338,9 @@ export function cleanupSessionStorageOnStartup(options?: {
       const fullpath = path.join(baseDir, entry.name);
       if (entry.isFile()) {
         if (/^(session|conversation)-.+\.json$/i.test(entry.name)) {
+          if (preserveRoutingScopeFiles) {
+            continue;
+          }
           if (removeFileIfExists(fullpath)) {
             summary.removedLegacyScopeFiles += 1;
           }

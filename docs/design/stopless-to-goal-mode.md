@@ -152,7 +152,6 @@ type UpdateGoalPayload = {
 host 最低校验：
 
 - `next_step` 非空
-- 不能只是“继续处理 / 继续分析 / 继续看看”这类空洞语句
 
 校验失败：
 
@@ -216,7 +215,7 @@ host 最低校验：
 
 - `completion_evidence` 非空
 - `completion_summary` 非空
-- `ssot_assessment.rationale` 非空
+- `ssot_assessment` 非空
 
 说明：
 
@@ -280,6 +279,7 @@ host 强制 stop 或 pause，默认优先 stop。
 适用：
 
 - 连续三轮 `next_step / progress_summary` 实质重复
+- active goal 连续 plain-stop，且没有任何合法 `create_goal/update_goal` 迁移
 - 没有新增证据
 - 没有状态推进
 
@@ -301,6 +301,7 @@ host 强制 stop 或 pause，默认优先 stop。
   - RCC fence 解析出的 goal directive 已能写入 sticky `stoplessGoalState`
 - `sharedmodule/llmswitch-core/src/servertool/handlers/stopless-goal-guard.ts`
   - `status === active` 时自动 followup
+  - 连续 3 次 plain-stop / 口头完成但无合法 goal transition 时强制 `stopped`
 
 ### 仍需补齐的关键缺口
 
@@ -312,9 +313,10 @@ host 强制 stop 或 pause，默认优先 stop。
 2. `provider-response-converter.ts`
    - 只把**校验后的** goal tool call 投影进 `stoplessGoalState`
    - host 侧承担 transition proof enforcement 与 error ledger
+   - `update_goal` 缺证明字段 -> host 拒绝迁移，并累计 validation ledger
    - `CLIENT_TOOL_ARGS_INVALID` 连续 2 次 -> 强制 `stopped`
    - `provider.followup` 不可逆失败连续 2 次 -> 强制 `stopped`
-   - 重复 `active.next_step` 连续 3 次 -> 强制 `stopped`
+   - 不做 `next_step` 文本语义比对；active 合法续轮只看 control block
 
 仍未完成的缺口已经收窄为：
 
@@ -343,7 +345,7 @@ host 强制 stop 或 pause，默认优先 stop。
 2. error ledger：
    - 连续 2 次 irrecoverable error 强制 stopped
    - 连续 2 次 validation failure 强制 stopped
-   - 连续 3 次 no-progress 强制 stopped
+   - 连续 3 次 plain-stop / 缺 goal control block 强制 stopped
 
 3. lifecycle / followup：
    - active 续轮

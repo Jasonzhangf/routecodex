@@ -100,7 +100,7 @@ fn ensure_apply_patch_schema(candidate: Option<&Value>) -> Value {
     patch.insert(
         "description".to_string(),
         Value::String(
-            "Patch text (*** Begin Patch / *** End Patch or GNU unified diff).".to_string(),
+            "Raw patch text. Template: *** Begin Patch\\n*** Add File: path/to/file\\n+line\\n*** End Patch\\n\\nUpdate File template: *** Begin Patch\\n*** Update File: path/to/file\\n@@\\n old\\n-new\\n+new\\n old\\n*** End Patch\\n\\nREJECTED: conflict markers (======= / >>>>>>> / <<<<<<<), GNU diff headers (--- a/ +++ b/) inside Begin Patch envelope, shell heredoc wrapping, markdown fences, natural-language instructions.\\n\\nPick ONE format: either internal *** Begin/End Patch or pure GNU diff, not both.".to_string(),
         ),
     );
     properties.insert("patch".to_string(), Value::Object(patch));
@@ -109,7 +109,7 @@ fn ensure_apply_patch_schema(candidate: Option<&Value>) -> Value {
     input.insert("type".to_string(), Value::String("string".to_string()));
     input.insert(
         "description".to_string(),
-        Value::String("Alias of patch (patch text). Prefer patch.".to_string()),
+        Value::String("Alias of patch. Same patch text grammar as patch. Prefer patch.".to_string()),
     );
     properties.insert("input".to_string(), Value::Object(input));
 
@@ -204,15 +204,28 @@ fn normalize_generic_tool_schema(candidate: Option<&Value>) -> Option<Value> {
     Some(Value::Object(schema))
 }
 
-fn enforce_builtin_tool_schema(name: &str, candidate: Option<&Value>) -> Option<Value> {
+pub(crate) fn enforce_builtin_tool_schema(name: &str, candidate: Option<&Value>) -> Option<Value> {
     let normalized = name.trim().to_ascii_lowercase();
     if normalized == "apply_patch" {
         return Some(ensure_apply_patch_schema(candidate));
     }
-    if normalized == "web_search" {
+    if normalized == "web_search" || normalized.starts_with("web_search") {
         return Some(ensure_web_search_schema(candidate));
     }
     normalize_generic_tool_schema(candidate)
+}
+
+pub(crate) fn rewrite_builtin_tool_description(name: &str, existing: Option<&Value>) -> Option<String> {
+    let normalized = name.trim().to_ascii_lowercase();
+    let base = read_trimmed_string(existing);
+    if normalized != "apply_patch" {
+        return base;
+    }
+    Some(
+        r#"Use the `apply_patch` tool to edit files. Call it with schema arguments `{"patch": "*** Begin Patch
+...
+*** End Patch"}`. Do not send raw tool input, Markdown fences, prose, shell heredoc, or git/unified diff syntax. `input` is accepted only as an alias of `patch`."#.to_string(),
+    )
 }
 
 fn resolve_tool_name(candidates: &[Option<&Value>], sanitize_mode: &str) -> Option<String> {

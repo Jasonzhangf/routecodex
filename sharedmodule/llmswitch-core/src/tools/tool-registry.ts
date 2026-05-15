@@ -1,8 +1,6 @@
 // Tool registry and validator (single source of truth)
 
 import { parseToolArgsJson } from './args-json.js';
-import { validateApplyPatchArgs } from './apply-patch/validator.js';
-import { captureApplyPatchRegression } from './patch-regression-capturer.js';
 import { validateExecCommandArgs } from './exec-command/validator.js';
 import { captureExecCommandRegression } from './exec-command/regression-capturer.js';
 
@@ -99,7 +97,6 @@ export function getAllowedToolNames(): string[] {
     'shell_command',
     'bash',
     'exec_command',
-    'apply_patch',
     'update_plan',
     'view_image',
     'list_mcp_resources',
@@ -166,22 +163,6 @@ export function validateToolCall(
         return { ok: false, reason: 'missing_command' };
       }
       return { ok: true, normalizedArgs: toJson(rawArgs) };
-    }
-    case 'apply_patch': {
-      const validation = validateApplyPatchArgs(argsString, rawArgsAny);
-      if (!validation.ok) {
-        const reason = validation.reason || 'unknown';
-        // captureApplyPatchRegression({
-        //   errorType: reason,
-        //   originalArgs: typeof argsString === 'string' ? argsString : String(argsString ?? ''),
-        //   normalizedArgs: typeof argsString === 'string' ? argsString : String(argsString ?? ''),
-        //   validationError: reason,
-        //   source: 'tool-registry.validateToolCall',
-        //   meta: { applyPatchToolMode: 'freeform' }
-        // });
-        return { ok: false, reason, message: validation.message };
-      }
-      return { ok: true, normalizedArgs: validation.normalizedArgs };
     }
     case 'shell': {
       const rawArgs = isRecord(rawArgsAny) ? rawArgsAny : {};

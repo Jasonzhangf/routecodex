@@ -3,19 +3,11 @@ export declare function validateResponsePayloadWithNative(payload: Record<string
 export declare function applyRequestRulesWithNative(payload: Record<string, unknown>, config?: Record<string, unknown>): Record<string, unknown>;
 export declare function applyFieldMappingsWithNative(payload: Record<string, unknown>, mappings: unknown[]): Record<string, unknown>;
 export declare function sanitizeToolSchemaGlmShellWithNative(payload: Record<string, unknown>): Record<string, unknown>;
-export declare function fixApplyPatchToolCallsWithNative(payload: {
-    messages?: Array<Record<string, unknown>>;
-    input?: Array<Record<string, unknown>>;
-}): {
-    messages: Array<Record<string, unknown>>;
-    input?: Array<Record<string, unknown>>;
-};
 export declare function applyResponseBlacklistWithNative(payload: Record<string, unknown>, config?: Record<string, unknown>): Record<string, unknown>;
 export declare function normalizeToolCallIdsWithNative(payload: Record<string, unknown>): Record<string, unknown>;
 export declare function enforceLmstudioResponsesFcToolCallIdsWithNative(payload: Record<string, unknown>): Record<string, unknown>;
 export declare function applyAnthropicClaudeCodeUserIdWithNative(payload: Record<string, unknown>, adapterContext?: Record<string, unknown>): Record<string, unknown>;
 export declare function applyGeminiWebSearchRequestCompatWithNative(payload: Record<string, unknown>, adapterContext?: Record<string, unknown>): Record<string, unknown>;
-export declare function applyIflowToolTextFallbackWithNative(payload: Record<string, unknown>, adapterContext?: Record<string, unknown>, models?: string[]): Record<string, unknown>;
 export declare function applyLmstudioResponsesInputStringifyWithNative(payload: Record<string, unknown>, adapterContext?: Record<string, unknown>): Record<string, unknown>;
 export declare function applyToolTextRequestGuidanceWithNative(payload: Record<string, unknown>, config?: Record<string, unknown>): Record<string, unknown>;
 export declare function harvestToolCallsFromTextWithNative(payload: Record<string, unknown>, options?: Record<string, unknown>): Record<string, unknown>;

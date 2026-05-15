@@ -7,10 +7,22 @@ const mockSyncStoplessGoalStateFromRequest = jest.fn(() => ({
   hadDirective: false,
   directiveTypes: []
 }));
+const mockPersistStoplessGoalStateSnapshot = jest.fn();
+const mockLoadRoutingInstructionStateSync = jest.fn(() => null);
+const mockReadStoplessGoalState = jest.fn((adapterContext: Record<string, unknown>) => {
+  const sessionId = typeof adapterContext?.sessionId === 'string' ? adapterContext.sessionId : undefined;
+  return {
+    ...(sessionId ? { stickyKey: `session:${sessionId}` } : {}),
+    state: mockLoadRoutingInstructionStateSync(sessionId ? `session:${sessionId}` : '')?.stoplessGoalState
+  };
+});
 const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
   syncStoplessGoalStateFromRequest: mockSyncStoplessGoalStateFromRequest,
+  persistStoplessGoalStateSnapshot: mockPersistStoplessGoalStateSnapshot,
+  loadRoutingInstructionStateSync: mockLoadRoutingInstructionStateSync,
+  readStoplessGoalState: mockReadStoplessGoalState,
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
 });
 
@@ -23,6 +35,7 @@ describe('provider-response-converter serverTool followup metadata', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
+    mockPersistStoplessGoalStateSnapshot.mockReset();
 
     mockConvertProviderResponse.mockImplementation(async () => ({
       body: {
@@ -57,6 +70,7 @@ describe('provider-response-converter serverTool followup metadata', () => {
     );
 
     const pipelineMetadata: Record<string, unknown> = {
+      sessionId: 'goal-create-session',
       capturedChatRequest: {
         tools: [
           {
@@ -92,12 +106,20 @@ describe('provider-response-converter serverTool followup metadata', () => {
     expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.objective)
       .toBe('close stopless onto /goal lifecycle');
     expect(((pipelineMetadata.__rt as Record<string, unknown>) ?? {}).stoplessGoalStatus).toBe('active');
+    expect(mockPersistStoplessGoalStateSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'goal-create-session' }),
+      expect.objectContaining({
+        status: 'active',
+        objective: 'close stopless onto /goal lifecycle'
+      })
+    );
   });
 
   it('projects validated update_goal completed state back into pipeline metadata', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
+    mockPersistStoplessGoalStateSnapshot.mockReset();
 
     mockConvertProviderResponse.mockImplementation(async () => ({
       body: {
@@ -135,6 +157,7 @@ describe('provider-response-converter serverTool followup metadata', () => {
     );
 
     const pipelineMetadata: Record<string, unknown> = {
+      sessionId: 'goal-completed-session',
       stoplessGoalState: {
         status: 'active',
         objective: 'close stopless on /goal lifecycle',
@@ -168,6 +191,14 @@ describe('provider-response-converter serverTool followup metadata', () => {
     expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.ssotAssessment)
       .toBe('validated at unique host projection point');
     expect(((pipelineMetadata.__rt as Record<string, unknown>) ?? {}).stoplessGoalStatus).toBe('completed');
+    expect(mockPersistStoplessGoalStateSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'goal-completed-session' }),
+      expect.objectContaining({
+        status: 'completed',
+        objective: 'close stopless on /goal lifecycle',
+        completionEvidence: 'targeted tests green'
+      })
+    );
   });
 
   it('forces stopped after two irrecoverable followup failures', async () => {
@@ -232,7 +263,7 @@ describe('provider-response-converter serverTool followup metadata', () => {
     });
 
     expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.status).toBe('active');
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveIrrecoverableErrors).toBeUndefined();
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveIrrecoverableErrors).toBe(1);
 
     await expect(
       convertProviderResponseIfNeeded(
@@ -256,10 +287,10 @@ describe('provider-response-converter serverTool followup metadata', () => {
       code: 'SERVERTOOL_FOLLOWUP_FAILED'
     });
 
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.status).toBe('active');
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.errorClass).toBeUndefined();
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.attemptsExhausted).toBeUndefined();
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveIrrecoverableErrors).toBeUndefined();
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.status).toBe('stopped');
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.errorClass).toBe('repeated_irrecoverable_error');
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.attemptsExhausted).toBe(true);
+    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveIrrecoverableErrors).toBe(2);
   });
 
   it('does not accumulate converter-side no-progress ledgers for repeated active next_step updates', async () => {

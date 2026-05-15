@@ -16,4 +16,3 @@ export function makeNativeRequiredError(capability, reason) {
 export function failNativeRequired(capability, reason) {
     throw makeNativeRequiredError(capability, reason);
 }
-//# sourceMappingURL=native-router-hotpath-policy.js.map

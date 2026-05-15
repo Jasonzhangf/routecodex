@@ -227,4 +227,3 @@ export function injectMcpToolsForResponsesWithNative(tools, discoveredServers) {
         return fail(reason);
     }
 }
-//# sourceMappingURL=native-shared-conversion-semantics-tools.js.map

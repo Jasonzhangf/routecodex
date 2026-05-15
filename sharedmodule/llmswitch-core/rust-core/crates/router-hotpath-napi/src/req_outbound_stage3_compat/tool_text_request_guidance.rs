@@ -95,6 +95,7 @@ fn build_default_instruction(
     let marker = read_trimmed_string(config.and_then(|row| row.get("marker")))
         .unwrap_or_else(|| DEFAULT_MARKER.to_string());
     let has_exec_command = tool_names.iter().any(|name| name == "exec_command");
+    let has_apply_patch = tool_names.iter().any(|name| name == "apply_patch");
 
     let mut lines = vec![format!("{}:", marker)];
     let mut step = 1usize;
@@ -107,9 +108,19 @@ fn build_default_instruction(
         "This is a text-tool runtime. When a tool is needed, emit the tool-call container directly instead of explaining a plan first."
             .to_string(),
     );
-    if has_exec_command {
+    if has_exec_command && has_apply_patch {
+        push_line(
+            "If calling tools, output exactly one heredoc container: <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}\\nRCC_TOOL_CALLS_JSON or <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"apply_patch\",\"input\":{\"patch\":\"*** Begin Patch\\n*** Add File: path/to/file\\ncontent\\n*** End Patch\"}}]}\\nRCC_TOOL_CALLS_JSON"
+                .to_string(),
+        );
+    } else if has_exec_command {
         push_line(
             "If calling tools, output exactly one heredoc container: <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}\\nRCC_TOOL_CALLS_JSON"
+                .to_string(),
+        );
+    } else if has_apply_patch {
+        push_line(
+            "If calling tools, output exactly one heredoc container: <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"apply_patch\",\"input\":{\"patch\":\"*** Begin Patch\\n*** Add File: path/to/file\\ncontent\\n*** End Patch\"}}]}\\nRCC_TOOL_CALLS_JSON"
                 .to_string(),
         );
     } else {
@@ -146,6 +157,17 @@ fn build_default_instruction(
         );
         push_line(
             "If `cmd` starts with `bash -lc '`, the closing single quote at the very end is mandatory; `bash-lc` or a missing final `'` is invalid."
+                .to_string(),
+        );
+    }
+
+    if has_apply_patch {
+        push_line(
+            "For `apply_patch`, use only `input.patch` with the patch text. Must use \"*** Begin Patch\" / \"*** End Patch\" markers with \"*** Add File:\" or \"*** Update File:\" headers. Do NOT use JSON, prose, or markdown fences for the patch body."
+                .to_string(),
+        );
+        push_line(
+            "For `apply_patch`, always include the full patch text inside the `patch` field; do not split it across multiple tool calls or omit the required markers."
                 .to_string(),
         );
     }
@@ -404,7 +426,7 @@ mod tests {
         assert!(content
             .contains("tool_choice is required for this turn: return at least one tool call."));
         assert!(content.contains("Allowed tool names this turn: exec_command"));
-        assert!(content.contains("bash -lc 'pwd'"));
+        assert!(content.contains("bash -lc '...'"));
     }
 
     #[test]
@@ -425,5 +447,43 @@ mod tests {
         assert!(content.contains("Allowed tool names this turn: exec_command, apply_patch"));
         assert!(content.contains("use tool name `exec_command`"));
         assert!(content.contains("Do NOT emit `command`, `cwd`, or `workdir`"));
+        assert!(content.contains("For `apply_patch`, use only `input.patch`"));
+        assert!(content.contains("*** Begin Patch"));
+        assert!(content.contains("*** End Patch"));
+    }
+
+    #[test]
+    fn guidance_adds_apply_patch_example() {
+        let mut payload = json!({
+            "tools": [
+                { "type": "function", "function": { "name": "apply_patch" } }
+            ],
+            "messages": [{ "role": "user", "content": "edit file" }]
+        });
+
+        apply_tool_text_request_guidance(&mut payload, None);
+
+        let content = payload["messages"][0]["content"].as_str().unwrap_or("");
+        assert!(content.contains("For `apply_patch`, use only `input.patch`"));
+        assert!(content.contains("*** Begin Patch"));
+        assert!(content.contains("*** End Patch"));
+        assert!(content.contains("*** Add File:"));
+        assert!(content.contains("apply_patch"));
+        assert!(!content.contains("exec_command"), "should not mention exec_command when not declared");
+    }
+
+    #[test]
+    fn guidance_does_not_mention_apply_patch_when_not_declared() {
+        let mut payload = json!({
+            "tools": [
+                { "type": "function", "function": { "name": "exec_command" } },
+            ],
+            "messages": [{ "role": "user", "content": "list files" }]
+        });
+
+        apply_tool_text_request_guidance(&mut payload, None);
+
+        let content = payload["messages"][0]["content"].as_str().unwrap_or("");
+        assert!(!content.contains("apply_patch"), "should not mention apply_patch when not declared");
     }
 }

@@ -13,7 +13,7 @@ export function propagateApplyPatchToolModeToRequestMetadata(
     const mode = String((rt as any)?.applyPatchToolMode || "")
       .trim()
       .toLowerCase();
-    if (mode === "freeform" || mode === "schema") {
+    if (mode === "schema") {
       (
         standardizedRequest.metadata as Record<string, unknown>
       ).applyPatchToolMode = mode;

@@ -67,4 +67,3 @@ export function analyzeProviderKey(providerKey) {
 export function loadNativeRouterHotpathBindingForInternalUse() {
     return loadNativeRouterHotpathBinding();
 }
-//# sourceMappingURL=native-router-hotpath.js.map

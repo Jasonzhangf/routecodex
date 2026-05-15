@@ -1,4 +1,4 @@
-import { normalizeApplyPatchToolCallsOnRequest } from '../../shared/tool-governor.js';
+import { normalizeRequestToolCalls } from '../../shared/tool-governor.js';
 import { containsImageAttachment, stripHistoricalImageAttachments } from './chat-process-media.js';
 import { maybeInjectPendingServerToolResultsAfterClientTools } from './chat-process-pending-tool-sync.js';
 import type { StandardizedRequest } from '../types/standardized.js';
@@ -17,7 +17,7 @@ export async function applyPostGovernedNormalization(
     ...options.request,
     messages: stripHistoricalImageAttachments(options.request.messages)
   };
-  request = normalizeApplyPatchToolCallsOnRequest(
+  request = normalizeRequestToolCalls(
     request as unknown as Record<string, unknown>
   ) as unknown as StandardizedRequest;
   request = await maybeInjectPendingServerToolResultsAfterClientTools(request, options.metadata);

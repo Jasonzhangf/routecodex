@@ -5,7 +5,6 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use serde_json::Value;
-use std::env;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1314,40 +1313,6 @@ fn resolve_hub_shadow_compare_config(metadata: &Value) -> Option<Value> {
     Some(Value::Object(out))
 }
 
-fn normalize_apply_patch_tool_mode_token(raw: Option<&str>) -> Option<String> {
-    let token = raw.unwrap_or("").trim().to_ascii_lowercase();
-    match token.as_str() {
-        "freeform" => Some("freeform".to_string()),
-        "schema" | "json_schema" => Some("schema".to_string()),
-        _ => None,
-    }
-}
-
-fn is_truthy_env_value(raw: &str) -> bool {
-    matches!(
-        raw.trim().to_ascii_lowercase().as_str(),
-        "1" | "true" | "yes" | "on"
-    )
-}
-
-fn resolve_apply_patch_tool_mode_from_env() -> Option<String> {
-    let mode = env::var("RCC_APPLY_PATCH_TOOL_MODE")
-        .ok()
-        .or_else(|| env::var("ROUTECODEX_APPLY_PATCH_TOOL_MODE").ok())
-        .and_then(|raw| normalize_apply_patch_tool_mode_token(Some(raw.as_str())));
-    if mode.is_some() {
-        return mode;
-    }
-    let freeform = env::var("RCC_APPLY_PATCH_FREEFORM")
-        .ok()
-        .or_else(|| env::var("ROUTECODEX_APPLY_PATCH_FREEFORM").ok())
-        .unwrap_or_default();
-    if is_truthy_env_value(freeform.as_str()) {
-        return Some("freeform".to_string());
-    }
-    None
-}
-
 fn resolve_apply_patch_tool_mode_from_tools(tools_raw: &Value) -> Option<String> {
     let tools = tools_raw.as_array()?;
     if tools.is_empty() {
@@ -1377,15 +1342,7 @@ fn resolve_apply_patch_tool_mode_from_tools(tools_raw: &Value) -> Option<String>
         if name != "apply_patch" {
             continue;
         }
-        let format = normalize_apply_patch_tool_mode_token(
-            record.get("format").and_then(|v| v.as_str()).or_else(|| {
-                fn_obj
-                    .and_then(|obj| obj.get("format"))
-                    .and_then(|v| v.as_str())
-            }),
-        );
-        // If apply_patch exists without explicit freeform marker, default to schema mode.
-        return Some(format.unwrap_or_else(|| "schema".to_string()));
+        return Some("schema".to_string());
     }
     None
 }
@@ -2377,12 +2334,10 @@ pub fn run_hub_pipeline(input: HubPipelineInput) -> Result<HubPipelineOutput, St
         }
     }
 
-    let apply_patch_tool_mode = resolve_apply_patch_tool_mode_from_env().or_else(|| {
-        payload
-            .as_object()
-            .and_then(|row| row.get("tools"))
-            .and_then(resolve_apply_patch_tool_mode_from_tools)
-    });
+    let apply_patch_tool_mode = payload
+        .as_object()
+        .and_then(|row| row.get("tools"))
+        .and_then(resolve_apply_patch_tool_mode_from_tools);
     if let Some(mode) = apply_patch_tool_mode {
         if !output_metadata
             .get("runtime")
@@ -2866,17 +2821,6 @@ pub fn resolve_hub_shadow_compare_config_json(metadata_json: String) -> napi::Re
 }
 
 #[napi_derive::napi]
-pub fn resolve_apply_patch_tool_mode_from_env_json() -> napi::Result<String> {
-    let output = resolve_apply_patch_tool_mode_from_env();
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize apply patch tool mode from env: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
 pub fn resolve_apply_patch_tool_mode_from_tools_json(tools_json: String) -> napi::Result<String> {
     let tools_raw: Value = serde_json::from_str(&tools_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse tools JSON: {}", e)))?;
@@ -3278,7 +3222,7 @@ mod tests {
                     "type": "function",
                     "function": {
                         "name": "apply_patch",
-                        "format": "freeform"
+                        "format": "schema"
                     }
                 }]
             }),
@@ -3295,7 +3239,7 @@ mod tests {
                 .get("runtime")
                 .and_then(|v| v.get("applyPatchToolMode"))
                 .and_then(|v| v.as_str()),
-            Some("freeform")
+            Some("schema")
         );
     }
 
@@ -4249,7 +4193,7 @@ mod tests {
             .as_str()
             .expect("exec args");
         let exec_args: Value = serde_json::from_str(exec_args_text).expect("exec args json");
-        assert_eq!(exec_args["cmd"], "pwd");
+        assert!(exec_args.get("cmd").is_none());
         assert_eq!(exec_args["command"], "pwd");
         assert_eq!(exec_args["workdir"], "/repo");
 
@@ -4257,6 +4201,7 @@ mod tests {
             .as_str()
             .expect("patch args");
         let patch_args: Value = serde_json::from_str(patch_args_text).expect("patch args json");
+        assert!(patch_args.get("patch").is_none());
         let patch_input = patch_args["input"].as_str().expect("patch input");
         assert!(patch_input.starts_with("*** Begin Patch"));
         assert!(patch_input.contains("*** Add File: note.txt"));
@@ -4810,15 +4755,15 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_apply_patch_tool_mode_from_tools_freeform() {
+    fn test_resolve_apply_patch_tool_mode_from_tools_schema() {
         let tools = json!([
             {
                 "type": "function",
-                "function": { "name": "apply_patch", "format": "freeform" }
+                "function": { "name": "apply_patch", "parameters": { "type": "object", "properties": { "patch": { "type": "string" } }, "required": ["patch"] } }
             }
         ]);
         let mode = resolve_apply_patch_tool_mode_from_tools(&tools);
-        assert_eq!(mode.as_deref(), Some("freeform"));
+        assert_eq!(mode.as_deref(), Some("schema"));
     }
 
     #[test]

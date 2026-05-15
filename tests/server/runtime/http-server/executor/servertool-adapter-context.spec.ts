@@ -316,6 +316,40 @@ describe('servertool adapter context builder', () => {
     expect(mockSyncStoplessGoalStateFromRequest).not.toHaveBeenCalled();
   });
 
+  it('goal-capable request without legacy fence still hydrates persisted goal state', async () => {
+    jest.resetModules();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+
+    const originalRequest = {
+      messages: [{ role: 'user', content: 'continue goal lifecycle' }],
+      tools: [
+        { type: 'function', function: { name: 'get_goal', parameters: { type: 'object' } } },
+        { type: 'function', function: { name: 'update_goal', parameters: { type: 'object' } } }
+      ]
+    };
+
+    const context = buildServerToolAdapterContext({
+      metadata: {
+        capturedChatRequest: {
+          messages: [{ role: 'user', content: 'stale goal request' }]
+        }
+      },
+      originalRequest,
+      requestId: 'req-goal-tools-hydrate-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(context.capturedChatRequest).toBe(originalRequest);
+    expect((context.__rt as Record<string, unknown>).goalMode).toBe(true);
+    expect(mockSyncStoplessGoalStateFromRequest).toHaveBeenCalledTimes(1);
+    expect((context.stoplessGoalState as Record<string, unknown>)?.status).toBe('active');
+  });
+
   it('goal-capable semantics restores full client goal tools over stale reasoning.stop-only tools', async () => {
     jest.resetModules();
     mockSyncStoplessGoalStateFromRequest.mockClear();
@@ -353,6 +387,7 @@ describe('servertool adapter context builder', () => {
       .map((tool) => tool?.function?.name);
     expect(toolNames).toEqual(['get_goal', 'update_goal', 'request_user_input']);
     expect((context.__rt as Record<string, unknown>).goalMode).toBe(true);
-    expect(mockSyncStoplessGoalStateFromRequest).not.toHaveBeenCalled();
+    expect(mockSyncStoplessGoalStateFromRequest).toHaveBeenCalledTimes(1);
+    expect((context.stoplessGoalState as Record<string, unknown>)?.status).toBe('active');
   });
 });

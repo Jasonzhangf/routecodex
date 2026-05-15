@@ -1299,45 +1299,6 @@ fn looks_like_apply_patch_text(value: &str) -> bool {
     !trimmed.is_empty() && trimmed.contains("*** Begin Patch") && trimmed.contains("*** End Patch")
 }
 
-fn extract_freeform_text_from_args(args_raw: &Value) -> Option<String> {
-    if let Some(raw) = args_raw.as_str() {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-        if let Some(parsed) = try_parse_json_string(trimmed) {
-            if let Some(parsed_row) = parsed.as_object() {
-                for key in ["instructions", "patch", "input", "text"] {
-                    if let Some(value) = parsed_row.get(key).and_then(|v| v.as_str()) {
-                        let cleaned = value.trim();
-                        if !cleaned.is_empty() {
-                            return Some(cleaned.to_string());
-                        }
-                    }
-                }
-            }
-        }
-        if !trimmed.starts_with('{')
-            && !trimmed.starts_with('[')
-            && looks_like_apply_patch_text(trimmed)
-        {
-            return Some(trimmed.to_string());
-        }
-        return Some(trimmed.to_string());
-    }
-    if let Some(row) = args_raw.as_object() {
-        for key in ["instructions", "patch", "input", "text"] {
-            if let Some(value) = row.get(key).and_then(|v| v.as_str()) {
-                let cleaned = value.trim();
-                if !cleaned.is_empty() {
-                    return Some(cleaned.to_string());
-                }
-            }
-        }
-    }
-    None
-}
-
 fn extract_json_schema_like(
     parameters: &Map<String, Value>,
 ) -> Option<(Vec<String>, Vec<String>, bool)> {
@@ -1404,31 +1365,6 @@ fn repair_tool_args_by_schema_keys(
             }
         }
     }
-    if tool_name == "apply_patch" {
-        if wants.contains("instructions") && out.get("instructions").is_none() {
-            if let Some(patch) = out.get("patch").and_then(|v| v.as_str()) {
-                if !patch.trim().is_empty() {
-                    out.insert("instructions".to_string(), Value::String(patch.to_string()));
-                }
-            } else if let Some(input) = out.get("input").and_then(|v| v.as_str()) {
-                if !input.trim().is_empty() {
-                    out.insert("instructions".to_string(), Value::String(input.to_string()));
-                }
-            }
-        }
-        if wants.contains("patch") && out.get("patch").is_none() {
-            if let Some(instructions) = out.get("instructions").and_then(|v| v.as_str()) {
-                if !instructions.trim().is_empty() {
-                    out.insert("patch".to_string(), Value::String(instructions.to_string()));
-                }
-            } else if let Some(input) = out.get("input").and_then(|v| v.as_str()) {
-                if !input.trim().is_empty() {
-                    out.insert("patch".to_string(), Value::String(input.to_string()));
-                }
-            }
-        }
-    }
-
     for key in required {
         if !out.contains_key(key.as_str()) {
             return None;
@@ -1675,20 +1611,6 @@ fn resolve_client_tool_name(
 }
 
 fn normalize_call_args(tool_name: &str, args_raw: &Value, spec: &ClientToolDefinition) -> Value {
-    if spec
-        .format
-        .as_deref()
-        .map(|value| value.eq_ignore_ascii_case("freeform"))
-        .unwrap_or(false)
-    {
-        if let Some(raw_text) = extract_freeform_text_from_args(args_raw) {
-            if !raw_text.trim().is_empty() {
-                return Value::String(raw_text);
-            }
-        }
-        return args_raw.clone();
-    }
-
     let Some(parameters) = spec.parameters.as_ref() else {
         return args_raw.clone();
     };

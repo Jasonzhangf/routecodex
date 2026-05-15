@@ -34,6 +34,23 @@ type FollowupOpHandlerMap = {
   [K in ServerToolFollowupInjectionOp['op']]: FollowupOpHandler<Extract<ServerToolFollowupInjectionOp, { op: K }>>;
 };
 
+function readToolName(tool: unknown): string {
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+    return '';
+  }
+  const record = tool as Record<string, unknown>;
+  if (typeof record.name === 'string' && record.name.trim()) {
+    return record.name.trim().toLowerCase();
+  }
+  const fn =
+    record.function && typeof record.function === 'object' && !Array.isArray(record.function)
+      ? (record.function as Record<string, unknown>)
+      : undefined;
+  return typeof fn?.name === 'string' && fn.name.trim()
+    ? fn.name.trim().toLowerCase()
+    : '';
+}
+
 export function shouldIncludeReasoningStopToolFromOps(
   ops: ServerToolFollowupInjectionPlan['ops'] | undefined
 ): boolean {
@@ -61,16 +78,30 @@ export function hasReasoningStopTool(tools: JsonObject[] | undefined): boolean {
   return Boolean(
     Array.isArray(tools)
     && tools.some((tool) => {
-      if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
-        return false;
-      }
-      const fn = (tool as any).function;
-      const name = fn && typeof fn === 'object' && typeof fn.name === 'string'
-        ? String(fn.name).trim().toLowerCase()
-        : '';
-      return name === 'reasoning.stop';
+      return readToolName(tool) === 'reasoning.stop';
     })
   );
+}
+
+export function stripToolsByCanonicalName(
+  tools: JsonObject[] | undefined,
+  dropNames: string[]
+): JsonObject[] | undefined {
+  if (!Array.isArray(tools) || tools.length === 0) {
+    return tools;
+  }
+  const blocked = new Set(
+    dropNames
+      .map((value) => String(value ?? '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (blocked.size === 0) {
+    return tools;
+  }
+  return tools.filter((tool) => {
+    const name = readToolName(tool);
+    return !name || !blocked.has(name);
+  });
 }
 
 function ensureStandardToolsIfMissing(
@@ -217,6 +248,7 @@ export function applyFollowupInjectionOps(args: {
 export function resolveFollowupInjectionOpsForNative(args: {
   ops: Array<Record<string, unknown>>;
   seed: CapturedChatSeed;
+  allowReasoningStopTool?: boolean;
 }): Array<Record<string, unknown>> {
   return args.ops.map((op) => {
     if (!op || typeof op !== 'object') {
@@ -236,7 +268,9 @@ export function resolveFollowupInjectionOpsForNative(args: {
     });
     return {
       ...op,
-      includeReasoningStopTool: hasReasoningStopMention || hasReasoningStopTool(args.seed.tools),
+      includeReasoningStopTool:
+        args.allowReasoningStopTool !== false
+        && (hasReasoningStopMention || hasReasoningStopTool(args.seed.tools)),
       reasoningStopToolDefinition: REASONING_STOP_TOOL_DEF
     };
   });

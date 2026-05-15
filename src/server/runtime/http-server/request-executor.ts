@@ -65,6 +65,20 @@ import {
   resolvePoolCooldownWaitMs,
   writeInboundClientSnapshot
 } from './executor/request-executor-core-utils.js';
+import {
+  type RequestExecutorFailureState,
+  applyResolveFailureState,
+  applySendFailureState
+} from './executor/request-executor-failure-state.js';
+import {
+  isWebLikeRuntimeForTraffic,
+  resolveProviderTrafficSoftWaitTimeoutMs
+} from './executor/request-executor-traffic-soft-wait.js';
+import {
+  asFlatRecord,
+  persistGoalStateFromMergedMetadata
+} from './executor/goal-state-persistence.js';
+
 import { initializeRequestExecutorRequestState } from './executor/request-executor-request-state.js';
 import { prepareRequestExecutorAttemptState } from './executor/request-executor-attempt-state.js';
 import { resolveProviderRuntimeOrThrow } from './executor/provider-runtime-resolver.js';
@@ -219,99 +233,8 @@ export interface RequestExecutor {
   execute(input: PipelineExecutionInput): Promise<PipelineExecutionResult>;
 }
 
-type RequestExecutorFailureState = {
-  lastError: unknown;
-  blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
-  allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
-  forcedRouteHint?: string;
-  contextOverflowRetries: number;
-  cumulativeExternalLatencyMs: number;
-};
 
-function applyResolveFailureState(
-  state: RequestExecutorFailureState,
-  failure: {
-    lastError: unknown;
-    blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
-    allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
-  }
-): RequestExecutorFailureState {
-  return {
-    ...state,
-    lastError: failure.lastError,
-    blockingRecoverableRouteHoldState: failure.blockingRecoverableRouteHoldState,
-    allowBlockingRecoverableRetryBeyondAttemptBudget: failure.allowBlockingRecoverableRetryBeyondAttemptBudget
-  };
-}
 
-function applySendFailureState(
-  state: RequestExecutorFailureState,
-  failure: {
-    lastError: unknown;
-    blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
-    allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
-    forcedRouteHint?: string;
-    contextOverflowRetries: number;
-    cumulativeExternalLatencyMs: number;
-  }
-): RequestExecutorFailureState {
-  return {
-    ...state,
-    lastError: failure.lastError,
-    blockingRecoverableRouteHoldState: failure.blockingRecoverableRouteHoldState,
-    allowBlockingRecoverableRetryBeyondAttemptBudget: failure.allowBlockingRecoverableRetryBeyondAttemptBudget,
-    forcedRouteHint: failure.forcedRouteHint,
-    contextOverflowRetries: failure.contextOverflowRetries,
-    cumulativeExternalLatencyMs: failure.cumulativeExternalLatencyMs
-  };
-}
-
-const WEB_PROVIDER_TRAFFIC_SOFT_WAIT_TIMEOUT_MS = 1_500;
-
-function isWebLikeRuntimeForTraffic(args: {
-  runtime: ReturnType<typeof resolveRequestExecutorTrafficRuntimeProfile>;
-  compatibilityProfile?: string;
-}): boolean {
-  const { runtime } = args;
-  const tokens = [
-    args.compatibilityProfile,
-    runtime.compatibilityProfile,
-    runtime.providerId,
-    runtime.providerKey,
-    runtime.providerFamily,
-    runtime.runtimeKey,
-    runtime.endpoint,
-    runtime.baseUrl
-  ]
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    .map((value) => value.trim().toLowerCase());
-
-  if (args.compatibilityProfile === 'chat:deepseek-web' || args.compatibilityProfile === 'chat:qwenchat-web') {
-    return true;
-  }
-
-  if (runtime.compatibilityProfile === 'chat:deepseek-web' || runtime.compatibilityProfile === 'chat:qwenchat-web') {
-    return true;
-  }
-
-  return tokens.some((value) => value === 'deepseek-web' || value.startsWith('deepseek-web.') || value === 'qwenchat' || value.startsWith('qwenchat.') || value === 'mimoweb' || value.startsWith('mimoweb.'));
-}
-
-function resolveProviderTrafficSoftWaitTimeoutMs(args: {
-  runtimeKey: string;
-  handle: ProviderHandle;
-  providerKey?: string;
-  compatibilityProfile?: string;
-}): number | undefined {
-  const runtime = resolveRequestExecutorTrafficRuntimeProfile(args.runtimeKey, args.handle, args.providerKey);
-  if (!isWebLikeRuntimeForTraffic({
-    runtime,
-    compatibilityProfile: args.compatibilityProfile
-  })) {
-    return undefined;
-  }
-  return WEB_PROVIDER_TRAFFIC_SOFT_WAIT_TIMEOUT_MS;
-}
 
 const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
 const RECOVERABLE_BACKOFF_TTL_MS = 5 * 60_000;

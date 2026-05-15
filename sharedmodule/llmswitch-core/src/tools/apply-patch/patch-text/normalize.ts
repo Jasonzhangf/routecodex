@@ -369,7 +369,7 @@ const repairMissingHunkHeaderSafely = (patchText: string): string => {
 
       // 安全白名单：仅当已经是“显式 +/- diff 行”但缺失 @@ 时，自动补 @@；
       // 不做整文件替换等语义猜测。
-      if ((hasAdd || hasDel) && onlyPatchPrefixed) {
+      if (hasAdd && hasDel && onlyPatchPrefixed) {
         out.push(`*** Update File: ${normalizedFilePath}`);
         out.push('@@');
         out.push(...sectionBody);

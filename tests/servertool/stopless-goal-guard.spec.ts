@@ -1,4 +1,5 @@
 import { describe, expect, test, beforeEach, jest } from '@jest/globals';
+import { loadRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
 
 describe('stopless goal guard', () => {
   beforeEach(() => {
@@ -26,6 +27,7 @@ describe('stopless goal guard', () => {
       } as any,
       toolCalls: [],
       adapterContext: {
+        sessionId: 'stopless-goal-guard-active',
         stoplessGoalState: {
           status: 'active',
           objective: '完成 RCC stopless goal 接管',
@@ -79,6 +81,7 @@ describe('stopless goal guard', () => {
       } as any,
       toolCalls: [],
       adapterContext: {
+        sessionId: 'stopless-goal-guard-paused',
         stoplessGoalState: {
           status: 'paused',
           objective: '完成 RCC stopless goal 接管',
@@ -97,5 +100,88 @@ describe('stopless goal guard', () => {
     });
 
     expect(plan).toBeNull();
+  });
+
+  test('active stopless goal forces stopped after three plain stop replies without validated goal transition', async () => {
+    await import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');
+    const { listAutoServerToolHooks } = await import('../../sharedmodule/llmswitch-core/src/servertool/registry.js');
+
+    const hook = listAutoServerToolHooks().find((entry) => entry.id === 'stopless_goal_guard');
+    expect(hook).toBeDefined();
+
+    const sessionId = 'stopless-goal-no-progress-threshold';
+    const base = {
+      choices: [
+        {
+          finish_reason: 'stop',
+          message: {
+            role: 'assistant',
+            content: '完成。'
+          }
+        }
+      ]
+    } as any;
+
+    const first = await hook!.handler({
+      base,
+      toolCalls: [],
+      adapterContext: {
+        sessionId,
+        stoplessGoalState: {
+          status: 'active',
+          objective: '收口 stopless -> /goal 生命周期',
+          updatedAt: 1,
+          createdAt: 1
+        }
+      } as any,
+      requestId: 'req-stopless-goal-no-progress-1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      capabilities: {
+        reenterPipeline: true,
+        providerInvoker: false
+      }
+    });
+    expect(first?.flowId).toBe('stopless_goal_continue_flow');
+
+    for (let i = 0; i < 1; i += 1) {
+      const plan = await hook!.handler({
+        base,
+        toolCalls: [],
+        adapterContext: {
+          sessionId
+        } as any,
+        requestId: `req-stopless-goal-no-progress-${i + 2}`,
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        capabilities: {
+          reenterPipeline: true,
+          providerInvoker: false
+        }
+      });
+      expect(plan?.flowId).toBe('stopless_goal_continue_flow');
+    }
+
+    const third = await hook!.handler({
+      base,
+      toolCalls: [],
+      adapterContext: {
+        sessionId
+      } as any,
+      requestId: 'req-stopless-goal-no-progress-3',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      capabilities: {
+        reenterPipeline: true,
+        providerInvoker: false
+      }
+    });
+
+    expect(third).toBeNull();
+    const persisted = loadRoutingInstructionStateSync(`session:${sessionId}`);
+    expect((persisted?.stoplessGoalState as Record<string, unknown>)?.status).toBe('stopped');
+    expect((persisted?.stoplessGoalState as Record<string, unknown>)?.errorClass).toBe('repeated_no_progress');
+    expect((persisted?.stoplessGoalState as Record<string, unknown>)?.attemptsExhausted).toBe(true);
+    expect((persisted?.stoplessGoalState as Record<string, unknown>)?.consecutiveNoProgress).toBe(3);
   });
 });

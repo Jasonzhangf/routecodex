@@ -273,7 +273,7 @@ function validateApplyPatchToolSchema(sample: MockSample, body: Record<string, u
       }
     })();
     const error = new Error(
-      `apply_patch schema 校验失败：freeform 模式要求 input/patch schema（sample=${sample.reqId}，当前：${summary}）`
+      `apply_patch schema 校验失败：必须提供结构化 patch schema（sample=${sample.reqId}，当前：${summary}）`
     ) as MockRuntimeError & { status?: number };
     error.code = 'HTTP_400';
     (error as Record<string, unknown>).status = 400;

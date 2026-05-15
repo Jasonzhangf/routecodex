@@ -82,7 +82,7 @@ describe('tool governor apply_patch rewrite', () => {
     expect(policyMessage).toBeTruthy();
   });
 
-  it('rewrites invalid apply_patch args into reason-encoded guard payload on request path', () => {
+  it('leaves invalid apply_patch args on request path for Rust governance owner', () => {
     const badPatch = [
       '*** Begin Patch',
       '*** Update File: HEARTBEAT.md',
@@ -114,10 +114,10 @@ describe('tool governor apply_patch rewrite', () => {
     expect(fn?.name).toBe('apply_patch');
     const args = JSON.parse(String(fn?.arguments || '{}')) as Record<string, unknown>;
     const patchOrInput = String(args.patch || args.input || '');
-    expect(patchOrInput).toContain('__rcc_apply_patch_validation_error__/reason-unsupported-patch-format');
+    expect(patchOrInput).toContain('*** Update File: HEARTBEAT.md');
   });
 
-  it('rewrites invalid apply_patch args into reason-encoded guard payload on response path', () => {
+  it('leaves invalid apply_patch args in response helper without TS guard fallback', () => {
     const badPatch = [
       '*** Begin Patch',
       '*** Add File: src/empty.txt',
@@ -149,7 +149,7 @@ describe('tool governor apply_patch rewrite', () => {
     const fn = out.choices?.[0]?.message?.tool_calls?.[0]?.function;
     const args = JSON.parse(String(fn?.arguments || '{}')) as Record<string, unknown>;
     const patchOrInput = String(args.patch || args.input || '');
-    expect(patchOrInput).toContain('__rcc_apply_patch_validation_error__/reason-empty-add-file-block');
+    expect(patchOrInput).toContain('*** Add File: src/empty.txt');
   });
 
   it('does not rewrite noncanonical shell wrapper with extra commands into apply_patch payload', () => {
@@ -184,6 +184,6 @@ PATCH"`
     const fn = out.choices?.[0]?.message?.tool_calls?.[0]?.function;
     const args = JSON.parse(String(fn?.arguments || '{}')) as Record<string, unknown>;
     const patchOrInput = String(args.patch || args.input || '');
-    expect(patchOrInput).toContain('__rcc_apply_patch_validation_error__/reason-missing-changes');
+    expect(patchOrInput).toContain('bash -lc');
   });
 });

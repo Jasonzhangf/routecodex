@@ -80,7 +80,10 @@ export function syncStoplessGoalStateFromCapturedRequest(
   baseContext: Record<string, unknown>,
   onError?: (error: unknown) => void
 ): void {
-  if (isGoalCapableRequestPayload(baseContext.capturedChatRequest)) {
+  if (
+    isGoalCapableRequestPayload(baseContext.capturedChatRequest)
+    && hasRccFenceInPayload(baseContext.capturedChatRequest)
+  ) {
     return;
   }
   try {
