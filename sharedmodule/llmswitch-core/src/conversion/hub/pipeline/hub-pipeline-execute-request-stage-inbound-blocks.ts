@@ -5,7 +5,7 @@ import type { AdapterContext } from "../types/chat-envelope.js";
 import type { HubPipelineNodeResult, NormalizedRequest } from "./hub-pipeline.js";
 import type { RequestStageHooks } from "./hub-pipeline-stage-hooks.js";
 import { writeCacheEntryForRequest } from "./stages/req_inbound/req_inbound_stage3_context_capture/cache-write.js";
-import { persistResponsesConversationRequestContext } from "./stages/req_inbound/req_inbound_stage3_context_capture/responses-context-snapshot.js";
+import { captureResponsesRequestContext } from '../../shared/responses-conversation-store.js';
 import {
   buildReqInboundNodeResultWithNative,
   readResponsesResumeFromMetadataWithNative,
@@ -68,11 +68,24 @@ export async function captureInboundContextSnapshot<TContext = Record<string, un
       rawRequest: args.rawRequest,
       adapterContext: args.inboundAdapterContext,
     });
-    persistResponsesConversationRequestContext({
-      rawRequest: args.rawRequest,
-      adapterContext: args.inboundAdapterContext,
-      context: args.inboundStage2ResponsesContext,
-    });
+    // Inline persistResponsesConversationRequestContext
+    {
+      const reqId = typeof args.inboundAdapterContext.requestId === 'string'
+        ? args.inboundAdapterContext.requestId.trim() : undefined;
+      if (reqId) {
+        captureResponsesRequestContext({
+          requestId: reqId,
+          payload: args.rawRequest as unknown as Record<string, unknown>,
+          context: args.inboundStage2ResponsesContext as unknown as Record<string, unknown>,
+          sessionId: typeof (args.inboundAdapterContext as Record<string, unknown>).sessionId === 'string'
+            ? String((args.inboundAdapterContext as Record<string, unknown>).sessionId) : undefined,
+          conversationId: typeof (args.inboundAdapterContext as Record<string, unknown>).conversationId === 'string'
+            ? String((args.inboundAdapterContext as Record<string, unknown>).conversationId) : undefined,
+          routeHint: typeof (args.inboundAdapterContext as Record<string, unknown>).routeId === 'string'
+            ? String((args.inboundAdapterContext as Record<string, unknown>).routeId) : undefined,
+        });
+      }
+    }
     return args.inboundStage2ResponsesContext;
   }
   return args.hooks.captureContext({

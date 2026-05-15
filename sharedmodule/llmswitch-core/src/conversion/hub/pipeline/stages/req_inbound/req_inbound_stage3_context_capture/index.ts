@@ -6,9 +6,6 @@ import {
   normalizeProviderProtocolTokenWithNative
 } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
 import { captureResponsesRequestContext } from '../../../../../shared/responses-conversation-store.js';
-import {
-  captureResponsesContextSnapshot as captureResponsesContextSnapshotModule
-} from './responses-context-snapshot.js';
 import type {
   ContextCaptureHandler,
   ContextCaptureOptions,

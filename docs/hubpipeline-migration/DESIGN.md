@@ -958,3 +958,36 @@ rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs
 ## live 验证待完成
 
 **NOT VERIFIED**：5520 未重启 live 验证所有 Anthropic 路径。
+
+---
+
+## Phase 2 全部完成汇总
+
+| 文件 | 原行数 | 现行数 | 变化 |
+|------|--------|--------|------|
+| `responses_reasoning_registry.rs`（新增） | 0 | 576 | +576 Rust |
+| `hub_resp_outbound_client_semantics.rs` | 4690 | 4896 | +206 Rust |
+| `responses-reasoning-registry.ts` | 320 | 129 | -191 TS |
+| `response-runtime-anthropic.ts` | 432 | 406 | -26 TS |
+| `tool-governor.ts` | - | 87 | dead export清理 |
+| `client-remap-protocol-switch.ts` | 106 | 95 | -11 TS |
+| `req_inbound_stage1_format_parse/index.ts` | 113 | 93 | -20 TS |
+| `req_inbound_stage2_semantic_map/index.ts` | 307 | 296 | -11 TS |
+| `tool-output-snapshot.ts` | 26 | 0 | -26 TS（物理删除） |
+| `responses-context-snapshot.ts` | 58 | 0 | -58 TS（物理删除） |
+| `apply_patch dist/fixer` | - | - | 已删除（Phase 0） |
+
+### Rust NAPI 新增（Phase 2）
+- `responses_reasoning_registry`: 10 NAPI函数
+- `build_anthropic_response_from_chat_full_json`: 1 NAPI函数
+
+### 保留TS（专项，不在HubPipeline范围）
+- `tool-governor-request.ts`（196行）：tool governance专项
+- `applyAnthropicToolAliasSemantics`（~70行）：Anthropic专用
+- `buildOpenAIChatFromAnthropicMessage`（~300行）：依赖bridge policy TS
+
+### NOT VERIFIED
+- 5520 live重启未验证
+
+### build:min
+v0.90.1694
