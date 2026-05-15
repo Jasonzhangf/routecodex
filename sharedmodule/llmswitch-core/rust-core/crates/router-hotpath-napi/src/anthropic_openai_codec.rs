@@ -66,6 +66,11 @@ fn has_visible_text(value: &str) -> bool {
     !value.trim().is_empty()
 }
 
+fn is_likely_url(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("ftp://")
+}
+
 fn normalize_anthropic_tool_name(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -430,12 +435,94 @@ fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value
         }
 
         let mut blocks: Vec<Value> = Vec::new();
-        let text = collect_openai_chat_text(row.get("content").unwrap_or(&Value::Null));
-        if has_visible_text(&text) {
-            blocks.push(Value::Object(Map::from_iter([
-                ("type".to_string(), Value::String("text".to_string())),
-                ("text".to_string(), Value::String(text)),
-            ])));
+        let content_node = row.get("content").unwrap_or(&Value::Null);
+        if let Some(content_parts) = content_node.as_array() {
+            for part in content_parts {
+                let Some(part_obj) = part.as_object() else {
+                    continue;
+                };
+                let part_type = read_trimmed_string(part_obj.get("type"))
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                if part_type == "image" {
+                    if let Some(source) = part_obj.get("source").and_then(|v| v.as_object()) {
+                        let source_type = read_trimmed_string(source.get("type"))
+                            .unwrap_or_default()
+                            .to_ascii_lowercase();
+                        if source_type == "base64" {
+                            let media_type = read_trimmed_string(source.get("media_type")).unwrap_or_default();
+                            let data = read_trimmed_string(source.get("data")).unwrap_or_default();
+                            if media_type.is_empty() || data.is_empty() {
+                                panic!("Anthropic bridge constraint violated: embedded image source must include non-empty base64 data and media_type");
+                            }
+                        }
+                        blocks.push(Value::Object(Map::from_iter([
+                            ("type".to_string(), Value::String("image".to_string())),
+                            ("source".to_string(), Value::Object(source.clone())),
+                        ])));
+                    }
+                    continue;
+                }
+                if part_type == "image_url" || part_type == "input_image" {
+                    let image_url_value = part_obj.get("image_url");
+                    let mut url = String::new();
+                    if let Some(Value::String(raw)) = image_url_value {
+                        url = raw.trim().to_string();
+                    } else if let Some(Value::Object(node)) = image_url_value {
+                        if let Some(raw) = read_trimmed_string(node.get("url")) {
+                            url = raw;
+                        }
+                    }
+                    if url.is_empty() {
+                        continue;
+                    }
+                    let source = if url.to_ascii_lowercase().starts_with("data:") {
+                        let Some(comma_idx) = url.find(',') else {
+                            panic!("Anthropic bridge constraint violated: malformed data URL image payload");
+                        };
+                        let header = &url[..comma_idx];
+                        let data = &url[comma_idx + 1..];
+                        let media_type = header
+                            .strip_prefix("data:")
+                            .and_then(|s| s.split(';').next())
+                            .filter(|s| !s.trim().is_empty())
+                            .unwrap_or("image/png");
+                        Value::Object(Map::from_iter([
+                            ("type".to_string(), Value::String("base64".to_string())),
+                            ("media_type".to_string(), Value::String(media_type.to_string())),
+                            ("data".to_string(), Value::String(data.to_string())),
+                        ]))
+                    } else if is_likely_url(&url) {
+                        Value::Object(Map::from_iter([
+                            ("type".to_string(), Value::String("url".to_string())),
+                            ("url".to_string(), Value::String(url)),
+                        ]))
+                    } else {
+                        panic!("Anthropic bridge constraint violated: image_url must be a valid URL or data URL");
+                    };
+                    blocks.push(Value::Object(Map::from_iter([
+                        ("type".to_string(), Value::String("image".to_string())),
+                        ("source".to_string(), source),
+                    ])));
+                    continue;
+                }
+                if part_type == "text" || part_type == "input_text" {
+                    if let Some(text) = read_trimmed_string(part_obj.get("text")) {
+                        blocks.push(Value::Object(Map::from_iter([
+                            ("type".to_string(), Value::String("text".to_string())),
+                            ("text".to_string(), Value::String(text)),
+                        ])));
+                    }
+                }
+            }
+        } else {
+            let text = collect_openai_chat_text(content_node);
+            if has_visible_text(&text) {
+                blocks.push(Value::Object(Map::from_iter([
+                    ("type".to_string(), Value::String("text".to_string())),
+                    ("text".to_string(), Value::String(text)),
+                ])));
+            }
         }
 
         if role.eq_ignore_ascii_case("assistant") {

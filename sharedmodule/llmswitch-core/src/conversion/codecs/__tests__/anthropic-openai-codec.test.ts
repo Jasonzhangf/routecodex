@@ -302,4 +302,61 @@ describe('anthropic-openai-codec native wrapper', () => {
       input: { cmd: 'pwd' }
     });
   });
+
+  test('keeps embedded image as anthropic base64 source when chat content uses data URL', () => {
+    const result = buildAnthropicRequestFromOpenAIChat(
+      {
+        model: 'claude-3-7-sonnet',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'input_text', text: 'look' },
+              {
+                type: 'input_image',
+                image_url: {
+                  url: 'data:image/png;base64,QUJDRA=='
+                }
+              }
+            ]
+          }
+        ]
+      } as any
+    );
+
+    expect((result as any).messages[0].content).toEqual([
+      {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+          data: 'QUJDRA=='
+        }
+      },
+      { type: 'text', text: 'look' }
+    ]);
+  });
+
+  test('fails fast on malformed embedded image data URL', () => {
+    expect(() =>
+      buildAnthropicRequestFromOpenAIChat(
+        {
+          model: 'claude-3-7-sonnet',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'input_image',
+                  image_url: {
+                    url: 'data:image/png;base64'
+                  }
+                }
+              ]
+            }
+          ]
+        } as any
+      )
+    ).toThrow('malformed data URL image payload');
+  });
 });

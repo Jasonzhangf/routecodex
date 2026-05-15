@@ -75,6 +75,10 @@ function isAnthropicToolDefinitionArray(value: unknown): value is Array<Record<s
   });
 }
 
+function isLikelyUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value) || /^ftp:\/\//i.test(value);
+}
+
 export function buildAnthropicRequestFromOpenAIChat(
   chatReq: unknown,
   options?: { requestId?: string },
@@ -250,6 +254,23 @@ export function buildAnthropicRequestFromOpenAIChat(
         const node = entry as Record<string, unknown>;
         const t = typeof node.type === 'string' ? node.type.toLowerCase() : '';
         if (t === 'image' && node.source && typeof node.source === 'object') {
+          const sourceNode = node.source as Record<string, unknown>;
+          const sourceType = typeof sourceNode.type === 'string' ? sourceNode.type.trim().toLowerCase() : '';
+          if (sourceType === 'base64') {
+            const data = typeof sourceNode.data === 'string' ? sourceNode.data.trim() : '';
+            const mediaType = typeof sourceNode.media_type === 'string' ? sourceNode.media_type.trim() : '';
+            if (!data || !mediaType) {
+              throw new ProviderProtocolError(
+                'Anthropic bridge constraint violated: embedded image source must include non-empty base64 data and media_type',
+                {
+                  code: 'MALFORMED_REQUEST',
+                  protocol: 'anthropic-messages',
+                  providerType: 'anthropic',
+                  details: { context: 'chat.image.source.base64' }
+                }
+              );
+            }
+          }
           blocks.push({
             type: 'image',
             source: jsonClone(node.source as JsonValue)
@@ -275,12 +296,29 @@ export function buildAnthropicRequestFromOpenAIChat(
               source.media_type = mediaType;
               source.data = match[2] || '';
             } else {
-              source.type = 'url';
-              source.url = trimmed;
+              throw new ProviderProtocolError(
+                'Anthropic bridge constraint violated: malformed data URL image payload',
+                {
+                  code: 'MALFORMED_REQUEST',
+                  protocol: 'anthropic-messages',
+                  providerType: 'anthropic',
+                  details: { context: 'chat.image_url.data_url' }
+                }
+              );
             }
-          } else {
+          } else if (isLikelyUrl(trimmed)) {
             source.type = 'url';
             source.url = trimmed;
+          } else {
+            throw new ProviderProtocolError(
+              'Anthropic bridge constraint violated: image_url must be a valid URL or data URL',
+              {
+                code: 'MALFORMED_REQUEST',
+                protocol: 'anthropic-messages',
+                providerType: 'anthropic',
+                details: { context: 'chat.image_url', value: trimmed.slice(0, 80) }
+              }
+            );
           }
           blocks.push({
             type: 'image',
