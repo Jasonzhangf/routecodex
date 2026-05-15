@@ -1,7 +1,6 @@
 import { buildAnthropicResponseFromChat } from '../../../../response/response-runtime.js';
 import { type JsonObject } from '../../../../types/json.js';
 import type { BridgeToolDefinition } from '../../../../../types/bridge-message-types.js';
-import { normalizeResponsesToolCallIds } from '../../../../../shared/responses-tool-utils.js';
 import {
   applyClientPassthroughPatchWithNative,
   buildResponsesPayloadFromChatWithNative,
@@ -14,6 +13,7 @@ import {
   assertNoUnknownToolNamesWithNative,
   remapChatToolCallsWithNative,
 } from '../../../../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
+import { normalizeResponsesToolCallIdsWithNative } from '../../../../../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
 
 export type ClientProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages';
 
@@ -99,7 +99,7 @@ export function buildClientPayloadForProtocol(options: ClientRemapProtocolSwitch
   ) as JsonObject;
   Object.assign(clientPayload as Record<string, unknown>, patchedPayload as Record<string, unknown>);
   if (options.clientProtocol === 'openai-responses') {
-    normalizeResponsesToolCallIds(clientPayload as Record<string, unknown>);
+    normalizeResponsesToolCallIdsWithNative(clientPayload);
   }
   enforceClientToolNameContract(options, clientPayload, toolsRaw);
   return clientPayload;

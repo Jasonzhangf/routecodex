@@ -51,15 +51,6 @@ export interface ReqInboundStage2SemanticMapResult {
   standardizedRequest: StandardizedRequest;
   responsesContext?: JsonObject;
 }
-function buildSlimResponsesContextForSemantics(
-  context: JsonObject | undefined,
-): JsonObject | undefined {
-  if (!context || typeof context !== "object" || Array.isArray(context)) {
-    return undefined;
-  }
-  const result = buildSlimResponsesContextWithNative(context as Record<string, unknown>);
-  return (result as JsonObject) ?? undefined;
-}
 
 export async function runReqInboundStage2SemanticMap(
   options: ReqInboundStage2SemanticMapOptions,
@@ -100,8 +91,7 @@ export async function runReqInboundStage2SemanticMap(
     return contextNode;
   })();
   const semanticsResponsesContext =
-    buildSlimResponsesContextForSemantics(preservedResponsesContext) ??
-    preservedResponsesContext;
+    buildSlimResponsesContextWithNative(preservedResponsesContext as Record<string, unknown>) as JsonObject ?? preservedResponsesContext;
   logHubStageTiming(
     requestId,
     "req_inbound.stage2_operation_table_inbound",
@@ -282,8 +272,7 @@ export async function runReqInboundStage2SemanticMap(
           : undefined;
       if (envelopeContext) {
         const slimContext =
-          buildSlimResponsesContextForSemantics(envelopeContext) ??
-          envelopeContext;
+          buildSlimResponsesContextWithNative(envelopeContext as Record<string, unknown>) as JsonObject ?? envelopeContext;
         const nextResponses = {
           ...(isJsonObject((existingObj as any).responses)
             ? ((existingObj as any).responses as JsonObject)

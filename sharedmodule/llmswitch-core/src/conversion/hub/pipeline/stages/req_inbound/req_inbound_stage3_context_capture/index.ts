@@ -1,14 +1,16 @@
 import type { ResponsesRequestContext } from '../../../../../responses/responses-openai-bridge.js';
-import { buildToolOutputSnapshot } from './tool-output-snapshot.js';
+import { runReqInboundStage3ContextCaptureOrchestration } from './context-capture-orchestration.js';
 import {
-  captureResponsesContextSnapshot as captureResponsesContextSnapshotModule,
-  type ResponsesContextCaptureOptions
+  buildReqInboundToolOutputSnapshotWithNative,
+  captureReqInboundResponsesContextSnapshotWithNative,
+  normalizeProviderProtocolTokenWithNative
+} from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
+import { captureResponsesRequestContext } from '../../../../../shared/responses-conversation-store.js';
+import {
+  captureResponsesContextSnapshot as captureResponsesContextSnapshotModule
 } from './responses-context-snapshot.js';
-import {
-  runReqInboundStage3ContextCaptureOrchestration
-} from './context-capture-orchestration.js';
-import { normalizeProviderProtocolTokenWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
 import type {
+  ContextCaptureHandler,
   ContextCaptureOptions,
   ReqInboundStage3ContextCaptureOptions
 } from './context-capture-orchestration.js';
@@ -37,17 +39,38 @@ export function runChatContextCapture(
   });
 }
 
-export function captureResponsesContextSnapshot(options: ContextCaptureOptions): ResponsesRequestContext {
-  // 写入请求到 CACHE.md（responses input）
+export function captureResponsesContextSnapshot(
+  options: ContextCaptureOptions
+): ResponsesRequestContext {
+  // Write request to CACHE.md (responses input)
   writeCacheEntryForRequest(options);
-  return captureResponsesContextSnapshotModule(options as ResponsesContextCaptureOptions);
+  const context = captureReqInboundResponsesContextSnapshotWithNative({
+    rawRequest: options.rawRequest as unknown as Record<string, unknown>,
+    requestId: options.adapterContext.requestId,
+    toolCallIdStyle: (options.adapterContext as Record<string, unknown>).toolCallIdStyle as string | undefined,
+  }) as unknown as ResponsesRequestContext;
+  const requestId = options.adapterContext.requestId;
+  if (requestId) {
+    captureResponsesRequestContext({
+      requestId,
+      payload: options.rawRequest as unknown as Record<string, unknown>,
+      context: context as unknown as Record<string, unknown>,
+      sessionId: typeof (options.adapterContext as Record<string, unknown>).sessionId === 'string'
+        ? String((options.adapterContext as Record<string, unknown>).sessionId) : undefined,
+      conversationId: typeof (options.adapterContext as Record<string, unknown>).conversationId === 'string'
+        ? String((options.adapterContext as Record<string, unknown>).conversationId) : undefined,
+      routeHint: typeof (options.adapterContext as Record<string, unknown>).routeId === 'string'
+        ? String((options.adapterContext as Record<string, unknown>).routeId) : undefined,
+    });
+  }
+  return context;
 }
 
 function captureChatContextSnapshot(options: ContextCaptureOptions): Record<string, unknown> {
   const protocol = normalizeProviderProtocolTokenWithNative(options.adapterContext.providerProtocol);
-
-  // 写入请求到 CACHE.md（最后一条 user message）
   writeCacheEntryForRequest(options);
-
-  return buildToolOutputSnapshot(options.rawRequest, protocol);
+  return buildReqInboundToolOutputSnapshotWithNative(
+    options.rawRequest as unknown as Record<string, unknown>,
+    protocol
+  );
 }

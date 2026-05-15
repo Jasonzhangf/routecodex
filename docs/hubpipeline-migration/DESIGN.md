@@ -678,3 +678,211 @@ rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs
 
 ### 标注
 - **live 测试**：5520 未重启验证 ⚠️ NOT VERIFIED
+
+---
+
+## Slice 3.4: req_inbound_stage1_format_parse 收口 → ✅
+
+**完成时间**：2026-05-15
+
+### 变更
+| 文件 | 变更 |
+|------|------|
+| `req_inbound_stage1_format_parse/index.ts` | 删除 3 个 thin wrappers（`resolveProtocolToken`/`shouldNormalize`/`normalize`）；内联 Rust 调用链；113→93 行（-20 行） |
+
+### 验证
+| 测试 | 结果 |
+|------|------|
+| tsc --noEmit | ✅ 0 错误 |
+| build:min | ✅ v0.90.1675 |
+| unified-hub-shadow | ✅ diff=0 |
+
+### 语义状态
+- **Rust 唯一真源**：`shouldNormalizeReasoningPayloadWithNative` + `normalizeReasoningPayloadV2WithNative` + `resolveHubProviderProtocolWithNative`
+- **TS 残留**：`approximateJsonBytes`（纯 logging utility，7 行）
+- **标注**：NOT VERIFIED（5520 未重启）
+
+---
+
+## Slice 3.5: buildSlimResponsesContextForSemantics 收口 → ✅
+
+**完成时间**：2026-05-15
+
+### 变更
+| 文件 | 变更 |
+|------|------|
+| `req_inbound_stage2_semantic_map/index.ts` | 删除 `buildSlimResponsesContextForSemantics` wrapper 函数（8 行）；两处调用点内联为 `buildSlimResponsesContextWithNative` 直接调用；307→296 行（-11 行） |
+
+### 验证
+| 测试 | 结果 |
+|------|------|
+| tsc --noEmit | ✅ 0 错误 |
+| build:min | ✅ v0.90.1675 |
+| unified-hub-shadow | ✅ diff=0 |
+
+### 语义状态
+- **Rust 唯一真源**：`buildSlimResponsesContextWithNative`
+- **TS 残留**：无（wrapper 已内联删除）
+
+---
+
+## Slice 3.6: normalizeRequestToolCalls 评估 → ⚠️ 结论：暂不迁移
+
+**评估时间**：2026-05-15
+
+### 评估对象
+| 函数 | 路径 | 现状 | 结论 |
+|------|------|------|------|
+| `normalizeRequestToolCalls` | `tool-governor-request.ts` | 纯 TS，耦合 validator/regression/guards | **暂不迁移**：超出 req_inbound stage 范围，需大改架构 |
+| `normalizeReqInboundShellLikeToolCallsWithNative` | `semantic_map` 调用 | ✅ 已接入 Rust | 无需操作 |
+| `applyAnthropicToolAliasSemantics` | `semantic_map` 调用 | 纯 TS，Anthropic 特定 | **暂不迁移**：Anthropic 特定逻辑，非 HubPipeline 主线 |
+| `buildAnthropicToolAliasMapWithNative` | `semantic_map` 调用 | ✅ 已接入 Rust | 无需操作 |
+
+### 下一步建议
+- **Slice 3.7**：`req_inbound_stage2_semantic_map` 主体 orchestrator 评估（296 行 await/toChat/bridge/operation-table）
+- **独立任务**：`normalizeRequestToolCalls` 作为 tool-governance 专项迁移
+
+---
+
+## Phase 1 Slice 3 当前累计
+
+| 指标 | 数值 |
+|------|------|
+| 初始行数（stage1_format_parse） | 113 行 |
+| 当前行数 | 93 行 |
+| 减少 | **20 行（18%）** |
+| semantic_map | 307→296 行（-11 行） |
+| **累计减少** | **~31 行 TS 物理删除** |
+
+### 待推进
+- Slice 3.7：semantic_map 主体 orchestrator 评估
+- Slice 4：`req_inbound format_parse` 剩余 Rust 接入点
+
+
+---
+
+## Slice 3.7: req_inbound_stage3_context_capture 审计 → ✅ 完成
+
+**完成时间**：2026-05-15
+
+### 审计结论
+
+| 文件 | 行数 | 评估 | 动作 |
+|------|------|------|------|
+| `tool-output-snapshot.ts` | 26 | ✅ 纯 Rust wrapper | **已物理删除** |
+| `context-capture-orchestration.ts` | 59→62 | orchestrator 控制流 | 无法迁 Rust |
+| `context-factories.ts` | 29 | factory wrapper | 无法迁 Rust |
+| `responses-context-snapshot.ts` | 58 | 待独立审计 | 非 HubPipeline 主线 |
+| `cache-write.ts` | 70 | 依赖 servertool/cache-writer | **不迁移**：独立基础设施 |
+| `index.ts` | 53→58 | thin wrapper | 保留 |
+
+### 变更
+| 文件 | 变更 |
+|------|------|
+| `tool-output-snapshot.{ts,d.ts}` | **物理删除**（26 行 TS wrapper） |
+| `context-capture-orchestration.ts` | 直接调用 `buildReqInboundToolOutputSnapshotWithNative`，删除 import |
+| `index.ts` | 直接调用 `buildReqInboundToolOutputSnapshotWithNative`，删除 import |
+
+### 验证
+| 测试 | 结果 |
+|------|------|
+| tsc --noEmit | ✅ 0 错误 |
+| build:min | ✅ v0.90.1676 |
+| unified-hub-shadow | ✅ diff=0 |
+
+### 剩余文件（stage3_context_capture）
+| 文件 | 行数 | Rust | 备注 |
+|------|------|------|------|
+| `index.ts` | 58 | ✅ 部分 | orchestrator thin wrapper |
+| `context-capture-orchestration.ts` | 62 | ✅ 部分 | 控制流 |
+| `context-factories.ts` | 29 | ✅ 部分 | factory |
+| `responses-context-snapshot.ts` | 58 | ❌ 待审计 | 非 HubPipeline 主线 |
+| `cache-write.ts` | 70 | ❌ | 独立基础设施 |
+
+### 标注
+- **NOT VERIFIED**：5520 未重启 live 验证
+- **无新 Rust 能力补齐**：无需
+
+---
+
+## Phase 1 Slice 3 最终累计
+
+| 指标 | 数值 |
+|------|------|
+| stage1_format_parse | 113→93 行（-20 行） |
+| stage2_semantic_map | 307→296 行（-11 行） |
+| stage3_context_capture | -26 行（tool-output-snapshot 物理删除） |
+| **累计减少** | **~57 行 TS 物理删除** |
+
+### 剩余未推进
+- `stage2_semantic_map`：`applyAnthropicToolAliasSemantics`（Anthropic 专用）
+- `stage2_semantic_map`：`normalizeRequestToolCalls`（tool-governance 专项）
+- `stage3`：responses-context-snapshot 审计
+
+
+---
+
+## Slice 3.8: stage3 剩余审计 → ⚠️ 部分完成
+
+**完成时间**：2026-05-15
+
+### 审计结论
+| 文件 | 行数 | 评估 | 动作 |
+|------|------|------|------|
+| `tool-output-snapshot.ts` | 26 | ✅ 纯 Rust wrapper | **已物理删除** |
+| `responses-context-snapshot.ts` | 58 | `persistResponsesConversationRequestContext` 仍被外部调用 | **保留**：待独立清理 |
+| `context-factories.ts` | 29 | factory wrapper | 无法迁 Rust |
+| `cache-write.ts` | 70 | 依赖 servertool/cache-writer | **不迁移** |
+
+### 变更
+| 文件 | 变更 |
+|------|------|
+| `tool-output-snapshot.{ts,d.ts}` | **物理删除**（26 行） |
+| `context-capture-orchestration.ts` | 直连 Rust |
+| `index.ts` | 内联 `captureResponsesContextSnapshot`，保留 `responses-context-snapshot` import |
+| Rust：`req_process_stage2_route_select.rs` | 修复 `.as_deref()` → `.clone()`（stash pre-existing） |
+
+### 验证
+| 测试 | 结果 |
+|------|------|
+| tsc --noEmit | ✅ 0 错误 |
+| build:min | ✅ v0.90.1680 |
+| unified-hub-shadow | ✅ diff=0 |
+
+---
+
+## Slice 3.9: semantic_map unused imports → ✅ 无需操作
+
+**完成时间**：2026-05-15
+
+### 结论
+所有 imports 均在使用，无 unused imports。
+
+---
+
+## Slice 4: resp_outbound `normalizeResponsesToolCallIds` 内联 → ✅
+
+**完成时间**：2026-05-15
+
+### 变更
+| 文件 | 变更 |
+|------|------|
+| `client-remap-protocol-switch.ts` | 删除 `normalizeResponsesToolCallIds` import（从 responses-tool-utils）；直连 `normalizeResponsesToolCallIdsWithNative`（从 native-shared-conversion-semantics） |
+
+### 验证
+| 测试 | 结果 |
+|------|------|
+| build:min | ✅ v0.90.1680 |
+| unified-hub-shadow | ✅ diff=0 |
+
+### resp_outbound 剩余审计（106 行）
+| 函数 | 行数 | Rust | 评估 |
+|------|------|------|------|
+| `remapChatToolCallsToClientNames` | 8 | ✅ 已迁移 | 活跃 |
+| `remapResponsesToolCallsToClientNames` | 8 | ✅ 已迁移 | 活跃 |
+| `enforceClientToolNameContract` | 20 | ✅ 已迁移 | 活跃 |
+| `buildClientPayloadForProtocol` | ~60 | 部分 Rust | **唯一剩余主体** |
+| `normalizeResponsesToolCallIds` | 6 | ✅ 已内联 | **已删除** |
+
+### 下一步建议
+- `buildClientPayloadForProtocol`（~60 行）：判断是否拆分为多个 Rust 函数，或整体迁移

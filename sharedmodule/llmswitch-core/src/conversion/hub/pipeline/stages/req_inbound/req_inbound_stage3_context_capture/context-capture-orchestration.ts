@@ -2,9 +2,9 @@ import type { AdapterContext } from '../../../../types/chat-envelope.js';
 import type { StageRecorder } from '../../../../format-adapters/index.js';
 import type { JsonObject } from '../../../../types/json.js';
 import { recordStage } from '../../../stages/utils.js';
-import { buildToolOutputSnapshot } from './tool-output-snapshot.js';
 import {
   augmentReqInboundContextSnapshotWithNative,
+  buildReqInboundToolOutputSnapshotWithNative,
   resolveReqInboundServerToolFollowupSnapshotWithNative
 } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
 
@@ -50,7 +50,10 @@ export async function runReqInboundStage3ContextCaptureOrchestration(
     }
   }
 
-  const baseSnapshot = buildToolOutputSnapshot(options.rawRequest, options.adapterContext.providerProtocol);
+  const baseSnapshot = buildReqInboundToolOutputSnapshotWithNative(
+    options.rawRequest as unknown as Record<string, unknown>,
+    options.adapterContext.providerProtocol
+  );
   const snapshot = context
     ? augmentReqInboundContextSnapshotWithNative(context, baseSnapshot)
     : baseSnapshot;
