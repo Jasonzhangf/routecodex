@@ -138,6 +138,29 @@ export function normalizeReqInboundReasoningPayloadWithNative(
   }
 }
 
+
+export function normalizeReasoningPayloadV2WithNative(
+  input: NativeReqInboundReasoningNormalizeInput
+): { normalizedRequest: unknown; strategy: string } {
+  const capability = 'normalizeReasoningPayloadV2Json';
+  const fail = (reason?: string) => { throw new Error(`[normalizeReasoningPayloadV2] ${reason ?? 'native unavailable'}`); };
+  if (isNativeDisabledByEnv()) return fail('native disabled');
+  const fn = readNativeFunction(capability);
+  if (!fn) return fail();
+  const inputJson = safeStringify(input);
+  if (!inputJson) return fail('json stringify failed');
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) return fail('empty result');
+    const parsed = JSON.parse(raw) as { normalizedRequest: unknown; strategy: string };
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fail('invalid result');
+    return parsed;
+  } catch (error: unknown) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function shouldNormalizeReasoningPayloadWithNative(
   payload: Record<string, unknown>,
   protocol: string

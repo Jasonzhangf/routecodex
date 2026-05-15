@@ -1478,3 +1478,75 @@ pub fn build_slim_responses_context_json(input_json: String) -> NapiResult<Strin
     }
     serde_json::to_string(&Value::Object(result)).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
+
+pub fn normalize_reasoning_payload_v2_json(input_json: String) -> NapiResult<String> {
+    let mut value: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let protocol = value
+        .as_object()
+        .and_then(|row| row.get("protocol"))
+        .and_then(Value::as_str)
+        .unwrap_or("openai-chat")
+        .trim()
+        .to_ascii_lowercase();
+    let mut fallback = Value::Null;
+    let payload = value
+        .as_object_mut()
+        .and_then(|row| row.get_mut("payload"))
+        .unwrap_or(&mut fallback);
+    if payload.is_null() {
+        let result = serde_json::json!({
+            "normalizedRequest": Value::Null,
+            "strategy": "fast_path"
+        });
+        return serde_json::to_string(&result).map_err(|e| napi::Error::from_reason(e.to_string()));
+    }
+    let obj = match payload.as_object_mut() {
+        Some(o) => o,
+        None => {
+            let result = serde_json::json!({
+                "normalizedRequest": payload.clone(),
+                "strategy": "fast_path"
+            });
+            return serde_json::to_string(&result).map_err(|e| napi::Error::from_reason(e.to_string()));
+        }
+    };
+    match protocol.as_str() {
+        "openai-responses" => {
+            let options = serde_json::json!({
+                "includeInput": true,
+                "includeInstructions": true
+            });
+            normalize_reasoning_in_responses_payload(payload, &options);
+            let result = serde_json::json!({
+                "normalizedRequest": payload.clone(),
+                "strategy": "native"
+            });
+            serde_json::to_string(&result).map_err(|e| napi::Error::from_reason(e.to_string()))
+        }
+        "anthropic-messages" => {
+            normalize_reasoning_in_anthropic_payload(payload);
+            let result = serde_json::json!({
+                "normalizedRequest": payload.clone(),
+                "strategy": "native"
+            });
+            serde_json::to_string(&result).map_err(|e| napi::Error::from_reason(e.to_string()))
+        }
+        "gemini-chat" => {
+            normalize_reasoning_in_gemini_payload(payload);
+            let result = serde_json::json!({
+                "normalizedRequest": payload.clone(),
+                "strategy": "native"
+            });
+            serde_json::to_string(&result).map_err(|e| napi::Error::from_reason(e.to_string()))
+        }
+        _ => {
+            normalize_reasoning_in_chat_payload(payload);
+            let result = serde_json::json!({
+                "normalizedRequest": payload.clone(),
+                "strategy": "native"
+            });
+            serde_json::to_string(&result).map_err(|e| napi::Error::from_reason(e.to_string()))
+        }
+    }
+}

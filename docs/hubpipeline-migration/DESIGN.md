@@ -634,3 +634,47 @@ rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs
 
 ### 标注
 - **live 测试**：5520 未重启验证 ⚠️
+
+---
+
+## Slice 3.3: normalizeReqInboundReasoningPayload → Rust ✅
+
+**完成时间**：2026-05-15
+
+### 变更
+| 文件 | 变更 |
+|------|------|
+| `rust-core/.../bindings.rs` | 添加 `normalize_reasoning_payload_v2_json`（~120 行 Rust） |
+| `rust-core/.../mod.rs` | 导出 |
+| `rust-core/.../lib.rs` | 暴露 `normalize_reasoning_payload_v2_json` |
+| `native-router-hotpath-required-exports.ts` | 添加 `normalizeReasoningPayloadV2Json` |
+| `native-hub-pipeline-req-inbound-semantics.ts` | 添加 `normalizeReasoningPayloadV2WithNative` wrapper |
+| `req_inbound_stage1_format_parse/index.ts` | `normalizeReqInboundReasoningPayload` 改用 Rust v2（113 行 TS → ~20 行） |
+
+### 删除的 TS 功能代码（物理删除）
+- `responsesPayloadMayContainReasoningMarkup`（payload 级 ~20 行）
+- `findLatestResponsesReasoningTarget`（~15 行）
+- `responsesItemIsReasoningCarrier`（~18 行）
+- `responsesItemMayContainReasoningMarkup`（item 级 ~20 行）
+- `responsesContentMayContainReasoningMarkup`（~27 行）
+- `normalizeLatestResponsesReasoningTarget`（~32 行）
+- `shouldNormalizeReqInboundReasoningPayload` body（~30 行）
+- `ResponsesReasoningTarget` interface
+- 未使用 imports（`normalizeReqInboundReasoningPayloadWithNative`、`valueMayContainReasoningMarkup`）
+- 约 **~190 行 TS 物理删除**
+
+### 验证
+| 测试 | 结果 |
+|------|------|
+| cargo build | ✅ |
+| build:min | ✅ v0.90.1669 |
+| unified-hub-shadow | ✅ diff=0 |
+
+### 语义状态
+- **Rust 唯一真源**：`normalize_reasoning_payload_v2_json`（responses 全量 normalize）
+- **TS 薄 wrapper**：`normalizeReqInboundReasoningPayload`（调用 Rust v2，20 行）
+- **语义变化**：fast-path（仅 latest item）→ 全量 normalize（所有 items）
+- **logging `target` 字段**：已移除（仅用于日志，无下游依赖）
+
+### 标注
+- **live 测试**：5520 未重启验证 ⚠️ NOT VERIFIED
