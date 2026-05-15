@@ -204,28 +204,7 @@ export function resolveSessionStormBackoffMaxMs(): number {
 }
 
 export function resolveSessionStormHardBlockMsForError(error?: unknown): number {
-  if (isClientToolArgsInvalidStorm(error)) {
-    const raw =
-      process.env.ROUTECODEX_SESSION_STORM_HARD_BLOCK_MS
-      ?? process.env.RCC_SESSION_STORM_HARD_BLOCK_MS
-      ?? '';
-    const parsed = Number.parseInt(String(raw).trim(), 10);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
-    return process.env.NODE_ENV === 'test' ? 1_000 : 60_000;
-  }
-  if (isDeterministicNoProviderStorm(error)) {
-    const raw =
-      process.env.ROUTECODEX_SESSION_STORM_NO_PROVIDER_BLOCK_MS
-      ?? process.env.RCC_SESSION_STORM_NO_PROVIDER_BLOCK_MS
-      ?? '';
-    const parsed = Number.parseInt(String(raw).trim(), 10);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
-    return process.env.NODE_ENV === 'test' ? 500 : 15_000;
-  }
+  void error;
   return 0;
 }
 

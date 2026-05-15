@@ -5,7 +5,6 @@ import { buildRequestMetadata, cloneClientHeaders, resolveClientRequestId } from
 import { bindSessionConversationSession } from './request-retry-helpers.js';
 import { writeInboundClientSnapshot } from './request-executor-core-utils.js';
 import {
-  buildSessionStormHardBlockError,
   peekSessionStormBackoffWaitMs,
   resolveSessionStormBackoffScopes,
   waitSessionStormBackoffWithGate
@@ -39,15 +38,6 @@ export async function initializeRequestExecutorRequestState(args: {
   const clientRequestId = resolveClientRequestId(initialMetadata, providerRequestId);
   const sessionStormBackoffScopes = resolveSessionStormBackoffScopes(initialMetadata);
   for (const scope of sessionStormBackoffScopes) {
-    const hardBlockError = buildSessionStormHardBlockError(scope);
-    if (hardBlockError) {
-      const details = (hardBlockError as { details?: Record<string, unknown> }).details ?? {};
-      args.logStage('request.session_storm_hard_blocked', providerRequestId, {
-        scope,
-        ...details
-      });
-      throw hardBlockError;
-    }
     const pendingSessionStormWaitMs = peekSessionStormBackoffWaitMs(scope);
     if (!(pendingSessionStormWaitMs > 0)) {
       continue;
