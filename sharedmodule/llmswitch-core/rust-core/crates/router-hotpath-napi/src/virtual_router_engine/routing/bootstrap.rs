@@ -23,6 +23,9 @@ pub(crate) struct NormalizedRoutePoolConfig {
     pub load_balancing: Option<LoadBalancingPolicy>,
     #[serde(rename = "routeParams", skip_serializing_if = "Option::is_none")]
     pub route_params: Option<Map<String, Value>>,
+    /// Reasoning effort override for this route pool (low/medium/high/off).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -255,6 +258,7 @@ fn expand_routing_table(
                 force: pool.force,
                 load_balancing: pool.load_balancing.clone(),
                 route_params: pool.route_params.clone(),
+                thinking: pool.thinking.clone(),
             });
         }
         routing.insert(route_name.clone(), expanded_pools);
@@ -273,6 +277,7 @@ fn build_legacy_route_pool(route_name: &str, targets: Vec<String>) -> Normalized
             force: None,
             load_balancing: None,
             route_params: None,
+            thinking: None,
         }
 }
 
@@ -296,6 +301,7 @@ fn normalize_route_pool_entry(
                 force: None,
                 load_balancing: None,
                 route_params: None,
+                thinking: None,
             })
         };
     }
@@ -317,6 +323,7 @@ fn normalize_route_pool_entry(
                 health_weighted: None,
             }),
             route_params,
+            thinking: normalize_thinking(record),
         });
     }
     let id = read_optional_string(record.get("id"))
@@ -367,6 +374,7 @@ fn normalize_route_pool_entry(
         },
         load_balancing,
         route_params,
+        thinking: normalize_thinking(record),
     })
 }
 
@@ -378,6 +386,7 @@ fn normalize_simplified_weighted_route(
     let mut targets: Vec<String> = Vec::new();
     let mut weights: HashMap<String, i64> = HashMap::new();
     let mut route_params: Option<Map<String, Value>> = None;
+    let mut thinking: Option<String> = None;
     for entry in entries {
         let record = entry.as_object()?;
         let (target, weight, params) = normalize_simplified_weighted_target(record)?;
@@ -387,6 +396,9 @@ fn normalize_simplified_weighted_route(
         weights.insert(target, weight);
         if route_params.is_none() {
             route_params = params;
+        }
+        if thinking.is_none() {
+            thinking = normalize_thinking(record);
         }
     }
     if targets.is_empty() {
@@ -405,6 +417,7 @@ fn normalize_simplified_weighted_route(
             health_weighted: None,
         }),
         route_params,
+        thinking,
     })
 }
 
@@ -446,6 +459,33 @@ fn normalize_route_params(record: &Map<String, Value>) -> Option<Map<String, Val
         }
     }
     if params.is_empty() { None } else { Some(params) }
+}
+
+/// Extract the top-level `thinking` field from a route pool record.
+/// Returns the string value if present, None otherwise.
+fn normalize_thinking(record: &Map<String, Value>) -> Option<String> {
+    for key in ["thinking", "reasoningEffort", "reasoning_effort"] {
+        if let Some(value) = record.get(key).and_then(Value::as_str) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_lowercase());
+            }
+        }
+    }
+    // Also check inside routeParams
+    for key in ["routeParams", "params", "parameters"] {
+        if let Some(map) = record.get(key).and_then(Value::as_object) {
+            for tkey in ["thinking", "reasoningEffort", "reasoning_effort"] {
+                if let Some(value) = map.get(tkey).and_then(Value::as_str) {
+                    let trimmed = value.trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_lowercase());
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn infer_route_pool_mode_from_config(

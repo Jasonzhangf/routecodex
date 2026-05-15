@@ -12,6 +12,9 @@ pub struct RouteSelectionApplyInput {
     pub route_name: Option<String>,
     #[serde(default)]
     pub original_model: Option<String>,
+    /// Configurable reasoning effort override (low/medium/high/off).
+    #[serde(default)]
+    pub thinking: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -99,6 +102,7 @@ fn apply_target_metadata(
     target_map: &Map<String, Value>,
     route_name: Option<String>,
     original_model: Option<String>,
+    thinking: Option<&str>,
 ) {
     if let Some(route) = route_name.filter(|v| !v.trim().is_empty()) {
         let route_trimmed = route.trim().to_string();
@@ -107,6 +111,29 @@ fn apply_target_metadata(
             Value::String(route_trimmed.clone()),
         );
 
+        // Configurable reasoning effort: use pool.thinking if set, otherwise fall back
+        // to route-name default for backward compatibility.
+        let reasoning_effort: String = if let Some(configured) = thinking {
+            normalized_metadata.insert(
+                "__thinking_source".to_string(),
+                Value::String("config".to_string()),
+            );
+            configured.to_string()
+        } else {
+            normalized_metadata.insert(
+                "__thinking_source".to_string(),
+                Value::String("route_default".to_string()),
+            );
+            match route_trimmed.to_lowercase().as_str() {
+                "coding" | "thinking" => "high",
+                _ => "medium",
+            }
+            .to_string()
+        };
+        normalized_metadata.insert(
+            "reasoning_effort".to_string(),
+            Value::String(reasoning_effort),
+        );
     }
 
     apply_route_params(normalized_metadata, target_map);
@@ -303,6 +330,7 @@ pub fn apply_route_selection(
         target_map,
         input.route_name,
         input.original_model.clone(),
+        input.thinking.as_deref(),
     );
     apply_target_to_subject(request_map, target_map, input.original_model);
     crate::virtual_router_engine::instructions::clean_routing_instruction_markers(&mut request);
@@ -355,6 +383,7 @@ mod tests {
             }),
             route_name: Some("thinking".to_string()),
             original_model: Some("gpt-4.1".to_string()),
+            thinking: None,
         };
 
         let result = apply_route_selection(input).unwrap();
@@ -392,6 +421,7 @@ mod tests {
             }),
             route_name: None,
             original_model: None,
+            thinking: None,
         };
 
         let result = apply_route_selection(input).unwrap();

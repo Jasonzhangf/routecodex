@@ -78,6 +78,7 @@ fn apply_target_metadata(
     target: &Value,
     route_name: Option<&str>,
     original_model: Option<&str>,
+    thinking_config: Option<&str>,
 ) {
     let Some(metadata_obj) = metadata.as_object_mut() else {
         return;
@@ -106,14 +107,29 @@ fn apply_target_metadata(
             }
         }
 
-        // Adjust reasoning effort based on route: coding/thinking -> high, others -> medium
-        let reasoning_effort = match route_name_value.to_lowercase().as_str() {
-            "coding" | "thinking" => "high",
-            _ => "medium",
+        // Configurable reasoning effort: use pool.thinking if set, otherwise fall back
+        // to route-name default for backward compatibility.
+        let reasoning_effort: String = if let Some(configured) = thinking_config {
+            metadata_obj.insert(
+                "__thinking_source".to_string(),
+                Value::String("config".to_string()),
+            );
+            configured.to_string()
+        } else {
+            // Fallback: coding/thinking -> high, others -> medium
+            metadata_obj.insert(
+                "__thinking_source".to_string(),
+                Value::String("route_default".to_string()),
+            );
+            match route_name_value.to_lowercase().as_str() {
+                "coding" | "thinking" => "high",
+                _ => "medium",
+            }
+            .to_string()
         };
         metadata_obj.insert(
             "reasoning_effort".to_string(),
-            Value::String(reasoning_effort.to_string()),
+            Value::String(reasoning_effort.clone()),
         );
     }
     metadata_obj.insert("target".to_string(), target.clone());
@@ -291,6 +307,7 @@ pub fn apply_target_metadata_json(
     target_json: String,
     route_name_json: String,
     original_model_json: String,
+    thinking_json: String,
 ) -> NapiResult<String> {
     let mut metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
@@ -298,12 +315,14 @@ pub fn apply_target_metadata_json(
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse target JSON: {}", e)))?;
     let route_name = parse_optional_trimmed_string_json(route_name_json.as_str());
     let original_model = parse_optional_trimmed_string_json(original_model_json.as_str());
+    let thinking = parse_optional_trimmed_string_json(thinking_json.as_str());
 
     apply_target_metadata(
         &mut metadata,
         &target,
         route_name.as_deref(),
         original_model.as_deref(),
+        thinking.as_deref(),
     );
     serde_json::to_string(&metadata)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output JSON: {}", e)))
@@ -376,7 +395,7 @@ mod tests {
           "processMode": "chat",
           "forceWebSearch": true
         });
-        apply_target_metadata(&mut metadata, &target, Some("thinking"), Some("gpt-5"));
+        apply_target_metadata(&mut metadata, &target, Some("thinking"), Some("gpt-5"), None);
         let obj = metadata.as_object().expect("metadata object");
         assert_eq!(
             obj.get("routeName").and_then(|v| v.as_str()),

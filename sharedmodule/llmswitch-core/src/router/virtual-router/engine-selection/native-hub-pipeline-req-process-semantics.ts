@@ -107,6 +107,8 @@ export interface NativeReqProcessRouteSelectInput {
   target: Record<string, unknown>;
   routeName?: string;
   originalModel?: string;
+  /** Configurable reasoning effort override (low/medium/high/off). */
+  thinking?: string;
 }
 
 export interface NativeReqProcessRouteSelectOutput {

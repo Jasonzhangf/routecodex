@@ -45,7 +45,8 @@ export function runReqProcessStage2RouteSelect(
       normalizedMetadata: options.normalizedMetadata,
       target: result.target as unknown as Record<string, unknown>,
       routeName: result.decision.routeName,
-      originalModel: previousModel
+      originalModel: previousModel,
+      thinking: ((result.target as unknown as Record<string, unknown>)?.thinking as string | undefined)
     }
   );
   cleanMarkerSyntaxInPlace(nativeApplied.request as Record<string, unknown>);

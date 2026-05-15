@@ -22,6 +22,10 @@ pub(crate) struct RoutePoolTier {
     pub load_balancing: Option<LoadBalancingPolicy>,
     #[serde(rename = "routeParams", skip_serializing_if = "Option::is_none")]
     pub route_params: Option<Map<String, Value>>,
+    /// Reasoning effort override for this route pool (low/medium/high/off).
+    /// When None, falls back to route-level default logic.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
