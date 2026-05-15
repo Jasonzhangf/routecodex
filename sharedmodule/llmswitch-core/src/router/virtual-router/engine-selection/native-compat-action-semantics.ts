@@ -123,38 +123,7 @@ export function sanitizeToolSchemaGlmShellWithNative(
   return invokeRecordCapability('sanitizeToolSchemaGlmShellJson', [payload]);
 }
 
-export function fixApplyPatchToolCallsWithNative(
-  payload: {
-    messages?: Array<Record<string, unknown>>;
-    input?: Array<Record<string, unknown>>;
-  },
-): {
-  messages: Array<Record<string, unknown>>;
-  input?: Array<Record<string, unknown>>;
-} {
-  const parsed = invokeRecordCapability('fixApplyPatchToolCallsJson', [
-    {
-      messages: Array.isArray(payload?.messages) ? payload.messages : [],
-      ...(Array.isArray(payload?.input) ? { input: payload.input } : {})
-    },
-  ]);
-  const messages = Array.isArray(parsed.messages)
-    ? parsed.messages.filter(
-        (entry): entry is Record<string, unknown> =>
-          !!entry && typeof entry === 'object' && !Array.isArray(entry),
-      )
-    : [];
-  const input = Array.isArray(parsed.input)
-    ? parsed.input.filter(
-        (entry): entry is Record<string, unknown> =>
-          !!entry && typeof entry === 'object' && !Array.isArray(entry),
-      )
-    : undefined;
-  return {
-    messages,
-    ...(input ? { input } : {})
-  };
-}
+
 
 
 export function applyResponseBlacklistWithNative(

@@ -196,7 +196,6 @@ function filterResponsesInboundActionsByPayloadHints(
   }
   const toolOnlyActions = new Set([
     'tools.normalize-call-ids',
-    'compat.fix-apply-patch',
     'tools.ensure-placeholders'
   ]);
   return actions.filter((action) => {

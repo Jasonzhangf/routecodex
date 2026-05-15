@@ -107,7 +107,6 @@ function filterToolOnlyActionsWhenNoToolSignals(
   const toolOnlyActions = new Set([
     'tools.capture-results',
     'tools.normalize-call-ids',
-    'compat.fix-apply-patch',
     'tools.ensure-placeholders'
   ]);
   return actions.filter((action) => {

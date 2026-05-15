@@ -136,6 +136,17 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
     if (noProgress.forcedStop) {
       return null;
     }
+  } else {
+    // Valid goal control block (tool calls present) → reset consecutiveNoProgress
+    if (
+      typeof goalState.consecutiveNoProgress === 'number' &&
+      goalState.consecutiveNoProgress > 0
+    ) {
+      persistStoplessGoalStateSnapshot(ctx.adapterContext, {
+        ...(goalState as unknown as Record<string, unknown>),
+        consecutiveNoProgress: 0,
+      } as any);
+    }
   }
 
   return {

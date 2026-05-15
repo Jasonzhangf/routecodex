@@ -10,6 +10,7 @@ import {
 } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js";
 import { parseReqInboundFormatEnvelopeWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js";
 import { logHubStageTiming } from "../../../hub-stage-timing.js";
+import { resolveHubProviderProtocolWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
 
 export interface ReqInboundStage1FormatParseOptions {
   rawRequest: JsonObject;
@@ -29,20 +30,7 @@ interface ReqInboundReasoningNormalizeResult {
 }
 
 function resolveProtocolToken(adapterContext: AdapterContext): string {
-  const candidate =
-    typeof adapterContext.providerProtocol === "string" &&
-    adapterContext.providerProtocol.trim().length
-      ? adapterContext.providerProtocol.trim().toLowerCase()
-      : "";
-  if (
-    candidate === "openai-chat" ||
-    candidate === "openai-responses" ||
-    candidate === "anthropic-messages" ||
-    candidate === "gemini-chat"
-  ) {
-    return candidate;
-  }
-  return "openai-chat";
+  return resolveHubProviderProtocolWithNative(adapterContext.providerProtocol);
 }
 
 function shouldNormalizeReqInboundReasoningPayload(

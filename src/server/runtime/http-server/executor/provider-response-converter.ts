@@ -358,7 +358,12 @@ function persistGoalIrrecoverableErrorLedger(args: {
   });
 }
 
-function applyGoalLedgersToValidatedProjection(args: {
+/**
+ * 清零 Codex Goal counters（仅 active 状态管理）
+ * consecutiveIrrecoverableErrors + consecutiveValidationFailures
+ * 不清零 consecutiveNoProgress（RCC stopless 独立管理）
+ */
+function applyCodexGoalLedgers(args: {
   existingGoal?: StoplessGoalProjection;
   nextState: StoplessGoalProjection;
 }): StoplessGoalProjection {
@@ -366,7 +371,21 @@ function applyGoalLedgersToValidatedProjection(args: {
     ...args.nextState,
     consecutiveIrrecoverableErrors: undefined,
     consecutiveValidationFailures: undefined,
-    consecutiveNoProgress: undefined
+    // consecutiveNoProgress 由 RCC stopless-guard 独立管理，不清零
+  };
+}
+
+/**
+ * 清零 RCC Stopless counter
+ * consecutiveNoProgress：连续无进度（模型要求停止的次数）
+ */
+function applyRccStoplessLedger(args: {
+  existingGoal?: StoplessGoalProjection;
+  nextState: StoplessGoalProjection;
+}): StoplessGoalProjection {
+  return {
+    ...args.nextState,
+    consecutiveNoProgress: undefined,
   };
 }
 
@@ -441,10 +460,10 @@ function projectValidatedGoalStateFromConvertedBody(args: {
         }
         nextState.nextStep = nextStep;
         nextState.latestNote = nextStep;
-        return applyGoalLedgersToValidatedProjection({
-          existingGoal,
-          nextState
-        });
+        // 清零 Codex counters
+        const afterCodex = applyCodexGoalLedgers({ existingGoal, nextState });
+        // 清零 RCC counter
+        return applyRccStoplessLedger({ existingGoal, nextState: afterCodex });
       }
       case 'paused': {
         const userQuestion =
@@ -536,16 +555,17 @@ function projectValidatedGoalStateFromConvertedBody(args: {
     return undefined;
   }
   const nowMs = Date.now();
-  return applyGoalLedgersToValidatedProjection({
-    existingGoal,
-    nextState: {
-    status: 'active',
+  const nextState: StoplessGoalProjection = {
+    status: 'active' as const,
     objective: createObjective,
     latestNote: createObjective,
     updatedAt: nowMs,
     createdAt: nowMs,
-    }
-  });
+  };
+  // 清零 Codex counters
+  const afterCodex = applyCodexGoalLedgers({ existingGoal, nextState });
+  // 清零 RCC counter
+  return applyRccStoplessLedger({ existingGoal, nextState: afterCodex });
 }
 
 function syncProjectedGoalStateBackToPipelineMetadata(args: {

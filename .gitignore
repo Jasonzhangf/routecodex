@@ -103,6 +103,10 @@ sharedmodule/llmswitch-core/src/tools/*.js.map
 sharedmodule/llmswitch-core/src/tools/**/*.js
 sharedmodule/llmswitch-core/src/tools/**/*.d.ts
 sharedmodule/llmswitch-core/src/tools/**/*.js.map
+# Generated TS emit under sharedmodule/llmswitch-core/src (keep source TS tracked)
+sharedmodule/llmswitch-core/src/**/*.js
+sharedmodule/llmswitch-core/src/**/*.d.ts
+sharedmodule/llmswitch-core/src/**/*.js.map
 sharedmodule/llmswitch-core/test-results/
 sharedmodule/test-results/
 sharedmodule/llmswitch-core/src/conversion/shared/request-meta-store.ts
@@ -111,6 +115,7 @@ tests/sharedmodule/provider-runtime-ingress.spec.ts
 thinking_history.rs
 sharedmodule/llmswitch-core/src/sse/test/chat-converter.test.ts
 tmp-*
+*.bak
 
 docs/design/virtual-router-risk-audit.md
 sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/key_utils.rs
