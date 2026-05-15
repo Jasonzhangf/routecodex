@@ -308,7 +308,33 @@ export async function handleProviderQuotaErrorEvent(
     timestampMs: nowMs
   };
 
-  const nextState = applyQuotaErrorEvent(previous, errorForQuota, nowMs);
+  const appliedState = applyQuotaErrorEvent(previous, errorForQuota, nowMs);
+  const detailsRecord =
+    event.details && typeof event.details === 'object'
+      ? (event.details as Record<string, unknown>)
+      : {};
+  const errorClassification =
+    typeof detailsRecord.errorClassification === 'string'
+      ? detailsRecord.errorClassification.trim().toLowerCase()
+      : '';
+  const routePoolSizeRaw = detailsRecord.routePoolSize;
+  const routePoolSize =
+    typeof routePoolSizeRaw === 'number' && Number.isFinite(routePoolSizeRaw)
+      ? Math.max(0, Math.floor(routePoolSizeRaw))
+      : 0;
+  const shouldEvictFromPool =
+    errorClassification === 'unrecoverable'
+    && appliedState.consecutiveErrorCount >= 3
+    && routePoolSize > 1;
+  const nextState: QuotaState =
+    shouldEvictFromPool
+      ? appliedState
+      : {
+        ...appliedState,
+        inPool: true,
+        reason: appliedState.reason === 'ok' ? 'ok' : 'cooldown',
+        cooldownKeepsPool: appliedState.reason === 'ok' ? undefined : true
+      };
   ctx.quotaStates.set(providerKey, nextState);
 
   const tsIso = new Date(nowMs).toISOString();

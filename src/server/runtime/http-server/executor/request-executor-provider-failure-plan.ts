@@ -123,7 +123,10 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     dependencies: args.dependencies,
     attempt: args.attempt,
     logStage: args.logStage,
-    stageHint: reportPlan.stageHint
+    stageHint: reportPlan.stageHint,
+    extraDetails: {
+      routePoolSize: Array.isArray(args.routePool) ? args.routePool.length : 0
+    }
   });
   const retryTelemetryPlan =
     retryExecutionPlan.shouldRetry && retryExecutionPlan.retrySwitchPlan && retryExecutionPlan.backoffScope
