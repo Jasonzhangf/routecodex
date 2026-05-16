@@ -5,6 +5,7 @@ import { recordStage } from '../../../stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../../hub-stage-timing.js';
 import {
   applyRespProcessToolGovernanceWithNative,
+  resolveRequestedToolNamesWithNative,
   prepareRespProcessToolGovernancePayloadWithNative
 } from '../../../../../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
 
@@ -30,40 +31,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function collectToolNamesFromCandidate(candidate: unknown, out: Set<string>): void {
-  if (!Array.isArray(candidate)) {
-    return;
-  }
-  for (const tool of candidate) {
-    if (typeof tool === 'string') {
-      const name = tool.trim();
-      if (name) {
-        out.add(name);
-      }
-      continue;
-    }
-    const row = asRecord(tool);
-    const functionBag = asRecord(row?.function);
-    const name =
-      (typeof functionBag?.name === 'string' ? functionBag.name.trim() : '')
-      || (typeof row?.name === 'string' ? row.name.trim() : '');
-    if (name) {
-      out.add(name);
-    }
-  }
-}
 
-function resolveRequestedToolNames(options: RespProcessStage1ToolGovernanceOptions): string[] {
-  const names = new Set<string>();
-  const requestSemantics = asRecord(options.requestSemantics);
-  const semanticsTools = asRecord(requestSemantics?.tools);
-  collectToolNamesFromCandidate(requestSemantics?.tools, names);
-  collectToolNamesFromCandidate(semanticsTools?.clientToolsRaw, names);
-  collectToolNamesFromCandidate(semanticsTools?.baselineTools, names);
-  const capturedChatRequest = asRecord(options.adapterContext?.capturedChatRequest);
-  collectToolNamesFromCandidate(capturedChatRequest?.tools, names);
-  return Array.from(names);
-}
 
 function attachRequestedToolNames(payload: JsonObject, requestedToolNames: string[]): JsonObject {
   if (!requestedToolNames.length) {
@@ -98,7 +66,7 @@ export async function runRespProcessStage1ToolGovernance(
   options: RespProcessStage1ToolGovernanceOptions
 ): Promise<RespProcessStage1ToolGovernanceResult> {
   const forceDetailLog = isHubStageTimingDetailEnabled();
-  const requestedToolNames = resolveRequestedToolNames(options);
+  const requestedToolNames = resolveRequestedToolNamesWithNative({ requestSemantics: options.requestSemantics as Record<string, unknown>, adapterContext: options.adapterContext as Record<string, unknown> });
   const governancePayload = attachRequestedToolNames(options.payload as JsonObject, requestedToolNames);
   logHubStageTiming(options.requestId, 'resp_process.stage1_prepare_native', 'start');
   const prepareStart = Date.now();

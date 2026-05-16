@@ -8219,3 +8219,44 @@ console.log('ok')"#;
         assert!(!output.contains("<function_calls>"));
     }
 }
+
+/// Collect tool names from a candidate (array of tools) and return as JSON array.
+#[napi]
+pub fn collect_tool_names_from_candidate_json(candidate_json: String) -> napi::Result<String> {
+    let candidate: serde_json::Value = serde_json::from_str(&candidate_json)
+        .map_err(|e| napi::Error::new(napi::Status::InvalidArg, e.to_string()))?;
+
+    let arr = match &candidate {
+        serde_json::Value::Array(a) => a,
+        _ => return Ok("[]".to_string()),
+    };
+
+    let mut names: Vec<String> = Vec::new();
+    for item in arr {
+        let name = match item {
+            serde_json::Value::String(s) => {
+                let t = s.trim();
+                if t.is_empty() { None } else { Some(t.to_string()) }
+            }
+            serde_json::Value::Object(m) => {
+                // Try function.name first
+                if let Some(serde_json::Value::Object(func)) = m.get("function") {
+                    if let Some(serde_json::Value::String(n)) = func.get("name") {
+                        let t = n.trim();
+                        if t.is_empty() { None } else { Some(t.to_string()) }
+                    } else { None }
+                } else if let Some(serde_json::Value::String(n)) = m.get("name") {
+                    let t = n.trim();
+                    if t.is_empty() { None } else { Some(t.to_string()) }
+                } else { None }
+            }
+            _ => None,
+        };
+        if let Some(n) = name {
+            names.push(n);
+        }
+    }
+
+    serde_json::to_string(&names)
+        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
+}
