@@ -129,7 +129,7 @@ export async function runRespInboundStage1SseDecode(
     providerProtocol: options.providerProtocol
   });
   const textProbeStart = Date.now();
-  const maybeJsonText = tryDecodeJsonBodyFromText(options.payload as unknown);
+  const maybeJsonText = (() => { const p = options.payload; if (typeof p !== "string") return null; const parsed = parseJsonObjectCandidateWithNative(p, 10 * 1024 * 1024); return (parsed as JsonObject | null) ?? null; })();
   logHubStageTiming(requestId, 'resp_inbound.stage1_text_json_probe', 'completed', {
     elapsedMs: Date.now() - textProbeStart,
     providerProtocol: options.providerProtocol,
@@ -295,13 +295,6 @@ function supportsSseProtocol(protocol: ProviderProtocol): protocol is SseProtoco
   return protocol === 'openai-chat' || protocol === 'openai-responses' || protocol === 'anthropic-messages' || protocol === 'gemini-chat';
 }
 
-function tryDecodeJsonBodyFromText(payload: unknown): JsonObject | null {
-  if (typeof payload !== 'string') {
-    return null;
-  }
-  const parsed = parseJsonObjectCandidateWithNative(payload, 10 * 1024 * 1024);
-  return (parsed as JsonObject | null) ?? null;
-}
 
 function extractSseStream(payload?: Record<string, unknown>): Readable | undefined {
   if (!payload || typeof payload !== 'object') {
