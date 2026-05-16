@@ -845,6 +845,123 @@ fn parse_json_record(value: Option<&Value>) -> Option<Map<String, Value>> {
     }
 }
 
+const EXEC_COMMAND_HEREDOC_BLOCK_THRESHOLD: usize = 4096;
+const EXEC_COMMAND_HEREDOC_PREVIEW_CHARS: usize = 240;
+
+fn truncate_preview(raw: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    let mut count = 0usize;
+    for ch in raw.chars() {
+        if count >= max_chars {
+            out.push('…');
+            break;
+        }
+        out.push(ch);
+        count += 1;
+    }
+    out
+}
+
+fn shell_single_quote(raw: &str) -> String {
+    format!("'{}'", raw.replace('\'', "'\"'\"'"))
+}
+
+fn extract_exec_command_preview_from_malformed_args(raw: &str) -> String {
+    let lowered = raw.to_ascii_lowercase();
+    let key = if lowered.contains("\"cmd\"") {
+        "\"cmd\""
+    } else if lowered.contains("\"command\"") {
+        "\"command\""
+    } else {
+        ""
+    };
+    if key.is_empty() {
+        return truncate_preview(raw.trim(), EXEC_COMMAND_HEREDOC_PREVIEW_CHARS);
+    }
+    let Some(idx) = raw.find(key) else {
+        return truncate_preview(raw.trim(), EXEC_COMMAND_HEREDOC_PREVIEW_CHARS);
+    };
+    truncate_preview(raw[idx..].trim(), EXEC_COMMAND_HEREDOC_PREVIEW_CHARS)
+}
+
+fn is_large_heredoc_file_generation_command(cmd: &str) -> bool {
+    if cmd.len() < EXEC_COMMAND_HEREDOC_BLOCK_THRESHOLD {
+        return false;
+    }
+    Regex::new(r#"(?is)\bcat\s*>\s*\S+\s*<<\s*['"]?[A-Za-z0-9_:-]+['"]?"#)
+        .map(|re| re.is_match(cmd))
+        .unwrap_or(false)
+}
+
+fn build_exec_command_large_write_guard_command(preview: &str) -> String {
+    let message = format!(
+        "[routecodex] exec_command blocked: large heredoc file generation was truncated before execution. \
+Use apply_patch for file creation or updates instead of cat <<EOF / bulk shell writes. \
+Adjust and retry with apply_patch. Command preview: {}",
+        preview
+    );
+    format!("printf '%s\\n' {} >&2; exit 64", shell_single_quote(message.as_str()))
+}
+
+fn build_exec_command_object_with_shape(
+    cmd: String,
+    args: Option<&Map<String, Value>>,
+    source_is_shell_alias: bool,
+    force_cmd: Option<bool>,
+    force_command: Option<bool>,
+) -> Option<String> {
+    let empty = Map::new();
+    let args = args.unwrap_or(&empty);
+    let mut out = Map::new();
+    let has_cmd = force_cmd.unwrap_or_else(|| args_contain_direct_or_nested_key(args, "cmd"));
+    let has_command =
+        force_command.unwrap_or_else(|| args_contain_direct_or_nested_key(args, "command"));
+    let emit_cmd = has_cmd || (!has_command && !source_is_shell_alias);
+    let emit_command = has_command || (source_is_shell_alias && !has_cmd);
+    if emit_command {
+        out.insert("command".to_string(), Value::String(cmd.clone()));
+    }
+    if emit_cmd {
+        out.insert("cmd".to_string(), Value::String(cmd));
+    }
+    if let Some(workdir) = read_workdir_from_args(args) {
+        out.insert("workdir".to_string(), Value::String(workdir));
+    }
+    serde_json::to_string(&Value::Object(out)).ok()
+}
+
+fn maybe_guard_large_exec_command_from_raw_string(
+    raw_args: Option<&Value>,
+    source_is_shell_alias: bool,
+) -> Option<String> {
+    let raw = match raw_args {
+        Some(Value::String(raw)) => raw.trim(),
+        _ => return None,
+    };
+    if raw.is_empty() {
+        return None;
+    }
+    let lowered = raw.to_ascii_lowercase();
+    if raw.len() < EXEC_COMMAND_HEREDOC_BLOCK_THRESHOLD
+        || !lowered.contains("cat >")
+        || !lowered.contains("<<")
+        || (!lowered.contains("\"cmd\"") && !lowered.contains("\"command\""))
+    {
+        return None;
+    }
+    let preview = extract_exec_command_preview_from_malformed_args(raw);
+    let guard = build_exec_command_large_write_guard_command(preview.as_str());
+    let has_cmd = lowered.contains("\"cmd\"");
+    let has_command = lowered.contains("\"command\"");
+    build_exec_command_object_with_shape(
+        guard,
+        None,
+        source_is_shell_alias,
+        Some(has_cmd),
+        Some(has_command),
+    )
+}
+
 fn read_command_from_args(args: &Map<String, Value>) -> Option<String> {
     let input = args.get("input");
     let read_value = |value: Option<&Value>| -> Option<String> {
@@ -1855,20 +1972,15 @@ pub(crate) fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> 
     let name = normalize_tool_name(tool_name)?;
     let args = parse_json_record(raw_args).unwrap_or_default();
     if name == "exec_command" {
-        let cmd = normalize_exec_command_text(read_command_from_args(&args)?.as_str());
-        let mut out = Map::new();
-        let has_cmd = args_contain_direct_or_nested_key(&args, "cmd");
-        let has_command = args_contain_direct_or_nested_key(&args, "command");
-        let emit_cmd = has_cmd || (!has_command && !source_is_shell_alias);
-        let emit_command = has_command || (source_is_shell_alias && !has_cmd);
-        if emit_command {
-            out.insert("command".to_string(), Value::String(cmd.clone()));
+        if let Some(guarded) =
+            maybe_guard_large_exec_command_from_raw_string(raw_args, source_is_shell_alias)
+        {
+            return Some(guarded);
         }
-        if emit_cmd {
-            out.insert("cmd".to_string(), Value::String(cmd));
-        }
-        if let Some(workdir) = read_workdir_from_args(&args) {
-            out.insert("workdir".to_string(), Value::String(workdir));
+        let mut cmd = normalize_exec_command_text(read_command_from_args(&args)?.as_str());
+        if is_large_heredoc_file_generation_command(cmd.as_str()) {
+            let preview = truncate_preview(cmd.as_str(), EXEC_COMMAND_HEREDOC_PREVIEW_CHARS);
+            cmd = build_exec_command_large_write_guard_command(preview.as_str());
         }
         let read_nested_value = |keys: &[&str]| -> Option<Value> {
             for key in keys {
@@ -1949,6 +2061,15 @@ pub(crate) fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> 
                 _ => None,
             }
         };
+        let parsed = build_exec_command_object_with_shape(
+            cmd,
+            Some(&args),
+            source_is_shell_alias,
+            None,
+            None,
+        )?;
+        let mut out_value: Value = serde_json::from_str(parsed.as_str()).ok()?;
+        let out = out_value.as_object_mut()?;
 
         for (key, value) in [
             ("yield_time_ms", read_i64_value(&["yield_time_ms"])),
@@ -1967,7 +2088,7 @@ pub(crate) fn normalize_tool_args(tool_name: &str, raw_args: Option<&Value>) -> 
                 out.insert(key.to_string(), value);
             }
         }
-        return serde_json::to_string(&Value::Object(out)).ok();
+        return serde_json::to_string(&out_value).ok();
     }
 
     if name == "write_stdin" {
@@ -2075,8 +2196,29 @@ pub(crate) fn normalize_tool_args_preserving_raw_shape(
     if canonical_name != "exec_command" {
         return normalize_tool_args(tool_name, raw_args);
     }
+    let source_tool_name = tool_name.trim().to_ascii_lowercase();
+    let source_is_shell_alias = matches!(
+        source_tool_name.as_str(),
+        "shell_command" | "shell" | "bash" | "terminal" | "execute_command" | "execute-command"
+    );
+    if let Some(guarded) =
+        maybe_guard_large_exec_command_from_raw_string(raw_args, source_is_shell_alias)
+    {
+        return Some(guarded);
+    }
     let args = parse_json_record(raw_args).unwrap_or_default();
-    read_command_from_args(&args)?;
+    let cmd = read_command_from_args(&args)?;
+    if is_large_heredoc_file_generation_command(cmd.as_str()) {
+        let preview = truncate_preview(cmd.as_str(), EXEC_COMMAND_HEREDOC_PREVIEW_CHARS);
+        let guard = build_exec_command_large_write_guard_command(preview.as_str());
+        return build_exec_command_object_with_shape(
+            guard,
+            Some(&args),
+            source_is_shell_alias,
+            None,
+            None,
+        );
+    }
     serde_json::to_string(&Value::Object(args)).ok()
 }
 
@@ -6223,6 +6365,36 @@ console.log('ok')"#;
 
         let raw_args = json!({"command": "pwd"});
         assert!(normalize_tool_args("bash", Some(&raw_args)).is_some());
+    }
+
+    #[test]
+    fn test_normalize_tool_args_exec_command_blocks_large_heredoc_file_generation() {
+        let large_body = "x".repeat(5000);
+        let raw_args = json!({
+            "cmd": format!("cat > /tmp/FileSheet.tsx << 'ENDOFFILE'\n{}\nENDOFFILE", large_body),
+            "workdir": "/workspace"
+        });
+        let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        let cmd = parsed["cmd"].as_str().unwrap_or("");
+        assert!(cmd.contains("Use apply_patch"));
+        assert!(cmd.contains("large heredoc file generation was truncated"));
+        assert_eq!(parsed["workdir"], "/workspace");
+    }
+
+    #[test]
+    fn test_normalize_tool_args_exec_command_salvages_malformed_large_heredoc_args_into_guard() {
+        let large_body = "y".repeat(5000);
+        let raw_args = Value::String(format!(
+            "{{\"cmd\": \"cat > /tmp/FileSheet.tsx << 'ENDOFFILE'\\n{}",
+            large_body
+        ));
+        let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        let cmd = parsed["cmd"].as_str().unwrap_or("");
+        assert!(cmd.contains("Use apply_patch"));
+        assert!(cmd.contains("Command preview"));
+        assert!(cmd.contains("FileSheet.tsx"));
     }
 
     #[test]
