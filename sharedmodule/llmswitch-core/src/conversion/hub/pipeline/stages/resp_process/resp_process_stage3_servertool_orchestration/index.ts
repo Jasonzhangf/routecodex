@@ -4,7 +4,7 @@ import type { StageRecorder } from '../../../../format-adapters/index.js';
 import type { ChatCompletionLike } from '../../../../response/response-mappers.js';
 import type { ProviderInvoker } from '../../../../../../servertool/types.js';
 import { runServerToolOrchestration } from '../../../../../../servertool/engine.js';
-import { detectProviderResponseShapeWithNative } from '../../../../../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+import { detectProviderResponseShapeWithNative, readFollowupClientInjectSourceWithNative } from '../../../../../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 import { recordStage } from '../../../stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../../hub-stage-timing.js';
 
