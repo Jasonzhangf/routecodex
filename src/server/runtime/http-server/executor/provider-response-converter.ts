@@ -45,8 +45,7 @@ import {
 
 import {
   asFlatRecord,
-  collectValidatedConvertedProviderToolCallsOrThrow,
-  normalizeValidatedConvertedProviderToolCallsInPlace,
+  collectConvertedProviderToolCalls,
   tryParseJsonLikeString,
   hasStoplessDirectiveInRequestPayload,
   collectDeclaredToolNames,
@@ -449,22 +448,44 @@ function projectValidatedGoalStateFromConvertedBody(args: {
   pipelineMetadata?: Record<string, unknown>;
   declaredToolNames?: Set<string>;
 }): StoplessGoalProjection | undefined {
-  const toolCalls = collectValidatedConvertedProviderToolCallsOrThrow(args.payload, args.declaredToolNames);
+  const toolCalls = collectConvertedProviderToolCalls(args.payload);
   let lastCreateGoalArgs: Record<string, unknown> | undefined;
   let lastUpdateGoalArgs: Record<string, unknown> | undefined;
   for (const toolCall of toolCalls) {
-    if (toolCall.name.trim().toLowerCase() === 'create_goal') {
-      if (toolCall.normalizedInput && typeof toolCall.normalizedInput === 'object' && !Array.isArray(toolCall.normalizedInput)) {
-        lastCreateGoalArgs = toolCall.normalizedInput;
-      }
+    const normalizedName = toolCall.name.trim().toLowerCase();
+    if (normalizedName !== 'create_goal' && normalizedName !== 'update_goal') {
       continue;
     }
-    if (toolCall.name.trim().toLowerCase() !== 'update_goal') {
+    const validation = validateCanonicalClientToolCall(
+      toolCall.name,
+      toolCall.argumentsText,
+      args.declaredToolNames
+    );
+    if (!validation.ok) {
+      buildGoalToolTransitionError({
+        toolName: toolCall.name,
+        validationReason: validation.reason || 'invalid_tool_arguments',
+        validationMessage:
+          validation.message
+          || `Converted provider tool call has invalid client arguments: ${toolCall.name}`,
+        missingFields: validation.missingFields
+      });
+    }
+    const parsed = asFlatRecord(
+      tryParseJsonLikeString(
+        typeof validation.normalizedArgs === 'string'
+          ? validation.normalizedArgs
+          : toolCall.argumentsText
+      )
+    );
+    if (!parsed) {
       continue;
     }
-    if (toolCall.normalizedInput && typeof toolCall.normalizedInput === 'object' && !Array.isArray(toolCall.normalizedInput)) {
-      lastUpdateGoalArgs = toolCall.normalizedInput;
+    if (normalizedName === 'create_goal') {
+      lastCreateGoalArgs = parsed;
+      continue;
     }
+    lastUpdateGoalArgs = parsed;
   }
 
   const existingGoal = readCurrentGoalState({
@@ -638,6 +659,65 @@ function syncProjectedGoalStateBackToPipelineMetadata(args: {
     pipelineMetadata: args.pipelineMetadata,
     state: projected
   });
+}
+
+function validateHostManagedConvertedToolCallsOrThrow(args: {
+  payload: unknown;
+  declaredToolNames?: Set<string>;
+}): void {
+  const toolCalls = collectConvertedProviderToolCalls(args.payload);
+  for (const toolCall of toolCalls) {
+    const normalizedName = toolCall.name.trim().toLowerCase();
+    if (
+      normalizedName !== 'reasoning.stop'
+      && normalizedName !== 'create_goal'
+      && normalizedName !== 'update_goal'
+    ) {
+      continue;
+    }
+    const validation = validateCanonicalClientToolCall(
+      toolCall.name,
+      toolCall.argumentsText,
+      args.declaredToolNames
+    );
+    if (!validation.ok) {
+      const err = new Error(
+        validation.message
+          ? `Converted provider tool call has invalid client arguments at ${toolCall.path}: ${toolCall.name}. ${validation.message}`
+          : `Converted provider tool call has invalid client arguments at ${toolCall.path}: ${toolCall.name} (${validation.reason || 'invalid_tool_arguments'})`
+      ) as Error & {
+        code?: string;
+        status?: number;
+        statusCode?: number;
+        retryable?: boolean;
+        toolName?: string;
+        validationReason?: string;
+        validationMessage?: string;
+        missingFields?: string[];
+        upstreamCode?: string;
+        details?: Record<string, unknown>;
+      };
+      err.code = 'CLIENT_TOOL_ARGS_INVALID';
+      err.status = 502;
+      err.statusCode = 502;
+      err.retryable = false;
+      err.upstreamCode = 'CLIENT_TOOL_ARGS_INVALID';
+      err.toolName = toolCall.name;
+      err.validationReason = validation.reason || 'invalid_tool_arguments';
+      err.validationMessage = validation.message;
+      if (validation.missingFields?.length) {
+        err.missingFields = validation.missingFields;
+      }
+      err.details = {
+        ...(err.details ?? {}),
+        toolName: toolCall.name,
+        validationReason: validation.reason || 'invalid_tool_arguments',
+        ...(validation.message ? { validationMessage: validation.message } : {}),
+        ...(validation.missingFields?.length ? { missingFields: validation.missingFields } : {})
+      };
+      throw err;
+    }
+  }
 }
 
 function logProviderResponseConverterNonBlockingError(
@@ -1094,7 +1174,10 @@ export async function convertProviderResponseIfNeeded(
       });
     }
     const declaredToolNames = collectDeclaredToolNames(baseContext);
-    normalizeValidatedConvertedProviderToolCallsInPlace(converted.body ?? body, declaredToolNames);
+    validateHostManagedConvertedToolCallsOrThrow({
+      payload: converted.body ?? body,
+      declaredToolNames
+    });
     syncProjectedGoalStateBackToPipelineMetadata({
       payload: converted.body ?? body,
       adapterContext,

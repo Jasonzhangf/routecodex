@@ -872,7 +872,7 @@ describe('provider-response-converter servertool regressions', () => {
     });
   });
 
-  it('rejects converted provider responses whose tool args only pass via alias guessing', async () => {
+  it('does not reject converted non-goal tool args that only differ by alias shape', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -907,33 +907,27 @@ describe('provider-response-converter servertool regressions', () => {
       '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
     );
 
-    await expect(
-      convertProviderResponseIfNeeded(
-        {
-          entryEndpoint: '/v1/responses',
-          providerProtocol: 'openai-chat',
-          requestId: 'req_converted_invalid_tool_args_1',
-          wantsStream: false,
-          response: { body: { id: 'upstream_body' } } as any,
-          pipelineMetadata: {}
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        requestId: 'req_converted_invalid_tool_args_1',
+        wantsStream: false,
+        response: { body: { id: 'upstream_body' } } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
         },
-        {
-          runtimeManager: {
-            resolveRuntimeKey: () => undefined,
-            getHandleByRuntimeKey: () => undefined
-          },
-          executeNested: async () => ({ body: { ok: true } } as any)
-        }
-      )
-    ).rejects.toMatchObject({
-      code: 'CLIENT_TOOL_ARGS_INVALID',
-      status: 502,
-      statusCode: 502,
-      toolName: 'exec_command',
-      validationReason: 'missing_cmd',
-      validationMessage: 'exec_command requires input.cmd as a string.',
-      missingFields: ['cmd']
-    });
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect((converted.body as any)?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments).toBe(
+      JSON.stringify({ command: 'pwd' })
+    );
   });
 
   it('rejects converted reasoning.stop calls with explicit missing field guidance', async () => {
@@ -1578,7 +1572,7 @@ describe('provider-response-converter servertool regressions', () => {
     expect(JSON.parse(toolCall?.function?.arguments ?? '{}')).toEqual({ patch: '' });
   });
 
-  it('rejects converted broad-kill exec_command calls before servertool guard can swallow them', async () => {
+  it('does not perform host-side broad-kill screening on converted non-goal tool calls', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -1615,32 +1609,26 @@ describe('provider-response-converter servertool regressions', () => {
       '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
     );
 
-    await expect(
-      convertProviderResponseIfNeeded(
-        {
-          entryEndpoint: '/v1/responses',
-          providerProtocol: 'openai-chat',
-          requestId: 'req_invalid_broad_kill_exec_command_1',
-          wantsStream: false,
-          response: { body: { id: 'upstream_body' } } as any,
-          pipelineMetadata: {}
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        requestId: 'req_broad_kill_passthrough_1',
+        wantsStream: false,
+        response: { body: { id: 'upstream_body' } } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
         },
-        {
-          runtimeManager: {
-            resolveRuntimeKey: () => undefined,
-            getHandleByRuntimeKey: () => undefined
-          },
-          executeNested: async () => ({ body: { ok: true } } as any)
-        }
-      )
-    ).rejects.toMatchObject({
-      code: 'CLIENT_TOOL_ARGS_INVALID',
-      status: 502,
-      statusCode: 502,
-      toolName: 'exec_command',
-      validationReason: 'forbidden_broad_kill',
-      validationMessage:
-        'exec_command contains a forbidden broad process-kill command. Use explicit PID- or service-scoped shutdown/restart only.'
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect(JSON.parse((converted.body as any)?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments ?? '{}')).toEqual({
+      cmd: "bash -lc 'pkill -9 -f \"fin-cli\"; sleep 1; echo ok'"
     });
   });
 
