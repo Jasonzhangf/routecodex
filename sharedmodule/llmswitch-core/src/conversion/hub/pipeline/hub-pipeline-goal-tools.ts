@@ -8,6 +8,7 @@ export function resolveGoalCapableRequest(args: {
 }): {
   requestGoalCapable: boolean;
   adapterContextGoalCapable: boolean;
+  followupGoalManagedContext: boolean;
 } {
   return resolveGoalCapableRequestWithNative({
     request: args.request,
@@ -25,4 +26,10 @@ export function isGoalCapableAdapterContext(
   adapterContext: AdapterContext,
 ): boolean {
   return resolveGoalCapableRequest({ adapterContext }).adapterContextGoalCapable;
+}
+
+export function isFollowupGoalManagedContext(
+  adapterContext: AdapterContext,
+): boolean {
+  return resolveGoalCapableRequest({ adapterContext }).followupGoalManagedContext;
 }

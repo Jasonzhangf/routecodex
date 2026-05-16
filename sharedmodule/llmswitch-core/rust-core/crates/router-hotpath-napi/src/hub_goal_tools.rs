@@ -76,6 +76,46 @@ pub fn is_goal_capable_adapter_context(value: &Value) -> bool {
         || has_goal_capable_tools(value.get("capturedChatRequest").and_then(|entry| entry.get("tools")))
 }
 
+fn read_followup_source(value: &Value) -> String {
+    let direct = value
+        .get("clientInjectSource")
+        .and_then(|entry| entry.as_str())
+        .map(|entry| entry.trim().to_string())
+        .filter(|entry| !entry.is_empty());
+    if let Some(source) = direct {
+        return source;
+    }
+    value
+        .get("__rt")
+        .and_then(|entry| entry.as_object())
+        .and_then(|entry| entry.get("clientInjectSource"))
+        .and_then(|entry| entry.as_str())
+        .map(|entry| entry.trim().to_string())
+        .filter(|entry| !entry.is_empty())
+        .unwrap_or_default()
+}
+
+fn has_managed_stopless_goal_state(value: &Value) -> bool {
+    value
+        .get("stoplessGoalState")
+        .and_then(|entry| entry.as_object())
+        .and_then(|entry| entry.get("status"))
+        .and_then(|entry| entry.as_str())
+        .map(|entry| {
+            let normalized = entry.trim().to_ascii_lowercase();
+            !normalized.is_empty() && normalized != "idle"
+        })
+        .unwrap_or(false)
+}
+
+pub fn is_goal_managed_followup_context(value: &Value) -> bool {
+    let followup_source = read_followup_source(value);
+    if followup_source == "servertool.stopless_goal_continue" {
+        return false;
+    }
+    is_goal_capable_adapter_context(value) || has_managed_stopless_goal_state(value)
+}
+
 #[napi]
 pub fn resolve_goal_capable_request_json(input_json: String) -> NapiResult<String> {
     let input: Value =
@@ -85,6 +125,45 @@ pub fn resolve_goal_capable_request_json(input_json: String) -> NapiResult<Strin
     let output = json!({
         "requestGoalCapable": is_goal_capable_request(request),
         "adapterContextGoalCapable": is_goal_capable_adapter_context(adapter_context),
+        "followupGoalManagedContext": is_goal_managed_followup_context(adapter_context),
     });
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_goal_managed_followup_context;
+    use serde_json::json;
+
+    #[test]
+    fn stopless_non_goal_followup_is_not_goal_managed() {
+        let input = json!({
+            "clientInjectSource": "servertool.stopless_goal_continue",
+            "stoplessGoalState": {
+                "status": "active",
+                "objective": "continue",
+                "updatedAt": 1,
+                "createdAt": 1
+            },
+            "capturedChatRequest": {
+                "tools": [
+                    { "type": "function", "function": { "name": "exec_command" } }
+                ]
+            }
+        });
+        assert!(!is_goal_managed_followup_context(&input));
+    }
+
+    #[test]
+    fn real_goal_context_stays_goal_managed() {
+        let input = json!({
+            "__rt": { "goalMode": true },
+            "capturedChatRequest": {
+                "tools": [
+                    { "type": "function", "function": { "name": "update_goal" } }
+                ]
+            }
+        });
+        assert!(is_goal_managed_followup_context(&input));
+    }
 }

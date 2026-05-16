@@ -53,6 +53,8 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 
 ## 工具治理唯一真源
 
+- Hub Pipeline Rust-only 铁律（2026-05-16）：`llmswitch-core Hub Pipeline / chat process / req_process / resp_process / servertool followup orchestration` 已经是 **Rust-only** 责任域；凡发现 TS 里还残留语义判定、followup tools sanitize、兼容修复、注入裁剪等第二实现，必须立即迁回 `rust-core/crates/router-hotpath-napi/`，TS 只保留薄壳调用。
+- stopless non-goal followup 判定（2026-05-16）：`clientInjectSource=servertool.stopless_goal_continue` 只是**非 /goal bootstrap followup**，即使 adapterContext 持有 `stoplessGoalState=active`，也**绝不能**按 goal-managed followup 清洗 tools；这条判定必须落在 Rust goal/followup 真源，禁止 TS builder 再拼第二判断面。
 - Codex namespace/deferred tools（2026-04-27）：`type="namespace"` + child `tools[]` + `defer_loading` 必须先在 **ingress/canonical** 原样保真；**只允许**在 non-responses outbound compat/request-build 侧做 namespace child flatten，responses-capable upstream 禁止提前 flatten。
 - namespace tool 闭环（2026-04-27）：若 non-responses provider 需要 function-only tools，flatten alias 后**必须**在 client remap 用 `clientToolsRaw` 恢复成 `name + namespace` 客户端语义；禁止靠 provider capability 猜测或 host 侧硬编码补 computer-use。
 
@@ -191,6 +193,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - 上下文能力测试铁律（2026-05-01）：**只允许用完整显式历史重放**来测试 provider 的可用上下文与历史保真；**禁止**用 `conversationId/sessionId` 原生续聊模式来宣称上下文能力，因为那无法证明上游实际记录了哪段历史，也不等价于主链可控记忆。
 - Web provider 隐藏会话污染（2026-05-01）：对 `mimoweb` / `deepseek-web` / `qwenchat-web` 这类 web 形态 provider，若复用 `conversationId/sessionId`，上游可能已缓存未知轮次、摘要或截断历史，导致**实际已占用上下文预算不可见**，现场表现就是同 payload 上下文测试忽大忽小、成功/超限/裁切随机漂移；因此上下文测试必须**每次新建会话 + 完整显式历史重放**，否则测到的是产品态隐藏记忆，不是主链可控上下文。
 
+- 2026-05-16（Jason 约束）：新增且必要的文档与代码，默认直接纳入 track（git add）；不再为“是否加入跟踪”单独询问。
 ## PipeDebug 诊断流程
 
 ### 错误请求复测铁律（先复测，再结论）
@@ -213,10 +216,11 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 3. **空响应/空请求必须做 payload 二分**
    - 如果 provider 原始响应为空，先检查原始请求是否不规范。
    - 必须按“从最新一轮历史/最新 tool result 开始逐条减掉”的方式二分，确认到底是哪一轮 shape/tool 配对/history 污染触发了空响应或幻觉。
-   - 结论要区分清楚：
-     - **请求形状有问题导致空响应**
-     - **上游原始响应就是空**
-     - **我们本地 sanitize/cleanup 变空**
+- 结论要区分清楚：
+  - **请求形状有问题导致空响应**
+  - **上游原始响应就是空**
+  - **我们本地 sanitize/cleanup 变空**
+- 2026-05-16 经验铁律：**空响应 = 请求有问题（shape/history/tool-pairing）优先判定，与 `finish_reason` 无关**。禁止用 `finish_reason=stop/tool_calls` 去否定“空响应问题”；先按 same-shape 样本做历史二分（从最后一轮 append/tool_result 开始）并锁定触发轮次。
 
 4. **工具/结果配对必须复测真实链**
    - 任何 `tool_call_id` / `function_call_output` / servertool 相关修改，复测时必须验证：

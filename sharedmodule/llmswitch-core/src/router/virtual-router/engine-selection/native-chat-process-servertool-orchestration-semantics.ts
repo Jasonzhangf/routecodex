@@ -74,6 +74,7 @@ export type NativeServertoolFollowupRuntimePlan = ReturnType<typeof parseServert
 export type NativeGoalCapableRequestPlan = {
   requestGoalCapable: boolean;
   adapterContextGoalCapable: boolean;
+  followupGoalManagedContext: boolean;
 };
 
 export type NativeServertoolSkeletonDocument = Record<string, unknown>;
@@ -719,7 +720,8 @@ export function resolveGoalCapableRequestWithNative(input: {
     }
     return {
       requestGoalCapable: row.requestGoalCapable,
-      adapterContextGoalCapable: row.adapterContextGoalCapable
+      adapterContextGoalCapable: row.adapterContextGoalCapable,
+      followupGoalManagedContext: row.followupGoalManagedContext === true
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

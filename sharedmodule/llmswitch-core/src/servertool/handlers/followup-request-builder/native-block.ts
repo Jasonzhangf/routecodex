@@ -1,9 +1,8 @@
 import type { JsonObject } from '../../../conversion/hub/types/json.js';
-import { isGoalCapableAdapterContext } from '../../../conversion/hub/pipeline/hub-pipeline-goal-tools.js';
+import { isFollowupGoalManagedContext } from '../../../conversion/hub/pipeline/hub-pipeline-goal-tools.js';
 import { buildServertoolGenericFollowupPayloadWithNative } from '../../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 import { buildServertoolFollowupConfig } from '../../skeleton-config.js';
 import type { ServerToolFollowupInjectionPlan } from '../../types.js';
-import { hasManagedStoplessGoalState } from '../stopless-goal-state.js';
 import { resolveFollowupInjectionOpsForNative, stripToolsByCanonicalName } from './op-blocks.js';
 import {
   extractCapturedChatSeed,
@@ -35,9 +34,7 @@ export function buildNativeFollowupPayloadFromInjection(args: {
   if (!seed) {
     return null;
   }
-  const goalManagedContext =
-    isGoalCapableAdapterContext(args.adapterContext as any)
-    || hasManagedStoplessGoalState(args.adapterContext);
+  const goalManagedContext = isFollowupGoalManagedContext(args.adapterContext as any);
   const followupModel = resolveFollowupModel(seed.model, args.adapterContext);
   if (!followupModel) {
     return null;
