@@ -443,3 +443,34 @@ export function extractDecodeStatsWithNative(
     return fail(reason);
   }
 }
+export function resolveSseTimeoutOptionsWithNative(
+  adapterContext: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  const capability = 'resolveSseTimeoutOptionsJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown> | undefined>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const ctxJson = safeStringify(adapterContext);
+  if (!ctxJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(ctxJson);
+    if (typeof raw !== 'string') {
+      return fail('expected string result');
+    }
+    if (raw === 'null' || !raw) {
+      return undefined;
+    }
+    const parsed = parseRecord(raw);
+    return parsed ?? undefined;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}

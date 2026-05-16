@@ -577,3 +577,104 @@ pub fn extract_decode_stats_json(payload_json: String) -> napi::Result<String> {
     serde_json::to_string(&out)
         .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
 }
+
+/// Read a positive timeout value from an arbitrary JSON value.
+fn read_positive_timeout(value: &serde_json::Value) -> Option<u64> {
+    match value {
+        serde_json::Value::Number(n) if n.is_f64() => {
+            let f = n.as_f64()?;
+            if f.is_finite() && f > 0.0 {
+                Some(f.floor() as u64)
+            } else {
+                None
+            }
+        }
+        serde_json::Value::String(s) if !s.trim().is_empty() => {
+            s.trim().parse::<f64>().ok().filter(|&f| f.is_finite() && f > 0.0).map(|f| f.floor() as u64)
+        }
+        _ => None,
+    }
+}
+
+/// Extract nested timeout values from adapter context JSON.
+#[napi]
+pub fn resolve_sse_timeout_options_json(adapter_context_json: String) -> napi::Result<String> {
+    let ctx: serde_json::Value = serde_json::from_str(&adapter_context_json)
+        .map_err(|e| napi::Error::new(napi::Status::InvalidArg, e.to_string()))?;
+
+    let runtime = ctx.get("__rt").and_then(|v| v.as_object());
+    let target = ctx.get("target").and_then(|v| v.as_object());
+    let profile_extensions = target
+        .and_then(|t| t.get("profile"))
+        .and_then(|p| p.get("extensions"))
+        .and_then(|e| e.as_object());
+
+    fn get_timeout(ctx: &serde_json::Value, runtime: Option<&serde_json::Map<String, serde_json::Value>>, profile_extensions: Option<&serde_json::Map<String, serde_json::Value>>, keys: &[&str]) -> Option<u64> {
+        for k in keys {
+            if let Some(v) = ctx.get(*k) {
+                if let Some(t) = read_positive_timeout(v) {
+                    return Some(t);
+                }
+            }
+            if let Some(r) = runtime {
+                if let Some(v) = r.get(*k) {
+                    if let Some(t) = read_positive_timeout(v) {
+                        return Some(t);
+                    }
+                }
+            }
+            if let Some(p) = profile_extensions {
+                if let Some(v) = p.get(*k) {
+                    if let Some(t) = read_positive_timeout(v) {
+                        return Some(t);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    let mut result = serde_json::Map::new();
+
+    // firstFrameTimeoutMs
+    if let Some(t) = get_timeout(&ctx, runtime, profile_extensions, &[
+        "providerStreamFirstFrameTimeoutMs",
+        "streamFirstFrameTimeoutMs",
+    ]) {
+        result.insert("firstFrameTimeoutMs".to_string(), serde_json::Value::Number(t.into()));
+    }
+
+    // noContentTimeoutMs
+    if let Some(t) = get_timeout(&ctx, runtime, profile_extensions, &[
+        "providerStreamNoContentTimeoutMs",
+        "streamNoContentTimeoutMs",
+        "noContentTimeoutMs",
+    ]) {
+        result.insert("noContentTimeoutMs".to_string(), serde_json::Value::Number(t.into()));
+    }
+
+    // preAnchorIdleTimeoutMs
+    if let Some(t) = get_timeout(&ctx, runtime, profile_extensions, &[
+        "providerStreamPreAnchorIdleTimeoutMs",
+        "streamPreAnchorIdleTimeoutMs",
+        "preAnchorIdleTimeoutMs",
+    ]) {
+        result.insert("preAnchorIdleTimeoutMs".to_string(), serde_json::Value::Number(t.into()));
+    }
+
+    // contentIdleTimeoutMs
+    if let Some(t) = get_timeout(&ctx, runtime, profile_extensions, &[
+        "providerStreamContentIdleTimeoutMs",
+        "streamContentIdleTimeoutMs",
+        "contentIdleTimeoutMs",
+    ]) {
+        result.insert("contentIdleTimeoutMs".to_string(), serde_json::Value::Number(t.into()));
+    }
+
+    if result.is_empty() {
+        Ok("null".to_string())
+    } else {
+        serde_json::to_string(&result)
+            .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
+    }
+}

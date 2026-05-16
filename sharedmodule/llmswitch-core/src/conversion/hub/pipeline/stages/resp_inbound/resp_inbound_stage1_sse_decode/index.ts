@@ -12,6 +12,7 @@ import {
   parseJsonObjectCandidateWithNative
 } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
 import { extractDecodeStatsWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics-inbound-tools.js';
+import { resolveSseTimeoutOptionsWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics-inbound-tools.js';
 import { tryDecodeJsonBodyFromStream } from './stream-json-sniffer.js';
 
 type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
@@ -40,82 +41,7 @@ function recordStage1SseDecode(
 
 
 
-function readPositiveTimeout(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-    return Math.floor(value);
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.floor(parsed);
-    }
-  }
-  return undefined;
-}
 
-function resolveSseTimeoutOptions(adapterContext: AdapterContext): {
-  firstFrameTimeoutMs?: number;
-  noContentTimeoutMs?: number;
-  preAnchorIdleTimeoutMs?: number;
-  contentIdleTimeoutMs?: number;
-} {
-  const ctx = adapterContext as Record<string, unknown>;
-  const runtime = ctx.__rt && typeof ctx.__rt === 'object' && !Array.isArray(ctx.__rt)
-    ? (ctx.__rt as Record<string, unknown>)
-    : undefined;
-  const target = ctx.target && typeof ctx.target === 'object' && !Array.isArray(ctx.target)
-    ? (ctx.target as Record<string, unknown>)
-    : undefined;
-  const profileExtensions =
-    target?.profile && typeof target.profile === 'object' && !Array.isArray(target.profile)
-      ? ((target.profile as Record<string, unknown>).extensions as Record<string, unknown> | undefined)
-      : undefined;
-
-  const firstFrameTimeoutMs =
-    readPositiveTimeout(ctx.providerStreamFirstFrameTimeoutMs)
-    ?? readPositiveTimeout(ctx.streamFirstFrameTimeoutMs)
-    ?? readPositiveTimeout(runtime?.providerStreamFirstFrameTimeoutMs)
-    ?? readPositiveTimeout(runtime?.streamFirstFrameTimeoutMs)
-    ?? readPositiveTimeout(profileExtensions?.providerStreamFirstFrameTimeoutMs)
-    ?? readPositiveTimeout(profileExtensions?.streamFirstFrameTimeoutMs);
-
-  const noContentTimeoutMs =
-    readPositiveTimeout(ctx.providerStreamNoContentTimeoutMs)
-    ?? readPositiveTimeout(ctx.streamNoContentTimeoutMs)
-    ?? readPositiveTimeout(ctx.noContentTimeoutMs)
-    ?? readPositiveTimeout(runtime?.providerStreamNoContentTimeoutMs)
-    ?? readPositiveTimeout(runtime?.streamNoContentTimeoutMs)
-    ?? readPositiveTimeout(runtime?.noContentTimeoutMs)
-    ?? readPositiveTimeout(profileExtensions?.providerStreamNoContentTimeoutMs)
-    ?? readPositiveTimeout(profileExtensions?.streamNoContentTimeoutMs);
-
-  const preAnchorIdleTimeoutMs =
-    readPositiveTimeout(ctx.providerStreamPreAnchorIdleTimeoutMs)
-    ?? readPositiveTimeout(ctx.streamPreAnchorIdleTimeoutMs)
-    ?? readPositiveTimeout(ctx.preAnchorIdleTimeoutMs)
-    ?? readPositiveTimeout(runtime?.providerStreamPreAnchorIdleTimeoutMs)
-    ?? readPositiveTimeout(runtime?.streamPreAnchorIdleTimeoutMs)
-    ?? readPositiveTimeout(runtime?.preAnchorIdleTimeoutMs)
-    ?? readPositiveTimeout(profileExtensions?.providerStreamPreAnchorIdleTimeoutMs)
-    ?? readPositiveTimeout(profileExtensions?.streamPreAnchorIdleTimeoutMs);
-
-  const contentIdleTimeoutMs =
-    readPositiveTimeout(ctx.providerStreamContentIdleTimeoutMs)
-    ?? readPositiveTimeout(ctx.streamContentIdleTimeoutMs)
-    ?? readPositiveTimeout(ctx.contentIdleTimeoutMs)
-    ?? readPositiveTimeout(runtime?.providerStreamContentIdleTimeoutMs)
-    ?? readPositiveTimeout(runtime?.streamContentIdleTimeoutMs)
-    ?? readPositiveTimeout(runtime?.contentIdleTimeoutMs)
-    ?? readPositiveTimeout(profileExtensions?.providerStreamContentIdleTimeoutMs)
-    ?? readPositiveTimeout(profileExtensions?.streamContentIdleTimeoutMs);
-
-  return {
-    ...(firstFrameTimeoutMs ? { firstFrameTimeoutMs } : {}),
-    ...(noContentTimeoutMs ? { noContentTimeoutMs } : {}),
-    ...(preAnchorIdleTimeoutMs ? { preAnchorIdleTimeoutMs } : {}),
-    ...(contentIdleTimeoutMs ? { contentIdleTimeoutMs } : {})
-  };
-}
 
 export async function runRespInboundStage1SseDecode(
   options: RespInboundStage1SseDecodeOptions
@@ -236,7 +162,7 @@ export async function runRespInboundStage1SseDecode(
     const decoded = (await codec.convertSseToJson(stream, {
       requestId: options.adapterContext.requestId,
       model: (options.adapterContext as Record<string, unknown>).modelId as string | undefined,
-      ...resolveSseTimeoutOptions(options.adapterContext)
+      ...resolveSseTimeoutOptionsWithNative(options.adapterContext as Record<string, unknown>)
     })) as JsonObject;
     const decodeStats = extractDecodeStatsWithNative(decoded as Record<string, unknown>);
     logHubStageTiming(requestId, 'resp_inbound.stage1_codec_decode', 'completed', {
