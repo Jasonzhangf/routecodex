@@ -8260,3 +8260,40 @@ pub fn collect_tool_names_from_candidate_json(candidate_json: String) -> napi::R
     serde_json::to_string(&names)
         .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
 }
+
+/// Resolve requested tool names from multiple sources in one call.
+#[napi]
+pub fn resolve_requested_tool_names_json(input_json: String) -> napi::Result<String> {
+    let input: serde_json::Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::new(napi::Status::InvalidArg, e.to_string()))?;
+    let mut names: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    fn collect(candidate: &serde_json::Value, names: &mut Vec<String>, seen: &mut std::collections::HashSet<String>) {
+        let arr = match candidate { serde_json::Value::Array(a) => a, _ => return };
+        for item in arr {
+            let name = match item {
+                serde_json::Value::String(s) => { let t = s.trim(); if t.is_empty() { None } else { Some(t.to_string()) } }
+                serde_json::Value::Object(m) => {
+                    if let Some(serde_json::Value::Object(func)) = m.get("function") {
+                        if let Some(serde_json::Value::String(n)) = func.get("name") { let t = n.trim(); if t.is_empty() { None } else { Some(t.to_string()) } } else { None }
+                    } else if let Some(serde_json::Value::String(n)) = m.get("name") { let t = n.trim(); if t.is_empty() { None } else { Some(t.to_string()) } } else { None }
+                }
+                _ => None,
+            };
+            if let Some(n) = name { if !seen.contains(&n) { seen.insert(n.clone()); names.push(n); } }
+        }
+    }
+    if let Some(serde_json::Value::Object(sem)) = input.get("requestSemantics") {
+        if let Some(tools) = sem.get("tools") { collect(tools, &mut names, &mut seen); }
+        if let Some(serde_json::Value::Object(t)) = sem.get("tools") {
+            if let Some(v) = t.get("clientToolsRaw") { collect(v, &mut names, &mut seen); }
+            if let Some(v) = t.get("baselineTools") { collect(v, &mut names, &mut seen); }
+        }
+    }
+    if let Some(serde_json::Value::Object(ac)) = input.get("adapterContext") {
+        if let Some(serde_json::Value::Object(cr)) = ac.get("capturedChatRequest") {
+            if let Some(tools) = cr.get("tools") { collect(tools, &mut names, &mut seen); }
+        }
+    }
+    serde_json::to_string(&names).map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
+}

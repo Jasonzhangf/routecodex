@@ -497,29 +497,28 @@ export function resolveRequestedToolNamesWithNative(
   }
 ): string[] {
   const names = new Set<string>();
-  function collect(candidate: unknown) {
-    if (!Array.isArray(candidate)) return;
-    const capability = 'collectToolNamesFromCandidateJson';
-    if (isNativeDisabledByEnv()) return;
-    const fn = readNativeFunction(capability);
-    if (!fn) return;
-    const json = safeStringify(candidate);
-    if (!json) return;
-    try {
-      const raw = fn(json);
-      if (typeof raw === 'string') {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          parsed.forEach((n: string) => names.add(n));
-        }
-      }
-    } catch {}
+  const capability = 'resolveRequestedToolNamesJson';
+  if (isNativeDisabledByEnv()) {
+    return [];
   }
-  const requestSemantics = options.requestSemantics;
-  const semanticsTools = (requestSemantics as Record<string, unknown>)?.tools;
-  collect((requestSemantics as Record<string, unknown>)?.tools);
-  collect((semanticsTools as Record<string, unknown>)?.clientToolsRaw);
-  collect((semanticsTools as Record<string, unknown>)?.baselineTools);
-  collect(((options.adapterContext as Record<string, unknown>)?.capturedChatRequest as Record<string, unknown>)?.tools);
-  return Array.from(names);
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return [];
+  }
+  const inputJson = safeStringify(options);
+  if (!inputJson) {
+    return [];
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw === 'string' && raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+    return [];
+  } catch {
+    return [];
+  }
 }
