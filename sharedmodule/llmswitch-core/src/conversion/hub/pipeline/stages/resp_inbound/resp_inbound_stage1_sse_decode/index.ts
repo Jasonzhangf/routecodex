@@ -11,6 +11,7 @@ import {
   extractSseWrapperErrorWithNative,
   parseJsonObjectCandidateWithNative
 } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
+import { extractDecodeStatsWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics-inbound-tools.js';
 import { tryDecodeJsonBodyFromStream } from './stream-json-sniffer.js';
 
 type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
@@ -36,41 +37,7 @@ function recordStage1SseDecode(
   recordStage(stageRecorder, 'chat_process.resp.stage1.sse_decode', payload);
 }
 
-function extractDecodeStats(payload: JsonObject): Record<string, unknown> | undefined {
-  const stats =
-    payload && typeof payload === 'object'
-      ? ((payload as Record<string, unknown>).__rccDecodeStats as Record<string, unknown> | undefined)
-      : undefined;
-  if (!stats || typeof stats !== 'object' || Array.isArray(stats)) {
-    return undefined;
-  }
-  const out: Record<string, unknown> = {};
-  for (const key of [
-    'chunkCount',
-    'byteCount',
-    'totalEvents',
-    'contentBlocks',
-    'toolUseBlocks',
-    'thinkingBlocks',
-    'textBlocks',
-    'errors',
-    'streamMs',
-    'eventSpanMs',
-    'parserMs',
-    'builderMs',
-    'messageStopSeen',
-    'firstContentAtMs',
-    'lastContentAtMs',
-    'totalTokens',
-    'tokenRate'
-  ]) {
-    const value = stats[key];
-    if (value !== undefined) {
-      out[key] = value;
-    }
-  }
-  return Object.keys(out).length ? out : undefined;
-}
+
 
 function resolveProviderType(protocol: ProviderProtocol): string | undefined {
   if (protocol === 'openai-chat') return 'openai';
@@ -278,7 +245,7 @@ export async function runRespInboundStage1SseDecode(
       model: (options.adapterContext as Record<string, unknown>).modelId as string | undefined,
       ...resolveSseTimeoutOptions(options.adapterContext)
     })) as JsonObject;
-    const decodeStats = extractDecodeStats(decoded);
+    const decodeStats = extractDecodeStatsWithNative(decoded as Record<string, unknown>);
     logHubStageTiming(requestId, 'resp_inbound.stage1_codec_decode', 'completed', {
       elapsedMs: Date.now() - codecDecodeStart,
       providerProtocol: options.providerProtocol,

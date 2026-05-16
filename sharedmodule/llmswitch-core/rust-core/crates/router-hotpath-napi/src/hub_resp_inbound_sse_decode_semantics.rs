@@ -542,3 +542,38 @@ mod tests {
         );
     }
 }
+
+/// Extract decode stats from payload.__rccDecodeStats, returning only known fields.
+#[napi]
+pub fn extract_decode_stats_json(payload_json: String) -> napi::Result<String> {
+    let payload: serde_json::Value = serde_json::from_str(&payload_json)
+        .map_err(|e| napi::Error::new(napi::Status::InvalidArg, e.to_string()))?;
+
+    let stats = payload.get("__rccDecodeStats")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| napi::Error::new(napi::Status::Ok, "null".to_string()))?;
+
+    let allowed_keys = [
+        "chunkCount", "byteCount", "totalEvents", "contentBlocks",
+        "toolUseBlocks", "thinkingBlocks", "textBlocks", "errors",
+        "streamMs", "eventSpanMs", "parserMs", "builderMs",
+        "messageStopSeen", "firstContentAtMs", "lastContentAtMs",
+        "totalTokens", "tokenRate"
+    ];
+
+    let mut out = serde_json::Map::new();
+    for key in allowed_keys {
+        if let Some(v) = stats.get(key) {
+            if !v.is_null() {
+                out.insert(key.to_string(), v.clone());
+            }
+        }
+    }
+
+    if out.is_empty() {
+        return Ok("null".to_string());
+    }
+
+    serde_json::to_string(&out)
+        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
+}

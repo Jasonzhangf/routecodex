@@ -411,3 +411,35 @@ export function buildAnthropicResponseFromChatWithNative(
     return fail(reason);
   }
 }
+
+export function extractDecodeStatsWithNative(
+  payload: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  const capability = 'extractDecodeStatsJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown> | undefined>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(payload);
+  if (!payloadJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson);
+    if (typeof raw !== 'string') {
+      return fail('expected string result');
+    }
+    if (raw === 'null' || !raw) {
+      return undefined;
+    }
+    const parsed = parseRecord(raw);
+    return parsed ?? undefined;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
