@@ -2934,3 +2934,35 @@ mod tests {
         );
     }
 }
+
+/// Read followup client inject source from adapter context.
+#[napi]
+pub fn read_followup_client_inject_source_json(adapter_context_json: String) -> napi::Result<String> {
+    let ctx: serde_json::Value = serde_json::from_str(&adapter_context_json)
+        .map_err(|e| napi::Error::new(napi::Status::InvalidArg, e.to_string()))?;
+
+    let obj = match &ctx {
+        serde_json::Value::Object(m) => m,
+        _ => return Ok(String::new()),
+    };
+
+    // Direct clientInjectSource
+    if let Some(serde_json::Value::String(s)) = obj.get("clientInjectSource") {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+
+    // From __rt
+    if let Some(serde_json::Value::Object(rt)) = obj.get("__rt") {
+        if let Some(serde_json::Value::String(s)) = rt.get("clientInjectSource") {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
+        }
+    }
+
+    Ok(String::new())
+}

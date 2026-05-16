@@ -23,28 +23,6 @@ type ClientInjectDispatch = (options: {
   metadata?: JsonObject;
 }) => Promise<{ ok: boolean; reason?: string }>;
 
-function readFollowupClientInjectSource(
-  adapterContext: AdapterContext
-): string {
-  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
-    return '';
-  }
-  const record = adapterContext as Record<string, unknown>;
-  const direct =
-    typeof record.clientInjectSource === 'string' && record.clientInjectSource.trim().length
-      ? record.clientInjectSource.trim()
-      : '';
-  if (direct) {
-    return direct;
-  }
-  const runtimeMeta =
-    record.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
-      ? (record.__rt as Record<string, unknown>)
-      : undefined;
-  return typeof runtimeMeta?.clientInjectSource === 'string' && runtimeMeta.clientInjectSource.trim().length
-    ? runtimeMeta.clientInjectSource.trim()
-    : '';
-}
 
 function markServertoolResponseOrchestration(adapterContext: AdapterContext): void {
   if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
@@ -91,7 +69,7 @@ export async function runRespProcessStage3ServerToolOrchestration(
     !Array.isArray(options.adapterContext)
       ? ((options.adapterContext as Record<string, unknown>).__rt as Record<string, unknown> | undefined)
       : undefined;
-  const followupSource = readFollowupClientInjectSource(options.adapterContext);
+  const followupSource = readFollowupClientInjectSourceWithNative(options.adapterContext as Record<string, unknown>);
   const allowReasoningStopFollowupReentry =
     followupSource === 'servertool.reasoning_stop_guard'
     || followupSource === 'servertool.reasoning_stop_continue';

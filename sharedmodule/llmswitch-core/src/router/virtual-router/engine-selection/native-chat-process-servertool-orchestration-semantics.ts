@@ -728,3 +728,28 @@ export function resolveGoalCapableRequestWithNative(input: {
     return fail(reason);
   }
 }
+export function readFollowupClientInjectSourceWithNative(
+  adapterContext: Record<string, unknown>
+): string {
+  const capability = 'readFollowupClientInjectSourceJson';
+  if (isNativeDisabledByEnv()) {
+    return '';
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return '';
+  }
+  const ctxJson = safeStringify(adapterContext);
+  if (!ctxJson) {
+    return '';
+  }
+  try {
+    const raw = fn(ctxJson);
+    if (typeof raw === 'string') {
+      return raw;
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
