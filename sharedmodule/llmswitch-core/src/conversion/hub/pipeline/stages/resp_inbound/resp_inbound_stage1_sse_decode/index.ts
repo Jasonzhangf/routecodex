@@ -39,13 +39,6 @@ function recordStage1SseDecode(
 
 
 
-function resolveProviderType(protocol: ProviderProtocol): string | undefined {
-  if (protocol === 'openai-chat') return 'openai';
-  if (protocol === 'openai-responses') return 'responses';
-  if (protocol === 'anthropic-messages') return 'anthropic';
-  if (protocol === 'gemini-chat') return 'gemini';
-  return undefined;
-}
 
 function readPositiveTimeout(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
