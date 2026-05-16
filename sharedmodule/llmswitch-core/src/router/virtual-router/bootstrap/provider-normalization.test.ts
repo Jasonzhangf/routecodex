@@ -120,12 +120,46 @@ describe('normalizeProvider anthropic thinking config', () => {
       models: {
         'glm-5': {
           supportsStreaming: true,
-          capabilities: ['text', 'websearch', 'web-search', 'search', 'web_search']
+          capabilities: ['text', 'websearch', 'web-search', 'web_search']
         }
       }
     });
 
     expect(normalized.modelCapabilities?.['glm-5']).toEqual(['text', 'web_search']);
+  });
+
+  it('does not map generic search capability to web_search', () => {
+    const normalized = normalizeProvider('alias-test', {
+      id: 'alias-test',
+      type: 'openai',
+      baseURL: 'https://example.test/openai',
+      auth: { type: 'apikey', apiKey: 'test-key' },
+      models: {
+        'glm-5': {
+          supportsStreaming: true,
+          capabilities: ['text', 'search']
+        }
+      }
+    });
+
+    expect(normalized.modelCapabilities?.['glm-5']).toEqual(['text']);
+  });
+
+  it('maps websearch-direct capability aliases to web_search_direct', () => {
+    const normalized = normalizeProvider('alias-test', {
+      id: 'alias-test',
+      type: 'openai',
+      baseURL: 'https://example.test/openai',
+      auth: { type: 'apikey', apiKey: 'test-key' },
+      models: {
+        'glm-5': {
+          supportsStreaming: true,
+          capabilities: ['text', 'websearch-direct', 'web_search_direct', 'web-search-direct']
+        }
+      }
+    });
+
+    expect(normalized.modelCapabilities?.['glm-5']).toEqual(['text', 'web_search_direct']);
   });
 
   it('treats supportsStreaming as capability auto instead of forcing always', () => {

@@ -66,11 +66,8 @@ impl RoutingClassifier {
                 .clone()
                 .unwrap_or_default()
         };
-        let web_search_continuation = last_tool_category == "websearch";
-        let local_tool_continuation = matches!(
-            last_tool_category.as_str(),
-            "thinking" | "coding" | "search" | "other"
-        );
+        // Web-search routing must be decided from current-turn signals only.
+        // Do not inherit web_search intent from historical tool continuation.
         let reached_long_context = features.estimated_tokens >= self.long_context_threshold_tokens;
         let has_tool_activity =
             features.has_tools || (!latest_message_from_user && features.has_tool_call_responses);
@@ -86,19 +83,37 @@ impl RoutingClassifier {
         let coding_continuation = last_tool_category == "coding";
         let search_continuation = last_tool_category == "search";
         let tools_continuation = last_tool_category == "other";
-        let explicit_web_search_tool = features.has_web_search_tool_declared;
-        let declared_web_tool = features.has_web_tool;
+        let web_search_tool_intent = !latest_message_from_user && last_tool_category == "websearch";
         let user_text_lower = features.user_text_sample.to_lowercase();
+        // Keep web-search intent strict to avoid over-routing:
+        // only explicit web-search phrases should trigger web_search route.
+        // Web-search intent is only valid on the *current fresh user turn*.
+        // If tool-call responses already exist in the current segment, we are in a tool/followup loop
+        // and must not keep inheriting the previous user search intent.
         let search_intent_from_text = latest_message_from_user
-            && (user_text_lower.contains("search the web")
-                || user_text_lower.contains("web search")
-                || user_text_lower.contains("搜索")
-                || user_text_lower.contains("查一下")
-                || user_text_lower.contains("最新")
-                || user_text_lower.contains("with sources")
-                || user_text_lower.contains("来源"));
-        let should_route_search = explicit_web_search_tool
-            || (!has_visual && (search_intent_from_text || declared_web_tool));
+            && !features.has_tool_call_responses
+            && contains_any_keyword(
+                &user_text_lower,
+                &[
+                    "search the web",
+                    "web search",
+                    "browse the web",
+                    "search online",
+                    "look it up",
+                    "with sources",
+                    "联网搜索",
+                    "上网搜索",
+                    "上网搜",
+                    "搜下",
+                    "查一下",
+                    "网页搜索",
+                    "请搜索",
+                    "引用来源",
+                ],
+            );
+        // Web-search routing is current-turn intent only.
+        // Servertool declaration itself must not force route switch.
+        let should_route_search = web_search_tool_intent || (!has_visual && search_intent_from_text);
 
         let mut evaluation: Vec<(String, bool, String)> = Vec::new();
         evaluation.push((
@@ -127,11 +142,11 @@ impl RoutingClassifier {
         ));
         evaluation.push((
             "web_search".to_string(),
-            should_route_search || (!local_tool_continuation && web_search_continuation),
-            if should_route_search {
-                "web_search:explicit-or-intent".to_string()
+            should_route_search,
+            if web_search_tool_intent {
+                "web_search:tool-intent".to_string()
             } else {
-                "web_search:last-tool-websearch".to_string()
+                "web_search:explicit-or-intent".to_string()
             },
         ));
         evaluation.push((
@@ -212,6 +227,13 @@ fn contains_keywords(text: &str, keywords: &[String]) -> bool {
     }
     let normalized = text.to_lowercase();
     keywords.iter().any(|keyword| normalized.contains(keyword))
+}
+
+fn contains_any_keyword(text: &str, keywords: &[&str]) -> bool {
+    if text.is_empty() || keywords.is_empty() {
+        return false;
+    }
+    keywords.iter().any(|keyword| text.contains(keyword))
 }
 
 pub(crate) const DEFAULT_ROUTE: &str = "default";
@@ -337,6 +359,23 @@ mod tests {
     }
 
     #[test]
+    fn tool_followup_after_user_web_search_does_not_stick_to_web_search() {
+        let features = RoutingFeatures {
+            latest_message_from_user: true,
+            has_tools: true,
+            has_tool_call_responses: true,
+            user_text_sample: "please web search latest release notes".to_string(),
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_eq!(result.route_name, "thinking");
+        assert!(result.reasoning.contains("thinking:user-input"));
+        assert!(!result.reasoning.contains("web_search:explicit-or-intent"));
+    }
+
+    #[test]
     fn server_tool_required_does_not_force_web_search_route() {
         let features = RoutingFeatures {
             latest_message_from_user: true,
@@ -367,6 +406,35 @@ mod tests {
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
         assert!(result.reasoning.contains("tools:tool-request-detected"));
-        assert!(!result.reasoning.contains("web_search:tool-declared"));
+    }
+
+    #[test]
+    fn tool_intent_routes_to_web_search() {
+        let features = RoutingFeatures {
+            latest_message_from_user: false,
+            has_tools: true,
+            has_tool_call_responses: true,
+            last_assistant_tool_category: Some("websearch".to_string()),
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_eq!(result.route_name, "web_search");
+        assert!(result.reasoning.contains("web_search:tool-intent"));
+    }
+
+    #[test]
+    fn chinese_search_intent_routes_to_web_search() {
+        let features = RoutingFeatures {
+            latest_message_from_user: true,
+            user_text_sample: "上网搜下 minimax m2.7 官方如何支持图片输入".to_string(),
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_eq!(result.route_name, "web_search");
+        assert!(result.reasoning.contains("web_search:explicit-or-intent"));
     }
 }

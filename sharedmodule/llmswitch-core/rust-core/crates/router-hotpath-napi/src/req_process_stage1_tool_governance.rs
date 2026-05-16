@@ -12,6 +12,9 @@ use crate::chat_servertool_orchestration::{
 };
 use crate::chat_web_search_tool_schema::build_web_search_tool_append_operations_json;
 use crate::hub_req_inbound_context_capture::resolve_client_inject_ready_json;
+use crate::web_search_mode::{
+    resolve_web_search_execution_mode_from_value, WebSearchExecutionMode,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -258,28 +261,6 @@ fn read_clock_enabled(runtime_metadata: &Map<String, Value>) -> bool {
     }
 }
 
-fn read_web_search_execution_mode(engine: &Value) -> String {
-    let row = match engine.as_object() {
-        Some(v) => v,
-        None => return "servertool".to_string(),
-    };
-    let direct = row
-        .get("executionMode")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_ascii_lowercase())
-        .filter(|v| !v.is_empty())
-        .or_else(|| {
-            row.get("mode")
-                .and_then(|v| v.as_str())
-                .map(|v| v.trim().to_ascii_lowercase())
-                .filter(|v| !v.is_empty())
-        });
-    match direct.as_deref() {
-        Some("direct") => "direct".to_string(),
-        _ => "servertool".to_string(),
-    }
-}
-
 fn resolve_default_bundle_plan(
     runtime_metadata: &Map<String, Value>,
     has_active_stop_message: bool,
@@ -288,26 +269,30 @@ fn resolve_default_bundle_plan(
         pick_bool(runtime_metadata.get("serverToolFollowup")).unwrap_or(false);
     let clock_followup_inject_tool =
         pick_bool(runtime_metadata.get("clockFollowupInjectTool")).unwrap_or(false);
-    let web_search_indexes = runtime_metadata
+    let (web_search_indexes, has_direct_web_search_engine) = runtime_metadata
         .get("webSearch")
         .and_then(|v| v.as_object())
         .and_then(|row| row.get("engines"))
         .and_then(|v| v.as_array())
         .map(|engines| {
-            engines
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, engine)| {
-                    if read_web_search_execution_mode(engine) != "servertool" {
-                        return None;
+            let mut servertool_indexes: Vec<i64> = Vec::new();
+            let mut has_direct = false;
+            for (idx, engine) in engines.iter().enumerate() {
+                match resolve_web_search_execution_mode_from_value(engine) {
+                    WebSearchExecutionMode::Servertool => servertool_indexes.push(idx as i64),
+                    WebSearchExecutionMode::DirectRoute | WebSearchExecutionMode::DirectBuiltin => {
+                        has_direct = true
                     }
-                    Some(idx as i64)
-                })
-                .collect::<Vec<i64>>()
+                }
+            }
+            (servertool_indexes, has_direct)
         })
-        .unwrap_or_default();
+        .unwrap_or_else(|| (Vec::new(), false));
 
-    let web_search_should = !web_search_indexes.is_empty() && !server_tool_followup;
+    // Single gate: direct-capable webSearch and servertool webSearch are mutually exclusive
+    // within the same request. Once direct mode is present, do not inject servertool websearch.
+    let web_search_should =
+        !has_direct_web_search_engine && !web_search_indexes.is_empty() && !server_tool_followup;
     let clock_should = if server_tool_followup && !clock_followup_inject_tool {
         false
     } else {
@@ -349,7 +334,9 @@ fn read_selected_web_search_engines(
         if idx >= engines.len() {
             continue;
         }
-        if read_web_search_execution_mode(&engines[idx]) != "servertool" {
+        if resolve_web_search_execution_mode_from_value(&engines[idx])
+            != WebSearchExecutionMode::Servertool
+        {
             continue;
         }
         selected.push(engines[idx].clone());
@@ -1046,7 +1033,7 @@ mod tests {
     }
 
     #[test]
-    fn test_servertool_orchestration_appends_clock_review_continue_tools() {
+    fn test_servertool_orchestration_appends_clock_only_and_keeps_review_continue_hidden() {
         let input = ToolGovernanceInput {
             request: serde_json::json!({
               "model": "gpt-4o-mini",
@@ -1098,7 +1085,8 @@ mod tests {
         }
         assert!(names.contains("exec_command"));
         assert!(names.contains("clock"));
-        assert!(names.contains("review"));
+        assert!(!names.contains("review"));
+        assert!(!names.contains("continue_execution"));
     }
 
     #[test]
@@ -1197,6 +1185,59 @@ mod tests {
             }
         }
         assert!(names.contains("websearch"));
+    }
+
+    #[test]
+    fn test_servertool_orchestration_skips_websearch_when_direct_and_servertool_both_present() {
+        let input = ToolGovernanceInput {
+            request: serde_json::json!({
+              "model": "gpt-4o-mini",
+              "messages": [{"role": "user", "content": "search latest routecodex news"}],
+              "parameters": {
+                "stream": true
+              }
+            }),
+            raw_payload: serde_json::json!({}),
+            metadata: serde_json::json!({
+              "tmuxSessionId": "s-1",
+              "__rt": {
+                "webSearch": {
+                  "engines": [
+                    {
+                      "id": "native-search",
+                      "providerKey": "demo.key1.model",
+                      "executionMode": "direct",
+                      "directActivation": "route"
+                    },
+                    {
+                      "id": "servertool-search",
+                      "providerKey": "demo.key1.model",
+                      "executionMode": "servertool"
+                    }
+                  ]
+                }
+              }
+            }),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            request_id: "req_tools_both_search_modes".to_string(),
+            has_active_stop_message_for_continue_execution: None,
+        };
+
+        let result = apply_req_process_tool_governance(input).unwrap();
+        let tools = result
+            .processed_request
+            .as_object()
+            .and_then(|row| row.get("tools"))
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut names: HashSet<String> = HashSet::new();
+        for tool in tools {
+            if let Some(v) = resolve_tool_name(&tool) {
+                names.insert(v);
+            }
+        }
+        assert!(!names.contains("websearch"));
     }
 
     #[test]

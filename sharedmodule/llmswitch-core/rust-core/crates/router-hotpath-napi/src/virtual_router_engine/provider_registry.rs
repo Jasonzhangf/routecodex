@@ -303,7 +303,10 @@ fn normalize_model_capabilities(value: Option<&Value>) -> Option<HashMap<String,
                         }
                         let mapped = match normalized.as_str() {
                             "vision" => "multimodal".to_string(),
-                            "websearch" | "web-search" | "search" => "web_search".to_string(),
+                            "websearch" | "web-search" => "web_search".to_string(),
+                            "websearch-direct" | "web_search_direct" | "web-search-direct" => {
+                                "web_search_direct".to_string()
+                            }
                             _ => normalized,
                         };
                         if seen.insert(mapped.clone()) {

@@ -115,12 +115,12 @@ fn build_web_search_tool_append_operations(engines: &Value) -> Option<Value> {
         Value::String(SERVERTOOL_WEB_SEARCH_TOOL_NAME.to_string()),
     );
     function.insert(
-    "description".to_string(),
-    Value::String(
-      "Perform web search using configured search engines. Use this when the user asks for up-to-date information or news."
-        .to_string(),
-    ),
-  );
+        "description".to_string(),
+        Value::String(
+            "唯一联网搜索工具（非 direct 模型专用）。当你需要最新事实、新闻、网页证据、官方文档或可引用来源时，必须调用此工具而不是猜测。参数要求：engine 必选（从枚举中选），query 必选且具体，recency 必选（不确定时用 noLimit），count 必选（建议 5-10）。返回的是搜索结果摘要与来源线索，随后继续基于结果推理。"
+                .to_string(),
+        ),
+    );
     function.insert("parameters".to_string(), Value::Object(parameters));
     function.insert("strict".to_string(), Value::Bool(true));
 

@@ -183,7 +183,13 @@ pub(crate) fn filter_pools_by_capability(
         let targets: Vec<String> = pool
             .targets
             .iter()
-            .filter(|key| provider_registry.has_capability(key, capability))
+            .filter(|key| {
+                if capability == "web_search" {
+                    return provider_registry.has_capability(key, "web_search")
+                        || provider_registry.has_capability(key, "web_search_direct");
+                }
+                provider_registry.has_capability(key, capability)
+            })
             .cloned()
             .collect();
         if targets.is_empty() {

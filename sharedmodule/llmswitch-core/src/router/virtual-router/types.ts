@@ -112,7 +112,8 @@ export type ModelCapability =
   | "multimodal"
   | "video"
   | "thinking"
-  | "web_search";
+  | "web_search"
+  | "web_search_direct";
 
 export interface ProviderProfile {
   providerKey: string;

@@ -129,10 +129,12 @@ export function normalizeModelCapabilities(
       const mapped =
         normalized === 'multimodal' || normalized === 'vision'
           ? 'multimodal'
-          : ['websearch', 'web-search', 'search'].includes(normalized)
+          : ['websearch-direct', 'web_search_direct', 'web-search-direct'].includes(normalized)
+            ? 'web_search_direct'
+          : ['websearch', 'web-search'].includes(normalized)
             ? 'web_search'
             : normalized;
-      if (['text', 'reasoning', 'multimodal', 'video', 'thinking', 'web_search'].includes(mapped)) {
+      if (['text', 'reasoning', 'multimodal', 'video', 'thinking', 'web_search', 'web_search_direct'].includes(mapped)) {
         validSet.add(mapped as ModelCapability);
       }
     }

@@ -9,6 +9,7 @@ use crate::chat_web_search_intent::analyze_chat_web_search_intent;
 use crate::hub_bridge_actions::utils::{
     can_servertool_own_tool_call_id, is_synthetic_routecodex_tool_call_id,
 };
+use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecutionMode};
 use crate::virtual_router_engine::routing::{
     resolve_session_scope, resolve_sticky_key, resolve_stop_message_scope,
 };
@@ -1065,12 +1066,9 @@ fn detect_empty_assistant_payload_contract_signal(
                     .get("content")
                     .map(value_has_visible_assistant_text)
                     .unwrap_or(false);
-            if (finish_reason.is_empty()
-                || finish_reason == "stop"
-                || finish_reason == "tool_calls")
-                && !has_tool_calls
-                && !has_text
-            {
+            // 空响应属于请求/协议形状问题，不能用 finish_reason 掩盖。
+            // 只要 assistant 侧既无可见文本也无 tool_calls，就视为 payload contract 失败。
+            if !has_tool_calls && !has_text {
                 return Some(PayloadContractSignalOutput {
                     reason: format!(
                         "finish_reason={} but assistant text/tool_calls are empty",
@@ -1284,53 +1282,12 @@ fn read_web_search_semantics(request: &Value) -> (bool, bool) {
     }
 }
 
-fn read_execution_mode(engine: &Map<String, Value>) -> String {
-    let direct = engine
-        .get("executionMode")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_ascii_lowercase())
-        .filter(|v| !v.is_empty())
-        .or_else(|| {
-            engine
-                .get("mode")
-                .and_then(|v| v.as_str())
-                .map(|v| v.trim().to_ascii_lowercase())
-                .filter(|v| !v.is_empty())
-        });
-    match direct.as_deref() {
-        Some("direct") => "direct".to_string(),
-        _ => "servertool".to_string(),
-    }
-}
-
-fn read_direct_activation(engine: &Map<String, Value>) -> String {
-    let execution_mode = read_execution_mode(engine);
-    let direct = engine
-        .get("directActivation")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_ascii_lowercase())
-        .filter(|v| !v.is_empty())
-        .or_else(|| {
-            engine
-                .get("activation")
-                .and_then(|v| v.as_str())
-                .map(|v| v.trim().to_ascii_lowercase())
-                .filter(|v| !v.is_empty())
-        });
-    match direct.as_deref() {
-        Some("builtin") => "builtin".to_string(),
-        Some("route") => "route".to_string(),
-        _ if execution_mode == "direct" => "route".to_string(),
-        _ => String::new(),
-    }
-}
-
 fn is_servertool_web_search_engine(engine: &Map<String, Value>) -> bool {
-    read_execution_mode(engine) == "servertool"
+    resolve_web_search_execution_mode(engine) == WebSearchExecutionMode::Servertool
 }
 
 fn is_direct_route_web_search_engine(engine: &Map<String, Value>) -> bool {
-    read_execution_mode(engine) == "direct" && read_direct_activation(engine) == "route"
+    resolve_web_search_execution_mode(engine) == WebSearchExecutionMode::DirectRoute
 }
 
 fn should_bypass_servertool_web_search(
@@ -2850,5 +2807,130 @@ mod tests {
         assert_eq!(optional[0].get("id").and_then(|v| v.as_str()), Some("clock_auto"));
         assert_eq!(optional[0].get("queueIndex").and_then(|v| v.as_i64()), Some(1));
         assert_eq!(optional[0].get("queueTotal").and_then(|v| v.as_i64()), Some(1));
+    }
+
+    #[test]
+    fn test_plan_chat_web_search_operations_user_intent_prefers_direct_route_and_skips_servertool() {
+        let request = serde_json::json!({
+            "messages": [
+                { "role": "user", "content": "please web search latest routecodex updates" }
+            ]
+        });
+        let runtime_metadata = serde_json::json!({
+            "webSearch": {
+                "engines": [
+                    {
+                        "id": "native-search",
+                        "providerKey": "demo.key1.model",
+                        "executionMode": "direct",
+                        "directActivation": "route",
+                        "default": true
+                    },
+                    {
+                        "id": "servertool-search",
+                        "providerKey": "demo.key1.model",
+                        "executionMode": "servertool"
+                    }
+                ]
+            }
+        });
+        let output = plan_chat_web_search_operations_json(
+            request.to_string(),
+            runtime_metadata.to_string(),
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
+        assert_eq!(
+            parsed.get("shouldInject").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            parsed
+                .get("selectedEngineIndexes")
+                .and_then(|v| v.as_array())
+                .map(|v| v.len()),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn test_plan_chat_web_search_operations_user_intent_servertool_mode_injects() {
+        let request = serde_json::json!({
+            "messages": [
+                { "role": "user", "content": "please web search latest routecodex updates" }
+            ]
+        });
+        let runtime_metadata = serde_json::json!({
+            "webSearch": {
+                "engines": [
+                    {
+                        "id": "servertool-search",
+                        "providerKey": "demo.key1.model",
+                        "executionMode": "servertool"
+                    }
+                ]
+            }
+        });
+        let output = plan_chat_web_search_operations_json(
+            request.to_string(),
+            runtime_metadata.to_string(),
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
+        assert_eq!(
+            parsed.get("shouldInject").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            parsed
+                .get("selectedEngineIndexes")
+                .and_then(|v| v.as_array())
+                .map(|v| v.len()),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn test_plan_chat_web_search_operations_tool_intent_servertool_mode_injects_via_semantics_force() {
+        let request = serde_json::json!({
+            "semantics": {
+                "providerExtras": {
+                    "webSearch": {
+                        "force": true
+                    }
+                }
+            },
+            "messages": [
+                { "role": "assistant", "content": "calling websearch tool now" }
+            ]
+        });
+        let runtime_metadata = serde_json::json!({
+            "webSearch": {
+                "engines": [
+                    {
+                        "id": "servertool-search",
+                        "providerKey": "demo.key1.model",
+                        "executionMode": "servertool"
+                    }
+                ]
+            }
+        });
+        let output = plan_chat_web_search_operations_json(
+            request.to_string(),
+            runtime_metadata.to_string(),
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
+        assert_eq!(
+            parsed.get("shouldInject").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            parsed
+                .get("selectedEngineIndexes")
+                .and_then(|v| v.as_array())
+                .map(|v| v.len()),
+            Some(1)
+        );
     }
 }

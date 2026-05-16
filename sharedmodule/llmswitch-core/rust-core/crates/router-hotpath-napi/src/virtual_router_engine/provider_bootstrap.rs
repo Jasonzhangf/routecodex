@@ -2025,7 +2025,10 @@ fn normalize_model_capabilities(
                 .unwrap_or_default();
             let mapped = match normalized.as_str() {
                 "multimodal" | "vision" => "multimodal".to_string(),
-                "websearch" | "web-search" | "search" => "web_search".to_string(),
+                "websearch" | "web-search" => "web_search".to_string(),
+                "websearch-direct" | "web_search_direct" | "web-search-direct" => {
+                    "web_search_direct".to_string()
+                }
                 _ => normalized,
             };
             if [
@@ -2035,6 +2038,7 @@ fn normalize_model_capabilities(
                 "video",
                 "thinking",
                 "web_search",
+                "web_search_direct",
             ]
             .contains(&mapped.as_str())
                 && seen.insert(mapped.clone())

@@ -1,5 +1,6 @@
 use crate::hub_bridge_actions::{build_bridge_history, BuildBridgeHistoryInput};
 use crate::hub_standardized_bridge::normalize_chat_envelope_tool_calls;
+use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecutionMode};
 use chrono;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -1573,22 +1574,7 @@ fn find_direct_builtin_web_search_engine<'a>(
             Some(v) => v,
             None => continue,
         };
-        let execution_mode = row
-            .get("executionMode")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        if execution_mode != "direct" {
-            continue;
-        }
-        let direct_activation = row
-            .get("directActivation")
-            .and_then(|v| v.as_str())
-            .unwrap_or("route")
-            .trim()
-            .to_ascii_lowercase();
-        if direct_activation != "builtin" {
+        if resolve_web_search_execution_mode(row) != WebSearchExecutionMode::DirectBuiltin {
             continue;
         }
         let configured_model_id = row

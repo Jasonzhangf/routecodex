@@ -102,6 +102,7 @@ mod virtual_router_provider_key;
 mod virtual_router_stop_message_actions;
 mod virtual_router_stop_message_instruction;
 mod virtual_router_stop_message_state_codec;
+mod web_search_mode;
 use crate::virtual_router_engine::routing::resolve_sticky_key as resolve_virtual_router_sticky_key;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

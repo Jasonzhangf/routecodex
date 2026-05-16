@@ -101,6 +101,37 @@ function extractClientToolsRaw(requestSemantics: Record<string, unknown> | undef
   return Array.isArray(toolsNode?.clientToolsRaw) ? toolsNode.clientToolsRaw : undefined;
 }
 
+function readServerToolFollowupSource(requestSemantics: Record<string, unknown> | undefined): string {
+  const routecodex =
+    requestSemantics?.__routecodex && typeof requestSemantics.__routecodex === 'object' && !Array.isArray(requestSemantics.__routecodex)
+      ? (requestSemantics.__routecodex as Record<string, unknown>)
+      : undefined;
+  const raw = routecodex?.serverToolFollowupSource;
+  return typeof raw === 'string' && raw.trim().length ? raw.trim() : '';
+}
+
+function extractAnySemanticsToolList(requestSemantics: Record<string, unknown> | undefined): unknown[] | undefined {
+  if (!requestSemantics || typeof requestSemantics !== 'object') {
+    return undefined;
+  }
+  const toolsNode =
+    requestSemantics.tools && typeof requestSemantics.tools === 'object' && !Array.isArray(requestSemantics.tools)
+      ? (requestSemantics.tools as Record<string, unknown>)
+      : undefined;
+  const candidates = [
+    toolsNode?.clientToolsRaw,
+    toolsNode?.baselineTools,
+    toolsNode?.canonicalTools,
+    requestSemantics.tools
+  ];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate) && candidate.length > 0) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
 function isServerToolFollowup(requestSemantics: Record<string, unknown> | undefined): boolean {
   const routecodex =
     requestSemantics?.__routecodex && typeof requestSemantics.__routecodex === 'object' && !Array.isArray(requestSemantics.__routecodex)
@@ -239,20 +270,37 @@ function restoreFollowupRootToolsIfNeeded(
     return body;
   }
   const clientToolsRaw = extractClientToolsRaw(requestSemantics);
-  if (!Array.isArray(clientToolsRaw) || clientToolsRaw.length === 0) {
+  const followupSource = readServerToolFollowupSource(requestSemantics);
+  const semanticsTools = extractAnySemanticsToolList(requestSemantics);
+  const rootTools = Array.isArray(body.tools) ? body.tools : undefined;
+  const fullTools = mergeUniqueTools(clientToolsRaw, semanticsTools);
+
+  if (followupSource === 'servertool.stopless_goal_continue' && !isGoalCapableRequestSemantics(requestSemantics)) {
+    // Non-/goal stopless followup must run with a complete tool set.
+    // Make it happen by force-restoring from semantics tool truth (clientToolsRaw/baseline/canonical),
+    // and merge existing root tools if present.
+    const merged = mergeUniqueTools(fullTools, rootTools);
+    if (merged?.length) {
+      return {
+        ...body,
+        tools: merged
+      };
+    }
+  }
+
+  if (!fullTools?.length) {
     return body;
   }
-  const rootTools = Array.isArray(body.tools) ? body.tools : undefined;
   if (isGoalCapableRequestSemantics(requestSemantics) || isManagedStoplessGoalRequestSemantics(requestSemantics)) {
     return {
       ...body,
-      tools: clientToolsRaw
+      tools: fullTools
     };
   }
   if (rootTools && !isCollapsedReasoningStopOnlyTools(rootTools)) {
     return body;
   }
-  const mergedTools = mergeUniqueTools(clientToolsRaw, rootTools);
+  const mergedTools = mergeUniqueTools(fullTools, rootTools);
   if (!mergedTools?.length) {
     return body;
   }
