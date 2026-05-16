@@ -274,6 +274,132 @@ describe('provider-response-converter unified semantics handoff', () => {
     });
   });
 
+  it('normalizes responses required_action exec_command arguments through rust ssot before host validation', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+    mockSyncReasoningStopModeFromRequest.mockClear();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+    mockLoadRoutingInstructionStateSync.mockReset();
+    mockLoadRoutingInstructionStateSync.mockReturnValue(null);
+
+    mockConvertProviderResponse.mockResolvedValueOnce({
+      body: {
+        object: 'response',
+        id: 'resp_tool_args_repaired_1',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            name: 'exec_command',
+            call_id: 'call_exec_1',
+            arguments: JSON.stringify({ command: 'pwd' }),
+            function: {
+              name: 'exec_command',
+              arguments: JSON.stringify({ command: 'pwd' })
+            }
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_exec_1',
+                type: 'function',
+                name: 'exec_command',
+                arguments: JSON.stringify({ command: 'pwd' }),
+                function: {
+                  name: 'exec_command',
+                  arguments: JSON.stringify({ command: 'pwd' })
+                }
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const result = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'anthropic-messages',
+        requestId: 'req_responses_tool_args_repaired_1',
+        wantsStream: false,
+        requestSemantics: {
+          tools: {
+            clientToolsRaw: [
+              {
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  parameters: {
+                    type: 'object',
+                    properties: {
+                      cmd: { type: 'string' }
+                    },
+                    required: ['cmd'],
+                    additionalProperties: false
+                  }
+                }
+              }
+            ]
+          }
+        } as any,
+        originalRequest: {
+          model: 'gpt-5.4',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'run pwd' }] }]
+        },
+        response: {
+          body: {
+            id: 'provider_resp_repaired_1',
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'done' }],
+            stop_reason: 'tool_use'
+          }
+        } as any,
+        pipelineMetadata: {
+          capturedChatRequest: {
+            model: 'gpt-5.4',
+            tools: [
+              {
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  parameters: {
+                    type: 'object',
+                    properties: {
+                      cmd: { type: 'string' }
+                    },
+                    required: ['cmd'],
+                    additionalProperties: false
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    const toolCall = (result.body as any)?.required_action?.submit_tool_outputs?.tool_calls?.[0];
+    expect(toolCall?.arguments).toBe(JSON.stringify({ cmd: 'pwd' }));
+    expect(toolCall?.function?.arguments).toBe(JSON.stringify({ cmd: 'pwd' }));
+    expect((result.body as any)?.output?.[0]?.arguments).toBe(JSON.stringify({ cmd: 'pwd' }));
+  });
+
   it('preserves anthropic tool_use on real reasoning_stop_guard followup sample instead of collapsing to empty tool_calls', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();

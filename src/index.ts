@@ -802,6 +802,14 @@ class RouteCodexApp {
       const { userConfig, configPath: resolvedConfigPath, providerProfiles } = await loadRouteCodexConfig(userConfigPath);
       this.configPath = resolvedConfigPath;
       const userConfigRecord = asRecord(userConfig) ?? {};
+      const httpserverRecord = getNestedRecord(userConfigRecord, ['httpserver']);
+      const configuredPortGroup = Array.isArray((httpserverRecord as Record<string, unknown> | null)?.ports)
+        ? (((httpserverRecord as Record<string, unknown>).ports as unknown[])
+            .map((entry) => (entry && typeof entry === 'object' ? (entry as Record<string, unknown>).port : undefined))
+            .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0)
+            .map((value) => Math.floor(value)))
+        : [];
+      const hasMultiPortConfig = configuredPortGroup.length > 1;
 
       if (!process.env.ROUTECODEX_STAGE_LOG || process.env.ROUTECODEX_STAGE_LOG.trim() === '') {
         if (buildInfo.mode === 'dev') {
@@ -889,8 +897,13 @@ class RouteCodexApp {
         return value;
       };
       this.prepareRuntimeExitForensics(bindPort);
-      process.env.ROUTECODEX_PORT = String(bindPort);
-      process.env.RCC_PORT = String(bindPort);
+      if (hasMultiPortConfig) {
+        delete process.env.ROUTECODEX_PORT;
+        delete process.env.RCC_PORT;
+      } else {
+        process.env.ROUTECODEX_PORT = String(bindPort);
+        process.env.RCC_PORT = String(bindPort);
+      }
       process.env.ROUTECODEX_HTTP_HOST = bindHost;
       process.env.ROUTECODEX_HTTP_PORT = String(bindPort);
       if (!process.env.ROUTECODEX_TOKEN_PORTAL_BASE) {
@@ -903,13 +916,16 @@ class RouteCodexApp {
       //    必须在 provider OAuth 初始化之前完成监听，否则本地 token portal 无法访问。
       // Ensure the port is available before continuing. Attempt graceful shutdown first.
       const buildRestartOnly = isBuildRestartOnlyMode();
-      const firstPortCheck = await ensurePortAvailable(port, {
-        attemptGraceful: !buildRestartOnly,
-        restartInPlaceOnly: buildRestartOnly
-      });
-      if (firstPortCheck === 'handled_existing_server') {
-        console.log(`ℹ Build restart-only mode: existing server on port ${port} handled in place.`);
-        return;
+      const bootstrapPorts = configuredPortGroup.length > 0 ? configuredPortGroup : [port];
+      for (const candidatePort of bootstrapPorts) {
+        const firstPortCheck = await ensurePortAvailable(candidatePort, {
+          attemptGraceful: !buildRestartOnly,
+          restartInPlaceOnly: buildRestartOnly
+        });
+        if (firstPortCheck === 'handled_existing_server') {
+          console.log(`ℹ Build restart-only mode: existing server on port ${candidatePort} handled in place.`);
+          return;
+        }
       }
       try {
         await this.httpServer.start();
@@ -918,15 +934,18 @@ class RouteCodexApp {
         const code = nodeError?.code ?? nodeError?.errno ?? '';
         const msg = err instanceof Error ? err.message : String(err ?? '');
         if (String(code) === 'EADDRINUSE' || /address already in use/i.test(msg)) {
-          console.warn(`⚠ Port ${port} in use; attempting to free and retry...`);
+          const retryTargets = configuredPortGroup.length > 0 ? configuredPortGroup : [port];
+          console.warn(`⚠ Port ${retryTargets.join(', ')} in use; attempting to free and retry...`);
           try {
-            const retryPortCheck = await ensurePortAvailable(port, {
-              attemptGraceful: !buildRestartOnly,
-              restartInPlaceOnly: buildRestartOnly
-            });
-            if (retryPortCheck === 'handled_existing_server') {
-              console.log(`ℹ Build restart-only mode: existing server on port ${port} handled in place.`);
-              return;
+            for (const candidatePort of retryTargets) {
+              const retryPortCheck = await ensurePortAvailable(candidatePort, {
+                attemptGraceful: !buildRestartOnly,
+                restartInPlaceOnly: buildRestartOnly
+              });
+              if (retryPortCheck === 'handled_existing_server') {
+                console.log(`ℹ Build restart-only mode: existing server on port ${candidatePort} handled in place.`);
+                return;
+              }
             }
             await this.httpServer.start();
           } catch (e) {
@@ -968,15 +987,30 @@ class RouteCodexApp {
         logNonBlockingError('resolve_server_config_after_start', error);
       }
 
+      const listenerEndpoints = (() => {
+        try {
+          const snapshot = this.httpServer.getPortRegistry().snapshot() as Array<{ host: string; port: number; mode?: string }>;
+          return Array.isArray(snapshot) ? snapshot : [];
+        } catch {
+          return [] as Array<{ host: string; port: number; mode?: string }>;
+        }
+      })();
+      const primaryBase = `http://${serverConfig.host}:${serverConfig.port}`;
+
       console.log(`✅ RouteCodex server started successfully!`);
-      console.log(`🌐 Server URL: http://${serverConfig.host}:${serverConfig.port}`);
+      console.log(`🌐 Primary Server URL: ${primaryBase}`);
+      if (listenerEndpoints.length > 1) {
+        console.log(
+          `🌐 Active listeners: ${listenerEndpoints.map((item) => `${item.host}:${item.port}${item.mode ? `(${item.mode})` : ''}`).join(', ')}`
+        );
+      }
       console.log(`🗂️ User config: ${this.configPath}`);
-      console.log(`📊 Health check: http://${serverConfig.host}:${serverConfig.port}/health`);
-      console.log(`🔧 Configuration: http://${serverConfig.host}:${serverConfig.port}/config`);
-      console.log(`📖 OpenAI API: http://${serverConfig.host}:${serverConfig.port}/v1/openai`);
+      console.log(`📊 Health check: ${primaryBase}/health`);
+      console.log(`🔧 Configuration: ${primaryBase}/config`);
+      console.log(`📖 OpenAI API: ${primaryBase}/v1/openai`);
       // Anthropic 入口保持 V2 之前的一致形态：/v1/messages
       // 不在日志中引入新的 /v1/anthropic 前缀，避免与实际路由不符
-      console.log(`🔬 Anthropic API: http://${serverConfig.host}:${serverConfig.port}/v1/messages`);
+      console.log(`🔬 Anthropic API: ${primaryBase}/v1/messages`);
 
       // samples dry-run removed
 
@@ -1144,6 +1178,15 @@ class RouteCodexApp {
         parsed.httpserver && typeof parsed.httpserver === 'object'
           ? (parsed.httpserver as Record<string, unknown>)
           : null;
+      const groupedPorts = Array.isArray(httpserver?.ports)
+        ? (httpserver.ports as unknown[])
+            .map((entry) => (entry && typeof entry === 'object' ? (entry as Record<string, unknown>).port : undefined))
+            .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0)
+            .map((value) => Math.floor(value))
+        : [];
+      if (groupedPorts.length > 0) {
+        return groupedPorts[0];
+      }
       const httpPort = httpserver && typeof httpserver.port === 'number' ? httpserver.port : null;
       const legacyPort = typeof parsed.port === 'number' ? parsed.port : null;
       const resolved = httpPort ?? legacyPort;
@@ -1157,11 +1200,6 @@ class RouteCodexApp {
         return envPort;
       }
 
-      // Dev 模式：无论配置是否存在，若未显式指定端口，则使用固定默认 5555
-      if (buildInfo.mode === 'dev') {
-        console.log('🔧 Using dev default port 5555');
-        return 5555;
-      }
       // 首先检查ROUTECODEX_CONFIG_PATH环境变量（当前使用的）
       if (process.env.ROUTECODEX_CONFIG_PATH) {
         const configPath = process.env.ROUTECODEX_CONFIG_PATH;
@@ -1223,6 +1261,12 @@ class RouteCodexApp {
           console.log(`🔧 Using port ${port} from default config: ${defaultConfigPath}`);
           return port;
         }
+      }
+
+      // Dev 模式：仅在未提供任何可解析配置时兜底 5555
+      if (buildInfo.mode === 'dev') {
+        console.log('🔧 Using dev default port 5555');
+        return 5555;
       }
     } catch (error) {
       console.error('❌ Error detecting server port:', error);

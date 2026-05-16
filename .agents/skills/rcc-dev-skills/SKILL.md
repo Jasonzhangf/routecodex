@@ -54,6 +54,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 ## 工具治理唯一真源
 
 - Hub Pipeline Rust-only 铁律（2026-05-16）：`llmswitch-core Hub Pipeline / chat process / req_process / resp_process / servertool followup orchestration` 已经是 **Rust-only** 责任域；凡发现 TS 里还残留语义判定、followup tools sanitize、兼容修复、注入裁剪等第二实现，必须立即迁回 `rust-core/crates/router-hotpath-napi/`，TS 只保留薄壳调用。
+- Responses tool-args scope 边界（2026-05-16）：`/v1/responses required_action/output function_call` 的 client args 归一（如 `exec_command command -> cmd`）必须先走 Rust `hub_resp_outbound_client_semantics` 的 schema-based SSOT；Host/TS 若在此之前直接校验并报 `CLIENT_TOOL_ARGS_INVALID`，属于 scope 越权。唯一修复点是在 Host validator 前复用该 Rust normalize，而不是放宽 TS validator。
 - stopless non-goal followup 判定（2026-05-16）：`clientInjectSource=servertool.stopless_goal_continue` 只是**非 /goal bootstrap followup**，即使 adapterContext 持有 `stoplessGoalState=active`，也**绝不能**按 goal-managed followup 清洗 tools；这条判定必须落在 Rust goal/followup 真源，禁止 TS builder 再拼第二判断面。
 - Codex namespace/deferred tools（2026-04-27）：`type="namespace"` + child `tools[]` + `defer_loading` 必须先在 **ingress/canonical** 原样保真；**只允许**在 non-responses outbound compat/request-build 侧做 namespace child flatten，responses-capable upstream 禁止提前 flatten。
 - namespace tool 闭环（2026-04-27）：若 non-responses provider 需要 function-only tools，flatten alias 后**必须**在 client remap 用 `clientToolsRaw` 恢复成 `name + namespace` 客户端语义；禁止靠 provider capability 猜测或 host 侧硬编码补 computer-use。

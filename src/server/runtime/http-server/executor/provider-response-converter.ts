@@ -39,6 +39,9 @@ import {
   extractServerToolFollowupErrorLogDetails,
   finalizeServerToolBridgeConvertError
 } from './servertool-followup-error.js';
+import {
+  normalizeResponsesToolCallArgumentsForClientWithNative
+} from '../../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
 
 import {
   asFlatRecord,
@@ -268,6 +271,44 @@ function hasGoalPersistenceScope(adapterContext: Record<string, unknown>): boole
     ?? readNonEmptyString(adapterContext.sessionId)
     ?? readNonEmptyString(adapterContext.conversationId)
   );
+}
+
+function readClientToolsRawForResponsesNormalization(args: {
+  adapterContext?: Record<string, unknown>;
+  requestSemantics?: Record<string, unknown>;
+}): unknown[] {
+  const adapterCapturedRequest = asFlatRecord(args.adapterContext?.capturedChatRequest);
+  const adapterTools = Array.isArray(adapterCapturedRequest?.tools) ? adapterCapturedRequest.tools : undefined;
+  if (adapterTools?.length) {
+    return adapterTools;
+  }
+  const semanticsTools = asFlatRecord(args.requestSemantics?.tools);
+  const clientToolsRaw = Array.isArray(semanticsTools?.clientToolsRaw) ? semanticsTools.clientToolsRaw : undefined;
+  if (clientToolsRaw?.length) {
+    return clientToolsRaw;
+  }
+  const rootTools = Array.isArray(args.requestSemantics?.tools) ? args.requestSemantics.tools : undefined;
+  return rootTools?.length ? rootTools : [];
+}
+
+function normalizeResponsesToolCallsViaRustSsot(args: {
+  payload: Record<string, unknown>;
+  adapterContext?: Record<string, unknown>;
+  requestSemantics?: Record<string, unknown>;
+  entryEndpoint?: string;
+}): Record<string, unknown> {
+  const entry = String(args.entryEndpoint || '').toLowerCase();
+  if (!entry.includes('/v1/responses')) {
+    return args.payload;
+  }
+  const toolsRaw = readClientToolsRawForResponsesNormalization({
+    adapterContext: args.adapterContext,
+    requestSemantics: args.requestSemantics
+  });
+  if (!Array.isArray(toolsRaw) || toolsRaw.length === 0) {
+    return args.payload;
+  }
+  return normalizeResponsesToolCallArgumentsForClientWithNative(args.payload, toolsRaw);
 }
 
 function persistGoalValidationLedger(args: {
@@ -1044,6 +1085,14 @@ export async function convertProviderResponseIfNeeded(
       hasBody: converted.body !== undefined && converted.body !== null,
       elapsedMs: Date.now() - bridgeStartMs
     });
+    if (converted.body && typeof converted.body === 'object' && !Array.isArray(converted.body)) {
+      converted.body = normalizeResponsesToolCallsViaRustSsot({
+        payload: converted.body as Record<string, unknown>,
+        adapterContext,
+        requestSemantics: options.requestSemantics,
+        entryEndpoint: options.entryEndpoint || entry
+      });
+    }
     const declaredToolNames = collectDeclaredToolNames(baseContext);
     normalizeValidatedConvertedProviderToolCallsInPlace(converted.body ?? body, declaredToolNames);
     syncProjectedGoalStateBackToPipelineMetadata({
