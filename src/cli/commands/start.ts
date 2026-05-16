@@ -234,12 +234,17 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         // Determine effective port:
         // - dev package (`routecodex`): env override, otherwise固定端口 DEFAULT_DEV_PORT
         // - release package (`rcc`): 严格按配置文件端口启动
+        const resolvedPortGroup = resolvePortGroupFromConfig(ctx, { configPath });
+        const hasMultiPortConfig = !!(resolvedPortGroup?.ports && resolvedPortGroup.ports.length > 1);
         let resolvedPort: number;
         if (ctx.isDevPackage) {
           const flagPort = typeof options.port === 'string' ? Number(options.port) : NaN;
           if (!Number.isNaN(flagPort) && flagPort > 0) {
             ctx.logger.info(`Using port ${flagPort} from --port flag [dev package: routecodex]`);
             resolvedPort = flagPort;
+          } else if (hasMultiPortConfig) {
+            resolvedPort = resolvedPortGroup!.ports[0];
+            ctx.logger.info(`Using first port ${resolvedPort} from multi-port config [dev package: routecodex]`);
           } else {
             const envPort = Number(ctx.env.ROUTECODEX_PORT || ctx.env.RCC_PORT || NaN);
             if (!Number.isNaN(envPort) && envPort > 0) {
@@ -302,12 +307,14 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         // Ensure port state aligns with requested behavior.
         // Default behavior is takeover/restart; pass --no-restart for legacy non-disruptive mode.
         const shouldRestart = options.restart !== false || options.exclusive === true;
-        const grouped = ctx.isDevPackage
-          ? null
-          : resolvePortGroupFromConfig(ctx, {
-              configPath,
-              targetPort: resolvedPort
-            });
+        const grouped = hasMultiPortConfig
+          ? resolvedPortGroup
+          : (ctx.isDevPackage
+            ? null
+            : resolvePortGroupFromConfig(ctx, {
+                configPath,
+                targetPort: resolvedPort
+              }));
         const portGroup = grouped?.ports?.length ? grouped.ports : [resolvedPort];
         if (portGroup.length > 1) {
           spinner.info(`[start] resolved config port-group: ${portGroup.join(', ')}`);
@@ -324,8 +331,15 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         };
         const serverHost = resolveServerHost();
 
-        ctx.env.ROUTECODEX_PORT = String(resolvedPort);
-        ctx.env.RCC_PORT = String(resolvedPort);
+        const isMultiPortGroup = portGroup.length > 1;
+        if (!isMultiPortGroup) {
+          ctx.env.ROUTECODEX_PORT = String(resolvedPort);
+          ctx.env.RCC_PORT = String(resolvedPort);
+        } else {
+          // Multi-port startup must not be collapsed by single-port env overrides.
+          delete ctx.env.ROUTECODEX_PORT;
+          delete ctx.env.RCC_PORT;
+        }
         ctx.env.ROUTECODEX_HTTP_HOST = serverHost;
         ctx.env.ROUTECODEX_HTTP_PORT = String(resolvedPort);
         await ctx.ensureLocalTokenPortalEnv();
@@ -366,7 +380,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         const baseDirWasDefaulted =
           !String(ctx.env.ROUTECODEX_BASEDIR || '').trim()
           && !String(ctx.env.RCC_BASEDIR || '').trim();
-        if (ctx.isDevPackage) {
+        if (ctx.isDevPackage && !isMultiPortGroup) {
           env.ROUTECODEX_PORT = String(resolvedPort);
         }
         const bindServerToParent = parseBoolish(

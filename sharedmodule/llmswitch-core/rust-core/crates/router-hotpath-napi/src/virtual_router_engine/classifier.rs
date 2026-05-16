@@ -75,6 +75,9 @@ impl RoutingClassifier {
         let has_tool_activity =
             features.has_tools || (!latest_message_from_user && features.has_tool_call_responses);
         let thinking_continuation = last_tool_category == "thinking";
+        let has_visual =
+            features.has_image_attachment
+            || (features.has_video_attachment && features.has_remote_video_attachment);
         // Jason 规则：当前轮是用户输入时始终优先 thinking，
         // 但不再引用历史 last-tool continuation 影响本轮判断。
         // （tools 仍可作为并行诊断信号，避免“thinking 与 tools 冲突”）
@@ -83,9 +86,19 @@ impl RoutingClassifier {
         let coding_continuation = last_tool_category == "coding";
         let search_continuation = last_tool_category == "search";
         let tools_continuation = last_tool_category == "other";
-        let has_visual =
-            features.has_image_attachment
-            || (features.has_video_attachment && features.has_remote_video_attachment);
+        let explicit_web_search_tool = features.has_web_search_tool_declared;
+        let declared_web_tool = features.has_web_tool;
+        let user_text_lower = features.user_text_sample.to_lowercase();
+        let search_intent_from_text = latest_message_from_user
+            && (user_text_lower.contains("search the web")
+                || user_text_lower.contains("web search")
+                || user_text_lower.contains("搜索")
+                || user_text_lower.contains("查一下")
+                || user_text_lower.contains("最新")
+                || user_text_lower.contains("with sources")
+                || user_text_lower.contains("来源"));
+        let should_route_search = explicit_web_search_tool
+            || (!has_visual && (search_intent_from_text || declared_web_tool));
 
         let mut evaluation: Vec<(String, bool, String)> = Vec::new();
         evaluation.push((
@@ -114,8 +127,12 @@ impl RoutingClassifier {
         ));
         evaluation.push((
             "web_search".to_string(),
-            !local_tool_continuation && web_search_continuation,
-            "web_search:last-tool-websearch".to_string(),
+            should_route_search || (!local_tool_continuation && web_search_continuation),
+            if should_route_search {
+                "web_search:explicit-or-intent".to_string()
+            } else {
+                "web_search:last-tool-websearch".to_string()
+            },
         ));
         evaluation.push((
             "search".to_string(),

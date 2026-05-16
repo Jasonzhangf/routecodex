@@ -634,6 +634,16 @@ export class RouteCodexHttpServer {
     await initializeWithUserConfig(this, userConfig, context);
   }
 
+  /**
+   * Seed raw user config before listener start so multi-port bootstrap can read httpserver.ports.
+   * This only sets config snapshot and does not initialize runtime/provider state.
+   */
+  public seedUserConfigForBootstrap(userConfig: UnknownObject): void {
+    if (userConfig && typeof userConfig === 'object') {
+      this.userConfig = structuredClone(userConfig);
+    }
+  }
+
   public async reloadRuntime(
     userConfig: UnknownObject,
     context?: { providerProfiles?: ProviderProfileCollection }

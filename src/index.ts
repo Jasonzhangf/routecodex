@@ -29,6 +29,7 @@ import {
 } from './utils/runtime-exit-forensics.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
+import { detectUserConfigFormat, parseUserConfigText } from './config/user-config-codec.js';
 import { ensureRccUserDirEnvironment, resolveRccPath, resolveRccPathForRead } from './config/user-data-paths.js';
 import type { RouteCodexHttpServer } from './server/runtime/http-server.js';
 
@@ -861,6 +862,7 @@ class RouteCodexApp {
         providers: {},
         v2Config: { enableHooks: hooksOn }
       });
+      this.httpServer.seedUserConfigForBootstrap(userConfig);
 
       // 4.1 校验 virtualrouter 配置
       const virtualRouter = getNestedRecord(userConfigRecord, ['virtualrouter']);
@@ -1134,6 +1136,19 @@ class RouteCodexApp {
    * Detect server port from user configuration
    */
   private async detectServerPort(_modulesConfigPath: string): Promise<number> {
+    const readPortFromConfigFile = async (configPath: string): Promise<number | null> => {
+      const raw = await fs.readFile(configPath, 'utf-8');
+      const format = detectUserConfigFormat(configPath);
+      const parsed = parseUserConfigText(raw, format) as Record<string, unknown>;
+      const httpserver =
+        parsed.httpserver && typeof parsed.httpserver === 'object'
+          ? (parsed.httpserver as Record<string, unknown>)
+          : null;
+      const httpPort = httpserver && typeof httpserver.port === 'number' ? httpserver.port : null;
+      const legacyPort = typeof parsed.port === 'number' ? parsed.port : null;
+      const resolved = httpPort ?? legacyPort;
+      return typeof resolved === 'number' && resolved > 0 ? resolved : null;
+    };
     try {
       // Highest priority: explicit environment override
       const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
@@ -1156,11 +1171,7 @@ class RouteCodexApp {
             throw new Error(`ROUTECODEX_CONFIG_PATH must point to a file: ${configPath}`);
           }
 
-          const raw = await fs.readFile(configPath, 'utf-8');
-          const json = JSON.parse(raw);
-          const port = (json && typeof json.httpserver === 'object' && typeof json.httpserver.port === 'number')
-            ? json.httpserver.port
-            : json?.port;
+          const port = await readPortFromConfigFile(configPath);
           if (typeof port === 'number' && port > 0) {
             console.log(`🔧 Using port ${port} from ROUTECODEX_CONFIG_PATH: ${configPath}`);
             return port;
@@ -1177,11 +1188,7 @@ class RouteCodexApp {
             throw new Error(`ROUTECODEX_CONFIG must point to a file: ${configPath}`);
           }
 
-          const raw = await fs.readFile(configPath, 'utf-8');
-          const json = JSON.parse(raw);
-          const port = (json && typeof json.httpserver === 'object' && typeof json.httpserver.port === 'number')
-            ? json.httpserver.port
-            : json?.port;
+          const port = await readPortFromConfigFile(configPath);
           if (typeof port === 'number' && port > 0) {
             console.log(`🔧 Using port ${port} from ROUTECODEX_CONFIG: ${configPath}`);
             return port;
@@ -1193,11 +1200,7 @@ class RouteCodexApp {
       try {
         const sharedPath = resolveRouteCodexConfigPath();
         if (sharedPath && fsSync.existsSync(sharedPath)) {
-          const raw = await fs.readFile(sharedPath, 'utf-8');
-          const json = JSON.parse(raw);
-          const port = (json && typeof json.httpserver === 'object' && typeof json.httpserver.port === 'number')
-            ? json.httpserver.port
-            : json?.port;
+          const port = await readPortFromConfigFile(sharedPath);
           if (typeof port === 'number' && port > 0) {
             console.log(`🔧 Using port ${port} from resolved config: ${sharedPath}`);
             return port;
@@ -1215,11 +1218,7 @@ class RouteCodexApp {
           throw new Error(`Default configuration path must be a file: ${defaultConfigPath}`);
         }
 
-        const raw = await fs.readFile(defaultConfigPath, 'utf-8');
-        const json = JSON.parse(raw);
-        const port = (json && typeof json.httpserver === 'object' && typeof json.httpserver.port === 'number')
-          ? json.httpserver.port
-          : json?.port;
+        const port = await readPortFromConfigFile(defaultConfigPath);
         if (typeof port === 'number' && port > 0) {
           console.log(`🔧 Using port ${port} from default config: ${defaultConfigPath}`);
           return port;

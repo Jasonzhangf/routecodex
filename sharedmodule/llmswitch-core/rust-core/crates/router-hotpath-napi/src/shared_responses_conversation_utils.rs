@@ -477,7 +477,9 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
         base_payload.insert("stream".to_string(), Value::Bool(stream));
     }
 
-    let input = clone_array(context.as_object().and_then(|row| row.get("input")));
+    let input = strip_meta_from_history_items(clone_array(
+        context.as_object().and_then(|row| row.get("input")),
+    ));
 
     let tools = context
         .as_object()
@@ -512,6 +514,33 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
         "tools": tools.map(Value::Array).unwrap_or(Value::Null),
         "routeHint": route_hint_value,
     })
+}
+
+fn strip_meta_from_history_items(items: Vec<Value>) -> Vec<Value> {
+    items
+        .into_iter()
+        .map(|item| strip_meta_value(item))
+        .collect::<Vec<_>>()
+}
+
+fn strip_meta_value(value: Value) -> Value {
+    match value {
+        Value::Array(arr) => Value::Array(arr.into_iter().map(strip_meta_value).collect()),
+        Value::Object(mut map) => {
+            map.remove("metadata");
+            map.remove("meta");
+            map.remove("__meta");
+            map.remove("_meta");
+            let keys: Vec<String> = map.keys().cloned().collect();
+            for key in keys {
+                if let Some(v) = map.remove(&key) {
+                    map.insert(key, strip_meta_value(v));
+                }
+            }
+            Value::Object(map)
+        }
+        other => other,
+    }
 }
 
 fn resume_responses_conversation_payload(
