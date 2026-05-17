@@ -8,6 +8,7 @@ import {
   resolveClientToolsRawFromRespSemanticsWithNative,
 } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
 import { normalizeOpenaiChatReasoningOutboundWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js';
+import { buildResponsesPayloadFromChat } from '../../../../../responses/responses-openai-bridge/response-payload.js';
 import {
   shouldLogClientRemapDebugWithNative,
   assertNoUnknownToolNamesWithNative,
@@ -23,6 +24,47 @@ export interface ClientRemapProtocolSwitchOptions {
   requestId: string;
   requestSemantics?: JsonObject;
   responseSemantics?: JsonObject;
+}
+
+function hasChatToolCalls(payload: JsonObject): boolean {
+  const choices = Array.isArray((payload as Record<string, unknown>).choices)
+    ? ((payload as Record<string, unknown>).choices as unknown[])
+    : [];
+  for (const choice of choices) {
+    if (!choice || typeof choice !== 'object' || Array.isArray(choice)) continue;
+    const message = (choice as Record<string, unknown>).message;
+    if (!message || typeof message !== 'object' || Array.isArray(message)) continue;
+    const toolCalls = (message as Record<string, unknown>).tool_calls;
+    if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasResponsesFunctionCalls(payload: JsonObject): boolean {
+  const output = Array.isArray((payload as Record<string, unknown>).output)
+    ? ((payload as Record<string, unknown>).output as unknown[])
+    : [];
+  for (const item of output) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const type = typeof (item as Record<string, unknown>).type === 'string'
+      ? String((item as Record<string, unknown>).type).trim().toLowerCase()
+      : '';
+    if (type === 'function_call') {
+      return true;
+    }
+  }
+  const requiredAction = (payload as Record<string, unknown>).required_action;
+  if (!requiredAction || typeof requiredAction !== 'object' || Array.isArray(requiredAction)) {
+    return false;
+  }
+  const submitToolOutputs = (requiredAction as Record<string, unknown>).submit_tool_outputs;
+  if (!submitToolOutputs || typeof submitToolOutputs !== 'object' || Array.isArray(submitToolOutputs)) {
+    return false;
+  }
+  const toolCalls = (submitToolOutputs as Record<string, unknown>).tool_calls;
+  return Array.isArray(toolCalls) && toolCalls.length > 0;
 }
 
 function remapChatToolCallsToClientNames(
@@ -81,6 +123,15 @@ export function buildClientPayloadForProtocol(options: ClientRemapProtocolSwitch
       responseSemantics: options.responseSemantics,
       ...(toolsRaw ? { toolsRaw } : {})
     }) as JsonObject;
+    if (hasChatToolCalls(options.payload) && !hasResponsesFunctionCalls(clientPayload)) {
+      const recovered = buildResponsesPayloadFromChat(options.payload, {
+        requestId: options.requestId,
+        ...(toolsRaw ? { toolsRaw } : {})
+      }) as JsonObject;
+      if (hasResponsesFunctionCalls(recovered)) {
+        clientPayload = recovered;
+      }
+    }
   }
   const patchedPayload = applyClientPassthroughPatchWithNative(
     clientPayload,

@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-15T21:31:58.164Z",
+  "tool": "apply_patch",
+  "errorType": "empty_update_hunk",
+  "originalArgs": "{\"patch\":\"*** Begin Patch\\n*** Update File: /Volumes/extension/code/fin/rust/crates/contracts/src/records.rs\\n@@\\n@@ -389,7 +389,7 @@\\n     pub resume_from_step_id: Option<String>,\\n     #[serde(default)]\\n-    pub resume_checkpoint_ready: bool,\\n+    pub resume_checkpoint_ready: Option<bool>,\\n     #[serde(default)]\\n     pub resume_checkpoint_id: Option<String>,\\n*** End Patch\"}",
+  "normalizedArgs": "{\"patch\":\"*** Begin Patch\\n*** Update File: /Volumes/extension/code/fin/rust/crates/contracts/src/records.rs\\n@@\\n@@ -389,7 +389,7 @@\\n     pub resume_from_step_id: Option<String>,\\n     #[serde(default)]\\n-    pub resume_checkpoint_ready: bool,\\n+    pub resume_checkpoint_ready: Option<bool>,\\n     #[serde(default)]\\n     pub resume_checkpoint_id: Option<String>,\\n*** End Patch\"}",
+  "validationError": "empty_update_hunk",
+  "source": "tool-governor.request",
+  "meta": {
+    "applyPatchToolMode": "freeform"
+  }
+}

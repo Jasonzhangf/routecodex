@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-16T14:43:38.561Z",
+  "tool": "apply_patch",
+  "errorType": "unsupported_patch_format",
+  "originalArgs": "{\"input\":\"*** Begin Patch\\n*** Update File: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs\\n            }\\n            if !capability_filtered.is_empty() {\\n                pools = capability_filtered;\\n            }\\n        }\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Update File: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs\\n            }\\n            if !capability_filtered.is_empty() {\\n                pools = capability_filtered;\\n            }\\n        }\\n*** End Patch\"}",
+  "normalizedArgs": "{\"input\":\"*** Begin Patch\\n*** Update File: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs\\n            }\\n            if !capability_filtered.is_empty() {\\n                pools = capability_filtered;\\n            }\\n        }\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Update File: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs\\n            }\\n            if !capability_filtered.is_empty() {\\n                pools = capability_filtered;\\n            }\\n        }\\n*** End Patch\"}",
+  "validationError": "unsupported_patch_format",
+  "source": "tool-governor.request",
+  "meta": {
+    "applyPatchToolMode": "freeform"
+  }
+}

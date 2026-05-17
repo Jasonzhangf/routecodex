@@ -2149,11 +2149,16 @@ pub(crate) fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (St
             true,
         );
     };
-    let patch = normalize_apply_patch_text(patch_source.as_str());
+    let source_trimmed = patch_source.trim();
+    let patch = normalize_apply_patch_text(source_trimmed);
+    let repaired = patch.trim() != source_trimmed;
     let mut out = Map::new();
     out.insert("patch".to_string(), Value::String(patch.clone()));
     out.insert("input".to_string(), Value::String(patch));
-    (serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()), false)
+    (
+        serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
+        repaired,
+    )
 }
 
 fn normalize_apply_patch_text(raw: &str) -> String {
@@ -2213,6 +2218,7 @@ fn normalize_apply_patch_text(raw: &str) -> String {
 
     let mut out: Vec<String> = Vec::new();
     let mut in_add_section = false;
+    let mut in_update_section = false;
     let mut pending_unified_from: Option<String> = None;
     for line in text.split('\n') {
         let raw_line = line.strip_suffix('\r').unwrap_or(line);
@@ -2241,6 +2247,7 @@ fn normalize_apply_patch_text(raw: &str) -> String {
                     normalize_unified_header_path(&plus_path)
                 ));
                 in_add_section = true;
+                in_update_section = false;
                 continue;
             }
             if plus_is_dev_null {
@@ -2250,6 +2257,7 @@ fn normalize_apply_patch_text(raw: &str) -> String {
                         normalize_unified_header_path(&from_path)
                     ));
                     in_add_section = false;
+                    in_update_section = false;
                     continue;
                 }
             }
@@ -2264,6 +2272,7 @@ fn normalize_apply_patch_text(raw: &str) -> String {
                     normalize_unified_header_path(&update_path)
                 ));
                 in_add_section = false;
+                in_update_section = true;
                 continue;
             }
         }
@@ -2275,6 +2284,7 @@ fn normalize_apply_patch_text(raw: &str) -> String {
                         normalize_unified_header_path(&from_path)
                     ));
                     in_add_section = false;
+                    in_update_section = true;
                 }
             }
         }
@@ -2282,25 +2292,30 @@ fn normalize_apply_patch_text(raw: &str) -> String {
         if normalized.starts_with("*** Begin Patch") {
             out.push("*** Begin Patch".to_string());
             in_add_section = false;
+            in_update_section = false;
             pending_unified_from = None;
             continue;
         }
         if normalized.starts_with("*** End Patch") {
             out.push("*** End Patch".to_string());
             in_add_section = false;
+            in_update_section = false;
             pending_unified_from = None;
             continue;
         }
         if normalized.starts_with("*** Add File:") {
             out.push(normalized);
             in_add_section = true;
+            in_update_section = false;
             pending_unified_from = None;
             continue;
         }
         if normalized.starts_with("*** Update File:") || normalized.starts_with("*** Delete File:")
         {
+            let is_update = normalized.starts_with("*** Update File:");
             out.push(normalized);
             in_add_section = false;
+            in_update_section = is_update;
             pending_unified_from = None;
             continue;
         }
@@ -2315,12 +2330,68 @@ fn normalize_apply_patch_text(raw: &str) -> String {
             }
             continue;
         }
+        if in_update_section {
+            let trimmed = raw_line.trim_start();
+            if trimmed.starts_with("@@")
+                || raw_line.starts_with('+')
+                || raw_line.starts_with('-')
+                || raw_line.starts_with(' ')
+            {
+                out.push(raw_line.to_string());
+            }
+            continue;
+        }
         out.push(raw_line.to_string());
     }
 
-    repair_line_number_update_hunks_with_live_context(out.join("\n").trim())
+    let normalized = repair_update_file_blocks_missing_hunk_header(out.join("\n").trim());
+    repair_line_number_update_hunks_with_live_context(normalized.as_str())
         .trim()
         .to_string()
+}
+
+fn repair_update_file_blocks_missing_hunk_header(raw: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut in_update_block = false;
+    let mut block_has_hunk = false;
+    let mut inserted_hunk_for_block = false;
+
+    for line in raw.split('\n') {
+        let trimmed = line.trim();
+        let is_file_header = trimmed.starts_with("*** Add File:")
+            || trimmed.starts_with("*** Update File:")
+            || trimmed.starts_with("*** Delete File:");
+        let is_block_boundary = trimmed == "*** Begin Patch"
+            || trimmed == "*** End Patch"
+            || is_file_header;
+
+        if is_block_boundary {
+            in_update_block = trimmed.starts_with("*** Update File:");
+            block_has_hunk = false;
+            inserted_hunk_for_block = false;
+            out.push(line.to_string());
+            continue;
+        }
+
+        if in_update_block {
+            if trimmed.starts_with("@@") {
+                block_has_hunk = true;
+                out.push(line.to_string());
+                continue;
+            }
+            if !block_has_hunk
+                && !inserted_hunk_for_block
+                && (line.starts_with('+') || line.starts_with('-') || line.starts_with(' '))
+            {
+                out.push("@@".to_string());
+                inserted_hunk_for_block = true;
+            }
+        }
+
+        out.push(line.to_string());
+    }
+
+    out.join("\n")
 }
 
 fn normalize_tool_name(raw_name: &str) -> Option<String> {
@@ -7508,6 +7579,22 @@ console.log('ok')"#;
     }
 
     #[test]
+    fn test_normalize_apply_patch_text_repairs_update_block_missing_hunk_marker() {
+        let input = "*** Begin Patch\n*** Update File: src/a.ts\n-const a = 1;\n+const a = 2;\n*** End Patch";
+        let normalized = normalize_apply_patch_text(input);
+        assert!(normalized.contains("*** Update File: src/a.ts\n@@\n-const a = 1;\n+const a = 2;"));
+    }
+
+    #[test]
+    fn test_normalize_apply_patch_text_masks_non_patch_lines_inside_update_block() {
+        let input = "*** Begin Patch\n*** Update File: src/a.ts\nrandom prose should be dropped\n-const a = 1;\n+const a = 2;\n*** End Patch";
+        let normalized = normalize_apply_patch_text(input);
+        assert!(!normalized.contains("random prose should be dropped"));
+        assert!(normalized.contains("-const a = 1;"));
+        assert!(normalized.contains("+const a = 2;"));
+    }
+
+    #[test]
     fn test_normalize_apply_patch_header_path_empty() {
         assert_eq!(normalize_apply_patch_header_path("   "), "");
     }
@@ -7639,6 +7726,69 @@ console.log('ok')"#;
         let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
         assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(false));
         assert_eq!(parsed.get("reason").and_then(Value::as_str), Some("empty_add_file_block"));
+    }
+
+    #[test]
+    fn test_validate_apply_patch_arguments_accepts_repaired_delete_only_update_block() {
+        let raw = json!({
+            "arguments": {
+                "patch": "*** Begin Patch\n*** Update File: src/a.ts\n-old\n*** End Patch"
+            }
+        });
+        let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
+        assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(true));
+    }
+
+    #[test]
+    #[ignore = "diagnostic replay against local /Volumes error samples"]
+    fn test_validate_apply_patch_arguments_replay_latest_20260516_samples() {
+        let base = std::path::Path::new("/Volumes/extension/.rcc/errorsamples/apply-patch-regression");
+        if !base.exists() {
+            eprintln!("skip sample replay: {} not found", base.display());
+            return;
+        }
+        let mut total = 0usize;
+        let mut failed = 0usize;
+        for entry in std::fs::read_dir(base).expect("read sample dir").flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            let raw = match std::fs::read_to_string(&path) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let sample: Value = match serde_json::from_str(&raw) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let ts = sample.get("timestamp").and_then(Value::as_str).unwrap_or_default();
+            if !ts.starts_with("2026-05-16") {
+                continue;
+            }
+            total += 1;
+            let args_text = sample
+                .get("originalArgs")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let args: Value = serde_json::from_str(args_text)
+                .unwrap_or_else(|_| Value::String(args_text.to_string()));
+            let input = json!({ "arguments": args });
+            let out = validate_apply_patch_arguments_json(input.to_string()).unwrap();
+            let parsed: Value = serde_json::from_str(&out).unwrap();
+            let ok = parsed.get("ok").and_then(Value::as_bool).unwrap_or(false);
+            if !ok {
+                failed += 1;
+                eprintln!(
+                    "sample not repaired: {} reason={}",
+                    path.display(),
+                    parsed.get("reason").and_then(Value::as_str).unwrap_or("unknown")
+                );
+            }
+        }
+        eprintln!("sample replay summary: total={total} failed={failed}");
+        assert!(total > 0);
     }
 
     #[test]
@@ -9309,8 +9459,12 @@ pub fn validate_apply_patch_arguments_json(input_json: String) -> napi::Result<S
         .unwrap_or("")
         .trim()
         .to_string();
-    let invalid_reason = detect_apply_patch_authoring_invalid_reason(raw_source.as_str())
-        .or_else(|| detect_apply_patch_invalid_reason(patch.as_str()));
+    let invalid_reason = if normalized.1 {
+        detect_apply_patch_invalid_reason(patch.as_str())
+    } else {
+        detect_apply_patch_authoring_invalid_reason(raw_source.as_str())
+            .or_else(|| detect_apply_patch_invalid_reason(patch.as_str()))
+    };
 
     let mut out = Map::new();
     out.insert("ok".to_string(), Value::Bool(invalid_reason.is_none()));

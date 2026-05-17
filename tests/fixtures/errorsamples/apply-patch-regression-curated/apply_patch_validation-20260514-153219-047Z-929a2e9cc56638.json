@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-14T15:32:18.972Z",
+  "tool": "apply_patch",
+  "errorType": "missing_changes",
+  "originalArgs": "{\"input\":\"\",\"patch\":\"\"}",
+  "normalizedArgs": "{\"input\":\"\",\"patch\":\"\"}",
+  "validationError": "missing_changes",
+  "source": "tool-governor.request",
+  "meta": {
+    "applyPatchToolMode": "freeform"
+  }
+}

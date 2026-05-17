@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-15T20:59:29.695Z",
+  "tool": "apply_patch",
+  "errorType": "empty_update_hunk",
+  "originalArgs": "{\"patch\":\"*** Begin Patch\\n*** Update File: /Volumes/extension/code/fin/rust/crates/config/src/lib.rs\\n@@\\n@@ -572,7 +572,12 @@\\n pub fn parse_system_toml(input: &str) -> Result<SystemConfig, ConfigError> {\\n     let system: SystemConfig = toml::from_str(input).map_err(|source| ConfigError::ParseToml {\\n         context: \\\"system\\\",\\n         source,\\n     })?;\\n+    eprintln!(\\\"[DEBUG parse_system_toml] SUCCESS, input_len={}\\\", input.len());\\n+    system.validate()?;\\n+    Ok(system)\\n+}\\n+#[cfg(feature = \\\"debug_parse\\\")]\\n+pub fn parse_system_toml_with_context(input: &str, context: &str) -> Result<SystemConfig, ConfigError> {\\n+    eprintln!(\\\"[DEBUG parse_system_toml context={}] input_len={}, first_200={:?}\\\", context, input.len(), &input[..input.len().min(200)]);\\n+    let system: SystemConfig = toml::from_str(input).map_err(|source| {\\n+        eprintln!(\\\"[DEBUG parse_system_toml FAILED context={}] {:?}\\\", context, source);\\n+        source\\n     })?;\\n     system.validate()?;\\n     Ok(system)\\n*** End Patch\"}",
+  "normalizedArgs": "{\"patch\":\"*** Begin Patch\\n*** Update File: /Volumes/extension/code/fin/rust/crates/config/src/lib.rs\\n@@\\n@@ -572,7 +572,12 @@\\n pub fn parse_system_toml(input: &str) -> Result<SystemConfig, ConfigError> {\\n     let system: SystemConfig = toml::from_str(input).map_err(|source| ConfigError::ParseToml {\\n         context: \\\"system\\\",\\n         source,\\n     })?;\\n+    eprintln!(\\\"[DEBUG parse_system_toml] SUCCESS, input_len={}\\\", input.len());\\n+    system.validate()?;\\n+    Ok(system)\\n+}\\n+#[cfg(feature = \\\"debug_parse\\\")]\\n+pub fn parse_system_toml_with_context(input: &str, context: &str) -> Result<SystemConfig, ConfigError> {\\n+    eprintln!(\\\"[DEBUG parse_system_toml context={}] input_len={}, first_200={:?}\\\", context, input.len(), &input[..input.len().min(200)]);\\n+    let system: SystemConfig = toml::from_str(input).map_err(|source| {\\n+        eprintln!(\\\"[DEBUG parse_system_toml FAILED context={}] {:?}\\\", context, source);\\n+        source\\n     })?;\\n     system.validate()?;\\n     Ok(system)\\n*** End Patch\"}",
+  "validationError": "empty_update_hunk",
+  "source": "tool-governor.request",
+  "meta": {
+    "applyPatchToolMode": "freeform"
+  }
+}

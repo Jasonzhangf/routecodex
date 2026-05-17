@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-14T15:31:49.383Z",
+  "tool": "apply_patch",
+  "errorType": "empty_add_file_block",
+  "originalArgs": "{\"input\":\"*** Begin Patch\\n*** Add File: test_apply_patch/empty_file.txt\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Add File: test_apply_patch/empty_file.txt\\n*** End Patch\"}",
+  "normalizedArgs": "{\"input\":\"*** Begin Patch\\n*** Add File: test_apply_patch/empty_file.txt\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Add File: test_apply_patch/empty_file.txt\\n*** End Patch\"}",
+  "validationError": "empty_add_file_block",
+  "source": "tool-governor.request",
+  "meta": {
+    "applyPatchToolMode": "freeform"
+  }
+}

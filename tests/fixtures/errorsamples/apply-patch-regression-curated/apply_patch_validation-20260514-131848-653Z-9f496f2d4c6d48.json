@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-14T13:18:48.636Z",
+  "tool": "apply_patch",
+  "errorType": "missing_changes",
+  "originalArgs": "bash -lc \"echo hi && apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/nope.ts\n+console.log('nope');\n*** End Patch\nPATCH\"",
+  "normalizedArgs": "bash -lc \"echo hi && apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/nope.ts\n+console.log('nope');\n*** End Patch\nPATCH\"",
+  "validationError": "missing_changes",
+  "source": "tool-governor.response",
+  "meta": {
+    "applyPatchToolMode": "freeform"
+  }
+}

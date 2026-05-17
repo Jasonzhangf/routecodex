@@ -27,6 +27,40 @@ function buildChatResponse(): JsonObject {
   } as JsonObject;
 }
 
+function buildChatToolCallResponse(): JsonObject {
+  return {
+    id: 'chatcmpl_hub_toolcall',
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: 'MiniMax-M2.7',
+    choices: [
+      {
+        index: 0,
+        finish_reason: 'tool_calls',
+        message: {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'call_function_abc_1',
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                arguments: '{"cmd":"pwd"}'
+              }
+            }
+          ]
+        }
+      }
+    ],
+    usage: {
+      prompt_tokens: 5,
+      completion_tokens: 7,
+      total_tokens: 12
+    }
+  } as JsonObject;
+}
+
 async function collectStream(stream: NodeJS.ReadableStream | undefined): Promise<string> {
   if (!stream) return '';
   const chunks: string[] = [];
@@ -196,6 +230,22 @@ describe('Hub provider response pipeline', () => {
     });
     expect(converted.body?.object).toBe('response');
     expect(converted.body?.output_text).toContain('Hub response pipeline rocks.');
+  });
+
+  test('openai-chat provider preserves tool_calls when remapped to /v1/responses', async () => {
+    const chatResponse = buildChatToolCallResponse();
+    const converted = await convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: chatResponse,
+      context: baseContext,
+      entryEndpoint: '/v1/responses',
+      wantsStream: false
+    });
+    expect(converted.body?.object).toBe('response');
+    expect(converted.body?.status).toBe('requires_action');
+    expect(converted.body?.output?.[0]?.type).toBe('function_call');
+    expect(converted.body?.output?.[0]?.name).toBe('exec_command');
+    expect(converted.body?.required_action?.submit_tool_outputs?.tool_calls?.[0]?.name).toBe('exec_command');
   });
 
   test('responses /v1/responses preserves OpenAI call_* ids for required_action tool calls', async () => {

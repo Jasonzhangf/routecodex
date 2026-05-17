@@ -1,0 +1,174 @@
+{
+  "total_selected": 24,
+  "selection_rule": "latest-3-per-errorType + all-2026-05-16",
+  "items": [
+    {
+      "file": "apply_patch_validation-20260514-131848-653Z-881e2f7a305298.json",
+      "timestamp": "2026-05-14T13:18:48.619Z",
+      "errorType": "empty_add_file_block",
+      "source": "tool-governor.response",
+      "validationError": "empty_add_file_block"
+    },
+    {
+      "file": "apply_patch_validation-20260514-131848-653Z-9f496f2d4c6d48.json",
+      "timestamp": "2026-05-14T13:18:48.636Z",
+      "errorType": "missing_changes",
+      "source": "tool-governor.response",
+      "validationError": "missing_changes"
+    },
+    {
+      "file": "apply_patch_validation-20260514-131854-655Z-3a3c1e5d546bc.json",
+      "timestamp": "2026-05-14T13:18:54.619Z",
+      "errorType": "empty_add_file_block",
+      "source": "tool-governor.response",
+      "validationError": "empty_add_file_block"
+    },
+    {
+      "file": "apply_patch_validation-20260514-131854-655Z-5e40645dbc6df.json",
+      "timestamp": "2026-05-14T13:18:54.635Z",
+      "errorType": "missing_changes",
+      "source": "tool-governor.response",
+      "validationError": "missing_changes"
+    },
+    {
+      "file": "apply_patch_validation-20260514-153149-458Z-cf87fedba71258.json",
+      "timestamp": "2026-05-14T15:31:49.383Z",
+      "errorType": "empty_add_file_block",
+      "source": "tool-governor.request",
+      "validationError": "empty_add_file_block"
+    },
+    {
+      "file": "apply_patch_validation-20260514-153219-047Z-929a2e9cc56638.json",
+      "timestamp": "2026-05-14T15:32:18.972Z",
+      "errorType": "missing_changes",
+      "source": "tool-governor.request",
+      "validationError": "missing_changes"
+    },
+    {
+      "file": "apply_patch_validation-20260515-100500-062Z-8cc8e964185e8.json",
+      "timestamp": "2026-05-15T10:04:59.927Z",
+      "errorType": "unknown_tool",
+      "source": "tool-governor.request",
+      "validationError": "unknown_tool"
+    },
+    {
+      "file": "apply_patch_validation-20260515-101517-938Z-b0f1c6745ba268.json",
+      "timestamp": "2026-05-15T10:15:17.786Z",
+      "errorType": "unknown_tool",
+      "source": "tool-governor.request",
+      "validationError": "unknown_tool"
+    },
+    {
+      "file": "apply_patch_validation-20260515-101617-015Z-833247d5a2ab68.json",
+      "timestamp": "2026-05-15T10:16:15.901Z",
+      "errorType": "unknown_tool",
+      "source": "tool-governor.request",
+      "validationError": "unknown_tool"
+    },
+    {
+      "file": "apply_patch_validation-20260515-163144-840Z-a2fb86c947a958.json",
+      "timestamp": "2026-05-15T16:31:44.229Z",
+      "errorType": "empty_update_hunk",
+      "source": "tool-governor.request",
+      "validationError": "empty_update_hunk"
+    },
+    {
+      "file": "apply_patch_validation-20260515-205930-020Z-d21abbbaeaade.json",
+      "timestamp": "2026-05-15T20:59:29.695Z",
+      "errorType": "empty_update_hunk",
+      "source": "tool-governor.request",
+      "validationError": "empty_update_hunk"
+    },
+    {
+      "file": "apply_patch_validation-20260515-213158-897Z-09efd827e799a8.json",
+      "timestamp": "2026-05-15T21:31:58.164Z",
+      "errorType": "empty_update_hunk",
+      "source": "tool-governor.request",
+      "validationError": "empty_update_hunk"
+    },
+    {
+      "file": "apply_patch_validation-20260516-135540-583Z-b0b60e26037778.json",
+      "timestamp": "2026-05-16T13:55:39.942Z",
+      "errorType": "unsupported_patch_format",
+      "source": "tool-governor.request",
+      "validationError": "unsupported_patch_format"
+    },
+    {
+      "file": "apply_patch_validation-20260516-140919-103Z-f072a097887fe8.json",
+      "timestamp": "2026-05-16T14:09:18.259Z",
+      "errorType": "unsupported_patch_format",
+      "source": "tool-governor.request",
+      "validationError": "unsupported_patch_format"
+    },
+    {
+      "file": "apply_patch_validation-20260516-140936-985Z-c4d092266277d.json",
+      "timestamp": "2026-05-16T14:09:36.144Z",
+      "errorType": "unsupported_patch_format",
+      "source": "tool-governor.request",
+      "validationError": "unsupported_patch_format"
+    },
+    {
+      "file": "apply_patch_validation-20260516-141048-425Z-78ec8adc33b3c.json",
+      "timestamp": "2026-05-16T14:10:47.575Z",
+      "errorType": "unsupported_patch_format",
+      "source": "tool-governor.request",
+      "validationError": "unsupported_patch_format"
+    },
+    {
+      "file": "apply_patch_validation-20260516-141144-985Z-cf1ed76c96f908.json",
+      "timestamp": "2026-05-16T14:11:44.111Z",
+      "errorType": "unsupported_patch_format",
+      "source": "tool-governor.request",
+      "validationError": "unsupported_patch_format"
+    },
+    {
+      "file": "apply_patch_validation-20260516-141200-683Z-524b8071473ca.json",
+      "timestamp": "2026-05-16T14:11:59.820Z",
+      "errorType": "unsupported_patch_format",
+      "source": "tool-governor.request",
+      "validationError": "unsupported_patch_format"
+    },
+    {
+      "file": "apply_patch_validation-20260516-141433-229Z-9bef0785c4028.json",
+      "timestamp": "2026-05-16T14:14:32.350Z",
+      "errorType": "unsupported_patch_format",
+      "source": "tool-governor.request",
+      "validationError": "unsupported_patch_format"
+    },
+    {
+      "file": "apply_patch_validation-20260516-141455-094Z-a86bf7e62ca25.json",
+      "timestamp": "2026-05-16T14:14:54.212Z",
+      "errorType": "unsupported_patch_format",
+      "source": "tool-governor.request",
+      "validationError": "unsupported_patch_format"
+    },
+    {
+      "file": "apply_patch_validation-20260516-141523-499Z-af6051461b4b9.json",
+      "timestamp": "2026-05-16T14:15:22.613Z",
+      "errorType": "unsupported_patch_format",
+      "source": "tool-governor.request",
+      "validationError": "unsupported_patch_format"
+    },
+    {
+      "file": "apply_patch_validation-20260516-141533-175Z-6e2b48f7c4b858.json",
+      "timestamp": "2026-05-16T14:15:32.293Z",
+      "errorType": "unsupported_patch_format",
+      "source": "tool-governor.request",
+      "validationError": "unsupported_patch_format"
+    },
+    {
+      "file": "apply_patch_validation-20260516-142439-789Z-5a519908c144e.json",
+      "timestamp": "2026-05-16T14:24:38.909Z",
+      "errorType": "unsupported_patch_format",
+      "source": "tool-governor.request",
+      "validationError": "unsupported_patch_format"
+    },
+    {
+      "file": "apply_patch_validation-20260516-144339-333Z-56008906d4798.json",
+      "timestamp": "2026-05-16T14:43:38.561Z",
+      "errorType": "unsupported_patch_format",
+      "source": "tool-governor.request",
+      "validationError": "unsupported_patch_format"
+    }
+  ]
+}

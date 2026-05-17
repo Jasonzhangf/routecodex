@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-16T13:55:39.942Z",
+  "tool": "apply_patch",
+  "errorType": "unsupported_patch_format",
+  "originalArgs": "{\"input\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/routecodex/AGENTS.md\\n6. **非授权不破坏**：未获明确授权，不做删除/回滚/迁移/发布类破坏动作。\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/routecodex/AGENTS.md\\n6. **非授权不破坏**：未获明确授权，不做删除/回滚/迁移/发布类破坏动作。\\n*** End Patch\"}",
+  "normalizedArgs": "{\"input\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/routecodex/AGENTS.md\\n6. **非授权不破坏**：未获明确授权，不做删除/回滚/迁移/发布类破坏动作。\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/routecodex/AGENTS.md\\n6. **非授权不破坏**：未获明确授权，不做删除/回滚/迁移/发布类破坏动作。\\n*** End Patch\"}",
+  "validationError": "unsupported_patch_format",
+  "source": "tool-governor.request",
+  "meta": {
+    "applyPatchToolMode": "freeform"
+  }
+}

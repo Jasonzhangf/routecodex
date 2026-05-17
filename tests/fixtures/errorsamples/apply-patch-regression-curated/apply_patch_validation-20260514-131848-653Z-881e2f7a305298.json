@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-14T13:18:48.619Z",
+  "tool": "apply_patch",
+  "errorType": "empty_add_file_block",
+  "originalArgs": "{\"patch\":\"*** Begin Patch\\n*** Add File: src/empty.txt\\n*** End Patch\"}",
+  "normalizedArgs": "{\"patch\":\"*** Begin Patch\\n*** Add File: src/empty.txt\\n*** End Patch\"}",
+  "validationError": "empty_add_file_block",
+  "source": "tool-governor.response",
+  "meta": {
+    "applyPatchToolMode": "freeform"
+  }
+}
