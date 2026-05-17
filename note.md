@@ -1,5 +1,13 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-05-17 servertool followup 路由回归
+
+- `apply_patch_read_before_retry_guard` 的 followup 502 不是工具列表问题，当前真源更像是 **followup metadata 丢了 routeHint**：sticky provider 还在，但 followup 若只剩 `__shadowCompareForcedProviderKey`、没有 `routeHint/routeName`，Virtual Router 会按错误池选路，mini27 这类 coding lane provider 会直接报 `PROVIDER_NOT_AVAILABLE`。
+- 最小唯一修复点先落在 `sharedmodule/llmswitch-core/src/servertool/followup-runtime-block.ts::applyFollowupRuntimeMetadata`：followup metadata 组装时必须把 adapter runtime 里的 `__rt.routeName/routeHint` 也当成路由真源回灌，不能只看 `adapterContext.routeId/routeHint`。
+- `start` daemon supervisor 的无限重启问题，唯一真源在 `src/cli/commands/start.ts`：当前 child 退出后无条件 restart。可直接读 `state/runtime-lifecycle/server-<port>.json` 的 exit marker；若 child 记录的是 `startupError`，supervisor 必须停止，而不是继续重启风暴。
+- `search` 不是直接掉 `default` 的 route。工具类专用 route miss 时应先落 `tools` 总兜底，再决定是否继续到 `default`；本轮唯一修复点先落在 Rust `virtual_router_engine/routing/config.rs::build_route_queue`，并同时补齐用户配置里的 `routing.search` 池。
+- `EMPTY_ASSISTANT_RESPONSE` 的错误日志不得把 `__sse_responses` 这类内部 stream carrier 整坨透传到 `rawError/rawErrorSnippet`；证据可保留，但必须在 host 日志序列化前剥离内部 carrier。
+
 ## 探索日期: 2026-05-08
 
 ## 继承链结构
@@ -3717,3 +3725,14 @@ Next slice:
   - Rust：`cargo test -p router-hotpath-napi resolves_responses_request_bridge_decisions -- --nocapture` ✅
   - Jest：`npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/provider-payload-web-search-gate.spec.ts` ✅
   - Live：build/install/restart 后，`POST http://127.0.0.1:5520/v1/responses model=llmgate.deepseek-v4-pro tools=[web_search,exec_command]` 返回 `200 requires_action(exec_command)`；`~/.rcc/logs/server-5520.log` 显示 `direct/direct -> llmgate... finish_reason=tool_calls`，不再有 `tools[0] 不支持的类型: web_search`。
+
+## 2026-05-17 route queue fallback / error meta strip
+- `search/read/write/web_search` 专用 route 的兜底必须是 `tools` 在前、`default` 在后；唯一正确落点是 Rust `virtual_router_engine/routing/config.rs::build_route_queue()`，因为 classifier 只给语义候选，真正的 route queue 顺序真源在这里。
+- `EMPTY_ASSISTANT_RESPONSE` 等错误日志不应透传 `__sse_responses`/stream carrier；现已在 `src/utils/log-helpers.ts` 统一剥离，仅保留可读错误摘要。
+
+## 2026-05-17 SSE decode stats null contract
+- 真源在 Rust `hub_resp_inbound_sse_decode_semantics.rs::extract_decode_stats_json()`：缺少 `__rccDecodeStats` 本应表示“无统计”，必须返回 `Ok("null")`，之前错误地抛 `Status::Ok("null")`，被 TS 包装层误判成 native 不可用，直接制造 anthropic SSE_DECODE_ERROR。
+
+## 2026-05-17 llmgate empty assistant / model catalog audit
+- `EMPTY_ASSISTANT_RESPONSE` 这次不是 RouteCodex 请求形状必现问题：同一份 `provider-request-contract_1.json` 直打 llmgate `/v1/chat/completions` 可复现成功返回完整 assistant 文本，说明该样本请求形状本身可被上游接受；原故障更像 llmgate/上游的瞬态空响应。
+- `llmgate` provider config 真源里若保留 `deepseek-v4-pro-search / deepseek-v4-flash-reasoner` 之类模型，forced coding lane 会被 provider catalog 扩展到这些别名并触发 `model_not_found`；按 Jason 规则已收缩为只保留 `deepseek-v4-pro` 与 `deepseek-v4-flash`。

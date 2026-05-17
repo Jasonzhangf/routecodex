@@ -1,7 +1,7 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
-import { ensureRuntimeMetadata } from '../conversion/runtime-metadata.js';
+import { ensureRuntimeMetadata, readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import {
   resolveFollowupFlowDecision,
   type FollowupFlowDecision
@@ -177,12 +177,25 @@ export function applyFollowupRuntimeMetadata(args: {
     args.adapterContext && typeof args.adapterContext === 'object' && !Array.isArray(args.adapterContext)
       ? (args.adapterContext as Record<string, unknown>)
       : undefined;
+  const adapterTarget =
+    adapterRecord?.target && typeof adapterRecord.target === 'object' && !Array.isArray(adapterRecord.target)
+      ? (adapterRecord.target as Record<string, unknown>)
+      : undefined;
+  const adapterRuntime = adapterRecord ? readRuntimeMetadata(adapterRecord) : undefined;
+  const runtimeRouteHint =
+    typeof adapterRuntime?.routeHint === 'string' ? String(adapterRuntime.routeHint).trim() : '';
+  const runtimeRouteName =
+    typeof adapterRuntime?.routeName === 'string' ? String(adapterRuntime.routeName).trim() : '';
   const routeHint =
     (typeof (args.metadata as Record<string, unknown>).routeHint === 'string'
       ? String((args.metadata as Record<string, unknown>).routeHint).trim()
       : '') ||
+    runtimeRouteHint ||
+    runtimeRouteName ||
     (typeof adapterRecord?.routeHint === 'string' ? String(adapterRecord.routeHint).trim() : '') ||
-    (typeof adapterRecord?.routeId === 'string' ? String(adapterRecord.routeId).trim() : '');
+    (typeof adapterRecord?.routeId === 'string' ? String(adapterRecord.routeId).trim() : '') ||
+    (typeof adapterRecord?.routeName === 'string' ? String(adapterRecord.routeName).trim() : '') ||
+    (typeof adapterTarget?.routeName === 'string' ? String(adapterTarget.routeName).trim() : '');
   const rt = ensureRuntimeMetadata(args.metadata as unknown as Record<string, unknown>);
   (rt as Record<string, unknown>).serverToolFollowup = true;
   if (args.loopState) {

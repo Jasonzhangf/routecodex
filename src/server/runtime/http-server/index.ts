@@ -48,6 +48,12 @@ import {
   detectInboundProtocolFromRequest,
   executeProviderDirectPipeline,
 } from './provider-direct-pipeline.js';
+import {
+  executeRouterDirectPipeline,
+  type RouterDirectAuditContext,
+  type RouterDirectOutcome,
+  type RouterDirectResult,
+} from './router-direct-pipeline.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
@@ -115,6 +121,7 @@ import {
 } from './http-server-lifecycle.js';
 import type { RouteErrorHub } from '../../../error-handling/route-error-hub.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
+import { runHubPipeline } from './executor-pipeline.js';
 import { normalizeProviderResponse } from './executor/provider-response-utils.js';
 import { convertProviderResponseIfNeeded } from './executor/provider-response-converter.js';
 import { extractUsageFromResult } from './executor/usage-aggregator.js';
@@ -808,9 +815,149 @@ export class RouteCodexHttpServer {
       metadata,
     };
     if (!portConfig || portConfig.mode === 'router') {
+      // For router-mode ports with sameProtocolBehavior='direct', check same-protocol
+      // direct bypass before falling through to the full executor pipeline.
+      if (portConfig?.mode === 'router' && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct') {
+        const directResult = await this.executeRouterDirectPipelineForPort(portConfig, nextInput);
+        if (directResult.used) {
+          return this.buildRouterDirectResult(directResult, input);
+        }
+        // same-protocol direct not applicable, fall through to normal pipeline
+      }
       return await this.executePipeline(nextInput);
     }
     return await this.executeProviderDirectPipelineForPort(portConfig, nextInput);
+  }
+
+
+  /**
+   * Router-Direct Pipeline: runs Hub Pipeline routing, then checks same-protocol
+   * direct eligibility. If the inbound and provider protocols match, bypasses the
+   * full executor pipeline and sends directly via provider.processIncoming.
+   */
+  private async executeRouterDirectPipelineForPort(
+    portConfig: PortConfig,
+    input: PipelineExecutionInput,
+  ): Promise<RouterDirectOutcome> {
+    const hubPipeline = this.hubPipeline;
+    if (!hubPipeline) {
+      this.logStage('router-direct.skipped', input.requestId, { reason: 'hub-pipeline-not-ready' });
+      return { used: false, reason: 'hub-pipeline-not-ready' };
+    }
+
+    const metadataForHub = {
+      ...(input.metadata ?? {}),
+      routecodexLocalPort: portConfig.port,
+      routecodexPortMode: portConfig.mode,
+    };
+
+    // Run Hub Pipeline to get routing decision (preserves routing truth source)
+    let pipelineResult: Awaited<ReturnType<typeof runHubPipeline>>;
+    try {
+      pipelineResult = await runHubPipeline(hubPipeline, input, metadataForHub);
+    } catch (error) {
+      this.logStage('router-direct.hub_pipeline_failed', input.requestId, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { used: false, reason: `hub-pipeline-failed: ${error instanceof Error ? error.message : String(error)}` };
+    }
+
+    const { target, providerPayload, routingDecision, processMode } = pipelineResult;
+
+    if (!target || !target.providerKey) {
+      this.logStage('router-direct.skipped', input.requestId, { reason: 'no-target-from-router' });
+      return { used: false, reason: 'no-target-from-router' };
+    }
+
+    // Try the router-direct pipeline
+    const directOutcome = await executeRouterDirectPipeline({
+      portConfig,
+      providerPayload,
+      target: {
+        providerKey: target.providerKey,
+        providerType: target.providerType,
+        runtimeKey: target.runtimeKey,
+        processMode: target.processMode,
+      },
+      routingDecision,
+      processMode,
+      requestInfo: {
+        path: input.entryEndpoint,
+        headers: input.headers as Record<string, string | string[] | undefined>,
+      },
+      resolveProviderByRuntimeKey: (runtimeKey?: string) => {
+        if (!runtimeKey) return undefined;
+        return this.providerHandles.get(runtimeKey);
+      },
+      onSnapshotBefore: (payload, ctx) => {
+        this.logStage('router-direct.send.start', input.requestId, {
+          port: portConfig.port,
+          providerKey: ctx.providerKey,
+          inboundProtocol: ctx.inboundProtocol,
+          providerProtocol: ctx.providerProtocol,
+          routeName: ctx.routingDecision?.routeName,
+          observedFields: ctx.observedFields,
+        });
+      },
+      onSnapshotAfter: (response, ctx) => {
+        const responseRecord =
+          response && typeof response === 'object' ? (response as Record<string, unknown>) : undefined;
+        this.logStage('router-direct.send.completed', input.requestId, {
+          port: portConfig.port,
+          providerKey: ctx.providerKey,
+          inboundProtocol: ctx.inboundProtocol,
+          providerProtocol: ctx.providerProtocol,
+          routeName: ctx.routingDecision?.routeName,
+          status: typeof responseRecord?.status === 'number' ? responseRecord.status : undefined,
+          observedFields: ctx.observedFields,
+        });
+      },
+    });
+
+    if (!directOutcome.used) {
+      this.logStage('router-direct.skipped', input.requestId, { reason: directOutcome.reason });
+      return { used: false, reason: directOutcome.reason };
+    }
+
+    return {
+      used: true,
+      response: directOutcome.response,
+      providerHandle: directOutcome.providerHandle,
+      auditContext: directOutcome.auditContext,
+    };
+  }
+
+  /**
+   * Build a PipelineExecutionResult from a router-direct outcome.
+   * Response is passed through without outbound rewriting.
+   */
+  private async buildRouterDirectResult(directResult: RouterDirectResult, input: PipelineExecutionInput): Promise<PipelineExecutionResult> {
+    const { response, providerHandle, auditContext } = directResult;
+
+    const normalized = normalizeProviderResponse(response);
+    const usage = extractUsageFromResult(normalized, input.metadata);
+    const requestModel =
+      input.body && typeof input.body === 'object' && typeof (input.body as any).model === 'string'
+        ? ((input.body as any).model as string)
+        : undefined;
+    const finishReason =
+      normalized.body && typeof normalized.body === 'object'
+        ? deriveFinishReason(normalized.body as Record<string, unknown>)
+        : undefined;
+
+    // Response is passed through without outbound rewriting
+    return {
+      ...normalized,
+      usageLogInfo: {
+        ...normalized.usageLogInfo ?? {},
+        providerKey: auditContext.providerKey,
+        model: requestModel,
+        routeName: `router-direct:${auditContext.routingDecision?.routeName ?? 'unknown'}`,
+        finishReason,
+        usage: usage ? (usage as Record<string, unknown>) : undefined,
+        requestStartedAtMs: Date.now(),
+      },
+    };
   }
 
   private async executeProviderDirectPipelineForPort(

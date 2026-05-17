@@ -16,12 +16,34 @@ function coerceToString(value: unknown): string | undefined {
   }
   if (typeof value === 'object' && value !== null) {
     try {
-      return JSON.stringify(value);
+      return JSON.stringify(stripInternalErrorCarriers(value));
     } catch {
       /* ignore serialization failure */
     }
   }
   return undefined;
+}
+
+function stripInternalErrorCarriers(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stripInternalErrorCarriers(entry));
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  const record = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    if (
+      key === '__sse_responses' ||
+      key === '__sse_stream' ||
+      key === 'sseStream'
+    ) {
+      continue;
+    }
+    out[key] = stripInternalErrorCarriers(entry);
+  }
+  return out;
 }
 
 function extractRawErrorPayload(error: unknown): string | undefined {

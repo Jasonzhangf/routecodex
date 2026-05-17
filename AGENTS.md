@@ -24,6 +24,7 @@
 14. **禁止未授权扩 scope**：未获 Jason 明确要求，不主动附加额外目标或动作（如顺手加约束、加提示词、加兜底、加测试、build/install/restart、提交/清理等）；只做当前被要求的事，并先回报证据再推进下一步。
 15. **Qwen / QwenChat 禁止混淆**：`qwen` 与系统安装的 **Qwen Code** / DashScope OAuth 链路同源；`qwenchat` 是另一条独立 Web 链路。调试 `qwen` 时，禁止拿 `qwenchat` 的成功/鉴权/UA/header 结论冒充 `qwen` 证据。
 16. **发现即修（最小切片）**：本次任务触达范围内，凡发现 fallback 或静默失败代码，必须顺手修复并补充验证证据；禁止“先记账后放过”。
+17. **默认全局安装 rcc（除非用户明确拒绝）**：凡涉及 build/dev/install/restart/可执行验证，默认执行“编译 + 全局安装 rcc/routecodex + 健康检查”；只有当 Jason 明确要求“不全局安装”时才可跳过。
 
 ## 分类路由（路径 + 作用）
 1. 入口总览：`docs/agent-routing/00-entry-routing.md`

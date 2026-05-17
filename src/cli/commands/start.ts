@@ -15,6 +15,10 @@ import {
   consumeDaemonStopIntent
 } from '../../utils/daemon-stop-intent.js';
 import {
+  resolveRuntimeLifecyclePath,
+  safeReadRuntimeLifecycle
+} from '../../utils/runtime-exit-forensics.js';
+import {
   buildStartCommandArgs,
   isDaemonSupervisorProcess,
   normalizeRunMode,
@@ -63,6 +67,27 @@ function resolveStartShutdownHttpTimeoutMs(env: NodeJS.ProcessEnv): number {
     return Math.floor(parsed);
   }
   return 1200;
+}
+
+function readChildStartupExitState(args: {
+  port: number;
+  routeCodexHomeDir?: string;
+}): { kind?: string; message?: string } | null {
+  try {
+    const lifecyclePath = resolveRuntimeLifecyclePath(args.port, args.routeCodexHomeDir);
+    const state = safeReadRuntimeLifecycle(lifecyclePath);
+    if (!state?.exit || typeof state.exit !== 'object') {
+      return null;
+    }
+    const kind = typeof state.exit.kind === 'string' ? state.exit.kind.trim() : '';
+    const message = typeof state.exit.message === 'string' ? state.exit.message.trim() : '';
+    return {
+      ...(kind ? { kind } : {}),
+      ...(message ? { message } : {})
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function createStartCommand(program: Command, ctx: StartCommandContext): void {
@@ -600,6 +625,31 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
                 }
               });
               ctx.exit(0);
+            }
+
+            const childExitState = readChildStartupExitState({
+              port: resolvedPort,
+              routeCodexHomeDir: routeCodexHome
+            });
+            if (childExitState?.kind === 'startupError') {
+              logProcessLifecycleSync({
+                event: 'daemon_supervisor',
+                source: 'cli.start',
+                details: {
+                  result: 'child_exited_no_restart_startup_error',
+                  port: resolvedPort,
+                  childExitCode: exitInfo.code,
+                  childSignal: exitInfo.signal,
+                  startupError: childExitState.message ?? null
+                }
+              });
+              ctx.logger.error(
+                `[client-exit] RouteCodex startup failed on port ${resolvedPort}; supervisor will not restart automatically`
+              );
+              if (childExitState.message) {
+                ctx.logger.error(`[client-exit] startupError=${childExitState.message}`);
+              }
+              ctx.exit(typeof exitInfo.code === 'number' && Number.isFinite(exitInfo.code) ? exitInfo.code : 1);
             }
 
             logProcessLifecycleSync({

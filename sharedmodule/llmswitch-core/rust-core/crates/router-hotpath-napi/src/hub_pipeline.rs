@@ -1651,7 +1651,6 @@ fn apply_direct_builtin_web_search_tool(
 ) -> Value {
     let mut payload = value_as_object_or_empty(provider_payload);
     if !is_search_route_id(route_id) {
-        strip_builtin_web_search_tools(&mut payload);
         return Value::Object(payload);
     }
     let model_id = payload
@@ -1660,13 +1659,11 @@ fn apply_direct_builtin_web_search_tool(
         .unwrap_or("")
         .trim();
     if model_id.is_empty() {
-        strip_builtin_web_search_tools(&mut payload);
         return Value::Object(payload);
     }
     let runtime_metadata_obj = match runtime_metadata.as_object() {
         Some(v) => v,
         None => {
-            strip_builtin_web_search_tools(&mut payload);
             return Value::Object(payload);
         }
     };
@@ -1674,7 +1671,6 @@ fn apply_direct_builtin_web_search_tool(
     {
         Some(v) => v,
         None => {
-            strip_builtin_web_search_tools(&mut payload);
             return Value::Object(payload);
         }
     };
@@ -4996,19 +4992,11 @@ mod tests {
             &json!("web_search.default"),
             &runtime_metadata,
         );
-        assert_eq!(
-            output["tools"],
-            json!([
-                {
-                    "type": "function",
-                    "function": { "name": "exec_command" }
-                }
-            ])
-        );
+        assert_eq!(output["tools"], provider_payload["tools"]);
     }
 
     #[test]
-    fn test_apply_direct_builtin_web_search_tool_strips_builtin_for_non_search_route() {
+    fn test_apply_direct_builtin_web_search_tool_preserves_tools_for_non_search_route() {
         let provider_payload = json!({
             "model": "deepseek-v4-pro",
             "tools": [
@@ -5027,15 +5015,7 @@ mod tests {
             &json!("thinking.default"),
             &json!({}),
         );
-        assert_eq!(
-            output["tools"],
-            json!([
-                {
-                    "type": "function",
-                    "function": { "name": "exec_command" }
-                }
-            ])
-        );
+        assert_eq!(output["tools"], provider_payload["tools"]);
     }
 
     #[test]

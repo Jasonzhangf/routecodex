@@ -4,6 +4,7 @@
 
 export type PortMode = 'router' | 'provider';
 export type ProtocolBehavior = 'direct' | 'relay' | 'auto';
+export type SameProtocolBehavior = 'direct' | 'relay';
 
 export interface PortConfig {
   port: number;
@@ -18,6 +19,8 @@ export interface PortConfig {
   apikey?: string;
   timeout?: number;
   bodyLimit?: string;
+  // router mode: same-protocol direct bypass behavior (default: 'direct')
+  sameProtocolBehavior?: SameProtocolBehavior;
 }
 
 export type PortStatus = 'starting' | 'running' | 'error' | 'stopped';
@@ -30,6 +33,8 @@ export interface PortRuntimeState {
   routingPolicyGroup?: string;
   providerBinding?: string;
   status: PortStatus;
+  // router mode: same-protocol behavior
+  sameProtocolBehavior?: SameProtocolBehavior;
   activeConnections: number;
   error?: string;
   serverId?: string;
@@ -41,6 +46,8 @@ export interface PortCreateOrUpdateRequest {
   routingPolicyGroup?: string;
   protocolBehavior?: ProtocolBehavior;
   providerBinding?: string;
+  // router mode: same-protocol behavior
+  sameProtocolBehavior?: SameProtocolBehavior;
   apikey?: string;
   timeout?: number;
   bodyLimit?: string;
@@ -53,6 +60,8 @@ export interface PortView {
   protocolBehavior?: ProtocolBehavior;
   routingPolicyGroup?: string;
   providerBinding?: string;
+  // router mode: same-protocol behavior
+  sameProtocolBehavior?: SameProtocolBehavior;
   status: PortStatus;
   activeConnections: number;
   error?: string;
@@ -62,8 +71,13 @@ export interface PortListView {
   ports: PortView[];
 }
 
-export function createDefaultRouterPort(port: number, host = '0.0.0.0', routingPolicyGroup = 'default'): PortConfig {
-  return { port, host, mode: 'router', routingPolicyGroup };
+export function createDefaultRouterPort(
+  port: number,
+  host = '0.0.0.0',
+  routingPolicyGroup = 'default',
+  sameProtocolBehavior: SameProtocolBehavior = 'direct'
+): PortConfig {
+  return { port, host, mode: 'router', routingPolicyGroup, sameProtocolBehavior };
 }
 
 export function createDefaultProviderPort(

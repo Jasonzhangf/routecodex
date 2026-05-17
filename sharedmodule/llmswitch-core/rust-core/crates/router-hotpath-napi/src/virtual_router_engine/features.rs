@@ -31,6 +31,40 @@ fn get_responses_context_input(request: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+fn read_tool_name(tool: &Value) -> Option<String> {
+    let Some(obj) = tool.as_object() else {
+        return None;
+    };
+    if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
+        let trimmed = name.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_ascii_lowercase());
+        }
+    }
+    let function_obj = obj.get("function").and_then(|v| v.as_object())?;
+    let function_name = function_obj.get("name").and_then(|v| v.as_str())?;
+    let trimmed = function_name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_ascii_lowercase())
+}
+
+fn has_goal_capable_tools(request: &Value) -> bool {
+    let Some(tools) = request.get("tools").and_then(|v| v.as_array()) else {
+        return false;
+    };
+    tools.iter().any(|tool| {
+        matches!(
+            read_tool_name(tool).as_deref(),
+            Some("get_goal")
+                | Some("create_goal")
+                | Some("update_goal")
+                | Some("request_user_input")
+        )
+    })
+}
+
 fn get_message_turn_state(
     messages: &[Value],
 ) -> (
@@ -396,7 +430,7 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
             .and_then(|tool| tool.snippet.clone()),
         last_assistant_tool_label,
         latest_message_from_user: latest_message_role == "user"
-            && !is_server_tool_followup_request(metadata),
+            && (!is_server_tool_followup_request(metadata) || has_goal_capable_tools(request)),
         metadata: metadata_copy,
     }
 }
@@ -888,6 +922,31 @@ mod tests {
         let features = build_routing_features(&request, &json!({}));
         assert!(features.has_tool_call_responses);
         assert_eq!(features.last_assistant_tool_category, None);
+    }
+
+    #[test]
+    fn goal_mode_user_turn_is_not_demoted_by_stale_servertool_followup_flag() {
+        let request = json!({
+            "model": "mimo-v2.5-pro",
+            "messages": [
+                { "role": "assistant", "content": "previous tool step" },
+                { "role": "user", "content": "继续规划并输出 /goal 提示词" }
+            ],
+            "tools": [
+                { "type": "function", "function": { "name": "get_goal" } },
+                { "type": "function", "function": { "name": "request_user_input" } },
+                { "type": "function", "function": { "name": "exec_command" } }
+            ]
+        });
+        let metadata = json!({
+            "__rt": {
+                "serverToolFollowup": true
+            }
+        });
+
+        let features = build_routing_features(&request, &metadata);
+        assert!(features.latest_message_from_user);
+        assert_eq!(features.user_text_sample, "继续规划并输出 /goal 提示词");
     }
 
     #[test]

@@ -10,6 +10,7 @@
  */
 
 import type { PortConfig, ProtocolBehavior } from './port-config-types.js';
+import type { SameProtocolBehavior } from './port-config-types.js';
 import type { ProviderProtocol } from './types.js';
 
 export interface PortValidationError {
@@ -27,6 +28,7 @@ const VALID_PORT_MIN = 1024;
 const VALID_PORT_MAX = 65535;
 const VALID_MODES: ReadonlySet<string> = new Set(['router', 'provider']);
 const VALID_BEHAVIORS: ReadonlySet<string> = new Set(['direct', 'relay', 'auto']);
+const VALID_SAME_PROTOCOL_BEHAVIORS: ReadonlySet<string> = new Set(['direct', 'relay']);
 
 function validatePortConfig(config: PortConfig): PortValidationError[] {
   const errors: PortValidationError[] = [];
@@ -65,6 +67,16 @@ function validatePortConfig(config: PortConfig): PortValidationError[] {
     if (protocolBehavior !== undefined && protocolBehavior !== null) {
       errors.push({ port, field: 'protocolBehavior', message: 'Router mode does not support protocolBehavior' });
     }
+    // Router mode: sameProtocolBehavior is allowed (optional, defaults to 'direct')
+    if (config.sameProtocolBehavior !== undefined && config.sameProtocolBehavior !== null) {
+      if (!VALID_SAME_PROTOCOL_BEHAVIORS.has(config.sameProtocolBehavior)) {
+        errors.push({
+          port,
+          field: 'sameProtocolBehavior',
+          message: `Router mode sameProtocolBehavior must be "direct" or "relay", got: "${config.sameProtocolBehavior}"`
+        });
+      }
+    }
     return errors;
   }
 
@@ -81,6 +93,14 @@ function validatePortConfig(config: PortConfig): PortValidationError[] {
     // Provider mode MUST NOT have routingPolicyGroup
     if (routingPolicyGroup !== undefined && routingPolicyGroup !== null && routingPolicyGroup !== '') {
       errors.push({ port, field: 'routingPolicyGroup', message: 'Provider mode does not support routingPolicyGroup' });
+    }
+    // Provider mode: sameProtocolBehavior is NOT allowed
+    if (config.sameProtocolBehavior !== undefined && config.sameProtocolBehavior !== null) {
+      errors.push({
+        port,
+        field: 'sameProtocolBehavior',
+        message: 'Provider mode does not support sameProtocolBehavior'
+      });
     }
   }
 
@@ -138,6 +158,11 @@ export function normalizePortsConfig(rawHttpserver: Record<string, unknown>): Po
     typeof rawHttpserver.host === 'string' && rawHttpserver.host.trim()
       ? rawHttpserver.host.trim()
       : '0.0.0.0';
+  const sameProtocolBehavior = rawHttpserver.sameProtocolBehavior;
   // Fallback to router with default group (legacy compat for old configs without ports[])
-  return [{ port, host, mode: 'router', routingPolicyGroup: 'default' }];
+  const portConfig: PortConfig = { port, host, mode: 'router', routingPolicyGroup: 'default' };
+  if (typeof sameProtocolBehavior === 'string' && VALID_SAME_PROTOCOL_BEHAVIORS.has(sameProtocolBehavior)) {
+    portConfig.sameProtocolBehavior = sameProtocolBehavior as SameProtocolBehavior;
+  }
+  return [portConfig];
 }

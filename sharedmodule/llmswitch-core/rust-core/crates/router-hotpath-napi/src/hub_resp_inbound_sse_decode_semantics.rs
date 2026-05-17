@@ -541,6 +541,37 @@ mod tests {
             Some(&Value::String("context_length_exceeded".to_string()))
         );
     }
+
+    #[test]
+    fn extract_decode_stats_returns_null_when_stats_missing() {
+        let raw = extract_decode_stats_json(json!({
+            "id": "resp_1"
+        }).to_string())
+        .expect("extract decode stats");
+
+        assert_eq!(raw, "null");
+    }
+
+    #[test]
+    fn extract_decode_stats_keeps_only_known_non_null_fields() {
+        let raw = extract_decode_stats_json(json!({
+            "__rccDecodeStats": {
+                "chunkCount": 12,
+                "byteCount": 2048,
+                "tokenRate": 31.5,
+                "ignoredField": "drop-me",
+                "errors": null
+            }
+        }).to_string())
+        .expect("extract decode stats");
+
+        let parsed: Value = serde_json::from_str(&raw).expect("parse");
+        assert_eq!(parsed.get("chunkCount"), Some(&json!(12)));
+        assert_eq!(parsed.get("byteCount"), Some(&json!(2048)));
+        assert_eq!(parsed.get("tokenRate"), Some(&json!(31.5)));
+        assert!(parsed.get("ignoredField").is_none());
+        assert!(parsed.get("errors").is_none());
+    }
 }
 
 /// Extract decode stats from payload.__rccDecodeStats, returning only known fields.
@@ -549,9 +580,9 @@ pub fn extract_decode_stats_json(payload_json: String) -> napi::Result<String> {
     let payload: serde_json::Value = serde_json::from_str(&payload_json)
         .map_err(|e| napi::Error::new(napi::Status::InvalidArg, e.to_string()))?;
 
-    let stats = payload.get("__rccDecodeStats")
-        .and_then(|v| v.as_object())
-        .ok_or_else(|| napi::Error::new(napi::Status::Ok, "null".to_string()))?;
+    let Some(stats) = payload.get("__rccDecodeStats").and_then(|v| v.as_object()) else {
+        return Ok("null".to_string());
+    };
 
     let allowed_keys = [
         "chunkCount", "byteCount", "totalEvents", "contentBlocks",

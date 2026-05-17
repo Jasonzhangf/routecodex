@@ -488,6 +488,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 ### Jason 重启固定动作（2026-04-14）
 - 触发信号：Jason 直接要求“编译 / 全局安装 / 重启 5555 和 5520”，或用户明确要让**运行中的端口吃到本地新代码**。
 - 固定顺序：**先 build，再 install，再 restart，再验活**；不要现场猜是 `SIGUSR2`、`start` 还是别的路径。
+- 默认动作补充（2026-05-17）：除非 Jason 明确要求“不全局安装”，凡执行 build/dev/restart 流程都默认包含 `npm run install:global`（rcc/routecodex 全局可执行刷新）再做重启验活。
 - Jason 原地重启纠正规则（2026-04-30）：**优先直接用 `restart`，禁止把 `stop + start` 当成等价替代**；某些端口/child 链路只有 `restart` 才能正确原地重启并吃到本地新代码，`stop` 后再 `start` 会破坏原地续接语义。
 - Release snapshot 精华（2026-04-27）：**release 运行时绝不能直接吃 repo `dist/` 或 npm 全局 symlink**；必须先 `npm run install:release` 生成 `~/.rcc/install/current` 不可变快照，再让端口进程切到该 snapshot。若现网进程仍是 repo 路径，优先 `rcc start --config <cfg> --port <port>` 让 CLI 接管端口并重启到 snapshot，不要继续信任旧进程自重启。
 - Launcher auto-start 生命周期精华（2026-04-27）：`rcc codex/claude` 自动拉起 server 时，必须使用**config-scoped lock + lease**，并在 **ready 超时/启动失败** 时对**本次 spawn 的明确 PID**做主动回收；不能只靠 parent guard 被动善后，否则会留下短时孤儿与启动竞争风暴。
@@ -654,3 +655,5 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - apply_patch shape 一致性铁律（2026-05-16）：请求文案可继续“prefer patch, input alias accepted”，但 Host validator / Rust resp governance / tool validator 的**归一输出必须统一镜像成 `{patch,input}` 同值**；任何一层只吐 `patch`，都会把下游 `missing field input` 假错误重新注回历史。
 - malformed shell-like message history 清理铁律（2026-05-16）：若 `messages[].assistant.tool_calls[*].function.arguments` 对 `exec_command/shell_command` 已不是有效 JSON，且配对 tool 输出已落 `failed to parse function arguments...`，必须在 Rust inbound history normalize **物理删除该 assistant tool_call 与配对 tool message**；只清理 `responses input` 不清理 `messages`，MiniMax 会直接报 `provider_status_2013 invalid function arguments json string`。
 - builtin `web_search` 透传门禁：默认必须过滤；只有 runtime `__rt.webSearch.engines[*]` 明确命中 `executionMode=direct + directActivation=builtin` 时，才能把 canonical `web_search` 变成 provider builtin。遇到 llmgate/deepseek `tools[i] 不支持的类型: web_search`，唯一先查两层：Rust `hub_bridge_actions/history.rs`（bridge 注入）和 Rust `hub_pipeline.rs::apply_direct_builtin_web_search_tool()`（provider outbound 最后一跳剥离/转换）。
+- tool-route fallback 铁律（2026-05-17）：`search/read/write/web_search` 这类专用工具 route 若本 route 无 targets，但 `tools` route 有 targets，Rust `virtual_router_engine/routing/config.rs::build_route_queue()` 必须生成 `专用 route -> tools -> default`；禁止直接 `专用 route -> default`，否则会绕过工具兜底并制造错误的 default 命中。
+- SSE decode stats null-contract（2026-05-17）：Rust `extract_decode_stats_json()` 在 payload 缺少 `__rccDecodeStats` 时必须返回字符串 `"null"`，不能抛 `Status::Ok("null")`；否则 TS `extractDecodeStatsWithNative()` 会把“无 stats”误报成 `native extractDecodeStatsJson is required but unavailable: null`。
