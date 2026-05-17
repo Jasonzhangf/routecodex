@@ -25,8 +25,6 @@ export async function reenterServerToolBackend(args: {
   };
   const rt = ensureRuntimeMetadata(merged as unknown as Record<string, unknown>);
   (rt as Record<string, unknown>).serverToolFollowup = true;
-  (rt as Record<string, unknown>).preserveRouteHint = false;
-  (rt as Record<string, unknown>).disableStickyRoutes = true;
   return await args.reenterPipeline({
     entryEndpoint: args.entryEndpoint,
     requestId: args.requestId,

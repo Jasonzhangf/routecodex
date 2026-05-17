@@ -7,6 +7,7 @@ use crate::hub_tool_session_compat::{normalize_tool_session_payload, ToolSession
 use crate::shared_metadata_semantics::read_runtime_metadata_json;
 use crate::shared_responses_tool_utils::resolve_tool_call_id_style_json;
 use crate::shared_tool_result_text_normalizer::{normalize_tool_result_text, normalize_tool_result_value};
+use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecutionMode};
 
 use super::types::{
     ApplyBridgeCaptureToolResultsInput, ApplyBridgeCaptureToolResultsOutput,
@@ -473,6 +474,7 @@ pub(crate) fn resolve_responses_bridge_tools(
     let has_server_side_web_search = input
         .has_server_side_web_search
         .unwrap_or(inferred_server_side_web_search);
+    let allow_builtin_web_search = input.allow_builtin_web_search.unwrap_or(false);
     let original_has_builtin_web_search = input
         .original_tools
         .as_ref()
@@ -506,14 +508,18 @@ pub(crate) fn resolve_responses_bridge_tools(
 
     if let Some(chat_tools) = input.chat_tools.as_ref() {
         for tool in chat_tools {
-            if has_server_side_web_search && is_server_side_web_search_function(tool) {
+            if allow_builtin_web_search
+                && has_server_side_web_search
+                && is_server_side_web_search_function(tool)
+            {
                 continue;
             }
             register(tool);
         }
     }
 
-    if !has_server_side_web_search || !original_has_non_builtin_tools {
+    if allow_builtin_web_search && (!has_server_side_web_search || !original_has_non_builtin_tools)
+    {
         if let Some(original_tools) = input.original_tools.as_ref() {
             for tool in original_tools {
                 if !is_builtin_web_search_tool(tool) {
@@ -524,7 +530,8 @@ pub(crate) fn resolve_responses_bridge_tools(
         }
     }
 
-    let should_inject_builtin_web_search = has_server_side_web_search
+    let should_inject_builtin_web_search = allow_builtin_web_search
+        && has_server_side_web_search
         && chat_declares_server_side_web_search
         && !original_has_builtin_web_search;
 
@@ -604,6 +611,64 @@ fn read_force_web_search(context: Option<&Value>) -> bool {
         .and_then(|row| row.get("force"))
         .and_then(Value::as_bool)
         .unwrap_or(false)
+}
+
+fn read_context_metadata(context: Option<&Value>) -> Option<&Map<String, Value>> {
+    context
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("metadata"))
+        .and_then(Value::as_object)
+}
+
+fn read_builtin_web_search_passthrough(context: Option<&Value>) -> bool {
+    let Some(metadata) = read_context_metadata(context) else {
+        return false;
+    };
+    let provider_key = read_trimmed_string(metadata.get("providerKey"))
+        .or_else(|| {
+            metadata
+                .get("target")
+                .and_then(Value::as_object)
+                .and_then(|row| read_trimmed_string(row.get("providerKey")))
+        })
+        .unwrap_or_default();
+    let model_id = read_trimmed_string(metadata.get("assignedModelId"))
+        .or_else(|| read_trimmed_string(metadata.get("modelId")))
+        .or_else(|| read_trimmed_string(metadata.get("clientModelId")))
+        .or_else(|| {
+            metadata
+                .get("target")
+                .and_then(Value::as_object)
+                .and_then(|row| read_trimmed_string(row.get("modelId")))
+        })
+        .unwrap_or_default();
+    let runtime_metadata = read_runtime_metadata_value(Some(&Value::Object(metadata.clone())));
+    let engines = runtime_metadata
+        .as_ref()
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("webSearch"))
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("engines"))
+        .and_then(Value::as_array);
+    let Some(engines) = engines else {
+        return false;
+    };
+    for engine in engines {
+        let Some(row) = engine.as_object() else {
+            continue;
+        };
+        if resolve_web_search_execution_mode(row) != WebSearchExecutionMode::DirectBuiltin {
+            continue;
+        }
+        let engine_provider_key = read_trimmed_string(row.get("providerKey")).unwrap_or_default();
+        let engine_model_id = read_trimmed_string(row.get("modelId")).unwrap_or_default();
+        let provider_matches = engine_provider_key.is_empty() || provider_key == engine_provider_key;
+        let model_matches = engine_model_id.is_empty() || model_id == engine_model_id;
+        if provider_matches && model_matches {
+            return true;
+        }
+    }
+    false
 }
 
 fn build_context_history_seed(context: Option<&Value>) -> Option<Value> {
@@ -692,6 +757,7 @@ pub(crate) fn resolve_responses_request_bridge_decisions(
 
     ResolveResponsesRequestBridgeDecisionsOutput {
         force_web_search: read_force_web_search(input.context.as_ref()),
+        allow_builtin_web_search: read_builtin_web_search_passthrough(input.context.as_ref()),
         tool_call_id_style: route_tool_call_id_style
             .or(envelope_tool_call_id_style)
             .or(context_tool_call_id_style),

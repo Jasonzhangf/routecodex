@@ -133,7 +133,8 @@ export function parseResolveResponsesRequestBridgeDecisionsOutput(
     return null;
   }
   const output: NativeResolveResponsesRequestBridgeDecisionsOutput = {
-    forceWebSearch: row.forceWebSearch
+    forceWebSearch: row.forceWebSearch,
+    allowBuiltinWebSearch: row.allowBuiltinWebSearch === true
   };
   if (row.toolCallIdStyle === 'fc' || row.toolCallIdStyle === 'preserve') {
     output.toolCallIdStyle = row.toolCallIdStyle;

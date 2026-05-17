@@ -3694,3 +3694,26 @@ Next slice:
 - `cargo test -p router-hotpath-napi virtual_router_engine::classifier -- --nocapture` ✅
 - `cargo test -p router-hotpath-napi virtual_router_engine::features::tools -- --nocapture` ✅
 - `node sharedmodule/llmswitch-core/scripts/tests/apply-patch-native-regression-matrix.mjs` ✅
+2026-05-17 09:18:17
+
+[2026-05-17 followup-route-fix] servertool followup 不能再无条件写 preserveRouteHint=false / disableStickyRoutes=true；apply_patch_read_before_retry_guard 需要 stickyProvider，并保留原 routeId/routeHint，否则会把 followup 路由上下文打丢，触发 PROVIDER_NOT_AVAILABLE 死循环。
+
+## 2026-05-17 quota snapshot restart poison（已验证）
+- 现象：llmgate upstream 直连 200，但本地 5520 在重启后仍报 `PROVIDER_NOT_AVAILABLE`。
+- 真源：`provider-quota.json` 把 auth/config 类 fatal cooldown（样本：`EFATAL + NEW_API_ERROR`）持久化了，重启后又恢复，把 provider 先过滤掉。
+- 唯一正确修复点：`src/manager/quota/provider-quota-store.ts` 的 snapshot save/load sanitize；不能去改路由、重启流程或 fallback。
+- 规则：跨重启只保留 restart-stable backoff（`E429`/`ENET`/`E5XX`/`quotaDepleted`/`blacklist`）；`EFATAL + auth/config` 一律不持久化。
+- 验证：snapshot 中 `llmgate.key1.deepseek-v4-pro*` 已恢复 `reason=ok/cooldownUntil=null`；本地 `POST http://127.0.0.1:5520/v1/chat/completions model=llmgate.deepseek-v4-pro` 返回 200 `ok`；`POST /v1/responses` 同样 200 `ok`。
+
+## 2026-05-17 builtin web_search outbound gate / llmgate 400 修复
+- 现象：`/v1/responses` 直连 llmgate.deepseek-v4-pro 时，即使只是普通 thinking/direct 请求，也把 builtin `{"type":"web_search"}` 原样发上游，触发 `bad request: tools[i] 不支持的类型: web_search`。
+- 真源分两层：
+  1. Rust `hub_bridge_actions/history.rs` 之前会盲保留/注入 builtin `web_search`；
+  2. 更关键的是 direct `/v1/responses` raw tools 不走 chat bridge，必须在 Rust `hub_pipeline.rs::apply_direct_builtin_web_search_tool()` 的 provider outbound 最后一跳做物理剥离。
+- 唯一正确规则：默认过滤 builtin `web_search`；只有 runtime metadata 明确选中了 `webSearch.engines[*]` 的 `executionMode=direct + directActivation=builtin`，才允许透传/转换为 builtin。否则无论 non-search route 还是 search route 但 capability 不匹配，都必须 strip。
+- 回归：
+  - Rust：`cargo test -p router-hotpath-napi test_apply_direct_builtin_web_search_tool -- --nocapture` ✅
+  - Rust：`cargo test -p router-hotpath-napi resolves_responses_bridge_tools -- --nocapture` ✅
+  - Rust：`cargo test -p router-hotpath-napi resolves_responses_request_bridge_decisions -- --nocapture` ✅
+  - Jest：`npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/provider-payload-web-search-gate.spec.ts` ✅
+  - Live：build/install/restart 后，`POST http://127.0.0.1:5520/v1/responses model=llmgate.deepseek-v4-pro tools=[web_search,exec_command]` 返回 `200 requires_action(exec_command)`；`~/.rcc/logs/server-5520.log` 显示 `direct/direct -> llmgate... finish_reason=tool_calls`，不再有 `tools[0] 不支持的类型: web_search`。

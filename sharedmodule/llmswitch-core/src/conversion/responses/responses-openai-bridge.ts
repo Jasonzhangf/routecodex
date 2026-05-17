@@ -496,7 +496,8 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   const resolvedBridgeTools = resolveResponsesBridgeToolsWithNative({
     originalTools: Array.isArray(originalTools) ? (originalTools as Array<Record<string, unknown>>) : undefined,
     chatTools: Array.isArray(responsesToolsFromChat) ? (responsesToolsFromChat as Array<Record<string, unknown>>) : undefined,
-    hasServerSideWebSearch: !forceWebSearch,
+    allowBuiltinWebSearch: bridgeDecisions.allowBuiltinWebSearch === true,
+    hasServerSideWebSearch: true,
     passthroughKeys: [...RESPONSES_TOOL_PASSTHROUGH_KEYS],
     request: pickObjectFields(chat as Record<string, unknown>, RESPONSES_TOOL_PASSTHROUGH_KEYS)
   });

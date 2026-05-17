@@ -1,7 +1,6 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
-import { ensureRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import { applyFollowupRuntimeMetadata } from './followup-runtime-block.js';
 import { resolveFollowupFlowDecision, resolveTransparentReplayRequestSuffixForFlowId, type FollowupFlowDecision } from './followup-flow-policy.js';
@@ -194,9 +193,6 @@ export async function maybeRunTransparentBootstrapReplay(args: {
     adapterContext: args.adapterContext,
     resolveProviderKey: args.resolveProviderKey
   });
-  const replayRt = ensureRuntimeMetadata(replayMetadata as unknown as Record<string, unknown>);
-  (replayRt as any).preserveRouteHint = false;
-  (replayRt as any).disableStickyRoutes = true;
 
   const replayRequestId = buildFollowupRequestId(args.requestId, replayRequestSuffix);
   const replayPayloadFinal = args.applyHubFollowupPolicyShadow({

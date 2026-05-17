@@ -185,6 +185,7 @@ export function resolveResponsesBridgeToolsWithNative(
   const payloadJson = safeStringify({
     originalTools: input.originalTools,
     chatTools: input.chatTools,
+    allowBuiltinWebSearch: input.allowBuiltinWebSearch,
     hasServerSideWebSearch: input.hasServerSideWebSearch,
     passthroughKeys: input.passthroughKeys,
     request: input.request

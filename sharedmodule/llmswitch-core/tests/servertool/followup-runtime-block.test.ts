@@ -1,6 +1,7 @@
 import { describe, expect, test } from '@jest/globals';
 
 import {
+  applyFollowupRuntimeMetadata,
   materializeFollowupPayload,
   resolveFollowupExecutionMode,
   resolveFollowupPayloadSource
@@ -63,5 +64,38 @@ describe('servertool followup runtime block', () => {
       source: 'injection',
       payload: { messages: [{ role: 'user', content: '继续执行' }] }
     });
+  });
+
+  test('preserves original route hint on followup metadata instead of clearing routing context', () => {
+    const metadata: Record<string, unknown> = {};
+    applyFollowupRuntimeMetadata({
+      metadata,
+      loopState: null,
+      originalEntryEndpoint: '/v1/responses',
+      followupEntryEndpoint: '/v1/responses',
+      flowId: 'apply_patch_read_before_retry_guard',
+      decision: {
+        flowId: 'apply_patch_read_before_retry_guard',
+        outcomeMode: 'reenter',
+        noFollowup: false,
+        autoLimit: true,
+        flowOnlyLoopLimit: true,
+        stickyProvider: true,
+        clientInjectOnly: false,
+        seedLoopPayload: false,
+        retryEmptyFollowupOnce: false,
+        ignoreRequiresActionFollowup: false
+      },
+      adapterContext: {
+        requestId: 'req-followup',
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        routeId: 'coding'
+      } as any,
+      resolveProviderKey: () => 'mini27.key1.MiniMax-M2.7'
+    });
+    expect(metadata.routeHint).toBe('coding');
+    expect((metadata as any).__shadowCompareForcedProviderKey).toBe('mini27.key1.MiniMax-M2.7');
+    expect((metadata as any).__rt?.disableStickyRoutes).toBeUndefined();
   });
 });

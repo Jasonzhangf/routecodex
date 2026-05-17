@@ -173,14 +173,25 @@ export function applyFollowupRuntimeMetadata(args: {
   resolveProviderKey: (adapterContext: AdapterContext) => string;
 }): void {
   const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
+  const adapterRecord =
+    args.adapterContext && typeof args.adapterContext === 'object' && !Array.isArray(args.adapterContext)
+      ? (args.adapterContext as Record<string, unknown>)
+      : undefined;
+  const routeHint =
+    (typeof (args.metadata as Record<string, unknown>).routeHint === 'string'
+      ? String((args.metadata as Record<string, unknown>).routeHint).trim()
+      : '') ||
+    (typeof adapterRecord?.routeHint === 'string' ? String(adapterRecord.routeHint).trim() : '') ||
+    (typeof adapterRecord?.routeId === 'string' ? String(adapterRecord.routeId).trim() : '');
   const rt = ensureRuntimeMetadata(args.metadata as unknown as Record<string, unknown>);
   (rt as Record<string, unknown>).serverToolFollowup = true;
   if (args.loopState) {
     (rt as Record<string, unknown>).serverToolLoopState = args.loopState;
   }
   (args.metadata as any).__hubEntry = 'chat_process';
-  (rt as Record<string, unknown>).preserveRouteHint = false as any;
-  (rt as Record<string, unknown>).disableStickyRoutes = true as any;
+  if (routeHint) {
+    (args.metadata as Record<string, unknown>).routeHint = routeHint;
+  }
   (rt as Record<string, unknown>).serverToolOriginalEntryEndpoint =
     (typeof args.originalEntryEndpoint === 'string' && args.originalEntryEndpoint.trim().length
       ? args.originalEntryEndpoint

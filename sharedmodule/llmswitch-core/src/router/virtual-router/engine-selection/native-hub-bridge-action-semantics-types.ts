@@ -44,6 +44,7 @@ export interface NativeNormalizeBridgeHistorySeedOutput {
 export interface NativeResolveResponsesBridgeToolsInput {
   originalTools?: Array<Record<string, unknown>>;
   chatTools?: Array<Record<string, unknown>>;
+  allowBuiltinWebSearch?: boolean;
   hasServerSideWebSearch?: boolean;
   passthroughKeys?: string[];
   request?: Record<string, unknown>;
@@ -65,6 +66,7 @@ export interface NativeResolveResponsesRequestBridgeDecisionsInput {
 
 export interface NativeResolveResponsesRequestBridgeDecisionsOutput {
   forceWebSearch: boolean;
+  allowBuiltinWebSearch: boolean;
   toolCallIdStyle?: 'fc' | 'preserve';
   historySeed?: NativeBridgeHistoryOutput;
   previousResponseId?: string;

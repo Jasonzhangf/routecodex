@@ -1552,6 +1552,35 @@ fn is_canonical_web_search_tool_definition(tool: &Value) -> bool {
     )
 }
 
+fn is_builtin_web_search_tool_definition(tool: &Value) -> bool {
+    let Some(row) = tool.as_object() else {
+        return false;
+    };
+    let raw_type = row
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    matches!(raw_type.as_str(), "web_search" | "web_search_20250305")
+}
+
+fn strip_builtin_web_search_tools(payload: &mut Map<String, Value>) {
+    let tools = payload
+        .get("tools")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if tools.is_empty() {
+        return;
+    }
+    let next_tools: Vec<Value> = tools
+        .into_iter()
+        .filter(|tool| !is_builtin_web_search_tool_definition(tool))
+        .collect();
+    payload.insert("tools".to_string(), Value::Array(next_tools));
+}
+
 fn parse_js_number_like(value: Option<&Value>) -> Option<f64> {
     match value {
         Some(Value::Number(num)) => num.as_f64(),
@@ -1621,10 +1650,8 @@ fn apply_direct_builtin_web_search_tool(
     runtime_metadata: &Value,
 ) -> Value {
     let mut payload = value_as_object_or_empty(provider_payload);
-    if provider_protocol.trim() != "anthropic-messages" {
-        return Value::Object(payload);
-    }
     if !is_search_route_id(route_id) {
+        strip_builtin_web_search_tools(&mut payload);
         return Value::Object(payload);
     }
     let model_id = payload
@@ -1633,17 +1660,27 @@ fn apply_direct_builtin_web_search_tool(
         .unwrap_or("")
         .trim();
     if model_id.is_empty() {
+        strip_builtin_web_search_tools(&mut payload);
         return Value::Object(payload);
     }
     let runtime_metadata_obj = match runtime_metadata.as_object() {
         Some(v) => v,
-        None => return Value::Object(payload),
+        None => {
+            strip_builtin_web_search_tools(&mut payload);
+            return Value::Object(payload);
+        }
     };
     let matched_engine = match find_direct_builtin_web_search_engine(runtime_metadata_obj, model_id)
     {
         Some(v) => v,
-        None => return Value::Object(payload),
+        None => {
+            strip_builtin_web_search_tools(&mut payload);
+            return Value::Object(payload);
+        }
     };
+    if provider_protocol.trim() != "anthropic-messages" {
+        return Value::Object(payload);
+    }
 
     let raw_max_uses = parse_js_number_like(matched_engine.get("maxUses"));
     let max_uses = match raw_max_uses {
@@ -4934,6 +4971,9 @@ mod tests {
             "model": "claude-3-7-sonnet",
             "tools": [
                 {
+                    "type": "web_search"
+                },
+                {
                     "type": "function",
                     "function": { "name": "exec_command" }
                 }
@@ -4956,7 +4996,46 @@ mod tests {
             &json!("web_search.default"),
             &runtime_metadata,
         );
-        assert_eq!(output, provider_payload);
+        assert_eq!(
+            output["tools"],
+            json!([
+                {
+                    "type": "function",
+                    "function": { "name": "exec_command" }
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn test_apply_direct_builtin_web_search_tool_strips_builtin_for_non_search_route() {
+        let provider_payload = json!({
+            "model": "deepseek-v4-pro",
+            "tools": [
+                {
+                    "type": "web_search"
+                },
+                {
+                    "type": "function",
+                    "function": { "name": "exec_command" }
+                }
+            ]
+        });
+        let output = apply_direct_builtin_web_search_tool(
+            &provider_payload,
+            "openai-responses",
+            &json!("thinking.default"),
+            &json!({}),
+        );
+        assert_eq!(
+            output["tools"],
+            json!([
+                {
+                    "type": "function",
+                    "function": { "name": "exec_command" }
+                }
+            ])
+        );
     }
 
     #[test]

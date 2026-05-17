@@ -74,6 +74,8 @@ pub struct ResolveResponsesBridgeToolsInput {
     #[serde(default)]
     pub chat_tools: Option<Vec<Value>>,
     #[serde(default)]
+    pub allow_builtin_web_search: Option<bool>,
+    #[serde(default)]
     pub has_server_side_web_search: Option<bool>,
     #[serde(default)]
     pub passthrough_keys: Option<Vec<String>>,
@@ -111,6 +113,7 @@ pub struct ResolveResponsesRequestBridgeDecisionsInput {
 #[serde(rename_all = "camelCase")]
 pub struct ResolveResponsesRequestBridgeDecisionsOutput {
     pub force_web_search: bool,
+    pub allow_builtin_web_search: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id_style: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

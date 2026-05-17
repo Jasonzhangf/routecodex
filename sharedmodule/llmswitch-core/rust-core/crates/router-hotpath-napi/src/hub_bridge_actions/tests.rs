@@ -366,25 +366,27 @@ fn normalizes_bridge_history_seed_filters_empty_system_messages_and_preserves_te
 }
 
 #[test]
-fn resolves_responses_bridge_tools_dedupes_by_function_name_and_preserves_builtin_web_search() {
+fn resolves_responses_bridge_tools_dedupes_by_function_name_and_filters_builtin_web_search_without_direct_passthrough(
+) {
     let output = resolve_responses_bridge_tools(ResolveResponsesBridgeToolsInput {
         original_tools: Some(vec![json!({ "type": "web_search" })]),
         chat_tools: Some(vec![
             json!({ "type": "function", "function": { "name": "exec_command" } }),
             json!({ "type": "function", "function": { "name": "exec_command" } }),
         ]),
+        allow_builtin_web_search: Some(false),
         has_server_side_web_search: Some(false),
         passthrough_keys: None,
         request: None,
     });
     let merged = output.merged_tools.unwrap();
-    assert_eq!(merged.len(), 2);
+    assert_eq!(merged.len(), 1);
     assert_eq!(merged[0]["function"]["name"], "exec_command");
-    assert_eq!(merged[1]["type"], "web_search");
+    assert!(!merged.iter().any(|tool| tool["type"] == "web_search"));
 }
 
 #[test]
-fn resolves_responses_bridge_tools_injects_builtin_web_search_for_server_side_tool() {
+fn resolves_responses_bridge_tools_injects_builtin_web_search_only_for_direct_passthrough() {
     let output = resolve_responses_bridge_tools(ResolveResponsesBridgeToolsInput {
         original_tools: Some(vec![]),
         chat_tools: Some(vec![
@@ -397,6 +399,7 @@ fn resolves_responses_bridge_tools_injects_builtin_web_search_for_server_side_to
                 "function": { "name": "exec_command" }
             }),
         ]),
+        allow_builtin_web_search: Some(true),
         has_server_side_web_search: Some(true),
         passthrough_keys: None,
         request: None,
@@ -417,6 +420,7 @@ fn resolves_responses_bridge_tools_does_not_inject_builtin_web_search_without_we
             "type": "function",
             "function": { "name": "exec_command" }
         })]),
+        allow_builtin_web_search: Some(true),
         has_server_side_web_search: Some(true),
         passthrough_keys: None,
         request: None,
@@ -435,6 +439,7 @@ fn resolves_responses_bridge_tools_dedupes_builtin_web_search_by_type() {
             json!({ "type": "web_search_preview" }),
         ]),
         chat_tools: None,
+        allow_builtin_web_search: Some(true),
         has_server_side_web_search: Some(true),
         passthrough_keys: None,
         request: None,
@@ -464,6 +469,7 @@ fn resolves_responses_bridge_tools_strips_server_side_web_search_function_and_pr
                 "parameters": { "type": "object", "properties": {} }
             }),
         ]),
+        allow_builtin_web_search: Some(true),
         has_server_side_web_search: Some(true),
         passthrough_keys: Some(vec!["temperature".to_string(), "seed".to_string()]),
         request: Some(json!({ "temperature": 0.4, "seed": 7 })),
@@ -506,6 +512,7 @@ fn resolves_responses_bridge_tools_does_not_double_inject_builtin_web_search_whe
                 "function": { "name": "write_stdin", "parameters": { "type": "object", "properties": {} } }
             }),
         ]),
+        allow_builtin_web_search: Some(false),
         has_server_side_web_search: Some(true),
         passthrough_keys: None,
         request: None,
@@ -526,6 +533,7 @@ fn resolves_responses_bridge_tools_request_only_keeps_passthrough_fields() {
             "type": "function",
             "function": { "name": "exec_command", "parameters": { "type": "object", "properties": {} } }
         })]),
+        allow_builtin_web_search: Some(false),
         has_server_side_web_search: Some(false),
         passthrough_keys: Some(vec!["temperature".to_string(), "top_p".to_string()]),
         request: Some(json!({
@@ -581,6 +589,7 @@ fn resolves_responses_request_bridge_decisions_prefers_route_style_and_force_web
             request_semantics: None,
         });
     assert!(output.force_web_search);
+    assert!(!output.allow_builtin_web_search);
     assert_eq!(output.tool_call_id_style.as_deref(), Some("fc"));
     let history_seed = output.history_seed.expect("history seed");
     assert_eq!(
@@ -620,6 +629,7 @@ fn resolves_responses_request_bridge_decisions_falls_back_to_context_history_see
             request_semantics: None,
         });
     assert!(!output.force_web_search);
+    assert!(!output.allow_builtin_web_search);
     assert_eq!(output.tool_call_id_style.as_deref(), Some("fc"));
     let history_seed = output.history_seed.expect("history seed");
     assert_eq!(
@@ -631,6 +641,44 @@ fn resolves_responses_request_bridge_decisions_falls_back_to_context_history_see
         history_seed.input[0]["content"][0]["text"].as_str(),
         Some("ctx fallback")
     );
+}
+
+#[test]
+fn resolves_responses_request_bridge_decisions_enables_builtin_web_search_only_for_matching_direct_builtin_engine(
+) {
+    let output =
+        resolve_responses_request_bridge_decisions(ResolveResponsesRequestBridgeDecisionsInput {
+            context: Some(json!({
+                "metadata": {
+                    "providerKey": "llmgate.key1.deepseek-v4-pro-search",
+                    "assignedModelId": "deepseek-v4-pro-search",
+                    "__rt": {
+                        "webSearch": {
+                            "engines": [
+                                {
+                                    "providerKey": "llmgate.key1.deepseek-v4-pro-search",
+                                    "modelId": "deepseek-v4-pro-search",
+                                    "executionMode": "direct",
+                                    "directActivation": "builtin"
+                                },
+                                {
+                                    "providerKey": "llmgate.key1.deepseek-v4-pro",
+                                    "modelId": "deepseek-v4-pro",
+                                    "executionMode": "servertool"
+                                }
+                            ]
+                        }
+                    }
+                }
+            })),
+            request_metadata: None,
+            envelope_metadata: Some(json!({})),
+            bridge_metadata: None,
+            extra_bridge_history: None,
+            request_semantics: None,
+        });
+    assert!(!output.force_web_search);
+    assert!(output.allow_builtin_web_search);
 }
 
 #[test]

@@ -165,6 +165,11 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                                 "autoLimit": true,
                                 "flowOnlyLoopLimit": true
                             },
+                            "apply_patch_read_before_retry_guard": {
+                                "autoLimit": true,
+                                "flowOnlyLoopLimit": true,
+                                "stickyProvider": true
+                            },
                             "exec_command_guard": {
                                 "autoLimit": true,
                                 "flowOnlyLoopLimit": true
@@ -337,6 +342,27 @@ mod tests {
         );
         assert_eq!(
             parsed.get("clientInjectOnly").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn resolves_apply_patch_read_before_retry_guard_as_sticky_provider_followup() {
+        let raw = plan_servertool_followup_runtime_json(
+            "apply_patch_read_before_retry_guard".to_string(),
+        )
+        .expect("runtime plan json");
+        let parsed: Value = serde_json::from_str(&raw).expect("parse runtime plan");
+        assert_eq!(
+            parsed.get("outcomeMode").and_then(|v| v.as_str()),
+            Some("reenter")
+        );
+        assert_eq!(
+            parsed.get("stickyProvider").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            parsed.get("autoLimit").and_then(|v| v.as_bool()),
             Some(true)
         );
     }

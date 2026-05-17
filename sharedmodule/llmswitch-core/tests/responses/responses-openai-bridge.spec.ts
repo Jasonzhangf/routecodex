@@ -744,7 +744,7 @@ describe('responses-openai-bridge history seed normalization', () => {
     expect(result.request.metadata).toEqual({ ctx: true });
   });
 
-  test('restores builtin web_search and preserves passthrough fields without TS fallback merging', () => {
+  test('filters builtin web_search by default and preserves passthrough fields', () => {
     const chatPayload = {
       model: 'glm-4.7',
       messages: [{ role: 'user', content: 'search this' }],
@@ -772,16 +772,69 @@ describe('responses-openai-bridge history seed normalization', () => {
     expect(result.request.tools).toEqual([
       {
         type: 'function',
+        name: 'web_search',
+        function: { name: 'web_search', parameters: { type: 'object', properties: {} } },
+        parameters: { type: 'object', properties: {} }
+      },
+      {
+        type: 'function',
+        name: 'exec_command',
+        function: { name: 'exec_command', parameters: { type: 'object', properties: {} } },
+        parameters: { type: 'object', properties: {} }
+      }
+    ]);
+    expect(result.request.temperature).toBe(0.4);
+    expect(result.request.top_p).toBe(0.8);
+    expect(result.request.seed).toBe(7);
+    expect(result.request.prompt_cache_key).toBe('cache-key');
+  });
+
+  test('allows builtin web_search passthrough only for matching direct builtin engine', () => {
+    const chatPayload = {
+      model: 'deepseek-v4-pro-search',
+      messages: [{ role: 'user', content: 'search this' }],
+      tools: [
+        {
+          type: 'function',
+          function: { name: 'web_search', parameters: { type: 'object', properties: {} } }
+        },
+        {
+          type: 'function',
+          function: { name: 'exec_command', parameters: { type: 'object', properties: {} } }
+        }
+      ]
+    };
+
+    const result = buildResponsesRequestFromChat(chatPayload, {
+      requestId: 'bridge-web-search-direct-builtin',
+      toolsRaw: [{ type: 'web_search' }],
+      metadata: {
+        providerKey: 'llmgate.key1.deepseek-v4-pro-search',
+        assignedModelId: 'deepseek-v4-pro-search',
+        __rt: {
+          webSearch: {
+            engines: [
+              {
+                providerKey: 'llmgate.key1.deepseek-v4-pro-search',
+                modelId: 'deepseek-v4-pro-search',
+                executionMode: 'direct',
+                directActivation: 'builtin'
+              }
+            ]
+          }
+        }
+      }
+    } as any);
+
+    expect(result.request.tools).toEqual([
+      {
+        type: 'function',
         name: 'exec_command',
         function: { name: 'exec_command', parameters: { type: 'object', properties: {} } },
         parameters: { type: 'object', properties: {} }
       },
       { type: 'web_search' }
     ]);
-    expect(result.request.temperature).toBe(0.4);
-    expect(result.request.top_p).toBe(0.8);
-    expect(result.request.seed).toBe(7);
-    expect(result.request.prompt_cache_key).toBe('cache-key');
   });
 
   test('uses route toolCallIdStyle over context and skips builtin web_search when forceWebSearch is enabled', () => {

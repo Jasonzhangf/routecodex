@@ -61,9 +61,27 @@ function shouldDropCooldownPersistence(state: QuotaState): boolean {
   if (!state || typeof state !== 'object') {
     return false;
   }
-  // Cooldown persistence is required for restart-stable backoff semantics.
-  // Do not silently clear runtime cooldown windows during snapshot save.
-  return false;
+  const reason = typeof state.reason === 'string' ? state.reason : '';
+  const lastErrorSeries = typeof state.lastErrorSeries === 'string' ? state.lastErrorSeries : '';
+  const lastErrorCode = typeof state.lastErrorCode === 'string' ? state.lastErrorCode.trim().toUpperCase() : '';
+  const hasAuthIssue = state.authIssue !== null && state.authIssue !== undefined;
+
+  const isAuthOrConfigFatal =
+    lastErrorSeries === 'EFATAL' ||
+    hasAuthIssue ||
+    lastErrorCode.includes('AUTH') ||
+    lastErrorCode.includes('UNAUTHORIZED') ||
+    lastErrorCode.includes('NEW_API_ERROR') ||
+    lastErrorCode.includes('CONFIG');
+
+  if (!isAuthOrConfigFatal) {
+    return false;
+  }
+
+  // Auth / config fatal cooldowns are not restart-stable truth.
+  // Credentials can be repaired out-of-band, so persisting these cooldowns
+  // across restart only creates stale "provider unavailable" state.
+  return reason === 'cooldown' || reason === 'fatal' || reason === 'authVerify';
 }
 
 function sanitizeQuotaStateForSnapshot(state: QuotaState): QuotaState {
@@ -122,6 +140,14 @@ export async function loadProviderQuotaSnapshot(): Promise<ProviderQuotaSnapshot
     if (!parsed || typeof parsed !== 'object' || !parsed.providers || typeof parsed.providers !== 'object') {
       return null;
     }
+    const sanitizedProviders: Record<string, QuotaState> = {};
+    for (const [providerKey, state] of Object.entries(parsed.providers)) {
+      if (!state || typeof state !== 'object') {
+        continue;
+      }
+      sanitizedProviders[providerKey] = sanitizeQuotaStateForSnapshot(state as QuotaState);
+    }
+    parsed.providers = sanitizedProviders;
     return parsed;
   } catch (error) {
     logProviderQuotaStoreNonBlockingError('loadProviderQuotaSnapshot', error, { filePath });
