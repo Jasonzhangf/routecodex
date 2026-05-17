@@ -2,8 +2,8 @@
 
 import { parseToolArgsJson } from './args-json.js';
 import { validateExecCommandArgs } from './exec-command/validator.js';
-import { validateApplyPatchArgs } from './apply-patch/validator.js';
 import { captureExecCommandRegression } from './exec-command/regression-capturer.js';
+import { validateApplyPatchArgumentsWithNative } from '../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -133,7 +133,7 @@ export function validateToolCall(
 
   switch (normalizedName) {
     case 'apply_patch': {
-      const validation = validateApplyPatchArgs(argsString, rawArgsAny);
+      const validation = validateApplyPatchArgumentsWithNative(rawArgsAny);
       if (!validation.ok) {
         return {
           ok: false,
@@ -141,7 +141,7 @@ export function validateToolCall(
           message: validation.message
         };
       }
-      return { ok: true, normalizedArgs: validation.normalizedArgs };
+      return { ok: true, normalizedArgs: validation.normalizedArguments };
     }
     case 'exec_command': {
       const guard = options?.execCommandGuard;

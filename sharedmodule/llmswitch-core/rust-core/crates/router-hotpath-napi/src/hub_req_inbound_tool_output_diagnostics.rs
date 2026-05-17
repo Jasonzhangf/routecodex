@@ -3,8 +3,8 @@ use napi_derive::napi;
 use serde_json::Map;
 use serde_json::Value;
 
-const APPLY_PATCH_MISSING_INPUT: &str = "\n\n[RouteCodex precheck] apply_patch 参数解析失败：缺少字段 \"input\"。当前 RouteCodex 期望 { input, patch } 形态，并且两个字段都应包含完整统一 diff 文本。";
-const APPLY_PATCH_MAP_TYPE: &str = "\n\n[RouteCodex precheck] apply_patch 参数类型错误：检测到 JSON 对象（map），但客户端期望字符串。请先对参数做 JSON.stringify 再写入 arguments，或直接提供 { patch: \"<统一 diff>\" } 形式。";
+const APPLY_PATCH_MISSING_INPUT: &str = "\n\n[RouteCodex precheck][APPLY_PATCH_ARGUMENTS_MISSING_PATCH] apply_patch 参数解析失败：缺少可用 patch 文本。规范形状是 {\"patch\":\"*** Begin Patch\\n...\\n*** End Patch\"}；`input` 只允许作为同一 patch 文本的兼容镜像。";
+const APPLY_PATCH_MAP_TYPE: &str = "\n\n[RouteCodex precheck][APPLY_PATCH_ARGUMENTS_NOT_STRING] apply_patch 参数类型错误：检测到 JSON 对象（map），但 arguments 需要字符串化后的 patch 文本。请先对参数做 JSON.stringify，或直接提供 { patch: \"<canonical patch>\" }。";
 const SHELL_MISSING_COMMAND: &str = "\n\n[RouteCodex precheck] shell/exec 参数解析失败：缺少字段 \"command\"。请改为 {\"tool_calls\":[{\"name\":\"shell_command\",\"input\":{\"command\":\"<cmd>\"}}]}；若调用 exec_command，建议同时提供 {\"cmd\":\"<cmd>\",\"command\":\"<cmd>\"}。";
 const SHELL_MISSING_CMD: &str = "\n\n[RouteCodex precheck] shell/exec 参数解析失败：缺少字段 \"cmd\"。exec_command 推荐形状为 {\"cmd\":\"<cmd>\",\"command\":\"<cmd>\",\"workdir\":\"<path>\"}。";
 

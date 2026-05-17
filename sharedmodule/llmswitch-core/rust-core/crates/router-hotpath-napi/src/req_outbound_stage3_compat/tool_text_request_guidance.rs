@@ -1,5 +1,6 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{json, Map, Value};
+use std::collections::VecDeque;
 
 const DEFAULT_MARKER: &str = "Tool-call output contract (STRICT)";
 
@@ -85,6 +86,114 @@ fn is_tool_choice_required(root: &Map<String, Value>) -> bool {
         .unwrap_or(false)
 }
 
+fn parse_json_object(text: &str) -> Option<Map<String, Value>> {
+    serde_json::from_str::<Value>(text).ok()?.as_object().cloned()
+}
+
+fn read_tool_call_name(entry: &Map<String, Value>) -> Option<String> {
+    read_trimmed_string(entry.get("name")).or_else(|| {
+        entry.get("function")
+            .and_then(Value::as_object)
+            .and_then(|row| read_trimmed_string(row.get("name")))
+    })
+}
+
+fn read_tool_call_arguments_text(entry: &Map<String, Value>) -> Option<String> {
+    read_trimmed_string(entry.get("arguments")).or_else(|| {
+        entry.get("function")
+            .and_then(Value::as_object)
+            .and_then(|row| read_trimmed_string(row.get("arguments")))
+    })
+}
+
+fn read_shell_command_text_from_tool_call(entry: &Map<String, Value>) -> Option<String> {
+    let name = read_tool_call_name(entry)?;
+    if !is_shell_like_tool_name(name.as_str()) {
+        return None;
+    }
+    let args_text = read_tool_call_arguments_text(entry)?;
+    let args = parse_json_object(args_text.as_str())?;
+    read_trimmed_string(args.get("cmd"))
+        .or_else(|| read_trimmed_string(args.get("command")))
+        .or_else(|| {
+            args.get("input")
+                .and_then(Value::as_object)
+                .and_then(|row| read_trimmed_string(row.get("cmd")))
+        })
+        .or_else(|| {
+            args.get("input")
+                .and_then(Value::as_object)
+                .and_then(|row| read_trimmed_string(row.get("command")))
+        })
+}
+
+fn looks_like_file_read_command(command: &str) -> bool {
+    let normalized = command.trim().to_ascii_lowercase();
+    normalized.contains("nl -ba ")
+        || normalized.contains("sed -n ")
+        || normalized.contains("cat ")
+        || normalized.contains("head ")
+        || normalized.contains("tail ")
+        || normalized.contains("rg ")
+        || normalized.contains("awk ")
+        || normalized.contains("python ")
+}
+
+fn tool_output_text(record: &Map<String, Value>) -> String {
+    read_trimmed_string(record.get("content"))
+        .or_else(|| read_trimmed_string(record.get("output")))
+        .unwrap_or_default()
+}
+
+fn has_recent_apply_patch_failure_without_read(root: &Map<String, Value>) -> bool {
+    let mut events = VecDeque::<String>::new();
+
+    if let Some(messages) = root.get("messages").and_then(Value::as_array) {
+        for message in messages {
+            let Some(row) = message.as_object() else {
+                continue;
+            };
+            if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
+                for tool_call in tool_calls {
+                    let Some(tool_call_row) = tool_call.as_object() else {
+                        continue;
+                    };
+                    if let Some(command) = read_shell_command_text_from_tool_call(tool_call_row) {
+                        if looks_like_file_read_command(command.as_str()) {
+                            events.push_back("read".to_string());
+                        }
+                    }
+                }
+            }
+            let role = read_trimmed_string(row.get("role"))
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if role == "tool" {
+                let name = read_trimmed_string(row.get("name")).unwrap_or_default();
+                let text = tool_output_text(row).to_ascii_lowercase();
+                if name.eq_ignore_ascii_case("apply_patch")
+                    && text.contains("apply_patch verification failed")
+                {
+                    events.push_back("apply_patch_failure".to_string());
+                }
+                if is_shell_like_tool_name(name.as_str()) && looks_like_file_read_command(text.as_str()) {
+                    events.push_back("read".to_string());
+                }
+            }
+        }
+    }
+
+    let mut failure_seen = false;
+    for event in events {
+        match event.as_str() {
+            "apply_patch_failure" => failure_seen = true,
+            "read" if failure_seen => return false,
+            _ => {}
+        }
+    }
+    failure_seen
+}
+
 fn build_default_instruction(
     root: &Map<String, Value>,
     config: Option<&Map<String, Value>>,
@@ -110,7 +219,13 @@ fn build_default_instruction(
     );
     if has_exec_command && has_apply_patch {
         push_line(
-            "If calling tools, output exactly one heredoc container: <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}\\nRCC_TOOL_CALLS_JSON or <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"apply_patch\",\"input\":{\"patch\":\"*** Begin Patch\\n*** Add File: path/to/file\\ncontent\\n*** End Patch\"}}]}\\nRCC_TOOL_CALLS_JSON"
+            "FORBIDDEN FIRST: never send `apply_patch` through `exec_command`, shell, `bash -lc`, command substitution, or heredoc wrappers like `apply_patch <<PATCH`; any file edit must be a direct `apply_patch` tool call."
+                .to_string(),
+        );
+    }
+    if has_exec_command && has_apply_patch {
+        push_line(
+            "If calling tools, output exactly one heredoc container: <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}\\nRCC_TOOL_CALLS_JSON or <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"apply_patch\",\"input\":{\"patch\":\"*** Begin Patch\\n*** Add File: path/to/file\\n+content\\n*** End Patch\"}}]}\\nRCC_TOOL_CALLS_JSON"
                 .to_string(),
         );
     } else if has_exec_command {
@@ -120,7 +235,7 @@ fn build_default_instruction(
         );
     } else if has_apply_patch {
         push_line(
-            "If calling tools, output exactly one heredoc container: <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"apply_patch\",\"input\":{\"patch\":\"*** Begin Patch\\n*** Add File: path/to/file\\ncontent\\n*** End Patch\"}}]}\\nRCC_TOOL_CALLS_JSON"
+            "If calling tools, output exactly one heredoc container: <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"apply_patch\",\"input\":{\"patch\":\"*** Begin Patch\\n*** Add File: path/to/file\\n+content\\n*** End Patch\"}}]}\\nRCC_TOOL_CALLS_JSON"
                 .to_string(),
         );
     } else {
@@ -163,13 +278,23 @@ fn build_default_instruction(
 
     if has_apply_patch {
         push_line(
-            "For `apply_patch`, use only `input.patch` with the patch text. Must use \"*** Begin Patch\" / \"*** End Patch\" markers with \"*** Add File:\" or \"*** Update File:\" headers. Do NOT use JSON, prose, or markdown fences for the patch body."
+            "For `apply_patch`, file edits must be a DIRECT tool call. Author exactly one canonical patch body in `patch`."
                 .to_string(),
         );
         push_line(
-            "For `apply_patch`, always include the full patch text inside the `patch` field; do not split it across multiple tool calls or omit the required markers."
+            "For `apply_patch`, use the canonical internal patch grammar only."
                 .to_string(),
         );
+        push_line(
+            "If an `apply_patch` attempt failed, read the file first, then rebuild the patch from the latest content before retrying."
+                .to_string(),
+        );
+        if has_recent_apply_patch_failure_without_read(root) {
+            push_line(
+                "MANDATORY NEXT ACTION: a recent `apply_patch` failed and no file-read step was observed afterwards. Before any new `apply_patch`, first use `exec_command` to read the exact latest file content for the target path (for example `nl -ba <file>`)."
+                    .to_string(),
+            );
+        }
     }
 
     if include_tool_names && !tool_names.is_empty() {
@@ -447,7 +572,7 @@ mod tests {
         assert!(content.contains("Allowed tool names this turn: exec_command, apply_patch"));
         assert!(content.contains("use tool name `exec_command`"));
         assert!(content.contains("Do NOT emit `command`, `cwd`, or `workdir`"));
-        assert!(content.contains("For `apply_patch`, use only `input.patch`"));
+        assert!(content.contains("Author exactly one canonical patch body in `patch`"));
         assert!(content.contains("*** Begin Patch"));
         assert!(content.contains("*** End Patch"));
     }
@@ -464,12 +589,36 @@ mod tests {
         apply_tool_text_request_guidance(&mut payload, None);
 
         let content = payload["messages"][0]["content"].as_str().unwrap_or("");
-        assert!(content.contains("For `apply_patch`, use only `input.patch`"));
+        assert!(content.contains("Author exactly one canonical patch body in `patch`"));
         assert!(content.contains("*** Begin Patch"));
         assert!(content.contains("*** End Patch"));
         assert!(content.contains("*** Add File:"));
         assert!(content.contains("apply_patch"));
         assert!(!content.contains("exec_command"), "should not mention exec_command when not declared");
+    }
+
+    #[test]
+    fn guidance_requires_file_read_before_retry_after_recent_apply_patch_failure() {
+        let mut payload = json!({
+            "tools": [
+                { "type": "function", "function": { "name": "exec_command" } },
+                { "type": "function", "function": { "name": "apply_patch" } }
+            ],
+            "messages": [
+                {
+                    "role": "tool",
+                    "name": "apply_patch",
+                    "content": "apply_patch verification failed: Failed to find context '-15,2 +15,2 @@' in AGENTS.md"
+                }
+            ]
+        });
+
+        apply_tool_text_request_guidance(&mut payload, None);
+
+        let content = payload["messages"][0]["content"].as_str().unwrap_or("");
+        assert!(content.contains("MANDATORY NEXT ACTION"));
+        assert!(content.contains("first use `exec_command` to read the exact latest file content"));
+        assert!(content.contains("nl -ba <file>"));
     }
 
     #[test]

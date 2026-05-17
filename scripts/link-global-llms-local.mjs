@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -72,12 +73,34 @@ function linkForPackage(globalRoot, packageName) {
   return { packageName, changed: true, skipped: false, linkPath, linkedTo };
 }
 
+function buildInstallCurrentRoots() {
+  const home = os.homedir();
+  return [
+    path.join(home, '.rcc', 'install', 'current'),
+    path.join('/Volumes/extension', '.rcc', 'install', 'current')
+  ];
+}
+
+function linkForInstallCurrentRoot(installRoot) {
+  if (!fs.existsSync(installRoot)) {
+    return { installRoot, changed: false, skipped: true, reason: 'install-root-missing' };
+  }
+  const scopeDir = path.join(installRoot, 'node_modules');
+  const linkPath = path.join(scopeDir, 'rcc-llmswitch-core');
+  fs.mkdirSync(scopeDir, { recursive: true });
+  fs.rmSync(linkPath, { recursive: true, force: true });
+  fs.symlinkSync(localLlms, linkPath, 'junction');
+  const linkedTo = fs.readlinkSync(linkPath);
+  return { installRoot, changed: true, skipped: false, linkPath, linkedTo };
+}
+
 function main() {
   const args = parseArgs(process.argv);
   const targets = args.packageNames.length > 0 ? args.packageNames : ['routecodex'];
   ensureLocalLlmsReady();
   const globalRoot = npmRootGlobal();
   const results = targets.map((name) => linkForPackage(globalRoot, name));
+  const installResults = buildInstallCurrentRoots().map((root) => linkForInstallCurrentRoot(root));
   const changed = results.filter((it) => it.changed);
 
   if (args.requireTarget && changed.length <= 0) {
@@ -94,6 +117,15 @@ function main() {
       );
     } else if (row.skipped) {
       console.log(`[link-global-llms-local] skip ${row.packageName} (${row.reason})`);
+    }
+  }
+  for (const row of installResults) {
+    if (row.changed) {
+      console.log(
+        `[link-global-llms-local] linked install current -> ${row.linkPath} => ${row.linkedTo}`
+      );
+    } else if (row.skipped && row.reason !== 'install-root-missing') {
+      console.log(`[link-global-llms-local] skip install current ${row.installRoot} (${row.reason})`);
     }
   }
 }

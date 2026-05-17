@@ -483,26 +483,26 @@ fn apply_fixups(name: &str, parameters: &Value, mode: &str) -> Value {
                 "patch".to_string(),
                 serde_json::json!({
                     "type": "string",
-                    "description": "Raw patch text only. Must use the special \"*** Begin Patch ... *** End Patch\" grammar. Do not use JSON, prose, Markdown fences, or git/unified diff syntax. Paths must be workspace-relative."
+                    "description": "Raw patch text only. Author exactly one canonical patch body in `patch`."
                 }),
             );
         }
         if !props.contains_key("input") {
             props.insert(
                 "input".to_string(),
-                serde_json::json!({ "type": "string", "description": "Alias of patch. Same patch text grammar as patch. Prefer patch." }),
+                serde_json::json!({ "type": "string", "description": "Compatibility alias of patch. Prefer patch." }),
             );
         }
         if !props.contains_key("instructions") {
             props.insert(
                 "instructions".to_string(),
-                serde_json::json!({ "type": "string", "description": "Alias of patch. Same patch text grammar as patch. Prefer patch." }),
+                serde_json::json!({ "type": "string", "description": "Compatibility alias of patch. Prefer patch." }),
             );
         }
         if !props.contains_key("text") {
             props.insert(
                 "text".to_string(),
-                serde_json::json!({ "type": "string", "description": "Alias of patch. Same patch text grammar as patch. Prefer patch." }),
+                serde_json::json!({ "type": "string", "description": "Compatibility alias of patch. Prefer patch." }),
             );
         }
         params.insert("properties".to_string(), Value::Object(props));
@@ -518,7 +518,7 @@ fn rewrite_description(name: &str, description: Option<&str>, mode: &str) -> Opt
     let lowered = name.trim().to_ascii_lowercase();
     if lowered == "apply_patch" {
         return Some(
-            "Edit files by providing raw patch text in `patch` (string). Use only the special \"*** Begin Patch ... *** End Patch\" grammar. Do not use JSON, prose, Markdown fences, or GNU/git diff syntax. `input`/`instructions`/`text` are accepted as aliases.".to_string(),
+            "Edit files by providing exactly one canonical patch body in `patch` (string). `input`/`instructions`/`text` are compatibility aliases only.".to_string(),
         );
     }
     if lowered == "exec_command" {

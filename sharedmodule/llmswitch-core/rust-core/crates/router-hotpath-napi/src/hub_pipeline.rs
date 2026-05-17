@@ -4179,15 +4179,15 @@ mod tests {
             .as_str()
             .expect("exec args");
         let exec_args: Value = serde_json::from_str(exec_args_text).expect("exec args json");
-        assert!(exec_args.get("cmd").is_none());
-        assert_eq!(exec_args["command"], "pwd");
+        assert_eq!(exec_args["cmd"], "pwd");
+        assert!(exec_args.get("command").is_none());
         assert_eq!(exec_args["workdir"], "/repo");
 
         let patch_args_text = tool_calls[1]["function"]["arguments"]
             .as_str()
             .expect("patch args");
         let patch_args: Value = serde_json::from_str(patch_args_text).expect("patch args json");
-        assert!(patch_args.get("patch").is_none());
+        assert_eq!(patch_args["patch"], patch_args["input"]);
         let patch_input = patch_args["input"].as_str().expect("patch input");
         assert!(patch_input.starts_with("*** Begin Patch"));
         assert!(patch_input.contains("*** Add File: note.txt"));

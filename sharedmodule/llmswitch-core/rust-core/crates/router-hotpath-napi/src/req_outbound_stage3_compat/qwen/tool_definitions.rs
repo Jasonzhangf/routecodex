@@ -74,7 +74,7 @@ pub(crate) fn normalize_qwen_family_tool_definitions(root: &Map<String, Value>) 
             )
         } else if name.eq_ignore_ascii_case("apply_patch") {
             Some(
-                "Use only `patch`, as one string containing the complete `*** Begin Patch` ... `*** End Patch` envelope. Call the tool directly. For new files, use `*** Add File:` with added lines only.",
+                "Author exactly one canonical patch body in `patch`. Use the canonical internal patch grammar only. Call the tool directly.",
             )
         } else if name.eq_ignore_ascii_case("update_plan") {
             Some(
@@ -125,7 +125,7 @@ pub(crate) fn normalize_qwen_family_tool_definitions(root: &Map<String, Value>) 
                         .unwrap_or(Value::Null);
                     append_property_description(
                         patch_prop,
-                        "Single patch string only, including the full `*** Begin Patch` ... `*** End Patch` envelope.",
+                        "Single canonical patch string only.",
                     );
                     if patch_prop
                         .get("description")

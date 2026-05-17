@@ -9,15 +9,16 @@ use crate::shared_metadata_semantics::ensure_protocol_state_mut;
 use crate::shared_openai_message_normalize::normalize_openai_chat_messages;
 use crate::shared_tool_mapping::flatten_chat_tools_for_function_calling;
 
-const APPLY_PATCH_HINT: &str = "\n\n[apply_patch hint] 在使用 apply_patch 之前，请先读取目标文件的最新内容，并基于该内容生成补丁；同时确保补丁格式符合工具规范（统一补丁格式或结构化参数），避免上下文不匹配或语法错误。";
-const APPLY_PATCH_MISSING_INPUT: &str = "\n\n[RouteCodex precheck] apply_patch 参数解析失败：缺少字段 \"input\"。当前 RouteCodex 期望 { input, patch } 形态，并且两个字段都应包含完整统一 diff 文本。";
-const APPLY_PATCH_MAP_TYPE: &str = "\n\n[RouteCodex precheck] apply_patch 参数类型错误：检测到 JSON 对象（map），但客户端期望字符串。请先对参数做 JSON.stringify 再写入 arguments，或直接提供 { patch: \"<统一 diff>\" } 形式。";
-const APPLY_PATCH_SANDBOX_HINT: &str = "\n\n[RouteCodex hint] apply_patch 被 sandbox 终止 (Signal 9)。常见原因是补丁涉及 workspace 之外的路径。请改用当前 workspace 内路径，或将目标仓加入 workspaces/workdir 后再调用 apply_patch。";
-const APPLY_PATCH_PATH_MISSING_HINT: &str = "\n\n[RouteCodex hint] apply_patch 读取目标文件失败：路径不存在或不在当前 workspace。请确认路径在当前 workspace 内且文件真实存在；路径必须为 workspace 相对路径（如 src/...），不要以 / 或盘符开头。必要时切换 workspace/workdir。";
-const APPLY_PATCH_CONFLICT_MARKER_HINT: &str = "\n\n[RouteCodex hint] apply_patch 检测到 merge/conflict 标记被直接塞进了 Update File hunk。请不要发送 `<<<<<<<` / `=======` / `>>>>>>>`；先读取目标文件最新内容，再仅保留真正的 `@@` patch hunk。";
-const APPLY_PATCH_CONTEXT_MISMATCH_HINT: &str = "\n\n[RouteCodex hint] apply_patch 的 hunk 上下文与当前文件不匹配。请重新读取目标文件最新内容，使用更小且唯一的上下文；不要依赖猜测出来的 `@@ -x,y +x,y @@` 行号范围。";
-const APPLY_PATCH_MIXED_SYNTAX_HINT: &str = "\n\n[RouteCodex hint] apply_patch 混用了两种补丁语法：如果已经使用 `*** Begin Patch`，块内不要再写 `--- a/...` / `+++ b/...`。请二选一：要么发送纯 internal patch grammar，要么发送原始 GNU unified diff。";
-const APPLY_PATCH_EXPECTED_LINES_HINT: &str = "\n\n[RouteCodex hint] apply_patch 没找到待替换原文，通常说明文件已经变化或上下文过大。请重新读取目标文件最新内容后，用更小、唯一的上下文重试；必要时把大 patch 拆成多次小 patch。";
+const APPLY_PATCH_HINT: &str = "\n\n[RouteCodex apply_patch] Canonical contract: use exactly one patch body in `patch`, keep paths workspace-relative, and build Update File hunks from the latest real file content. If apply_patch fails with context/expected-lines errors, the next required action is to read the file first, then rebuild a smaller patch.";
+const APPLY_PATCH_MISSING_INPUT: &str = "\n\n[RouteCodex precheck][APPLY_PATCH_ARGUMENTS_MISSING_PATCH] apply_patch 参数解析失败：缺少可用 patch 文本。规范形状是 {\"patch\":\"*** Begin Patch\\n...\\n*** End Patch\"}；`input` 只允许作为同一 patch 文本的兼容镜像。";
+const APPLY_PATCH_MAP_TYPE: &str = "\n\n[RouteCodex precheck][APPLY_PATCH_ARGUMENTS_NOT_STRING] apply_patch 参数类型错误：检测到 JSON 对象（map），但 arguments 需要字符串化后的 patch 文本。请先对参数做 JSON.stringify，或直接提供 { patch: \"<canonical patch>\" }。";
+const APPLY_PATCH_SANDBOX_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_SANDBOX_OUTSIDE_WORKSPACE] apply_patch 被 sandbox 终止 (Signal 9)。常见原因是补丁涉及 workspace 之外的路径。下一步：改用当前 workspace 内相对路径，或将目标仓加入 workspaces/workdir 后再调用 apply_patch。";
+const APPLY_PATCH_PATH_MISSING_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_PATH_NOT_FOUND] apply_patch 读取目标文件失败：路径不存在或不在当前 workspace。下一步：确认路径真实存在且使用 workspace 相对路径（如 src/...），不要以 / 或盘符开头。";
+const APPLY_PATCH_CONFLICT_MARKER_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_CONFLICT_MARKERS] apply_patch 检测到 merge/conflict 标记被直接塞进了 Update File hunk。下一步：先读取目标文件最新内容，再只保留真正的 `@@` patch hunk；不要发送 `<<<<<<<` / `=======` / `>>>>>>>`。";
+const APPLY_PATCH_CONTEXT_MISMATCH_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_CONTEXT_MISMATCH] apply_patch 的 hunk 上下文与当前文件不匹配。下一步：必须先重新读取目标文件最新内容，再用更小且唯一的上下文重建 patch；不要继续猜 `@@ -x,y +x,y @@` 行号范围。";
+const APPLY_PATCH_MIXED_SYNTAX_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_MIXED_SYNTAX] apply_patch 混入了 GNU/git diff 头。模型输出时只能发送 canonical internal patch grammar：如果已经使用 `*** Begin Patch`，块内不要再写 `--- a/...` / `+++ b/...`。";
+const APPLY_PATCH_EXPECTED_LINES_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_EXPECTED_LINES_MISMATCH] apply_patch 没找到待替换原文，通常说明文件已经变化或上下文过大。下一步：先重读目标文件最新内容，再用更小、唯一的上下文重试；必要时把大 patch 拆成多次小 patch。";
+const APPLY_PATCH_HUNK_SHAPE_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_HUNK_SHAPE_INVALID] apply_patch 的 Update File hunk 形状不对：`@@` 之后的每一行都必须以前缀开头——空格=上下文，`-`=删除，`+`=新增；不要把原文件正文直接贴进 hunk。下一步：先用 `nl -ba <file>` 读取最新文件（保留空行编号），再基于真实内容重建一个更小、更唯一的 hunk。";
 
 const CHAT_PARAMETER_KEYS: [&str; 19] = [
     "model",
@@ -244,8 +245,18 @@ fn maybe_augment_apply_patch_error_content(content: &str, tool_name: Option<&str
     {
         return format!("{content}{APPLY_PATCH_MIXED_SYNTAX_HINT}");
     }
+    if lower.contains("expected update hunk to start with a @@ context marker") && lower.contains("@@")
+    {
+        return format!("{content}{APPLY_PATCH_CONTEXT_MISMATCH_HINT}");
+    }
     if lower.contains("failed to find expected lines in ") {
         return format!("{content}{APPLY_PATCH_EXPECTED_LINES_HINT}");
+    }
+    if lower.contains("unexpected line found in update hunk")
+        || lower.contains("update file hunk for path")
+        || lower.contains("every line should start with ' ' (context line), '+' (added line), or '-' (removed line)")
+    {
+        return format!("{content}{APPLY_PATCH_HUNK_SHAPE_HINT}");
     }
     format!("{content}{APPLY_PATCH_HINT}")
 }
@@ -908,7 +919,7 @@ mod tests {
             "apply_patch verification failed: invalid hunk at line 2, '--- a/src/server/index.ts' is not a valid hunk header.";
         let augmented = maybe_augment_apply_patch_error_content(content, Some("apply_patch"));
         assert!(augmented.contains("块内不要再写 `--- a/...` / `+++ b/...`"));
-        assert!(augmented.contains("二选一"));
+        assert!(augmented.contains("[APPLY_PATCH_MIXED_SYNTAX]"));
     }
 
     #[test]
@@ -917,7 +928,16 @@ mod tests {
             "apply_patch verification failed: Failed to find context '-50,6 +50,8 @@' in src/server/index.ts";
         let augmented = maybe_augment_apply_patch_error_content(content, Some("apply_patch"));
         assert!(augmented.contains("更小且唯一的上下文"));
-        assert!(augmented.contains("不要依赖猜测出来的 `@@ -x,y +x,y @@` 行号范围"));
+        assert!(augmented.contains("不要继续猜 `@@ -x,y +x,y @@` 行号范围"));
+    }
+
+    #[test]
+    fn apply_patch_hint_hunk_shape_keeps_specific_guidance() {
+        let content = "apply_patch verification failed: Unexpected line found in update hunk: console.log('raw body'); Every line should start with ' ' (context line), '+' (added line), or '-' (removed line)";
+        let augmented = maybe_augment_apply_patch_error_content(content, Some("apply_patch"));
+        assert!(augmented.contains("每一行都必须以前缀开头"));
+        assert!(augmented.contains("先用 `nl -ba <file>` 读取最新文件"));
+        assert!(augmented.contains("不要把原文件正文直接贴进 hunk"));
     }
 
     #[test]

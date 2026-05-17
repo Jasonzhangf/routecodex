@@ -13,7 +13,7 @@
 3. **Rust runtime 语义真源**：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/`。
 4. **Fail-fast + no fallback**：严禁一切 fallback/降级/兜底逻辑，错误必须显式暴露，禁止静默失败。
 5. **先验证后结论**：无文件/日志/测试证据，不得宣称完成。
-6. **非授权不破坏**：未获明确授权，不做删除/回滚/迁移/发布类破坏动作。
+6. **非授权不破坏**：未获明确授权，不做删除/回滚/迁移/发布类破坏动作。审计/只读任务中，仅允许执行只读 git 命令（`git show`、`git diff`、`git log` 等），禁止任何会修改磁盘状态的写操作，包括但不限于：`git checkout`（单文件路径除外）、`git reset`、`git stash`、`git clean`、`git rm`、`git revert`；禁止 `rm -rf`；禁止 `npm install`/`npm uninstall` 修改依赖。
 7. **禁止进程杀戮命令**：禁用 `kill/pkill/killall/taskkill/lsof|xargs kill` 等。
 8. **llmswitch-core 禁止新增 TS 功能代码**：不允许再增加任何 TypeScript 功能实现；如有必要，一律转为 Rust 实现，TS 仅允许保留最小调用壳层。
 9. **Hub Pipeline / Chat Process 必须 Rust-only**：凡属 `llmswitch-core Hub Pipeline / chat process / req_process / resp_process / servertool followup orchestration` 的语义、判定、修复、兼容、sanitize、tool list 注入与裁剪，唯一真源必须在 Rust `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/`；发现 TS 存在并行实现、补丁式判定或第二语义面，必须当场迁回 Rust，并把 TS 收缩为薄壳转发。

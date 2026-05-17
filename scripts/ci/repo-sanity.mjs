@@ -27,7 +27,7 @@ function listRootEntries() {
 
 function isForbiddenRootFile(p) {
   const base = path.posix.basename(p);
-  const allow = new Set(['AGENTS.md', 'README.md', 'MEMORY.md', 'HEARTBEAT.md', 'DELIVERY.md', 'task.md']);
+  const allow = new Set(['AGENTS.md', 'README.md', 'MEMORY.md', 'HEARTBEAT.md', 'DELIVERY.md', 'task.md', 'note.md']);
   if (allow.has(base)) return false;
   if (/^test-.*\.(mjs|js|ts|py)$/i.test(base)) return true;
   if (/^debug-.*\.(mjs|js|ts)$/i.test(base)) return true;
@@ -85,6 +85,7 @@ function checkRootLayout() {
    'docs',
    'jest.config.js',
    'memory',
+   'note.md',
    'node_modules',
    'package',
    'package-lock.json',

@@ -315,7 +315,7 @@ export function validateCanonicalClientToolCall(
           missingFields: ['patch']
         });
       }
-      return { ok: true, normalizedArgs: JSON.stringify({ ...parsed, patch }) };
+      return { ok: true, normalizedArgs: JSON.stringify({ ...parsed, patch, input: patch }) };
     }
     case 'update_plan': {
       if (!Array.isArray(parsed?.plan)) {

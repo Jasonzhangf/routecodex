@@ -522,3 +522,70 @@ export function resolveRequestedToolNamesWithNative(
     return [];
   }
 }
+
+export function normalizeApplyPatchArgumentsWithNative(
+  argumentsValue: unknown
+): { normalizedArguments: string; repaired: boolean } {
+  const capability = 'normalizeApplyPatchArgumentsJson';
+  const fail = (reason?: string): { normalizedArguments: string; repaired: boolean } =>
+    failNativeRequired<{ normalizedArguments: string; repaired: boolean }>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [{ arguments: argumentsValue ?? null }]);
+    const parsed = parseRecord(raw);
+    const normalizedArguments =
+      typeof parsed?.normalizedArguments === 'string'
+        ? parsed.normalizedArguments
+        : typeof parsed?.normalized_arguments === 'string'
+          ? (parsed.normalized_arguments as string)
+          : undefined;
+    const repaired =
+      parsed?.repaired === true
+      || parsed?.repaired === false
+        ? Boolean(parsed?.repaired)
+        : parsed?.repaired === 'true';
+    if (typeof normalizedArguments !== 'string') {
+      return fail('invalid payload');
+    }
+    return { normalizedArguments, repaired };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function validateApplyPatchArgumentsWithNative(
+  argumentsValue: unknown
+): { ok: boolean; normalizedArguments: string; repaired: boolean; reason?: string; message?: string } {
+  const capability = 'validateApplyPatchArgumentsJson';
+  const fail = (reason?: string): { ok: boolean; normalizedArguments: string; repaired: boolean; reason?: string; message?: string } =>
+    failNativeRequired<{ ok: boolean; normalizedArguments: string; repaired: boolean; reason?: string; message?: string }>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [{ arguments: argumentsValue ?? null }]);
+    const parsed = parseRecord(raw);
+    const normalizedArguments =
+      typeof parsed?.normalizedArguments === 'string'
+        ? parsed.normalizedArguments
+        : typeof parsed?.normalized_arguments === 'string'
+          ? (parsed?.normalized_arguments as string)
+          : undefined;
+    const ok = parsed?.ok === true || parsed?.ok === false ? Boolean(parsed.ok) : undefined;
+    const repaired =
+      parsed?.repaired === true
+      || parsed?.repaired === false
+        ? Boolean(parsed?.repaired)
+        : parsed?.repaired === 'true';
+    if (typeof normalizedArguments !== 'string' || typeof ok !== 'boolean') {
+      return fail('invalid payload');
+    }
+    return {
+      ok,
+      normalizedArguments,
+      repaired,
+      ...(typeof parsed?.reason === 'string' ? { reason: parsed.reason } : {}),
+      ...(typeof parsed?.message === 'string' ? { message: parsed.message } : {})
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}

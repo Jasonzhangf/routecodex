@@ -24,7 +24,7 @@ fn ensure_apply_patch_schema() -> Value {
     patch.insert(
         "description".to_string(),
         Value::String(
-            "Raw patch text only. Must use the special \"*** Begin Patch ... *** End Patch\" grammar. Do not use JSON, prose, Markdown fences, or git/unified diff syntax. Paths must be workspace-relative.".to_string(),
+            "Raw patch text only. Author exactly one canonical patch body in `patch`.".to_string(),
         ),
     );
 
@@ -32,7 +32,7 @@ fn ensure_apply_patch_schema() -> Value {
     input.insert("type".to_string(), Value::String("string".to_string()));
     input.insert(
         "description".to_string(),
-        Value::String("Alias of patch. Same patch text grammar as patch. Prefer patch.".to_string()),
+        Value::String("Compatibility alias of patch. Prefer patch.".to_string()),
     );
 
     let mut properties = Map::new();

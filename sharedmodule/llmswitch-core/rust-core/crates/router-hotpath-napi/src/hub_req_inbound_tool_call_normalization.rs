@@ -1,7 +1,9 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
+use regex::Regex;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
+use crate::resp_process_stage1_tool_governance::normalize_apply_patch_schema_args;
 
 fn normalize_shell_like_output_text(raw: &str) -> String {
     raw.to_string()
@@ -12,7 +14,76 @@ fn prune_responses_input_tool_history(items: &mut Vec<Value>) {
 }
 
 fn prune_message_tool_history(messages: &mut Vec<Value>) {
-    let _ = messages;
+    let mut dropped_call_ids = HashSet::<String>::new();
+    let mut normalized_messages = Vec::<Value>::with_capacity(messages.len());
+
+    for mut message in std::mem::take(messages) {
+        let mut drop_message = false;
+        if let Some(message_row) = message.as_object_mut() {
+            let role = read_trimmed_string(message_row.get("role"))
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+
+            if role == "assistant" {
+                let content_empty = read_trimmed_string(message_row.get("content")).is_none();
+                if let Some(tool_calls) = message_row
+                    .get_mut("tool_calls")
+                    .and_then(|node| node.as_array_mut())
+                {
+                    let mut kept_tool_calls = Vec::<Value>::with_capacity(tool_calls.len());
+                    for call in std::mem::take(tool_calls) {
+                        let drop_call = call
+                            .as_object()
+                            .and_then(|call_row| {
+                                let function_row =
+                                    call_row.get("function").and_then(Value::as_object)?;
+                                let raw_name = read_trimmed_string(function_row.get("name"))?;
+                                if !is_invalid_shell_like_call(
+                                    raw_name.as_str(),
+                                    function_row.get("arguments"),
+                                ) && !is_invalid_write_stdin_call(
+                                    raw_name.as_str(),
+                                    function_row.get("arguments"),
+                                ) {
+                                    return Some(false);
+                                }
+                                let call_id = read_trimmed_string(call_row.get("id"))
+                                    .or_else(|| read_trimmed_string(call_row.get("call_id")));
+                                if let Some(call_id) = call_id {
+                                    dropped_call_ids.insert(call_id);
+                                }
+                                Some(true)
+                            })
+                            .unwrap_or(false);
+                        if !drop_call {
+                            kept_tool_calls.push(call);
+                        }
+                    }
+                    *tool_calls = kept_tool_calls;
+                    if tool_calls.is_empty() {
+                        message_row.remove("tool_calls");
+                        if content_empty {
+                            drop_message = true;
+                        }
+                    }
+                }
+            } else if role == "tool" {
+                let call_id = read_trimmed_string(message_row.get("tool_call_id"))
+                    .or_else(|| read_trimmed_string(message_row.get("call_id")));
+                if let Some(call_id) = call_id {
+                    if dropped_call_ids.contains(call_id.as_str()) {
+                        drop_message = true;
+                    }
+                }
+            }
+        }
+
+        if !drop_message {
+            normalized_messages.push(message);
+        }
+    }
+
+    *messages = normalized_messages;
 }
 
 fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
@@ -167,23 +238,22 @@ fn resolve_shell_like_tool_name(raw_name: &str, requested_tool_names: &HashSet<S
     raw_name.to_string()
 }
 
-fn args_contain_direct_or_nested_key(args: &Map<String, Value>, key: &str) -> bool {
-    if args.contains_key(key) {
-        return true;
-    }
-    ["input", "args"].iter().any(|container_key| {
-        args.get(*container_key)
-            .and_then(Value::as_object)
-            .map(|row| row.contains_key(key))
-            .unwrap_or(false)
-    })
-}
-
 fn is_shell_like_tool_name(raw_name: &str) -> bool {
     matches!(
         raw_name.to_ascii_lowercase().as_str(),
         "exec_command" | "shell_command" | "shell" | "bash" | "terminal"
     )
+}
+
+fn is_write_stdin_tool_name(raw_name: &str) -> bool {
+    matches!(
+        raw_name.trim().to_ascii_lowercase().as_str(),
+        "write_stdin" | "write.stdin"
+    )
+}
+
+fn is_apply_patch_tool_name(raw_name: &str) -> bool {
+    raw_name.trim().eq_ignore_ascii_case("apply_patch")
 }
 
 fn is_shell_like_tool_name_token(name: Option<String>) -> bool {
@@ -192,6 +262,81 @@ fn is_shell_like_tool_name_token(name: Option<String>) -> bool {
         return false;
     }
     is_shell_like_tool_name(normalized.as_str())
+}
+
+fn read_write_stdin_session_id(args: &Map<String, Value>) -> Option<i64> {
+    args.get("session_id")
+        .or_else(|| args.get("sessionId"))
+        .and_then(|entry| match entry {
+            Value::Number(number) => number.as_i64(),
+            Value::String(text) => text.trim().parse::<i64>().ok(),
+            _ => None,
+        })
+}
+
+fn value_to_string(value: &Value) -> String {
+    match value {
+        Value::Null => String::new(),
+        Value::String(text) => text.clone(),
+        Value::Array(entries) => entries.iter().map(value_to_string).collect::<Vec<_>>().join(""),
+        other => other.to_string(),
+    }
+}
+
+fn read_write_stdin_chars(args: &Map<String, Value>) -> Option<String> {
+    args.get("chars")
+        .or_else(|| args.get("text"))
+        .or_else(|| args.get("input"))
+        .or_else(|| args.get("data"))
+        .map(value_to_string)
+}
+
+fn try_extract_write_stdin_session_id_from_raw(raw: &str) -> Option<i64> {
+    Regex::new(r#""(?:session_id|sessionId)"\s*:\s*"?(-?\d+)"?"#)
+        .ok()?
+        .captures(raw)
+        .and_then(|caps| caps.get(1).map(|m| m.as_str().trim().to_string()))
+        .and_then(|text| text.parse::<i64>().ok())
+}
+
+fn normalize_write_stdin_function_call_arguments(
+    raw_name: &str,
+    raw_arguments: Option<&Value>,
+) -> Option<(String, String)> {
+    if !is_write_stdin_tool_name(raw_name) {
+        return None;
+    }
+
+    let strict_args = parse_json_record(raw_arguments);
+    let session_id = strict_args
+        .as_ref()
+        .and_then(read_write_stdin_session_id)
+        .or_else(|| match raw_arguments {
+            Some(Value::String(raw)) => try_extract_write_stdin_session_id_from_raw(raw),
+            _ => None,
+        })?;
+
+    let chars = strict_args
+        .as_ref()
+        .and_then(read_write_stdin_chars)
+        .unwrap_or_default();
+
+    let mut next_args = Map::new();
+    next_args.insert("session_id".to_string(), Value::Number(session_id.into()));
+    next_args.insert("chars".to_string(), Value::String(chars));
+
+    let arguments = serde_json::to_string(&Value::Object(next_args)).ok()?;
+    Some(("write_stdin".to_string(), arguments))
+}
+
+fn is_invalid_write_stdin_call(name: &str, arguments: Option<&Value>) -> bool {
+    if !is_write_stdin_tool_name(name) {
+        return false;
+    }
+    match parse_json_record(arguments) {
+        Some(args) => read_write_stdin_session_id(&args).is_none(),
+        None => true,
+    }
 }
 
 fn normalize_shell_like_function_call_arguments(
@@ -207,20 +352,17 @@ fn normalize_shell_like_function_call_arguments(
     let args = parse_json_record(raw_arguments)?;
     let cmd = read_command_from_args(&args)?;
     let mut next_args = args;
-    let has_cmd = args_contain_direct_or_nested_key(&next_args, "cmd");
-    let has_command = args_contain_direct_or_nested_key(&next_args, "command");
     let source_is_shell_alias = matches!(
         resolved_name.trim().to_ascii_lowercase().as_str(),
         "shell_command" | "shell" | "bash" | "terminal"
     );
-    let emit_cmd = has_cmd || (!has_command && !source_is_shell_alias);
-    let emit_command = has_command || (source_is_shell_alias && !has_cmd);
+    let emit_cmd = !source_is_shell_alias;
     if emit_cmd {
         next_args.insert("cmd".to_string(), Value::String(cmd.clone()));
     } else {
         next_args.remove("cmd");
     }
-    if emit_command {
+    if source_is_shell_alias {
         next_args.insert("command".to_string(), Value::String(cmd));
     } else {
         next_args.remove("command");
@@ -233,6 +375,19 @@ fn normalize_shell_like_function_call_arguments(
     let arguments = serde_json::to_string(&Value::Object(next_args))
         .unwrap_or_else(|_| "{\"cmd\":\"\"}".to_string());
     Some((resolved_name, arguments))
+}
+
+fn normalize_apply_patch_function_call_arguments(
+    raw_name: &str,
+    raw_arguments: Option<&Value>,
+) -> Option<(String, String)> {
+    if !is_apply_patch_tool_name(raw_name) {
+        return None;
+    }
+    Some((
+        "apply_patch".to_string(),
+        normalize_apply_patch_schema_args(raw_arguments).0,
+    ))
 }
 
 fn normalize_message_tool_calls(payload: &mut Value, requested_tool_names: &HashSet<String>) {
@@ -297,21 +452,42 @@ fn normalize_message_tool_calls(payload: &mut Value, requested_tool_names: &Hash
             let Some(raw_name) = read_trimmed_string(fn_row.get("name")) else {
                 continue;
             };
-            let Some((resolved_name, arguments)) = normalize_shell_like_function_call_arguments(
+            if let Some((resolved_name, arguments)) = normalize_shell_like_function_call_arguments(
                 raw_name.as_str(),
                 fn_row.get("arguments"),
                 requested_tool_names,
-            ) else {
+            ) {
+                if resolved_name != raw_name {
+                    fn_row.insert("name".to_string(), Value::String(resolved_name));
+                }
+                fn_row.insert("arguments".to_string(), Value::String(arguments));
+                if let Some(call_id) = read_trimmed_string(call_row.get("id"))
+                    .or_else(|| read_trimmed_string(call_row.get("call_id")))
+                {
+                    shell_tool_call_ids.insert(call_id);
+                }
                 continue;
-            };
-            if resolved_name != raw_name {
-                fn_row.insert("name".to_string(), Value::String(resolved_name));
             }
-            fn_row.insert("arguments".to_string(), Value::String(arguments));
-            if let Some(call_id) = read_trimmed_string(call_row.get("id"))
-                .or_else(|| read_trimmed_string(call_row.get("call_id")))
+            if let Some((resolved_name, arguments)) = normalize_apply_patch_function_call_arguments(
+                raw_name.as_str(),
+                fn_row.get("arguments"),
+            ) {
+                if resolved_name != raw_name {
+                    fn_row.insert("name".to_string(), Value::String(resolved_name));
+                }
+                fn_row.insert("arguments".to_string(), Value::String(arguments));
+                continue;
+            }
+            if let Some((resolved_name, arguments)) =
+                normalize_write_stdin_function_call_arguments(
+                    raw_name.as_str(),
+                    fn_row.get("arguments"),
+                )
             {
-                shell_tool_call_ids.insert(call_id);
+                if resolved_name != raw_name {
+                    fn_row.insert("name".to_string(), Value::String(resolved_name));
+                }
+                fn_row.insert("arguments".to_string(), Value::String(arguments));
             }
         }
     }
@@ -358,7 +534,30 @@ fn normalize_responses_input_function_calls(
                         if let Some(call_id) = call_id {
                             shell_like_call_ids.insert(call_id);
                         }
+                    } else if let Some((resolved_name, arguments)) =
+                        normalize_apply_patch_function_call_arguments(
+                            raw_name.as_str(),
+                            item_row.get("arguments"),
+                        )
+                    {
+                        if resolved_name != raw_name {
+                            item_row.insert("name".to_string(), Value::String(resolved_name));
+                        }
+                        item_row.insert("arguments".to_string(), Value::String(arguments));
+                    } else if let Some((resolved_name, arguments)) =
+                        normalize_write_stdin_function_call_arguments(
+                            raw_name.as_str(),
+                            item_row.get("arguments"),
+                        )
+                    {
+                        if resolved_name != raw_name {
+                            item_row.insert("name".to_string(), Value::String(resolved_name));
+                        }
+                        item_row.insert("arguments".to_string(), Value::String(arguments));
                     } else if is_invalid_shell_like_call(
+                        raw_name.as_str(),
+                        item_row.get("arguments"),
+                    ) || is_invalid_write_stdin_call(
                         raw_name.as_str(),
                         item_row.get("arguments"),
                     ) {
@@ -483,8 +682,8 @@ mod tests {
             .as_str()
             .expect("arguments text");
         let args: Value = serde_json::from_str(args_text).expect("args object");
-        assert_eq!(args["command"], "git status");
-        assert!(args.get("cmd").is_none());
+        assert_eq!(args["cmd"], "git status");
+        assert!(args.get("command").is_none());
         assert_eq!(args["workdir"], "/repo");
     }
 
@@ -507,8 +706,8 @@ mod tests {
             .as_str()
             .expect("arguments text");
         let args: Value = serde_json::from_str(args_text).expect("args object");
-        assert_eq!(args["command"], "npm test");
-        assert!(args.get("cmd").is_none());
+        assert_eq!(args["cmd"], "npm test");
+        assert!(args.get("command").is_none());
         assert_eq!(args["workdir"], "/workspace");
     }
 
@@ -543,7 +742,7 @@ mod tests {
     }
 
     #[test]
-    fn leaves_exec_command_unchanged_when_cmd_missing() {
+    fn drops_exec_command_message_when_cmd_missing() {
         let mut payload = json!({
           "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
           "messages": [
@@ -564,10 +763,8 @@ mod tests {
         });
 
         normalize_shell_like_tool_calls_before_governance(&mut payload);
-        let args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
-            .as_str()
-            .expect("arguments text");
-        assert_eq!(args_text, "{}");
+        let messages = payload["messages"].as_array().expect("messages array");
+        assert!(messages.is_empty());
     }
 
     #[test]
@@ -645,8 +842,71 @@ mod tests {
         assert_eq!(items[0]["call_id"], "call_good");
         let args_text = items[0]["arguments"].as_str().expect("normalized args");
         let args: Value = serde_json::from_str(args_text).expect("args object");
-        assert_eq!(args["command"], "pwd");
-        assert!(args.get("cmd").is_none());
+        assert_eq!(args["cmd"], "pwd");
+        assert!(args.get("command").is_none());
+    }
+
+    #[test]
+    fn normalizes_apply_patch_inside_message_tool_calls_to_canonical_patch_shape() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
+          "messages": [
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_patch_1",
+                  "type": "function",
+                  "function": {
+                    "name": "apply_patch",
+                    "arguments": "{\"input\":\"*** note.txt\\n--- note.txt\\n@@ -0,0 +1 @@\\n+hello\"}"
+                  }
+                }
+              ]
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        let args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments text");
+        let args: Value = serde_json::from_str(args_text).expect("args object");
+        let patch = args["patch"].as_str().expect("patch");
+        let input = args["input"].as_str().expect("input");
+        assert_eq!(patch, input);
+        assert!(patch.starts_with("*** Begin Patch"));
+        assert!(patch.contains("*** Update File: note.txt"));
+    }
+
+    #[test]
+    fn shell_wrapped_apply_patch_is_normalized_to_empty_patch_shape() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
+          "messages": [
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_patch_bad_shell",
+                  "type": "function",
+                  "function": {
+                    "name": "apply_patch",
+                    "arguments": "bash -lc \"echo hi && apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/nope.ts\n+console.log('nope');\n*** End Patch\nPATCH\""
+                  }
+                }
+              ]
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        let args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments text");
+        let args: Value = serde_json::from_str(args_text).expect("args object");
+        assert_eq!(args["patch"], "");
+        assert_eq!(args["input"], "");
     }
 
     #[test]
@@ -899,5 +1159,138 @@ mod tests {
         assert!(entries
             .iter()
             .any(|entry| entry.get("tool_call_id").and_then(Value::as_str) == Some("call_msg_0")));
+    }
+
+    #[test]
+    fn drops_malformed_exec_command_message_history_and_orphan_tool_message() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+          "messages": [
+            {
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [
+                {
+                  "id": "call_bad",
+                  "type": "function",
+                  "function": {
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\": \"cat > demo.tsx << 'EOF'\nconst x = `${broken}`\nEOF"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "name": "exec_command",
+              "tool_call_id": "call_bad",
+              "content": "failed to parse function arguments: EOF while parsing a string at line 1 column 73"
+            },
+            {
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [
+                {
+                  "id": "call_good",
+                  "type": "function",
+                  "function": {
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "name": "exec_command",
+              "tool_call_id": "call_good",
+              "content": "/repo"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        let entries = payload["messages"].as_array().expect("messages array");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["tool_calls"][0]["id"], "call_good");
+        assert_eq!(entries[1]["tool_call_id"], "call_good");
+    }
+
+    #[test]
+    fn drops_malformed_write_stdin_message_history_and_orphan_tool_message() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "write_stdin" } }],
+          "messages": [
+            {
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [
+                {
+                  "id": "call_bad_write",
+                  "type": "function",
+                  "function": {
+                    "name": "write_stdin",
+                    "arguments": "{\"chars\": \"import { broken } from './demo';\\nexport const x = \\\"oops"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "name": "write_stdin",
+              "tool_call_id": "call_bad_write",
+              "content": "failed to parse function arguments: EOF while parsing a string at line 1 column 87"
+            },
+            {
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [
+                {
+                  "id": "call_good_write",
+                  "type": "function",
+                  "function": {
+                    "name": "write_stdin",
+                    "arguments": "{\"session_id\": 7, \"chars\": \"pwd\\n\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "name": "write_stdin",
+              "tool_call_id": "call_good_write",
+              "content": "ok"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        let entries = payload["messages"].as_array().expect("messages array");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["tool_calls"][0]["id"], "call_good_write");
+        assert_eq!(entries[1]["tool_call_id"], "call_good_write");
+    }
+
+    #[test]
+    fn normalizes_write_stdin_inside_responses_input_function_call_items() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "write_stdin" } }],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "fc_write_1",
+              "name": "write_stdin",
+              "arguments": "{\"sessionId\":\"42\",\"chars\":\"echo ok\\n\"}"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        let args_text = payload["input"][0]["arguments"]
+            .as_str()
+            .expect("arguments text");
+        let args: Value = serde_json::from_str(args_text).expect("args object");
+        assert_eq!(args["session_id"], 42);
+        assert_eq!(args["chars"], "echo ok\n");
     }
 }

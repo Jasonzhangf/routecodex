@@ -21,7 +21,6 @@ import {
   buildSlimResponsesContextWithNative,
 } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js";
 import { normalizeReqInboundShellLikeToolCallsWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics-tools.js";
-import { normalizeRequestToolCalls } from "../../../../../../conversion/shared/tool-governor.js";
 import {
   applyAnthropicToolAliasSemantics,
   normalizeAnthropicToolAliasMap
@@ -160,12 +159,6 @@ export async function runReqInboundStage2SemanticMap(
     normalizeReqInboundShellLikeToolCallsWithNative(
       chatEnvelope as unknown as Record<string, unknown>,
     );
-    const normalizedSpecialTools = normalizeRequestToolCalls({
-      messages: Array.isArray(chatEnvelope.messages) ? chatEnvelope.messages : []
-    }) as { messages?: ChatEnvelope["messages"] };
-    if (Array.isArray(normalizedSpecialTools?.messages)) {
-      chatEnvelope.messages = normalizedSpecialTools.messages;
-    }
   }
   logHubStageTiming(
     requestId,

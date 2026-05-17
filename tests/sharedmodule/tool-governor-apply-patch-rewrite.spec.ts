@@ -3,7 +3,7 @@ import {
   normalizeApplyPatchToolCallsOnResponse
 } from '../../sharedmodule/llmswitch-core/src/conversion/shared/tool-governor.js';
 
-describe('tool governor apply_patch rewrite', () => {
+describe('tool governor apply_patch canonicalization', () => {
   const patchText = [
     '*** Begin Patch',
     '*** Update File: apps/host_console/lib/main.dart',
@@ -13,7 +13,7 @@ describe('tool governor apply_patch rewrite', () => {
     '*** End Patch'
   ].join('\n');
 
-  it('rewrites response exec_command(apply_patch ...) into apply_patch tool call', () => {
+  it('does not rewrite response exec_command(apply_patch ...) into a second tool name', () => {
     const response: any = {
       choices: [
         {
@@ -41,14 +41,12 @@ describe('tool governor apply_patch rewrite', () => {
 
     const out: any = normalizeApplyPatchToolCallsOnResponse(response as any);
     const fn = out.choices?.[0]?.message?.tool_calls?.[0]?.function;
-    expect(fn?.name).toBe('apply_patch');
+    expect(fn?.name).toBe('exec_command');
 
-    const args = JSON.parse(String(fn?.arguments || '{}')) as Record<string, unknown>;
-    const patchOrInput = String(args.patch || args.input || '');
-    expect(patchOrInput).toContain('*** Begin Patch');
+    expect(typeof fn?.arguments).toBe('string');
   });
 
-  it('rewrites request history and injects nested-apply_patch policy notice', () => {
+  it('does not rewrite request history exec_command(apply_patch ...) or inject TS policy messages', () => {
     const request: any = {
       messages: [
         {
@@ -70,26 +68,17 @@ describe('tool governor apply_patch rewrite', () => {
 
     const out: any = normalizeApplyPatchToolCallsOnRequest(request as any);
     const fn = out.messages?.[0]?.tool_calls?.[0]?.function;
-    expect(fn?.name).toBe('apply_patch');
+    expect(fn?.name).toBe('exec_command');
 
-    const args = JSON.parse(String(fn?.arguments || '{}')) as Record<string, unknown>;
-    const patchOrInput = String(args.patch || args.input || '');
-    expect(patchOrInput).toContain('*** Begin Patch');
+    expect(typeof fn?.arguments).toBe('string');
 
     const policyMessage = out.messages?.find(
       (entry: any) => entry?.role === 'system' && String(entry?.content || '').includes('[Codex NestedApplyPatch Policy]')
     );
-    expect(policyMessage).toBeTruthy();
+    expect(policyMessage).toBeFalsy();
   });
 
-  it('leaves invalid apply_patch args on request path for Rust governance owner', () => {
-    const badPatch = [
-      '*** Begin Patch',
-      '*** Update File: HEARTBEAT.md',
-      '---',
-      'title: "finger project heartbeat"',
-      '*** End Patch'
-    ].join('\n');
+  it('normalizes request-side apply_patch args through Rust canonical contract', () => {
     const request: any = {
       messages: [
         {
@@ -101,7 +90,7 @@ describe('tool governor apply_patch rewrite', () => {
               type: 'function',
               function: {
                 name: 'apply_patch',
-                arguments: JSON.stringify({ patch: badPatch })
+                arguments: JSON.stringify({ patch: patchText })
               }
             }
           ]
@@ -113,16 +102,11 @@ describe('tool governor apply_patch rewrite', () => {
     const fn = out.messages?.[0]?.tool_calls?.[0]?.function;
     expect(fn?.name).toBe('apply_patch');
     const args = JSON.parse(String(fn?.arguments || '{}')) as Record<string, unknown>;
-    const patchOrInput = String(args.patch || args.input || '');
-    expect(patchOrInput).toContain('*** Update File: HEARTBEAT.md');
+    expect(String(args.patch || '')).toContain('*** Begin Patch');
+    expect(args.patch).toBe(args.input);
   });
 
-  it('leaves invalid apply_patch args in response helper without TS guard fallback', () => {
-    const badPatch = [
-      '*** Begin Patch',
-      '*** Add File: src/empty.txt',
-      '*** End Patch'
-    ].join('\n');
+  it('normalizes response-side apply_patch args through Rust canonical contract', () => {
     const response: any = {
       choices: [
         {
@@ -135,7 +119,7 @@ describe('tool governor apply_patch rewrite', () => {
                 type: 'function',
                 function: {
                   name: 'apply_patch',
-                  arguments: JSON.stringify({ patch: badPatch })
+                  arguments: JSON.stringify({ patch: patchText })
                 }
               }
             ]
@@ -148,11 +132,11 @@ describe('tool governor apply_patch rewrite', () => {
     const out: any = normalizeApplyPatchToolCallsOnResponse(response);
     const fn = out.choices?.[0]?.message?.tool_calls?.[0]?.function;
     const args = JSON.parse(String(fn?.arguments || '{}')) as Record<string, unknown>;
-    const patchOrInput = String(args.patch || args.input || '');
-    expect(patchOrInput).toContain('*** Add File: src/empty.txt');
+    expect(String(args.patch || '')).toContain('*** Begin Patch');
+    expect(args.patch).toBe(args.input);
   });
 
-  it('does not rewrite noncanonical shell wrapper with extra commands into apply_patch payload', () => {
+  it('normalizes noncanonical shell wrapper with extra commands into empty apply_patch payload', () => {
     const response: any = {
       choices: [
         {
@@ -183,7 +167,7 @@ PATCH"`
     const out: any = normalizeApplyPatchToolCallsOnResponse(response);
     const fn = out.choices?.[0]?.message?.tool_calls?.[0]?.function;
     const args = JSON.parse(String(fn?.arguments || '{}')) as Record<string, unknown>;
-    const patchOrInput = String(args.patch || args.input || '');
-    expect(patchOrInput).toContain('bash -lc');
+    expect(String(args.patch || '')).toBe('');
+    expect(String(args.input || '')).toBe('');
   });
 });

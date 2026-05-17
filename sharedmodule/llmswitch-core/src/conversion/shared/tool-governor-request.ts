@@ -1,15 +1,12 @@
 import { augmentOpenAITools } from '../../guidance/index.js';
 import { validateToolCall } from '../../tools/tool-registry.js';
-import { captureApplyPatchRegression } from '../../tools/apply-patch/regression-capturer.js';
 import { normalizeExecCommandArgs } from '../../tools/exec-command/normalize.js';
 import {
-  buildBlockedApplyPatchArgs,
   buildBlockedExecCommandArgs,
-  injectNestedApplyPatchPolicyNotice,
   repairCommandNameAsExecToolCall,
-  resolveExecCommandGuardValidationOptions,
-  rewriteExecCommandApplyPatchCall
+  resolveExecCommandGuardValidationOptions
 } from './tool-governor-guards.js';
+import { normalizeApplyPatchArgumentsWithNative } from '../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
 import {
   parseLenientJsonishWithNative as parseLenient,
   repairArgumentsToStringWithNative as repairArgumentsToString
@@ -63,7 +60,10 @@ export function processChatRequestTools(request: Unknown, opts?: ToolGovernanceO
     } catch (error) {
       logToolGovernorNonBlocking('request_tool_choice_policy', error);
     }
-    return normalizeSpecialToolCallsOnRequest(canonical);
+    // Hub Pipeline request-side tool-call/history normalization is Rust-owned.
+    // Do not rewrite assistant tool-call history here in TS, otherwise malformed
+    // history can be silently turned into valid coding continuations and poison routing.
+    return canonical;
   } catch (error) {
     logToolGovernorNonBlocking('process_chat_request_tools', error);
     return out;
@@ -95,7 +95,6 @@ function normalizeSpecialToolCallsOnRequest(request: Unknown): Unknown {
     if (lastAssistantIndex === -1) {
       return out;
     }
-    let rewrittenNestedApplyPatchCount = 0;
     for (let index = 0; index < messages.length; index += 1) {
       const message = messages[index];
       if (!message || typeof message !== 'object' || index !== lastAssistantIndex) continue;
@@ -105,21 +104,12 @@ function normalizeSpecialToolCallsOnRequest(request: Unknown): Unknown {
         try {
           const fn = toolCall && toolCall.function ? toolCall.function : undefined;
           repairCommandNameAsExecToolCall(fn as Record<string, unknown> | undefined, validationOptions);
-          if (rewriteExecCommandApplyPatchCall(fn as Record<string, unknown> | undefined)) {
-            rewrittenNestedApplyPatchCount += 1;
-          }
           const name = typeof fn?.name === 'string' ? String(fn.name).trim().toLowerCase() : '';
           const rawArgs = (fn as any)?.arguments;
 
           if (name === 'apply_patch') {
-            const argsStr = repairArgumentsToString(rawArgs);
-            const validation = validateToolCall('apply_patch', argsStr);
-            if (validation?.ok && typeof validation.normalizedArgs === 'string') {
-              (fn as any).arguments = validation.normalizedArgs;
-            } else if (validation && !validation.ok) {
-              (fn as any).arguments = buildBlockedApplyPatchArgs(rawArgs, validation.reason, validation.message);
-              captureApplyPatchFailure('request', rawArgs, argsStr, validation.reason);
-            }
+            const normalized = normalizeApplyPatchArgumentsWithNative(rawArgs);
+            (fn as any).arguments = normalized.normalizedArguments;
             continue;
           }
 
@@ -154,43 +144,9 @@ function normalizeSpecialToolCallsOnRequest(request: Unknown): Unknown {
         }
       }
     }
-    if (rewrittenNestedApplyPatchCount > 0) {
-      injectNestedApplyPatchPolicyNotice(messages, rewrittenNestedApplyPatchCount);
-    }
     return out;
   } catch (error) {
     logToolGovernorNonBlocking('normalize_special_tool_calls_on_request', error);
     return request;
-  }
-}
-
-function captureApplyPatchFailure(
-  source: 'request' | 'response',
-  rawArgs: unknown,
-  argsStr: string,
-  reason?: string
-): void {
-  try {
-    const finalReason = reason ?? 'unknown';
-    captureApplyPatchRegression({
-      errorType: finalReason,
-      originalArgs: rawArgs,
-      normalizedArgs: argsStr,
-      validationError: finalReason,
-      source: `tool-governor.${source}`,
-      meta: { applyPatchToolMode: 'freeform' }
-    });
-    const snippet =
-      typeof argsStr === 'string' && argsStr.trim().length
-        ? argsStr.trim().slice(0, 200).replace(/\s+/g, ' ')
-        : '';
-    // eslint-disable-next-line no-console
-    console.error(
-      `\x1b[31m[apply_patch][precheck][${source}] validation_failed reason=${finalReason}${
-        snippet ? ` args=${snippet}` : ''
-      }\x1b[0m`
-    );
-  } catch (error) {
-    logToolGovernorNonBlocking(`${source}_apply_patch_regression_capture`, error);
   }
 }

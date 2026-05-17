@@ -218,6 +218,64 @@ Verified findings:
 - 日志已证明第二类会触发上游 `HTTP_400`：
   - `Chat template error: ThinkingMode: thinking, invalid message without reasoning_content/tool_calls`
 
+## 2026-05-16 SSE decode native binding completeness + apply_patch raw-string compat
+
+Verified findings:
+- `extractDecodeStatsJson is required but unavailable` 不是 Rust 缺实现；真源函数已在 native binding 内存在。根因是 `native-router-hotpath-loader` 会接受**可加载但导出不完整**的旧 binding，随后 capability wrapper 才在运行时炸掉。
+- `apply_patch` 兼容差的唯一修复点仍在 Rust `resp_process_stage1_tool_governance`：此前只接受 `{patch|input}` schema，对**明显就是 patch 本体的 raw string**会误打 `missing_patch` guard。
+
+Progress:
+- `native-router-hotpath-loader.ts` 已改为：auto-discovered candidate 只要导出不完整就直接拒绝，不再把残缺 binding 当可用 native。
+- `native-router-hotpath-required-exports.ts` 已补齐 SSE decode 真实必需导出：`extractDecodeStatsJson` / `resolveSseTimeoutOptionsJson` / `buildRespInboundSseErrorDescriptorJson`。
+- `normalize_apply_patch_schema_args(...)` 已改为先吃结构化 schema；若没有，再仅对**可明确识别的 patch 文本**做 shape-only 回收，归一回 `{patch,input}`，不做额外语义猜测。
+- `hub_semantic_mapper_chat.rs` 已补 hunk-shape 专用错误提示，强制把模型拉回 `@@` 后每行必须带 ` / + / -` 前缀的正确形状。
+
+Verification:
+- `node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/sharedmodule/native-required-exports-sse-stream.spec.ts`
+- `cargo test -p router-hotpath-napi apply_patch_hint_hunk_shape_keeps_specific_guidance -- --nocapture`
+- `cargo test -p router-hotpath-napi test_govern_response_apply_patch_inline_create_file_shape -- --nocapture`
+- `cargo test -p router-hotpath-napi test_govern_response_apply_patch_raw_string_is_repaired_into_schema -- --nocapture`
+
+## 2026-05-16 MiniMax fresh-session 2013（malformed write_stdin args）
+
+Verified findings:
+- 新 session 仍可直接触发 `provider_status_2013 invalid function arguments json string`，不是旧历史污染专属问题。
+- 真证据在 `~/.rcc/codex-samples/openai-responses/mini27.key1.MiniMax-M2.7/req_1778940656359_1553848b/provider-request.json`：
+  - assistant tool_call `call_function_vy5kyjrg5689_1`
+  - `name=write_stdin`
+  - `arguments` 只有巨大 `chars` 串且 **没有 `session_id`**，还是截断坏 JSON
+  - 紧随其后的 tool message 明确写着 `failed to parse function arguments: EOF while parsing a string...`
+
+Progress:
+- 唯一修复点落在 Rust `hub_req_inbound_tool_call_normalization.rs`：followup/request-history 进入治理前，新增 `write_stdin` 参数规范化与坏历史清洗。
+- 策略是 **shape-only**：
+  - 严格 JSON 可解析时，统一 `sessionId -> session_id`
+  - 若工具参数连 `session_id` 都没有或 JSON 已坏，则直接删除该 assistant tool_call 与对应 orphan tool output，阻止坏历史再次发给 MiniMax 触发 2013
+
+Verification:
+- `cargo test -p router-hotpath-napi drops_malformed_write_stdin_message_history_and_orphan_tool_message -- --nocapture`
+- `cargo test -p router-hotpath-napi normalizes_write_stdin_inside_responses_input_function_call_items -- --nocapture`
+
+## 2026-05-16 native export drift（install/current stale llmswitch-core copy）
+
+Verified findings:
+- `22:34:49` 这组样本是 `0.90.1718`，但仍出现 `extractDecodeStatsJson is required but unavailable`。
+- 本地 repo / 全局 npm / 运行时 direct binding 都已具备该导出；真正漂移的是：
+  - `~/.rcc/install/current/node_modules/rcc-llmswitch-core/`
+  - `/Volumes/extension/.rcc/install/current/node_modules/rcc-llmswitch-core/`
+- 这两处还是 `5月14日` 的旧拷贝，里面 native `.node` 也是旧时间戳；而 repo `sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node` 已是 `5月16日 22:34` 新版。
+
+Progress:
+- 把 `scripts/link-global-llms-local.mjs` 扩到同时修正：
+  - 全局 npm `routecodex/node_modules/rcc-llmswitch-core`
+  - `~/.rcc/install/current/node_modules/rcc-llmswitch-core`
+  - `/Volumes/extension/.rcc/install/current/node_modules/rcc-llmswitch-core`
+- 全部改成指向本地 `sharedmodule/llmswitch-core` 的 symlink，消灭 snapshot/current install 的旧 native 副本漂移。
+
+Verification:
+- 现在 `~/.rcc/install/current/node_modules/rcc-llmswitch-core` 与 `/Volumes/extension/.rcc/install/current/node_modules/rcc-llmswitch-core` 都是 symlink。
+- 通过 install/current 路径直接加载 native，`extractDecodeStatsJson` / `normalizeShellLikeToolCallsBeforeGovernanceJson` 均为 `function`。
+
 ## 2026-05-11 deepseek-web exec_command malformed shell wrapper（invalid_shell_wrapper_shape）
 
 Verified findings:
@@ -3553,3 +3611,86 @@ Unique correct fix point:
 - 唯一正确修复点在 `src/server/runtime/http-server/executor/provider-response-converter.ts` bridge 后、Host 校验前。
 - 这里补一层 **Rust SSOT normalizeResponsesToolCallArgumentsForClientWithNative**，把 `/v1/responses` outbound tool args 先按 client tool schema 归一，再交给 TS host validator。
 - 不能去放宽 TS validator、不能在 provider/runtime/servertool 其他层补 alias，因为那都会制造第二语义面并继续扩 scope。
+
+## 2026-05-16 apply_patch guidance + shape contradiction（本次）
+
+- 现象：样本 `~/.rcc/codex-samples/openai-responses/mini27.key1.MiniMax-M2.7/req_1778938571779_71a73e46/provider-request.json` 同时出现两类互相矛盾信号：
+  1) tool schema / guidance 说 apply_patch 主字段是 `patch`；
+  2) 历史 tool output 多次报 `failed to parse function arguments: missing field \`input\``。
+- 真源：不是单纯提示词问题，而是 **多层 apply_patch 归一输出不一致**：
+  - tool validator 输出 `{patch,input}`
+  - Host `provider-response-tool-validation-blocks.ts` 之前只回 `{patch}`
+  - Rust `resp_process_stage1_tool_governance.rs` 之前也只回 `{patch}`
+  - 结果下游仍可能把 `missing field input` 假错误灌回历史，模型被迫在 `patch`/`input` 之间来回摇摆。
+- 修复：
+  1) 引导侧：TS + Rust request guidance 全部把“**禁止通过 exec_command/shell/bash -lc/heredoc 调 apply_patch**”前置，并明确 `apply_patch <<PATCH` 也是非法；
+  2) 归一侧：Host validator / Rust resp governance / guard args 全部统一镜像 `{patch,input}` 同值，避免跨层 contract 漂移；
+  3) 回归：新增 Host validator spec；补 Rust apply_patch mirror 测试；更新 guidance regression。
+
+## 2026-05-16 mini27 provider_status_2013 历史 tool_call 污染（本次）
+
+- 真样本：`~/.rcc/codex-samples/openai-responses/mini27.key1.MiniMax-M2.7/req_1778939979912_346f0923/provider-request.json`
+  - 历史 assistant `tool_calls[0].function.arguments` 带着一个 **inner JSON 已损坏** 的超长 heredoc exec_command；
+  - 对应 `tool` 消息已明确报错：`failed to parse function arguments: EOF while parsing a string...`；
+  - MiniMax 上游随后直接返回 `status_code=2013 invalid function arguments json string, tool_call_id=call_function_pgvv8999cdz7_1`。
+- 唯一修复点：Rust `hub_req_inbound_tool_call_normalization.rs` 的 **message history 清洗边界**。
+  - 之前只会清理 `responses input function_call/function_call_output`，但 **不会清理 messages[].assistant.tool_calls + role=tool** 这条历史链；
+  - 导致 malformed exec_command 历史继续透传上游。
+- 修复：在 `prune_message_tool_history()` 里物理删除 **malformed shell-like assistant tool_call**，并同步删除配对 `tool_call_id` 的 orphan tool message；若 assistant 轮次因此只剩空 content，也一并删除。
+
+## 2026-05-16 apply_patch contract/compat/state-machine audit
+
+- 结论：当前 apply_patch 的病根不是单个 regex，而是 authoring contract / ingress compat / failure recovery 三层混在一起。
+- 唯一正确分层：模型只看 canonical internal patch grammar；GNU diff 与 raw/wrapped/json/absolute-path/line-number-hunk compat 只在 Rust `resp_process_stage1_tool_governance.rs` 归一；重复失败后的 read-before-repatch 走真实工具列表上的硬门禁，不删工具、不伪造工具面。
+- 已动刀：把 request/response tool governor 里的 apply_patch fake blocked-args 语义改为复用 native normalize；新增 native `normalizeApplyPatchArgumentsJson` 出口；servertool `apply_patch` guard 改为 `APPLY_PATCH_REQUIRES_READ_BEFORE_RETRY` 硬门禁 + preserve_tools followup 注入。
+
+## 2026-05-17 apply_patch contract / TS second-semantic cleanup / routing audit
+
+Verified findings:
+- 模型可见 apply_patch 文案大体已收口为 canonical internal grammar only，但 Rust heredoc guidance 仍残留错误示例：`*** Add File: path/to/file` 下一行还是裸 `content`，这会直接把错误模板喂给模型。真源位置：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/shared_tool_text_guidance.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tool_text_request_guidance.rs`
+- TS 第二语义面仍在主链生效：`tool-governor-request/response.ts` 还在调用 `rewriteExecCommandApplyPatchCall`，等于把 `exec_command` 偷改成 `apply_patch`；这不是 compat，而是 scope 越权。
+- routing 现状确认：`virtual_router_engine/features/tools.rs` 已能跳过 malformed `apply_patch` / `write_stdin`，但 followup route 仍主要依赖 `last_assistant_tool_category`。当前最小正确切口仍是先阻止错误工具调用被改写成 coding，再继续审计 route continuation。
+
+Next slice:
+1. 修正所有模型可见 Add File 示例为 `+content`。
+2. 从 request/response governor 主路径移除 `rewriteExecCommandApplyPatchCall` 调用，停止 TS 偷改工具名。
+3. 跑最小测试，确认 guidance 与 servertool/read-before-repatch 未回归。
+
+## 2026-05-17
+- 路由修正：longcontext 不能再压过 thinking/coding/search/web_search；它只能作为弱信号落在强语义路由之后。
+- 回归要求：fresh user turn + 高 token 仍必须走 thinking；coding continuation + 高 token 仍必须走 coding。
+
+## 2026-05-17 apply_patch canonical guidance audit（继续）
+- qwen tool-definition contract 需要同时满足两件事：一是只保留 canonical patch authoring（`patch` + internal grammar only），二是仍要明确“直接调用工具”。否则 `req_profiles` 回归会失败，且 Qwen 家族描述会丢掉 direct-call 约束。
+- 已验证回归：classifier 15/15；Jest tool-guidance/apply-patch-guard/native-required-exports 10/10；Rust targeted tests 覆盖 qwen/qwenchat tool defs 与 read-before-repatch guidance 均通过。
+- 2026-05-17 routing false-positive root cause补充：`virtual_router_engine/features/tools.rs::classify_shell_command()` 里原先用 `normalized.contains("replace")` 直接判 coding，会把 `rg -n 'replace' ...`、`cat replacement-guide.md` 这类非写入命令误路由成 coding。唯一正确修法是把它收窄到命令名级别 `contains_command("replace")`，并补 responses-context 回归，避免搜索/读取命令因 query/path 含 replace 误进 coding。
+- 2026-05-17 routing false-positive补充（二）：read-only `python/node` 文件读取之前会落到 `other`，导致 followup 继续轮时无法稳定继承到 `thinking`。唯一正确修复点仍在 `virtual_router_engine/features/tools.rs::classify_shell_command()`：对 `python -c "print(Path(...).read_text())"`、`node -e "console.log(fs.readFileSync(...))"` 这种只读脚本显式判 `thinking`，并补 message-turn 回归，确保它们不会再掉进 coding/tools。
+- 验证：
+  - `cargo test -p router-hotpath-napi exec_command_read_only_python_and_node_are_classified_as_thinking -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi previous_turn_python_read_tool_is_classified_as_thinking_continuation -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi virtual_router_engine::features -- --nocapture` ✅
+  - `cargo test -p router-hotpath-napi virtual_router_engine::classifier -- --nocapture` ✅
+
+## 2026-05-17 ingress tool compat / routing root-cause audit（本轮分析）
+
+结论：现在的兼容差不是单点 bug，而是 ingress owner 被拆裂了。
+1. `req_inbound_stage2_semantic_map` 目前只调 `normalizeReqInboundShellLikeToolCallsWithNative()`，所以只能处理 shell/write_stdin；`apply_patch` 根本没进同一个 ingress normalize owner。
+2. `chatEnvelopeToStandardizedWithNative()` 走的 `hub_standardized_bridge::normalize_chat_envelope_tool_calls()` 也只包了一层 shell-like normalize，导致 stage2 record / standardized / later followup 看见的 tool args contract 不一致。
+3. `resp_process_stage1_tool_governance.rs` 已经有最强的 apply_patch canonical/compat 逻辑，但它被放在 response owner，request ingress 没复用，形成第二责任面。
+4. 现有 Rust test `hub_pipeline.rs::test_coerce_standardized_request_from_payload_normalizes_exec_command_and_apply_patch_shapes` 仍把 exec_command 保留成 `command`，和 `/v1/responses required_action` / client validator 期望的 `cmd` contract 冲突，说明 canonical contract 还没真正收口。
+5. 当前 Jest 失败不是历史污染，而是 fresh stage2 ingress 自己没有统一 normalize：
+   - exec_command nested args 没被统一成 client shape
+   - shell-wrapped apply_patch 仍原样留在 arguments，JSON.parse 直接炸
+
+唯一正确方向：做一个 Rust-only unified ingress tool normalizer，统一处理 messages / responses input 两种 carrier，并在 stage2 record + standardized 前执行；TS 不再做任何第二语义面。apply_patch canonical 输出必须镜像 `{patch,input}` 同值；exec_command canonical 输出必须固定 `cmd(+workdir)`；坏 shell wrapped apply_patch 不猜正文，只产空 patch 并由后续门禁提示 read-before-repatch / direct apply_patch.
+验证：
+- `cargo test -p router-hotpath-napi hub_req_inbound_tool_call_normalization -- --nocapture` ✅
+- `cargo test -p router-hotpath-napi test_coerce_standardized_request_from_payload_normalizes_exec_command_and_apply_patch_shapes -- --nocapture` ✅
+- `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` ✅
+- `node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/sharedmodule/req-inbound-stage2-tool-shape-normalization.spec.ts` ✅
+- `cargo test -p router-hotpath-napi virtual_router_engine::features -- --nocapture` ✅
+- `cargo test -p router-hotpath-napi virtual_router_engine::classifier -- --nocapture` ✅
+- `cargo test -p router-hotpath-napi virtual_router_engine::features::tools -- --nocapture` ✅
+- `node sharedmodule/llmswitch-core/scripts/tests/apply-patch-native-regression-matrix.mjs` ✅

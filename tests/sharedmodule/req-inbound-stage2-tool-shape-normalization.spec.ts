@@ -107,7 +107,7 @@ describe('req inbound stage2 tool shape normalization', () => {
     ).toContain('*** Begin Patch');
   });
 
-  it('keeps noncanonical shell-wrapped apply_patch as guarded invalid payload instead of guessing patch text', async () => {
+  it('keeps noncanonical shell-wrapped apply_patch from being guessed into patch text', async () => {
     const adapterContext = {
       requestId: 'req-stage2-tool-shape-bad-shell',
       entryEndpoint: '/v1/chat/completions',
@@ -159,9 +159,8 @@ PATCH"`
 
     const assistantMessage = (stage2.chatEnvelope.messages as any[])[1];
     const patchArgs = JSON.parse(assistantMessage.tool_calls[0].function.arguments);
-    expect(String(patchArgs.input || patchArgs.patch || '')).toContain(
-      '__rcc_apply_patch_validation_error__/reason-missing-changes'
-    );
+    expect(String(patchArgs.input || '')).toBe('');
+    expect(String(patchArgs.patch || '')).toBe('');
   });
 
   it('preserves assistant reasoning-only history into standardizedRequest', async () => {

@@ -6,8 +6,11 @@ use napi_derive::napi;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use std::env;
 use std::collections::HashSet;
+use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
 
 const TOOL_CALL_JSON_MARKER: &str = "\"tool_calls\"";
 
@@ -65,7 +68,7 @@ fn resolve_text_harvest_enabled(payload: &Value) -> bool {
         return enabled;
     }
     detect_text_tool_provider_family(payload) != TextToolProviderFamily::Other
-        || payload_contains_explicit_text_tool_markup(payload)
+        || payload_contains_harvestable_text_tool_payload(payload)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -322,7 +325,7 @@ fn collect_stage1_harvest_input_texts(raw: &str) -> Vec<String> {
     out
 }
 
-fn payload_contains_explicit_text_tool_markup(payload: &Value) -> bool {
+fn payload_contains_harvestable_text_tool_payload(payload: &Value) -> bool {
     let Some(choices) = payload.get("choices").and_then(Value::as_array) else {
         return false;
     };
@@ -337,7 +340,11 @@ fn payload_contains_explicit_text_tool_markup(payload: &Value) -> bool {
                     .any(|text| {
                         collect_stage1_harvest_input_texts(text)
                             .iter()
-                            .any(|candidate| text_contains_explicit_tool_markup(candidate))
+                            .any(|candidate| {
+                                text_contains_explicit_tool_markup(candidate)
+                                    || !extract_tool_calls_from_text_candidate(candidate, 1)
+                                        .is_empty()
+                            })
                     })
             })
             .unwrap_or(false)
@@ -364,7 +371,9 @@ fn detect_unharvested_text_tool_markup(payload: &Value) -> Option<&'static str> 
                 let cleaned = strip_orphan_tool_markup_lines(
                     strip_tool_call_marker_payload(candidate.as_str()).as_str(),
                 );
-                if contains_explicit_tool_wrapper_marker(cleaned.as_str()) {
+                if contains_explicit_tool_wrapper_marker(cleaned.as_str())
+                    && explicit_wrapper_inner_payload_has_tool_name_marker(cleaned.as_str())
+                {
                     return Some("explicit_tool_wrapper");
                 }
             }
@@ -372,6 +381,18 @@ fn detect_unharvested_text_tool_markup(payload: &Value) -> Option<&'static str> 
     }
 
     None
+}
+
+fn explicit_wrapper_inner_payload_has_tool_name_marker(raw: &str) -> bool {
+    let Some(inner) = extract_explicit_tool_wrapper_inner_payload(raw) else {
+        return false;
+    };
+    let lowered = inner.to_ascii_lowercase();
+    lowered.contains("\"name\"")
+        || lowered.contains("'name'")
+        || lowered.contains("<name>")
+        || lowered.contains("tool_name")
+        || lowered.contains("\"function\"")
 }
 
 fn strip_internal_tool_governance_state(payload: &mut Value) {
@@ -1487,6 +1508,19 @@ fn has_unified_like_header(text: &str) -> bool {
     })
 }
 
+fn looks_like_shell_wrapped_apply_patch(raw: &str) -> bool {
+    let trimmed = raw.trim_start().to_ascii_lowercase();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let starts_with_shell = trimmed.starts_with("bash ")
+        || trimmed.starts_with("sh ")
+        || trimmed.starts_with("zsh ")
+        || trimmed.starts_with("env ")
+        || trimmed.starts_with("command ");
+    starts_with_shell && trimmed.contains("apply_patch <<")
+}
+
 fn extract_apply_patch_text_from_object(row: &Map<String, Value>) -> Option<String> {
     row.get("patch")
         .and_then(|value| extract_apply_patch_text(Some(value)))
@@ -1509,6 +1543,9 @@ fn extract_apply_patch_text(raw_args: Option<&Value>) -> Option<String> {
         Some(Value::String(raw)) => {
             let trimmed = raw.trim();
             if trimmed.is_empty() {
+                return None;
+            }
+            if looks_like_shell_wrapped_apply_patch(trimmed) {
                 return None;
             }
             if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
@@ -1544,7 +1581,7 @@ fn normalize_apply_patch_header_path(raw: &str) -> String {
             out = out[1..out.len() - 1].trim().to_string();
         }
     }
-    out
+    relativize_workspace_path(out.as_str())
 }
 
 fn normalize_apply_patch_header_line(line: &str) -> String {
@@ -1587,6 +1624,330 @@ fn normalize_unified_header_path(raw: &str) -> String {
         return stripped.to_string();
     }
     normalized
+}
+
+fn current_workspace_root() -> Option<PathBuf> {
+    env::current_dir().ok()
+}
+
+fn relativize_workspace_path(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let candidate = Path::new(trimmed);
+    if !candidate.is_absolute() {
+        return trimmed.replace('\\', "/");
+    }
+    let Some(root) = current_workspace_root() else {
+        return trimmed.replace('\\', "/");
+    };
+    let Ok(relative) = candidate.strip_prefix(root.as_path()) else {
+        return trimmed.replace('\\', "/");
+    };
+    let text = relative.to_string_lossy().replace('\\', "/");
+    if text.trim().is_empty() {
+        ".".to_string()
+    } else {
+        text
+    }
+}
+
+fn normalize_patch_compare_line(raw: &str) -> String {
+    raw.replace('\r', "")
+        .replace('\t', " ")
+        .split_whitespace()
+        .collect::<Vec<&str>>()
+        .join(" ")
+        .trim()
+        .to_string()
+}
+
+fn line_sequence_matches_exact(haystack: &[String], start: usize, needle: &[String]) -> bool {
+    if needle.is_empty() || start + needle.len() > haystack.len() {
+        return false;
+    }
+    needle
+        .iter()
+        .enumerate()
+        .all(|(offset, line)| haystack[start + offset] == *line)
+}
+
+fn line_sequence_matches_trimmed(haystack: &[String], start: usize, needle: &[String]) -> bool {
+    if needle.is_empty() || start + needle.len() > haystack.len() {
+        return false;
+    }
+    needle.iter().enumerate().all(|(offset, line)| {
+        haystack[start + offset].trim_end() == line.trim_end()
+    })
+}
+
+fn line_sequence_matches_whitespace_normalized(
+    haystack: &[String],
+    start: usize,
+    needle: &[String],
+) -> bool {
+    if needle.is_empty() || start + needle.len() > haystack.len() {
+        return false;
+    }
+    needle.iter().enumerate().all(|(offset, line)| {
+        normalize_patch_compare_line(haystack[start + offset].as_str())
+            == normalize_patch_compare_line(line.as_str())
+    })
+}
+
+fn unique_match_in_window<F>(
+    haystack: &[String],
+    needle: &[String],
+    preferred_index: usize,
+    window_radius: usize,
+    matcher: F,
+) -> Option<usize>
+where
+    F: Fn(&[String], usize, &[String]) -> bool,
+{
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    let max_start = haystack.len().saturating_sub(needle.len());
+    let window_start = preferred_index.saturating_sub(window_radius).min(max_start);
+    let window_end = preferred_index
+        .saturating_add(window_radius)
+        .min(max_start);
+    let mut matches = Vec::<usize>::new();
+    for start in window_start..=window_end {
+        if matcher(haystack, start, needle) {
+            matches.push(start);
+            if matches.len() > 1 {
+                return None;
+            }
+        }
+    }
+    matches.into_iter().next()
+}
+
+fn unique_match_anywhere<F>(haystack: &[String], needle: &[String], matcher: F) -> Option<usize>
+where
+    F: Fn(&[String], usize, &[String]) -> bool,
+{
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    let max_start = haystack.len().saturating_sub(needle.len());
+    let mut matches = Vec::<usize>::new();
+    for start in 0..=max_start {
+        if matcher(haystack, start, needle) {
+            matches.push(start);
+            if matches.len() > 1 {
+                return None;
+            }
+        }
+    }
+    matches.into_iter().next()
+}
+
+fn locate_live_file_block(
+    file_lines: &[String],
+    removed_lines: &[String],
+    preferred_index: usize,
+) -> Option<usize> {
+    if removed_lines.is_empty() || file_lines.len() < removed_lines.len() {
+        return None;
+    }
+    unique_match_in_window(
+        file_lines,
+        removed_lines,
+        preferred_index,
+        8,
+        line_sequence_matches_exact,
+    )
+    .or_else(|| {
+        unique_match_in_window(
+            file_lines,
+            removed_lines,
+            preferred_index,
+            8,
+            line_sequence_matches_trimmed,
+        )
+    })
+    .or_else(|| {
+        unique_match_in_window(
+            file_lines,
+            removed_lines,
+            preferred_index,
+            8,
+            line_sequence_matches_whitespace_normalized,
+        )
+    })
+    .or_else(|| unique_match_anywhere(file_lines, removed_lines, line_sequence_matches_exact))
+    .or_else(|| unique_match_anywhere(file_lines, removed_lines, line_sequence_matches_trimmed))
+    .or_else(|| {
+        unique_match_anywhere(
+            file_lines,
+            removed_lines,
+            line_sequence_matches_whitespace_normalized,
+        )
+    })
+}
+
+fn parse_unified_hunk_header_line_numbers(line: &str) -> Option<(usize, usize, usize, usize)> {
+    let caps = Regex::new(r"^@@\s*-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s*@@")
+        .ok()?
+        .captures(line.trim())?;
+    let old_start = caps.get(1)?.as_str().parse::<usize>().ok()?;
+    let old_len = caps
+        .get(2)
+        .and_then(|m| m.as_str().parse::<usize>().ok())
+        .unwrap_or(1);
+    let new_start = caps.get(3)?.as_str().parse::<usize>().ok()?;
+    let new_len = caps
+        .get(4)
+        .and_then(|m| m.as_str().parse::<usize>().ok())
+        .unwrap_or(1);
+    Some((old_start, old_len, new_start, new_len))
+}
+
+fn try_rebuild_line_number_hunk_with_live_context(
+    file_path: &str,
+    header: &str,
+    body_lines: &[String],
+) -> Option<Vec<String>> {
+    let (old_start, old_len, _new_start, _new_len) = parse_unified_hunk_header_line_numbers(header)?;
+    let cwd = current_workspace_root()?;
+    let absolute_path = cwd.join(file_path);
+    let source = fs::read_to_string(absolute_path).ok()?;
+    let file_lines: Vec<String> = source
+        .replace("\r\n", "\n")
+        .split('\n')
+        .map(|line| line.to_string())
+        .collect();
+
+    let removed_lines: Vec<String> = body_lines
+        .iter()
+        .filter_map(|line| line.strip_prefix('-').map(|rest| rest.to_string()))
+        .collect();
+    let added_lines: Vec<String> = body_lines
+        .iter()
+        .filter_map(|line| line.strip_prefix('+').map(|rest| rest.to_string()))
+        .collect();
+    let context_lines: Vec<String> = body_lines
+        .iter()
+        .filter_map(|line| line.strip_prefix(' ').map(|rest| rest.to_string()))
+        .collect();
+
+    if !context_lines.is_empty() {
+        return None;
+    }
+
+    let preferred_index = old_start.saturating_sub(1);
+    let block_start = if !removed_lines.is_empty() {
+        locate_live_file_block(file_lines.as_slice(), removed_lines.as_slice(), preferred_index)?
+    } else {
+        preferred_index.min(file_lines.len())
+    };
+
+    let block_end = if !removed_lines.is_empty() {
+        block_start.saturating_add(removed_lines.len())
+    } else {
+        block_start
+    };
+
+    let mut rebuilt = Vec::<String>::new();
+    rebuilt.push("@@".to_string());
+    if block_start > 0 {
+        rebuilt.push(format!(" {}", file_lines[block_start - 1]));
+    }
+    for line in &removed_lines {
+        rebuilt.push(format!("-{}", line));
+    }
+    if removed_lines.is_empty() && old_len > 0 {
+        let insert_end = block_start.saturating_add(old_len).min(file_lines.len());
+        for line in &file_lines[block_start..insert_end] {
+            rebuilt.push(format!(" {}", line));
+        }
+    }
+    for line in &added_lines {
+        rebuilt.push(format!("+{}", line));
+    }
+    if block_end < file_lines.len() {
+        rebuilt.push(format!(" {}", file_lines[block_end]));
+    }
+    Some(rebuilt)
+}
+
+fn repair_line_number_update_hunks_with_live_context(patch_text: &str) -> String {
+    let lines: Vec<String> = patch_text
+        .split('\n')
+        .map(|line| line.to_string())
+        .collect();
+    if lines.is_empty() {
+        return patch_text.to_string();
+    }
+
+    let mut out = Vec::<String>::new();
+    let mut current_update_path: Option<String> = None;
+    let mut index = 0usize;
+
+    while index < lines.len() {
+        let line = lines[index].clone();
+        if let Some(path) = line.strip_prefix("*** Update File:") {
+            let normalized_path = normalize_apply_patch_header_path(path.trim());
+            current_update_path = Some(normalized_path);
+            out.push(format!(
+                "*** Update File: {}",
+                current_update_path.as_deref().unwrap_or("")
+            ));
+            index += 1;
+            continue;
+        }
+
+        if line.starts_with("*** Add File:")
+            || line.starts_with("*** Delete File:")
+            || line.starts_with("*** Begin Patch")
+            || line.starts_with("*** End Patch")
+        {
+            current_update_path = None;
+            out.push(line);
+            index += 1;
+            continue;
+        }
+
+        if line.starts_with("@@") {
+            let header = line.clone();
+            let mut body = Vec::<String>::new();
+            let mut cursor = index + 1;
+            while cursor < lines.len() {
+                let next = lines[cursor].clone();
+                if next.starts_with("@@")
+                    || next.starts_with("*** Update File:")
+                    || next.starts_with("*** Add File:")
+                    || next.starts_with("*** Delete File:")
+                    || next.starts_with("*** End Patch")
+                {
+                    break;
+                }
+                body.push(next);
+                cursor += 1;
+            }
+
+            let rebuilt = current_update_path
+                .as_deref()
+                .and_then(|path| try_rebuild_line_number_hunk_with_live_context(path, header.as_str(), body.as_slice()));
+            if let Some(next_hunk) = rebuilt {
+                out.extend(next_hunk);
+            } else {
+                out.push(header);
+                out.extend(body);
+            }
+            index = cursor;
+            continue;
+        }
+
+        out.push(line);
+        index += 1;
+    }
+
+    out.join("\n")
 }
 
 
@@ -1633,16 +1994,95 @@ fn apply_patch_error_message(reason: &str) -> &'static str {
         "mixed_gnu_diff" => "GNU diff headers are not valid apply_patch input; use the *** Begin Patch grammar with file markers.",
         "unsupported_patch_format" => "Invalid apply_patch grammar. Use *** Begin Patch / *** End Patch with Add/Update/Delete File markers.",
         "empty_add_file_block" => "Add File requires + content lines. Use + for every created file line.",
+        "empty_update_hunk" => "Update File requires a non-empty @@ hunk with context and/or +/- lines.",
         _ => "Invalid apply_patch schema or patch grammar.",
     }
+}
+
+fn detect_apply_patch_authoring_invalid_reason(raw: &str) -> Option<&'static str> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Some("empty_patch");
+    }
+    if trimmed.contains("<<<<<<<") || trimmed.contains("=======") || trimmed.contains(">>>>>>>") {
+        return Some("conflict_markers");
+    }
+    if trimmed.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with("diff --git ") || line.starts_with("--- ") || line.starts_with("+++ ")
+    }) {
+        return Some("mixed_gnu_diff");
+    }
+    if !(trimmed.starts_with("*** Begin Patch") && trimmed.contains("*** End Patch")) {
+        return Some("unsupported_patch_format");
+    }
+
+    let lines: Vec<&str> = trimmed.lines().collect();
+    let mut idx: usize = 0;
+    while idx < lines.len() {
+        let line = lines[idx].trim_end();
+        if line.starts_with("*** Add File:") {
+            let mut saw_plus = false;
+            idx += 1;
+            while idx < lines.len() {
+                let body = lines[idx];
+                if body.starts_with("*** ") {
+                    break;
+                }
+                if body.starts_with('+') && !body.starts_with("+++") {
+                    saw_plus = true;
+                } else if !body.trim().is_empty() {
+                    return Some("empty_add_file_block");
+                }
+                idx += 1;
+            }
+            if !saw_plus {
+                return Some("empty_add_file_block");
+            }
+            continue;
+        }
+        if line.starts_with("*** Update File:") {
+            let mut saw_hunk = false;
+            let mut current_hunk_has_body = false;
+            idx += 1;
+            while idx < lines.len() {
+                let body = lines[idx];
+                if body.starts_with("*** ") {
+                    break;
+                }
+                if body.starts_with("@@") {
+                    if saw_hunk && !current_hunk_has_body {
+                        return Some("empty_update_hunk");
+                    }
+                    saw_hunk = true;
+                    current_hunk_has_body = false;
+                } else if saw_hunk {
+                    if body.starts_with(' ') || body.starts_with('+') || body.starts_with('-') {
+                        current_hunk_has_body = true;
+                    } else if !body.trim().is_empty() {
+                        return Some("empty_update_hunk");
+                    }
+                }
+                idx += 1;
+            }
+            if !saw_hunk || !current_hunk_has_body {
+                return Some("empty_update_hunk");
+            }
+            continue;
+        }
+        idx += 1;
+    }
+
+    None
 }
 
 fn make_apply_patch_guard_args(reason: &str) -> String {
     let patch = build_apply_patch_guard_patch(reason, apply_patch_error_message(reason));
     let mut out = Map::new();
-    out.insert("patch".to_string(), Value::String(patch));
+    out.insert("patch".to_string(), Value::String(patch.clone()));
+    out.insert("input".to_string(), Value::String(patch));
     serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| {
-        "{\"patch\":\"*** Begin Patch\\n*** Update File: __APPLY_PATCH_ERROR__/unknown.txt\\n@@\\n-guard\\n+APPLY_PATCH_ERROR: invalid apply_patch schema or patch grammar\\n*** End Patch\"}".to_string()
+        "{\"patch\":\"*** Begin Patch\\n*** Update File: __APPLY_PATCH_ERROR__/unknown.txt\\n@@\\n-guard\\n+APPLY_PATCH_ERROR: invalid apply_patch schema or patch grammar\\n*** End Patch\",\"input\":\"*** Begin Patch\\n*** Update File: __APPLY_PATCH_ERROR__/unknown.txt\\n@@\\n-guard\\n+APPLY_PATCH_ERROR: invalid apply_patch schema or patch grammar\\n*** End Patch\"}".to_string()
     })
 }
 
@@ -1677,9 +2117,15 @@ fn detect_apply_patch_invalid_reason(patch: &str) -> Option<&'static str> {
     None
 }
 
-fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (String, bool) {
+pub(crate) fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (String, bool) {
     let Some(raw_args) = raw_args else {
-        return (make_apply_patch_guard_args("missing_patch"), true);
+        let mut out = Map::new();
+        out.insert("patch".to_string(), Value::String(String::new()));
+        out.insert("input".to_string(), Value::String(String::new()));
+        return (
+            serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
+            true,
+        );
     };
     let args = parse_json_record(Some(raw_args)).unwrap_or_default();
     let patch_source = args
@@ -1687,16 +2133,26 @@ fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (String, bool)
         .or_else(|| args.get("input"))
         .and_then(Value::as_str)
         .map(str::trim)
-        .filter(|value| !value.is_empty());
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .or_else(|| {
+            extract_apply_patch_text(Some(raw_args))
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        });
     let Some(patch_source) = patch_source else {
-        return (make_apply_patch_guard_args("missing_patch"), true);
+        let mut out = Map::new();
+        out.insert("patch".to_string(), Value::String(String::new()));
+        out.insert("input".to_string(), Value::String(String::new()));
+        return (
+            serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
+            true,
+        );
     };
-    let patch = normalize_apply_patch_text(patch_source);
-    if let Some(reason) = detect_apply_patch_invalid_reason(patch.as_str()) {
-        return (make_apply_patch_guard_args(reason), true);
-    }
+    let patch = normalize_apply_patch_text(patch_source.as_str());
     let mut out = Map::new();
-    out.insert("patch".to_string(), Value::String(patch));
+    out.insert("patch".to_string(), Value::String(patch.clone()));
+    out.insert("input".to_string(), Value::String(patch));
     (serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()), false)
 }
 
@@ -1862,7 +2318,9 @@ fn normalize_apply_patch_text(raw: &str) -> String {
         out.push(raw_line.to_string());
     }
 
-    out.join("\n").trim().to_string()
+    repair_line_number_update_hunks_with_live_context(out.join("\n").trim())
+        .trim()
+        .to_string()
 }
 
 fn normalize_tool_name(raw_name: &str) -> Option<String> {
@@ -3295,6 +3753,164 @@ fn parse_tool_calls_shape_from_text(text: &str) -> Option<Value> {
     try_parse_json_value_lenient(repaired.as_str())
 }
 
+fn extract_tool_call_entries_from_malformed_tool_calls_text(
+    text: &str,
+    fallback_start_id: usize,
+) -> Vec<Value> {
+    let marker_re =
+        Regex::new(r#"(?is)(?:"tool_calls"|'tool_calls'|\btool_calls\b)"#).expect("valid marker");
+    let Some(marker) = marker_re.find(text) else {
+        return Vec::new();
+    };
+    let tail = &text[marker.end()..];
+    let Some(rel_open) = tail.find('[') else {
+        return Vec::new();
+    };
+    let open_idx = marker.end() + rel_open;
+    let chars: Vec<char> = text[open_idx..].chars().collect();
+    if chars.first().copied() != Some('[') {
+        return Vec::new();
+    }
+
+    let mut recovered: Vec<Value> = Vec::new();
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut object_depth = 0i64;
+    let mut array_depth = 0i64;
+    let mut current = String::new();
+    let mut saw_entry_separator_repair = false;
+    let mut saw_array_close = false;
+    let mut idx = 1usize;
+
+    while idx < chars.len() {
+        let ch = chars[idx];
+        if in_string {
+            current.push(ch);
+            if escaped {
+                escaped = false;
+                idx += 1;
+                continue;
+            }
+            if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            idx += 1;
+            continue;
+        }
+
+        if object_depth == 0 {
+            match ch {
+                '"' => {
+                    in_string = true;
+                    idx += 1;
+                }
+                '{' => {
+                    object_depth = 1;
+                    array_depth = 0;
+                    current.clear();
+                    current.push(ch);
+                    idx += 1;
+                }
+                ']' => break,
+                _ => idx += 1,
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => {
+                in_string = true;
+                current.push(ch);
+            }
+            '{' => {
+                object_depth += 1;
+                current.push(ch);
+            }
+            '}' => {
+                object_depth -= 1;
+                current.push(ch);
+                if object_depth == 0 {
+                    let repaired = auto_close_jsonish_shape(current.trim());
+                    if let Some(parsed) = try_parse_json_value_lenient(repaired.as_str()) {
+                        if let Some(entry) = normalize_tool_call_entry(
+                            &parsed,
+                            fallback_start_id + recovered.len(),
+                        ) {
+                            recovered.push(entry);
+                        }
+                    }
+                    current.clear();
+                }
+            }
+            '[' => {
+                array_depth += 1;
+                current.push(ch);
+            }
+            ']' => {
+                if array_depth > 0 {
+                    array_depth -= 1;
+                    current.push(ch);
+                } else {
+                    saw_array_close = true;
+                    let repaired = auto_close_jsonish_shape(current.trim());
+                    if let Some(parsed) = try_parse_json_value_lenient(repaired.as_str()) {
+                        if let Some(entry) = normalize_tool_call_entry(
+                            &parsed,
+                            fallback_start_id + recovered.len(),
+                        ) {
+                            recovered.push(entry);
+                        }
+                    }
+                    break;
+                }
+            }
+            ',' if object_depth == 1 && array_depth == 0 => {
+                let mut lookahead = idx + 1;
+                while lookahead < chars.len() && chars[lookahead].is_whitespace() {
+                    lookahead += 1;
+                }
+                if chars.get(lookahead).copied() == Some('{') {
+                    saw_entry_separator_repair = true;
+                    let repaired = auto_close_jsonish_shape(current.trim());
+                    if let Some(parsed) = try_parse_json_value_lenient(repaired.as_str()) {
+                        if let Some(entry) = normalize_tool_call_entry(
+                            &parsed,
+                            fallback_start_id + recovered.len(),
+                        ) {
+                            recovered.push(entry);
+                        }
+                    }
+                    current.clear();
+                    object_depth = 1;
+                    array_depth = 0;
+                    current.push('{');
+                    idx = lookahead + 1;
+                    continue;
+                }
+                current.push(ch);
+            }
+            _ => current.push(ch),
+        }
+
+        idx += 1;
+    }
+
+    if !current.trim().is_empty() && (saw_entry_separator_repair || !recovered.is_empty() || saw_array_close) {
+        let repaired = auto_close_jsonish_shape(current.trim());
+        if let Some(parsed) = try_parse_json_value_lenient(repaired.as_str()) {
+            if let Some(entry) =
+                normalize_tool_call_entry(&parsed, fallback_start_id + recovered.len())
+            {
+                recovered.push(entry);
+            }
+        }
+    }
+
+    recovered
+}
+
 fn unescape_outer_json_quotes_only(raw: &str) -> String {
     raw.replace("\\\"", "\"")
 }
@@ -3343,6 +3959,18 @@ fn maybe_parse_tool_call_text_value(raw: &str) -> Option<Value> {
         }
     }
     parse_tool_calls_shape_from_text(trimmed)
+}
+
+fn is_obviously_truncated_tool_calls_payload(text: &str) -> bool {
+    let lowered = text.to_ascii_lowercase();
+    if !lowered.contains("tool_calls") {
+        return false;
+    }
+    let Some(marker_idx) = lowered.find("tool_calls") else {
+        return false;
+    };
+    let tail = &text[marker_idx..];
+    tail.contains('[') && !tail.contains(']')
 }
 
 fn normalize_tool_call_entry(entry: &Value, fallback_id: usize) -> Option<Value> {
@@ -4870,6 +5498,59 @@ fn extract_strict_wrapper_tool_calls_from_rcc(text: &str, fallback_start_id: usi
     recovered
 }
 
+fn extract_tool_calls_from_text_candidate(text: &str, fallback_start_id: usize) -> Vec<Value> {
+    if is_obviously_truncated_tool_calls_payload(text) {
+        return Vec::new();
+    }
+
+    let mut recovered: Vec<Value> = Vec::new();
+
+    recovered =
+        extract_tool_call_entries_from_malformed_tool_calls_text(text, fallback_start_id);
+
+    if recovered.is_empty() {
+        if let Some(parsed) = maybe_parse_tool_call_text_value(text) {
+        recovered = extract_tool_call_entries_from_unknown(&parsed);
+        }
+    }
+
+    if recovered.is_empty() {
+        for parsed in extract_json_candidates_from_text(text) {
+            recovered = extract_tool_call_entries_from_unknown(&parsed);
+            if !recovered.is_empty() {
+                break;
+            }
+        }
+    }
+
+    if recovered.is_empty() {
+        if let Some(shape) = parse_tool_calls_shape_from_text(text) {
+            recovered = extract_tool_call_entries_from_unknown(&shape);
+        }
+    }
+
+    if recovered.is_empty() {
+        recovered = extract_xml_tool_call_blocks(text, fallback_start_id);
+    }
+    if recovered.is_empty() {
+        recovered = extract_xml_named_tool_call_blocks(text, fallback_start_id);
+    }
+    if recovered.is_empty() {
+        recovered = extract_strict_wrapper_tool_calls_from_tool_calls_container(
+            text,
+            fallback_start_id,
+        );
+    }
+    if recovered.is_empty() {
+        recovered = extract_strict_wrapper_tool_calls_from_function_calls(text, fallback_start_id);
+    }
+    if recovered.is_empty() {
+        recovered = extract_strict_wrapper_tool_calls_from_rcc(text, fallback_start_id);
+    }
+
+    recovered
+}
+
 pub(crate) fn harvest_explicit_wrapper_only_tool_calls_from_payload(payload: &mut Value) -> i64 {
     let mut harvested = 0i64;
     let requested_tool_name_keys = collect_requested_tool_name_keys(payload);
@@ -4908,35 +5589,14 @@ pub(crate) fn harvest_explicit_wrapper_only_tool_calls_from_payload(payload: &mu
         let mut recovered: Vec<Value> = Vec::new();
         for text in read_message_text_candidates(message) {
             for harvest_input in collect_stage1_harvest_input_texts(&text) {
-                if !contains_explicit_tool_wrapper_marker(&harvest_input) {
-                    continue;
-                }
-
-                recovered =
-                    extract_xml_tool_call_blocks(&harvest_input, (harvested as usize) + 1);
-                if recovered.is_empty() {
-                    recovered = extract_xml_named_tool_call_blocks(
-                        &harvest_input,
+                for candidate in collect_harvest_text_variants(&harvest_input) {
+                    recovered = extract_tool_calls_from_text_candidate(
+                        &candidate,
                         (harvested as usize) + 1,
                     );
-                }
-                if recovered.is_empty() {
-                    recovered = extract_strict_wrapper_tool_calls_from_tool_calls_container(
-                        &harvest_input,
-                        (harvested as usize) + 1,
-                    );
-                }
-                if recovered.is_empty() {
-                    recovered = extract_strict_wrapper_tool_calls_from_function_calls(
-                        &harvest_input,
-                        (harvested as usize) + 1,
-                    );
-                }
-                if recovered.is_empty() {
-                    recovered = extract_strict_wrapper_tool_calls_from_rcc(
-                        &harvest_input,
-                        (harvested as usize) + 1,
-                    );
+                    if !recovered.is_empty() {
+                        break;
+                    }
                 }
                 if !recovered.is_empty() {
                     break;
@@ -5525,8 +6185,9 @@ mod tests {
             .unwrap_or("");
         let parsed: Value = serde_json::from_str(args).unwrap();
         let patch = parsed["patch"].as_str().unwrap_or("");
-        assert!(patch.contains("__APPLY_PATCH_ERROR__/unsupported_patch_format.txt"));
-        assert!(patch.contains("APPLY_PATCH_ERROR:"));
+        let input = parsed["input"].as_str().unwrap_or("");
+        assert_eq!(patch, "test");
+        assert_eq!(input, patch);
     }
 
     #[test]
@@ -5556,8 +6217,9 @@ mod tests {
         let parsed: Value = serde_json::from_str(args).unwrap();
         let patch = parsed["patch"].as_str().unwrap_or("");
         assert!(patch.contains("*** Begin Patch"));
-        assert!(patch.contains("__APPLY_PATCH_ERROR__/missing_patch.txt"));
-        assert!(patch.contains("APPLY_PATCH_ERROR:"));
+        assert!(patch.contains("*** Add File: src/a.ts"));
+        assert!(patch.contains("+console.log('ok')"));
+        assert_eq!(parsed["input"], parsed["patch"]);
     }
 
     #[test]
@@ -5589,12 +6251,12 @@ mod tests {
             .unwrap_or("");
         let parsed: Value = serde_json::from_str(args).unwrap();
         let patch = parsed["patch"].as_str().unwrap_or("");
-        assert!(patch.contains("__APPLY_PATCH_ERROR__/missing_patch.txt"));
-        assert!(patch.contains("APPLY_PATCH_ERROR:"));
+        assert!(patch.contains("*** Add File: src/quoted.ts"));
+        assert!(!patch.contains("APPLY_PATCH_ERROR:"));
     }
 
     #[test]
-    fn test_govern_response_apply_patch_raw_string_is_schema_guard() {
+    fn test_govern_response_apply_patch_raw_string_is_repaired_into_schema() {
         let input = ToolGovernanceInput {
             payload: serde_json::json!({
                 "choices": [{
@@ -5622,8 +6284,9 @@ mod tests {
             .unwrap_or("");
         let parsed: Value = serde_json::from_str(args).unwrap();
         let patch = parsed["patch"].as_str().unwrap_or("");
-        assert!(patch.contains("__APPLY_PATCH_ERROR__/missing_patch.txt"));
-        assert!(parsed.get("input").is_none());
+        assert!(patch.contains("*** Add File: raw.txt"));
+        assert!(patch.contains("+raw"));
+        assert_eq!(parsed["input"], parsed["patch"]);
     }
 
     #[test]
@@ -5767,6 +6430,11 @@ mod tests {
         });
         let repaired = normalize_apply_patch_tool_calls(&mut payload);
         assert_eq!(repaired, 0);
+        let args = payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or("");
+        let parsed: Value = serde_json::from_str(args).unwrap();
+        assert_eq!(parsed["input"], parsed["patch"]);
 
         let payload = json!({
             "choices": [{
@@ -6471,6 +7139,13 @@ console.log('ok')"#;
         let out = extract_tool_call_entries_from_unknown(&obj);
         assert_eq!(out.len(), 1);
 
+        let malformed = r#"{"tool_calls":[{"name":"update_plan","input":{"action":"create","plan":[{"step":"A","status":"pending"}]}},{"name":"agent.dispatch","input":{"target_agent_id":"finger-project-agent","task":"alpha"},{"name":"agent.dispatch","input":{"target_agent_id":"finger-reviewer","task":"beta"}}]}"#;
+        let out = extract_tool_call_entries_from_malformed_tool_calls_text(malformed, 1);
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0]["function"]["name"], "update_plan");
+        assert_eq!(out[1]["function"]["name"], "agent.dispatch");
+        assert_eq!(out[2]["function"]["name"], "agent.dispatch");
+
     }
 
     #[test]
@@ -6650,6 +7325,28 @@ console.log('ok')"#;
             "bd --no-db create \"Mailbox 统一消息与心跳优先级改造\" --type epic --description \"统一 mailbox 消息三段式格式\""
         );
 
+        // Malformed multi-tool tool_calls JSON should still recover each top-level tool call
+        // without filtering non-exec tool names.
+        let mut payload = json!({
+            "choices": [{
+                "message": {"tool_calls": [], "content": r#"{"tool_calls":[{"name":"update_plan","input":{"action":"create","plan":[{"step":"A","status":"pending"}]}},{"name":"agent.dispatch","input":{"target_agent_id":"finger-project-agent","task":"alpha"},{"name":"agent.dispatch","input":{"target_agent_id":"finger-reviewer","task":"beta"}}]}"#},
+                "finish_reason": "stop"
+            }]
+        });
+        assert_eq!(
+            maybe_harvest_empty_tool_calls_from_json_content(&mut payload),
+            3
+        );
+        let recovered = payload["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(recovered.len(), 3);
+        assert_eq!(recovered[0]["function"]["name"], "update_plan");
+        assert_eq!(recovered[1]["function"]["name"], "agent.dispatch");
+        assert_eq!(recovered[2]["function"]["name"], "agent.dispatch");
+        assert_eq!(payload["choices"][0]["finish_reason"], "tool_calls");
+
         // Truncated malformed tool_calls JSON must not be shape-repaired/harvested.
         let mut payload = json!({
             "choices": [{
@@ -6767,6 +7464,12 @@ console.log('ok')"#;
 
         let raw = Value::Bool(true);
         assert!(extract_apply_patch_text(Some(&raw)).is_none());
+
+        let shell_wrapped = Value::String(
+            "bash -lc \"echo hi && apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/nope.ts\n+console.log('nope');\n*** End Patch\nPATCH\""
+                .to_string(),
+        );
+        assert!(extract_apply_patch_text(Some(&shell_wrapped)).is_none());
     }
 
     #[test]
@@ -6810,6 +7513,13 @@ console.log('ok')"#;
     }
 
     #[test]
+    fn test_normalize_apply_patch_header_path_relativizes_workspace_absolute_path() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let abs = cwd.join("AGENTS.md").to_string_lossy().to_string();
+        assert_eq!(normalize_apply_patch_header_path(abs.as_str()), "AGENTS.md");
+    }
+
+    #[test]
     fn test_normalize_tool_args_apply_patch_strips_apply_patch_prefix() {
         let raw_args = json!({
             "input": "apply_patch *** Begin Patch\n*** Add File: src/new.ts\nconsole.log('ok');\n*** End Patch"
@@ -6817,9 +7527,67 @@ console.log('ok')"#;
         let out = normalize_tool_args("apply_patch", Some(&raw_args)).unwrap();
         let parsed: Value = serde_json::from_str(&out).unwrap();
         let patch = parsed["patch"].as_str().unwrap_or("");
+        let input = parsed["input"].as_str().unwrap_or("");
         assert!(patch.starts_with("*** Begin Patch"));
         assert!(!patch.starts_with("apply_patch "));
         assert!(patch.contains("*** Add File: src/new.ts"));
+        assert_eq!(input, patch);
+    }
+
+    #[test]
+    fn test_normalize_tool_args_apply_patch_mirrors_patch_into_input() {
+        let raw_args = json!({
+            "patch": "*** Begin Patch\n*** Add File: src/mirror.ts\n+ok\n*** End Patch"
+        });
+        let out = normalize_tool_args("apply_patch", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        let patch = parsed["patch"].as_str().unwrap_or("");
+        let input = parsed["input"].as_str().unwrap_or("");
+        assert_eq!(input, patch);
+        assert!(patch.contains("*** Add File: src/mirror.ts"));
+    }
+
+    #[test]
+    fn test_normalize_tool_args_apply_patch_relativizes_absolute_update_path() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let abs = cwd.join("AGENTS.md").to_string_lossy().to_string();
+        let raw_args = json!({
+            "patch": format!(
+                "*** Begin Patch\n*** Update File: {}\n@@\n-foo\n+bar\n*** End Patch",
+                abs
+            )
+        });
+        let out = normalize_tool_args("apply_patch", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        let patch = parsed["patch"].as_str().unwrap_or("");
+        assert!(patch.contains("*** Update File: AGENTS.md"));
+        assert!(!patch.contains(abs.as_str()));
+    }
+
+    #[test]
+    fn test_normalize_tool_args_apply_patch_rebuilds_line_number_only_hunk_with_live_context() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let rel_path = format!("target/apply_patch_live_context_{}.txt", std::process::id());
+        let abs_path = cwd.join(rel_path.as_str());
+        if let Some(parent) = abs_path.parent() {
+            std::fs::create_dir_all(parent).expect("create parent");
+        }
+        std::fs::write(&abs_path, "alpha\nbeta\ngamma\n").expect("write test file");
+
+        let raw_args = json!({
+            "patch": format!(
+                "*** Begin Patch\n*** Update File: {}\n@@ -20,1 +20,1 @@\n-beta\n+beta2\n*** End Patch",
+                rel_path
+            )
+        });
+        let out = normalize_tool_args("apply_patch", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        let patch = parsed["patch"].as_str().unwrap_or("");
+        assert!(patch.contains("*** Update File: target/apply_patch_live_context_"));
+        assert!(patch.contains("@@\n alpha\n-beta\n+beta2\n gamma"));
+        assert!(!patch.contains("@@ -20,1 +20,1 @@"));
+
+        let _ = std::fs::remove_file(abs_path);
     }
 
     #[test]
@@ -6845,6 +7613,32 @@ console.log('ok')"#;
         assert!(patch.contains("*** Update File: src/a.ts"));
         assert!(patch.contains("@@ -1 +1 @@"));
         assert!(!patch.contains("***************"));
+    }
+
+    #[test]
+    fn test_validate_apply_patch_arguments_rejects_empty_update_hunk() {
+        let raw = json!({
+            "arguments": {
+                "patch": "*** Begin Patch\n*** Update File: README.md\n@@\n*** End Patch"
+            }
+        });
+        let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
+        assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(parsed.get("reason").and_then(Value::as_str), Some("empty_update_hunk"));
+    }
+
+    #[test]
+    fn test_validate_apply_patch_arguments_rejects_add_file_without_plus_lines() {
+        let raw = json!({
+            "arguments": {
+                "patch": "*** Begin Patch\n*** Add File: demo.txt\nhello\n*** End Patch"
+            }
+        });
+        let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
+        assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(parsed.get("reason").and_then(Value::as_str), Some("empty_add_file_block"));
     }
 
     #[test]
@@ -8468,4 +9262,70 @@ pub fn resolve_requested_tool_names_json(input_json: String) -> napi::Result<Str
         }
     }
     serde_json::to_string(&names).map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
+}
+
+#[napi]
+pub fn normalize_apply_patch_arguments_json(input_json: String) -> napi::Result<String> {
+    let input: serde_json::Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::new(napi::Status::InvalidArg, e.to_string()))?;
+    let raw_args = input.get("arguments");
+    let normalized = normalize_apply_patch_schema_args(raw_args);
+    let mut out = Map::new();
+    out.insert(
+        "normalizedArguments".to_string(),
+        Value::String(normalized.0.clone()),
+    );
+    out.insert("repaired".to_string(), Value::Bool(normalized.1));
+    serde_json::to_string(&Value::Object(out))
+        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
+}
+
+#[napi]
+pub fn validate_apply_patch_arguments_json(input_json: String) -> napi::Result<String> {
+    let input: serde_json::Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::new(napi::Status::InvalidArg, e.to_string()))?;
+    let raw_args = input.get("arguments");
+    let parsed_args = parse_json_record(raw_args).unwrap_or_default();
+    let raw_source = parsed_args
+        .get("patch")
+        .or_else(|| parsed_args.get("input"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .or_else(|| {
+            extract_apply_patch_text(raw_args)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or_default();
+    let normalized = normalize_apply_patch_schema_args(raw_args);
+    let normalized_args_value: Value =
+        serde_json::from_str(&normalized.0).unwrap_or_else(|_| Value::Object(Map::new()));
+    let patch = normalized_args_value
+        .as_object()
+        .and_then(|row| row.get("patch"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let invalid_reason = detect_apply_patch_authoring_invalid_reason(raw_source.as_str())
+        .or_else(|| detect_apply_patch_invalid_reason(patch.as_str()));
+
+    let mut out = Map::new();
+    out.insert("ok".to_string(), Value::Bool(invalid_reason.is_none()));
+    out.insert(
+        "normalizedArguments".to_string(),
+        Value::String(normalized.0.clone()),
+    );
+    out.insert("repaired".to_string(), Value::Bool(normalized.1));
+    if let Some(reason) = invalid_reason {
+        out.insert("reason".to_string(), Value::String(reason.to_string()));
+        out.insert(
+            "message".to_string(),
+            Value::String(apply_patch_error_message(reason).to_string()),
+        );
+    }
+    serde_json::to_string(&Value::Object(out))
+        .map_err(|e| napi::Error::new(napi::Status::GenericFailure, e.to_string()))
 }

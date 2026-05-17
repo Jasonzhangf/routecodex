@@ -10,6 +10,7 @@ import {
   type Unknown
 } from './tool-governor-shared.js';
 import {
+  normalizeApplyPatchToolCallsOnRequest,
     normalizeRequestToolCalls,
   processChatRequestTools
 } from './tool-governor-request.js';
@@ -20,6 +21,7 @@ import {
 } from './tool-governor-response.js';
 
 export {
+    normalizeApplyPatchToolCallsOnRequest,
     normalizeRequestToolCalls,
   processChatRequestTools,
   normalizeApplyPatchToolCallsOnResponse,

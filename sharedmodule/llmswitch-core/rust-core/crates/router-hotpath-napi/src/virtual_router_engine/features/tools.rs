@@ -316,12 +316,21 @@ fn classify_tool_call(call: &Value) -> Option<ToolClassification> {
     if raw_name.is_empty() {
         return None;
     }
+    if !looks_like_valid_tool_name_for_routing(raw_name) {
+        return None;
+    }
     let function_name = canonicalize_tool_name(raw_name).to_lowercase();
-    let args = parse_tool_arguments(
-        call.get("function")
-            .and_then(|v| v.get("arguments"))
-            .or_else(|| call.get("arguments")),
-    );
+    let raw_arguments = call
+        .get("function")
+        .and_then(|v| v.get("arguments"))
+        .or_else(|| call.get("arguments"));
+    if should_skip_malformed_tool_call_for_routing(
+        function_name.as_str(),
+        raw_arguments,
+    ) {
+        return None;
+    }
+    let args = parse_tool_arguments(raw_arguments);
     let command_text = extract_command_text(args.as_ref());
     let snippet = build_command_snippet(&command_text);
     let name_category = categorize_tool_name(&function_name);
@@ -352,6 +361,145 @@ fn classify_tool_call(call: &Value) -> Option<ToolClassification> {
         snippet: snippet.clone(),
         label: snippet.or(Some(function_name)),
     })
+}
+
+fn looks_like_valid_tool_name_for_routing(raw_name: &str) -> bool {
+    let trimmed = raw_name.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    !trimmed.chars().any(|ch| {
+        ch.is_whitespace()
+            || matches!(
+                ch,
+                '"' | '\'' | '`' | '|' | '&' | ';' | '<' | '>' | '(' | ')' | '{' | '}' | '[' | ']'
+            )
+    })
+}
+
+fn should_skip_malformed_tool_call_for_routing(
+    function_name: &str,
+    raw_arguments: Option<&Value>,
+) -> bool {
+    let normalized = function_name.trim().to_lowercase();
+    if normalized.is_empty() {
+        return true;
+    }
+    if normalized == "apply_patch" {
+        return !looks_like_valid_apply_patch_arguments_for_routing(raw_arguments);
+    }
+    if normalized == "write_stdin" {
+        return !looks_like_valid_write_stdin_arguments_for_routing(raw_arguments);
+    }
+    if SHELL_TOOL_NAMES.iter().any(|item| *item == normalized) {
+        return !looks_like_valid_shell_like_arguments_for_routing(raw_arguments);
+    }
+    false
+}
+
+fn looks_like_valid_apply_patch_arguments_for_routing(raw_arguments: Option<&Value>) -> bool {
+    let Some(value) = raw_arguments else {
+        return false;
+    };
+    match value {
+        Value::String(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                return false;
+            }
+            if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+                return looks_like_valid_apply_patch_arguments_for_routing(Some(&parsed));
+            }
+            trimmed.contains("*** Begin Patch")
+                || trimmed.contains("*** Update File:")
+                || trimmed.contains("*** Add File:")
+                || trimmed.contains("*** Delete File:")
+        }
+        Value::Object(map) => {
+            let patch = map
+                .get("patch")
+                .and_then(|v| v.as_str())
+                .or_else(|| map.get("input").and_then(|v| v.as_str()))
+                .unwrap_or("")
+                .trim();
+            !patch.is_empty()
+                && (patch.contains("*** Begin Patch")
+                    || patch.contains("*** Update File:")
+                    || patch.contains("*** Add File:")
+                    || patch.contains("*** Delete File:"))
+        }
+        _ => false,
+    }
+}
+
+fn looks_like_valid_write_stdin_arguments_for_routing(raw_arguments: Option<&Value>) -> bool {
+    let Some(value) = raw_arguments else {
+        return false;
+    };
+    match value {
+        Value::String(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                return false;
+            }
+            if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+                return looks_like_valid_write_stdin_arguments_for_routing(Some(&parsed));
+            }
+            false
+        }
+        Value::Object(map) => {
+            let has_session = map
+                .get("session_id")
+                .and_then(|v| v.as_i64())
+                .is_some()
+                || map
+                    .get("sessionId")
+                    .and_then(|v| v.as_i64())
+                    .is_some();
+            let chars = map.get("chars").and_then(|v| v.as_str()).unwrap_or("").trim();
+            has_session && !chars.is_empty()
+        }
+        _ => false,
+    }
+}
+
+fn looks_like_valid_shell_like_arguments_for_routing(raw_arguments: Option<&Value>) -> bool {
+    let Some(value) = raw_arguments else {
+        return false;
+    };
+    match value {
+        Value::String(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                return false;
+            }
+            if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+                return looks_like_valid_shell_like_arguments_for_routing(Some(&parsed));
+            }
+            !trimmed.starts_with('{')
+                && !trimmed.starts_with('[')
+                && trimmed.split_whitespace().next().is_some()
+        }
+        Value::Object(map) => {
+            if let Some(cmd) = map.get("cmd").and_then(|v| v.as_str()) {
+                return !cmd.trim().is_empty();
+            }
+            if let Some(command) = map.get("command") {
+                if let Some(text) = command.as_str() {
+                    return !text.trim().is_empty();
+                }
+                if let Some(items) = command.as_array() {
+                    return items.iter().any(|item| {
+                        item.as_str()
+                            .map(|text| !text.trim().is_empty())
+                            .unwrap_or(false)
+                    });
+                }
+            }
+            false
+        }
+        _ => false,
+    }
 }
 
 fn canonicalize_tool_name(raw_name: &str) -> String {
@@ -469,7 +617,7 @@ fn classify_shell_command(command: &str) -> String {
     if normalized.trim().is_empty() {
         return "other".to_string();
     }
-    if normalized.contains("<<") {
+    if normalized.contains("<<") && shell_heredoc_looks_like_write(&normalized) {
         return "coding".to_string();
     }
     if SHELL_WRITE_COMMANDS
@@ -478,16 +626,16 @@ fn classify_shell_command(command: &str) -> String {
     {
         return "coding".to_string();
     }
-    if contains_command(&normalized, "sed") {
+    if shell_sed_looks_like_write(&normalized) {
         return "coding".to_string();
     }
-    if contains_command(&normalized, "awk") {
+    if shell_awk_looks_like_write(&normalized) {
         return "coding".to_string();
     }
     if contains_command(&normalized, "perl") && normalized.contains("-pi") {
         return "coding".to_string();
     }
-    if normalized.contains("replace") {
+    if contains_command(&normalized, "replace") {
         return "coding".to_string();
     }
     if SHELL_REDIRECT_WRITE_BINARIES
@@ -512,6 +660,12 @@ fn classify_shell_command(command: &str) -> String {
     }
     if contains_command(&normalized, "bd") && normalized.contains(" search") {
         return "search".to_string();
+    }
+    if contains_command(&normalized, "sed") || contains_command(&normalized, "awk") {
+        return "thinking".to_string();
+    }
+    if shell_script_looks_like_read(&normalized) {
+        return "thinking".to_string();
     }
     if SHELL_THINKING_COMMANDS
         .iter()
@@ -572,14 +726,117 @@ fn normalize_binary_name(binary: &str) -> String {
 
 fn has_output_redirect(command: &str) -> bool {
     let bytes = command.as_bytes();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
     for idx in 0..bytes.len() {
-        if bytes[idx] != b'>' {
+        let ch = bytes[idx] as char;
+        if in_single {
+            if ch == '\'' {
+                in_single = false;
+            }
+            continue;
+        }
+        if in_double {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if ch == '\\' {
+                escaped = true;
+                continue;
+            }
+            if ch == '"' {
+                in_double = false;
+            }
+            continue;
+        }
+        if ch == '\'' {
+            in_single = true;
+            continue;
+        }
+        if ch == '"' {
+            in_double = true;
+            continue;
+        }
+        if ch != '>' {
+            continue;
+        }
+        if idx > 0 && bytes[idx - 1] == b'=' {
+            continue;
+        }
+        if idx + 1 < bytes.len() && bytes[idx + 1] == b'=' {
             continue;
         }
         if idx > 0 && bytes[idx - 1] == b'2' {
             continue;
         }
         return true;
+    }
+    false
+}
+
+fn shell_heredoc_looks_like_write(command: &str) -> bool {
+    if !command.contains("<<") {
+        return false;
+    }
+    if contains_command(command, "apply_patch") {
+        return true;
+    }
+    if SHELL_REDIRECT_WRITE_BINARIES
+        .iter()
+        .any(|cmd| contains_command(command, cmd))
+        && has_output_redirect(command)
+    {
+        return true;
+    }
+    command.contains("write_text(")
+        || command.contains(".write_text(")
+        || command.contains(".write(")
+        || command.contains("fs.writefile")
+        || command.contains("appendfile")
+        || command.contains("open(") && command.contains("'w'")
+        || command.contains("open(") && command.contains("\"w\"")
+}
+
+fn shell_sed_looks_like_write(command: &str) -> bool {
+    contains_command(command, "sed")
+        && (command.contains(" -i")
+            || command.starts_with("sed -i")
+            || has_output_redirect(command)
+            || command.contains(" w "))
+}
+
+fn shell_awk_looks_like_write(command: &str) -> bool {
+    contains_command(command, "awk")
+        && (has_output_redirect(command)
+            || command.contains(" -i inplace")
+            || command.contains("-vinplace")
+            || command.contains("print >")
+            || command.contains("printf >"))
+}
+
+fn shell_script_looks_like_read(command: &str) -> bool {
+    if contains_command(command, "python") {
+        return command.contains("print(open(")
+            || command.contains(".read_text(")
+            || command.contains(".read_bytes(")
+            || command.contains(".read()")
+            || command.contains("path.read_text(")
+            || command.contains("path.read_bytes(");
+    }
+    if contains_command(command, "node") {
+        return command.contains("fs.readfilesync(")
+            || command.contains("readfilesync(")
+            || command.contains("console.log(")
+            || command.contains("process.stdout.write(");
+    }
+    if contains_command(command, "perl") || contains_command(command, "ruby") || contains_command(command, "php") {
+        return command.contains("readfile(")
+            || command.contains("fileread(")
+            || command.contains("puts file.read")
+            || command.contains("print file.read")
+            || command.contains("slurp");
     }
     false
 }
@@ -690,7 +947,38 @@ mod tests {
     }
 
     #[test]
-    fn exec_command_sed_and_awk_are_classified_as_coding() {
+    fn exec_command_search_term_replace_does_not_route_to_coding() {
+        let grep = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"rg -n 'replace' README.md\"}"
+            }
+        });
+        let cat = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"cat docs/replacement-guide.md\"}"
+            }
+        });
+
+        assert_eq!(
+            classify_tool_call_for_report(&grep)
+                .expect("classification")
+                .category,
+            "search"
+        );
+        assert_eq!(
+            classify_tool_call_for_report(&cat)
+                .expect("classification")
+                .category,
+            "thinking"
+        );
+    }
+
+    #[test]
+    fn exec_command_sed_and_awk_writes_are_classified_as_coding() {
         let sed = json!({
             "type": "function",
             "function": {
@@ -702,7 +990,7 @@ mod tests {
             "type": "function",
             "function": {
                 "name": "exec_command",
-                "arguments": "{\"cmd\":\"awk '{gsub(/old/,\\\"new\\\")}1' src/a.ts\"}"
+                "arguments": "{\"cmd\":\"awk '{gsub(/old/,\\\"new\\\")}1' src/a.ts > src/a.ts.tmp\"}"
             }
         });
 
@@ -718,5 +1006,106 @@ mod tests {
                 .category,
             "coding"
         );
+    }
+
+    #[test]
+    fn exec_command_read_only_sed_and_awk_do_not_route_to_coding() {
+        let sed = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"sed -n '1,20p' src/a.ts\"}"
+            }
+        });
+        let awk = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"awk 'NR>=1 && NR<=20 {print}' src/a.ts\"}"
+            }
+        });
+
+        assert_eq!(
+            classify_tool_call_for_report(&sed)
+                .expect("classification")
+                .category,
+            "thinking"
+        );
+        assert_eq!(
+            classify_tool_call_for_report(&awk)
+                .expect("classification")
+                .category,
+            "thinking"
+        );
+    }
+
+    #[test]
+    fn exec_command_read_only_python_and_node_are_classified_as_thinking() {
+        let python = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"python -c \\\"from pathlib import Path; print(Path('README.md').read_text())\\\"\"}"
+            }
+        });
+        let node = json!({
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"node -e \\\"const fs=require('fs'); console.log(fs.readFileSync('README.md','utf8'))\\\"\"}"
+            }
+        });
+
+        assert_eq!(
+            classify_tool_call_for_report(&python)
+                .expect("classification")
+                .category,
+            "thinking"
+        );
+        assert_eq!(
+            classify_tool_call_for_report(&node)
+                .expect("classification")
+                .category,
+            "thinking"
+        );
+    }
+
+    #[test]
+    fn malformed_write_stdin_is_ignored_for_routing_classification() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "write_stdin",
+                "arguments": "{\"chars\":\"huge but missing session\"}"
+            }
+        });
+
+        assert!(classify_tool_call_for_report(&call).is_none());
+    }
+
+    #[test]
+    fn malformed_apply_patch_is_ignored_for_routing_classification() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "apply_patch",
+                "arguments": "{\"patch\":\"\"}"
+            }
+        });
+
+        assert!(classify_tool_call_for_report(&call).is_none());
+    }
+
+    #[test]
+    fn malformed_command_text_in_function_name_is_ignored_for_routing_classification() {
+        let call = json!({
+            "type": "function",
+            "function": {
+                "name": "bash -lc 'pwd'",
+                "arguments": "{\"cmd\":\"\"}"
+            }
+        });
+
+        assert!(classify_tool_call_for_report(&call).is_none());
     }
 }

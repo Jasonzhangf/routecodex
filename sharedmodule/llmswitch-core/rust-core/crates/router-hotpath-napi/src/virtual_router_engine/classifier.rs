@@ -240,11 +240,11 @@ pub(crate) const DEFAULT_ROUTE: &str = "default";
 
 pub(crate) const ROUTE_PRIORITY: [&str; 9] = [
     "multimodal",
-    "longcontext",
     "web_search",
     "thinking",
     "coding",
     "search",
+    "longcontext",
     "tools",
     "background",
     DEFAULT_ROUTE,
@@ -341,6 +341,23 @@ mod tests {
     }
 
     #[test]
+    fn malformed_tool_followup_without_valid_last_tool_category_does_not_route_to_coding() {
+        let features = RoutingFeatures {
+            latest_message_from_user: false,
+            has_tools: true,
+            has_tool_call_responses: true,
+            last_assistant_tool_category: None,
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_ne!(result.route_name, "coding");
+        assert!(result.reasoning.contains("tools:tool-request-detected"));
+        assert!(!result.reasoning.contains("coding:last-tool-coding"));
+    }
+
+    #[test]
     fn current_user_turn_ignores_previous_search_continuation_and_prefers_thinking() {
         let features = RoutingFeatures {
             latest_message_from_user: true,
@@ -406,6 +423,56 @@ mod tests {
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
         assert!(result.reasoning.contains("tools:tool-request-detected"));
+    }
+
+    #[test]
+    fn longcontext_does_not_override_current_user_thinking_route() {
+        let features = RoutingFeatures {
+            latest_message_from_user: true,
+            has_tools: true,
+            estimated_tokens: 250_000,
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_eq!(result.route_name, "thinking");
+        assert!(result.reasoning.contains("thinking:user-input"));
+        assert!(result.reasoning.contains("longcontext:token-threshold"));
+    }
+
+    #[test]
+    fn longcontext_does_not_override_coding_continuation() {
+        let features = RoutingFeatures {
+            latest_message_from_user: false,
+            has_tools: true,
+            has_tool_call_responses: true,
+            estimated_tokens: 250_000,
+            last_assistant_tool_category: Some("coding".to_string()),
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_eq!(result.route_name, "coding");
+        assert!(result.reasoning.contains("coding:last-tool-coding"));
+        assert!(result.reasoning.contains("longcontext:token-threshold"));
+    }
+
+    #[test]
+    fn longcontext_routes_when_no_stronger_route_signal_exists() {
+        let features = RoutingFeatures {
+            latest_message_from_user: false,
+            has_tools: false,
+            has_tool_call_responses: false,
+            estimated_tokens: 250_000,
+            ..Default::default()
+        };
+
+        let result = classifier().classify(&features);
+
+        assert_eq!(result.route_name, "longcontext");
+        assert!(result.reasoning.contains("longcontext:token-threshold"));
     }
 
     #[test]

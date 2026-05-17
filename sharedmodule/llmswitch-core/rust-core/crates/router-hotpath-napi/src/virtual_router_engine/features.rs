@@ -619,6 +619,39 @@ mod tests {
     }
 
     #[test]
+    fn previous_turn_python_read_tool_is_classified_as_thinking_continuation() {
+        let request = json!({
+            "model": "glm-5",
+            "messages": [
+                { "role": "user", "content": "读一下 README" },
+                {
+                    "role": "assistant",
+                    "content": "tool turn",
+                    "tool_calls": [
+                        {
+                            "id": "call_read_py",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"python -c \\\"from pathlib import Path; print(Path('README.md').read_text())\\\"\"}"
+                            }
+                        }
+                    ]
+                },
+                { "role": "tool", "tool_call_id": "call_read_py", "name": "exec_command", "content": "README" },
+                { "role": "user", "content": "继续分析" }
+            ]
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+        assert!(features.has_tool_call_responses);
+        assert_eq!(
+            features.last_assistant_tool_category.as_deref(),
+            Some("thinking")
+        );
+    }
+
+    #[test]
     fn previous_turn_tool_signals_ignore_older_responses_context_history_before_latest_user_boundary(
     ) {
         let request = json!({
@@ -702,6 +735,55 @@ mod tests {
     }
 
     #[test]
+    fn responses_context_search_pattern_replace_stays_search_not_coding() {
+        let request = json!({
+            "model": "glm-5",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "cmd": { "type": "string" }
+                            }
+                        }
+                    }
+                }
+            ],
+            "semantics": {
+                "responses": {
+                    "context": {
+                        "input": [
+                            { "type": "message", "role": "user", "content": "搜 replace 相关位置" },
+                            {
+                                "type": "function_call",
+                                "id": "call_search",
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"rg -n 'replace' sharedmodule/llmswitch-core\"}"
+                            },
+                            {
+                                "type": "function_call_output",
+                                "call_id": "call_search",
+                                "output": "matched"
+                            }
+                        ]
+                    }
+                }
+            }
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+        assert!(!features.latest_message_from_user);
+        assert!(features.has_tool_call_responses);
+        assert_eq!(
+            features.last_assistant_tool_category.as_deref(),
+            Some("search")
+        );
+    }
+
+    #[test]
     fn responses_context_current_tool_continuation_after_latest_user_boundary_is_not_user_turn() {
         let request = json!({
             "model": "glm-5",
@@ -777,6 +859,75 @@ mod tests {
         let features = build_routing_features(&request, &json!({}));
         assert!(features.has_tools);
         assert_eq!(features.tool_count, 1);
+    }
+
+    #[test]
+    fn malformed_exec_command_followup_does_not_set_last_assistant_tool_category() {
+        let request = json!({
+            "model": "glm-5",
+            "messages": [
+                { "role": "user", "content": "写文件" },
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [
+                        {
+                            "id": "call_bad_exec",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"\"}"
+                            }
+                        }
+                    ]
+                },
+                { "role": "tool", "tool_call_id": "call_bad_exec", "name": "exec_command", "content": "bad args" }
+            ]
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+        assert!(features.has_tool_call_responses);
+        assert_eq!(features.last_assistant_tool_category, None);
+    }
+
+    #[test]
+    fn declared_coding_tools_without_valid_assistant_tool_call_do_not_create_coding_continuation() {
+        let request = json!({
+            "model": "glm-5",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "cmd": { "type": "string" }
+                            }
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "apply_patch",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "patch": { "type": "string" }
+                            }
+                        }
+                    }
+                }
+            ],
+            "messages": [
+                { "role": "user", "content": "继续" }
+            ]
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+        assert!(features.has_tools);
+        assert_eq!(features.last_assistant_tool_category, None);
     }
 }
 

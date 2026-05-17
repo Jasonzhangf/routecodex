@@ -1,15 +1,13 @@
 import { validateToolCall } from '../../tools/tool-registry.js';
 import { repairFindMeta } from './tooling.js';
-import { captureApplyPatchRegression } from '../../tools/apply-patch/regression-capturer.js';
 import { normalizeExecCommandArgs } from '../../tools/exec-command/normalize.js';
 import {
-  buildBlockedApplyPatchArgs,
   repairCommandNameAsExecToolCall,
-  resolveExecCommandGuardValidationOptions,
-  rewriteExecCommandApplyPatchCall
+  resolveExecCommandGuardValidationOptions
 } from './tool-governor-guards.js';
 import {
   applyRespProcessToolGovernanceWithNative,
+  normalizeApplyPatchArgumentsWithNative,
   prepareRespProcessToolGovernancePayloadWithNative
 } from '../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
 import {
@@ -32,18 +30,11 @@ export function normalizeApplyPatchToolCallsOnResponse(chat: Unknown): Unknown {
         try {
           const fn = toolCall && toolCall.function ? toolCall.function : undefined;
           repairCommandNameAsExecToolCall(fn as Record<string, unknown> | undefined, validationOptions);
-          rewriteExecCommandApplyPatchCall(fn as Record<string, unknown> | undefined);
           const name = typeof fn?.name === 'string' ? String(fn.name).trim().toLowerCase() : '';
           if (name !== 'apply_patch') continue;
           const rawArgs = (fn as any)?.arguments;
-          const argsStr = repairArgumentsToString(rawArgs);
-          const validation = validateToolCall('apply_patch', argsStr);
-          if (validation?.ok && typeof validation.normalizedArgs === 'string') {
-            (fn as any).arguments = validation.normalizedArgs;
-          } else if (validation && !validation.ok) {
-            (fn as any).arguments = buildBlockedApplyPatchArgs(rawArgs, validation.reason, validation.message);
-            captureApplyPatchFailure(rawArgs, argsStr, validation.reason);
-          }
+          const normalized = normalizeApplyPatchArgumentsWithNative(rawArgs);
+          (fn as any).arguments = normalized.normalizedArguments;
         } catch (error) {
           logToolGovernorNonBlocking('response_tool_call_normalize_item', error);
         }
@@ -72,8 +63,7 @@ export function processChatResponseTools(resp: Unknown): Unknown {
       requestId
     });
     const canonical = governed.governedPayload as Unknown;
-    const withPatch = normalizeApplyPatchToolCallsOnResponse(canonical);
-    return enhanceResponseToolArguments(withPatch);
+    return enhanceResponseToolArguments(canonical);
   } catch (error) {
     logToolGovernorNonBlocking('process_chat_response_tools', error);
     return resp;
@@ -189,32 +179,6 @@ function normalizeExecCommandArguments(
     }
   }
   return repaired;
-}
-
-function captureApplyPatchFailure(rawArgs: unknown, argsStr: string, reason?: string): void {
-  try {
-    const finalReason = reason ?? 'unknown';
-    captureApplyPatchRegression({
-      errorType: finalReason,
-      originalArgs: rawArgs,
-      normalizedArgs: argsStr,
-      validationError: finalReason,
-      source: 'tool-governor.response',
-      meta: { applyPatchToolMode: 'freeform' }
-    });
-    const snippet =
-      typeof argsStr === 'string' && argsStr.trim().length
-        ? argsStr.trim().slice(0, 200).replace(/\s+/g, ' ')
-        : '';
-    // eslint-disable-next-line no-console
-    console.error(
-      `\x1b[31m[apply_patch][precheck][response] validation_failed reason=${finalReason}${
-        snippet ? ` args=${snippet}` : ''
-      }\x1b[0m`
-    );
-  } catch (error) {
-    logToolGovernorNonBlocking('response_apply_patch_regression_capture', error);
-  }
 }
 
 function isBashLc(tokens: string[]): boolean {

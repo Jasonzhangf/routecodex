@@ -338,8 +338,8 @@ async function main() {
   results.push(await run('matrix:apply-patch-freeform-schema', 'scripts/tests/apply-patch-freeform-tool-schema-passthrough.mjs'));
   // 1f.4.1) apply_patch must accept GNU unified diff and convert to apply_patch grammar
   results.push(await run('matrix:apply-patch-gnu-diff', 'scripts/tests/apply-patch-gnu-diff-compat.mjs'));
-  // 1f.4.1.1) apply_patch args normalizer: action skeleton + configurable pipeline
-  results.push(await run('matrix:apply-patch-action-pipeline', 'scripts/tests/apply-patch-action-pipeline.mjs'));
+  // 1f.4.1.1) apply_patch native regression matrix: 7 same-shape compat/state-machine gates
+  results.push(await run('matrix:apply-patch-native-regression-matrix', 'scripts/tests/apply-patch-native-regression-matrix.mjs'));
   // 1f.4.2.3) responses tool loop: submit_tool_outputs resume must work for non-responses providers
   results.push(await run('matrix:responses-submit-tool-outputs-resume', 'scripts/tests/responses-submit-tool-outputs-resume.mjs'));
   // 1f.5) responses request: must not emit top-level parameters wrapper

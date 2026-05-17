@@ -84,6 +84,7 @@ pub(crate) fn build_route_queue(
     routing: &RoutingPools,
 ) -> Vec<String> {
     let mut queue: Vec<String> = Vec::new();
+    let protects_default_fallback = protects_default_fallback(requested_route, routing);
     let has_multimodal_targets = route_has_targets(routing, "multimodal");
     let has_vision_targets = route_has_targets(routing, "vision");
     let has_video_targets = route_has_targets(routing, "video");
@@ -94,6 +95,9 @@ pub(crate) fn build_route_queue(
         queue.push(requested_route.to_string());
     }
     for route in candidates {
+        if protects_default_fallback && route == super::super::classifier::DEFAULT_ROUTE {
+            continue;
+        }
         if !queue.contains(route) {
             queue.push(route.clone());
         }
@@ -119,10 +123,19 @@ pub(crate) fn build_route_queue(
             deduped.push(route);
         }
     }
-    if !deduped.contains(&super::super::classifier::DEFAULT_ROUTE.to_string()) {
+    if !protects_default_fallback
+        && !deduped.contains(&super::super::classifier::DEFAULT_ROUTE.to_string())
+    {
         deduped.push(super::super::classifier::DEFAULT_ROUTE.to_string());
     }
     deduped
+}
+
+fn protects_default_fallback(requested_route: &str, routing: &RoutingPools) -> bool {
+    matches!(
+        requested_route.trim(),
+        "thinking" | "coding" | "search" | "longcontext"
+    ) && route_has_targets(routing, requested_route)
 }
 
 pub(crate) fn build_route_candidates(
@@ -255,5 +268,53 @@ mod tests {
         let queue = build_route_queue("web_search", &["default".to_string()], &features, &routing);
 
         assert_eq!(queue, vec!["web_search".to_string(), "default".to_string()]);
+    }
+
+    #[test]
+    fn thinking_route_with_targets_does_not_fall_back_to_default() {
+        let routing = parse_routing(&Map::from_iter([
+            (
+                "thinking".to_string(),
+                Value::Array(vec![serde_json::json!({
+                    "id": "thinking",
+                    "priority": 100,
+                    "targets": ["provider.thinking"]
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![serde_json::json!({
+                    "id": "default",
+                    "priority": 100,
+                    "targets": ["provider.default"]
+                })]),
+            ),
+        ]));
+        let queue = build_route_queue(
+            "thinking",
+            &["thinking".to_string(), "default".to_string()],
+            &RoutingFeatures::default(),
+            &routing,
+        );
+        assert_eq!(queue, vec!["thinking".to_string()]);
+    }
+
+    #[test]
+    fn coding_route_without_targets_can_still_fall_back_to_default() {
+        let routing = parse_routing(&Map::from_iter([(
+            "default".to_string(),
+            Value::Array(vec![serde_json::json!({
+                "id": "default",
+                "priority": 100,
+                "targets": ["provider.default"]
+            })]),
+        )]));
+        let queue = build_route_queue(
+            "coding",
+            &["default".to_string()],
+            &RoutingFeatures::default(),
+            &routing,
+        );
+        assert_eq!(queue, vec!["coding".to_string(), "default".to_string()]);
     }
 }

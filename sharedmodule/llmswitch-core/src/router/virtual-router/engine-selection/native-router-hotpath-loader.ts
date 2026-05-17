@@ -116,10 +116,7 @@ function tryRequireFromPath(
       options?.requireComplete !== false &&
       !hasCompleteNativeBinding(loaded, REQUIRED_NATIVE_EXPORTS)
     ) {
-      // Do not reject an already-loadable native binding here.
-      // Capability-level wrappers still fail fast for any missing export,
-      // while this avoids false negatives during startup/import on some Node/NAPI path combinations.
-      return loaded;
+      return null;
     }
     return loaded;
   } catch {

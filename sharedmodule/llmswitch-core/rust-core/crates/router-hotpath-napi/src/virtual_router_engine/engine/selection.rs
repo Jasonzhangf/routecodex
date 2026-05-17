@@ -185,11 +185,6 @@ impl VirtualRouterEngineCore {
             features,
             &self.routing,
         );
-        if !routing_state.allowed_providers.is_empty()
-            && route_has_targets(&self.routing, DEFAULT_ROUTE)
-        {
-            route_queue = vec![DEFAULT_ROUTE.to_string()];
-        }
         let sticky_key = crate::virtual_router_engine::routing::resolve_sticky_key(metadata);
         let now_for_weights = extract_runtime_now_ms(metadata).unwrap_or_else(now_ms);
         let health_cfg =

@@ -100,7 +100,7 @@ fn ensure_apply_patch_schema(candidate: Option<&Value>) -> Value {
     patch.insert(
         "description".to_string(),
         Value::String(
-            "Raw patch text. Template: *** Begin Patch\\n*** Add File: path/to/file\\n+line\\n*** End Patch\\n\\nUpdate File template: *** Begin Patch\\n*** Update File: path/to/file\\n@@\\n old\\n-new\\n+new\\n old\\n*** End Patch\\n\\nREJECTED: conflict markers (======= / >>>>>>> / <<<<<<<), GNU diff headers (--- a/ +++ b/) inside Begin Patch envelope, shell heredoc wrapping, markdown fences, natural-language instructions.\\n\\nPick ONE format: either internal *** Begin/End Patch or pure GNU diff, not both.".to_string(),
+            "Raw patch text only. Author exactly one canonical patch body in `patch`. `input` is a compatibility alias only.".to_string(),
         ),
     );
     properties.insert("patch".to_string(), Value::Object(patch));
@@ -109,7 +109,7 @@ fn ensure_apply_patch_schema(candidate: Option<&Value>) -> Value {
     input.insert("type".to_string(), Value::String("string".to_string()));
     input.insert(
         "description".to_string(),
-        Value::String("Alias of patch. Same patch text grammar as patch. Prefer patch.".to_string()),
+        Value::String("Compatibility alias of patch. Prefer patch.".to_string()),
     );
     properties.insert("input".to_string(), Value::Object(input));
 
@@ -222,9 +222,7 @@ pub(crate) fn rewrite_builtin_tool_description(name: &str, existing: Option<&Val
         return base;
     }
     Some(
-        r#"Use the `apply_patch` tool to edit files. Call it with schema arguments `{"patch": "*** Begin Patch
-...
-*** End Patch"}`. Do not send raw tool input, Markdown fences, prose, shell heredoc, or git/unified diff syntax. `input` is accepted only as an alias of `patch`."#.to_string(),
+        r#"Use `apply_patch` to edit files. Author exactly one canonical patch body in `patch`. `input` is a compatibility alias only."#.to_string(),
     )
 }
 

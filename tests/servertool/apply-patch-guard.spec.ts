@@ -76,5 +76,73 @@ describe('apply_patch servertool guard', () => {
     expect(tc?.arguments).toBe(invalidArgs);
     expect(final.tool_outputs).toBeUndefined();
   });
-});
 
+  test('blocks repeated apply_patch retry until a file read is observed, while preserving tools', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-apply-patch-read-before-retry',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      routeId: 'coding',
+      capturedChatRequest: {
+        ...makeCapturedChatRequest(),
+        messages: [
+          { role: 'user', content: 'edit AGENTS.md' },
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_apply_patch_prev',
+                type: 'function',
+                function: {
+                  name: 'apply_patch',
+                  arguments: JSON.stringify({ patch: '*** Begin Patch\n*** Update File: AGENTS.md\n@@\n-old\n+new\n*** End Patch' })
+                }
+              }
+            ]
+          },
+          {
+            role: 'tool',
+            tool_call_id: 'call_apply_patch_prev',
+            name: 'apply_patch',
+            content: "apply_patch verification failed: Failed to find context '-1,1 +1,1 @@' in AGENTS.md"
+          }
+        ]
+      } as any
+    } as any;
+
+    const nextArgs = JSON.stringify({
+      patch: '*** Begin Patch\n*** Update File: AGENTS.md\n@@\n-older\n+newer\n*** End Patch'
+    });
+    const chatResponse = makeApplyPatchToolCallResponse(nextArgs);
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-apply-patch-read-before-retry',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => ({ body: {} as JsonObject })
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    const outputs = ((result.finalChatResponse as any).tool_outputs ?? []) as Array<any>;
+    expect(outputs).toHaveLength(1);
+    const payload = JSON.parse(String(outputs[0].content || '{}'));
+    expect(payload.ok).toBe(false);
+    expect(payload.code).toBe('APPLY_PATCH_REQUIRES_READ_BEFORE_RETRY');
+    expect(String(payload.message || '')).toContain('read the latest target file content');
+
+    const followup = result.execution?.followup as any;
+    expect(followup?.injection?.ops).toEqual(
+      expect.arrayContaining([
+        { op: 'preserve_tools' },
+        { op: 'append_tool_messages_from_tool_outputs', required: true },
+        expect.objectContaining({ op: 'inject_system_text' })
+      ])
+    );
+    expect(String(followup?.metadata?.clientInjectSource || '')).toBe(
+      'servertool.apply_patch_read_before_retry'
+    );
+  });
+});

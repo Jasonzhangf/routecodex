@@ -2973,12 +2973,12 @@ fn test_req_profile_chat_qwen_only_normalizes_tool_definitions_and_keeps_message
         .unwrap_or("");
     assert!(cmd_desc.contains("Single command string only."));
     let patch_desc = tools[1]["function"]["description"].as_str().unwrap_or("");
-    assert!(patch_desc.contains("Use only `patch`"));
+    assert!(patch_desc.contains("Author exactly one canonical patch body in `patch`"));
     assert!(patch_desc.contains("Call the tool directly."));
     let patch_prop_desc = tools[1]["function"]["parameters"]["properties"]["patch"]["description"]
         .as_str()
         .unwrap_or("");
-    assert!(patch_prop_desc.contains("full `*** Begin Patch` ... `*** End Patch` envelope"));
+    assert!(patch_prop_desc.contains("canonical patch string"));
 }
 
 #[test]
@@ -3108,14 +3108,14 @@ fn test_req_profile_chat_qwenchat_web_injects_override_head_and_normalizes_tool_
         .unwrap_or("");
     assert!(cmd_desc.contains("Single command string only."));
     let apply_patch_desc = tools[1]["function"]["description"].as_str().unwrap_or("");
-    assert!(apply_patch_desc.contains("Use only `patch`"));
+    assert!(apply_patch_desc.contains("Author exactly one canonical patch body in `patch`"));
     assert!(apply_patch_desc.contains("Treat file editing as available here."));
     assert!(apply_patch_desc
         .contains("output exactly one RCC_TOOL_CALLS_JSON heredoc dry-run container"));
     let patch_prop_desc = tools[1]["function"]["parameters"]["properties"]["patch"]["description"]
         .as_str()
         .unwrap_or("");
-    assert!(patch_prop_desc.contains("full `*** Begin Patch` ... `*** End Patch` envelope"));
+    assert!(patch_prop_desc.contains("canonical patch string"));
     let update_plan_desc = tools[2]["function"]["description"].as_str().unwrap_or("");
     assert!(update_plan_desc.contains("Use `plan`"));
     assert!(update_plan_desc.contains("Do not use `steps`"));
