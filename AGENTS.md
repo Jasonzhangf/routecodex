@@ -44,6 +44,8 @@
    - `docs/routing-instructions.md`
    - `docs/stop-message-auto.md`
    - `docs/design/servertool-stopmessage-lifecycle.md`
+   - `docs/hubpipeline-rust-boundary.md`
+   - `docs/design/servertool-followup-rebuild-from-origin.md`
 7. 用户纠偏路由（全局）：`~/.codex/docs/agent-routing/10-alignment-and-profile.md`
    - 说明：`user-correction-alignment` 是 **skill 名称**，不是 shell 命令。
 
