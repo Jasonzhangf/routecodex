@@ -88,8 +88,18 @@ export function resolveFollowupExecutionMode(args: {
   readClientInjectOnly: (metadata: JsonObject) => boolean;
 }): 'skip' | 'client_inject_only' | 'reenter' {
   const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
+  const metadataRecord = args.metadata as Record<string, unknown>;
+  const injectSource =
+    typeof metadataRecord.clientInjectSource === 'string'
+      ? metadataRecord.clientInjectSource.trim()
+      : '';
   if (decision.outcomeMode === 'skip' || decision.noFollowup) {
     return 'skip';
+  }
+  // stopless followup must continue via normal request re-enter path,
+  // not tmux/client inject.
+  if (injectSource === 'servertool.stopless_goal_continue') {
+    return 'reenter';
   }
   if (
     args.readClientInjectOnly(args.metadata) ||
