@@ -25,6 +25,7 @@
 15. **Qwen / QwenChat 禁止混淆**：`qwen` 与系统安装的 **Qwen Code** / DashScope OAuth 链路同源；`qwenchat` 是另一条独立 Web 链路。调试 `qwen` 时，禁止拿 `qwenchat` 的成功/鉴权/UA/header 结论冒充 `qwen` 证据。
 16. **发现即修（最小切片）**：本次任务触达范围内，凡发现 fallback 或静默失败代码，必须顺手修复并补充验证证据；禁止“先记账后放过”。
 17. **默认全局安装 rcc（除非用户明确拒绝）**：凡涉及 build/dev/install/restart/可执行验证，默认执行“编译 + 全局安装 rcc/routecodex + 健康检查”；只有当 Jason 明确要求“不全局安装”时才可跳过。
+18. **HubPipeline 强制 Rust 规则**：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/**` 与 `sharedmodule/llmswitch-core/src/conversion/hub/process/**` 涉及的 HubPipeline 语义（消息处理、tool_calls 处理、clock/heartbeat 指令语义、session usage 语义、marker 语义）必须由 Rust 真源实现；禁止在上述 TS 路径新增或扩展业务语义逻辑。TS 仅允许薄壳 native 调用（参数/返回桥接）与不改写 payload 语义的运行时基础设施编排。发现 TS 语义实现时，必须迁回 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/` 并将 TS 收缩为薄壳。
 
 ## 分类路由（路径 + 作用）
 1. 入口总览：`docs/agent-routing/00-entry-routing.md`
