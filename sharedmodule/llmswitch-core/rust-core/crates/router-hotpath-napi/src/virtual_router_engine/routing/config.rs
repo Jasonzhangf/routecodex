@@ -148,10 +148,9 @@ fn is_tool_route_with_tools_fallback(route: &str) -> bool {
 }
 
 fn protects_default_fallback(requested_route: &str, routing: &RoutingPools) -> bool {
-    matches!(
-        requested_route.trim(),
-        "thinking" | "coding" | "search" | "longcontext"
-    ) && route_has_targets(routing, requested_route)
+    let _ = requested_route;
+    let _ = routing;
+    false
 }
 
 pub(crate) fn build_route_candidates(

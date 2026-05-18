@@ -8,13 +8,7 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
         "servertool": {
             "enabled": true,
             "internalTools": {
-                "reasoning.stop": {
-                    "name": "reasoning.stop",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "tool_call", "canonicalName": "reasoning.stop" },
-                    "execution": { "mode": "guarded", "stripAfterExecute": true }
-                },
+                
                 "clock": {
                     "name": "clock",
                     "enabled": true,
@@ -71,27 +65,8 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                     "trigger": { "type": "auto", "canonicalName": "vision_auto", "phase": "post", "priority": 60 },
                     "execution": { "mode": "auto_hook", "stripAfterExecute": true }
                 },
-                "reasoning_only_continue": {
-                    "name": "reasoning_only_continue",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "auto", "canonicalName": "reasoning_only_continue", "phase": "post", "priority": 200 },
-                    "execution": { "mode": "auto_hook", "stripAfterExecute": true }
-                },
-                "stopless_goal_guard": {
-                    "name": "stopless_goal_guard",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "auto", "canonicalName": "stopless_goal_guard", "phase": "post", "priority": 150 },
-                    "execution": { "mode": "auto_hook", "stripAfterExecute": true }
-                },
-                "reasoning_stop_guard": {
-                    "name": "reasoning_stop_guard",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "auto", "canonicalName": "reasoning_stop_guard", "phase": "post", "priority": 160 },
-                    "execution": { "mode": "auto_hook", "stripAfterExecute": true }
-                },
+                
+                
                 "exec_command": {
                     "name": "exec_command",
                     "enabled": true,
@@ -121,10 +96,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                 "progress": {
                     "toolNameByFlowId": {
                         "continue_execution_flow": "continue_execution",
-                        "stopless_goal_continue_flow": "stopless_goal_guard",
-                        "reasoning_stop_flow": "reasoning.stop",
-                        "reasoning_stop_guard_flow": "reasoning_stop_guard",
-                        "reasoning_stop_finalize_flow": "reasoning_stop_finalize",
                         "stop_message_flow": "stop_message_auto",
                         "apply_patch_guard": "apply_patch_guard",
                         "exec_command_guard": "exec_command_guard",
@@ -158,9 +129,7 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                     ],
                     "flowPolicy": {
                         "profilesByFlowId": {
-                            "reasoning_stop_finalize_flow": {
-                                "noFollowup": true
-                            },
+
                             "apply_patch_guard": {
                                 "autoLimit": true,
                                 "flowOnlyLoopLimit": true
@@ -174,20 +143,7 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                                 "autoLimit": true,
                                 "flowOnlyLoopLimit": true
                             },
-                            "reasoning_only_continue_flow": {
-                                "autoLimit": true,
-                                "flowOnlyLoopLimit": true
-                            },
-                            "reasoning_stop_guard_flow": {
-                                "autoLimit": true,
-                                "flowOnlyLoopLimit": true,
-                                "stickyProvider": true
-                            },
-                            "reasoning_stop_continue_flow": {
-                                "autoLimit": true,
-                                "flowOnlyLoopLimit": true,
-                                "stickyProvider": true
-                            },
+
                             "stop_message_flow": {
                                 "stickyProvider": true,
                                 "seedLoopPayload": true,
@@ -207,12 +163,7 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                                 "stickyProvider": true,
                                 "contextDecorationMode": "continue_execution_summary"
                             },
-                            "stopless_goal_continue_flow": {
-                                "stickyProvider": true
-                            },
-                            "reasoning_stop_flow": {
-                                "stickyProvider": true
-                            },
+
                             "web_search_flow": {
                                 "contextDecorationMode": "web_search_summary"
                             }
@@ -310,7 +261,7 @@ mod tests {
         assert!(parsed
             .get("servertool")
             .and_then(|v| v.get("internalTools"))
-            .and_then(|v| v.get("reasoning.stop"))
+            
             .is_some());
     }
 

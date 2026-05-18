@@ -50,6 +50,7 @@ export {
   resumeResponsesConversation,
   resumeLatestResponsesContinuationByScope,
   rebindResponsesConversationRequestId,
+  clearResponsesConversationByRequestId,
   createResponsesSseToJsonConverter,
   reportProviderErrorToRouterPolicy,
   reportProviderSuccessToRouterPolicy,

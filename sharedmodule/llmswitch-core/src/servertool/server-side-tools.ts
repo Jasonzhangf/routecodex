@@ -1,6 +1,5 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject, JsonValue } from '../conversion/hub/types/json.js';
-import { isGoalCapableAdapterContext } from '../conversion/hub/pipeline/hub-pipeline-goal-tools.js';
 import type {
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
@@ -13,14 +12,11 @@ import {
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import './handlers/memory/cache-auto.js';
 import './handlers/stop-message-auto.js';
-import './handlers/reasoning-only-continue.js';
-import './handlers/reasoning-stop.js';
 import './handlers/clock.js';
 import './handlers/clock-auto.js';
 import './handlers/exec-command-guard.js';
 import './handlers/apply-patch-guard.js';
 import './handlers/continue-execution.js';
-import { hasManagedStoplessGoalState } from './handlers/stopless-goal-state.js';
 import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import { loadRoutingInstructionStateSync } from '../router/virtual-router/sticky-session-store.js';
 import {
@@ -43,12 +39,10 @@ import {
   stripToolOutputs
 } from './orchestration-blocks.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
+import { isStopEligibleForServerTool } from './stop-gateway-context.js';
 
 type AutoHookQueueName = 'A_optional' | 'B_mandatory';
 type AutoHookDescriptor = ReturnType<typeof listAutoServerToolHooks>[number];
-const LEGACY_REASONING_STOP_TOOL_HANDLER_NAMES = ['reasoning.stop'];
-const LEGACY_REASONING_STOP_AUTO_HOOK_IDS = ['reasoning_stop_guard'];
-const LEGACY_REASONING_STOP_TOOL_NAMES = new Set(['reasoning.stop', 'reasoning_stop', 'reasoning-stop']);
 
 function normalizeFilterTokenSet(values: string[] | undefined): Set<string> | null {
   if (!Array.isArray(values) || values.length === 0) {
@@ -67,78 +61,12 @@ function normalizeFilterTokenSet(values: string[] | undefined): Set<string> | nu
   }
   return normalized.size > 0 ? normalized : null;
 }
-
-function mergeNormalizedFilterTokenSets(
-  base: Set<string> | null,
-  extras: string[]
-): Set<string> | null {
-  const merged = new Set<string>(base ? [...base] : []);
-  for (const raw of extras) {
-    if (typeof raw !== 'string') {
-      continue;
-    }
-    const value = raw.trim().toLowerCase();
-    if (!value) {
-      continue;
-    }
-    merged.add(value);
-  }
-  return merged.size > 0 ? merged : null;
-}
-
-function readNormalizedToolCallNameFromMessageNode(toolCall: unknown): string {
-  if (!toolCall || typeof toolCall !== 'object' || Array.isArray(toolCall)) {
-    return '';
-  }
-  const record = toolCall as Record<string, unknown>;
-  if (typeof record.name === 'string' && record.name.trim()) {
-    return record.name.trim().toLowerCase();
-  }
-  const fn =
-    record.function && typeof record.function === 'object' && !Array.isArray(record.function)
-      ? (record.function as Record<string, unknown>)
-      : undefined;
-  return typeof fn?.name === 'string' && fn.name.trim()
-    ? fn.name.trim().toLowerCase()
-    : '';
-}
-
-function stripLegacyReasoningStopToolCallsInPlace(chatResponse: JsonObject): void {
-  const choices = Array.isArray((chatResponse as { choices?: unknown }).choices)
-    ? ((chatResponse as { choices: unknown[] }).choices as unknown[])
-    : [];
-  for (const choice of choices) {
-    if (!choice || typeof choice !== 'object' || Array.isArray(choice)) {
-      continue;
-    }
-    const message =
-      (choice as { message?: unknown }).message && typeof (choice as { message?: unknown }).message === 'object' && !Array.isArray((choice as { message?: unknown }).message)
-        ? ((choice as { message: Record<string, unknown> }).message as Record<string, unknown>)
-        : undefined;
-    const toolCalls = Array.isArray(message?.tool_calls) ? (message.tool_calls as unknown[]) : undefined;
-    if (!message || !toolCalls?.length) {
-      continue;
-    }
-    message.tool_calls = toolCalls.filter((toolCall) => {
-      const name = readNormalizedToolCallNameFromMessageNode(toolCall);
-      return !name || !LEGACY_REASONING_STOP_TOOL_NAMES.has(name);
-    });
-  }
-}
-
 export async function runServerSideToolEngine(
   options: ServerSideToolEngineOptions
 ): Promise<ServerSideToolEngineResult> {
   const base = asObject(options.chatResponse);
   if (!base) {
     return { mode: 'passthrough', finalChatResponse: options.chatResponse };
-  }
-
-  const goalManagedContext =
-    isGoalCapableAdapterContext(options.adapterContext as AdapterContext)
-    || hasManagedStoplessGoalState(options.adapterContext);
-  if (goalManagedContext) {
-    stripLegacyReasoningStopToolCallsInPlace(base);
   }
 
   const toolCalls = extractToolCalls(base, options.requestId);
@@ -160,19 +88,9 @@ export async function runServerSideToolEngine(
     }
   };
   const includeToolCallNames = normalizeFilterTokenSet(options.includeToolCallHandlerNames);
-  const excludeToolCallNames = goalManagedContext
-    ? mergeNormalizedFilterTokenSets(
-        normalizeFilterTokenSet(options.excludeToolCallHandlerNames),
-        LEGACY_REASONING_STOP_TOOL_HANDLER_NAMES
-      )
-    : normalizeFilterTokenSet(options.excludeToolCallHandlerNames);
+  const excludeToolCallNames = normalizeFilterTokenSet(options.excludeToolCallHandlerNames);
   const includeAutoHookIds = normalizeFilterTokenSet(options.includeAutoHookIds);
-  const excludeAutoHookIds = goalManagedContext
-    ? mergeNormalizedFilterTokenSets(
-        normalizeFilterTokenSet(options.excludeAutoHookIds),
-        LEGACY_REASONING_STOP_AUTO_HOOK_IDS
-      )
-    : normalizeFilterTokenSet(options.excludeAutoHookIds);
+  const excludeAutoHookIds = normalizeFilterTokenSet(options.excludeAutoHookIds);
 
   // Tool-call servertools: execute all executable servertool calls first, then decide:
   // - if only servertools were present -> followup via reenter (existing behavior)
@@ -246,7 +164,7 @@ export async function runServerSideToolEngine(
   }
 
   const payloadContractSignal = detectEmptyAssistantPayloadContractSignalWithNative(base);
-  if (payloadContractSignal) {
+  if (payloadContractSignal && !isStopEligibleForServerTool(base, options.adapterContext)) {
     return { mode: 'passthrough', finalChatResponse: base };
   }
 

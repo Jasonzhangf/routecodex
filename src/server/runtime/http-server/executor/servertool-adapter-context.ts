@@ -82,13 +82,6 @@ function shouldReplaceCapturedChatRequestTools(args: {
     return false;
   }
 
-  const existingOnlyReasoningStop = existingNames.every(
-    (name) => name === 'reasoning.stop' || name === 'reasoning_stop' || name === 'reasoning-stop'
-  );
-  if (existingOnlyReasoningStop) {
-    return true;
-  }
-
   return existingNames.length < clientNames.size && existingNames.every((name) => clientNames.has(name));
 }
 

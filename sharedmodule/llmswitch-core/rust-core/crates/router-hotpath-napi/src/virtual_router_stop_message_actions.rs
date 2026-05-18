@@ -132,7 +132,10 @@ fn apply_stop_message_set(
     if from_historical && !is_same_instruction {
         return make_result(true, Map::new(), Vec::new());
     }
-    let should_rearm_for_source = !from_historical;
+    // Historical replay must not re-arm on every turn. But when the current
+    // chain has already exhausted (used >= max), the next fresh turn should
+    // be able to arm again from the same persisted instruction.
+    let should_rearm_for_source = !from_historical || used >= max_repeats;
 
     let explicit_source = read_trimmed_string(instruction.get("stopMessageSource"))
         .unwrap_or_else(|| "explicit_text".to_string());
@@ -211,6 +214,43 @@ fn apply_stop_message_clear(now_ms: i64) -> NapiResult<String> {
     push_unset(&mut unset, "stopMessageAiHistory");
 
     make_result(true, set, unset)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn historical_set_rearms_when_exhausted() {
+        let instruction = json!({
+            "type": "stopMessageSet",
+            "stopMessageText": "继续执行",
+            "stopMessageMaxRepeats": 2,
+            "fromHistoricalUserMessage": true
+        });
+        let state = json!({
+            "stopMessageText": "继续执行",
+            "stopMessageMaxRepeats": 2,
+            "stopMessageUsed": 2,
+            "stopMessageStageMode": "on",
+            "stopMessageAiMode": "off"
+        });
+        let output = apply_stop_message_instruction_json(
+            instruction.to_string(),
+            state.to_string(),
+            12345,
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            parsed
+                .get("set")
+                .and_then(|v| v.get("stopMessageUsed"))
+                .and_then(|v| v.as_i64()),
+            Some(0)
+        );
+    }
 }
 
 #[napi]

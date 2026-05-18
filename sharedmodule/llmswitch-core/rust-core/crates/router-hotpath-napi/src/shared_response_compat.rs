@@ -654,6 +654,315 @@ pub fn normalize_tool_call_ids_json(payload_json: String) -> NapiResult<String> 
     serde_json::to_string(&payload).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+
+/// Input: JSON object with optional messages array.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SanitizeMessagesOutput {
+    messages: Vec<Value>,
+    removed_assistant_turns: i64,
+    removed_empty_assistant_turns: i64,
+    removed_template_assistant_turns: i64,
+    removed_duplicate_mirror_assistant_turns: i64,
+    removed_historical_goal_turns: i64,
+    did_mutate_message_shapes: bool,
+}
+
+fn extract_message_text(content: &Value) -> String {
+    match content {
+        Value::String(s) => s.trim().to_string(),
+        Value::Array(parts) => {
+            let mut buf = String::new();
+            for part in parts {
+                if let Some(s) = part.as_str() {
+                    buf.push_str(s.trim()); buf.push(' ');
+                } else if let Some(obj) = part.as_object() {
+                    for key in ["text","output_text","input_text","content","thinking","reasoning","reasoning_content"] {
+                        if let Some(v) = obj.get(key).and_then(|v| v.as_str()) {
+                            buf.push_str(v.trim()); buf.push(' ');
+                        }
+                    }
+                }
+            }
+            buf.trim().to_string()
+        }
+        _ => String::new(),
+    }
+}
+
+fn is_meaningless_dot_text(text: &str) -> bool {
+    let t = text.trim();
+    t == "." || t == ".." || t == "..."
+}
+
+fn is_template_assistant_text(text: &str) -> bool {
+    let n = text.trim().replace(|c: char| c.is_whitespace(), " ").to_lowercase();
+    (n.contains("i'm here to help") && n.contains("what would you like me to do"))
+        || (n.contains("i'm ready to help you with whatever you need") && n.contains("what would you like me to do"))
+}
+
+fn is_goal_tool_name(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "get_goal" | "create_goal" | "update_goal" | "request_user_input"
+    )
+}
+
+fn read_message_role(msg: &Value) -> &str {
+    msg.get("role").and_then(|v| v.as_str()).unwrap_or("")
+}
+
+fn read_message_type(msg: &Value) -> &str {
+    msg.get("type").and_then(|v| v.as_str()).unwrap_or("")
+}
+
+fn read_message_name(msg: &Value) -> String {
+    msg.get("name")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_default()
+}
+
+fn read_message_call_id(msg: &Value) -> Option<String> {
+    msg.get("call_id")
+        .or_else(|| msg.get("tool_call_id"))
+        .or_else(|| msg.get("id"))
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn read_assistant_tool_call_goal_ids(msg: &Value) -> Option<Vec<String>> {
+    let tool_calls = msg.get("tool_calls").and_then(|v| v.as_array())?;
+    if tool_calls.is_empty() {
+        return None;
+    }
+
+    let mut ids: Vec<String> = Vec::new();
+    for tool_call in tool_calls {
+        let Some(tool_row) = tool_call.as_object() else {
+            return None;
+        };
+        let name = tool_row
+            .get("function")
+            .and_then(|v| v.as_object())
+            .and_then(|row| row.get("name"))
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_ascii_lowercase())
+            .unwrap_or_default();
+        if !is_goal_tool_name(&name) {
+            return None;
+        }
+        let Some(call_id) = tool_row
+            .get("id")
+            .or_else(|| tool_row.get("call_id"))
+            .or_else(|| tool_row.get("tool_call_id"))
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+        else {
+            return None;
+        };
+        ids.push(call_id);
+    }
+
+    Some(ids)
+}
+
+fn is_active_thread_goal_prompt_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.contains("Continue working toward the active thread goal.")
+        || trimmed.contains("<untrusted_objective>")
+}
+
+fn is_goal_history_assistant_text(text: &str) -> bool {
+    let normalized = text.trim().to_ascii_lowercase();
+    normalized.contains("update_goal")
+        || normalized.contains("goal 已完成")
+        || normalized.contains("goal 已满足")
+        || normalized.contains("goal has already been achieved")
+        || normalized.contains("mark the goal complete")
+}
+
+fn latest_user_index(messages: &[Value]) -> Option<usize> {
+    messages
+        .iter()
+        .rposition(|msg| read_message_role(msg) == "user")
+}
+
+fn should_drop_historical_goal_turn(
+    msg: &Value,
+    latest_user_idx: Option<usize>,
+    idx: usize,
+    dropped_goal_call_ids: &mut std::collections::HashSet<String>,
+) -> bool {
+    let Some(last_user_idx) = latest_user_idx else {
+        return false;
+    };
+    if idx >= last_user_idx {
+        return false;
+    }
+
+    let role = read_message_role(msg);
+    let message_type = read_message_type(msg);
+    let content_text = extract_message_text(msg.get("content").unwrap_or(&Value::Null));
+
+    if role == "developer" && is_active_thread_goal_prompt_text(&content_text) {
+        return true;
+    }
+
+    if role == "assistant" && is_goal_history_assistant_text(&content_text) {
+        return true;
+    }
+
+    if role == "assistant" {
+        if let Some(call_ids) = read_assistant_tool_call_goal_ids(msg) {
+            for call_id in call_ids {
+                dropped_goal_call_ids.insert(call_id);
+            }
+            return true;
+        }
+    }
+
+    if message_type == "function_call" {
+        let name = read_message_name(msg);
+        if is_goal_tool_name(&name) {
+            if let Some(call_id) = read_message_call_id(msg) {
+                dropped_goal_call_ids.insert(call_id);
+            }
+            return true;
+        }
+    }
+
+    if message_type == "function_call_output" {
+        if let Some(call_id) = read_message_call_id(msg) {
+            if dropped_goal_call_ids.contains(&call_id) {
+                return true;
+            }
+        }
+        let output_text = extract_message_text(msg.get("output").unwrap_or(&Value::Null));
+        if output_text.contains("\"goal\"") || output_text.contains("\"threadId\"") {
+            return true;
+        }
+    }
+
+    if role == "tool" {
+        let name = read_message_name(msg);
+        if is_goal_tool_name(&name) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn message_has_block_type(content: &Value, target: &str) -> bool {
+    let Some(arr) = content.as_array() else { return false };
+    for item in arr {
+        if let Some(obj) = item.as_object() {
+            if let Some(typ) = obj.get("type").and_then(|v| v.as_str()) {
+                if typ.to_lowercase() == target { return true; }
+            }
+        }
+    }
+    false
+}
+
+fn collect_mirror_indices(messages: &[Value]) -> Vec<bool> {
+    let mut result = vec![false; messages.len()];
+    let mut has_boundary = false;
+    for (i, msg) in messages.iter().enumerate() {
+        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
+        let content = msg.get("content").unwrap_or(&Value::Null);
+        if role == "assistant" {
+            if msg.get("tool_calls").and_then(|v| v.as_array()).map(|a| !a.is_empty()).unwrap_or(false)
+                || message_has_block_type(content, "tool_use") {
+                has_boundary = true; continue;
+            }
+        }
+        if (role == "user" || role == "tool") && message_has_block_type(content, "tool_result") {
+            has_boundary = true; continue;
+        }
+        if role == "tool" { has_boundary = true; continue; }
+        if !has_boundary || role != "assistant" { continue; }
+        let t1 = extract_message_text(content);
+        let t2 = extract_message_text(msg.get("reasoning_content").or_else(|| msg.get("reasoning")).or_else(|| msg.get("reasoningContent")).unwrap_or(&Value::Null));
+        let n1 = if is_meaningless_dot_text(&t1) { String::new() } else { t1 };
+        let n2 = if is_meaningless_dot_text(&t2) { String::new() } else { t2 };
+        if !n1.is_empty() && !n2.is_empty() && n1 == n2 { result[i] = true; }
+    }
+    result
+}
+
+fn sanitize_chat_process_messages_value(input: &Value) -> SanitizeMessagesOutput {
+    let messages = match input.get("messages").and_then(|v| v.as_array()) {
+        Some(a) => a.clone(),
+        None => return SanitizeMessagesOutput { messages: vec![], removed_assistant_turns: 0, removed_empty_assistant_turns: 0, removed_template_assistant_turns: 0, removed_duplicate_mirror_assistant_turns: 0, removed_historical_goal_turns: 0, did_mutate_message_shapes: false },
+    };
+    let mirror_set = collect_mirror_indices(&messages);
+    let last_user_idx = latest_user_index(&messages);
+    let mut dropped_goal_call_ids = std::collections::HashSet::new();
+    let mut out: Vec<Value> = Vec::with_capacity(messages.len());
+    let mut re = 0i64; let mut rt = 0i64; let mut rm = 0i64; let mut rg = 0i64; let mut did_mut = false;
+
+    for (i, msg) in messages.iter().enumerate() {
+        if should_drop_historical_goal_turn(msg, last_user_idx, i, &mut dropped_goal_call_ids) {
+            rg += 1;
+            did_mut = true;
+            continue;
+        }
+        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
+        if role != "assistant" { out.push(msg.clone()); continue; }
+        if let Some(calls) = msg.get("tool_calls").and_then(|v| v.as_array()) {
+            if !calls.is_empty() {
+                let mut ncalls: Vec<Value> = Vec::with_capacity(calls.len());
+                let mut changed = false;
+                for c in calls {
+                    let Some(obj) = c.as_object() else { ncalls.push(c.clone()); continue; };
+                    let id = obj.get("id").or_else(|| obj.get("call_id")).or_else(|| obj.get("tool_call_id"))
+                        .and_then(|v| v.as_str()).map(|s| s.trim().to_string());
+                    if let Some(id) = id {
+                        let mut n = obj.clone(); n.remove("call_id"); n.remove("tool_call_id");
+                        n.insert("id".to_string(), Value::String(id.clone()));
+                        ncalls.push(Value::Object(n)); changed = true;
+                    } else { ncalls.push(c.clone()); }
+                }
+                if changed { did_mut = true; }
+                let mut nm = msg.as_object().unwrap().clone();
+                nm.insert("tool_calls".to_string(), Value::Array(ncalls));
+                out.push(Value::Object(nm)); continue;
+            }
+        }
+        let content = msg.get("content").unwrap_or(&Value::Null);
+        if message_has_block_type(content, "tool_use") { out.push(msg.clone()); continue; }
+        let t = extract_message_text(content);
+        let r = extract_message_text(msg.get("reasoning_content").or_else(|| msg.get("reasoning")).or_else(|| msg.get("reasoningContent")).unwrap_or(&Value::Null));
+        let nt = if is_meaningless_dot_text(&t) { String::new() } else { t };
+        let nr = if is_meaningless_dot_text(&r) { String::new() } else { r };
+        if nt.is_empty() && nr.is_empty() { re += 1; continue; }
+        if is_template_assistant_text(&nt) { rt += 1; continue; }
+        if mirror_set[i] { rm += 1; continue; }
+        out.push(msg.clone());
+    }
+    SanitizeMessagesOutput {
+        removed_assistant_turns: re + rt + rm + rg,
+        removed_empty_assistant_turns: re,
+        removed_template_assistant_turns: rt,
+        removed_duplicate_mirror_assistant_turns: rm,
+        removed_historical_goal_turns: rg,
+        did_mutate_message_shapes: did_mut || re > 0 || rt > 0 || rm > 0 || rg > 0,
+        messages: out,
+    }
+}
+
+#[napi_derive::napi]
+pub fn sanitize_chat_process_messages_json(input_json: String) -> NapiResult<String> {
+    let input: Value = serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = sanitize_chat_process_messages_value(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 fn sanitize_id_core(value: &str) -> String {
     value
         .chars()

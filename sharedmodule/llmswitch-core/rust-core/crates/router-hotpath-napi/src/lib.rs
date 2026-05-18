@@ -1074,6 +1074,12 @@ pub fn normalize_tool_call_ids_json(payload_json: String) -> NapiResult<String> 
     shared_response_compat::normalize_tool_call_ids_json(payload_json)
 }
 
+#[allow(non_snake_case)]
+#[napi(js_name = "sanitizeChatProcessMessagesJson")]
+pub fn sanitize_chat_process_messages_json(input_json: String) -> NapiResult<String> {
+    shared_response_compat::sanitize_chat_process_messages_json(input_json)
+}
+
 #[napi(js_name = "applyUniversalShapeRequestFilterJson")]
 pub fn apply_universal_shape_request_filter_json(
     payload_json: String,

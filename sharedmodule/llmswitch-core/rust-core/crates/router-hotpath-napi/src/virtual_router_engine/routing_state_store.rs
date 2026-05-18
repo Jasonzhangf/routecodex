@@ -235,6 +235,36 @@ fn resolve_session_filepath(key: &str) -> Option<PathBuf> {
     Some(dir.join(Path::new(&filename)))
 }
 
+fn resolve_provider_health_filepath() -> Option<PathBuf> {
+    let dir = resolve_session_dir()?;
+    Some(dir.join(Path::new("provider-health.json")))
+}
+
+pub(crate) fn load_provider_health_state() -> Option<Value> {
+    let filepath = resolve_provider_health_filepath()?;
+    let raw = fs::read_to_string(&filepath).ok()?;
+    if raw.trim().is_empty() {
+        return None;
+    }
+    serde_json::from_str(&raw).ok()
+}
+
+pub(crate) fn persist_provider_health_state(state: &Value) {
+    let filepath = match resolve_provider_health_filepath() {
+        Some(path) => path,
+        None => return,
+    };
+    if let Some(dir) = filepath.parent() {
+        if fs::create_dir_all(dir).is_err() {
+            return;
+        }
+    }
+    let Ok(text) = serde_json::to_string(state) else {
+        return;
+    };
+    let _ = fs::write(&filepath, text);
+}
+
 pub(crate) fn is_state_empty(state: &RoutingInstructionState) -> bool {
     is_stopless_goal_empty(state)
         && state.forced_target.is_none()

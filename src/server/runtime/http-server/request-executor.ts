@@ -22,7 +22,10 @@ import {
   ensureClientHeadersOnPayload,
   resolveClientRequestId
 } from './executor-metadata.js';
-import { rebindResponsesConversationRequestId } from '../../../modules/llmswitch/bridge.js';
+import {
+  rebindResponsesConversationRequestId,
+  clearResponsesConversationByRequestId
+} from '../../../modules/llmswitch/bridge.js';
 import {
   convertProviderResponseIfNeeded as convertProviderResponseWithBridge
 } from './executor/provider-response-converter.js';
@@ -1201,6 +1204,11 @@ export class HubRequestExecutor implements RequestExecutor {
         releaseLogicalRequestChainIfNeeded();
       }
     } catch (error: unknown) {
+      try {
+        await clearResponsesConversationByRequestId(input.requestId || executorRequestId);
+      } catch {
+        // non-blocking cleanup
+      }
       recordGlobalErrorBackoff(error);
       // If we failed before selecting a provider (no bindProvider/recordAttempt),
       // at least record one error sample for this request.

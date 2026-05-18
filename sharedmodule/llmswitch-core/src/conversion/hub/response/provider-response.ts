@@ -48,8 +48,8 @@ import {
   peekHubStageTopSummary
 } from '../pipeline/hub-stage-timing.js';
 import {
+  finalizeResponsesConversationRequestRetention,
   recordResponsesResponse,
-  releaseResponsesConversationRequestPayload
 } from '../../shared/responses-conversation-store.js';
 import type { ProviderInvoker } from '../../../servertool/types.js';
 import { saveChatProcessSessionActualUsage } from '../process/chat-process-session-usage.js';
@@ -266,6 +266,25 @@ function hasNewGovernedServerToolCalls(beforePayload: unknown, afterPayload: unk
     }
   }
   return false;
+}
+
+function responsesPayloadRequiresSubmitToolOutputs(payload: unknown): boolean {
+  const row = asRecord(payload);
+  const requiredAction = asRecord(row?.required_action);
+  const submitToolOutputs = asRecord(requiredAction?.submit_tool_outputs);
+  const submitToolCalls = Array.isArray(submitToolOutputs?.tool_calls) ? submitToolOutputs.tool_calls : [];
+  if (submitToolCalls.some((entry) => asRecord(entry))) {
+    return true;
+  }
+  const output = Array.isArray(row?.output) ? row.output : [];
+  return output.some((entry) => {
+    const item = asRecord(entry);
+    if (!item) {
+      return false;
+    }
+    const type = typeof item.type === 'string' ? item.type.trim().toLowerCase() : '';
+    return type === 'function_call' || type === 'tool_call';
+  });
 }
 
 export interface ProviderResponseConversionOptions {
@@ -601,9 +620,13 @@ export async function convertProviderResponse(
     }
   }
 
-  // Release large request-side payload fields after the response is indexed, while
-  // preserving responseId/scope-based continuation metadata for future followups.
-  releaseResponsesConversationRequestPayload(options.context.requestId);
+  // Retain only the minimum conversation state required for future followups.
+  // - unscoped plain responses: clear immediately
+  // - scoped responses: keep slim payload for auto-continuation
+  // - submit_tool_outputs flows: preserve responseId path
+  finalizeResponsesConversationRequestRetention(options.context.requestId, {
+    keepForSubmitToolOutputs: responsesPayloadRequiresSubmitToolOutputs(clientPayload)
+  });
 
   // Phase 2 (shadow): response tool surface mismatch detection (client outbound).
   recordToolSurfaceShadowMismatch({

@@ -17,6 +17,23 @@ type BuildNestedMetadataLogger = (error: unknown, details: {
   mode: 'reenter' | 'client_inject';
 }) => void;
 
+const SAME_PROVIDER_FOLLOWUP_MAX_ATTEMPTS = 3;
+const SAME_PROVIDER_FOLLOWUP_BACKOFF_BASE_MS = 200;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+function readForcedProviderKey(metadata?: Record<string, unknown>): string | undefined {
+  const raw = metadata?.__shadowCompareForcedProviderKey;
+  return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : undefined;
+}
+
+function computeExponentialBackoffMs(attempt: number): number {
+  const safeAttempt = Math.max(1, Math.floor(attempt));
+  return SAME_PROVIDER_FOLLOWUP_BACKOFF_BASE_MS * (2 ** (safeAttempt - 1));
+}
+
 
 function cloneStringHeaders(headers: unknown): Record<string, string> | undefined {
   if (!headers || typeof headers !== 'object' || Array.isArray(headers)) {
@@ -60,14 +77,6 @@ function readToolName(tool: unknown): string {
   return typeof (fn as { name?: unknown }).name === 'string'
     ? String((fn as { name: string }).name).trim().toLowerCase()
     : '';
-}
-
-function isCollapsedReasoningStopOnlyTools(tools: unknown): boolean {
-  if (!Array.isArray(tools) || tools.length === 0) {
-    return false;
-  }
-  const names = tools.map(readToolName).filter(Boolean);
-  return names.length > 0 && names.every((name) => name === 'reasoning.stop' || name === 'reasoning_stop' || name === 'reasoning-stop');
 }
 
 function mergeUniqueTools(primary?: unknown[], secondary?: unknown[]): unknown[] | undefined {
@@ -231,41 +240,6 @@ function materializeFollowupRequestSemantics(args: {
   return nextSemantics;
 }
 
-function sanitizeFollowupRequestSemantics(
-  requestSemantics: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  if (!isServerToolFollowup(requestSemantics)) {
-    return requestSemantics;
-  }
-  const responsesNode = asRecord(requestSemantics?.responses);
-  const requestParameters = asRecord(responsesNode?.requestParameters);
-  if (!responsesNode || !requestParameters) {
-    return requestSemantics;
-  }
-
-  const nextRequestParameters = { ...requestParameters };
-  delete nextRequestParameters.model;
-  delete nextRequestParameters.max_tokens;
-  delete nextRequestParameters.max_output_tokens;
-  delete nextRequestParameters.parallel_tool_calls;
-  delete nextRequestParameters.tool_choice;
-  delete nextRequestParameters.reasoning;
-  if (Object.keys(nextRequestParameters).length === Object.keys(requestParameters).length) {
-    return requestSemantics;
-  }
-
-  const nextSemantics = cloneJsonRecord(requestSemantics) as Record<string, unknown>;
-  const nextResponsesNode = asRecord(nextSemantics.responses);
-  if (!nextResponsesNode) {
-    return requestSemantics;
-  }
-  if (Object.keys(nextRequestParameters).length === 0) {
-    delete nextResponsesNode.requestParameters;
-  } else {
-    nextResponsesNode.requestParameters = nextRequestParameters;
-  }
-  return nextSemantics;
-}
 
 function restoreFollowupRootToolsIfNeeded(
   body: Record<string, unknown>,
@@ -302,7 +276,7 @@ function restoreFollowupRootToolsIfNeeded(
       tools: fullTools
     };
   }
-  if (rootTools && !isCollapsedReasoningStopOnlyTools(rootTools)) {
+  if (rootTools && rootTools.length > 0) {
     return body;
   }
   const mergedTools = mergeUniqueTools(fullTools, rootTools);
@@ -315,46 +289,11 @@ function restoreFollowupRootToolsIfNeeded(
   };
 }
 
-function sanitizeFollowupRootBodyRequestParameters(
-  body: Record<string, unknown>,
-  requestSemantics: Record<string, unknown> | undefined
-): Record<string, unknown> {
-  if (!isServerToolFollowup(requestSemantics)) {
-    return body;
-  }
-  let changed = false;
-  const nextBody = { ...body };
-  if ('max_tokens' in nextBody) {
-    delete nextBody.max_tokens;
-    changed = true;
-  }
-  if ('max_output_tokens' in nextBody) {
-    delete nextBody.max_output_tokens;
-    changed = true;
-  }
-  if ('parallel_tool_calls' in nextBody) {
-    delete nextBody.parallel_tool_calls;
-    changed = true;
-  }
-  if ('tool_choice' in nextBody) {
-    delete nextBody.tool_choice;
-    changed = true;
-  }
-  if ('reasoning' in nextBody) {
-    delete nextBody.reasoning;
-    changed = true;
-  }
-  return changed ? nextBody : body;
-}
-
 function cloneNestedBodyWithSemantics(
   body: Record<string, unknown> | undefined,
   requestSemantics: Record<string, unknown> | undefined
 ): Record<string, unknown> {
-  const out = sanitizeFollowupRootBodyRequestParameters(
-    restoreFollowupRootToolsIfNeeded(body ? { ...body } : {}, requestSemantics),
-    requestSemantics
-  );
+  const out = restoreFollowupRootToolsIfNeeded(body ? { ...body } : {}, requestSemantics);
   if (
     requestSemantics
     && typeof requestSemantics === 'object'
@@ -453,12 +392,11 @@ function buildServerToolNestedInput(args: {
     metadata: nestedExtra,
     baseMetadata: args.baseMetadata
   });
-  const sanitizedRequestSemantics = sanitizeFollowupRequestSemantics(materializedRequestSemantics);
   const nestedMetadata = buildServerToolNestedRequestMetadata({
     baseMetadata: args.baseMetadata,
     extraMetadata: nestedExtra,
     entryEndpoint: nestedEntry,
-    requestSemantics: sanitizedRequestSemantics,
+    requestSemantics: materializedRequestSemantics,
     onMergeRuntimeMetaError: args.onMergeRuntimeMetaError
       ? (error) => {
           args.onMergeRuntimeMetaError?.(error, {
@@ -470,6 +408,39 @@ function buildServerToolNestedInput(args: {
       : undefined
   });
 
+  const baseProviderKeyCandidate =
+    typeof (args.baseMetadata as Record<string, unknown> | undefined)?.providerKey === 'string'
+      ? String((args.baseMetadata as Record<string, unknown>).providerKey).trim()
+      : '';
+  const extraProviderKeyCandidate =
+    typeof nestedExtra.providerKey === 'string' ? String(nestedExtra.providerKey).trim() : '';
+  const pinnedProviderKey = baseProviderKeyCandidate || extraProviderKeyCandidate;
+  if (pinnedProviderKey && !readForcedProviderKey(nestedMetadata)) {
+    nestedMetadata.__shadowCompareForcedProviderKey = pinnedProviderKey;
+  }
+
+  const portModeCandidate =
+    typeof (args.baseMetadata as Record<string, unknown> | undefined)?.routecodexPortMode === 'string'
+      ? String((args.baseMetadata as Record<string, unknown>).routecodexPortMode).trim().toLowerCase()
+      : '';
+  const routeNameCandidate =
+    typeof (args.baseMetadata as Record<string, unknown> | undefined)?.routeName === 'string'
+      ? String((args.baseMetadata as Record<string, unknown>).routeName).trim()
+      : '';
+  if (portModeCandidate === 'router' && routeNameCandidate && typeof nestedMetadata.routeHint !== 'string') {
+    nestedMetadata.routeHint = routeNameCandidate;
+  }
+  if (portModeCandidate) {
+    const rt =
+      nestedMetadata.__rt && typeof nestedMetadata.__rt === 'object' && !Array.isArray(nestedMetadata.__rt)
+        ? (nestedMetadata.__rt as Record<string, unknown>)
+        : {};
+    nestedMetadata.__rt = {
+      ...rt,
+      serverToolFollowupMode: portModeCandidate
+    };
+  }
+
   return {
     nestedEntry,
     nestedMetadata,
@@ -479,7 +450,7 @@ function buildServerToolNestedInput(args: {
       requestId: args.requestId,
       headers: cloneStringHeaders(nestedMetadata.clientHeaders) ?? {},
       query: {},
-      body: cloneNestedBodyWithSemantics(args.body, sanitizedRequestSemantics),
+      body: cloneNestedBodyWithSemantics(args.body, materializedRequestSemantics),
       metadata: nestedMetadata
     }
   };
@@ -526,14 +497,44 @@ export async function executeServerToolReenterPipeline(args: {
       return {};
     }
   }
+  const forcedProviderKey = readForcedProviderKey(nestedMetadata);
+  const maxAttempts = forcedProviderKey ? SAME_PROVIDER_FOLLOWUP_MAX_ATTEMPTS : 1;
+  let lastError: unknown;
+  let nestedResult: PipelineExecutionResult | undefined;
 
-  const nestedResult = await awaitNestedExecutionWithFailFast({
-    promise: args.executeNested(nestedInput),
-    abortSignal: getNestedFollowupAbortSignal(nestedMetadata),
-    timeoutMs: resolveServerToolNestedFollowupTimeoutMs(),
-    requestId: args.requestId
-  });
-  throwIfNestedPipelineReturnedError(nestedResult);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      nestedResult = await awaitNestedExecutionWithFailFast({
+        promise: args.executeNested(nestedInput),
+        abortSignal: getNestedFollowupAbortSignal(nestedMetadata),
+        timeoutMs: resolveServerToolNestedFollowupTimeoutMs(),
+        requestId: args.requestId
+      });
+      throwIfNestedPipelineReturnedError(nestedResult);
+      break;
+    } catch (error) {
+      lastError = error;
+      const isLastAttempt = attempt >= maxAttempts;
+      if (isLastAttempt) {
+        break;
+      }
+      const backoffMs = computeExponentialBackoffMs(attempt);
+      console.warn(
+        `[servertool.followup] req=${args.requestId} forcedProvider=${forcedProviderKey} `
+        + `attempt=${attempt}/${maxAttempts} failed, retry in ${backoffMs}ms: `
+        + `${error instanceof Error ? error.message : String(error)}`
+      );
+      await sleep(backoffMs);
+    }
+  }
+
+  if (!nestedResult) {
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(
+        `[servertool] followup failed after ${maxAttempts} attempts`
+      );
+  }
   const nestedBody =
     nestedResult.body && typeof nestedResult.body === 'object'
       ? (nestedResult.body as Record<string, unknown>)

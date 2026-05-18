@@ -58,6 +58,7 @@ type ResponsesConversationModule = {
     requestId?: string;
   }) => { payload: AnyRecord; meta: AnyRecord } | null;
   rebindResponsesConversationRequestId?: (oldId: string, newId: string) => void;
+  clearResponsesConversationByRequestId?: (requestId?: string) => void;
 };
 
 let cachedResponsesConversationModule: ResponsesConversationModule | null = null;
@@ -92,6 +93,17 @@ export async function rebindResponsesConversationRequestId(oldId?: string, newId
   const fn = mod.rebindResponsesConversationRequestId;
   if (typeof fn === 'function') {
     fn(oldId, newId);
+  }
+}
+
+export async function clearResponsesConversationByRequestId(requestId?: string): Promise<void> {
+  if (!requestId) {
+    return;
+  }
+  const mod = await getResponsesConversationModule();
+  const fn = mod.clearResponsesConversationByRequestId;
+  if (typeof fn === 'function') {
+    fn(requestId);
   }
 }
 

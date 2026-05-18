@@ -514,8 +514,11 @@ impl VirtualRouterEngineCore {
                     }
                 }
             }
-            // quota_view is the authoritative availability source; skip health_manager cooldown.
-            return true;
+            // Both sources are mandatory:
+            // - quota_view controls dynamic pool/quota limits
+            // - health_manager controls provider failure cooldown (e.g. HTTP_503 daily cooldown)
+            // Do not bypass health_manager when quota_view exists.
+            return self.health_manager.is_available(provider_key, now);
         }
         self.health_manager.is_available(provider_key, now)
     }

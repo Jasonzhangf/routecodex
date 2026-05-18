@@ -6,7 +6,7 @@ import type { ToolCall } from '../types.js';
 import {
   buildToolMessagesFromToolOutputs as buildToolMessagesFromToolOutputsShared,
   extractAssistantMessageFromChatLike as extractAssistantMessageFromChatLikeShared
-} from './followup-request-builder/message-blocks.js';
+} from './followup-message-blocks.js';
 
 type PlainObject = Record<string, unknown>;
 

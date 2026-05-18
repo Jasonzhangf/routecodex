@@ -19,7 +19,7 @@ import {
   isServerToolFollowupErrorCode,
   normalizeCodeKey
 } from './request-executor-error-shared.js';
-import { emitProviderError } from '../../../../providers/core/utils/provider-error-reporter.js';
+import { emitProviderErrorAndWait } from '../../../../providers/core/utils/provider-error-reporter.js';
 import type {
   ReportRequestExecutorProviderErrorArgs,
   RequestExecutorProviderErrorClassification,
@@ -193,7 +193,7 @@ export async function reportRequestExecutorProviderError(
     return;
   }
   try {
-    emitProviderError({
+    await emitProviderErrorAndWait({
       error: args.error,
       stage,
       runtime: {

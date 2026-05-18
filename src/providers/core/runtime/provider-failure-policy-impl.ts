@@ -645,6 +645,9 @@ export function resolveProviderFailureRetryEligibility(args: {
 export function resolveProviderFailureExclusionDecision(args: {
   promptTooLong?: boolean;
   classification?: ProviderFailureClassification;
+  statusCode?: number;
+  errorCode?: string;
+  upstreamCode?: string;
   isProviderTrafficSaturated?: boolean;
   isNetworkTransport?: boolean;
   hasAlternativeCandidate: boolean;
@@ -652,6 +655,18 @@ export function resolveProviderFailureExclusionDecision(args: {
   isVerify?: boolean;
   isReauth?: boolean;
 }): ProviderFailureExclusionDecision {
+  const normalizedErrorCode = normalizeProviderFailureCodeKey(args.errorCode);
+  const normalizedUpstreamCode = normalizeProviderFailureCodeKey(args.upstreamCode);
+  const isHttp503 =
+    args.statusCode === 503
+    || normalizedErrorCode === 'HTTP_503'
+    || normalizedUpstreamCode === 'HTTP_503';
+  if (isHttp503) {
+    return {
+      excludeCurrentProvider: true,
+      retryAction: 'reroute_explicit_alternative'
+    };
+  }
   if (args.promptTooLong) {
     return {
       excludeCurrentProvider: true,
@@ -699,11 +714,18 @@ export function isProviderFailureHealthNeutral(args: {
   if (args.stage === 'provider.followup' || isHostFailureStage(args.stage)) {
     return true;
   }
-  if (args.classification === 'special_400' || args.classification === 'recoverable') {
-    return true;
-  }
+  const statusCode =
+    typeof args.statusCode === 'number'
+      ? args.statusCode
+      : extractProviderFailureStatusCode(args.error);
   const errorCode = normalizeProviderFailureCodeKey(args.errorCode);
   const upstreamCode = normalizeProviderFailureCodeKey(args.upstreamCode);
+  if (statusCode === 503 || errorCode === 'HTTP_503' || upstreamCode === 'HTTP_503') {
+    return false;
+  }
+  if (args.classification === 'special_400') {
+    return true;
+  }
   if (errorCode === 'CLIENT_DISCONNECTED' || upstreamCode === 'CLIENT_DISCONNECTED') {
     return true;
   }

@@ -1,5 +1,18 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-05-18 responses conversation store 持续涨真源
+
+- 线上证据：`mem-observer` 中 `scopeIndex` 基本稳定（如 4），但 `requestMap/responseIndex` 随同一 session 连续请求单调上升（如 19/18）。这说明不是“新 scope 正常增加”，而是**旧 scoped entry 被新的 scoped entry 覆盖后，仍残留在 requestMap/responseIndex**。
+- 真源在 `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`：
+  - `attachEntryScopes(entry)` 只把 `scopeIndex[key] = entry`，**不会清理被同一 scope 新 entry 替换掉的旧 entry**；
+  - 由于 Codex 路径几乎总带 `sessionId/conversationId`，`finalizeResponsesConversationRequestRetention()` 对 scoped entry 只会 `releaseRequestPayload()`，不会 `clearRequest()`；
+  - 结果：`scopeIndex` 始终只指向最新 entry，但旧 entry 永远挂在 `requestMap/responseIndex`，直到 30min TTL，造成持续堆积。
+- 唯一正确修复点：仍在 `attachEntryScopes(entry)`。因为“旧 entry 被新 scoped entry supersede”的事实**只在这里发生**；在 finalize / memory observer / host 层补删都会变成第二语义面。
+- 修复原则：当 `scopeIndex` 发现当前 key 已绑定到另一个旧 entry 时，先 `detachEntry(oldEntry)` 再绑定新 entry。这样：
+  - 同 scope 只保留最新 continuation state；
+  - `requestMap/responseIndex` 不再为被覆盖 scope 累积历史垃圾；
+  - 非 scoped / submit_tool_outputs 路径语义不变。
+
 ## 2026-05-17 qwenchat guest runtime 真源对齐
 
 - 线上 `5520 -> qwenchat` 已有硬证据不是“内容违规”，而是 **请求 shape 偏离 qwen2api 真源 + 未识别 WAF/HTML**：
@@ -3951,3 +3964,59 @@ Next slice:
 - Jason 新规则已收敛：stopless 默认开启、默认次数 2、默认注入文本固定为 `继续执行`。
 - 唯一自动续轮 owner 收缩为 `stop_message_auto.ts`：`/goal active` 时 stop 不续轮；`/goal non-active` 与非 `/goal` 时收到 `finish_reason=stop` 自动注入一次 `继续执行`。
 - 旧复杂魔块（AI/reviewer followup、approved/done marker、stopless_goal_guard 第二决策面）不再作为当前 stopless 真相。
+
+## 2026-05-18 5555 provider ban not effective
+- 证据复核后，Jason 说得对：dbittai 这条线不是“ban 晚了”，而是 Rust `handle_provider_error()` 在 `quota_view.is_some()` 时直接 `return`，导致 5555 这类 quota/router 路径根本**不吃 provider error 事件**。
+- 因果链：Host 已经 await 上报错误事件 -> ingress hook 会调 `routerEngine.handleProviderError()` -> Rust `engine/events.rs` 第一个分支直接因 quota_view 退出 -> 不写 health_manager，不 persist provider-health.json -> 下一轮 selection 即使改成 consult health_manager，也永远看不到 ban。
+- 这解释了全部现场现象：1) 之前一直没 ban；2) `provider-health.json` 不存在；3) 5555 后续仍反复命中 dbittai。
+- 唯一修复点应在 Rust `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/events.rs`，移除这条错误的 `quota_view` 短路；TS/Host 不该再补任何二次 ban 逻辑。
+
+## 2026-05-18 503 ban 黑盒回归已补
+
+- Jest VM 下的 `provider-503-ban-blackbox.e2e.spec.ts` 会被 `STATE_INTEGRATION_FAILED` 噪音污染，不适合作为 ban 真证据。
+- 已新增独立黑盒脚本：`scripts/tests/provider-503-ban-blackbox.mjs`，直接重放真实链路：
+  - `/v1/responses`
+  - 5555 router `sameProtocolBehavior=relay`
+  - 第一次命中 dbittai 返回 503
+  - request-executor 触发 `exclude_and_reroute`
+  - `provider-health.json` 持久化 `__http_503_daily_cooldown__`
+  - 第二次请求直接跳过 dbittai
+  - 重启后第三次请求仍跳过 dbittai
+- 实跑证据（2026-05-18 23:04 CST）：
+  - 第 1 次：`dbittaiHits=1`, `crsHits=1`
+  - 第 2 次后累计：`dbittaiHits=1`, `crsHits=2`
+  - 重启后增量：`dbittaiHitsDelta=0`, `crsHitsDelta=1`
+  - `provider-health.json` 含 `reason="__http_503_daily_cooldown__"`
+
+## 2026-05-18 502 黑盒继续排查
+
+- 已把黑盒脚本升级为 `scripts/tests/provider-failure-ban-blackbox.mjs`；默认 gate 503，附加 `--include-502` 可重放 502。
+- 新证据：`isProviderFailureHealthNeutral()` 之前把 `classification==='recoverable'` 整体当成 health-neutral，导致 502/500/504 根本不进 3 次冷却计数；已去掉这条错误总开关。
+- 但 502 黑盒继续暴露第二个问题：**当前实际行为不是“3 个独立请求后冷却”，而是单个请求内部第 3 个 attempt 前就切到 backup**。活日志显示：
+  - attempt1 -> primary 502
+  - attempt2 -> primary 502
+  - attempt3 route 已直接选 backup
+- 说明“502 连续计数”仍存在**提前触发或重复计数**的问题，下一步要查 provider error event 是否被重复计入 health_manager，或 health threshold 之外还有第二条 cooldown 语义面。
+
+## 2026-05-18 502/503 provider ban 黑盒终证
+
+- 真实黑盒现在已经钉死 502 提前切 backup 的唯一真源：**同一次 provider 失败被上报了两次 health 事件**。
+  - provider runtime：`src/providers/core/runtime/base-provider.ts -> emitProviderError(stage='provider.http')`
+  - request-executor：`src/server/runtime/http-server/executor/request-executor-provider-failure.ts -> emitProviderErrorAndWait(stage='provider.send')`
+- 唯一正确修复点落在 `src/providers/core/utils/provider-error-reporter.ts`：
+  - 统一打 `__routecodexProviderErrorReported` marker；
+  - 同一错误对象已上报过时，后续 reporter 直接 no-op；
+  - 这样保留 provider runtime 作为主上报面，request-executor 对同一错误不会再重复记健康。
+- 黑盒新增 observer 证据：
+  - 503 场景：primary 只收到 **1 条** `provider.http` 错误事件；第二次请求与重启后都直接跳过 primary；`provider-health.json` 持久化 `__http_503_daily_cooldown__`。
+  - 502 场景：primary 恰好收到 **3 条** `provider.http` 错误事件，不再出现 `provider.send` 的重复上报；之后同一请求第 4 次 attempt 命中 backup，下一次请求继续直接跳过 primary。
+- 额外校准：502 黑盒要与真实运行时一致，必须给足 `maxAttempts=6` 和更长 response timeout；否则 2s+4s+8s backoff 叠加会先撞到 host timeout，看到的是 timeout，不是 ban 语义本身。
+
+## 2026-05-19 502 storm triage
+- 最新 5555 /v1/responses 502 主因已从日志确认：不是 provider 502，而是本地 `CLIENT_TOOL_ARGS_INVALID`，报错 `update_goal status=complete requires completion_evidence, completion_summary, and ssot_assessment.`
+- 同 shape 样本 `~/.rcc/codex-samples/openai-responses/crs.crsa.gpt-5.3-codex/req_1779138004314_587a574d/provider-request.json` 仍携带历史 `get_goal/update_goal` 控制面与 active-thread-goal developer prompt，当前轮最新 user 仅为 `继续执行`。
+- 当前加载的 native `.node` 明显不是最新 Rust 产物：源码已有 `removedHistoricalGoalTurns` 与 goal-history scrub，运行时 `sanitizeChatProcessMessagesJson` 返回仍为旧形状且未删除历史 goal turns。
+
+- 第二真源已定位：`shared_response_compat.rs` 的 goal-history scrub 只覆盖 Responses `function_call` 形状，未覆盖 chat `assistant.tool_calls` 形状；导致 assistant `get_goal` tool_call 保留、对应 tool result 被删，后续 `sync_responses_context_from_canonical_messages` 在 Rust history pairing 阶段抛 `dangling_tool_call`。
+- 已在 Rust sanitizer 增补 assistant.tool_calls 旧 goal 清理，并完成本地 same-shape 验证：sanitize 后旧 `get_goal` assistant/tool 对消失，`syncResponsesContextFromCanonicalMessagesWithNative(...)` 成功。
+

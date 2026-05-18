@@ -6,7 +6,7 @@ import type {
 } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
 import { isCompactionRequest } from './compaction-detect.js';
-import { extractCapturedChatSeed } from './followup-request-builder.js';
+import { extractCapturedChatSeed } from '../followup-seed.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
 import { isStopEligibleForServerTool } from '../stop-gateway-context.js';
 import { attachStopMessageCompareContext, type StopMessageCompareContext } from '../stop-message-compare-context.js';
@@ -34,8 +34,8 @@ import { loadRoutingInstructionStateSync } from '../../router/virtual-router/sti
 import { readStoplessGoalState } from './stopless-goal-state.js';
 import {
   applyStopMessageSnapshotToState,
-  clearStopMessageState,
   createStopMessageState,
+  normalizeStopMessageStageMode,
   resolveStopMessageSnapshot
 } from './stop-message-auto/routing-state.js';
 
@@ -74,21 +74,6 @@ function debugLog(message: string, extra?: JsonObject): void {
   } catch {
     /* ignore logging failures */
   }
-}
-
-function readStopMessageStageMode(raw: unknown): 'on' | 'off' | 'auto' | undefined {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return undefined;
-  }
-  const value = (raw as Record<string, unknown>).stopMessageStageMode;
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'on' || normalized === 'off' || normalized === 'auto') {
-    return normalized;
-  }
-  return undefined;
 }
 
 function enforceStopMessageExecutionFollowupText(text: string): string {
@@ -143,52 +128,19 @@ const handler: ServerToolHandler = async (
   };
 
   try {
-    const followupFlagRaw = (rt as Record<string, unknown> | null | undefined)?.serverToolFollowup;
     const followupFlowId = readServerToolFollowupFlowId(rt);
-    const isFollowupRequest =
-      followupFlagRaw === true ||
-      (typeof followupFlagRaw === 'string' && followupFlagRaw.trim().toLowerCase() === 'true');
-    if (isFollowupRequest) {
-      debugLog('skip_followup_request', { followupFlowId } as JsonObject);
-      return markSkip('skip_followup_request');
-    }
-
-    if (hasCompactionFlag(rt)) {
-      return markSkip('skip_compaction_flag');
+    if (followupFlowId) {
+      debugLog('followup_request_allowed', { followupFlowId } as JsonObject);
     }
 
     const strictSessionScope = resolveStopMessageSessionScope(record, rt);
-    if (!strictSessionScope) {
-      return markSkip('skip_missing_session_scope');
-    }
-
     const stickyKey = strictSessionScope || resolveStickyKey(record, rt);
     let stickyState = stickyKey ? loadRoutingInstructionStateSync(stickyKey) : null;
     const runtimeStopMessageState = resolveRuntimeStopMessageState(rt);
     let snapshot = resolveStopMessageSnapshot(stickyState) ?? runtimeStopMessageState;
-    const stickyMode = readStopMessageStageMode(stickyState);
+    const stickyMode = normalizeStopMessageStageMode(stickyState?.stopMessageStageMode);
     const runtimeMode = readRuntimeStopMessageStageMode(rt);
     const explicitMode = stickyMode ?? runtimeMode;
-
-    if (!snapshot && explicitMode === 'off') {
-      return markSkip('skip_explicit_mode_off', {
-        armed: true,
-        mode: 'off',
-        textLength: 0,
-        maxRepeats: 0,
-        used: 0
-      });
-    }
-
-    if (!snapshot && stickyState) {
-      return markSkip('skip_existing_mode_only_state_without_text', {
-        armed: true,
-        mode: explicitMode ?? 'off',
-        textLength: 0,
-        maxRepeats: 0,
-        used: 0
-      });
-    }
 
     if (!snapshot) {
       const implicit = STOPMESSAGE_IMPLICIT_GEMINI
@@ -223,10 +175,15 @@ const handler: ServerToolHandler = async (
               aiMode: 'off' as const
             }
           : null;
-      if (!fallback) {
-        return markSkip('skip_no_stop_message_state', { armed: false, mode: 'off' });
-      }
-      snapshot = fallback;
+      snapshot = fallback ?? {
+        text: STOPMESSAGE_DEFAULT_TEXT,
+        maxRepeats: STOPMESSAGE_DEFAULT_MAX_REPEATS,
+        used: 0,
+        source: 'default',
+        updatedAt: Date.now(),
+        stageMode: 'on' as const,
+        aiMode: 'off' as const
+      };
       if (stickyKey) {
         stickyState = applyStopMessageSnapshotToState(stickyState, snapshot);
         persistStopMessageState(stickyKey, stickyState);
@@ -237,17 +194,8 @@ const handler: ServerToolHandler = async (
     }
 
     const mode = snapshot.stageMode ?? 'on';
-    if (mode === 'off') {
-      return markSkip('skip_explicit_mode_off', {
-        armed: true,
-        mode: 'off',
-        textLength: 0,
-        maxRepeats: 0,
-        used: 0
-      });
-    }
-
-    const text = typeof snapshot.text === 'string' ? snapshot.text.trim() : '';
+    const textRaw = typeof snapshot.text === 'string' ? snapshot.text.trim() : '';
+    const text = textRaw || STOP_MESSAGE_EXECUTION_APPEND;
     const maxRepeats =
       typeof snapshot.maxRepeats === 'number' && Number.isFinite(snapshot.maxRepeats)
         ? Math.max(1, Math.floor(snapshot.maxRepeats))
@@ -266,29 +214,9 @@ const handler: ServerToolHandler = async (
       used
     });
 
-    if (!text) {
-      return markSkip('skip_missing_stop_message_text');
-    }
-
     if (used >= maxRepeats) {
-      if (stickyKey && stickyState) {
-        clearStopMessageState(stickyState, Date.now());
-        persistStopMessageState(stickyKey, stickyState);
-      }
-      return markSkip('skip_reached_max_repeats');
-    }
-
-    const injectReadyRaw = (rt as Record<string, unknown> | null | undefined)?.stopMessageClientInjectReady;
-    const injectReadyExplicitlyFalse =
-      injectReadyRaw === false ||
-      (typeof injectReadyRaw === 'string' && injectReadyRaw.trim().toLowerCase() === 'false');
-    if (injectReadyExplicitlyFalse) {
-      const injectReason =
-        typeof (rt as Record<string, unknown> | null | undefined)?.stopMessageClientInjectReason === 'string'
-          ? String((rt as Record<string, unknown>).stopMessageClientInjectReason).trim()
-          : '';
       if (stickyKey) {
-        const nextState =
+        const resetState =
           stickyState ??
           createStopMessageState({
             text,
@@ -300,12 +228,16 @@ const handler: ServerToolHandler = async (
             ...(snapshot.stageMode ? { stageMode: snapshot.stageMode } : {}),
             aiMode: 'off'
           });
-        clearStopMessageState(nextState, Date.now());
-        persistStopMessageState(stickyKey, nextState);
+        resetState.stopMessageText = text;
+        resetState.stopMessageMaxRepeats = maxRepeats;
+        resetState.stopMessageUsed = 0;
+        resetState.stopMessageStageMode = mode;
+        resetState.stopMessageAiMode = 'off';
+        resetState.stopMessageAiSeedPrompt = undefined;
+        resetState.stopMessageAiHistory = undefined;
+        persistStopMessageState(stickyKey, resetState);
       }
-      const normalizedInjectReason =
-        injectReason && /^[a-z0-9_:-]+$/i.test(injectReason) ? injectReason.toLowerCase() : 'unknown';
-      return markSkip(`skip_client_inject_unready_${normalizedInjectReason}`);
+      return markSkip('skip_reached_max_repeats');
     }
 
     const stopEligible = isStopEligibleForServerTool(ctx.base, ctx.adapterContext);
@@ -314,30 +246,18 @@ const handler: ServerToolHandler = async (
       return markSkip('skip_not_stop_finish_reason');
     }
 
-    const goalState = readStoplessGoalState(ctx.adapterContext).state;
-    const hasManagedGoal = Boolean(goalState && goalState.status !== 'idle');
-    if (hasManagedGoal && goalState?.status === 'active') {
+    const effectiveGoalState = stickyState?.stoplessGoalState ?? readStoplessGoalState(ctx.adapterContext).state;
+    const hasManagedGoal = Boolean(effectiveGoalState && effectiveGoalState.status !== 'idle');
+    if (hasManagedGoal && effectiveGoalState?.status === 'active') {
       return markSkip('skip_goal_active');
     }
 
     const captured = getCapturedRequest(ctx.adapterContext);
-    updateCompare({ hasCapturedRequest: Boolean(captured) });
-    if (!captured) {
-      return markSkip('skip_no_captured_request');
-    }
-
-    const compactionRequest = isCompactionRequest(captured);
-    updateCompare({ compactionRequest });
-    if (compactionRequest) {
-      return markSkip('skip_compaction_request');
-    }
-
-    const seed = extractCapturedChatSeed(captured);
-    updateCompare({ hasSeed: Boolean(seed) });
-    if (!seed) {
-      return markSkip('skip_failed_build_followup');
-    }
-    void seed;
+    updateCompare({
+      hasCapturedRequest: Boolean(captured),
+      compactionRequest: Boolean(captured && isCompactionRequest(captured)),
+      hasSeed: Boolean(captured && extractCapturedChatSeed(captured))
+    });
 
     const followupText = enforceStopMessageExecutionFollowupText(STOP_MESSAGE_EXECUTION_APPEND);
     const nextUsed = used + 1;
@@ -357,18 +277,14 @@ const handler: ServerToolHandler = async (
           aiMode: 'off'
         });
       const now = Date.now();
-      if (nextUsed >= maxRepeats) {
-        clearStopMessageState(nextState, now);
-      } else {
-        nextState.stopMessageText = text;
-        nextState.stopMessageMaxRepeats = maxRepeats;
-        nextState.stopMessageUsed = nextUsed;
-        nextState.stopMessageStageMode = mode;
-        nextState.stopMessageAiMode = 'off';
-        nextState.stopMessageLastUsedAt = now;
-        nextState.stopMessageAiSeedPrompt = undefined;
-        nextState.stopMessageAiHistory = undefined;
-      }
+      nextState.stopMessageText = text;
+      nextState.stopMessageMaxRepeats = maxRepeats;
+      nextState.stopMessageUsed = Math.min(nextUsed, maxRepeats);
+      nextState.stopMessageStageMode = mode;
+      nextState.stopMessageAiMode = 'off';
+      nextState.stopMessageLastUsedAt = now;
+      nextState.stopMessageAiSeedPrompt = undefined;
+      nextState.stopMessageAiHistory = undefined;
       persistStopMessageState(stickyKey, nextState);
     }
 

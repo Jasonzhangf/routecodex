@@ -5,7 +5,8 @@ import {
   materializeLatestResponsesContinuationByScope,
   recordResponsesResponse,
   releaseResponsesConversationRequestPayload,
-  resumeLatestResponsesContinuationByScope
+  resumeLatestResponsesContinuationByScope,
+  responsesConversationStore
 } from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js';
 
 describe('responses conversation store plain continuation restore', () => {
@@ -296,6 +297,115 @@ describe('responses conversation store plain continuation restore', () => {
       scopeKey: 'session:sess-1',
       materialized: true,
       materializedMode: 'local_full_input'
+    });
+  });
+
+  it('detaches superseded scoped entries so requestMap/responseIndex do not grow unbounded per session', () => {
+    captureResponsesRequestContext({
+      requestId: 'req-resp-store-1',
+      sessionId: 'sess-supersede',
+      conversationId: 'conv-supersede',
+      payload: {
+        model: 'gpt-5.3-codex'
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'turn-1' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: 'req-resp-store-1',
+      response: {
+        id: 'resp-store-supersede-1',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'answer-1' }]
+          }
+        ]
+      }
+    });
+
+    releaseResponsesConversationRequestPayload('req-resp-store-1');
+
+    captureResponsesRequestContext({
+      requestId: 'req-resp-store-2',
+      sessionId: 'sess-supersede',
+      conversationId: 'conv-supersede',
+      payload: {
+        model: 'gpt-5.3-codex'
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'turn-2' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: 'req-resp-store-2',
+      response: {
+        id: 'resp-store-supersede-2',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'answer-2' }]
+          }
+        ]
+      }
+    });
+
+    const rawStore = responsesConversationStore as unknown as {
+      requestMap?: Map<string, unknown>;
+      responseIndex?: Map<string, unknown>;
+      scopeIndex?: Map<string, unknown>;
+    };
+
+    expect(rawStore.requestMap?.size).toBe(1);
+    expect(rawStore.responseIndex?.size).toBe(1);
+    expect(rawStore.scopeIndex?.size).toBe(2);
+
+    const restored = resumeLatestResponsesContinuationByScope({
+      requestId: 'req-resp-store-3',
+      sessionId: 'sess-supersede',
+      payload: {
+        model: 'gpt-5.3-codex',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'turn-2' }]
+          },
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'answer-2' }]
+          },
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'turn-3' }]
+          }
+        ]
+      }
+    });
+
+    expect(restored?.payload.previous_response_id).toBe('resp-store-supersede-2');
+    expect(restored?.meta).toMatchObject({
+      previousRequestId: 'req-resp-store-2',
+      restoredFromResponseId: 'resp-store-supersede-2'
     });
   });
 

@@ -75,7 +75,7 @@ describe('resp-process-stage2-finalize native wrapper', () => {
                   id: 'call_reasoning_stop_1',
                   type: 'function',
                   function: {
-                    name: 'reasoning.stop',
+                    name: 'continue_execution',
                     arguments: '{"task_goal":"done","is_completed":true,"completion_evidence":"ok"}'
                   }
                 }
@@ -88,7 +88,7 @@ describe('resp-process-stage2-finalize native wrapper', () => {
         tool_outputs: [
           {
             tool_call_id: 'call_reasoning_stop_1',
-            name: 'reasoning.stop',
+            name: 'continue_execution',
             content: '{"ok":true,"armed":true}'
           }
         ]

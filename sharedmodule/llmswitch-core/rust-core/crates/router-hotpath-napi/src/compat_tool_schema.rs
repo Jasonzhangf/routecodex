@@ -330,7 +330,7 @@ mod tests {
                 {
                   "type": "function",
                   "function": {
-                    "name": "reasoning.stop",
+                    "name": "continue_execution",
                     "arguments": "{}"
                   }
                 }
@@ -338,7 +338,7 @@ mod tests {
             },
             {
               "role": "tool",
-              "name": "reasoning.stop",
+              "name": "continue_execution",
               "content": "{}"
             }
           ],
@@ -346,7 +346,7 @@ mod tests {
             {
               "type": "function",
               "function": {
-                "name": "reasoning.stop",
+                "name": "continue_execution",
                 "parameters": {
                   "type": "object"
                 }
@@ -356,7 +356,7 @@ mod tests {
           "tool_choice": {
             "type": "function",
             "function": {
-              "name": "reasoning.stop"
+              "name": "continue_execution"
             }
           }
         });
@@ -364,16 +364,16 @@ mod tests {
         let output = sanitize_glm_tools_schema(&payload);
         assert_eq!(
             output["tools"][0]["function"]["name"],
-            json!("reasoning_stop")
+            json!("continue_execution")
         );
         assert_eq!(
             output["tool_choice"]["function"]["name"],
-            json!("reasoning_stop")
+            json!("continue_execution")
         );
         assert_eq!(
             output["messages"][0]["tool_calls"][0]["function"]["name"],
-            json!("reasoning_stop")
+            json!("continue_execution")
         );
-        assert_eq!(output["messages"][1]["name"], json!("reasoning_stop"));
+        assert_eq!(output["messages"][1]["name"], json!("continue_execution"));
     }
 }

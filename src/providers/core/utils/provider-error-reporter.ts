@@ -55,7 +55,9 @@ interface EmitOptions {
   details?: Record<string, unknown>;
 }
 
-export function emitProviderError(options: EmitOptions): void {
+const PROVIDER_ERROR_REPORTED_MARKER = '__routecodexProviderErrorReported';
+
+function buildProviderErrorEvent(options: EmitOptions): ProviderErrorEventExtended {
   const err = normalizeError(options.error);
   const code = normalizeCode(err, options.stage);
   const status = determineStatusCode(err, options.statusCode);
@@ -104,9 +106,42 @@ export function emitProviderError(options: EmitOptions): void {
   if (typeof recoverable === 'boolean') {
     (err as ErrorWithMetadata).retryable = recoverable;
   }
+  return event;
+}
+
+function hasProviderErrorReportedMarker(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === 'object'
+    && (error as Record<string, unknown>)[PROVIDER_ERROR_REPORTED_MARKER] === true
+  );
+}
+
+function markProviderErrorReported(error: unknown): void {
+  if (!error || typeof error !== 'object') {
+    return;
+  }
+  (error as Record<string, unknown>)[PROVIDER_ERROR_REPORTED_MARKER] = true;
+}
+
+export function emitProviderError(options: EmitOptions): void {
+  if (hasProviderErrorReportedMarker(options.error)) {
+    return;
+  }
+  const event = buildProviderErrorEvent(options);
+  markProviderErrorReported(options.error);
   void reportProviderErrorToRouterPolicy(event).catch((emitError) => {
     console.error('[provider-error-reporter] failed to report provider error to router policy', emitError);
   });
+}
+
+export async function emitProviderErrorAndWait(options: EmitOptions): Promise<void> {
+  if (hasProviderErrorReportedMarker(options.error)) {
+    return;
+  }
+  const event = buildProviderErrorEvent(options);
+  markProviderErrorReported(options.error);
+  await reportProviderErrorToRouterPolicy(event);
 }
 
 export function buildRuntimeFromProviderContext(ctx: ProviderContext): ExtendedRuntimeMetadata {

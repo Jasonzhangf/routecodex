@@ -8,6 +8,7 @@ use super::super::instructions::RoutingInstructionState;
 use super::super::load_balancer::{LoadBalancingPolicy, RouteLoadBalancer};
 use super::super::provider_registry::ProviderRegistry;
 use super::super::routing::{parse_routing, RoutingPools};
+use super::super::routing_state_store::{load_provider_health_state, persist_provider_health_state};
 use super::super::time_utils::now_ms;
 
 /// Default TTL for concurrency busy entries (60 seconds).
@@ -60,6 +61,9 @@ impl VirtualRouterEngineCore {
         self.health_manager.configure(health_config);
         let provider_keys = self.provider_registry.list_keys();
         self.health_manager.register_providers(&provider_keys);
+        if let Some(raw) = load_provider_health_state() {
+            self.health_manager.import_persistable_state(&raw, now_ms());
+        }
         let load_balancing = config
             .get("loadBalancing")
             .cloned()
@@ -77,6 +81,11 @@ impl VirtualRouterEngineCore {
             .unwrap_or(false);
         self.web_search_force = web_search_force;
         Ok(())
+    }
+
+    pub(crate) fn persist_provider_health(&self) {
+        let raw = self.health_manager.export_persistable_state(now_ms());
+        persist_provider_health_state(&raw);
     }
 
     pub(crate) fn update_quota_view(&mut self, quota_view: Option<Ref<()>>) {

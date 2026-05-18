@@ -7,9 +7,6 @@
  */
 
 import { readString } from './request-executor-error-shared.js';
-import {
-  REASONING_STOP_FINALIZED_MARKER
-} from './servertool-response-normalizer.js';
 import { recordVirtualRouterHitRollup } from './log-rollup.js';
 
 type StoplessLogMode = 'on' | 'off' | 'endless';
@@ -190,39 +187,6 @@ export function readServerToolFollowupSource(requestSemantics?: Record<string, u
   return typeof raw === 'string' && raw.trim().length ? raw.trim() : '';
 }
 
-export function isReasoningStopFollowupTurn(requestSemantics?: Record<string, unknown>): boolean {
-  const source = readServerToolFollowupSource(requestSemantics);
-  return source === 'servertool.reasoning_stop_guard' || source === 'servertool.reasoning_stop_continue';
-}
-
-export function containsReasoningStopFinalizedMarker(value: unknown): boolean {
-  if (typeof value === 'string') {
-    return value.includes(REASONING_STOP_FINALIZED_MARKER);
-  }
-  if (Array.isArray(value)) {
-    return value.some((entry) => containsReasoningStopFinalizedMarker(entry));
-  }
-  if (!isRecord(value)) {
-    return false;
-  }
-  const entryType = readString(value.type)?.toLowerCase();
-  if (entryType && entryType !== 'output_text' && entryType !== 'text' && entryType !== 'input_text' && entryType !== 'message') {
-    return false;
-  }
-  if (containsReasoningStopFinalizedMarker(value.output_text)) {
-    return true;
-  }
-  if (containsReasoningStopFinalizedMarker(value.text)) {
-    return true;
-  }
-  if (entryType === 'message') {
-    return containsReasoningStopFinalizedMarker(value.content);
-  }
-  if (Array.isArray(value.content)) {
-    return containsReasoningStopFinalizedMarker(value.content);
-  }
-  return false;
-}
 
 export type PayloadContractSignal = {
   reason: string;
@@ -267,40 +231,14 @@ export function unwrapProviderRequestPayloadBody(payload: unknown): Record<strin
   return root;
 }
 
-export function bodyContainsReasoningStopFinalizedMarker(body: unknown): boolean {
-  if (!isRecord(body)) {
-    return false;
-  }
-  const choices = Array.isArray(body.choices) ? body.choices : [];
-  for (const choice of choices) {
-    if (!isRecord(choice)) {
-      continue;
-    }
-    const message = isRecord(choice.message) ? choice.message : undefined;
-    if (message && containsReasoningStopFinalizedMarker(message.content)) {
-      return true;
-    }
-  }
-  if (containsReasoningStopFinalizedMarker(body.output_text)) {
-    return true;
-  }
-  const output = Array.isArray(body.output) ? body.output : [];
-  for (const item of output) {
-    if (!isRecord(item)) {
-      continue;
-    }
-    if (containsReasoningStopFinalizedMarker(item.output_text)) {
-      return true;
-    }
-    if (containsReasoningStopFinalizedMarker(item.text)) {
-      return true;
-    }
-    if (containsReasoningStopFinalizedMarker(item.content)) {
-      return true;
-    }
-  }
+function containsReasoningStopFinalizedMarker(_value: unknown): boolean {
   return false;
 }
+
+export function bodyContainsReasoningStopFinalizedMarker(_body: unknown): boolean {
+  return false;
+}
+
 
 export function hasAnthropicToolUseSuccess(body: Record<string, unknown>): boolean {
   const data = isRecord(body.data) ? body.data : body;

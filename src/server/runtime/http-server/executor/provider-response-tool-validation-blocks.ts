@@ -378,39 +378,6 @@ export function validateCanonicalClientToolCall(
       }
       return { ok: true, normalizedArgs: JSON.stringify({ server: parsed.server, uri: parsed.uri }) };
     }
-    case 'reasoning.stop': {
-      if (!parsed) {
-        return buildToolValidationFailure({
-          reason: 'invalid_reasoning_stop_arguments',
-          message: 'reasoning.stop requires a JSON object arguments payload.'
-        });
-      }
-      if (
-        typeof parsed.task_goal !== 'string'
-        && typeof parsed.taskGoal !== 'string'
-        && typeof parsed.goal !== 'string'
-      ) {
-        return buildToolValidationFailure({
-          reason: 'invalid_reasoning_stop_arguments',
-          message: 'reasoning.stop requires task_goal as a string.',
-          missingFields: ['task_goal']
-        });
-      }
-      const completedValue = parsed.is_completed ?? parsed.isCompleted ?? parsed.completed;
-      if (typeof completedValue !== 'boolean') {
-        return buildToolValidationFailure({
-          reason: 'invalid_reasoning_stop_arguments',
-          message: 'reasoning.stop requires is_completed(boolean).',
-          missingFields: ['is_completed']
-        });
-      }
-      return { ok: true, normalizedArgs: JSON.stringify(parsed) };
-    }
-    case 'update_goal':
-      return validateUpdateGoalArguments(parsed);
-    case 'list_mcp_resources':
-    case 'list_mcp_resource_templates':
-      return { ok: true, normalizedArgs: JSON.stringify(parsed ?? {}) };
     default:
       if (!parsed) {
         return buildToolValidationFailure({

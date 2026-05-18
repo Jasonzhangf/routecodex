@@ -1,15 +1,9 @@
 import type { PipelineExecutionResult } from '../../../handlers/types.js';
 import {
-  REASONING_STOP_FINALIZED_FLAG_KEY,
   STREAM_CONTRACT_PROBE_BODY_KEY,
 } from './servertool-response-normalizer.js';
 import { readString } from './request-executor-error-shared.js';
 import { STREAM_LOG_FINISH_REASON_KEY } from '../../../utils/finish-reason.js';
-import {
-  bodyContainsReasoningStopFinalizedMarker,
-  valueContainsReasoningStopFinalizedMarker
-} from './reasoning-stop-finalization-visibility.js';
-export { bodyContainsReasoningStopFinalizedMarker } from './reasoning-stop-finalization-visibility.js';
 
 type ProviderSnapshotWriteArgs = {
   phase:
@@ -365,8 +359,8 @@ export function detectAssistantSanitizationPlaceholder(body: unknown): PayloadCo
   };
 }
 
-function containsReasoningStopFinalizedMarker(value: unknown): boolean {
-  return valueContainsReasoningStopFinalizedMarker(value);
+function containsReasoningStopFinalizedMarker(_value: unknown): boolean {
+  return false;
 }
 
 export async function persistPayloadContractProviderSnapshots(args: {
@@ -428,4 +422,9 @@ export async function persistPayloadContractProviderSnapshots(args: {
     },
     forceLocalDiskWriteWhenDisabled: true
   });
+}
+
+
+export function bodyContainsReasoningStopFinalizedMarker(_body: unknown): boolean {
+  return false;
 }

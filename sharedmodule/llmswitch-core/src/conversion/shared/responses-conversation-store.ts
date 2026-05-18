@@ -86,6 +86,30 @@ class ResponsesConversationStore {
   private responseIndex = new Map<string, ConversationEntry>();
   private scopeIndex = new Map<string, ConversationEntry>();
 
+  getDebugStats(): {
+    requestMapSize: number;
+    responseIndexSize: number;
+    scopeIndexSize: number;
+    requestEntriesWithoutLastResponseId: number;
+    retainedInputItems: number;
+  } {
+    let requestEntriesWithoutLastResponseId = 0;
+    let retainedInputItems = 0;
+    for (const entry of this.requestMap.values()) {
+      if (typeof entry.lastResponseId !== 'string' || !entry.lastResponseId.trim()) {
+        requestEntriesWithoutLastResponseId += 1;
+      }
+      retainedInputItems += Array.isArray(entry.input) ? entry.input.length : 0;
+    }
+    return {
+      requestMapSize: this.requestMap.size,
+      responseIndexSize: this.responseIndex.size,
+      scopeIndexSize: this.scopeIndex.size,
+      requestEntriesWithoutLastResponseId,
+      retainedInputItems
+    };
+  }
+
   rebindRequestId(oldId: string | undefined, newId: string | undefined): void {
     if (!oldId || !newId || oldId === newId) {
       return;
@@ -297,6 +321,10 @@ class ResponsesConversationStore {
 
   private attachEntryScopes(entry: ConversationEntry): void {
     for (const key of entry.scopeKeys) {
+      const previous = this.scopeIndex.get(key);
+      if (previous && previous !== entry) {
+        this.detachEntry(previous);
+      }
       this.scopeIndex.set(key, entry);
     }
   }
@@ -418,6 +446,39 @@ export function clearResponsesConversationByRequestId(requestId?: string): void 
 export function releaseResponsesConversationRequestPayload(requestId?: string): void {
   if (RESPONSES_DEBUG && requestId) {
     console.log('[responses-store] release-payload', requestId);
+  }
+  store.releaseRequestPayload(requestId);
+}
+
+export function finalizeResponsesConversationRequestRetention(
+  requestId?: string,
+  options?: { keepForSubmitToolOutputs?: boolean }
+): void {
+  if (!requestId) {
+    return;
+  }
+  const entry = (store as unknown as {
+    requestMap?: Map<string, {
+      scopeKeys?: string[];
+    }>;
+  }).requestMap?.get(requestId);
+  if (!entry) {
+    return;
+  }
+  if (
+    typeof (entry as { lastResponseId?: unknown }).lastResponseId !== 'string' ||
+    !String((entry as { lastResponseId?: unknown }).lastResponseId).trim()
+  ) {
+    store.clearRequest(requestId);
+    return;
+  }
+  if (options?.keepForSubmitToolOutputs === true) {
+    store.releaseRequestPayload(requestId);
+    return;
+  }
+  if (!Array.isArray(entry.scopeKeys) || entry.scopeKeys.length <= 0) {
+    store.clearRequest(requestId);
+    return;
   }
   store.releaseRequestPayload(requestId);
 }

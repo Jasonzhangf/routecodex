@@ -6221,7 +6221,7 @@ mod tests {
                     "message": {
                         "tool_calls": [{
                             "function": {
-                                "name": "reasoning.stop",
+                                "name": "continue_execution",
                                 "arguments": "{\"stop_reason\":\"task_completed\",\"is_completed\":true}"
                             }
                         }]
@@ -6236,7 +6236,7 @@ mod tests {
         let call_id = result.governed_payload["choices"][0]["message"]["tool_calls"][0]["id"]
             .as_str()
             .unwrap_or("");
-        assert!(call_id.starts_with("call_servertool_reasoning_stop_"));
+        assert!(call_id.starts_with("call_servertool_continue_execution_"));
     }
 
     #[test]

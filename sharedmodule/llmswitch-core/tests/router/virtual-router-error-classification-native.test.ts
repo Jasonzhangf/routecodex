@@ -78,6 +78,21 @@ function readHealthState(engine: VirtualRouterEngine, providerKey: string) {
 }
 
 describe('virtual router native error classification consumption', () => {
+  test('quota mode still consumes HTTP_503 into persisted health cooldown', () => {
+    const providerKey = 'test.key1.gpt-test';
+    const quotaView = jest.fn(() => ({ providerKey, inPool: true, priorityTier: 100 }));
+    const engine = new VirtualRouterEngine({ quotaView } as any);
+    engine.initialize(buildConfig(providerKey));
+
+    engine.handleProviderError(buildEvent(providerKey, 'recoverable', { status: 503, code: 'HTTP_503' }));
+
+    const state = readHealthState(engine, providerKey);
+    expect(state.state).toBe('tripped');
+    expect(state.reason).toBe('__http_503_daily_cooldown__');
+    expect(typeof state.cooldownExpiresAt).toBe('number');
+    expect((state.cooldownExpiresAt ?? 0)).toBeGreaterThan(Date.now());
+  });
+
   test('special_400 does not mutate health on active native path', () => {
     const providerKey = 'test.key1.gpt-test';
     const engine = new VirtualRouterEngine({} as any);

@@ -586,11 +586,7 @@ function validateHostManagedConvertedToolCallsOrThrow(args: {
   const toolCalls = collectConvertedProviderToolCalls(args.payload);
   for (const toolCall of toolCalls) {
     const normalizedName = toolCall.name.trim().toLowerCase();
-    if (
-      normalizedName !== 'reasoning.stop'
-      && normalizedName !== 'create_goal'
-      && normalizedName !== 'update_goal'
-    ) {
+    if (normalizedName !== 'create_goal' && normalizedName !== 'update_goal') {
       continue;
     }
     const validation = validateCanonicalClientToolCall(

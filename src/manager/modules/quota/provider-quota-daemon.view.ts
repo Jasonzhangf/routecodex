@@ -41,8 +41,16 @@ export function buildQuotaViewEntry(options: {
   const modelCooldownUntil =
     options.modelBackoff ? options.modelBackoff.getActiveCooldownUntil(state.providerKey, nowMs) : null;
   const cooldownUntilRaw = state.cooldownUntil ?? null;
+  const keepPoolDuringCooldown =
+    (state as QuotaState & { cooldownKeepsPool?: boolean }).cooldownKeepsPool === true;
   const cooldownUntil =
-    typeof modelCooldownUntil === 'number' && Number.isFinite(modelCooldownUntil)
+    keepPoolDuringCooldown
+      ? (
+          typeof modelCooldownUntil === 'number' && Number.isFinite(modelCooldownUntil) && modelCooldownUntil > nowMs
+            ? modelCooldownUntil
+            : null
+        )
+      : typeof modelCooldownUntil === 'number' && Number.isFinite(modelCooldownUntil)
       ? (typeof cooldownUntilRaw === 'number' && Number.isFinite(cooldownUntilRaw) && cooldownUntilRaw > modelCooldownUntil
           ? cooldownUntilRaw
           : modelCooldownUntil)

@@ -324,7 +324,7 @@ export function mapProviderErrorImpl(
    }
  } else if (statusCode && statusCode >= 500) {
    fatal = false;
-    cooldownOverrideMs = Math.max(60_000, healthConfig.cooldownMs ?? 60_000);
+   cooldownOverrideMs = statusCode === 503 ? computeCooldownUntilNextLocalMidnightMs(Date.now()) : Math.max(60_000, healthConfig.cooldownMs ?? 60_000);
    reason = 'upstream_error';
  } else if (stage.includes('compat')) {
    fatal = false;

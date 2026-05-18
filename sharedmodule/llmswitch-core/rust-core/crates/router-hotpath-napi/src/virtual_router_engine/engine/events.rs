@@ -29,6 +29,7 @@ impl VirtualRouterEngineCore {
             return;
         }
         self.health_manager.record_success(provider_key);
+        self.persist_provider_health();
     }
 
     pub(crate) fn handle_provider_failure(&mut self, event: &Value) {
@@ -41,42 +42,23 @@ impl VirtualRouterEngineCore {
         }
         let reason = extract_error_reason(event);
         let now = now_ms();
-        let fatal = event
-            .get("fatal")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
         let status_code = extract_status_code(event);
-        let cooldown_override_ms = extract_cooldown_override_ms(event);
-        let cooldown_ms = cooldown_override_ms.or_else(|| {
-            if status_code == Some(429) && is_daily_limit_exceeded(event) {
-                Some(compute_cooldown_until_next_local_midnight_ms(now))
-            } else {
-                None
-            }
-        });
-        if fatal {
+        // Single policy gate:
+        // - HTTP 503: immediate persisted cooldown until local midnight
+        // - all other failures: consecutive threshold handling in health.rs
+        if matches!(status_code, Some(503)) {
+            let ttl = compute_cooldown_until_next_local_midnight_ms(now);
             self.health_manager
-                .trip_provider(&provider_key, reason, cooldown_ms, now);
-            return;
-        }
-        if matches!(status_code, Some(429)) {
-            self.health_manager
-                .cooldown_provider(&provider_key, reason, cooldown_ms, now);
-            return;
-        }
-        if cooldown_override_ms.is_some() {
-            self.health_manager
-                .cooldown_provider(&provider_key, reason, cooldown_override_ms, now);
+                .cooldown_provider_until_midnight_persisted(&provider_key, now, now + ttl);
+            self.persist_provider_health();
             return;
         }
         self.health_manager
             .record_failure(&provider_key, reason, now);
+        self.persist_provider_health();
     }
 
     pub(crate) fn handle_provider_error(&mut self, event: &Value) {
-        if self.quota_view.is_some() {
-            return;
-        }
         if !event_affects_health(event) {
             return;
         }
@@ -94,6 +76,7 @@ impl VirtualRouterEngineCore {
         }
         self.handle_provider_failure(event);
         self.apply_series_cooldown(event);
+        self.persist_provider_health();
     }
 
 
@@ -135,23 +118,23 @@ impl VirtualRouterEngineCore {
         match classification {
             ProviderErrorClassification::Special400 => true,
             ProviderErrorClassification::Recoverable => {
-                let cooldown_ms = extract_recoverable_cooldown_ms(event)
-                    .unwrap_or(DEFAULT_RECOVERABLE_COOLDOWN_MS);
-                self.health_manager.cooldown_provider(
-                    provider_key,
-                    reason,
-                    Some(cooldown_ms.max(DEFAULT_RECOVERABLE_COOLDOWN_MS)),
-                    now,
-                );
+                let status = extract_status_code(event);
+                if status == Some(503) {
+                    let ttl = compute_cooldown_until_next_local_midnight_ms(now);
+                    self.health_manager
+                        .cooldown_provider_until_midnight_persisted(provider_key, now, now + ttl);
+                    self.persist_provider_health();
+                    return true;
+                }
+                self.health_manager.record_failure(provider_key, reason, now);
                 self.apply_series_cooldown(event);
+                self.persist_provider_health();
                 true
             }
             ProviderErrorClassification::Unrecoverable => {
-                let cooldown_ms = compute_cooldown_until_next_local_midnight_ms(now)
-                    .max(DEFAULT_UNRECOVERABLE_MIN_COOLDOWN_MS);
-                self.health_manager
-                    .trip_provider(provider_key, reason, Some(cooldown_ms), now);
+                self.health_manager.record_failure(provider_key, reason, now);
                 let _ = self.apply_qwen_auth_family_blacklist(event);
+                self.persist_provider_health();
                 true
             }
         }
@@ -204,7 +187,6 @@ impl VirtualRouterEngineCore {
     }
 }
 
-const DEFAULT_RECOVERABLE_COOLDOWN_MS: i64 = 30_000;
 const DEFAULT_UNRECOVERABLE_MIN_COOLDOWN_MS: i64 = 5 * 60_000;
 
 fn event_affects_health(event: &Value) -> bool {
@@ -299,11 +281,10 @@ fn extract_provider_error_classification(event: &Value) -> Option<ProviderErrorC
 }
 
 fn extract_recoverable_cooldown_ms(event: &Value) -> Option<i64> {
-    let status = event.get("status").and_then(|v| {
-        v.as_i64()
-            .or_else(|| v.as_u64().map(|value| value as i64))
-            .or_else(|| v.as_f64().map(|value| value.round() as i64))
-    });
+    let status = extract_status_code(event);
+    if matches!(status, Some(401 | 402 | 403 | 503)) {
+        return Some(compute_cooldown_until_next_local_midnight_ms(now_ms()));
+    }
     if status == Some(429) && is_daily_limit_exceeded(event) {
         return Some(compute_cooldown_until_next_local_midnight_ms(now_ms()));
     }

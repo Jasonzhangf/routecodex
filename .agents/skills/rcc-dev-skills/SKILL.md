@@ -187,6 +187,20 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - synthetic local control text 铁律（2026-04-28）：`[RouteCodex] assistant response became empty...` / `request timed out...` / `tool result unknown...` 这类**本地诊断文本**在 `chat messages`、`bridge input`、`responses conversation store` 三个入口都**禁止静默 filter/drop**；必须直接 `MALFORMED_REQUEST` fail-fast，防止旧污染被“清洗后继续跑”。
 - 本地 control-plane 文本防污染（2026-04-28）：`[RouteCodex] request timed out...` / `assistant response became empty...` 这类**本地超时/降级/诊断提示**绝不能物化成 assistant 历史再回传上游；bridge input / chat normalize 入口必须剔除，命中 sanitize-placeholder 时必须转为显式错误，不得继续返给客户端。
 - Token/usage 观测热路径精华（2026-04-27）：`usage` / token 累计这类**纯观测统计**禁止在请求主链同步写盘；请求路径只允许**内存累加**，落盘必须走**后台异步 flush + 原子 rename**，rollup 日志只打 **top N**，避免磁盘抖动和日志风暴反噬主链。
+- 503/502 路由健康处理唯一改动位（2026-05-18）：遇到“503 连续命中同 provider/重启后又命中”时，**只查并只改三处**，禁止散改：
+  1) `src/providers/core/runtime/provider-failure-policy-impl.ts`
+     - `resolveProviderFailureExclusionDecision`：`HTTP_503` 必须 `excludeCurrentProvider=true + reroute_explicit_alternative`。
+     - `isProviderFailureHealthNeutral`：`HTTP_503` 必须 `false`（允许上报影响健康）。
+  2) `src/server/runtime/http-server/executor/request-executor-retry-decision.ts`
+     - `resolveProviderRetryExclusionPlan`：必须把 `statusCode/errorCode/upstreamCode` 透传给 exclusion decision。
+  3) `rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/events.rs`
+     - `apply_classified_provider_error(Recoverable)`：`status==503` 必须走 `cooldown_provider_until_midnight_persisted`；
+     - `extract_recoverable_cooldown_ms` 必须使用 `extract_status_code(event)`（不能只读 `event.status`）。
+  验证门禁：日志必须出现 `switch=exclude_and_reroute`，且 `~/.rcc/sessions/provider-health.json` 出现该 provider 的 `state=tripped + cooldownExpiresAt>now`；重启后依然生效。
+- 5555 ban 不生效真源补充（2026-05-18）：如果 **5555/quota 路由**上出现“`provider-switch` 已显示 exclude，但下一轮仍继续命中同 provider”，先看 Rust `virtual_router_engine/engine/events.rs::handle_provider_error()` 是否在 `quota_view.is_some()` 时提前 `return`。这会导致 **provider error 事件根本没进 health_manager / provider-health.json**，表现成“从来没 ban 过”。唯一真修复点就是移除这条 quota 短路，不能去 TS/Host 补第二套 ban。
+- 503 ban 黑盒回归真源（2026-05-18）：这类问题不能只看 unit。必须重放真实链：`/v1/responses -> 5555 router relay -> request-executor -> upstream 503 -> provider-health.json persist -> restart -> 再次请求`。固定回归入口：`node scripts/tests/provider-503-ban-blackbox.mjs`；通过标准是 **第 1 次 hit dbittai 后 reroute 到 crs，第 2 次直接跳过 dbittai，重启后仍跳过 dbittai**。
+- provider failure 黑盒入口更新（2026-05-18）：503/502 统一黑盒入口已收敛为 `node scripts/tests/provider-failure-ban-blackbox.mjs`。默认 gate 503；需要继续追 502 时追加 `--include-502`。
+- 502 冷却排查门禁（2026-05-18）：若 502 风暴看起来“不进 3 次冷却”，先查 `src/providers/core/runtime/provider-failure-policy-impl.ts::isProviderFailureHealthNeutral()`；这里**绝不能**再把 `classification==='recoverable'` 整体当成 health-neutral，否则 502/500/504 全部不会进入 health_manager。若去掉后仍提前切 backup，则继续追“重复计数/第二 cooldown 面”，不要在别处补 ban。
 - Snapshot 固定文件并发写精华（2026-04-18）：`__runtime.json` 这类**固定文件名**若会被 Rust hook 与 TS mirror 共同落盘，必须使用**create-if-missing / 原子链接或 rename**；禁止对同一路径直接 `fs::write` 覆盖，否则会出现“前半段旧 JSON + 后半段新尾巴”的拼接坏样本。
 - Snapshot 双实现扫描动作（2026-04-18）：排查样本坏文件时，先 grep 同名文件是否同时存在 **native hook 写盘** 与 **host mirror 写盘** 两套实现；如果两边都写同一路径，只允许一边 `create_new`，另一边只能幂等跳过。
 - DeepSeek 静默失败排查（2026-04-12）：若日志出现 `finish_reason=stop` + `no assistant content`，先查 `resp_process_stage1_tool_governance::sanitize_reasoning_fields_after_tool_harvest`。**ChunkingError / 沙箱失败正文只有在 message 已成功带上非空 `tool_calls` 后才允许去噪；无 tool_calls 时必须保留原始失败正文。**
@@ -700,3 +714,5 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - builtin `web_search` 透传门禁：默认必须过滤；只有 runtime `__rt.webSearch.engines[*]` 明确命中 `executionMode=direct + directActivation=builtin` 时，才能把 canonical `web_search` 变成 provider builtin。遇到 llmgate/deepseek `tools[i] 不支持的类型: web_search`，唯一先查两层：Rust `hub_bridge_actions/history.rs`（bridge 注入）和 Rust `hub_pipeline.rs::apply_direct_builtin_web_search_tool()`（provider outbound 最后一跳剥离/转换）。
 - tool-route fallback 铁律（2026-05-17）：`search/read/write/web_search` 这类专用工具 route 若本 route 无 targets，但 `tools` route 有 targets，Rust `virtual_router_engine/routing/config.rs::build_route_queue()` 必须生成 `专用 route -> tools -> default`；禁止直接 `专用 route -> default`，否则会绕过工具兜底并制造错误的 default 命中。
 - SSE decode stats null-contract（2026-05-17）：Rust `extract_decode_stats_json()` 在 payload 缺少 `__rccDecodeStats` 时必须返回字符串 `"null"`，不能抛 `Status::Ok("null")`；否则 TS `extractDecodeStatsWithNative()` 会把“无 stats”误报成 `native extractDecodeStatsJson is required but unavailable: null`。
+- provider ban 黑盒排查铁律（2026-05-18）：若 5555/5520 出现“同一个 provider 明明应该被 ban，却提前/重复/根本不 ban”，先跑 `scripts/tests/provider-failure-ban-blackbox.mjs`，并同时挂 `provider-runtime-ingress` observer 看**每次失败到底上报了几条 error event、stage 是什么**；不要只看 selection 日志猜。
+- provider 错误重复上报真源（2026-05-18）：主链 provider 失败可能同时来自 `base-provider.ts -> emitProviderError(stage=provider.http)` 与 `request-executor-provider-failure.ts -> emitProviderErrorAndWait(stage=provider.send)`；若黑盒显示 502 两次就提前 cooldown，先审 `src/providers/core/utils/provider-error-reporter.ts` 的单次错误去重 marker，禁止去 router selection/quota view 补第三语义面。

@@ -160,9 +160,9 @@ describe('resp-process-stage1-tool-governance native wrapper', () => {
     expect(content.includes('</function_calls>')).toBe(false);
   });
 
-  it('preserves anthropic tool_use exec_command on reasoning_stop_continue followup when requestSemantics carries original client tools', async () => {
+  it('preserves anthropic tool_use exec_command on continue_execution_followup followup when requestSemantics carries original client tools', async () => {
     const anthropicPayload = {
-      id: 'msg_reasoning_stop_continue_sample',
+      id: 'msg_continue_execution_followup_sample',
       type: 'message',
       role: 'assistant',
       model: 'mimo-v2.5-pro',
@@ -219,7 +219,7 @@ describe('resp-process-stage1-tool-governance native wrapper', () => {
             {
               type: 'function',
               function: {
-                name: 'reasoning.stop',
+                name: 'continue_execution',
                 parameters: { type: 'object' }
               }
             }

@@ -11,6 +11,8 @@ interface StoreMetrics {
   requestMapSize: number;
   responseIndexSize: number;
   scopeIndexSize: number;
+  requestEntriesWithoutLastResponseId?: number;
+  retainedInputItems?: number;
 }
 
 // Expose raw store for diagnostic access
@@ -26,7 +28,15 @@ function getStoreMetrics(): StoreMetrics | null {
   if (!store || typeof store !== 'object') {
     return null;
   }
-  const s = store as { requestMap?: Map<unknown, unknown>; responseIndex?: Map<unknown, unknown>; scopeIndex?: Map<unknown, unknown> };
+  const s = store as {
+    requestMap?: Map<unknown, unknown>;
+    responseIndex?: Map<unknown, unknown>;
+    scopeIndex?: Map<unknown, unknown>;
+    getDebugStats?: () => StoreMetrics;
+  };
+  if (typeof s.getDebugStats === 'function') {
+    return s.getDebugStats();
+  }
   return {
     requestMapSize: s.requestMap?.size ?? 0,
     responseIndexSize: s.responseIndex?.size ?? 0,
@@ -55,7 +65,15 @@ function logSnapshot(): void {
   ].join(' ');
 
   const storeMsg = storeMetrics
-    ? ` [store requestMap=${storeMetrics.requestMapSize} responseIndex=${storeMetrics.responseIndexSize} scopeIndex=${storeMetrics.scopeIndexSize}]`
+    ? ` [store requestMap=${storeMetrics.requestMapSize} responseIndex=${storeMetrics.responseIndexSize} scopeIndex=${storeMetrics.scopeIndexSize}${
+        typeof storeMetrics.requestEntriesWithoutLastResponseId === 'number'
+          ? ` pendingNoResponseId=${storeMetrics.requestEntriesWithoutLastResponseId}`
+          : ''
+      }${
+        typeof storeMetrics.retainedInputItems === 'number'
+          ? ` retainedInputItems=${storeMetrics.retainedInputItems}`
+          : ''
+      }]`
     : '';
 
   console.log(msg + storeMsg);

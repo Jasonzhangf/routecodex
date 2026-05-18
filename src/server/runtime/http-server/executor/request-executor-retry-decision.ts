@@ -141,6 +141,9 @@ export function resolveProviderRetryExclusionPlan(args: {
   const exclusionDecision = resolveProviderFailureExclusionDecision({
     promptTooLong: args.promptTooLong,
     classification: args.classification,
+    statusCode: args.status,
+    errorCode: normalizeCodeKey((args.error as { code?: unknown } | undefined)?.code),
+    upstreamCode: normalizeCodeKey((args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode),
     isProviderTrafficSaturated: isProviderTrafficSaturatedRetryError({ status: args.status, error: args.error }),
     isNetworkTransport: isNetworkTransportLikeError(args.error),
     hasAlternativeCandidate: hasExplicitAlternativeRouteCandidate({

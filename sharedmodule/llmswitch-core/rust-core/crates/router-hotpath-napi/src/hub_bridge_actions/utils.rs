@@ -199,7 +199,7 @@ fn normalize_with_fallback(call_id: Option<&str>, fallback: &str, prefix: &str) 
 pub(crate) fn can_servertool_own_tool_call_id(tool_name: &str) -> bool {
     matches!(
         sanitize_servertool_name_token(tool_name).as_str(),
-        "clock" | "continue_execution" | "reasoning_stop" | "web_search"
+        "clock" | "continue_execution" | "web_search"
     )
 }
 

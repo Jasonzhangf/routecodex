@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::collections::HashMap;
+
+const PERSIST_REASON_HTTP_503_DAILY: &str = "__http_503_daily_cooldown__";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +30,7 @@ struct ProviderInternalState {
     cooldown_expires_at: Option<i64>,
     last_failure_at: Option<i64>,
     reason: Option<String>,
+    consecutive_http_502_failures: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +47,29 @@ struct ProviderHealthConfigNormalized {
 }
 
 impl ProviderHealthManager {
+    fn canonicalize_provider_key(provider_key: &str) -> String {
+        let lower = provider_key.trim().to_ascii_lowercase();
+        let mut out = String::with_capacity(lower.len());
+        let bytes = lower.as_bytes();
+        let mut i = 0usize;
+        while i < bytes.len() {
+            if bytes[i] == b'.' && i + 4 < bytes.len() && &bytes[i + 1..i + 4] == b"key" {
+                let mut j = i + 4;
+                while j < bytes.len() && bytes[j].is_ascii_digit() {
+                    j += 1;
+                }
+                if j > i + 4 {
+                    out.push('.');
+                    out.push_str(&lower[i + 4..j]);
+                    i = j;
+                    continue;
+                }
+            }
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+        out
+    }
     pub(crate) fn new() -> Self {
         Self {
             states: HashMap::new(),
@@ -68,16 +95,18 @@ impl ProviderHealthManager {
 
     pub(crate) fn register_providers(&mut self, provider_keys: &[String]) {
         for key in provider_keys {
-            if !self.states.contains_key(key) {
+            let canonical = Self::canonicalize_provider_key(key);
+            if !self.states.contains_key(&canonical) {
                 self.states.insert(
-                    key.clone(),
+                    canonical.clone(),
                     ProviderInternalState {
-                        provider_key: key.clone(),
+                        provider_key: canonical,
                         state: "healthy".to_string(),
                         failure_count: 0,
                         cooldown_expires_at: None,
                         last_failure_at: None,
                         reason: None,
+                        consecutive_http_502_failures: 0,
                     },
                 );
             }
@@ -96,15 +125,16 @@ impl ProviderHealthManager {
 
         let state = self.get_state_mut(provider_key);
         state.failure_count += 1;
+        state.consecutive_http_502_failures = 0;
         state.last_failure_at = Some(now_ms);
         if let Some(reason) = reason {
             state.reason = Some(reason);
         }
 
-        // Aggressive ban: auto-trip when reaching threshold (3 consecutive failures = 3 cycles cooldown)
+        // Unified policy: any consecutive failures reaching threshold are cooled down for 30 minutes.
         if state.failure_count >= threshold {
             state.state = "tripped".to_string();
-            state.cooldown_expires_at = Some(now_ms + cooldown_unit * 3);
+            state.cooldown_expires_at = Some(now_ms + cooldown_unit);
         }
     }
 
@@ -118,8 +148,25 @@ impl ProviderHealthManager {
         let ttl = override_ms.unwrap_or(self.config.cooldown_ms);
         let state = self.get_state_mut(provider_key);
         state.failure_count += 1;
+        state.consecutive_http_502_failures = 0;
         state.state = "tripped".to_string();
         state.reason = reason;
+        state.cooldown_expires_at = Some(now_ms + ttl);
+        state.last_failure_at = Some(now_ms);
+    }
+
+    pub(crate) fn cooldown_provider_until_midnight_persisted(
+        &mut self,
+        provider_key: &str,
+        now_ms: i64,
+        expires_at_ms: i64,
+    ) {
+        let ttl = (expires_at_ms - now_ms).max(1);
+        let state = self.get_state_mut(provider_key);
+        state.failure_count += 1;
+        state.consecutive_http_502_failures = 0;
+        state.state = "tripped".to_string();
+        state.reason = Some(PERSIST_REASON_HTTP_503_DAILY.to_string());
         state.cooldown_expires_at = Some(now_ms + ttl);
         state.last_failure_at = Some(now_ms);
     }
@@ -127,6 +174,7 @@ impl ProviderHealthManager {
     pub(crate) fn record_success(&mut self, provider_key: &str) {
         let state = self.get_state_mut(provider_key);
         state.failure_count = 0;
+        state.consecutive_http_502_failures = 0;
         state.state = "healthy".to_string();
         state.cooldown_expires_at = None;
         state.last_failure_at = None;
@@ -144,6 +192,7 @@ impl ProviderHealthManager {
         let ttl = cooldown_override_ms.unwrap_or(self.config.fatal_cooldown_ms);
         let state = self.get_state_mut(provider_key);
         state.failure_count = state.failure_count.max(failure_threshold);
+        state.consecutive_http_502_failures = 0;
         state.state = "tripped".to_string();
         state.reason = reason;
         state.cooldown_expires_at = Some(now_ms + ttl);
@@ -177,7 +226,8 @@ impl ProviderHealthManager {
     }
 
     pub(crate) fn cooldown_remaining_ms(&self, provider_key: &str, now_ms: i64) -> Option<i64> {
-        let state = self.states.get(provider_key)?;
+        let canonical = Self::canonicalize_provider_key(provider_key);
+        let state = self.states.get(&canonical)?;
         let expiry = state.cooldown_expires_at?;
         if expiry <= now_ms {
             return None;
@@ -189,21 +239,85 @@ impl ProviderHealthManager {
         self.config.clone()
     }
 
+    pub(crate) fn export_persistable_state(&self, now_ms: i64) -> Value {
+        let entries: Vec<Value> = self
+            .states
+            .values()
+            .filter_map(|state| {
+                let expiry = state.cooldown_expires_at?;
+                if expiry <= now_ms {
+                    return None;
+                }
+                if state.reason.as_deref() != Some(PERSIST_REASON_HTTP_503_DAILY) {
+                    return None;
+                }
+                Some(json!({
+                    "providerKey": state.provider_key,
+                    "cooldownExpiresAt": expiry,
+                    "reason": PERSIST_REASON_HTTP_503_DAILY
+                }))
+            })
+            .collect();
+        json!({ "version": 1, "providerCooldowns": entries })
+    }
+
+    pub(crate) fn import_persistable_state(&mut self, raw: &Value, now_ms: i64) {
+        let Some(entries) = raw
+            .get("providerCooldowns")
+            .and_then(|v| v.as_array())
+        else {
+            return;
+        };
+        for entry in entries {
+            let Some(provider_key) = entry.get("providerKey").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(expires_at) = entry
+                .get("cooldownExpiresAt")
+                .and_then(|v| v.as_i64().or_else(|| v.as_u64().map(|x| x as i64)))
+            else {
+                continue;
+            };
+            if expires_at <= now_ms {
+                continue;
+            }
+            self.cooldown_provider_until_midnight_persisted(provider_key, now_ms, expires_at);
+        }
+    }
+
+    pub(crate) fn record_http_502_failure(&mut self, provider_key: &str, reason: Option<String>, now_ms: i64) {
+        let threshold = self.config.failure_threshold.max(3);
+        let cooldown_ms = self.config.cooldown_ms;
+        let state = self.get_state_mut(provider_key);
+        state.failure_count += 1;
+        state.consecutive_http_502_failures += 1;
+        state.last_failure_at = Some(now_ms);
+        if let Some(reason) = reason {
+            state.reason = Some(reason);
+        }
+        if state.consecutive_http_502_failures >= threshold {
+            state.state = "tripped".to_string();
+            state.cooldown_expires_at = Some(now_ms + cooldown_ms);
+        }
+    }
+
     fn get_state_mut(&mut self, provider_key: &str) -> &mut ProviderInternalState {
-        if !self.states.contains_key(provider_key) {
+        let canonical = Self::canonicalize_provider_key(provider_key);
+        if !self.states.contains_key(&canonical) {
             self.states.insert(
-                provider_key.to_string(),
+                canonical.clone(),
                 ProviderInternalState {
-                    provider_key: provider_key.to_string(),
+                    provider_key: canonical.clone(),
                     state: "healthy".to_string(),
                     failure_count: 0,
                     cooldown_expires_at: None,
                     last_failure_at: None,
                     reason: None,
+                    consecutive_http_502_failures: 0,
                 },
             );
         }
-        self.states.get_mut(provider_key).expect("state exists")
+        self.states.get_mut(&canonical).expect("state exists")
     }
 }
 
@@ -218,7 +332,7 @@ impl Default for ProviderHealthConfigNormalized {
 }
 
 const DEFAULT_FAILURE_THRESHOLD: i64 = 3;
-const DEFAULT_COOLDOWN_MS: i64 = 30_000;
+const DEFAULT_COOLDOWN_MS: i64 = 30 * 60_000;
 const DEFAULT_FATAL_COOLDOWN_MS: i64 = 120_000;
 
 #[cfg(test)]

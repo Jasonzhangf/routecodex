@@ -228,6 +228,45 @@ describe('sanitizeChatProcessRequest', () => {
     expect(out.metadata?.chatProcessSanitizer).toBeUndefined();
   });
 
+  it('removes historical goal-control turns before the latest user turn', () => {
+    const input: any = {
+      messages: [
+        { role: 'user', content: '普通历史' },
+        {
+          role: 'developer',
+          content: 'Continue working toward the active thread goal.\n\n<untrusted_objective>\n历史 goal\n</untrusted_objective>'
+        },
+        {
+          type: 'function_call',
+          id: 'fc_goal_1',
+          call_id: 'fc_goal_1',
+          name: 'get_goal',
+          arguments: '{}'
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'fc_goal_1',
+          output: '{\"goal\":{\"threadId\":\"t1\",\"objective\":\"历史 goal\"}}'
+        },
+        {
+          role: 'assistant',
+          content: 'Goal 已满足全部完成信号。我现在就调用 `update_goal` 标记 `complete`。'
+        },
+        { role: 'user', content: '继续执行' }
+      ]
+    };
+
+    const out: any = sanitizeChatProcessRequest(input);
+
+    expect(out.messages).toHaveLength(2);
+    expect(out.messages[0]).toMatchObject({ role: 'user', content: '普通历史' });
+    expect(out.messages[1]).toMatchObject({ role: 'user', content: '继续执行' });
+    expect(out.metadata?.chatProcessSanitizer).toMatchObject({
+      removedHistoricalGoalTurns: 4,
+      removedAssistantTurns: 4
+    });
+  });
+
   it('removes mirrored assistant text across multiple tool-boundary segments', () => {
     const repeatedMirror = 'Jason，我来检查编译构建、全局安装、daemon 重启的脚本链路。';
     const input: any = {

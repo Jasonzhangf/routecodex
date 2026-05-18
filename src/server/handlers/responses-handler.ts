@@ -98,10 +98,21 @@ export async function handleResponses(
   options: ResponsesHandlerOptions = {}
 ): Promise<void> {
   const entryEndpoint = options.entryEndpoint || '/v1/responses';
+  const initialBody = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+    ? (req.body as Record<string, unknown>)
+    : undefined;
+  const initialModel =
+    typeof initialBody?.model === 'string' && initialBody.model.trim()
+      ? initialBody.model.trim()
+      : 'request';
   // Some client endpoints are "synthetic" entrypoints used only for Hub/Pipeline semantics
   // (e.g. submit_tool_outputs). We may rewrite the pipeline entryEndpoint after preprocessing.
   let pipelineEntryEndpoint = entryEndpoint;
-  const { clientRequestId, providerRequestId } = nextRequestIdentifiers(req.headers['x-request-id'], { entryEndpoint });
+  const { clientRequestId, providerRequestId } = nextRequestIdentifiers(req.headers['x-request-id'], {
+    entryEndpoint,
+    providerId: 'router',
+    model: initialModel
+  });
   const requestId = providerRequestId;
   const rawTimeout = String(
     process.env.ROUTECODEX_HTTP_RESPONSES_TIMEOUT_MS ||

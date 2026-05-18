@@ -246,7 +246,7 @@ describe('client-remap-protocol-switch', () => {
       tools: {
         clientToolsRaw: [
           { type: 'function', function: { name: 'mailbox.status', parameters: { type: 'object' } } },
-          { type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } },
+          { type: 'function', function: { name: 'continue_execution', parameters: { type: 'object' } } },
           { type: 'function', function: { name: 'context_ledger.memory', parameters: { type: 'object' } } }
         ]
       }
@@ -261,7 +261,7 @@ describe('client-remap-protocol-switch', () => {
 
     const toolCalls = (result as any).choices[0].message.tool_calls;
     expect(toolCalls[0].function.name).toBe('mailbox.status');
-    expect(toolCalls[1].function.name).toBe('reasoning.stop');
+    expect(toolCalls[1].function.name).toBe('continue_execution');
     expect(toolCalls[2].function.name).toBe('context_ledger.memory');
   });
 

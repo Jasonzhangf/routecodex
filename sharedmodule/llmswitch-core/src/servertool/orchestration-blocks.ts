@@ -8,9 +8,6 @@ function normalizeServerToolCallName(name: string): string {
   if (normalized === 'websearch' || normalized === 'web-search') {
     return 'web_search';
   }
-  if (normalized === 'reasoning_stop' || normalized === 'reasoning-stop') {
-    return 'reasoning.stop';
-  }
   return normalized;
 }
 
