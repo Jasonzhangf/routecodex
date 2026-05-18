@@ -1,9 +1,9 @@
-import type { JsonObject } from '../../../conversion/hub/types/json.js';
+import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
   buildChatRequestFromResponses,
   captureResponsesContext
-} from '../../../conversion/responses/responses-openai-bridge.js';
-import { cloneJson } from '../../server-side-tools.js';
+} from '../conversion/responses/responses-openai-bridge.js';
+import { cloneJson } from './server-side-tools.js';
 
 export type CapturedChatSeed = {
   model?: string;
@@ -66,41 +66,13 @@ export function normalizeFollowupParameters(value: unknown): Record<string, unkn
   return Object.keys(cloned).length ? cloned : undefined;
 }
 
-export function stripInheritedFollowupOutputBudget(
-  parameters: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) {
-    return undefined;
-  }
-  const sanitized = cloneJson(parameters) as Record<string, unknown>;
-  delete (sanitized as { max_tokens?: unknown }).max_tokens;
-  delete (sanitized as { max_output_tokens?: unknown }).max_output_tokens;
-  return Object.keys(sanitized).length ? sanitized : undefined;
-}
-
-function normalizeModelIdentity(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
 export function sanitizeFollowupParametersForResolvedModel(args: {
   parameters: Record<string, unknown> | undefined;
-  seedModel: unknown;
-  followupModel: string;
 }): Record<string, unknown> | undefined {
   if (!args.parameters || typeof args.parameters !== 'object' || Array.isArray(args.parameters)) {
     return undefined;
   }
-  const sanitized = stripInheritedFollowupOutputBudget(args.parameters);
-  const seedModel = normalizeModelIdentity(args.seedModel);
-  const followupModel = normalizeModelIdentity(args.followupModel);
-  if (!seedModel || !followupModel) {
-    return sanitized;
-  }
-  return sanitized;
+  return cloneJson(args.parameters) as Record<string, unknown>;
 }
 
 export function extractCapturedChatSeed(source: unknown): CapturedChatSeed | null {

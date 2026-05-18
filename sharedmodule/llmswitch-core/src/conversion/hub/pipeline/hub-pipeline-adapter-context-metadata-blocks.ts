@@ -5,6 +5,8 @@ import {
   resolveAdapterContextObjectCarriersWithNative,
 } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
 import { cloneRuntimeMetadata } from "../../runtime-metadata.js";
+import { saveOriginSnapshot } from "../../../servertool/origin-request-store.js";
+import { resolveServertoolPersistentScopeKey } from "../../../servertool/state-scope.js";
 
 export function applyMetadataAdapterContextFields(args: {
   adapterContext: AdapterContext;
@@ -50,6 +52,20 @@ export function applyMetadataAdapterContextFields(args: {
   if (adapterObjectCarriers.capturedChatRequest) {
     (adapterContext as Record<string, unknown>).capturedChatRequest =
       adapterObjectCarriers.capturedChatRequest;
+    // Persist origin snapshot for followup re-entry (Phase 1+).
+    const scope = resolveServertoolPersistentScopeKey(adapterContext);
+    if (scope && adapterObjectCarriers.capturedChatRequest) {
+      saveOriginSnapshot(scope, {
+        requestId: adapterContext.requestId ?? String(Date.now()),
+        sessionScope: scope,
+        model: (adapterObjectCarriers.capturedChatRequest as Record<string, unknown>)?.model as string | undefined,
+        messages: ((((adapterObjectCarriers.capturedChatRequest as Record<string, unknown>)?.messages as unknown[]) ?? []) as any),
+        tools: ((((adapterObjectCarriers.capturedChatRequest as Record<string, unknown>)?.tools as unknown[]) ?? []) as any),
+        parameters: (((adapterObjectCarriers.capturedChatRequest as Record<string, unknown>)?.parameters as Record<string, unknown>) ?? undefined) as any,
+        entryEndpoint: adapterContext.entryEndpoint,
+        providerProtocol: adapterContext.providerProtocol,
+      });
+    }
   }
   if (typeof adapterMetadataSignals.sessionId === "string") {
     (adapterContext as Record<string, unknown>).sessionId =

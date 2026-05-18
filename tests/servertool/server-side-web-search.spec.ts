@@ -13,7 +13,9 @@ describe('ServerTool web_search engine (generic)', () => {
   const baseCtx: AdapterContext = {
     requestId: 'req-base',
     entryEndpoint: '/v1/chat/completions',
-    providerProtocol: 'openai-chat'
+    providerProtocol: 'openai-chat',
+    sessionId: 'sess-web-search-test',
+    conversationId: 'conv-web-search-test'
   } as any;
 
   function makeCapturedChatRequest(): JsonObject {
@@ -339,8 +341,11 @@ describe('ServerTool web_search engine (generic)', () => {
     expect(body.stream).toBe(false);
     expect(body.parameters?.stream).toBeUndefined();
     const payloadText = JSON.stringify(body.messages);
-    expect(payloadText).toContain('web_search');
-    expect(payloadText).toContain('call_web_1');
+    // Origin-rebuild followup: messages are rebuilt from captured origin request,
+    // so tool call envelopes are not injected into followup messages.
+    expect(payloadText).toContain('hi');
+    expect(payloadText).not.toContain('web_search');
+    expect(payloadText).not.toContain('call_web_1');
   });
 
   test('falls back to next engine on backend failure', async () => {

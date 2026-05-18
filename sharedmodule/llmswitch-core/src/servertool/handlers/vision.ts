@@ -4,7 +4,7 @@ import { registerServerToolHandler } from '../registry.js';
 import { bindServertoolContractWithNative, cloneJson, extractTextFromChatLike } from '../server-side-tools.js';
 import {
   extractCapturedChatSeed
-} from './followup-request-builder.js';
+} from '../followup-seed.js';
 import { containsImageAttachment } from '../../conversion/hub/process/chat-process-media.js';
 import { reenterServerToolBackend } from '../reenter-backend.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';

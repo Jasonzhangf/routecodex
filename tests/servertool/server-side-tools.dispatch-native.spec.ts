@@ -94,7 +94,9 @@ function makeAdapterContext(): AdapterContext {
   return {
     requestId: 'req-servertool-dispatch-native',
     entryEndpoint: '/v1/responses',
-    providerProtocol: 'openai-responses'
+    providerProtocol: 'openai-responses',
+    sessionId: 'sess_dispatch_1',
+    conversationId: 'conv_dispatch_1'
   } as any;
 }
 
@@ -201,7 +203,6 @@ describe('server-side-tools native dispatch planner', () => {
         }
       ],
       pendingInjectionMessageKinds: ['assistant_tool_calls', 'tool_outputs'],
-      followupInjectionOps: ['append_assistant_message', 'append_tool_messages_from_tool_outputs'],
       hasLastExecutionFollowup: true,
       lastExecutionFlowId: `${DISPATCH_TOOL_A}_ok`
     });
@@ -235,34 +236,6 @@ describe('server-side-tools native dispatch planner', () => {
         name: DISPATCH_TOOL_A,
         content: JSON.stringify({ ok: true, tool: DISPATCH_TOOL_A })
       }
-    ]);
-    expect(outcome.followupInjectionOps).toEqual([]);
-  });
-
-  test('native planner echoes configured generic followup ops', () => {
-    const outcome = planServertoolOutcomeWithNative({
-      toolCalls: [{ id: 'call_dispatch_1', name: DISPATCH_TOOL_A, arguments: '{}' }],
-      executedToolCalls: [
-        {
-          id: 'call_dispatch_1',
-          name: DISPATCH_TOOL_A,
-          arguments: '{}',
-          executionMode: 'guarded',
-          stripAfterExecute: true
-        }
-      ],
-      executedFlowIds: [`${DISPATCH_TOOL_A}_ok`],
-      pendingInjectionMessageKinds: ['assistant_tool_calls', 'tool_outputs'],
-      followupInjectionOps: ['append_assistant_message', 'append_tool_messages_from_tool_outputs'],
-      hasLastExecutionFollowup: false
-    });
-    expect(outcome.followupInjectionOps).toEqual([
-      'append_assistant_message',
-      'append_tool_messages_from_tool_outputs'
-    ]);
-    expect(outcome.followupInjectionOpsResolved).toEqual([
-      { op: 'append_assistant_message', required: true },
-      { op: 'append_tool_messages_from_tool_outputs', required: true }
     ]);
   });
 

@@ -1,6 +1,6 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import { extractCapturedChatSeed } from './handlers/followup-request-builder.js';
+import { extractCapturedChatSeed } from './followup-seed.js';
 
 function resolveCapturedChatRequest(adapterContext: AdapterContext): JsonObject | null {
   if (!adapterContext || typeof adapterContext !== 'object') {

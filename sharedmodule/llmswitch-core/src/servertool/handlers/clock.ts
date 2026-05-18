@@ -5,7 +5,7 @@ import type { JsonObject, JsonValue } from '../../conversion/hub/types/json.js';
 import type { ServerToolHandler, ServerToolHandlerContext, ServerToolHandlerPlan, ToolCall } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
 import { cloneJson } from '../server-side-tools.js';
-import { extractCapturedChatSeed } from './followup-request-builder.js';
+import { extractCapturedChatSeed } from '../followup-seed.js';
 import { ensureRuntimeMetadata, readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
 import {
   cancelClockTask,

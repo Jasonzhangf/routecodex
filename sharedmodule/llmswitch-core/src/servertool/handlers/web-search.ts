@@ -5,7 +5,7 @@ import { registerServerToolHandler } from '../registry.js';
 import { cloneJson, extractTextFromChatLike } from '../server-side-tools.js';
 import {
   extractCapturedChatSeed
-} from './followup-request-builder.js';
+} from '../followup-seed.js';
 import { reenterServerToolBackend } from '../reenter-backend.js';
 import {
   resolveWebSearchToolName,

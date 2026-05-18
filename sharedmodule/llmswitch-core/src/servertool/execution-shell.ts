@@ -225,7 +225,6 @@ export function buildServertoolOutcomePlanInput(args: {
   conversationId?: string;
   toolOutputs?: unknown[];
   pendingInjectionMessageKinds?: string[];
-  followupInjectionOps?: string[];
 }) {
   return {
     toolCalls: args.toolCalls,
@@ -241,9 +240,6 @@ export function buildServertoolOutcomePlanInput(args: {
     ...(args.pendingInjectionMessageKinds?.length
       ? { pendingInjectionMessageKinds: args.pendingInjectionMessageKinds }
       : {}),
-    ...(args.followupInjectionOps?.length
-      ? { followupInjectionOps: args.followupInjectionOps }
-      : {})
   };
 }
 
@@ -257,7 +253,6 @@ export function resolveToolCallExecutionOutcome(args: {
   stripToolOutputs: (base: JsonObject) => void;
 }): ServerSideToolEngineResult {
   const pendingInjectionConfig = buildServertoolPendingInjectionConfig();
-  const followupConfig = buildServertoolFollowupConfig();
   const sessionId =
     args.options.adapterContext && typeof (args.options.adapterContext as any).sessionId === 'string'
       ? String((args.options.adapterContext as any).sessionId).trim()
@@ -275,7 +270,6 @@ export function resolveToolCallExecutionOutcome(args: {
         ? ((args.baseForExecution as any).tool_outputs as unknown[])
         : undefined,
       pendingInjectionMessageKinds: pendingInjectionConfig.messageKinds,
-      followupInjectionOps: followupConfig.genericInjectionOps,
       ...(sessionId ? { sessionId } : {}),
       ...(conversationId ? { conversationId } : {})
     })
@@ -316,10 +310,7 @@ export function resolveToolCallExecutionOutcome(args: {
   }
 
   const genericFollowup = {
-    requestIdSuffix: ':servertool_followup',
-    injection: {
-      ops: outcomePlan.followupInjectionOpsResolved as any[]
-    }
+    requestIdSuffix: ':servertool_followup'
   } as any;
   const followup =
     outcomePlan.followupStrategy === 'reuse_last_execution' &&

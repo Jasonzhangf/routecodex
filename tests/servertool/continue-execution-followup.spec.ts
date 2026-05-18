@@ -38,6 +38,7 @@ describe('continue_execution servertool followup provider pin', () => {
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
       providerKey,
+      sessionId: "sess-continue-pin-1",
       stream: false,
       capturedChatRequest: {
         model: 'kimi-k2.5',
@@ -85,6 +86,7 @@ describe('continue_execution servertool followup provider pin', () => {
       requestId: 'req-continue-pin-2',
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
+      sessionId: "sess-continue-pin-2",
       stream: false,
       capturedChatRequest: {
         model: 'kimi-k2.5',

@@ -1,7 +1,7 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
-import { extractCapturedChatSeed } from './handlers/followup-request-builder.js';
+import { extractCapturedChatSeed } from './followup-seed.js';
 
 export function extractAppendUserTextFromFollowupPlan(followupPlan: unknown): string | undefined {
   if (!followupPlan || typeof followupPlan !== 'object' || Array.isArray(followupPlan)) {

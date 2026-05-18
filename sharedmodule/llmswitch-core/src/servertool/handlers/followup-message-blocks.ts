@@ -1,5 +1,5 @@
-import type { JsonObject } from '../../../conversion/hub/types/json.js';
-import { bindServertoolContractWithNative, cloneJson } from '../../server-side-tools.js';
+import type { JsonObject } from '../../conversion/hub/types/json.js';
+import { bindServertoolContractWithNative, cloneJson } from '../server-side-tools.js';
 
 const TEXTUAL_TOOL_TRANSPORT_PATTERNS: RegExp[] = [
   /<\｜?DSML[\s\S]*tool_calls/i,

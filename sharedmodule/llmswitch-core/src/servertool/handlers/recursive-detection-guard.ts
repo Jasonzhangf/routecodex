@@ -10,7 +10,7 @@ import type {
 import { registerServerToolHandler } from '../registry.js';
 import { cloneJson } from '../server-side-tools.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
-import { extractCapturedChatSeed } from './followup-request-builder.js';
+import { extractCapturedChatSeed } from '../followup-seed.js';
 import { resolveServertoolLoopScopeKey } from '../state-scope.js';
 
 const FLOW_ID = 'recursive_detection_guard';

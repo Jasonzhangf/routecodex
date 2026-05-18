@@ -24,6 +24,15 @@ export type ChatWebSearchIntentPayload = {
   googlePreferred: boolean;
 };
 
+export type SanitizeMessagesPayload = {
+  messages: Record<string, unknown>[];
+  removedAssistantTurns: number;
+  removedEmptyAssistantTurns: number;
+  removedTemplateAssistantTurns: number;
+  removedDuplicateMirrorAssistantTurns: number;
+  didMutateMessageShapes: boolean;
+};
+
 export type ClockClearDirectivePayload = {
   hadClear: boolean;
   next: string;
@@ -84,8 +93,6 @@ export type ServertoolOutcomePlanPayload = {
   followupStrategy: string;
   requiresPendingInjection: boolean;
   primaryExecutionMode?: string | null;
-  followupInjectionOps: string[];
-  followupInjectionOpsResolved: unknown[];
 };
 
 export type ServertoolAutoHookPlanEntryPayload = {
@@ -383,8 +390,6 @@ export function parseServertoolOutcomePlanPayload(raw: string): ServertoolOutcom
       followupStrategy?: unknown;
       requiresPendingInjection?: unknown;
       primaryExecutionMode?: unknown;
-      followupInjectionOps?: unknown;
-      followupInjectionOpsResolved?: unknown;
     }
     | typeof JSON_PARSE_FAILED;
   if (
@@ -398,9 +403,7 @@ export function parseServertoolOutcomePlanPayload(raw: string): ServertoolOutcom
     typeof parsed.useLastExecutionFollowup !== 'boolean' ||
     typeof parsed.useGenericFollowup !== 'boolean' ||
     typeof parsed.followupStrategy !== 'string' ||
-    typeof parsed.requiresPendingInjection !== 'boolean' ||
-    !Array.isArray(parsed.followupInjectionOps) ||
-    !Array.isArray(parsed.followupInjectionOpsResolved)
+    typeof parsed.requiresPendingInjection !== 'boolean'
   ) {
     return null;
   }
@@ -430,10 +433,6 @@ export function parseServertoolOutcomePlanPayload(raw: string): ServertoolOutcom
     useGenericFollowup: parsed.useGenericFollowup,
     followupStrategy: parsed.followupStrategy,
     requiresPendingInjection: parsed.requiresPendingInjection,
-    followupInjectionOps: parsed.followupInjectionOps
-      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-      .map((entry) => entry.trim()),
-    followupInjectionOpsResolved: parsed.followupInjectionOpsResolved,
     ...(typeof parsed.primaryExecutionMode === 'string' && parsed.primaryExecutionMode.trim()
       ? { primaryExecutionMode: parsed.primaryExecutionMode.trim() }
       : parsed.primaryExecutionMode === null
@@ -575,4 +574,10 @@ export function parseServertoolFollowupRuntimePlanPayload(raw: string): Serverto
       ? { contextDecorationMode: plan.contextDecorationMode }
       : {})
   };
+}
+
+export function parseSanitizeMessagesPayload(raw: string): SanitizeMessagesPayload | null {
+  const parsed = parseJson('parseSanitizeMessagesPayload', raw);
+  if (!parsed || typeof parsed !== 'object') return null;
+  return parsed as SanitizeMessagesPayload;
 }

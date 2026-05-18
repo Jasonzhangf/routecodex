@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
-use crate::chat_process_media_semantics::strip_chat_process_historical_images;
 use crate::chat_web_search_intent::analyze_chat_web_search_intent;
 use crate::hub_bridge_actions::utils::{
     can_servertool_own_tool_call_id, is_synthetic_routecodex_tool_call_id,
@@ -122,7 +121,6 @@ struct ServertoolOutcomePlannerInput {
     conversation_id: Option<String>,
     tool_outputs: Option<Vec<Value>>,
     pending_injection_message_kinds: Option<Vec<String>>,
-    followup_injection_ops: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -150,20 +148,6 @@ struct ServertoolOutcomePlanOutput {
     followup_strategy: String,
     requires_pending_injection: bool,
     primary_execution_mode: Option<String>,
-    followup_injection_ops: Vec<String>,
-    followup_injection_ops_resolved: Vec<Value>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ServertoolGenericFollowupPayloadInput {
-    model: Option<String>,
-    messages: Vec<Value>,
-    tools: Option<Vec<Value>>,
-    parameters: Option<Map<String, Value>>,
-    assistant_message: Option<Value>,
-    tool_outputs: Option<Vec<Value>>,
-    followup_injection_ops: Vec<Value>,
 }
 
 fn build_pending_injection_messages_resolved(
@@ -262,470 +246,6 @@ fn normalize_nonempty_string_vec(values: Option<&Vec<String>>) -> Vec<String> {
         }
     }
     out
-}
-
-fn build_required_followup_injection_ops(values: &[String]) -> Result<Vec<Value>, String> {
-    let mut out = Vec::new();
-    for raw in values {
-        let op = raw.trim();
-        if op.is_empty() {
-            continue;
-        }
-        if op == "append_assistant_message" {
-            out.push(serde_json::json!({
-                "op": "append_assistant_message",
-                "required": true
-            }));
-            continue;
-        }
-        if op == "append_tool_messages_from_tool_outputs" {
-            out.push(serde_json::json!({
-                "op": "append_tool_messages_from_tool_outputs",
-                "required": true
-            }));
-            continue;
-        }
-        return Err(format!("unsupported generic followup op: {}", op));
-    }
-    Ok(out)
-}
-
-fn build_servertool_generic_followup_payload(
-    input: ServertoolGenericFollowupPayloadInput,
-) -> Result<Value, String> {
-    let model = input
-        .model
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "generic followup payload requires non-empty model".to_string())?;
-    let mut messages = strip_chat_process_historical_images(
-        input.messages,
-        "[Image omitted]".to_string(),
-    )
-    .messages;
-    let mut tools = input.tools.unwrap_or_default();
-    let mut parameters = input.parameters.unwrap_or_default();
-    for raw in input.followup_injection_ops {
-        let Some(record) = raw.as_object() else {
-            return Err("followupInjectionOps entry must be an object".to_string());
-        };
-        let op = record
-            .get("op")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| "followupInjectionOps entry missing non-empty op".to_string())?;
-        let required = record
-            .get("required")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
-        if op == "append_assistant_message" {
-            let Some(assistant) = input.assistant_message.clone() else {
-                if required {
-                    return Err("append_assistant_message requires assistantMessage".to_string());
-                }
-                continue;
-            };
-            messages.push(assistant);
-            continue;
-        }
-        if op == "append_tool_messages_from_tool_outputs" {
-            let Some(tool_outputs) = input.tool_outputs.clone() else {
-                if required {
-                    return Err("append_tool_messages_from_tool_outputs requires toolOutputs".to_string());
-                }
-                continue;
-            };
-            if tool_outputs.is_empty() {
-                if required {
-                    return Err("append_tool_messages_from_tool_outputs requires non-empty toolOutputs".to_string());
-                }
-                continue;
-            }
-            for entry in tool_outputs {
-                let Some(record) = entry.as_object() else {
-                    return Err("toolOutputs entry must be an object".to_string());
-                };
-                let Some(tool_call_id) = record
-                    .get("tool_call_id")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                else {
-                    return Err("toolOutputs entry missing non-empty tool_call_id".to_string());
-                };
-                let name = record
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .unwrap_or("tool");
-                let content = match record.get("content") {
-                    Some(Value::String(value)) => value.clone(),
-                    Some(value) => serde_json::to_string(value)
-                        .map_err(|error| format!("toolOutputs content serialization failed: {}", error))?,
-                    None => "null".to_string(),
-                };
-                messages.push(serde_json::json!({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "name": name,
-                    "content": content
-                }));
-            }
-            continue;
-        }
-        if op == "replace_tools" {
-            let next_tools = record
-                .get("tools")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            tools = next_tools;
-            continue;
-        }
-        if op == "preserve_tools" {
-            continue;
-        }
-        if op == "ensure_standard_tools" {
-            if tools.is_empty() {
-                continue;
-            }
-            let include_reasoning_stop = record
-                .get("includeReasoningStopTool")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            if !include_reasoning_stop {
-                continue;
-            }
-            let already_has_reasoning_stop = tools.iter().any(|tool| {
-                tool.as_object()
-                    .and_then(|tool_record| tool_record.get("function"))
-                    .and_then(Value::as_object)
-                    .and_then(|function| function.get("name"))
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .map(str::to_ascii_lowercase)
-                    == Some("reasoning.stop".to_string())
-            });
-            if already_has_reasoning_stop {
-                continue;
-            }
-            let Some(tool_definition) = record.get("reasoningStopToolDefinition") else {
-                continue;
-            };
-            if !tool_definition.is_object() {
-                continue;
-            }
-            tools.push(tool_definition.clone());
-            continue;
-        }
-        if op == "force_tool_choice" {
-            match record.get("value") {
-                Some(Value::Null) | None => {
-                    parameters.remove("tool_choice");
-                }
-                Some(value) => {
-                    parameters.insert("tool_choice".to_string(), value.clone());
-                    let is_function_choice = value
-                        .as_object()
-                        .and_then(|entry| entry.get("type"))
-                        .and_then(Value::as_str)
-                        .map(str::trim)
-                        .map(str::to_ascii_lowercase)
-                        == Some("function".to_string());
-                    if is_function_choice {
-                        parameters.insert(
-                            "parallel_tool_calls".to_string(),
-                            Value::Bool(false),
-                        );
-                    }
-                }
-            }
-            continue;
-        }
-        if op == "append_user_text" {
-            let text = record
-                .get("text")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .unwrap_or("");
-            if !text.is_empty() {
-                messages.push(serde_json::json!({
-                    "role": "user",
-                    "content": text
-                }));
-            }
-            continue;
-        }
-        if op == "append_tool_if_missing" {
-            let tool_name = record
-                .get("toolName")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .unwrap_or("");
-            let Some(tool_definition) = record.get("toolDefinition") else {
-                continue;
-            };
-            if tool_name.is_empty() || !tool_definition.is_object() {
-                continue;
-            }
-            let exists = tools.iter().any(|tool| {
-                tool.as_object()
-                    .and_then(|tool_record| tool_record.get("function"))
-                    .and_then(Value::as_object)
-                    .and_then(|function| function.get("name"))
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    == Some(tool_name)
-            });
-            if !exists {
-                tools.push(tool_definition.clone());
-            }
-            continue;
-        }
-        if op == "inject_vision_summary" {
-            let summary = record
-                .get("summary")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .unwrap_or("");
-            if summary.is_empty() {
-                continue;
-            }
-            let summary_text = format!("[Vision] {}", summary);
-            let mut injected = false;
-            for message in messages.iter_mut() {
-                let Some(message_record) = message.as_object_mut() else {
-                    continue;
-                };
-                let Some(content_parts) = message_record
-                    .get_mut("content")
-                    .and_then(Value::as_array_mut)
-                else {
-                    continue;
-                };
-                let had_placeholder = content_parts.iter().any(|part| {
-                    part.as_object()
-                        .and_then(|entry| entry.get("text"))
-                        .and_then(Value::as_str)
-                        .map(str::trim)
-                        == Some("[Image omitted]")
-                });
-                if !had_placeholder {
-                    continue;
-                }
-                content_parts.push(serde_json::json!({
-                    "type": "text",
-                    "text": summary_text
-                }));
-                injected = true;
-            }
-            if !injected {
-                for idx in (0..messages.len()).rev() {
-                    let Some(message_record) = messages[idx].as_object_mut() else {
-                        continue;
-                    };
-                    let role = message_record
-                        .get("role")
-                        .and_then(Value::as_str)
-                        .map(str::trim)
-                        .map(str::to_ascii_lowercase)
-                        .unwrap_or_default();
-                    if role != "user" {
-                        continue;
-                    }
-                    if let Some(content_parts) = message_record
-                        .get_mut("content")
-                        .and_then(Value::as_array_mut)
-                    {
-                        content_parts.push(serde_json::json!({
-                            "type": "text",
-                            "text": summary_text
-                        }));
-                    } else {
-                        let existing = message_record
-                            .get("content")
-                            .and_then(Value::as_str)
-                            .map(str::trim)
-                            .unwrap_or("");
-                        let next = if existing.is_empty() {
-                            summary_text.clone()
-                        } else {
-                            format!("{}\n{}", existing, summary_text)
-                        };
-                        message_record.insert("content".to_string(), Value::String(next));
-                    }
-                    injected = true;
-                    break;
-                }
-            }
-            if !injected {
-                messages.push(serde_json::json!({
-                    "role": "user",
-                    "content": summary_text
-                }));
-            }
-            continue;
-        }
-        if op == "trim_openai_messages" {
-            let max_non_system_messages = record
-                .get("maxNonSystemMessages")
-                .and_then(Value::as_i64)
-                .unwrap_or(16);
-            let max_non_system_messages = std::cmp::max(1_i64, max_non_system_messages) as usize;
-            let mut non_system_indices = Vec::new();
-            for (idx, entry) in messages.iter().enumerate() {
-                let role = entry
-                    .as_object()
-                    .and_then(|entry| entry.get("role"))
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .map(str::to_ascii_lowercase)
-                    .unwrap_or_default();
-                if role.is_empty() || role == "system" || role == "developer" {
-                    continue;
-                }
-                non_system_indices.push(idx);
-            }
-            if non_system_indices.len() > max_non_system_messages {
-                let keep_tail = non_system_indices[non_system_indices.len() - max_non_system_messages..]
-                    .iter()
-                    .copied()
-                    .collect::<std::collections::HashSet<_>>();
-                let mut next_messages = Vec::with_capacity(messages.len());
-                for (idx, entry) in messages.into_iter().enumerate() {
-                    let role = entry
-                        .as_object()
-                        .and_then(|record| record.get("role"))
-                        .and_then(Value::as_str)
-                        .map(str::trim)
-                        .map(str::to_ascii_lowercase)
-                        .unwrap_or_default();
-                    if role == "system" || role == "developer" || keep_tail.contains(&idx) {
-                        next_messages.push(entry);
-                    }
-                }
-                messages = next_messages;
-            }
-            continue;
-        }
-        if op == "compact_tool_content" {
-            let max_chars = record
-                .get("maxChars")
-                .and_then(Value::as_i64)
-                .map(|value| std::cmp::max(64_i64, value) as usize)
-                .unwrap_or(1200);
-            for message in messages.iter_mut() {
-                let Some(message_record) = message.as_object_mut() else {
-                    continue;
-                };
-                let role = message_record
-                    .get("role")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .map(str::to_ascii_lowercase)
-                    .unwrap_or_default();
-                if role != "tool" {
-                    continue;
-                }
-                let current = message_record.get("content").cloned().unwrap_or(Value::Null);
-                let text = match current {
-                    Value::String(value) => value,
-                    value => serde_json::to_string(&value).unwrap_or_else(|_| "null".to_string()),
-                };
-                if text.len() <= max_chars {
-                    continue;
-                }
-                let keep_head = std::cmp::max(24_usize, ((max_chars as f64) * 0.45).floor() as usize);
-                let keep_tail = std::cmp::max(24_usize, ((max_chars as f64) * 0.35).floor() as usize);
-                let omitted = text
-                    .len()
-                    .saturating_sub(keep_head)
-                    .saturating_sub(keep_tail);
-                let head = &text[..std::cmp::min(keep_head, text.len())];
-                let tail_start = text.len().saturating_sub(keep_tail);
-                let tail = &text[tail_start..];
-                message_record.insert(
-                    "content".to_string(),
-                    Value::String(format!(
-                        "{}\n...[tool_output_compacted omitted={}]...\n{}",
-                        head, omitted, tail
-                    )),
-                );
-            }
-            continue;
-        }
-        if op == "inject_system_text" {
-            let text = record
-                .get("text")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .unwrap_or("");
-            if text.is_empty() {
-                continue;
-            }
-            let mut insert_at = 0usize;
-            while insert_at < messages.len() {
-                let role = messages[insert_at]
-                    .as_object()
-                    .and_then(|entry| entry.get("role"))
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .map(str::to_lowercase)
-                    .unwrap_or_default();
-                if role == "system" {
-                    insert_at += 1;
-                    continue;
-                }
-                break;
-            }
-            messages.insert(
-                insert_at,
-                serde_json::json!({
-                    "role": "system",
-                    "content": text
-                }),
-            );
-            continue;
-        }
-        if op == "drop_tool_by_name" {
-            let drop_name = record
-                .get("name")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .unwrap_or("");
-            if drop_name.is_empty() {
-                continue;
-            }
-            tools.retain(|tool| {
-                let Some(tool_record) = tool.as_object() else {
-                    return false;
-                };
-                let tool_name = tool_record
-                    .get("function")
-                    .and_then(Value::as_object)
-                    .and_then(|function| function.get("name"))
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .unwrap_or("");
-                if tool_name.is_empty() {
-                    return true;
-                }
-                tool_name != drop_name
-            });
-            continue;
-        }
-        return Err(format!("unsupported generic followup op: {}", op));
-    }
-    let mut out = Map::new();
-    out.insert("model".to_string(), Value::String(model));
-    out.insert("messages".to_string(), Value::Array(messages));
-    out.insert("tools".to_string(), Value::Array(tools));
-    if !parameters.is_empty() {
-        out.insert("parameters".to_string(), Value::Object(parameters));
-    }
-    Ok(Value::Object(out))
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -840,7 +360,6 @@ fn normalize_servertool_call_name(name: &str) -> String {
     let normalized = name.trim().to_ascii_lowercase();
     match normalized.as_str() {
         "websearch" | "web-search" => "web_search".to_string(),
-        "reasoning_stop" | "reasoning-stop" => "reasoning.stop".to_string(),
         _ => normalized,
     }
 }
@@ -1784,8 +1303,6 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let configured_pending_injection_message_kinds =
         normalize_nonempty_string_vec(input.pending_injection_message_kinds.as_ref());
-    let configured_followup_injection_ops =
-        normalize_nonempty_string_vec(input.followup_injection_ops.as_ref());
     let executed_ids: Vec<String> = input
         .executed_tool_calls
         .iter()
@@ -1806,8 +1323,6 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
             followup_strategy: "none".to_string(),
             requires_pending_injection: false,
             primary_execution_mode: None,
-            followup_injection_ops: Vec::new(),
-            followup_injection_ops_resolved: Vec::new(),
         };
         return serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()));
     }
@@ -1876,8 +1391,6 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
             followup_strategy: "pending_injection".to_string(),
             requires_pending_injection: true,
             primary_execution_mode,
-            followup_injection_ops: Vec::new(),
-            followup_injection_ops_resolved: Vec::new(),
         };
         return serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()));
     }
@@ -1916,19 +1429,6 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
     } else {
         None
     };
-    let followup_injection_ops = if use_last_execution_followup {
-        Vec::new()
-    } else if configured_followup_injection_ops.is_empty() {
-        vec![
-            "append_assistant_message".to_string(),
-            "append_tool_messages_from_tool_outputs".to_string(),
-        ]
-    } else {
-        configured_followup_injection_ops
-    };
-    let followup_injection_ops_resolved =
-        build_required_followup_injection_ops(followup_injection_ops.as_slice())
-            .map_err(napi::Error::from_reason)?;
     let output = ServertoolOutcomePlanOutput {
         outcome_mode: "servertool_only".to_string(),
         remaining_tool_call_ids,
@@ -1946,19 +1446,10 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
         },
         requires_pending_injection: false,
         primary_execution_mode,
-        followup_injection_ops,
-        followup_injection_ops_resolved,
     };
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-#[napi]
-pub fn build_servertool_generic_followup_payload_json(input_json: String) -> NapiResult<String> {
-    let input: ServertoolGenericFollowupPayloadInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = build_servertool_generic_followup_payload(input).map_err(napi::Error::from_reason)?;
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
 
 #[napi]
 pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<String> {
@@ -2193,7 +1684,7 @@ mod tests {
                     "stripAfterExecute": true
                 },
                 {
-                    "name": "reasoning.stop",
+                    "name": "continue_execution",
                     "trigger": "tool_call",
                     "executionMode": "guarded",
                     "stripAfterExecute": true
@@ -2286,13 +1777,6 @@ mod tests {
         );
         assert_eq!(
             parsed
-                .get("followupInjectionOps")
-                .and_then(|v| v.as_array())
-                .map(|entries| entries.len()),
-            Some(0)
-        );
-        assert_eq!(
-            parsed
                 .get("remainingToolCallIds")
                 .and_then(|v| v.as_array())
                 .map(|entries| entries.len()),
@@ -2353,13 +1837,6 @@ mod tests {
                 .map(|entries| entries.len()),
             Some(0)
         );
-        assert_eq!(
-            parsed
-                .get("followupInjectionOps")
-                .and_then(|v| v.as_array())
-                .map(|entries| entries.len()),
-            Some(0)
-        );
     }
 
     #[test]
@@ -2390,370 +1867,6 @@ mod tests {
         assert_eq!(
             parsed.get("followupStrategy").and_then(|v| v.as_str()),
             Some("generic_tool_outputs")
-        );
-        assert_eq!(
-            parsed
-                .get("followupInjectionOps")
-                .and_then(|v| v.as_array())
-                .map(|entries| entries.iter().filter_map(|entry| entry.as_str()).collect::<Vec<_>>()),
-            Some(vec![
-                "append_assistant_message",
-                "append_tool_messages_from_tool_outputs"
-            ])
-        );
-    }
-
-    #[test]
-    fn test_build_servertool_generic_followup_payload_appends_assistant_and_tool_outputs() {
-        let raw = serde_json::json!({
-            "model": "gpt-test",
-            "messages": [
-                { "role": "user", "content": "hi" }
-            ],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": { "name": "exec_command", "parameters": { "type": "object" } }
-                }
-            ],
-            "parameters": {
-                "temperature": 0.7,
-                "parallel_tool_calls": true
-            },
-            "assistantMessage": {
-                "role": "assistant",
-                "content": null,
-                "tool_calls": [
-                    {
-                        "id": "call_1",
-                        "type": "function",
-                        "function": {
-                            "name": "clock",
-                            "arguments": "{}"
-                        }
-                    }
-                ]
-            },
-            "toolOutputs": [
-                {
-                    "tool_call_id": "call_1",
-                    "name": "clock",
-                    "content": "{\"ok\":true}"
-                }
-            ],
-            "followupInjectionOps": [
-                { "op": "append_assistant_message", "required": true },
-                { "op": "append_tool_messages_from_tool_outputs", "required": true }
-            ]
-        });
-        let output = build_servertool_generic_followup_payload_json(raw.to_string()).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
-        assert_eq!(parsed.get("model").and_then(|v| v.as_str()), Some("gpt-test"));
-        assert_eq!(
-            parsed
-                .get("messages")
-                .and_then(|v| v.as_array())
-                .map(|entries| entries.len()),
-            Some(3)
-        );
-        assert_eq!(
-            parsed
-                .get("messages")
-                .and_then(|v| v.as_array())
-                .and_then(|entries| entries.get(1))
-                .and_then(|entry| entry.get("role"))
-                .and_then(|v| v.as_str()),
-            Some("assistant")
-        );
-        assert_eq!(
-            parsed
-                .get("messages")
-                .and_then(|v| v.as_array())
-                .and_then(|entries| entries.get(2))
-                .and_then(|entry| entry.get("role"))
-                .and_then(|v| v.as_str()),
-            Some("tool")
-        );
-    }
-
-    #[test]
-    fn test_build_servertool_generic_followup_payload_supports_user_system_and_drop_tool_ops() {
-        let raw = serde_json::json!({
-            "model": "gpt-test",
-            "messages": [
-                { "role": "system", "content": "base system" },
-                { "role": "user", "content": "hi" }
-            ],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": { "name": "exec_command", "parameters": { "type": "object" } }
-                },
-                {
-                    "type": "function",
-                    "function": { "name": "web_search", "parameters": { "type": "object" } }
-                }
-            ],
-            "followupInjectionOps": [
-                { "op": "inject_system_text", "text": "extra system" },
-                { "op": "append_user_text", "text": "继续执行" },
-                { "op": "drop_tool_by_name", "name": "web_search" }
-            ]
-        });
-        let output = build_servertool_generic_followup_payload_json(raw.to_string()).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
-        assert_eq!(
-            parsed
-                .get("messages")
-                .and_then(|v| v.as_array())
-                .and_then(|entries| entries.first())
-                .and_then(|entry| entry.get("role"))
-                .and_then(|v| v.as_str()),
-            Some("system")
-        );
-        assert_eq!(
-            parsed
-                .get("messages")
-                .and_then(|v| v.as_array())
-                .and_then(|entries| entries.get(1))
-                .and_then(|entry| entry.get("role"))
-                .and_then(|v| v.as_str()),
-            Some("system")
-        );
-        assert_eq!(
-            parsed
-                .get("messages")
-                .and_then(|v| v.as_array())
-                .and_then(|entries| entries.last())
-                .and_then(|entry| entry.get("content"))
-                .and_then(|v| v.as_str()),
-            Some("继续执行")
-        );
-        assert_eq!(
-            parsed
-                .get("tools")
-                .and_then(|v| v.as_array())
-                .map(|entries| entries.len()),
-            Some(1)
-        );
-        assert_eq!(
-            parsed
-                .get("tools")
-                .and_then(|v| v.as_array())
-                .and_then(|entries| entries.first())
-                .and_then(|entry| entry.get("function"))
-                .and_then(|v| v.get("name"))
-                .and_then(|v| v.as_str()),
-            Some("exec_command")
-        );
-    }
-
-    #[test]
-    fn test_build_servertool_generic_followup_payload_supports_vision_and_compact_ops() {
-        let raw = serde_json::json!({
-            "model": "gpt-test",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        { "type": "input_text", "text": "look" },
-                        { "type": "input_image", "image_url": "data:image/png;base64,AAA" }
-                    ]
-                },
-                { "role": "assistant", "content": "ok" },
-                {
-                    "role": "tool",
-                    "content": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-                }
-            ],
-            "followupInjectionOps": [
-                { "op": "compact_tool_content", "maxChars": 80 },
-                { "op": "inject_vision_summary", "summary": "a cat" }
-            ]
-        });
-        let output = build_servertool_generic_followup_payload_json(raw.to_string()).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
-        let messages = parsed
-            .get("messages")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-        assert_eq!(messages.len(), 3);
-        let first_parts = messages[0]
-            .get("content")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-        let text_parts = first_parts
-            .iter()
-            .filter_map(|part| part.get("text").and_then(|v| v.as_str()))
-            .collect::<Vec<_>>();
-        assert!(text_parts.iter().any(|entry| *entry == "[Image omitted]"));
-        assert!(text_parts.iter().any(|entry| *entry == "[Vision] a cat"));
-        let tool_content = messages
-            .iter()
-            .find(|entry| entry.get("role").and_then(|v| v.as_str()) == Some("tool"))
-            .and_then(|entry| entry.get("content"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        assert!(tool_content.contains("[tool_output_compacted omitted="));
-    }
-
-    #[test]
-    fn test_build_servertool_generic_followup_payload_supports_trim_openai_messages_op() {
-        let raw = serde_json::json!({
-            "model": "gpt-test",
-            "messages": [
-                { "role": "system", "content": "policy" },
-                { "role": "user", "content": "turn-1" },
-                { "role": "assistant", "content": "turn-2" },
-                { "role": "user", "content": "turn-3" },
-                { "role": "assistant", "content": "turn-4" }
-            ],
-            "followupInjectionOps": [
-                { "op": "trim_openai_messages", "maxNonSystemMessages": 2 }
-            ]
-        });
-        let output = build_servertool_generic_followup_payload_json(raw.to_string()).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
-        let messages = parsed
-            .get("messages")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-        assert_eq!(messages.len(), 3);
-        assert_eq!(messages[0].get("role").and_then(|v| v.as_str()), Some("system"));
-        assert_eq!(messages[1].get("content").and_then(|v| v.as_str()), Some("turn-3"));
-        assert_eq!(messages[2].get("content").and_then(|v| v.as_str()), Some("turn-4"));
-    }
-
-    #[test]
-    fn test_build_servertool_generic_followup_payload_supports_tool_schema_and_tool_choice_ops() {
-        let raw = serde_json::json!({
-            "model": "gpt-test",
-            "messages": [
-                { "role": "user", "content": "continue" }
-            ],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": { "name": "exec_command", "parameters": { "type": "object" } }
-                }
-            ],
-            "parameters": {
-                "parallel_tool_calls": true
-            },
-            "followupInjectionOps": [
-                {
-                    "op": "ensure_standard_tools",
-                    "includeReasoningStopTool": true,
-                    "reasoningStopToolDefinition": {
-                        "type": "function",
-                        "function": { "name": "reasoning.stop", "parameters": { "type": "object" } }
-                    }
-                },
-                {
-                    "op": "append_tool_if_missing",
-                    "toolName": "web_search",
-                    "toolDefinition": {
-                        "type": "function",
-                        "function": { "name": "web_search", "parameters": { "type": "object" } }
-                    }
-                },
-                {
-                    "op": "force_tool_choice",
-                    "value": {
-                        "type": "function",
-                        "function": { "name": "reasoning.stop" }
-                    }
-                }
-            ]
-        });
-        let output = build_servertool_generic_followup_payload_json(raw.to_string()).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
-        let tool_names = parsed
-            .get("tools")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|entry| {
-                entry
-                    .get("function")
-                    .and_then(|v| v.get("name"))
-                    .and_then(|v| v.as_str())
-                    .map(|value| value.to_string())
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            tool_names,
-            vec![
-                "exec_command".to_string(),
-                "reasoning.stop".to_string(),
-                "web_search".to_string()
-            ]
-        );
-        assert_eq!(
-            parsed
-                .get("parameters")
-                .and_then(|v| v.get("tool_choice"))
-                .and_then(|v| v.get("function"))
-                .and_then(|v| v.get("name"))
-                .and_then(|v| v.as_str()),
-            Some("reasoning.stop")
-        );
-        assert_eq!(
-            parsed
-                .get("parameters")
-                .and_then(|v| v.get("parallel_tool_calls"))
-                .and_then(|v| v.as_bool()),
-            Some(false)
-        );
-    }
-
-    #[test]
-    fn test_build_servertool_generic_followup_payload_supports_replace_tools_op() {
-        let raw = serde_json::json!({
-            "model": "gpt-test",
-            "messages": [
-                { "role": "user", "content": "continue" }
-            ],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": { "name": "exec_command", "parameters": { "type": "object" } }
-                }
-            ],
-            "followupInjectionOps": [
-                {
-                    "op": "replace_tools",
-                    "tools": [
-                        {
-                            "type": "function",
-                            "function": { "name": "web_search", "parameters": { "type": "object" } }
-                        }
-                    ]
-                }
-            ]
-        });
-        let output = build_servertool_generic_followup_payload_json(raw.to_string()).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
-        assert_eq!(
-            parsed
-                .get("tools")
-                .and_then(|v| v.as_array())
-                .map(|entries| entries.len()),
-            Some(1)
-        );
-        assert_eq!(
-            parsed
-                .get("tools")
-                .and_then(|v| v.as_array())
-                .and_then(|entries| entries.first())
-                .and_then(|entry| entry.get("function"))
-                .and_then(|v| v.get("name"))
-                .and_then(|v| v.as_str()),
-            Some("web_search")
         );
     }
 

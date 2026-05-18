@@ -4,7 +4,7 @@ import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import { applyFollowupRuntimeMetadata } from './followup-runtime-block.js';
 import { resolveFollowupFlowDecision, resolveTransparentReplayRequestSuffixForFlowId, type FollowupFlowDecision } from './followup-flow-policy.js';
-import { extractCapturedChatSeed } from './handlers/followup-request-builder.js';
+import { extractCapturedChatSeed } from './followup-seed.js';
 
 function buildFollowupRequestId(baseRequestId: string, suffix?: string): string {
   const trimmedBase = typeof baseRequestId === 'string' && baseRequestId.trim() ? baseRequestId.trim() : 'servertool';

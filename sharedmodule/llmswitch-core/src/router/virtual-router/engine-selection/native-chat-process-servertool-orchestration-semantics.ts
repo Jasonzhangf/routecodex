@@ -10,8 +10,7 @@ import {
   parseServertoolFollowupRuntimePlanPayload,
   parseServertoolAutoHookQueuesPayload,
   parseServertoolOutcomePlanPayload,
-  parseServertoolResponseStagePayload,
-  parseServertoolGenericFollowupPayload
+  parseServertoolResponseStagePayload
 } from './native-router-hotpath-analysis.js';
 
 export type NativeChatWebSearchPlan = {
@@ -56,10 +55,6 @@ export type NativeServertoolOutcomePlan = ReturnType<typeof parseServertoolOutco
   : never;
 
 export type NativeServertoolAutoHookQueues = ReturnType<typeof parseServertoolAutoHookQueuesPayload> extends infer T
-  ? Exclude<T, null>
-  : never;
-
-export type NativeServertoolGenericFollowupPayload = ReturnType<typeof parseServertoolGenericFollowupPayload> extends infer T
   ? Exclude<T, null>
   : never;
 
@@ -614,7 +609,6 @@ export function planServertoolOutcomeWithNative(input: {
   conversationId?: string;
   toolOutputs?: unknown[];
   pendingInjectionMessageKinds?: string[];
-  followupInjectionOps?: string[];
 }): NativeServertoolOutcomePlan {
   const capability = 'planServertoolOutcomeJson';
   const fail = (reason?: string) => failNativeRequired<NativeServertoolOutcomePlan>(capability, reason);
@@ -642,28 +636,6 @@ export function planServertoolAutoHookQueuesWithNative(input: {
     const inputJson = encodeJsonArg(capability, input);
     const raw = invokeNativeStringCapability(capability, [inputJson]);
     const parsed = parseServertoolAutoHookQueuesPayload(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function buildServertoolGenericFollowupPayloadWithNative(input: {
-  model: string;
-  messages: unknown[];
-  tools?: unknown[];
-  parameters?: Record<string, unknown>;
-  assistantMessage?: unknown;
-  toolOutputs?: unknown[];
-  followupInjectionOps: unknown[];
-}): NativeServertoolGenericFollowupPayload {
-  const capability = 'buildServertoolGenericFollowupPayloadJson';
-  const fail = (reason?: string) => failNativeRequired<NativeServertoolGenericFollowupPayload>(capability, reason);
-  try {
-    const inputJson = encodeJsonArg(capability, input);
-    const raw = invokeNativeStringCapability(capability, [inputJson]);
-    const parsed = parseServertoolGenericFollowupPayload(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

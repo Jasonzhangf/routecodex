@@ -1,7 +1,7 @@
 import type { JsonObject } from '../../conversion/hub/types/json.js';
 import type { ServerToolHandler, ServerToolHandlerContext, ServerToolHandlerPlan } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
-import { extractCapturedChatSeed } from './followup-request-builder.js';
+import { extractCapturedChatSeed } from '../followup-seed.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
 import {
   findNextUndeliveredDueAtMs,
