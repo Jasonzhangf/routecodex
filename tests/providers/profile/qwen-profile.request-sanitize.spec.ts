@@ -201,4 +201,44 @@ describe('qwen profile request sanitization', () => {
     expect(body?.tools?.[0]?.cache_control).toEqual({ type: 'ephemeral' });
     expect(body?.vl_high_resolution_images).toBe(true);
   });
+
+  test('qwenchat-guest injects guest body shape', () => {
+    const body = qwenFamilyProfile.buildRequestBody?.({
+      request: {
+        metadata: { authType: 'qwenchat-guest' }
+      } as any,
+      runtimeMetadata: {
+        authType: 'qwenchat-guest',
+        providerProtocol: 'openai-chat'
+      } as any,
+      defaultBody: {
+        model: 'qwen3.6-plus',
+        messages: [{ role: 'user', content: 'hello' }]
+      } as any
+    } as any) as any;
+
+    expect(body?.chat_mode).toBe('guest');
+    expect(body?.chat_type).toBe('t2t');
+  });
+
+  test('qwenchat-guest injects baxia/guest headers and strips Authorization', () => {
+    const headers = qwenFamilyProfile.applyRequestHeaders?.({
+      headers: {
+        Authorization: 'Bearer should_be_removed'
+      },
+      runtimeMetadata: {
+        authType: 'qwenchat-guest'
+      } as any
+    } as any);
+
+    expect(headers?.Authorization).toBeUndefined();
+    expect(headers?.['X-DashScope-AuthType']).toBe('guest');
+    expect(headers?.Origin).toBe('https://chat.qwen.ai');
+    expect(headers?.Referer).toBe('https://chat.qwen.ai/c/guest');
+    expect(headers?.['bx-v']).toBe('2.5.31');
+    expect(typeof headers?.['bx-ua']).toBe('string');
+    expect((headers?.['bx-ua'] || '').length).toBeGreaterThan(8);
+    expect(typeof headers?.['bx-umidtoken']).toBe('string');
+    expect((headers?.['bx-umidtoken'] || '').length).toBeGreaterThan(8);
+  });
 });

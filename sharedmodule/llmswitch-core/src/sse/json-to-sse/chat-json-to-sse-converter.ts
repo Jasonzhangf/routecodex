@@ -33,6 +33,32 @@ function logChatJsonToSseNonBlocking(
   }
 }
 
+
+// Memory management constants
+const CONTEXT_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_CONTEXTS = 2048;
+
+/**
+ * Prune contexts by TTL and max-size
+ */
+function pruneChatContexts(contexts: Map<string, ChatJsonToSseContext>): void {
+  const now = Date.now();
+  // TTL sweep
+  for (const [id, ctx] of contexts) {
+    if (now - ctx.startTime > CONTEXT_TTL_MS) {
+      contexts.delete(id);
+    }
+  }
+  // Max-size protection: remove oldest 25% if at capacity
+  if (contexts.size >= MAX_CONTEXTS) {
+    const sorted = [...contexts.entries()].sort((a, b) => a[1].startTime - b[1].startTime);
+    const toRemove = Math.ceil(sorted.length * 0.25);
+    for (let i = 0; i < toRemove; i++) {
+      contexts.delete(sorted[i][0]);
+    }
+  }
+}
+
 /**
  * 重构后的Chat JSON到SSE转换器
  * 采用函数化架构，专注于编排而非具体业务逻辑
@@ -54,6 +80,8 @@ export class ChatJsonToSseConverterRefactored {
     request: ChatCompletionRequest,
     options: ChatJsonToSseOptions
   ): Promise<ChatSseEventStream> {
+    // TTL + max-size prune on every public entry
+    pruneChatContexts(this.contexts);
     // 1. 创建上下文
     const context = this.createRequestContext(request, options);
     this.contexts.set(options.requestId, context);
@@ -87,6 +115,8 @@ export class ChatJsonToSseConverterRefactored {
     response: ChatCompletionResponse,
     options: ChatJsonToSseOptions
   ): Promise<ChatSseEventStream> {
+    // TTL + max-size prune on every public entry
+    pruneChatContexts(this.contexts);
     // 1. 创建上下文
     const context = this.createResponseContext(response, options);
     this.contexts.set(options.requestId, context);
@@ -149,6 +179,8 @@ export class ChatJsonToSseConverterRefactored {
 
     } catch (error) {
       throw this.wrapError('REQUEST_CONVERSION_ERROR', error as Error, context.requestId);
+    } finally {
+      this.contexts.delete(context.requestId);
     }
   }
 
@@ -188,6 +220,8 @@ export class ChatJsonToSseConverterRefactored {
 
     } catch (error) {
       throw this.wrapError('RESPONSE_CONVERSION_ERROR', error as Error, context.requestId);
+    } finally {
+      this.contexts.delete(context.requestId);
     }
   }
 
@@ -268,6 +302,7 @@ export class ChatJsonToSseConverterRefactored {
     if (stream.writable) {
       stream.destroy(wrappedError);
     }
+    this.contexts.delete(context.requestId);
   }
 
   /**
@@ -280,6 +315,7 @@ export class ChatJsonToSseConverterRefactored {
     if (stream.writable) {
       stream.end();
     }
+    this.contexts.delete(context.requestId);
   }
 
   /**
@@ -295,6 +331,7 @@ export class ChatJsonToSseConverterRefactored {
 
     if (stream.writable) {
       stream.destroy(error);
+      this.contexts.delete(context.requestId);
     }
   }
 

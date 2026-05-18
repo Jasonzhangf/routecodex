@@ -8,6 +8,13 @@ export type TomlValue = TomlPrimitive | TomlValue[] | TomlTable;
 
 type MutableRecord = Record<string, unknown>;
 
+interface TomlCollectionState {
+  squareDepth: number;
+  braceDepth: number;
+  inString: boolean;
+  escape: boolean;
+}
+
 function stripTomlComment(line: string): string {
   let out = '';
   let inString = false;
@@ -86,6 +93,58 @@ function splitTopLevel(input: string, delimiter: string): string[] {
     parts.push(current.trim());
   }
   return parts;
+}
+
+function createCollectionState(): TomlCollectionState {
+  return {
+    squareDepth: 0,
+    braceDepth: 0,
+    inString: false,
+    escape: false
+  };
+}
+
+function advanceCollectionState(state: TomlCollectionState, input: string): void {
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (state.inString) {
+      if (state.escape) {
+        state.escape = false;
+        continue;
+      }
+      if (ch === '\\') {
+        state.escape = true;
+        continue;
+      }
+      if (ch === '"') {
+        state.inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      state.inString = true;
+      continue;
+    }
+    if (ch === '[') {
+      state.squareDepth += 1;
+      continue;
+    }
+    if (ch === ']') {
+      state.squareDepth -= 1;
+      continue;
+    }
+    if (ch === '{') {
+      state.braceDepth += 1;
+      continue;
+    }
+    if (ch === '}') {
+      state.braceDepth -= 1;
+    }
+  }
+}
+
+function isCollectionBalanced(state: TomlCollectionState): boolean {
+  return !state.inString && state.squareDepth === 0 && state.braceDepth === 0;
 }
 
 function parseQuotedString(raw: string): string {
@@ -216,8 +275,9 @@ export function parseTomlRecord(raw: string): Record<string, unknown> {
   const root: MutableRecord = {};
   let currentTarget: MutableRecord = root;
   const lines = raw.split(/\r?\n/);
-  for (const rawLine of lines) {
-    const line = stripTomlComment(rawLine);
+  for (let index = 0; index < lines.length; index++) {
+    const rawLine = lines[index];
+    let line = stripTomlComment(rawLine);
     if (!line) {
       continue;
     }
@@ -236,7 +296,22 @@ export function parseTomlRecord(raw: string): Record<string, unknown> {
       throw new Error(`[config] invalid TOML assignment "${line}"`);
     }
     const keyPath = parseKeyPath(line.slice(0, eq).trim());
-    const value = parseTomlValue(line.slice(eq + 1).trim());
+    let valueRaw = line.slice(eq + 1).trim();
+    const collectionState = createCollectionState();
+    advanceCollectionState(collectionState, valueRaw);
+    while (!isCollectionBalanced(collectionState)) {
+      index += 1;
+      if (index >= lines.length) {
+        throw new Error(`[config] unterminated TOML collection for key "${keyPath.join('.')}"`);
+      }
+      const nextLine = stripTomlComment(lines[index]);
+      if (!nextLine) {
+        continue;
+      }
+      valueRaw += ` ${nextLine}`;
+      advanceCollectionState(collectionState, nextLine);
+    }
+    const value = parseTomlValue(valueRaw);
     assignValueAtPath(currentTarget, keyPath, value);
   }
   return root;

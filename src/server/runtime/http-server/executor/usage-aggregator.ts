@@ -39,7 +39,10 @@ export function extractUsageFromResult(
   result: { body?: unknown; status?: number; headers?: Record<string, string>; metadata?: Record<string, unknown> },
   metadata?: Record<string, unknown>
 ): UsageMetrics | undefined {
-  void metadata;
+  const sourceProtocol =
+    typeof metadata?.providerProtocol === 'string'
+      ? String(metadata.providerProtocol).trim().toLowerCase()
+      : undefined;
   const candidates: unknown[] = [];
 
   if (result.body && typeof result.body === 'object') {
@@ -119,7 +122,9 @@ export function extractUsageFromResult(
   }
 
   for (const candidate of candidates) {
-    const normalized = normalizeUsage(candidate);
+    const normalized = normalizeUsage(candidate, {
+      sourceProtocol
+    });
     if (normalized) {
       return normalized;
     }
@@ -131,7 +136,10 @@ export function extractUsageFromResult(
 /**
  * Normalize usage metrics from various provider formats
  */
-export function normalizeUsage(value: unknown): UsageMetrics | undefined {
+export function normalizeUsage(
+  value: unknown,
+  options?: { sourceProtocol?: string }
+): UsageMetrics | undefined {
   if (!value || typeof value !== 'object') {
     return undefined;
   }
@@ -155,8 +163,9 @@ export function normalizeUsage(value: unknown): UsageMetrics | undefined {
     return undefined;
   };
   // Detect source field to decide cache handling:
-  // - prompt_tokens (OpenAI): already includes cache_read_input_tokens
+  // - prompt_tokens (OpenAI chat): already includes cache_read_input_tokens
   // - input_tokens (Anthropic): does NOT include cache_read_input_tokens
+  // - input_tokens (OpenAI responses): already includes cached tokens (when protocol hint is known)
   const basePromptOpenAI = readNumeric(usageRecord.prompt_tokens);
   const basePromptAnthropic =
     readNumeric(usageRecord.input_tokens) ??
@@ -188,10 +197,16 @@ export function normalizeUsage(value: unknown): UsageMetrics | undefined {
   const cacheCreation: number | undefined =
     readNumeric(usageRecord.cache_creation_input_tokens);
 
-  // prompt_tokens (OpenAI) already includes cache — do NOT add cacheRead again.
+  const sourceProtocol = options?.sourceProtocol?.toLowerCase();
+  const isResponsesProtocol = sourceProtocol === 'openai-responses';
+
+  // prompt_tokens (OpenAI chat) already includes cache — do NOT add cacheRead again.
+  // input_tokens (OpenAI responses) already includes cache — do NOT add cacheRead again.
   // input_tokens (Anthropic) does NOT include cache — add cacheRead.
   const prompt = basePromptOpenAI !== undefined
     ? basePromptOpenAI
+    : isResponsesProtocol
+      ? basePromptAnthropic
     : basePromptAnthropic !== undefined
       ? basePromptAnthropic + (cacheRead ?? 0)
       : basePromptOther;

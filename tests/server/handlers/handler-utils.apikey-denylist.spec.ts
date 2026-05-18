@@ -17,7 +17,7 @@ describe('captureClientHeaders denylist', () => {
 });
 
 describe('captureRawRequestBodyForMetadata', () => {
-  it('builds shallow metadata snapshot and truncates oversized arrays', () => {
+  it('captures the full raw request body for direct passthrough replay', () => {
     const payload = {
       model: 'qwen3.6-plus',
       metadata: { sessionId: 'sid-1', nested: { a: 1 } },
@@ -27,9 +27,7 @@ describe('captureRawRequestBodyForMetadata', () => {
     expect(captured).not.toBe(payload);
     expect(captured.model).toBe('qwen3.6-plus');
     expect(Array.isArray(captured.messages)).toBe(true);
-    expect((captured.messages as unknown[]).length).toBe(32);
-    expect(captured.__messages_truncated_count).toBe(8);
-    expect(captured.__raw_request_body_truncated).toBe(true);
+    expect((captured.messages as unknown[]).length).toBe(40);
     expect(captured.metadata).toEqual({ sessionId: 'sid-1', nested: { a: 1 } });
   });
 });

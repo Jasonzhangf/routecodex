@@ -1,0 +1,18 @@
+{
+  "kind": "payload_contract_error",
+  "timestamp": "2026-05-17T07:15:14.399Z",
+  "phase": "provider-request",
+  "marker": "provider_request_empty_messages",
+  "reason": "provider request messages[] is empty and no other prompt/input content exists",
+  "requestId": "req_runtime_scope_exclude",
+  "endpoint": "/v1/responses",
+  "providerKey": "tab.key1",
+  "providerId": "gemini",
+  "observation": {
+    "providerPayload": {
+      "data": {
+        "messages": []
+      }
+    }
+  }
+}

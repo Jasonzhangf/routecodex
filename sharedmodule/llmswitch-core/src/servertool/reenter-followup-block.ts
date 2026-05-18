@@ -3,6 +3,83 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 
+function readTrimmedString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function extractFollowupErrorEnvelope(error: unknown): {
+  upstreamStatus?: number;
+  upstreamCode?: string;
+  reason?: string;
+} {
+  const errorRecord =
+    error && typeof error === 'object' && !Array.isArray(error)
+      ? (error as Record<string, unknown>)
+      : undefined;
+  const errorDetails =
+    errorRecord?.details && typeof errorRecord.details === 'object' && !Array.isArray(errorRecord.details)
+      ? (errorRecord.details as Record<string, unknown>)
+      : undefined;
+  const upstreamCode =
+    readTrimmedString(errorRecord?.upstreamCode)
+    ?? readTrimmedString(errorDetails?.upstreamCode)
+    ?? readTrimmedString(errorRecord?.code)
+    ?? readTrimmedString(errorDetails?.code);
+  const upstreamStatus =
+    (typeof errorRecord?.status === 'number' && Number.isFinite(errorRecord.status)
+      ? Math.floor(errorRecord.status)
+      : undefined)
+    ?? (typeof errorRecord?.statusCode === 'number' && Number.isFinite(errorRecord.statusCode)
+      ? Math.floor(errorRecord.statusCode)
+      : undefined)
+    ?? (typeof errorDetails?.status === 'number' && Number.isFinite(errorDetails.status)
+      ? Math.floor(errorDetails.status)
+      : undefined)
+    ?? (typeof errorDetails?.statusCode === 'number' && Number.isFinite(errorDetails.statusCode)
+      ? Math.floor(errorDetails.statusCode)
+      : undefined);
+  const reason =
+    readTrimmedString(errorDetails?.reason)
+    ?? readTrimmedString(errorRecord?.reason)
+    ?? (error instanceof Error ? readTrimmedString(error.message) : undefined);
+  return { upstreamStatus, upstreamCode, reason };
+}
+
+function isTerminalFollowupError(error: unknown): boolean {
+  const { upstreamStatus, upstreamCode, reason } = extractFollowupErrorEnvelope(error);
+  if (typeof upstreamStatus === 'number' && upstreamStatus >= 400 && upstreamStatus < 500) {
+    return true;
+  }
+  const code = (upstreamCode || '').toLowerCase();
+  if (
+    code === 'bad_request'
+    || code === 'provider_not_available'
+    || code === 'client_disconnected'
+    || code === 'client_response_closed'
+    || code === 'client_request_aborted'
+    || code === 'client_timeout_hint_expired'
+    || code === 'client_tool_args_invalid'
+  ) {
+    return true;
+  }
+  const text = (reason || '').toLowerCase();
+  if (
+    text.includes('no available providers after applying routing instructions')
+    || text.includes("tool_choice") && text.includes('必须提供 tools')
+    || text.includes('client disconnected')
+    || text.includes('client_response_closed')
+    || text.includes('client_request_aborted')
+    || text.includes('client_timeout_hint_expired')
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export async function runReenterFollowup(args: {
   adapterContext: AdapterContext;
   requestId: string;
@@ -215,6 +292,10 @@ export async function runReenterFollowup(args: {
           }
         };
       }
+      if (isTerminalFollowupError(error)) {
+        lastError = error;
+        break;
+      }
       if (
         error &&
         typeof error === 'object' &&
@@ -233,37 +314,7 @@ export async function runReenterFollowup(args: {
           });
           throw error;
         }
-        const errorRecord =
-          error && typeof error === 'object' && !Array.isArray(error)
-            ? (error as Record<string, unknown>)
-            : undefined;
-        const errorDetails =
-          errorRecord?.details && typeof errorRecord.details === 'object' && !Array.isArray(errorRecord.details)
-            ? (errorRecord.details as Record<string, unknown>)
-            : undefined;
-        const upstreamCode =
-          (typeof errorRecord?.upstreamCode === 'string' && errorRecord.upstreamCode.trim()) ||
-          (typeof errorDetails?.upstreamCode === 'string' && errorDetails.upstreamCode.trim()) ||
-          undefined;
-        const upstreamStatus =
-          (typeof errorRecord?.status === 'number' && Number.isFinite(errorRecord.status)
-            ? Math.floor(errorRecord.status)
-            : undefined) ||
-          (typeof errorRecord?.statusCode === 'number' && Number.isFinite(errorRecord.statusCode)
-            ? Math.floor(errorRecord.statusCode)
-            : undefined) ||
-          (typeof errorDetails?.status === 'number' && Number.isFinite(errorDetails.status)
-            ? Math.floor(errorDetails.status)
-            : undefined) ||
-          (typeof errorDetails?.statusCode === 'number' && Number.isFinite(errorDetails.statusCode)
-            ? Math.floor(errorDetails.statusCode)
-            : undefined) ||
-          undefined;
-        const reason =
-          (typeof errorDetails?.reason === 'string' && errorDetails.reason.trim()) ||
-          (typeof errorRecord?.reason === 'string' && errorRecord.reason.trim()) ||
-          (error instanceof Error && error.message ? error.message : undefined) ||
-          undefined;
+        const { upstreamCode, upstreamStatus, reason } = extractFollowupErrorEnvelope(error);
         const compactReason = args.compactFollowupErrorReason(reason);
         const compactErrorMessage = args.compactFollowupErrorReason(
           error instanceof Error ? error.message : String(error ?? 'unknown')

@@ -1,5 +1,5 @@
 import type { JsonObject } from '../../../conversion/hub/types/json.js';
-import { cloneJson } from '../../server-side-tools.js';
+import { bindServertoolContractWithNative, cloneJson } from '../../server-side-tools.js';
 
 const TEXTUAL_TOOL_TRANSPORT_PATTERNS: RegExp[] = [
   /<\｜?DSML[\s\S]*tool_calls/i,
@@ -182,6 +182,113 @@ export function injectVisionSummaryIntoMessages(source: JsonObject[], summary: s
     messages.push({ role: 'user', content: `[Vision] ${summary}` } as JsonObject);
   }
   return messages;
+}
+
+function readTextFromContentPart(part: unknown): string {
+  if (!part || typeof part !== 'object' || Array.isArray(part)) {
+    return '';
+  }
+  const record = part as Record<string, unknown>;
+  if (typeof record.text === 'string' && record.text.trim()) {
+    return record.text.trim();
+  }
+  if (typeof record.input_text === 'string' && record.input_text.trim()) {
+    return record.input_text.trim();
+  }
+  if (typeof record.output_text === 'string' && record.output_text.trim()) {
+    return record.output_text.trim();
+  }
+  if (typeof record.content === 'string' && record.content.trim()) {
+    return record.content.trim();
+  }
+  return '';
+}
+
+function isImageLikeContentPart(part: unknown): boolean {
+  if (!part || typeof part !== 'object' || Array.isArray(part)) {
+    return false;
+  }
+  const typeValue =
+    typeof (part as { type?: unknown }).type === 'string'
+      ? String((part as { type?: unknown }).type).trim().toLowerCase()
+      : '';
+  return typeValue.includes('image');
+}
+
+function extractLatestUserPromptAndImageCount(messages: JsonObject[]): { prompt: string; imageCount: number } {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) {
+      continue;
+    }
+    const role =
+      typeof (msg as { role?: unknown }).role === 'string'
+        ? String((msg as { role?: unknown }).role).trim().toLowerCase()
+        : '';
+    if (role !== 'user') {
+      continue;
+    }
+    const content = (msg as { content?: unknown }).content;
+    if (typeof content === 'string') {
+      return { prompt: content.trim(), imageCount: 0 };
+    }
+    if (!Array.isArray(content)) {
+      return { prompt: '', imageCount: 0 };
+    }
+    const textParts: string[] = [];
+    let imageCount = 0;
+    for (const part of content) {
+      if (isImageLikeContentPart(part)) {
+        imageCount += 1;
+        continue;
+      }
+      const text = readTextFromContentPart(part);
+      if (text) {
+        textParts.push(text);
+      }
+    }
+    return {
+      prompt: textParts.join('\n').trim(),
+      imageCount
+    };
+  }
+  return { prompt: '', imageCount: 0 };
+}
+
+function formatVisionSummary(summary: string, imageCount: number): string {
+  const normalized = summary.trim();
+  if (!normalized) {
+    return '';
+  }
+  if (imageCount <= 1) {
+    return `图片内容为：\n[Image]:\n${normalized}`;
+  }
+  const explicitBlocks = normalized.match(/\[Image\s+\d+\]\s*:[\s\S]*?(?=(?:\n{2,}\[Image\s+\d+\]\s*:)|$)/gi);
+  if (explicitBlocks && explicitBlocks.length > 0) {
+    return `图片内容为：\n${explicitBlocks.map((item) => item.trim()).join('\n\n')}`;
+  }
+  return `图片内容为：\n${normalized}`;
+}
+
+export function rebuildVisionFollowupMessages(
+  source: JsonObject[],
+  summary: string,
+  originalPrompt?: string
+): JsonObject[] {
+  const messages = Array.isArray(source) ? (cloneJson(source) as JsonObject[]) : [];
+  const { prompt: extractedPrompt, imageCount } = extractLatestUserPromptAndImageCount(messages);
+  const prompt = typeof originalPrompt === 'string' && originalPrompt.trim()
+    ? originalPrompt.trim()
+    : extractedPrompt;
+  const summaryBlock = formatVisionSummary(summary, imageCount);
+  const finalText = bindServertoolContractWithNative([
+    summaryBlock,
+    prompt ? `用户请求：\n${prompt}` : ''
+  ].filter(Boolean).join('\n\n').trim());
+  if (!finalText) {
+    return messages;
+  }
+  return [{ role: 'user', content: finalText } as JsonObject];
 }
 
 export function injectSystemTextIntoMessages(source: JsonObject[], text: string): JsonObject[] {

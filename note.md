@@ -1,5 +1,36 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-05-17 qwenchat guest runtime 真源对齐
+
+- 线上 `5520 -> qwenchat` 已有硬证据不是“内容违规”，而是 **请求 shape 偏离 qwen2api 真源 + 未识别 WAF/HTML**：
+  - `curl http://127.0.0.1:5520/v1/responses` 实际返回 `Content-Type: text/html; charset=utf-8`
+  - body 为 Aliyun WAF challenge HTML，而非 OpenAI/Responses JSON。
+- 当前唯一真源修复点仍在 `src/providers/core/runtime/qwenchat-web-provider.ts`，原因：
+  1. qwenchat guest 是独立两段式 Web 链路，不属于 generic qwen/openai transport；
+  2. 当前实现把请求压缩成“最后一条 user 纯文本 + files=[]”，丢失了 qwen2api 真源里的 history/attachment/chat_type 语义；
+  3. 当前实现未把 HTML/WAF 挑战识别成显式 provider error，导致假 200 被直透。
+- qwen2api 真源确认：
+  - `/Volumes/extension/code/qwen2api/worker.js`
+  - 真请求链路：`/api/v2/chats/new` -> `/api/v2/chat/completions?chat_id=...`
+  - 消息语义：history 拼成文本前缀，最后一轮保留附件；有附件时需上传并填 `files`。
+  - completion 上游必须 `stream:true`，再本地聚合 SSE。
+
+## 2026-05-17 responses outbound 非法 `tool_choice without tools` 真源
+
+- `EMPTY_ASSISTANT_RESPONSE` / `bad request: tool_choice 为 'auto' 或 'required' 时必须提供 tools` 的这轮审计已钉死两件事：
+  1. `build_captured_chat_request_snapshot`（Rust `hub_pipeline.rs`）只是原样复制 `messages/tools/tool_choice/parameters`，**不是** compaction prompt 注入点；
+  2. 400 的唯一真源在 Rust `hub_bridge_actions/history.rs::prepare_responses_request_envelope`：该函数会从 context/metadata **回填 `tool_choice`**，但之前**不校验最终 request 是否仍有 `tools`**。
+- 坏样本因此会形成：
+  - `messages = ... + compaction prompt`
+  - `tools = missing`
+  - `tool_choice = auto`
+  - 上游 llmgate/DeepSeek 直接 400。
+- 最小修复已落在 Rust 真源：
+  - `prepare_responses_request_envelope` 在最终 request 无 `tools` 时，物理移除 `tool_choice`。
+- 回归已补：
+  - 保留原有“有 tools 时 tool_choice 单一真源”的测试；
+  - 新增“无 tools 时必须丢弃 tool_choice”的测试，防止再次生成非法 outbound shape。
+
 ## 2026-05-17 servertool followup 路由回归
 
 - `apply_patch_read_before_retry_guard` 的 followup 502 不是工具列表问题，当前真源更像是 **followup metadata 丢了 routeHint**：sticky provider 还在，但 followup 若只剩 `__shadowCompareForcedProviderKey`、没有 `routeHint/routeName`，Virtual Router 会按错误池选路，mini27 这类 coding lane provider 会直接报 `PROVIDER_NOT_AVAILABLE`。
@@ -3736,3 +3767,187 @@ Next slice:
 ## 2026-05-17 llmgate empty assistant / model catalog audit
 - `EMPTY_ASSISTANT_RESPONSE` 这次不是 RouteCodex 请求形状必现问题：同一份 `provider-request-contract_1.json` 直打 llmgate `/v1/chat/completions` 可复现成功返回完整 assistant 文本，说明该样本请求形状本身可被上游接受；原故障更像 llmgate/上游的瞬态空响应。
 - `llmgate` provider config 真源里若保留 `deepseek-v4-pro-search / deepseek-v4-flash-reasoner` 之类模型，forced coding lane 会被 provider catalog 扩展到这些别名并触发 `model_not_found`；按 Jason 规则已收缩为只保留 `deepseek-v4-pro` 与 `deepseek-v4-flash`。
+
+## qwenchat vision 测试结论 (2026-05-17)
+
+### 测试结果
+- qwen3.5-plus: vision ✅ (成功描述蓝色背景+白色TEST文字)
+- qwen3.6-plus: vision ✅ (成功描述蓝色背景+无衬线字体TEST)
+- coder-model: vision ✅ (正常响应)
+
+### 认证方式
+- 不需要登录账号，guest 模式 + baxia 指纹 token 即可
+- baxia: bx-ua (设备指纹) + bx-umidtoken (从 sg-wum.alibaba.com 获取 etag)
+- 需要 camo 浏览器 cookie (匿名访客会话)
+
+### Vision 使用流程
+1. POST /api/v2/files/getstsToken → 获取 OSS 上传凭证
+2. PUT 图片到 OSS (OSS4-HMAC-SHA256 签名)
+3. POST /api/v2/users/status → 轮询上传状态
+4. POST /api/v2/chat/completions → files 字段嵌入上传后的 payload
+
+### 推荐配置
+在 config.toml 中为以下模型添加 vision capability:
+- qwen3.5-plus
+- qwen3.6-plus
+- coder-model (已有 vision)
+
+## 2026-05-17 qwen Google OAuth camo 实测（手动页面勘测）
+- 实测 profile: `qwenchat-test`。
+- 在 `https://chat.qwen.ai/auth` 页面可见按钮：
+  - `.qwenchat-auth-pc-other-login-button`（Google/Github 共用 class，需按文本或后续 URL 判定）
+- 跳转到 Google 后 URL 为 `https://accounts.google.com/v3/signin/identifier...`，页面语言 `zh-CN`。
+- 当前页面类型不是 account chooser，而是 identifier 表单：
+  - 存在输入：`#identifierId` / `input[type="email"]` / `input[autocomplete="username"]`
+  - 存在下一步：`#identifierNext` / 按钮文本 `下一步`
+  - 不存在 account tile（`[data-identifier]` / `[data-email]` 数量为 0）
+- 根因：现有脚本在 `accountHint` 为 email 时优先走 account tile 点击，未匹配到即失败，未回退到 identifier 输入流程。
+- 修复：
+  1) 新增 `fillGoogleIdentifierByHint()`：定位 Google identifier 输入框 -> `camo type` 输入邮箱 -> 点击 `identifierNext`。
+  2) `maybeAdvanceGoogleAuth()` 在 email hint 的 account-click 失败后，改为尝试输入邮箱流程，而不是直接失败。
+  3) 扩展 selectors：`googleAccountSelect` 增加 `[data-account-index]`；新增 `googleIdentifierNext` selectors。
+
+## 2026-05-17 qwenchat guest auth 对齐 qwen2api
+- 证据：`/Volumes/extension/code/qwen2api/worker.js` 使用 guest + bx headers（非 qwen-oauth token file）。
+- 根因：`/Volumes/extension/.rcc/provider/qwenchat/config.v2.toml` 仍配置 `qwen-oauth`，导致 runtime 走 `TokenFileAuthProvider`，出现 `TokenFileAuthProvider not initialized / missing refresh token`。
+- 修复：新增 `qwenchat-guest` 认证分支（qwen family profile）
+  - body 注入 `chat_mode=guest` + 默认 `chat_type=t2t`
+  - header 注入 `X-DashScope-AuthType=guest`、`Origin/Referer`、`bx-v/bx-ua/bx-umidtoken`
+  - guest 模式移除 Authorization，避免 oauth 残留。
+- 配置同步：`/Volumes/extension/.rcc/provider/qwenchat/config.v2.toml` 改为 `type=qwenchat-guest` + 空 apiKey。
+- 单测：`tests/providers/profile/qwen-profile.request-sanitize.spec.ts` 新增 2 条 guest 用例并通过。
+
+## 2026-05-17 qwenchat guest startup init fix
+- 现象：qwenchat 已进入 virtual-router bootstrap/runtime，但 5520 请求期 `provider runtime qwenchat.key1 not found`。
+- 真源：Rust bootstrap rawType 已修复为 `qwenchat-guest` 后，TS `mapRuntimeAuthToConfig()` 仍把 runtime sentinel `value=guest` 错误物化成 provider auth.apiKey，后续被 `ApiKeyAuthProvider.initialize()` 当成真实 apiKey 做长度校验，startup handle 初始化失败。
+- 唯一正确修复点：`src/providers/core/runtime/provider-factory-helpers.ts::mapRuntimeAuthToConfig()`；这里是 runtime auth -> provider config 的唯一物化边界，必须在这里把 `qwenchat-guest` 的 sentinel 还原为空 credential。改 auth provider 只会掩盖“guest 不是 key”这一上游语义错误。
+- 回归：`tests/provider/provider-factory.test.ts` 新增 qwenchat-guest 用例；`tests/server/http-server/apikey-secret-resolution.spec.ts` 继续通过。
+
+## 2026-05-17 qwenchat guest shape audit
+- 证据1：本机直打 qwenchat 两步 guest 真链路，第1步 `POST /api/v2/chats/new` 返回 200 成功，说明不是 IP/WAF 必然拦截。
+- 当前 RC qwenchat-guest 仅在 `qwenFamilyProfile` 上对 OpenAI `/chat/completions` 单跳做 header/body 轻改；与 qwen2api 真链路（create chat -> completion?chat_id）不等价。
+- 初步结论：当前 5520 拿到 challenge HTML 的真源不是“guest 不可用”，而是 provider request shape 仍错误。
+
+## 2026-05-17 qwenchat guest create-chat 真源排查（本轮）
+
+- 已确认 5520 现在线上不是 router/direct 问题，而是 provider 真源问题：日志已进入 `QwenChatWebProvider.sendRequestInternal()`。
+- 当前唯一剩余失败点：`POST /api/v2/chats/new` 返回 200，但未满足现有 contract（`success !== true` 或 `data.id` 缺失），错误码 `QWENCHAT_GUEST_CREATE_CHAT_FAILED`。
+- 下一步必须补 create-step 原始响应证据（status/content-type/body shape），再按 qwen2api 真源对齐 create 请求 shape；不能猜。
+
+- codex samples 已给出旧错误铁证：旧版本真实 URL 为 `https://chat.qwen.ai/chat/completions`，响应为 Aliyun WAF HTML challenge（不是模型空内容）。因此历史样本根因已确认是 provider 选型/请求 shape 错误，不是内容违规。
+- 当前线上新版本已进入 dedicated provider，但 create-step 仍 200 contract fail；需继续核对 headers/body 与 qwen2api 真源的差异，重点看 `User-Agent` / `Accept-Language` / `Origin` / create response parse。
+
+- 最新实机证据已把 qwenchat 问题继续收敛：create-chat 已经通过，vision 请求失败真因不再是 create contract，而是 completion 请求中 `files` 仍为空，导致上游返回 `Not_Found/Bad_Request/Internal error` JSON；此前 host 把它误归类成 `EMPTY_COMPLETION`。
+- 唯一真修复点继续在 `qwenchat-web-provider.ts`：补齐附件上传链（getstsToken -> OSS PUT -> users/status -> files payload）并把 completion JSON reject 显式抛成 upstream rejected。
+
+
+## 2026-05-17 qwenchat vision completion 真源补充
+
+- qwen2api 成功附件样本（`/Volumes/extension/code/qwen2api/tasks/上传附件.md`）已给出唯一硬证据：**带图片附件的成功 completion body 仍使用 `chat_type: "t2t"`、`sub_chat_type: "t2t"`，不是 `vision`**。
+- 当前 RouteCodex `parseIncomingMessagesForQwenChat()` 把最后一轮含图片附件请求标成 `vision`，并将该值透传到 create/completion 两段 body；这与成功真源不一致，是当前 `Bad_Request/Internal error...` 的首个明确 shape 差异。
+- 同一成功样本还显示 `feature_config.auto_search: true`，而当前实现写死 `false`；该字段也应回到 qwen2api 真源。
+- 因此本轮唯一修复点继续保持在 `src/providers/core/runtime/qwenchat-web-payload.ts`（chatType 归一真源）与 `src/providers/core/runtime/qwenchat-web-provider.ts`（completion/create body 真源对齐），禁止去 router / host / 错误处理层打补丁。
+
+
+## 2026-05-17 multimodal / vision 路由纠偏
+
+- Jason 明确纠偏：`multimodal` 与 `vision` 是两条不同语义路径，不能再像旧实现那样把图片请求自动同时判成两者。
+- 已确认 Rust 真源存在 4 处混并：`routing/config.rs` 会在 `has_image_attachment` 时自动 prepend `vision`；`engine/selection.rs` 会把 `vision` 当作 `multimodal` capability 过滤；`provider_bootstrap.rs` / `provider_registry.rs` 会把 provider capability `vision` 归一成 `multimodal`。
+- 当前死循环真因不是 snapshot/pending，而是普通 `multimodal + tools` 请求被错误送入 `vision` lane，随后进入 qwenchat vision 子链后 tool contract 失败，再被 session 下一轮重复触发。
+- 本轮唯一修复点应先落在 Rust virtual-router 真源：物理拆开 capability 和 route queue，禁止自动 `multimodal -> vision` 升格。
+
+## 2026-05-17 apply_patch followup orphan_tool_result 真因
+
+- 21:03~21:05 新样本已确认：`apply_patch_read_before_retry_guard` 触发 followup 时，`syncResponsesContextFromCanonicalMessagesJson` 报 `orphan_tool_result`，不是模型内容问题，而是 followup history shape 缺半边。
+- 唯一真因：guard followup 只注入了 `append_tool_messages_from_tool_outputs`，漏掉与之配对的 `append_assistant_message`；因此回放时只有 `role=tool`，没有前置 `assistant.tool_calls`，被原生契约校验判成 orphan。
+- 额外现场坑：当前测试/运行链会加载 `sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch-guard.js`，只改 `.ts` 不生效；必须同步修 `.js` 同源产物，否则回归仍会看到旧 ops。
+- 本轮唯一修复点：`sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch-guard.{ts,js}` 为 followup ops 补 `append_assistant_message`；并在 `tests/servertool/apply-patch-guard.spec.ts` 锁死回归。
+
+## 2026-05-17 apply_patch followup MiniMax 2013 invalid chat setting
+
+- 真实样本：`~/.rcc/codex-samples/openai-responses/mini27.key1.MiniMax-M2.7/openai-responses-mini27.key1-MiniMax-M2.7-20260517T211239049-203515-2195_apply_patch_read_before_retry/`
+- 真相：这次不是 tool history 配对错，而是 **servertool reenter followup root body 仍继承了 Responses 参数**，最终发到 MiniMax `/chat/completions` 的 provider-request 顶层包含：
+  - `parallel_tool_calls: true`
+  - `reasoning: { effort: "medium", summary: "detailed" }`
+  - `max_tokens: 8192`
+- 上游返回：`provider_status_2013 invalid params, invalid chat setting`
+- 唯一修复点：`src/server/runtime/http-server/executor/servertool-followup-dispatch.ts`
+  - `sanitizeFollowupRequestSemantics`
+  - `sanitizeFollowupRootBodyRequestParameters`
+- 修复原则：servertool followup 是内部续轮，不应把客户端 `/v1/responses` 的 request-parameter 控制面（reasoning / parallel_tool_calls / tool_choice / output budget / model）继续物化到 provider chat request。
+- 必补回归：用该真实样本断言 followup nested body/semantics 都不再含 `reasoning / parallel_tool_calls / tool_choice / max_tokens / max_output_tokens / model`。
+
+## 2026-05-17 vision route contract
+- Jason 明确的 vision 真源：`vision` route 不是 inline multimodal；它必须走 `图片 -> qwenchat -> summary -> servertool followup`。
+- `multimodal` route 才是直接给具备内建多模态能力的 provider。
+- 当前 `sharedmodule/llmswitch-core/src/servertool/handlers/vision.ts::shouldRunVisionFlow` 把 `vision` 与 `multimodal` 一起短路为 false，违反语义真源；唯一修复点就是这里。
+- 回归必须补：routeHint=vision 时仍执行 vision_flow；routeHint=multimodal 时跳过。
+
+## 2026-05-17 update_goal + route followup break
+- 线上出现两个连续问题：1) provider -> client tool args 校验报 `update_goal requires status as a string`; 2) 紧随其后的 followup 全部 `No available providers after applying routing instructions`。
+- 先查 client tool args 出口归一真源，再查 followup route metadata / routing instruction continuity 是否断链。
+
+## 2026-05-17 update_goal contract drift fix
+- 真样本 req_1779027979210_dff31d45 证明这是 /goal 线程，但 provider 暴露的是最小 update_goal contract（仅 status=complete），宿主 provider-response-converter.ts 却仍保留 active/paused/stopped/completed 旧状态投影，形成双真源并诱导模型误用 update_goal 作为“更新 /goal 提示词”工具。
+- 本轮唯一修复点：物理删除 host 侧旧 update_goal 多状态投影，只保留 create_goal -> active 与 update_goal(status=complete) -> completed；随后用原样本 + 回归验证。
+
+## 2026-05-17 router-direct PROVIDER_NOT_AVAILABLE 真因
+- 22:27 连续 `No available providers after applying routing instructions` 已坐实不是 sticky/session 残留；routing-state 持久层为空。
+- 真源在 `src/server/runtime/http-server/http-server-bootstrap.ts::extractProviderKeysForRoutingGroup()`：5520 router 端口把 routing group targets 直接注入 metadata.allowedProviders，形状是 `llmgate.deepseek-v4-pro` / `mini27.MiniMax-M2.7` 这类 route target token。
+- Rust virtual-router 真源 `routing/selection.rs::filter_candidates_by_state()` 明确把 `allowedProviders` 当 **provider id 白名单** 使用，实际比较的是 provider key 首段（如 `llmgate` / `mini27`）。
+- 因此 TS 注入 shape 与 Rust 消费语义失配，任何同组候选都会被筛空。唯一正确修复点就是把该提取函数归一为 provider id；改 Rust 或其他调用层只会制造第二语义面。
+
+## 2026-05-17 5520 routingPolicyGroup + 5555 providerBinding 真源修复
+
+- 5520 串到 `gateway-coding-10000-thinking` 的真因不是配置文件没生效，而是 **v2 routing flatten 只保留最后一个同名 routeType**；即使加了 allowlist，也无法保证 route id/route pool 来自当前端口组。
+- 唯一修复点链路：`src/config/virtual-router-builder.ts` 在 flatten ALL groups 时必须 **append** 同 routeType pools，而不是覆盖；同时给每个 pool 注入 `routeParams.routePolicyGroup=<groupId>`。
+- Host 再把当前端口 `routingPolicyGroup` 放进 request metadata（`routecodexRoutingPolicyGroup`）；Rust `virtual_router_engine/engine/selection.rs` 只允许选择同组 pool。这样 5520/10000 共用 merged routing config 但不会串组。
+- 5555 `providerBinding = dbittai-gpt.key1.gpt-5.4` 不通的真因在 `src/server/runtime/http-server/index.ts::resolveRuntimeKeyForProviderBinding`：实际 runtime key 可是 `dbittai-gpt.key1`（model 在 provider payload 层选），旧解析无法把 `provider.alias.model` 绑定回 `provider.alias` runtime。
+- 唯一修复点：binding 解析增加 `provider.alias.model -> provider.alias` 命中逻辑；已用源码级脚本验证 `dbittai-gpt.key1.gpt-5.4 -> dbittai-gpt.key1`。
+
+## 2026-05-17 5555 provider direct / dbittai-gpt not found 真源
+
+- 5555 `Provider not found for binding: dbittai-gpt.key1.gpt-5.4` 的唯一真源不是 binding parser，也不是 runtime resolve，而是 `src/config/toml-basic.ts` 不支持 provider v2 TOML 中的**多行数组 + inline table**（如 `entries = [ { alias = "key1", apiKey = "${CRS_OAI_KEY1}" } ]`）。
+- 旧行为会在 `src/config/provider-v2-loader.ts` 中吞掉 decode 异常，导致 `~/.rcc/provider/dbittai-gpt/config.v2.toml` 被静默跳过，最终 `loadRouteCodexConfig(...).userConfig.virtualrouter.providers` 不含 `dbittai-gpt`，5555 direct binding 必然报 provider not found。
+- 唯一正确修复点：
+  1. `toml-basic.ts` 增加多行 collection 聚合解析；
+  2. `provider-v2-loader.ts` 对已命中的 `config.v2.*` 解析失败不再静默吞错。
+- 已验证：
+  - `decodeProviderConfigFile(~/.rcc/provider/dbittai-gpt/config.v2.toml)` 可正确得到 `auth.entries`;
+  - `loadProviderConfigsV2(~/.rcc/provider)` 包含 `dbittai-gpt`;
+  - `loadRouteCodexConfig(~/.rcc/config.toml)` materialized providers 包含 `dbittai-gpt`;
+  - 精确回归：`tests/config/toml-shadow-codec.spec.ts`、`tests/config/provider-v2-loader.spec.ts`、`tests/server/runtime/http-server/provider-binding-resolution.spec.ts` 全通过。
+
+## 2026-05-17 5555 direct cache 命中率异常真源
+
+- Jason 指出的约束是对的：same-protocol provider direct 不应该重建 request；理论上只允许最小覆盖 `model / thinking effort / ua` 等基础字段，其余请求 shape 必须透明透传。
+- 现网样本已证明旧实现违反该契约：`~/.rcc/codex-samples/openai-chat/dbittai-gpt.key1.gpt-5.4/req_*/provider-request.json` 中 `input` 持续膨胀、`previous_response_id` 始终为空、`model` 被落成默认模型 `gpt-5.3-codex`，并且 `__runtime.endpoint` 错记为 `/v1/chat/completions`。
+- 唯一真源是 provider direct 同协议路径仍调用 `ResponsesProtocolClient.buildRequestBody()` 重新 build responses request。正确修复应让 `executeProviderDirectPipeline` 优先走 provider 的 `processIncomingDirect()`，而 `ResponsesProvider.processIncomingDirect()` 必须绕过 request rebuild，直接把原始 responses payload（去掉内部 metadata）发送上游。
+
+
+## 2026-05-18 5555→5520 串线复盘（继续）
+
+- 实机证据：`[port-resolve]` 明确 5555 入口解析正确，但后续仍选到 `thinking/gateway-priority-5520-thinking`，说明错误不在入口端口解析。
+- 继续追到 router-direct 预跑链：`executeRouterDirectPipelineForPort()` 传给 `runHubPipeline()` 的 metadata 缺少 per-port `allowedProviders`。
+- 已修：`src/server/runtime/http-server/index.ts` 的 router-direct metadataForHub 现在同时注入 `routecodex*` 与 `allowedProviders`，与普通 executePortAwarePipeline 保持一致。
+- 当前待验证：build + global install + restart 后，5555 实机是否改为只命中 `gateway_priority_5555`。
+
+## 2026-05-18 SSE passthrough 真源补充
+
+- 已证实 SSE 问题与分类问题无关，必须拆开处理。
+- 真实样本显示两类故障：
+  1. 某些 upstream passthrough SSE 根本没有 terminal event（无 `response.completed`/`[DONE]`）。
+  2. 另一些样本明明已有 `response.completed`，但 host `handler-response-utils.ts` 仅依赖 stream `end` / wrapper finish reason，不会从 passthrough 文本流本身识别 terminal event，导致误记 `client_close before streamEnd`。
+- 最小修复已落在 host SSE bridge：直接从 passthrough chunk 识别 `response.completed` / `response.done` / `[DONE]`，在 terminal 到达后主动收束本地响应。
+
+## 2026-05-18 5555 router thinking current-turn-only 修复
+
+- 活证据先确认：5555 `/v1/responses` 基础 SSE 现已能收到 `response.completed`，host passthrough terminal 识别至少对简单 direct 流成立。
+- 继续审计发现 Jason 指出的第二个问题属实：Rust `virtual_router_engine/classifier.rs` 仍保留 `thinking_from_read = !thinking_from_user && last_tool_category == "thinking"`，会让历史 thinking/tool 延续继续命中 thinking，违反“只看当前轮”的路由规则。
+- 本轮唯一正确修复点：删除 classifier 中历史 thinking continuation，仅保留 `thinking:user-input` 作为 thinking 命中条件；coding/search/tools 等历史续轮逻辑保持独立。
+
+## 2026-05-18 stopless 最简复活
+
+- Jason 新规则已收敛：stopless 默认开启、默认次数 2、默认注入文本固定为 `继续执行`。
+- 唯一自动续轮 owner 收缩为 `stop_message_auto.ts`：`/goal active` 时 stop 不续轮；`/goal non-active` 与非 `/goal` 时收到 `finish_reason=stop` 自动注入一次 `继续执行`。
+- 旧复杂魔块（AI/reviewer followup、approved/done marker、stopless_goal_guard 第二决策面）不再作为当前 stopless 真相。

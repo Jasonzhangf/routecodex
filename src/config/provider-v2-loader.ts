@@ -62,15 +62,6 @@ async function listProviderDirs(rootDir: string): Promise<ProviderDirEntry[]> {
   return dirs;
 }
 
-async function readJsonFile(filePath: string): Promise<UnknownRecord | null> {
-  try {
-    const decoded = await decodeProviderConfigFile(filePath);
-    return decoded.parsed;
-  } catch {
-    return null;
-  }
-}
-
 function isProviderConfigV2FileName(fileName: string): boolean {
   const normalized = fileName.trim().toLowerCase();
   if (!normalized.endsWith('.json') && !normalized.endsWith('.toml')) {
@@ -169,10 +160,8 @@ async function loadProviderConfigV2(
   entry: ProviderDirEntry,
   file: ProviderConfigFileEntry
 ): Promise<ProviderConfigV2 | null> {
-  const parsed = await readJsonFile(file.filePath);
-  if (!parsed) {
-    return null;
-  }
+  const decoded = await decodeProviderConfigFile(file.filePath);
+  const parsed = decoded.parsed;
 
   const coerced = coerceProviderConfigV2FromParsed(parsed, entry.id);
   if (!coerced) {

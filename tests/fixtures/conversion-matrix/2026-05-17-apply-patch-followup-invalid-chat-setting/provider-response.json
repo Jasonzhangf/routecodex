@@ -1,0 +1,23 @@
+{
+  "body": {
+    "data": {
+      "base_resp": {
+        "status_code": 2013,
+        "status_msg": "invalid params, invalid chat setting"
+      },
+      "choices": null,
+      "usage": null
+    },
+    "headers": {
+      "content-type": "application/json; charset=utf-8"
+    },
+    "status": 200
+  },
+  "meta": {
+    "entryEndpoint": "/v1/responses",
+    "providerId": "mini27",
+    "providerKey": "mini27.key1.MiniMax-M2.7",
+    "stage": "provider-response"
+  },
+  "url": "http://guizhouyun.site:2080/chat/completions"
+}

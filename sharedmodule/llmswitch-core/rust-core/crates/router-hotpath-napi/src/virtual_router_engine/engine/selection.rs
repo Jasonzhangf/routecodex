@@ -25,6 +25,35 @@ use crate::virtual_router_engine::routing::{
 };
 use crate::virtual_router_engine::time_utils::now_ms;
 
+fn read_requested_route_policy_group(metadata: &Value) -> Option<String> {
+    metadata
+        .get("routecodexRoutingPolicyGroup")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+}
+
+fn pool_matches_route_policy_group(
+    pool: &crate::virtual_router_engine::routing::RoutePoolTier,
+    requested_group: Option<&str>,
+) -> bool {
+    let Some(requested_group) = requested_group.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    let pool_group = pool
+        .route_params
+        .as_ref()
+        .and_then(|params| params.get("routePolicyGroup"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match pool_group {
+        Some(value) => value == requested_group,
+        None => true,
+    }
+}
+
 fn order_instruction_keys_by_default_route(
     keys: &[String],
     routing: &crate::virtual_router_engine::routing::RoutingPools,
@@ -189,6 +218,7 @@ impl VirtualRouterEngineCore {
         let now_for_weights = extract_runtime_now_ms(metadata).unwrap_or_else(now_ms);
         let health_cfg =
             resolve_health_weighted_config(self.load_balancer.policy().health_weighted.as_ref());
+        let requested_route_policy_group = read_requested_route_policy_group(metadata);
         let requires_remote_video = features.has_video_attachment
             && features.has_remote_video_attachment
             && route_has_targets(&self.routing, "video");
@@ -241,24 +271,25 @@ impl VirtualRouterEngineCore {
                 }
             }
             if multimodal_route_requested
-                && (route_name == "multimodal"
-                    || route_name == "vision"
-                    || route_name == DEFAULT_ROUTE)
+                && (route_name == "multimodal" || route_name == DEFAULT_ROUTE)
             {
                 let capability_filtered =
                     filter_pools_by_capability(&pools, &self.provider_registry, "multimodal");
                 if !capability_filtered.is_empty() {
                     pools = capability_filtered;
                 } else if use_default_pool_multimodal_fallback
-                    && (route_name == "multimodal" || route_name == "vision")
+                    && route_name == "multimodal"
                 {
-                    // Legacy multimodal/vision routes may point to non-multimodal targets.
+                    // Multimodal direct-routing may point to non-multimodal targets.
                     // When default pool contains multimodal-capable targets, skip this route
                     // and fall through to default-pool capability fallback instead.
                     continue;
                 }
             }
             for pool in pools {
+                if !pool_matches_route_policy_group(&pool, requested_route_policy_group.as_deref()) {
+                    continue;
+                }
                 if pool.targets.is_empty() {
                     continue;
                 }
@@ -428,6 +459,9 @@ impl VirtualRouterEngineCore {
             &self.routing,
         ) {
             for pool in self.routing.get(&route_name) {
+                if !pool_matches_route_policy_group(&pool, requested_route_policy_group.as_deref()) {
+                    continue;
+                }
                 for key in filter_candidates_by_state(
                     &pool.targets,
                     routing_state,

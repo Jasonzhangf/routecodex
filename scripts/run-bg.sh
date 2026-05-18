@@ -270,7 +270,7 @@ log_file="/tmp/routecodex-bg-${ts}.log"
 port=$(detect_port)
 
 echo "[run-bg] starting: ${CMD_STR} (log: ${log_file})" >&2
-nohup bash -lc "${CMD_STR}" >"${log_file}" 2>&1 &
+nohup bash -lc "NODE_OPTIONS=--max-old-space-size=4096 ${CMD_STR}" >"${log_file}" 2>&1 &
 pid=$!
 echo "[run-bg] started pid=${pid}" >&2
 

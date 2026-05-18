@@ -1,5 +1,5 @@
 import type { JsonObject, JsonValue } from '../../../conversion/hub/types/json.js';
-import { cloneJson } from '../../server-side-tools.js';
+import { bindServertoolContractWithNative, cloneJson } from '../../server-side-tools.js';
 import type { ServerToolFollowupInjectionOp, ServerToolFollowupInjectionPlan } from '../../types.js';
 import { trimOpenAiMessagesForFollowup } from '../followup-message-trimmer.js';
 import { REASONING_STOP_TOOL_DEF } from '../reasoning-stop-state.js';
@@ -10,7 +10,8 @@ import {
   compactToolContentInMessages,
   extractAssistantMessageFromChatLike,
   injectSystemTextIntoMessages,
-  injectVisionSummaryIntoMessages
+  injectVisionSummaryIntoMessages,
+  rebuildVisionFollowupMessages
 } from './message-blocks.js';
 
 export type FollowupBuilderState = {
@@ -193,6 +194,19 @@ const FOLLOWUP_OP_HANDLERS: FollowupOpHandlerMap = {
   inject_vision_summary: (state, op) => {
     const summary = typeof op.summary === 'string' ? op.summary.trim() : '';
     return summary ? { ...state, messages: injectVisionSummaryIntoMessages(state.messages, summary) } : state;
+  },
+  rebuild_vision_followup: (state, op) => {
+    const summary = bindServertoolContractWithNative(typeof op.summary === 'string' ? op.summary.trim() : '');
+    return summary
+      ? {
+          ...state,
+          messages: rebuildVisionFollowupMessages(
+            state.messages,
+            summary,
+            typeof op.originalPrompt === 'string' ? op.originalPrompt : undefined
+          )
+        }
+      : state;
   },
   trim_openai_messages: (state, op) => ({
     ...state,

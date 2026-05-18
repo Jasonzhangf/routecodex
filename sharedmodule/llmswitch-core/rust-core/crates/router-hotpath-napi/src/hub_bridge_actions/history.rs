@@ -1072,6 +1072,15 @@ pub(crate) fn prepare_responses_request_envelope(
         request.insert("metadata".to_string(), Value::Object(metadata));
     }
 
+    let has_tools = request
+        .get("tools")
+        .and_then(Value::as_array)
+        .map(|tools| !tools.is_empty())
+        .unwrap_or(false);
+    if !has_tools {
+        request.remove("tool_choice");
+    }
+
     request.remove("parameters");
 
     PrepareResponsesRequestEnvelopeOutput {

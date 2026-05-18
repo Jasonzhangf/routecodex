@@ -3,16 +3,16 @@
   "scope": "sharedmodule/llmswitch-core/src",
   "metrics": {
     "prodTsFileCount": 645,
-    "prodTsLocTotal": 103864,
-    "nonNativeFileCount": 359,
-    "nonNativeLocTotal": 62455
+    "prodTsLocTotal": 103941,
+    "nonNativeFileCount": 356,
+    "nonNativeLocTotal": 62532
   },
   "byTopDir": {
     "conversion": {
       "prodTsFiles": 320,
       "prodTsLoc": 31295,
       "nonNativeFiles": 130,
-      "nonNativeLoc": 12328
+      "nonNativeLoc": 12331
     },
     "router": {
       "prodTsFiles": 133,
@@ -30,7 +30,7 @@
       "prodTsFiles": 44,
       "prodTsLoc": 14575,
       "nonNativeFiles": 43,
-      "nonNativeLoc": 14198
+      "nonNativeLoc": 14272
     },
     "tools": {
       "prodTsFiles": 13,

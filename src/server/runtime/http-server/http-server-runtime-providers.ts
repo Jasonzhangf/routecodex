@@ -141,8 +141,19 @@ function isCredentialMissingInitError(error: unknown): { missing: boolean; reaso
 }
 
 export async function initializeProviderRuntimes(server: any, artifacts?: VirtualRouterArtifacts): Promise<void> {
-  const runtimeMap = artifacts?.targetRuntime ?? server.currentRouterArtifacts?.targetRuntime ?? undefined;
-  if (!runtimeMap) {
+  const baseRuntimeMap =
+    artifacts?.runtime
+    ?? server.currentRouterArtifacts?.runtime
+    ?? undefined;
+  const targetRuntimeMap =
+    artifacts?.targetRuntime
+    ?? server.currentRouterArtifacts?.targetRuntime
+    ?? undefined;
+  const runtimeMap = {
+    ...(baseRuntimeMap ?? {}),
+    ...(targetRuntimeMap ?? {})
+  } as Record<string, ProviderRuntimeProfile>;
+  if (!runtimeMap || Object.keys(runtimeMap).length < 1) {
     return;
   }
   await server.disposeProviders();
@@ -222,6 +233,26 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
             patchedRuntime && patchedRuntime.auth && typeof (patchedRuntime.auth as { type?: unknown }).type === 'string'
               ? String((patchedRuntime.auth as { type?: string }).type).trim()
               : null;
+          if (runtimeKey.startsWith('qwenchat.')) {
+            try {
+              console.warn('[qwenchat.debug] patchedRuntime', JSON.stringify({
+                providerKey,
+                runtimeKey,
+                providerId: patchedRuntime?.providerId ?? null,
+                providerType: patchedRuntime?.providerType ?? null,
+                providerFamily: patchedRuntime?.providerFamily ?? null,
+                compatibilityProfile: patchedRuntime?.compatibilityProfile ?? null,
+                providerModule: (patchedRuntime as { providerModule?: unknown })?.providerModule ?? null,
+                endpoint: patchedRuntime?.endpoint ?? null,
+                baseUrl: (patchedRuntime as { baseUrl?: unknown })?.baseUrl ?? null,
+                authType: patchedRuntime?.auth?.type ?? null,
+                authRawType: (patchedRuntime?.auth as { rawType?: unknown })?.rawType ?? null,
+                authValue: typeof patchedRuntime?.auth?.value === 'string' ? patchedRuntime.auth.value : null,
+              }));
+            } catch {
+              // non-blocking debug
+            }
+          }
           if (authTypeFromPatched) {
             runtimeKeyAuthType.set(runtimeKey, authTypeFromPatched);
           } else if (authTypeFromRuntime) {
@@ -243,6 +274,16 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
           const aliasScopedRuntimeKey = `${runtimeKeyParts[0]}.${runtimeKeyParts[1]}`;
           if (!server.providerHandles.has(aliasScopedRuntimeKey)) {
             server.providerHandles.set(aliasScopedRuntimeKey, handle);
+          }
+          const aliasNormalized = runtimeKeyParts[1].replace(/^key(\d+)$/i, '$1');
+          const aliasDenormalized = runtimeKeyParts[1].match(/^\d+$/) ? `key${runtimeKeyParts[1]}` : runtimeKeyParts[1];
+          const normalizedAliasScopedRuntimeKey = `${runtimeKeyParts[0]}.${aliasNormalized}`;
+          const denormalizedAliasScopedRuntimeKey = `${runtimeKeyParts[0]}.${aliasDenormalized}`;
+          if (!server.providerHandles.has(normalizedAliasScopedRuntimeKey)) {
+            server.providerHandles.set(normalizedAliasScopedRuntimeKey, handle);
+          }
+          if (!server.providerHandles.has(denormalizedAliasScopedRuntimeKey)) {
+            server.providerHandles.set(denormalizedAliasScopedRuntimeKey, handle);
           }
         }
         server.providerRuntimeInitErrors.delete(runtimeKey);
@@ -309,14 +350,43 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
       });
     }
 
-    if (server.providerHandles.has(runtimeKey)) {
-      server.providerKeyToRuntimeKey.set(providerKey, runtimeKey);
+    const normalizedRuntimeKey = typeof runtimeKey === 'string'
+      ? runtimeKey.replace(/\.key(\d+)(?=\.|$)/gi, '.$1')
+      : runtimeKey;
+    const denormalizedRuntimeKey = typeof runtimeKey === 'string'
+      ? runtimeKey.replace(/\.(\d+)(?=\.|$)/g, '.key$1')
+      : runtimeKey;
+    const resolvedRuntimeKey =
+      server.providerHandles.has(runtimeKey)
+        ? runtimeKey
+        : (normalizedRuntimeKey && server.providerHandles.has(normalizedRuntimeKey)
+          ? normalizedRuntimeKey
+          : (denormalizedRuntimeKey && server.providerHandles.has(denormalizedRuntimeKey)
+            ? denormalizedRuntimeKey
+            : undefined));
+
+    if (resolvedRuntimeKey) {
+      server.providerKeyToRuntimeKey.set(providerKey, resolvedRuntimeKey);
+      const normalizedProviderKey = providerKey.replace(/\.key(\d+)(?=\.|$)/gi, '.$1');
+      if (normalizedProviderKey !== providerKey) {
+        server.providerKeyToRuntimeKey.set(normalizedProviderKey, resolvedRuntimeKey);
+      }
+      const denormalizedProviderKey = providerKey.replace(/\.(\d+)(?=\.|$)/g, '.key$1');
+      if (denormalizedProviderKey !== providerKey) {
+        server.providerKeyToRuntimeKey.set(denormalizedProviderKey, resolvedRuntimeKey);
+      }
       const providerKeyParts = providerKey.split('.');
       if (providerKeyParts.length >= 3) {
         const aliasScopedKey = `${providerKeyParts[0]}.${providerKeyParts[1]}`;
         if (!server.providerKeyToRuntimeKey.has(aliasScopedKey)) {
-          server.providerKeyToRuntimeKey.set(aliasScopedKey, runtimeKey);
+          server.providerKeyToRuntimeKey.set(aliasScopedKey, resolvedRuntimeKey);
         }
+        const aliasNormalized = providerKeyParts[1].replace(/^key(\d+)$/i, '$1');
+        const aliasDenormalized = providerKeyParts[1].match(/^\d+$/) ? `key${providerKeyParts[1]}` : providerKeyParts[1];
+        const normalizedAliasScopedKey = `${providerKeyParts[0]}.${aliasNormalized}`;
+        const denormalizedAliasScopedKey = `${providerKeyParts[0]}.${aliasDenormalized}`;
+        server.providerKeyToRuntimeKey.set(normalizedAliasScopedKey, resolvedRuntimeKey);
+        server.providerKeyToRuntimeKey.set(denormalizedAliasScopedKey, resolvedRuntimeKey);
       }
     }
   }
@@ -334,6 +404,21 @@ export async function createProviderHandle(
       ? (runtime.outboundProfile.trim() as ProviderProtocol)
       : undefined) ?? mapProviderProtocol(protocolType);
   const instance = ProviderFactory.createProviderFromRuntime(runtime, server.getModuleDependencies());
+  if (runtimeKey.startsWith('qwenchat.')) {
+    try {
+      const proto = Object.getPrototypeOf(instance as object) as { constructor?: { name?: string }; sendRequestInternal?: unknown };
+      console.warn('[qwenchat.debug] createProviderHandle.instance', JSON.stringify({
+        runtimeKey,
+        ctor: (instance as { constructor?: { name?: string } })?.constructor?.name ?? null,
+        protoCtor: proto?.constructor?.name ?? null,
+        hasProcessIncoming: typeof (instance as { processIncoming?: unknown }).processIncoming === 'function',
+        hasSendRequest: typeof (instance as { sendRequest?: unknown }).sendRequest === 'function',
+        hasProtoSendRequestInternal: typeof proto?.sendRequestInternal === 'function',
+      }));
+    } catch {
+      // non-blocking debug
+    }
+  }
   await instance.initialize();
   const providerId = runtime.providerId || runtimeKey.split('.')[0];
   return {
@@ -482,6 +567,16 @@ export async function resolveApiKeyValue(
           ? String((runtime as any).endpoint).trim()
           : '';
   if (server.isLocalBaseUrl(baseURL)) {
+    return '';
+  }
+
+  const rawType =
+    typeof (auth as { rawType?: unknown })?.rawType === 'string'
+      ? String((auth as { rawType?: string }).rawType).trim().toLowerCase()
+      : typeof (auth as { type?: unknown })?.type === 'string'
+        ? String((auth as { type?: string }).type).trim().toLowerCase()
+        : '';
+  if (rawType === 'qwenchat-guest') {
     return '';
   }
 

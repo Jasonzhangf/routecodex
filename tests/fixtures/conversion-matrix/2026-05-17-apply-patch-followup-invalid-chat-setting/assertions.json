@@ -1,0 +1,24 @@
+{
+  "case": "2026-05-17-apply-patch-followup-invalid-chat-setting",
+  "direction": [
+    "request-roundtrip",
+    "response-roundtrip"
+  ],
+  "assert": {
+    "forbid_root_keys": [
+      "max_tokens",
+      "max_output_tokens",
+      "parallel_tool_calls",
+      "tool_choice",
+      "reasoning"
+    ],
+    "forbid_paths": [
+      "body.semantics.responses.requestParameters.model",
+      "body.semantics.responses.requestParameters.max_tokens",
+      "body.semantics.responses.requestParameters.max_output_tokens",
+      "body.semantics.responses.requestParameters.parallel_tool_calls",
+      "body.semantics.responses.requestParameters.tool_choice",
+      "body.semantics.responses.requestParameters.reasoning"
+    ]
+  }
+}

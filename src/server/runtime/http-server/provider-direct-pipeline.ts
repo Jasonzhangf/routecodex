@@ -80,7 +80,9 @@ export async function executeProviderDirectPipeline(
     actualBehavior,
   });
 
-  const response = await providerHandle.instance.processIncoming(payloadToSend);
+  const response = actualBehavior === 'direct' && typeof providerHandle.instance.processIncomingDirect === 'function'
+    ? await providerHandle.instance.processIncomingDirect(payloadToSend)
+    : await providerHandle.instance.processIncoming(payloadToSend);
 
   options.onSnapshotAfter?.(response, {
     port: portConfig.port,

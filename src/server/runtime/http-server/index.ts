@@ -54,6 +54,10 @@ import {
   type RouterDirectOutcome,
   type RouterDirectResult,
 } from './router-direct-pipeline.js';
+import {
+  applyMinimalDirectOverrides,
+  resolveRawPayloadForDirect,
+} from './direct-passthrough-payload.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
@@ -214,8 +218,89 @@ export class RouteCodexHttpServer {
     this.requestExecutor = createRequestExecutor({
       runtimeManager: {
         resolveRuntimeKey: (providerKey?: string, fallback?: string): string | undefined => {
+          const debugQwenchat = typeof providerKey === 'string' && providerKey.startsWith('qwenchat.');
           if (providerKey && this.providerKeyToRuntimeKey.has(providerKey)) {
-            return this.providerKeyToRuntimeKey.get(providerKey);
+            const mapped = this.providerKeyToRuntimeKey.get(providerKey);
+            if (mapped && this.providerHandles.has(mapped)) {
+              if (debugQwenchat) {
+                console.warn(`[runtime.resolve.debug] providerKey=${providerKey} mapped=${mapped} direct_hit=true`);
+              }
+              return mapped;
+            }
+            if (mapped) {
+              const normalizedMapped = mapped.replace(/\.key(\d+)(?=\.|$)/gi, '.$1');
+              if (normalizedMapped !== mapped && this.providerHandles.has(normalizedMapped)) {
+                if (debugQwenchat) {
+                  console.warn(`[runtime.resolve.debug] providerKey=${providerKey} mapped=${mapped} normalized_hit=${normalizedMapped}`);
+                }
+                return normalizedMapped;
+              }
+              const denormalizedMapped = mapped.replace(/\.(\d+)(?=\.|$)/g, '.key$1');
+              if (denormalizedMapped !== mapped && this.providerHandles.has(denormalizedMapped)) {
+                if (debugQwenchat) {
+                  console.warn(`[runtime.resolve.debug] providerKey=${providerKey} mapped=${mapped} denormalized_hit=${denormalizedMapped}`);
+                }
+                return denormalizedMapped;
+              }
+            }
+          }
+          if (providerKey) {
+            const parts = providerKey.split('.');
+            if (parts.length >= 3) {
+              const providerId = parts[0];
+              const alias = parts[1];
+              const aliasNormalized = alias.replace(/^key(\d+)$/i, '$1');
+              const aliasDenormalized = alias.match(/^\d+$/) ? `key${alias}` : alias;
+              const directNormalizedRuntime = `${providerId}.${aliasNormalized}`;
+              if (this.providerHandles.has(directNormalizedRuntime)) {
+                if (debugQwenchat) {
+                  console.warn(`[runtime.resolve.debug] providerKey=${providerKey} direct_normalized_runtime=${directNormalizedRuntime}`);
+                }
+                return directNormalizedRuntime;
+              }
+              const directDenormalizedRuntime = `${providerId}.${aliasDenormalized}`;
+              if (this.providerHandles.has(directDenormalizedRuntime)) {
+                if (debugQwenchat) {
+                  console.warn(`[runtime.resolve.debug] providerKey=${providerKey} direct_denormalized_runtime=${directDenormalizedRuntime}`);
+                }
+                return directDenormalizedRuntime;
+              }
+            }
+            const normalizedProviderKey = providerKey.replace(/\.key(\d+)(?=\.|$)/gi, '.$1');
+            if (normalizedProviderKey !== providerKey && this.providerKeyToRuntimeKey.has(normalizedProviderKey)) {
+              const mapped = this.providerKeyToRuntimeKey.get(normalizedProviderKey);
+              if (mapped && this.providerHandles.has(mapped)) {
+                return mapped;
+              }
+              if (mapped) {
+                const normalizedMapped = mapped.replace(/\.key(\d+)(?=\.|$)/gi, '.$1');
+                if (this.providerHandles.has(normalizedMapped)) {
+                  return normalizedMapped;
+                }
+              }
+            }
+            const denormalizedProviderKey = providerKey.replace(/\.(\d+)(?=\.|$)/g, '.key$1');
+            if (denormalizedProviderKey !== providerKey && this.providerKeyToRuntimeKey.has(denormalizedProviderKey)) {
+              const mapped = this.providerKeyToRuntimeKey.get(denormalizedProviderKey);
+              if (mapped && this.providerHandles.has(mapped)) {
+                return mapped;
+              }
+              if (mapped) {
+                const denormalizedMapped = mapped.replace(/\.(\d+)(?=\.|$)/g, '.key$1');
+                if (this.providerHandles.has(denormalizedMapped)) {
+                  return denormalizedMapped;
+                }
+              }
+            }
+          }
+          if (debugQwenchat) {
+            const mappedKeys = Array.from(this.providerKeyToRuntimeKey.keys()).filter((k) => k.startsWith('qwenchat.')).slice(0, 20);
+            const handleKeys = Array.from(this.providerHandles.keys()).filter((k) => k.startsWith('qwenchat.')).slice(0, 20);
+            const qwenMappedKeys = Array.from(this.providerKeyToRuntimeKey.keys()).filter((k) => k.startsWith('qwen.')).slice(0, 20);
+            const qwenHandleKeys = Array.from(this.providerHandles.keys()).filter((k) => k.startsWith('qwen.')).slice(0, 20);
+            console.warn(
+              `[runtime.resolve.debug] providerKey=${providerKey} miss fallback=${fallback ?? 'undefined'} mapKeys=${JSON.stringify(mappedKeys)} handleKeys=${JSON.stringify(handleKeys)} qwenMapKeys=${JSON.stringify(qwenMappedKeys)} qwenHandleKeys=${JSON.stringify(qwenHandleKeys)}`
+            );
           }
           return fallback;
         },
@@ -227,12 +312,34 @@ export class RouteCodexHttpServer {
           if (direct) {
             return direct;
           }
+          const normalizedRuntimeKey = runtimeKey.replace(/\.key(\d+)(?=\.|$)/gi, '.$1');
+          if (normalizedRuntimeKey !== runtimeKey) {
+            const normalizedDirect = this.providerHandles.get(normalizedRuntimeKey);
+            if (normalizedDirect) {
+              return normalizedDirect;
+            }
+          }
+          const denormalizedRuntimeKey = runtimeKey.replace(/\.(\d+)(?=\.|$)/g, '.key$1');
+          if (denormalizedRuntimeKey !== runtimeKey) {
+            const denormalizedDirect = this.providerHandles.get(denormalizedRuntimeKey);
+            if (denormalizedDirect) {
+              return denormalizedDirect;
+            }
+          }
           const runtimeKeyParts = runtimeKey.split('.');
           if (runtimeKeyParts.length === 2) {
             const aliasScopedPrefix = `${runtimeKeyParts[0]}.${runtimeKeyParts[1]}.`;
             for (const [candidateKey, handle] of this.providerHandles.entries()) {
               if (candidateKey.startsWith(aliasScopedPrefix)) {
                 return handle;
+              }
+            }
+            const normalizedAliasScopedPrefix = aliasScopedPrefix.replace(/\.key(\d+)\./i, '.$1.');
+            if (normalizedAliasScopedPrefix !== aliasScopedPrefix) {
+              for (const [candidateKey, handle] of this.providerHandles.entries()) {
+                if (candidateKey.startsWith(normalizedAliasScopedPrefix)) {
+                  return handle;
+                }
               }
             }
           }
@@ -706,16 +813,61 @@ export class RouteCodexHttpServer {
     if (!bindingKey) {
       return undefined;
     }
-    if (this.providerKeyToRuntimeKey.has(bindingKey)) {
-      return this.providerKeyToRuntimeKey.get(bindingKey);
+    const normalizedBinding = bindingKey.trim();
+    if (!normalizedBinding) {
+      return undefined;
     }
-    if (this.providerHandles.has(bindingKey)) {
-      return bindingKey;
+    if (this.providerKeyToRuntimeKey.has(normalizedBinding)) {
+      return this.providerKeyToRuntimeKey.get(normalizedBinding);
     }
-    const scopedPrefix = `${bindingKey}.`;
+    if (this.providerHandles.has(normalizedBinding)) {
+      return normalizedBinding;
+    }
+    const scopedPrefix = `${normalizedBinding}.`;
     for (const runtimeKey of this.providerHandles.keys()) {
-      if (runtimeKey === bindingKey || runtimeKey.startsWith(scopedPrefix)) {
+      if (runtimeKey === normalizedBinding || runtimeKey.startsWith(scopedPrefix)) {
         return runtimeKey;
+      }
+    }
+    if (normalizedBinding.includes('.')) {
+      const lastDot = normalizedBinding.lastIndexOf('.');
+      const modelSuffix = `.${normalizedBinding.slice(lastDot + 1)}`;
+      for (const runtimeKey of this.providerHandles.keys()) {
+        if (runtimeKey.endsWith(modelSuffix) && runtimeKey.startsWith(normalizedBinding.slice(0, lastDot))) {
+          return runtimeKey;
+        }
+      }
+      const parentBinding = normalizedBinding.slice(0, lastDot);
+      if (parentBinding && parentBinding !== normalizedBinding) {
+        const parentResolved = this.resolveRuntimeKeyForProviderBinding(parentBinding);
+        if (parentResolved) {
+          return parentResolved;
+        }
+      }
+    }
+    const segments = normalizedBinding.split('.').map((part) => part.trim()).filter(Boolean);
+    if (segments.length >= 3) {
+      const providerId = segments[0];
+      const alias = segments[1];
+      const normalizedModel = segments[segments.length - 1].replace(/[-_]/g, '').toLowerCase();
+      for (const runtimeKey of this.providerHandles.keys()) {
+        const runtimeSegments = runtimeKey.split('.').map((part) => part.trim()).filter(Boolean);
+        if (runtimeSegments.length < 2 || runtimeSegments[0] !== providerId) {
+          continue;
+        }
+        if (!runtimeSegments.includes(alias)) {
+          continue;
+        }
+        const runtimeTail = runtimeSegments[runtimeSegments.length - 1].replace(/[-_]/g, '').toLowerCase();
+        if (runtimeTail === normalizedModel) {
+          return runtimeKey;
+        }
+      }
+      for (const runtimeKey of this.providerHandles.keys()) {
+        const runtimeSegments = runtimeKey.split('.').map((part) => part.trim()).filter(Boolean);
+        if (runtimeSegments[0] === providerId && runtimeSegments.includes(alias)) {
+          return runtimeKey;
+        }
       }
     }
     return undefined;
@@ -808,6 +960,7 @@ export class RouteCodexHttpServer {
       routecodexLocalPort: localPort,
       routecodexPortMode: portConfig?.mode ?? 'router',
       routecodexPortBinding: portConfig?.providerBinding,
+      routecodexRoutingPolicyGroup: portConfig?.routingPolicyGroup,
       ...(allowedProviders ? { allowedProviders } : {}),
     };
     const nextInput: PipelineExecutionInput = {
@@ -845,10 +998,18 @@ export class RouteCodexHttpServer {
       return { used: false, reason: 'hub-pipeline-not-ready' };
     }
 
+    const allowedProviders =
+      portConfig.routingPolicyGroup
+        ? extractProviderKeysForRoutingGroup(this.userConfig, portConfig.routingPolicyGroup)
+        : undefined;
+
     const metadataForHub = {
       ...(input.metadata ?? {}),
       routecodexLocalPort: portConfig.port,
       routecodexPortMode: portConfig.mode,
+      routecodexPortBinding: portConfig.providerBinding,
+      routecodexRoutingPolicyGroup: portConfig.routingPolicyGroup,
+      ...(allowedProviders && allowedProviders.length > 0 ? { allowedProviders } : {}),
     };
 
     // Run Hub Pipeline to get routing decision (preserves routing truth source)
@@ -869,10 +1030,22 @@ export class RouteCodexHttpServer {
       return { used: false, reason: 'no-target-from-router' };
     }
 
+    const requestPayload = applyMinimalDirectOverrides(
+      resolveRawPayloadForDirect(input.body, input.metadata),
+      {
+        providerPayload,
+        routeParams:
+          input.metadata?.routeParams && typeof input.metadata.routeParams === 'object' && !Array.isArray(input.metadata.routeParams)
+            ? (input.metadata.routeParams as Record<string, unknown>)
+            : undefined,
+      },
+    );
+
     // Try the router-direct pipeline
     const directOutcome = await executeRouterDirectPipeline({
       portConfig,
       providerPayload,
+      requestPayload,
       target: {
         providerKey: target.providerKey,
         providerType: target.providerType,
@@ -935,7 +1108,12 @@ export class RouteCodexHttpServer {
     const { response, providerHandle, auditContext } = directResult;
 
     const normalized = normalizeProviderResponse(response);
-    const usage = extractUsageFromResult(normalized, input.metadata);
+    const usage = extractUsageFromResult(normalized, {
+      ...(input.metadata ?? {}),
+      providerProtocol: providerHandle.providerProtocol,
+      providerType: providerHandle.providerType,
+      providerKey: auditContext.providerKey
+    });
     const requestModel =
       input.body && typeof input.body === 'object' && typeof (input.body as any).model === 'string'
         ? ((input.body as any).model as string)
@@ -944,6 +1122,13 @@ export class RouteCodexHttpServer {
       normalized.body && typeof normalized.body === 'object'
         ? deriveFinishReason(normalized.body as Record<string, unknown>)
         : undefined;
+    if (requestModel && normalized.body && typeof normalized.body === 'object' && !Array.isArray(normalized.body)) {
+      try {
+        (normalized.body as Record<string, unknown>).model = requestModel;
+      } catch {
+        // ignore model rewrite failures
+      }
+    }
 
     // Response is passed through without outbound rewriting
     return {
@@ -960,14 +1145,66 @@ export class RouteCodexHttpServer {
     };
   }
 
+  /**
+   * Build a PipelineExecutionResult from a provider-direct outcome.
+   * Contract: provider-mode direct must not re-enter response conversion/chat-process.
+   * Only transport normalization + usage extraction/log decoration are allowed here.
+   */
+  private async buildProviderDirectResult(
+    directResult: Awaited<ReturnType<typeof executeProviderDirectPipeline>>,
+    input: PipelineExecutionInput,
+    payload: Record<string, unknown>,
+    providerBinding?: string,
+  ): Promise<PipelineExecutionResult> {
+    const normalized = normalizeProviderResponse(directResult.response);
+    const usage = extractUsageFromResult(normalized, {
+      ...(input.metadata ?? {}),
+      providerProtocol: directResult.providerProtocol,
+      providerType: directResult.providerHandle.providerType,
+      providerKey: providerBinding
+    });
+    const requestModel =
+      input.body && typeof input.body === 'object' && typeof (input.body as any).model === 'string'
+        ? ((input.body as any).model as string)
+        : undefined;
+    const finishReason =
+      normalized.body && typeof normalized.body === 'object'
+        ? deriveFinishReason(normalized.body as Record<string, unknown>)
+        : undefined;
+    if (requestModel && normalized.body && typeof normalized.body === 'object' && !Array.isArray(normalized.body)) {
+      try {
+        (normalized.body as Record<string, unknown>).model = requestModel;
+      } catch {
+        // ignore model rewrite failures
+      }
+    }
+    return {
+      ...normalized,
+      usageLogInfo: {
+        ...(normalized.usageLogInfo ?? {}),
+        providerKey: providerBinding,
+        model: requestModel ?? this.extractProviderModel(payload),
+        routeName: 'port.provider-direct',
+        finishReason,
+        usage: usage ? (usage as Record<string, unknown>) : undefined,
+        requestStartedAtMs: Date.now(),
+      },
+    };
+  }
+
   private async executeProviderDirectPipelineForPort(
     portConfig: PortConfig,
     input: PipelineExecutionInput,
   ): Promise<PipelineExecutionResult> {
-    const payload =
-      input.body && typeof input.body === 'object'
-        ? ({ ...(input.body as Record<string, unknown>) })
-        : {};
+    const payload = applyMinimalDirectOverrides(
+      resolveRawPayloadForDirect(input.body, input.metadata),
+      {
+        routeParams:
+          input.metadata?.routeParams && typeof input.metadata.routeParams === 'object' && !Array.isArray(input.metadata.routeParams)
+            ? (input.metadata.routeParams as Record<string, unknown>)
+            : undefined,
+      },
+    );
     const providerBinding = portConfig.providerBinding;
     const runtimeKey = this.resolveRuntimeKeyForProviderBinding(providerBinding);
     this.logStage('port_pipeline.dispatch', input.requestId, {
@@ -992,7 +1229,6 @@ export class RouteCodexHttpServer {
           if (!handle) {
             throw new Error(`Provider not found for binding: ${context.providerKey}`);
           }
-          applyRouteParamsToProviderPayload(providerPayload, input.metadata);
           attachProviderRuntimeMetadata(providerPayload, {
             requestId: input.requestId,
             providerId: handle.providerId,
@@ -1029,64 +1265,15 @@ export class RouteCodexHttpServer {
       },
     );
 
-    const normalized = normalizeProviderResponse(directResult.response);
-    const converted = await convertProviderResponseIfNeeded(
-      {
-        entryEndpoint: input.entryEndpoint,
-        providerProtocol: directResult.providerProtocol,
-        providerType: directResult.providerHandle.providerType,
-        requestId: input.requestId,
-        serverToolsEnabled: false,
-        wantsStream: Boolean(input.metadata?.inboundStream ?? input.metadata?.stream),
-        originalRequest: payload,
-        processMode: 'passthrough',
-        response: normalized,
-        pipelineMetadata: input.metadata,
-      },
-      {
-        runtimeManager: {
-          resolveRuntimeKey: (providerKey?: string, fallback?: string): string | undefined =>
-            this.resolveRuntimeKeyForProviderBinding(providerKey) ?? fallback,
-          getHandleByRuntimeKey: (runtimeKey?: string): ProviderHandle | undefined =>
-            runtimeKey ? this.providerHandles.get(runtimeKey) : undefined,
-        },
-        executeNested: async (nestedInput: PipelineExecutionInput): Promise<PipelineExecutionResult> =>
-          await this.executePortAwarePipeline(portConfig.port, nestedInput),
-      },
+    return await this.buildProviderDirectResult(
+      directResult,
+      input,
+      payload,
+      providerBinding,
     );
-    const usage = extractUsageFromResult(converted, input.metadata);
-    const finishReason =
-      converted.body && typeof converted.body === 'object'
-        ? deriveFinishReason(converted.body as Record<string, unknown>)
-        : undefined;
-    return {
-      ...converted,
-      usageLogInfo: {
-        ...(converted.usageLogInfo ?? {}),
-        providerKey: providerBinding,
-        model: this.extractProviderModel(payload),
-        routeName: 'port.provider-direct',
-        finishReason,
-        usage: usage ? (usage as Record<string, unknown>) : undefined,
-        requestStartedAtMs: Date.now(),
-      },
-    };
   }
 
   private async initializeRouteErrorHub(): Promise<void> {
     await initializeRouteErrorHub(this);
-  }
-}
-function applyRouteParamsToProviderPayload(payload: Record<string, unknown>, metadata?: Record<string, unknown>): void {
-  const routeParams = metadata?.routeParams;
-  if (!routeParams || typeof routeParams !== 'object' || Array.isArray(routeParams)) {
-    return;
-  }
-  for (const [key, value] of Object.entries(routeParams as Record<string, unknown>)) {
-    if (key === 'reasoningEffort') {
-      payload.reasoning_effort = value;
-      continue;
-    }
-    payload[key] = value;
   }
 }

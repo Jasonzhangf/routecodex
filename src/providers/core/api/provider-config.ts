@@ -30,8 +30,10 @@ export interface OpenAIStandardConfig extends ModuleConfig {
     | 'anthropic-http-provider'
     | 'gemini-http-provider'
     | 'deepseek-http-provider'
+    | 'qwenchat-web-provider'
     | 'mimoweb-provider'
-    | 'mock-provider';
+    | 'mock-provider'
+    | 'windsurf-chat-provider';
   config: {
     // 服务类型标识 (必需)
     providerType: ProviderType;

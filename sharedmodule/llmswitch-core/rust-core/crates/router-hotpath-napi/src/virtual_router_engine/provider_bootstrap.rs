@@ -236,6 +236,7 @@ struct AuthFieldDefaults {
 #[derive(Debug, Clone, Default)]
 struct AuthCandidate {
     type_hint: Option<String>,
+    raw_type: Option<String>,
     value: Option<String>,
     secret_ref: Option<String>,
     token_file: Option<String>,
@@ -685,6 +686,7 @@ fn extract_provider_auth_entries(
     let mut entries: Vec<ProviderAuthEntry> = Vec::new();
     let mut alias_set = HashSet::new();
     let base_type_source = read_optional_string(auth.get("type"));
+    let base_raw_type_source = read_optional_string(auth.get("rawType"));
     let base_type_info = interpret_auth_type(base_type_source.as_deref());
     let defaults = collect_auth_defaults(&auth);
 
@@ -696,6 +698,7 @@ fn extract_provider_auth_entries(
                     Some(record),
                     None,
                     &base_type_source,
+                    &base_raw_type_source,
                     &base_type_info,
                     &defaults,
                     &mut entries,
@@ -713,6 +716,7 @@ fn extract_provider_auth_entries(
                     Some(record),
                     None,
                     &base_type_source,
+                    &base_raw_type_source,
                     &base_type_info,
                     &defaults,
                     &mut entries,
@@ -728,6 +732,7 @@ fn extract_provider_auth_entries(
                     Some(record),
                     Some(alias.to_string()),
                     &base_type_source,
+                    &base_raw_type_source,
                     &base_type_info,
                     &defaults,
                     &mut entries,
@@ -788,6 +793,7 @@ fn extract_provider_auth_entries(
                             Some(record),
                             None,
                             &base_type_source,
+                            &base_raw_type_source,
                             &base_type_info,
                             &defaults,
                             &mut entries,
@@ -825,6 +831,7 @@ fn extract_provider_auth_entries(
         &base_type_info,
         AuthCandidate {
             value: read_optional_string(auth.get("value")),
+            raw_type: base_raw_type_source.clone(),
             secret_ref: read_optional_string(auth.get("secretRef")),
             token_file: read_optional_string(auth.get("tokenFile"))
                 .or_else(|| read_optional_string(auth.get("file"))),
@@ -946,6 +953,9 @@ fn extract_provider_auth_entries(
                     .or_else(|| Some("deepseek-account".to_string())),
                 &base_type_info,
                 AuthCandidate {
+                    raw_type: base_raw_type_source
+                        .clone()
+                        .or_else(|| Some("deepseek-account".to_string())),
                     token_file: Some(matched.file_path),
                     ..Default::default()
                 },
@@ -972,6 +982,7 @@ fn extract_provider_auth_entries(
                 base_type_source.clone(),
                 &base_type_info,
                 AuthCandidate {
+                    raw_type: base_raw_type_source.clone(),
                     value: Some(String::new()),
                     ..Default::default()
                 },
@@ -1056,6 +1067,7 @@ fn push_auth_entry_from_record(
     record: Option<&Map<String, Value>>,
     alias_override: Option<String>,
     base_type_source: &Option<String>,
+    base_raw_type_source: &Option<String>,
     base_type_info: &AuthTypeInfo,
     defaults: &AuthFieldDefaults,
     entries: &mut Vec<ProviderAuthEntry>,
@@ -1068,10 +1080,14 @@ fn push_auth_entry_from_record(
     let type_hint = read_optional_string(record.get("type"))
         .or_else(|| base_type_source.clone())
         .or_else(|| Some(base_type_info.auth_type.clone()));
+    let raw_type_hint = read_optional_string(record.get("rawType"))
+        .or_else(|| base_raw_type_source.clone())
+        .or_else(|| type_hint.clone());
     let candidate = build_auth_candidate(
         type_hint,
         base_type_info,
         AuthCandidate {
+            raw_type: raw_type_hint,
             value: read_optional_string(record.get("value"))
                 .or_else(|| read_optional_string(record.get("apiKey"))),
             secret_ref: read_optional_string(record.get("secretRef")),
@@ -1121,7 +1137,13 @@ fn build_auth_candidate(
         .or_else(|| base_type_info.raw.clone())
         .or_else(|| Some(base_type_info.auth_type.clone()));
     let type_info = interpret_auth_type(source.as_deref());
+    let raw_type = extras
+        .raw_type
+        .clone()
+        .or_else(|| type_info.raw.clone())
+        .or_else(|| source.clone());
     extras.type_hint = type_info.raw.clone().or(source);
+    extras.raw_type = raw_type;
     if extras.oauth_provider_id.is_none() {
         extras.oauth_provider_id = type_info.oauth_provider_id.clone();
     }
@@ -1143,6 +1165,12 @@ fn push_auth_entry(
         .clone()
         .or_else(|| base_type_info.raw.clone())
         .unwrap_or_else(|| base_type_info.auth_type.clone());
+    let raw_type_source = candidate
+        .raw_type
+        .clone()
+        .or_else(|| candidate.type_hint.clone())
+        .or_else(|| base_type_info.raw.clone())
+        .unwrap_or_else(|| type_source.clone());
     let type_info = interpret_auth_type(Some(type_source.as_str()));
     let entry_type = type_info.auth_type;
     let oauth_provider_id = candidate
@@ -1161,7 +1189,7 @@ fn push_auth_entry(
     let merged_scopes = merge_scopes(candidate.scopes.clone(), defaults.scopes.clone());
     let mut normalized = ProviderAuthConfigJson {
         auth_type: entry_type.clone(),
-        raw_type: Some(type_source.clone()),
+        raw_type: Some(raw_type_source.clone()),
         oauth_provider_id,
         value: candidate.value.clone(),
         secret_ref: candidate
@@ -1356,6 +1384,52 @@ fn interpret_auth_type(value: Option<&str>) -> AuthTypeInfo {
         auth_type: "apiKey".to_string(),
         oauth_provider_id: None,
         raw: Some(raw.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bootstrap_virtual_router_providers_json;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn bootstrap_preserves_qwenchat_guest_raw_type_in_runtime_auth() {
+        let providers = json!({
+            "qwenchat": {
+                "id": "qwenchat",
+                "enabled": true,
+                "type": "openai",
+                "baseURL": "https://chat.qwen.ai",
+                "compatibilityProfile": "chat:qwenchat-web",
+                "auth": {
+                    "type": "apikey",
+                    "rawType": "qwenchat-guest",
+                    "entries": [
+                        {
+                            "alias": "key1",
+                            "type": "apikey",
+                            "rawType": "qwenchat-guest",
+                            "apiKey": "guest"
+                        }
+                    ]
+                },
+                "models": {
+                    "qwen3.6-plus": {
+                        "maxTokens": 64000,
+                        "maxContext": 256000,
+                        "supportsStreaming": true,
+                        "capabilities": ["tools", "vision"]
+                    }
+                }
+            }
+        });
+
+        let output = bootstrap_virtual_router_providers_json(providers.to_string()).expect("bootstrap should succeed");
+        let parsed: Value = serde_json::from_str(&output).expect("output json should parse");
+        let auth = &parsed["runtimeEntries"]["qwenchat.key1"]["auth"];
+        assert_eq!(auth["type"], "apiKey");
+        assert_eq!(auth["rawType"], "qwenchat-guest");
+        assert_eq!(auth["value"], "guest");
     }
 }
 
@@ -2024,7 +2098,8 @@ fn normalize_model_capabilities(
                 .map(|value| value.trim().to_lowercase())
                 .unwrap_or_default();
             let mapped = match normalized.as_str() {
-                "multimodal" | "vision" => "multimodal".to_string(),
+                "multimodal" => "multimodal".to_string(),
+                "vision" => "vision".to_string(),
                 "websearch" | "web-search" => "web_search".to_string(),
                 "websearch-direct" | "web_search_direct" | "web-search-direct" => {
                     "web_search_direct".to_string()
@@ -2035,6 +2110,7 @@ fn normalize_model_capabilities(
                 "text",
                 "reasoning",
                 "multimodal",
+                "vision",
                 "video",
                 "thinking",
                 "web_search",

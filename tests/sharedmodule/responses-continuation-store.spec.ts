@@ -4,6 +4,7 @@ import {
   clearResponsesConversationByRequestId,
   materializeLatestResponsesContinuationByScope,
   recordResponsesResponse,
+  releaseResponsesConversationRequestPayload,
   resumeLatestResponsesContinuationByScope
 } from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js';
 
@@ -150,6 +151,78 @@ describe('responses conversation store plain continuation restore', () => {
     });
 
     expect(restored).toBeNull();
+  });
+
+
+  it('releasing request payload preserves scope-based continuation lookup', () => {
+    captureResponsesRequestContext({
+      requestId: 'req-resp-store-1',
+      sessionId: 'sess-1',
+      payload: {
+        model: 'gpt-5.3-codex',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }]
+          }
+        ],
+        tools: [{ type: 'function', function: { name: 'exec_command' } }]
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: 'req-resp-store-1',
+      response: {
+        id: 'resp-store-release-1',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'world' }]
+          }
+        ]
+      }
+    });
+
+    releaseResponsesConversationRequestPayload('req-resp-store-1');
+
+    const restored = resumeLatestResponsesContinuationByScope({
+      requestId: 'req-resp-store-2',
+      sessionId: 'sess-1',
+      payload: {
+        model: 'gpt-5.3-codex',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }]
+          },
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'world' }]
+          },
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'next turn' }]
+          }
+        ]
+      }
+    });
+
+    expect(restored).not.toBeNull();
+    expect(restored?.payload.previous_response_id).toBe('resp-store-release-1');
   });
 
   it('materializes full input by session scope for local continuation when incoming payload only carries delta', () => {

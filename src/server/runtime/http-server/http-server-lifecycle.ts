@@ -373,10 +373,76 @@ export async function reloadHttpServerRuntime(
 }
 
 export function buildHttpHandlerContext(server: any, req: Request): HandlerContext {
-  const localPort =
+  const socketLocalPort =
     typeof req.socket?.localPort === 'number' && Number.isFinite(req.socket.localPort)
       ? req.socket.localPort
       : undefined;
+
+  const parsePortFromHostHeader = (): number | undefined => {
+    const hostHeader = (() => {
+      const raw = req.headers?.host;
+      if (Array.isArray(raw)) return raw[0];
+      return typeof raw === 'string' ? raw : undefined;
+    })();
+    if (!hostHeader) return undefined;
+    const trimmed = hostHeader.trim();
+    if (!trimmed) return undefined;
+    const ipv6Match = trimmed.match(/^\[[^\]]+\]:(\d+)$/);
+    if (ipv6Match?.[1]) {
+      const p = Number.parseInt(ipv6Match[1], 10);
+      return Number.isFinite(p) && p > 0 ? p : undefined;
+    }
+    const idx = trimmed.lastIndexOf(':');
+    if (idx < 0) return undefined;
+    const p = Number.parseInt(trimmed.slice(idx + 1), 10);
+    return Number.isFinite(p) && p > 0 ? p : undefined;
+  };
+
+  const hostHeaderPort = parsePortFromHostHeader();
+  const hasPortConfig = (port: number | undefined): boolean => {
+    if (typeof port !== 'number' || !Number.isFinite(port) || port <= 0) return false;
+    try {
+      const byLocal =
+        typeof server?.getPortConfigForLocalPort === 'function'
+          ? server.getPortConfigForLocalPort(port)
+          : undefined;
+      if (byLocal) return true;
+      const ports = typeof server?.getPortConfigs === 'function' ? server.getPortConfigs() : [];
+      return Array.isArray(ports) && ports.some((p: any) => Number(p?.port) === port);
+    } catch {
+      return false;
+    }
+  };
+
+  // Priority: explicit Host header port (when valid configured listener) > socket local port.
+  // This keeps per-port routing stable behind local proxies or shared-process multi-listener setups.
+  const localPort = hasPortConfig(hostHeaderPort) ? hostHeaderPort : (socketLocalPort ?? hostHeaderPort);
+  try {
+    const matchedPortConfig =
+      typeof server?.getPortConfigForLocalPort === 'function'
+        ? server.getPortConfigForLocalPort(localPort)
+        : undefined;
+    const requestPath =
+      typeof req.path === 'string' && req.path.trim()
+        ? req.path.trim()
+        : (typeof req.originalUrl === 'string' ? req.originalUrl : '');
+    const hostHeaderRaw = Array.isArray(req.headers?.host) ? req.headers.host[0] : req.headers?.host;
+    if (requestPath.includes('/v1/responses')) {
+      console.log(
+        `[port-resolve] host=${typeof hostHeaderRaw === 'string' ? hostHeaderRaw : '-'} `
+        + `socket.localPort=${typeof socketLocalPort === 'number' ? socketLocalPort : '-'} `
+        + `hostHeaderPort=${typeof hostHeaderPort === 'number' ? hostHeaderPort : '-'} `
+        + `resolvedLocalPort=${typeof localPort === 'number' ? localPort : '-'} `
+        + `matchedPort=${typeof matchedPortConfig?.port === 'number' ? matchedPortConfig.port : '-'} `
+        + `matchedMode=${typeof matchedPortConfig?.mode === 'string' ? matchedPortConfig.mode : '-'} `
+        + `matchedGroup=${typeof matchedPortConfig?.routingPolicyGroup === 'string' ? matchedPortConfig.routingPolicyGroup : '-'} `
+        + `matchedBinding=${typeof matchedPortConfig?.providerBinding === 'string' ? matchedPortConfig.providerBinding : '-'} `
+        + `url=${requestPath}`
+      );
+    }
+  } catch {
+    // non-blocking
+  }
   return {
     executePipeline: (input) => server.executePortAwarePipeline(localPort, input),
     errorHandling: server.errorHandling

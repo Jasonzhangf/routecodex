@@ -182,7 +182,7 @@ describe('openai-openai-codec native wrapper', () => {
           entryEndpoint: '/v1/chat/completions'
         } as any
       );
-      now += 21 * 60_000;
+      now += 6 * 60_000;
       await codec.convertRequest(
         { model: 'gpt-4.1', stream: false, messages: [{ role: 'user', content: 'two' }] },
         profile,

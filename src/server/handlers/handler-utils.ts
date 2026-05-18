@@ -485,33 +485,10 @@ export function captureClientHeaders(headers: IncomingHttpHeaders | undefined): 
 }
 
 export function captureRawRequestBodyForMetadata(payload: unknown): unknown {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return payload;
+  if (payload === undefined) {
+    return undefined;
   }
-  const source = payload as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  let truncatedAny = false;
-  for (const [key, value] of Object.entries(source)) {
-    if (Array.isArray(value)) {
-      if (value.length > RAW_REQUEST_PREVIEW_MAX_ARRAY_ITEMS) {
-        out[key] = value.slice(0, RAW_REQUEST_PREVIEW_MAX_ARRAY_ITEMS);
-        out[`__${key}_truncated_count`] = value.length - RAW_REQUEST_PREVIEW_MAX_ARRAY_ITEMS;
-        truncatedAny = true;
-      } else {
-        out[key] = value.slice();
-      }
-      continue;
-    }
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      out[key] = { ...(value as Record<string, unknown>) };
-      continue;
-    }
-    out[key] = value;
-  }
-  if (truncatedAny) {
-    out.__raw_request_body_truncated = true;
-  }
-  return out;
+  return structuredClone(payload);
 }
 
 export function readRequestBodyMetadata(payload: unknown): Record<string, unknown> | undefined {

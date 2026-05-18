@@ -347,7 +347,7 @@ describe('servertool followup dispatch helper', () => {
     const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
     expect(nestedInput?.body?.max_tokens).toBeUndefined();
     expect(nestedInput?.body?.max_output_tokens).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.reasoning).toEqual({ effort: 'high' });
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.reasoning).toBeUndefined();
     expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.max_tokens).toBeUndefined();
     expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.max_output_tokens).toBeUndefined();
     expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.model).toBeUndefined();
@@ -452,7 +452,7 @@ describe('servertool followup dispatch helper', () => {
     ]);
     expect(nestedInput?.body?.max_tokens).toBeUndefined();
     expect(nestedInput?.body?.max_output_tokens).toBeUndefined();
-    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.reasoning).toEqual({ effort: 'high' });
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.reasoning).toBeUndefined();
     expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.max_tokens).toBeUndefined();
     expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.model).toBeUndefined();
     expect((nestedInput?.metadata?.requestSemantics as any)?.tools?.clientToolsRaw?.map((tool: any) => tool?.function?.name)).toEqual([
@@ -463,6 +463,155 @@ describe('servertool followup dispatch helper', () => {
       serverToolFollowup: true,
       serverToolFollowupSource: 'servertool.reasoning_stop_guard'
     });
+  });
+
+  it('reenter path strips responses-only request settings from real apply_patch followup shape', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: {
+        semantics: input.body?.semantics,
+        requestSemantics: input.metadata?.requestSemantics,
+        body: input.body
+      }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    const requestSemantics = {
+      responses: {
+        requestParameters: {
+          model: 'MiniMax-M2.7',
+          max_tokens: 8192,
+          max_output_tokens: 8192,
+          parallel_tool_calls: true,
+          tool_choice: 'auto',
+          reasoning: { effort: 'medium', summary: 'detailed' }
+        }
+      },
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: { type: 'object', properties: { cmd: { type: 'string' } } }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'apply_patch',
+              parameters: { type: 'object', properties: { patch: { type: 'string' } } }
+            }
+          }
+        ]
+      },
+      __routecodex: {
+        serverToolFollowup: true,
+        serverToolFollowupSource: 'servertool.apply_patch_read_before_retry'
+      }
+    };
+
+    await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_followup_dispatch_apply_patch_strip_responses_settings',
+      body: {
+        model: 'MiniMax-M2.7',
+        max_tokens: 8192,
+        parallel_tool_calls: true,
+        reasoning: { effort: 'medium', summary: 'detailed' },
+        messages: [
+          { role: 'assistant', content: '' },
+          {
+            role: 'tool',
+            name: 'apply_patch',
+            tool_call_id: 'call_function_su9qqmws1kil_1',
+            content: '{"ok":false,"code":"APPLY_PATCH_REQUIRES_READ_BEFORE_RETRY"}'
+          }
+        ],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'mcp__computer_use__click',
+              parameters: { type: 'object', properties: { x: { type: 'number' } } }
+            }
+          }
+        ]
+      },
+      metadata: {
+        __rt: {
+          serverToolFollowup: true,
+          clientInjectSource: 'servertool.apply_patch_read_before_retry'
+        }
+      },
+      requestSemantics,
+      executeNested
+    });
+
+    const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
+    expect(nestedInput?.body?.max_tokens).toBeUndefined();
+    expect(nestedInput?.body?.max_output_tokens).toBeUndefined();
+    expect(nestedInput?.body?.parallel_tool_calls).toBeUndefined();
+    expect(nestedInput?.body?.tool_choice).toBeUndefined();
+    expect(nestedInput?.body?.reasoning).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.model).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.max_tokens).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.max_output_tokens).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.parallel_tool_calls).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.tool_choice).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.reasoning).toBeUndefined();
+    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.model).toBeUndefined();
+    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.max_tokens).toBeUndefined();
+    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.max_output_tokens).toBeUndefined();
+    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.parallel_tool_calls).toBeUndefined();
+    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.tool_choice).toBeUndefined();
+    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.reasoning).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.__routecodex?.serverToolFollowup).toBe(true);
+    expect((nestedInput?.metadata?.requestSemantics as any)?.__routecodex?.serverToolFollowup).toBe(true);
+  });
+
+  it('treats followup source marker alone as servertool followup for sanitize gates', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: { body: input.body, metadata: input.metadata }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_followup_dispatch_source_only_sets_followup_flag',
+      body: {
+        model: 'MiniMax-M2.7',
+        max_tokens: 8192,
+        parallel_tool_calls: true,
+        reasoning: { effort: 'medium', summary: 'detailed' }
+      },
+      metadata: {
+        __rt: {
+          clientInjectSource: 'servertool.apply_patch_read_before_retry'
+        }
+      },
+      executeNested
+    });
+
+    const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
+    expect(nestedInput?.body?.max_tokens).toBeUndefined();
+    expect(nestedInput?.body?.parallel_tool_calls).toBeUndefined();
+    expect(nestedInput?.body?.reasoning).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.__routecodex?.serverToolFollowup).toBe(true);
+    expect((nestedInput?.metadata?.requestSemantics as any)?.__routecodex?.serverToolFollowupSource).toBe(
+      'servertool.apply_patch_read_before_retry'
+    );
   });
 
   it('reenter path throws when nested pipeline returns HTTP error body instead of success payload', async () => {

@@ -21,6 +21,11 @@ import {
   readDeepSeekProviderRuntimeOptions
 } from '../contracts/deepseek-provider-contract.js';
 import {
+  isWindsurfRuntimeIdentity,
+  normalizeWindsurfProviderRuntimeOptions,
+  WINDSURF_COMPATIBILITY_PROFILE,
+} from '../contracts/windsurf-provider-contract.js';
+import {
   getAuthSignature,
   instantiateProvider,
   mapProviderModule,
@@ -273,10 +278,26 @@ export class ProviderFactory {
     ) {
       extensions.deepseek = deepseekOptions;
     }
+    const windsurfOptions = normalizeWindsurfProviderRuntimeOptions(
+      (runtime as unknown as { extensions?: Record<string, unknown> }).extensions
+    );
+    if (
+      windsurfOptions &&
+      isWindsurfRuntimeIdentity({
+        providerFamily,
+        providerId: runtime.providerId,
+        providerKey: runtime.providerKey,
+        compatibilityProfile: runtime.compatibilityProfile
+      })
+    ) {
+      extensions.windsurf = windsurfOptions;
+    }
     extensions.providerProtocol = runtime.providerProtocol || providerTypeToProtocol(providerType);
+    const implicitModuleOverride = this.resolveImplicitProviderModule(runtime, authConfig);
+    const explicitModuleOverride = resolveProviderModule(runtime.providerModule);
     const moduleOverride =
-      resolveProviderModule(runtime.providerModule) ??
-      this.resolveImplicitProviderModule(runtime, authConfig);
+      implicitModuleOverride ??
+      explicitModuleOverride;
 
     const timeoutMs =
       typeof runtime.timeoutMs === 'number' && Number.isFinite(runtime.timeoutMs) && runtime.timeoutMs > 0
@@ -321,6 +342,10 @@ export class ProviderFactory {
       return 'deepseek-http-provider';
     }
 
+    if (authRawType === 'qwenchat-guest') {
+      return 'qwenchat-web-provider';
+    }
+
     if (
       this.shouldUseImplicitDeepSeekHttpProvider(runtime) &&
       isDeepSeekRuntimeIdentity({
@@ -331,6 +356,15 @@ export class ProviderFactory {
       })
     ) {
       return 'deepseek-http-provider';
+    }
+
+    if (isWindsurfRuntimeIdentity({
+      providerFamily: runtime.providerFamily,
+      providerId: runtime.providerId,
+      providerKey: runtime.providerKey,
+      compatibilityProfile: runtime.compatibilityProfile
+    })) {
+      return 'windsurf-chat-provider';
     }
 
     return undefined;

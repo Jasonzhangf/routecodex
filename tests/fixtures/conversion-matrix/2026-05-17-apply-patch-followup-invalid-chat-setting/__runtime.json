@@ -1,0 +1,13 @@
+{
+  "endpoint": "/v1/responses",
+  "groupRequestId": "openai-responses-mini27.key1-MiniMax-M2.7-20260517T211239049-203515-2195_apply_patch_read_before_retry",
+  "providerKey": "mini27.key1.MiniMax-M2.7",
+  "requestId": "openai-responses-mini27.key1-MiniMax-M2.7-20260517T211239049-203515-2195_apply_patch_read_before_retry",
+  "timestamp": "2026-05-17T13:12:58.970523+00:00",
+  "versions": {
+    "llmswitchCore": null,
+    "node": null,
+    "routecodex": "0.90.1776",
+    "routecodexBuildTime": null
+  }
+}

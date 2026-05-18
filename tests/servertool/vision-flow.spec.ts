@@ -18,6 +18,23 @@ function makeCapturedChatRequestWithImage(): JsonObject {
   } as any;
 }
 
+function makeCapturedChatRequestWithTwoImages(): JsonObject {
+  return {
+    model: 'gpt-test',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '比较这两张图的版本号' },
+          { type: 'image_url', image_url: { url: 'https://example.com/1.png' } },
+          { type: 'image_url', image_url: { url: 'https://example.com/2.png' } }
+        ]
+      }
+    ],
+    parameters: { temperature: 0.2 }
+  } as any;
+}
+
 function makeCapturedChatRequestWithVideoUrl(partType: 'video_url' | 'image_url'): JsonObject {
   const part =
     partType === 'video_url'
@@ -119,7 +136,234 @@ describe('vision_auto servertool followup (entry-aware)', () => {
     expect(Array.isArray(body.messages)).toBe(true);
     expect(body.stream).toBe(false);
     expect(body.parameters?.stream).toBeUndefined();
-    expect(JSON.stringify(body.messages)).toContain('[Vision] vision summary');
+    expect(body.messages).toEqual([
+      {
+        role: 'user',
+        content: '图片内容为：\n[Image]:\nvision summary\n\n用户请求：\nwhat is in this image?'
+      }
+    ]);
+  });
+
+  test('vision analysis request uses dedicated prompt with raw user prompt and image only', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-vision-prompt-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      providerType: 'openai',
+      hasImageAttachment: true,
+      capturedChatRequest: makeCapturedChatRequestWithImage()
+    } as any;
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-vision-prompt-1',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    } as any;
+
+    let analysisHop: any;
+    await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-vision-prompt-1',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async (opts: any) => {
+        if (String(opts.requestId).includes(':vision_followup')) {
+          return { body: {} as JsonObject };
+        }
+        analysisHop = opts;
+        return {
+          body: {
+            id: 'chatcmpl-vision-analysis',
+            object: 'chat.completion',
+            model: 'gpt-test',
+            choices: [
+              {
+                index: 0,
+                message: { role: 'assistant', content: 'vision summary' },
+                finish_reason: 'stop'
+              }
+            ]
+          } as JsonObject
+        };
+      }
+    });
+
+    expect(analysisHop?.body?.messages).toHaveLength(2);
+    expect(analysisHop.body.messages[0].role).toBe('system');
+    expect(String(analysisHop.body.messages[0].content)).toContain('只是描述图片内容');
+    const userContent = analysisHop.body.messages[1].content;
+    expect(Array.isArray(userContent)).toBe(true);
+    expect(userContent[0]?.type).toBe('input_text');
+    expect(String(userContent[0]?.text)).toContain('用户原始提示词如下');
+    expect(String(userContent[0]?.text)).toContain('what is in this image?');
+    expect(userContent).toHaveLength(2);
+  });
+
+  test('multi-image followup preserves numbered placeholders and raw prompt', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-vision-multi-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      providerType: 'openai',
+      hasImageAttachment: true,
+      capturedChatRequest: makeCapturedChatRequestWithTwoImages()
+    } as any;
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-vision-multi-1',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    } as any;
+
+    let sawFollowup: any;
+    await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-vision-multi-1',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async (opts: any) => {
+        if (String(opts.requestId).includes(':vision_followup')) {
+          sawFollowup = opts;
+          return { body: {} as JsonObject };
+        }
+        return {
+          body: {
+            id: 'chatcmpl-vision-analysis',
+            object: 'chat.completion',
+            model: 'gpt-test',
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: 'assistant',
+                  content: '[Image 1]:\n- 第一张版本号 v1.2.3\n\n[Image 2]:\n- 第二张版本号 v1.2.4'
+                },
+                finish_reason: 'stop'
+              }
+            ]
+          } as JsonObject
+        };
+      }
+    });
+
+    expect(sawFollowup?.body?.messages).toEqual([
+      {
+        role: 'user',
+        content: '图片内容为：\n[Image 1]:\n- 第一张版本号 v1.2.3\n\n[Image 2]:\n- 第二张版本号 v1.2.4\n\n用户请求：\n比较这两张图的版本号'
+      }
+    ]);
+  });
+
+  test('routeHint=vision still runs vision two-hop flow', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-vision-route-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      providerType: 'openai',
+      routeHint: 'vision',
+      hasImageAttachment: true,
+      capturedChatRequest: makeCapturedChatRequestWithImage()
+    } as any;
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-vision-route-1',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    } as any;
+
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-vision-route-1',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async (opts: any) => {
+        if (String(opts.requestId).includes(':vision_followup')) {
+          return { body: {} as JsonObject };
+        }
+        return {
+          body: {
+            id: 'chatcmpl-vision-analysis',
+            object: 'chat.completion',
+            model: 'gpt-test',
+            choices: [
+              {
+                index: 0,
+                message: { role: 'assistant', content: 'vision summary' },
+                finish_reason: 'stop'
+              }
+            ]
+          } as JsonObject
+        };
+      }
+    });
+
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('vision_flow');
+  });
+
+  test('routeHint=multimodal skips vision two-hop flow', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-multimodal-route-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      providerType: 'openai',
+      routeHint: 'multimodal',
+      hasImageAttachment: true,
+      capturedChatRequest: makeCapturedChatRequestWithImage()
+    } as any;
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-multimodal-route-1',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    } as any;
+
+    let reentered = false;
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-multimodal-route-1',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => {
+        reentered = true;
+        return { body: {} as JsonObject };
+      }
+    });
+
+    expect(orchestration.executed).toBe(false);
+    expect(reentered).toBe(false);
   });
 
   test('does not run vision flow when latest user message uses video_url', async () => {
@@ -204,7 +448,7 @@ describe('vision_auto servertool followup (entry-aware)', () => {
     expect(reenterCalled).toBe(0);
   });
 
-  test('does not run vision flow when route already resolved to vision capability', async () => {
+  test('routeId=vision still runs explicit vision two-hop flow', async () => {
     const adapterContext: AdapterContext = {
       requestId: 'req-vision-route-bypass',
       entryEndpoint: '/v1/responses',
@@ -235,14 +479,31 @@ describe('vision_auto servertool followup (entry-aware)', () => {
       entryEndpoint: '/v1/responses',
       requestId: 'req-vision-route-bypass',
       providerProtocol: 'openai-chat',
-      reenterPipeline: async () => {
+      reenterPipeline: async (opts: any) => {
         reenterCalled += 1;
-        return { body: {} as JsonObject };
+        if (String(opts.requestId).includes(':vision_followup')) {
+          return { body: {} as JsonObject };
+        }
+        return {
+          body: {
+            id: 'chatcmpl-vision-analysis',
+            object: 'chat.completion',
+            model: 'gpt-test',
+            choices: [
+              {
+                index: 0,
+                message: { role: 'assistant', content: 'vision summary' },
+                finish_reason: 'stop'
+              }
+            ]
+          } as JsonObject
+        };
       }
     });
 
-    expect(orchestration.executed).toBe(false);
-    expect(reenterCalled).toBe(0);
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('vision_flow');
+    expect(reenterCalled).toBeGreaterThan(0);
   });
 
   test('does not run vision flow when runtime metadata marks qwen image generation', async () => {

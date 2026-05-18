@@ -66,4 +66,17 @@ describe('apikey secret resolution', () => {
     const auth = { type: 'apikey', value: '', secretRef: 'openai.key1' };
     await expect((server as any).resolveApiKeyValue(runtime, auth)).rejects.toThrow(/missing api key/i);
   });
+
+  it('allows empty apikey for qwenchat-guest remote runtime', async () => {
+    const server = await createServer();
+    const runtime = {
+      runtimeKey: 'qwenchat.key1',
+      providerId: 'qwenchat',
+      baseURL: 'https://chat.qwen.ai',
+      auth: { type: 'apikey', rawType: 'qwenchat-guest' }
+    };
+    const auth = { type: 'apikey', rawType: 'qwenchat-guest', value: '' };
+    const resolved = await (server as any).resolveApiKeyValue(runtime, auth);
+    expect(resolved).toBe('');
+  });
 });

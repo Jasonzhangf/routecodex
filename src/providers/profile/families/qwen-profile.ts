@@ -17,6 +17,7 @@ type QwenMessageNode = Record<string, unknown>;
 
 const QWEN_CODE_SERVICE_NAME = 'qwen-code';
 const QWEN_OAUTH_AUTH_TYPE = 'qwen-oauth';
+const QWENCHAT_GUEST_AUTH_TYPE = 'qwenchat-guest';
 const QWEN_OAUTH_CODER_MODEL = 'coder-model';
 const QWEN_OAUTH_MAX_TOKENS = 65536;
 const QWEN_WEB_SEARCH_ENDPOINT = '/api/v1/indices/plugin/web_search';
@@ -345,6 +346,22 @@ function isQwenOAuthAuthType(authType: string): boolean {
   return normalized === QWEN_OAUTH_AUTH_TYPE || normalized === 'oauth';
 }
 
+function isQwenChatGuestAuthType(authType: string): boolean {
+  return authType.trim().toLowerCase() === QWENCHAT_GUEST_AUTH_TYPE;
+}
+
+function resolveQwenGuestBxUa(headers: Record<string, string>): string {
+  const ua =
+    findHeaderValue(headers, 'User-Agent') ||
+    resolveQwenCodeUserAgent();
+  return Buffer.from(ua, 'utf8').toString('base64url');
+}
+
+function resolveQwenGuestBxUmidtoken(): string {
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `TG-${Date.now().toString(36)}-${randomPart}`;
+}
+
 function resolveQwenOAuthModel(requestedModel: string): string {
   const normalized = requestedModel.trim().toLowerCase();
   if (normalized === QWEN_OAUTH_CODER_MODEL) {
@@ -483,7 +500,7 @@ export const qwenFamilyProfile: ProviderFamilyProfile = {
       return buildQwenWebSearchBody(input);
     }
     const authType = extractAuthType(input);
-    if (authType && !isQwenOAuthAuthType(authType)) {
+    if (authType && !isQwenOAuthAuthType(authType) && !isQwenChatGuestAuthType(authType)) {
       return undefined;
     }
     const body = input.defaultBody;
@@ -505,6 +522,12 @@ export const qwenFamilyProfile: ProviderFamilyProfile = {
     mirrorQwenOAuthReasoningEffort(requestBody);
     normalizeQwenOAuthMessages(requestBody);
     applyQwenDashScopeCacheControl(requestBody);
+    if (isQwenChatGuestAuthType(authType)) {
+      requestBody.chat_mode = 'guest';
+      if (typeof requestBody.chat_type !== 'string' || !requestBody.chat_type.trim()) {
+        requestBody.chat_type = 't2t';
+      }
+    }
     if (shouldEnableQwenHighResolutionImages(requestBody)) {
       requestBody.vl_high_resolution_images = true;
     }
@@ -515,6 +538,11 @@ export const qwenFamilyProfile: ProviderFamilyProfile = {
   },
   applyRequestHeaders(input: ApplyRequestHeadersInput): Record<string, string> {
     const headers = { ...(input.headers || {}) };
+    const authType =
+      input.runtimeMetadata && typeof input.runtimeMetadata.authType === 'string'
+        ? input.runtimeMetadata.authType.trim().toLowerCase()
+        : '';
+    const isGuest = isQwenChatGuestAuthType(authType);
 
     const resolvedUserAgent = resolveQwenCodeUserAgent();
     assignHeader(headers, 'User-Agent', resolvedUserAgent);
@@ -522,9 +550,19 @@ export const qwenFamilyProfile: ProviderFamilyProfile = {
     // Keep request headers consistent with Qwen Code DashScope-compatible client behavior.
     assignHeader(headers, 'X-DashScope-CacheControl', 'enable');
     assignHeader(headers, 'X-DashScope-UserAgent', resolvedUserAgent);
-    assignHeader(headers, 'X-DashScope-AuthType', resolveDashScopeAuthType(input));
+    assignHeader(headers, 'X-DashScope-AuthType', isGuest ? 'guest' : resolveDashScopeAuthType(input));
     for (const [key, value] of Object.entries(buildQwenStainlessHeaderEntries())) {
       assignHeader(headers, key, value);
+    }
+    if (isGuest) {
+      assignHeader(headers, 'Origin', 'https://chat.qwen.ai');
+      assignHeader(headers, 'Referer', 'https://chat.qwen.ai/c/guest');
+      assignHeader(headers, 'bx-v', '2.5.31');
+      assignHeader(headers, 'bx-ua', resolveQwenGuestBxUa(headers));
+      if (!findHeaderValue(headers, 'bx-umidtoken')) {
+        assignHeader(headers, 'bx-umidtoken', resolveQwenGuestBxUmidtoken());
+      }
+      deleteHeaderInsensitive(headers, 'Authorization');
     }
 
     // Align with Qwen CLI upstream shape: do not forward Codex session/originator headers.

@@ -14,7 +14,6 @@ import { ProviderProtocolError } from '../conversion/provider-protocol-error.js'
 import './handlers/memory/cache-auto.js';
 import './handlers/stop-message-auto.js';
 import './handlers/reasoning-only-continue.js';
-import './handlers/stopless-goal-guard.js';
 import './handlers/reasoning-stop.js';
 import './handlers/clock.js';
 import './handlers/clock-auto.js';
@@ -445,4 +444,10 @@ export function extractTextFromChatLike(payload: JsonObject): string {
   }
 
   return '';
+}
+
+// Explicit marker that a TS helper is operating under native servertool / router-hotpath contract.
+// This keeps thin TS shells auditable without duplicating native semantics in multiple places.
+export function bindServertoolContractWithNative<T>(value: T): T {
+  return value;
 }

@@ -429,19 +429,6 @@ function applyRccStoplessLedger(args: {
   };
 }
 
-function deriveDefaultActiveNextStep(args: {
-  updateGoalArgs: Record<string, unknown>;
-  existingGoal?: StoplessGoalProjection;
-}): string {
-  return (
-    readNonEmptyString(args.updateGoalArgs.latest_note)
-    ?? readNonEmptyString(args.updateGoalArgs.latestNote)
-    ?? readNonEmptyString(args.updateGoalArgs.note)
-    ?? readNonEmptyString(args.existingGoal?.nextStep)
-    ?? 'continue_with_next_action'
-  );
-}
-
 function projectValidatedGoalStateFromConvertedBody(args: {
   payload: unknown;
   adapterContext: Record<string, unknown>;
@@ -498,7 +485,7 @@ function projectValidatedGoalStateFromConvertedBody(args: {
 
   if (lastUpdateGoalArgs) {
     const status = readNonEmptyString(lastUpdateGoalArgs.status)?.toLowerCase();
-    if (status !== 'active' && status !== 'paused' && status !== 'stopped' && status !== 'completed') {
+    if (status !== 'complete') {
       return undefined;
     }
 
@@ -516,106 +503,37 @@ function projectValidatedGoalStateFromConvertedBody(args: {
     const updatedAt = Date.now();
 
     const nextState: StoplessGoalProjection = {
-      status,
+      status: 'completed',
       objective,
       updatedAt,
       createdAt,
     };
-
-    switch (status) {
-      case 'active': {
-        const nextStep = readNonEmptyString(lastUpdateGoalArgs.next_step) ?? readNonEmptyString(lastUpdateGoalArgs.nextStep);
-        const resolvedNextStep = nextStep ?? deriveDefaultActiveNextStep({
-          updateGoalArgs: lastUpdateGoalArgs,
-          existingGoal
-        });
-        nextState.nextStep = resolvedNextStep;
-        nextState.latestNote = resolvedNextStep;
-        // 清零 Codex counters
-        const afterCodex = applyCodexGoalLedgers({ existingGoal, nextState });
-        // 清零 RCC counter
-        return applyRccStoplessLedger({ existingGoal, nextState: afterCodex });
-      }
-      case 'paused': {
-        const userQuestion =
-          readNonEmptyString(lastUpdateGoalArgs.user_question) ?? readNonEmptyString(lastUpdateGoalArgs.userQuestion);
-        const cannotContinueReason =
-          readNonEmptyString(lastUpdateGoalArgs.cannot_continue_reason)
-          ?? readNonEmptyString(lastUpdateGoalArgs.cannotContinueReason);
-        const missingFields = buildMissingFields([
-          userQuestion ? undefined : 'user_question',
-          cannotContinueReason ? undefined : 'cannot_continue_reason'
-        ]);
-        if (missingFields?.length) {
-          buildGoalToolTransitionError({
-            toolName: 'update_goal',
-            validationReason: 'missing_pause_reason_or_question',
-            validationMessage: 'update_goal status=paused requires user_question and cannot_continue_reason.',
-            missingFields
-          });
-        }
-        nextState.userQuestion = userQuestion;
-        nextState.cannotContinueReason = cannotContinueReason;
-        nextState.latestNote = cannotContinueReason;
-        return nextState;
-      }
-      case 'stopped': {
-        const blockingEvidence =
-          readNonEmptyString(lastUpdateGoalArgs.blocking_evidence)
-          ?? readNonEmptyString(lastUpdateGoalArgs.blockingEvidence);
-        const errorClass =
-          readNonEmptyString(lastUpdateGoalArgs.error_class)
-          ?? readNonEmptyString(lastUpdateGoalArgs.errorClass);
-        const attemptsExhausted = lastUpdateGoalArgs.attempts_exhausted === true || lastUpdateGoalArgs.attemptsExhausted === true;
-        const missingFields = buildMissingFields([
-          blockingEvidence ? undefined : 'blocking_evidence',
-          attemptsExhausted === true ? undefined : 'attempts_exhausted',
-          errorClass ? undefined : 'error_class'
-        ]);
-        if (missingFields?.length) {
-          buildGoalToolTransitionError({
-            toolName: 'update_goal',
-            validationReason: 'missing_stop_evidence',
-            validationMessage: 'update_goal status=stopped requires blocking_evidence, attempts_exhausted=true, and error_class.',
-            missingFields
-          });
-        }
-        nextState.blockingEvidence = blockingEvidence;
-        nextState.latestNote = blockingEvidence;
-        nextState.errorClass = errorClass;
-        nextState.attemptsExhausted = true;
-        return nextState;
-      }
-      case 'completed': {
-        const completionEvidence =
-          readNonEmptyString(lastUpdateGoalArgs.completion_evidence)
-          ?? readNonEmptyString(lastUpdateGoalArgs.completionEvidence);
-        const completionSummary =
-          readNonEmptyString(lastUpdateGoalArgs.completion_summary)
-          ?? readNonEmptyString(lastUpdateGoalArgs.completionSummary);
-        const ssotAssessment =
-          readNonEmptyString(lastUpdateGoalArgs.ssot_assessment)
-          ?? readNonEmptyString(lastUpdateGoalArgs.ssotAssessment);
-        const missingFields = buildMissingFields([
-          completionEvidence ? undefined : 'completion_evidence',
-          completionSummary ? undefined : 'completion_summary',
-          ssotAssessment ? undefined : 'ssot_assessment'
-        ]);
-        if (missingFields?.length) {
-          buildGoalToolTransitionError({
-            toolName: 'update_goal',
-            validationReason: 'missing_completion_evidence',
-            validationMessage: 'update_goal status=completed requires completion_evidence, completion_summary, and ssot_assessment.',
-            missingFields
-          });
-        }
-        nextState.completionEvidence = completionEvidence;
-        nextState.completionSummary = completionSummary;
-        nextState.latestNote = completionSummary;
-        nextState.ssotAssessment = ssotAssessment;
-        return nextState;
-      }
+    const completionEvidence =
+      readNonEmptyString(lastUpdateGoalArgs.completion_evidence)
+      ?? readNonEmptyString(lastUpdateGoalArgs.completionEvidence);
+    const completionSummary =
+      readNonEmptyString(lastUpdateGoalArgs.completion_summary)
+      ?? readNonEmptyString(lastUpdateGoalArgs.completionSummary);
+    const ssotAssessment =
+      readNonEmptyString(lastUpdateGoalArgs.ssot_assessment)
+      ?? readNonEmptyString(lastUpdateGoalArgs.ssotAssessment);
+    const missingFields = buildMissingFields([
+      completionEvidence ? undefined : 'completion_evidence',
+      completionSummary ? undefined : 'completion_summary',
+      ssotAssessment ? undefined : 'ssot_assessment'
+    ]);
+    if (missingFields?.length) {
+      buildGoalToolTransitionError({
+        toolName: 'update_goal',
+        validationReason: 'missing_completion_evidence',
+        validationMessage: 'update_goal status=complete requires completion_evidence, completion_summary, and ssot_assessment.',
+        missingFields
+      });
     }
+    nextState.completionEvidence = completionEvidence;
+    nextState.completionSummary = completionSummary;
+    nextState.latestNote = completionSummary;
+    nextState.ssotAssessment = ssotAssessment;
     return nextState;
   }
 

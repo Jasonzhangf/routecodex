@@ -115,7 +115,7 @@ describe('provider-response-converter serverTool followup metadata', () => {
     );
   });
 
-  it('projects validated update_goal completed state back into pipeline metadata', async () => {
+  it('projects validated update_goal complete state back into pipeline metadata', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -138,7 +138,7 @@ describe('provider-response-converter serverTool followup metadata', () => {
                   function: {
                     name: 'update_goal',
                     arguments: JSON.stringify({
-                      status: 'completed',
+                      status: 'complete',
                       completion_evidence: 'targeted tests green',
                       completion_summary: 'goal closed with evidence',
                       ssot_assessment: 'validated at unique host projection point'
@@ -291,125 +291,6 @@ describe('provider-response-converter serverTool followup metadata', () => {
     expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.errorClass).toBe('repeated_irrecoverable_error');
     expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.attemptsExhausted).toBe(true);
     expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveIrrecoverableErrors).toBe(2);
-  });
-
-  it('does not accumulate converter-side no-progress ledgers for repeated active next_step updates', async () => {
-    jest.resetModules();
-    mockConvertProviderResponse.mockReset();
-    mockCreateSnapshotRecorder.mockClear();
-
-    mockConvertProviderResponse.mockImplementation(async () => ({
-      body: {
-        id: 'chatcmpl-goal-no-progress',
-        choices: [
-          {
-            index: 0,
-            finish_reason: 'tool_calls',
-            message: {
-              role: 'assistant',
-              content: null,
-              tool_calls: [
-                {
-                  id: 'call_goal_no_progress',
-                  type: 'function',
-                  function: {
-                    name: 'update_goal',
-                    arguments: JSON.stringify({
-                      status: 'active',
-                      next_step: 'keep doing the same thing'
-                    })
-                  }
-                }
-              ]
-            }
-          }
-        ]
-      }
-    }));
-
-    const { convertProviderResponseIfNeeded } = await import(
-      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
-    );
-
-    const pipelineMetadata: Record<string, unknown> = {
-      stoplessGoalState: {
-        status: 'active',
-        objective: 'close stopless on /goal lifecycle',
-        nextStep: 'keep doing the same thing',
-        latestNote: 'keep doing the same thing',
-        updatedAt: 1,
-        createdAt: 1
-      }
-    };
-
-    await expect(
-      convertProviderResponseIfNeeded(
-        {
-          entryEndpoint: '/v1/responses',
-          providerProtocol: 'openai-chat',
-          requestId: 'req_goal_no_progress_1',
-          wantsStream: false,
-          response: { body: { id: 'upstream_body' } } as any,
-          pipelineMetadata
-        },
-        {
-          runtimeManager: {
-            resolveRuntimeKey: () => undefined,
-            getHandleByRuntimeKey: () => undefined
-          },
-          executeNested: async () => ({ body: { ok: true } } as any)
-        }
-      )
-    ).resolves.toBeTruthy();
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.status).toBe('active');
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveNoProgress).toBeUndefined();
-
-    await expect(
-      convertProviderResponseIfNeeded(
-        {
-          entryEndpoint: '/v1/responses',
-          providerProtocol: 'openai-chat',
-          requestId: 'req_goal_no_progress_2',
-          wantsStream: false,
-          response: { body: { id: 'upstream_body' } } as any,
-          pipelineMetadata
-        },
-        {
-          runtimeManager: {
-            resolveRuntimeKey: () => undefined,
-            getHandleByRuntimeKey: () => undefined
-          },
-          executeNested: async () => ({ body: { ok: true } } as any)
-        }
-      )
-    ).resolves.toBeTruthy();
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.status).toBe('active');
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveNoProgress).toBeUndefined();
-
-    await expect(
-      convertProviderResponseIfNeeded(
-        {
-          entryEndpoint: '/v1/responses',
-          providerProtocol: 'openai-chat',
-          requestId: 'req_goal_no_progress_3',
-          wantsStream: false,
-          response: { body: { id: 'upstream_body' } } as any,
-          pipelineMetadata
-        },
-        {
-          runtimeManager: {
-            resolveRuntimeKey: () => undefined,
-            getHandleByRuntimeKey: () => undefined
-          },
-          executeNested: async () => ({ body: { ok: true } } as any)
-        }
-      )
-    ).resolves.toBeTruthy();
-
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.status).toBe('active');
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.errorClass).toBeUndefined();
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.attemptsExhausted).toBeUndefined();
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveNoProgress).toBeUndefined();
   });
 
   it('rejects update_goal status aliases outside the minimal shape contract', async () => {

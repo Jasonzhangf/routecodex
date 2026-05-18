@@ -91,6 +91,7 @@ export type ServerToolFollowupInjectionOp =
   | { op: 'append_user_text'; text: string }
   | { op: 'drop_tool_by_name'; name: string }
   | { op: 'inject_vision_summary'; summary: string }
+  | { op: 'rebuild_vision_followup'; summary: string; originalPrompt?: string }
   | { op: 'trim_openai_messages'; maxNonSystemMessages: number }
   | { op: 'append_tool_if_missing'; toolName: string; toolDefinition: JsonObject }
   | { op: 'compact_tool_content'; maxChars: number };

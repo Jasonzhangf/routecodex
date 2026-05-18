@@ -3,12 +3,25 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, test } from '@jest/globals';
+import { jest } from '@jest/globals';
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 import { HttpTransportProvider } from '../../../../src/providers/core/runtime/http-transport-provider.js';
 import { ResponsesProvider } from '../../../../src/providers/core/runtime/responses-provider.js';
 import { AnthropicProtocolClient } from '../../../../src/client/anthropic/anthropic-protocol-client.js';
 import { DeepSeekHttpProvider } from '../../../../src/providers/core/runtime/deepseek-http-provider.js';
+import { attachProviderRuntimeMetadata } from '../../../../src/providers/core/runtime/provider-runtime-metadata.js';
+
+jest.mock('../../../../src/modules/llmswitch/bridge.js', () => ({
+  getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+  createResponsesSseToJsonConverter: async () => ({
+    convertSseToJson: async () => ({ status: 'completed', output: [] })
+  })
+}), { virtual: true });
+
+jest.mock('../../../../src/modules/llmswitch/bridge/state-integrations.js', () => ({
+  getStatsCenterSafe: () => ({ recordProviderUsage: () => {} })
+}), { virtual: true });
 
 const emptyDeps: ModuleDependencies = {} as ModuleDependencies;
 const tempDirs: string[] = [];
@@ -52,6 +65,54 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     expect(provider.type).toBe('responses-http-provider');
   });
 
+  test('ResponsesProvider direct passthrough preserves inbound responses shape and continuation fields', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      postStream: async (_url: string, body: any, headers: Record<string, string>) => {
+        provider.__lastDirect = { body, headers };
+        throw new Error('STOP_AFTER_CAPTURE');
+      }
+    };
+
+    const inbound = {
+      model: 'gpt-5.4',
+      previous_response_id: 'resp_prev_turn',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello direct' }] }],
+      tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }],
+      tool_choice: 'auto',
+      include: ['reasoning.encrypted_content'],
+      reasoning: { effort: 'high' },
+      store: false,
+      stream: true,
+      prompt_cache_key: 'cache-key-1',
+      metadata: { entryEndpoint: '/v1/responses' }
+    } as any;
+    inbound.metadata.__responsesDirectPassthrough = true;
+    await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
+    const captured = provider.__lastDirect.body;
+    expect(captured.model).toBe('gpt-5.4');
+    expect(captured.previous_response_id).toBe('resp_prev_turn');
+    expect(captured.input).toEqual(inbound.input);
+    expect(captured.prompt_cache_key).toBe('cache-key-1');
+    expect(captured.tools).toEqual(inbound.tools);
+    expect(captured.tool_choice).toBe('auto');
+    expect(captured.metadata).toBeUndefined();
+  });
+
   test('HttpTransportProvider/anthropic derives SSE intent from context metadata and request stream flags', () => {
     const config: OpenAIStandardConfig = {
       id: 'test-anthropic',
@@ -64,6 +125,7 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
       }
     } as unknown as OpenAIStandardConfig;
     const provider = new HttpTransportProvider(config, emptyDeps, 'anthropic-http-provider', new AnthropicProtocolClient()) as any;
+    provider.lastRuntimeMetadata = { providerFamily: 'anthropic' };
 
     expect(provider.providerType).toBe('openai');
     expect(provider.type).toBe('anthropic-http-provider');

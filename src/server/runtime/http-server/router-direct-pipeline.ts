@@ -36,6 +36,7 @@ export interface RouterDirectAuditContext {
 export interface RouterDirectInput {
   portConfig: PortConfig;
   providerPayload: Record<string, unknown>;
+  requestPayload: Record<string, unknown>;
   target: {
     providerKey: string;
     providerType: string;
@@ -107,7 +108,7 @@ export async function executeRouterDirectPipeline(
   }
 
   const auditContext: RouterDirectAuditContext = {
-    originalPayload: structuredClone(input.providerPayload),
+    originalPayload: structuredClone(input.requestPayload),
     observedFields: [],
     providerKey: target.providerKey,
     inboundProtocol,
@@ -116,11 +117,14 @@ export async function executeRouterDirectPipeline(
     processMode: input.processMode,
   };
 
-  const payloadToSend = recordPayloadAudit(input.providerPayload, auditContext);
+  const payloadToSend = recordPayloadAudit(input.requestPayload, auditContext);
 
   input.onSnapshotBefore?.(payloadToSend, auditContext);
 
-  const response = await providerHandle.instance.processIncoming(payloadToSend);
+  const response =
+    typeof providerHandle.instance.processIncomingDirect === 'function'
+      ? await providerHandle.instance.processIncomingDirect(payloadToSend)
+      : await providerHandle.instance.processIncoming(payloadToSend);
 
   input.onSnapshotAfter?.(response, auditContext);
 

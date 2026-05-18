@@ -136,7 +136,11 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
     configPath: server?.config?.configPath
   });
   server.currentRouterArtifacts = bootstrapArtifacts;
-  const routingScope = deriveRoutingProviderScope(bootstrapArtifacts?.targetRuntime, routerInput);
+  const runtimeForScope = {
+    ...(bootstrapArtifacts?.runtime ?? {}),
+    ...(bootstrapArtifacts?.targetRuntime ?? {})
+  } as Record<string, ProviderRuntimeProfile>;
+  const routingScope = deriveRoutingProviderScope(runtimeForScope, routerInput, server.userConfig);
   // Runtime-level scope cache: provider init/warmup must honor the same routing scope
   // as token/quota managers to avoid non-routed providers doing background tasks.
   server.routingProviderScope = routingScope;
@@ -262,9 +266,10 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
 
 function deriveRoutingProviderScope(
   targetRuntime: Record<string, ProviderRuntimeProfile> | undefined,
-  routerInput: UnknownObject
+  routerInput: UnknownObject,
+  userConfig?: UnknownObject
 ): RoutingProviderScope {
-  const configuredProviderIds = collectConfiguredProviderIds(routerInput);
+  const configuredProviderIds = collectConfiguredProviderIds(routerInput, userConfig);
   const providerKeys = new Set<string>();
   const providerIds = new Set<string>();
   const oauthProviderKeys = new Set<string>();
@@ -314,7 +319,7 @@ function deriveRoutingProviderScope(
   };
 }
 
-function collectConfiguredProviderIds(routerInput: UnknownObject): Set<string> {
+function collectConfiguredProviderIds(routerInput: UnknownObject, userConfig?: UnknownObject): Set<string> {
   const routing = resolveActiveRoutingNode(routerInput);
   const ids = new Set<string>();
   if (!routing || typeof routing !== 'object' || Array.isArray(routing)) {
@@ -353,6 +358,41 @@ function collectConfiguredProviderIds(routerInput: UnknownObject): Set<string> {
           ids.add(providerId);
         }
       }
+    }
+  }
+  for (const providerId of collectProviderIdsFromProviderPorts(userConfig)) {
+    ids.add(providerId);
+  }
+  return ids;
+}
+
+function collectProviderIdsFromProviderPorts(userConfig?: UnknownObject): Set<string> {
+  const ids = new Set<string>();
+  if (!userConfig || typeof userConfig !== 'object') {
+    return ids;
+  }
+  const httpserver =
+    userConfig.httpserver && typeof userConfig.httpserver === 'object' && !Array.isArray(userConfig.httpserver)
+      ? (userConfig.httpserver as Record<string, unknown>)
+      : null;
+  const ports = Array.isArray(httpserver?.ports) ? (httpserver!.ports as unknown[]) : [];
+  for (const portRaw of ports) {
+    if (!portRaw || typeof portRaw !== 'object' || Array.isArray(portRaw)) {
+      continue;
+    }
+    const port = portRaw as Record<string, unknown>;
+    const mode = typeof port.mode === 'string' ? port.mode.trim().toLowerCase() : '';
+    if (mode !== 'provider') {
+      continue;
+    }
+    const binding = typeof port.providerBinding === 'string' ? port.providerBinding.trim().toLowerCase() : '';
+    if (!binding) {
+      continue;
+    }
+    const firstDot = binding.indexOf('.');
+    const providerId = firstDot > 0 ? binding.slice(0, firstDot) : binding;
+    if (providerId) {
+      ids.add(providerId);
     }
   }
   return ids;

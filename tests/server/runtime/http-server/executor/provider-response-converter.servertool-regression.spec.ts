@@ -994,7 +994,7 @@ describe('provider-response-converter servertool regressions', () => {
     });
   });
 
-  it('auto-fills converted update_goal active calls without next_step', async () => {
+  it('rejects converted update_goal non-complete status outside the minimal shape contract', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -1056,9 +1056,11 @@ describe('provider-response-converter servertool regressions', () => {
           executeNested: async () => ({ body: { ok: true } } as any)
         }
       )
-    ).resolves.toBeDefined();
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.status).toBe('active');
-    expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.nextStep).toBe('continue_with_next_action');
+    ).rejects.toMatchObject({
+      code: 'CLIENT_TOOL_ARGS_INVALID',
+      toolName: 'update_goal',
+      validationReason: 'invalid_status'
+    });
   });
 
   it('forces stopped after two invalid update_goal transitions', async () => {
@@ -1227,7 +1229,7 @@ describe('provider-response-converter servertool regressions', () => {
     expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveValidationFailures).toBe(2);
   });
 
-  it('rejects converted update_goal paused calls without user_question via host transition contract', async () => {
+  it('rejects converted update_goal paused calls outside the minimal shape contract', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -1297,12 +1299,12 @@ describe('provider-response-converter servertool regressions', () => {
     ).rejects.toMatchObject({
       code: 'CLIENT_TOOL_ARGS_INVALID',
       toolName: 'update_goal',
-      validationReason: 'missing_pause_reason_or_question'
+      validationReason: 'invalid_status'
     });
     expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveValidationFailures).toBe(1);
   });
 
-  it('rejects converted update_goal stopped calls without attempts_exhausted=true via host transition contract', async () => {
+  it('rejects converted update_goal stopped calls outside the minimal shape contract', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -1374,12 +1376,12 @@ describe('provider-response-converter servertool regressions', () => {
     ).rejects.toMatchObject({
       code: 'CLIENT_TOOL_ARGS_INVALID',
       toolName: 'update_goal',
-      validationReason: 'missing_stop_evidence'
+      validationReason: 'invalid_status'
     });
     expect((pipelineMetadata.stoplessGoalState as Record<string, unknown>)?.consecutiveValidationFailures).toBe(1);
   });
 
-  it('rejects converted update_goal completed calls without completion evidence via host transition contract', async () => {
+  it('rejects converted update_goal complete calls without completion evidence via host transition contract', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -1403,7 +1405,7 @@ describe('provider-response-converter servertool regressions', () => {
                   function: {
                     name: 'update_goal',
                     arguments: JSON.stringify({
-                      status: 'completed',
+                      status: 'complete',
                       completion_summary: 'done',
                       ssot_assessment: 'matches docs'
                     })

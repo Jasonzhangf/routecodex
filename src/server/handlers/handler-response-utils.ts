@@ -44,6 +44,11 @@ type SseFinishReasonTracker = {
   seenTerminalEvent: boolean;
 };
 
+type SseTerminalWatch = {
+  sawTerminalChunk: boolean;
+  terminalSource?: string;
+};
+
 type ChatUsageNormalizationResult = {
   payload: unknown;
   normalized: boolean;
@@ -190,6 +195,68 @@ function normalizeChatUsagePayload(
     normalized: true,
     source: resolved.source
   };
+}
+
+
+function updateSseTerminalTrackerFromChunk(
+  chunk: unknown,
+  finishTracker: SseFinishReasonTracker,
+  terminalWatch: SseTerminalWatch,
+): void {
+  const text =
+    typeof chunk === 'string'
+      ? chunk
+      : Buffer.isBuffer(chunk)
+        ? chunk.toString('utf8')
+        : chunk instanceof Uint8Array
+          ? Buffer.from(chunk).toString('utf8')
+          : '';
+  if (!text) {
+    return;
+  }
+
+  if (text.includes('data: [DONE]')) {
+    finishTracker.seenTerminalEvent = true;
+    finishTracker.finishReason ||= 'stop';
+    terminalWatch.sawTerminalChunk = true;
+    terminalWatch.terminalSource = terminalWatch.terminalSource ?? '[DONE]';
+  }
+
+  if (!text.includes('response.completed') && !text.includes('response.done')) {
+    return;
+  }
+
+  const blocks = text.split(/\n\n+/);
+  for (const block of blocks) {
+    if (!block || (!block.includes('response.completed') && !block.includes('response.done'))) {
+      continue;
+    }
+    const lines = block.split(/\n/);
+    const eventName = lines
+      .filter((line) => line.startsWith('event:'))
+      .map((line) => line.slice('event:'.length).trim())
+      .find((name) => name === 'response.completed' || name === 'response.done');
+    if (!eventName) {
+      continue;
+    }
+    const dataText = lines
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice('data:'.length).trim())
+      .join('\n');
+    let derived = finishTracker.finishReason;
+    if (dataText && dataText !== '[DONE]') {
+      try {
+        const parsed = JSON.parse(dataText) as unknown;
+        derived = deriveFinishReason(parsed) ?? derived;
+      } catch {
+        // ignore parse failure; terminal event itself is enough to mark stream terminal
+      }
+    }
+    finishTracker.seenTerminalEvent = true;
+    finishTracker.finishReason = derived ?? 'stop';
+    terminalWatch.sawTerminalChunk = true;
+    terminalWatch.terminalSource = eventName;
+  }
 }
 
 function sendSseBridgeError(res: Response, requestLabel: string, status = 502): void {
@@ -406,6 +473,10 @@ export function sendPipelineResponse(
     };
     let totalTimer: NodeJS.Timeout | null = null;
     let keepaliveTimer: NodeJS.Timeout | null = null;
+    let terminalGraceTimer: NodeJS.Timeout | null = null;
+    const terminalWatch: SseTerminalWatch = {
+      sawTerminalChunk: false,
+    };
 
     const readTimeoutMs = (names: string[], fallback: number): number => {
       for (const name of names) {
@@ -453,6 +524,10 @@ export function sendPipelineResponse(
       if (keepaliveTimer) {
         clearInterval(keepaliveTimer);
         keepaliveTimer = null;
+      }
+      if (terminalGraceTimer) {
+        clearTimeout(terminalGraceTimer);
+        terminalGraceTimer = null;
       }
     };
 
@@ -516,7 +591,7 @@ export function sendPipelineResponse(
       } catch (error) {
         logResponseNonBlockingError(`response.sse.cleanup.destroy_stream:${requestLabel}`, error);
       }
-      const closeBeforeStreamEnd = trigger === 'close' && !streamEnded;
+      const closeBeforeStreamEnd = trigger === 'close' && !streamEnded && !finishTracker.seenTerminalEvent;
       const details = {
         status,
         trigger,
@@ -541,6 +616,41 @@ export function sendPipelineResponse(
         ...(finishTracker.finishReason ? { finishReason: finishTracker.finishReason } : {})
       });
     };
+    stream.on('data', (chunk: unknown) => {
+      updateSseTerminalTrackerFromChunk(chunk, finishTracker, terminalWatch);
+      if (!terminalWatch.sawTerminalChunk || ended || streamEnded || terminalGraceTimer) {
+        return;
+      }
+      terminalGraceTimer = setTimeout(() => {
+        if (ended || streamEnded || !finishTracker.seenTerminalEvent) {
+          return;
+        }
+        ended = true;
+        streamEnded = true;
+        clearTimers();
+        getSessionExecutionStateTracker().recordSseStreamEnd(requestLabel, {
+          finishReason: finishTracker.finishReason,
+          terminal: true
+        });
+        if (!completedLogged) {
+          completedLogged = true;
+          logStreamRequestComplete(entryEndpoint, requestLabel, status, finishTracker.finishReason, requestLogContext);
+        }
+        try {
+          stream.destroy?.();
+        } catch (destroyError) {
+          logResponseNonBlockingError(`response.sse.terminal.destroy_stream:${requestLabel}`, destroyError);
+        }
+        if (!res.writableEnded && !res.destroyed) {
+          try {
+            res.end();
+          } catch (endError) {
+            logResponseNonBlockingError(`response.sse.terminal.end:${requestLabel}`, endError);
+          }
+        }
+      }, 250);
+      terminalGraceTimer.unref?.();
+    });
     stream.on('error', (error: Error) => {
       ended = true;
       clearTimers();

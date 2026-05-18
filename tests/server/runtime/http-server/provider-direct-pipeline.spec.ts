@@ -10,6 +10,11 @@ function createHandle(protocol: ProviderHandle['providerProtocol']) {
     status: 200,
     body: payload,
   }));
+  const processIncomingDirect = jest.fn(async (payload: Record<string, unknown>) => ({
+    status: 200,
+    body: payload,
+    direct: true,
+  }));
   const handle: ProviderHandle = {
     runtimeKey: `runtime.${protocol}`,
     providerId: 'mock',
@@ -21,9 +26,10 @@ function createHandle(protocol: ProviderHandle['providerProtocol']) {
       initialize: async () => {},
       cleanup: async () => {},
       processIncoming,
+      processIncomingDirect,
     },
   };
-  return { handle, processIncoming };
+  return { handle, processIncoming, processIncomingDirect };
 }
 
 describe('provider-direct-pipeline', () => {
@@ -110,7 +116,7 @@ describe('provider-direct-pipeline', () => {
   });
 
   it('keeps openai-responses same-protocol requests on direct path in auto mode', async () => {
-    const { handle, processIncoming } = createHandle('openai-responses');
+    const { handle, processIncoming, processIncomingDirect } = createHandle('openai-responses');
     const requestPayload = {
       model: 'mimo-v2.5-pro',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
@@ -138,15 +144,16 @@ describe('provider-direct-pipeline', () => {
     );
 
     expect(result.actualBehavior).toBe('direct');
-    expect(processIncoming).toHaveBeenCalledTimes(1);
-    expect(processIncoming).toHaveBeenCalledWith(requestPayload);
+    expect(processIncomingDirect).toHaveBeenCalledTimes(1);
+    expect(processIncomingDirect).toHaveBeenCalledWith(requestPayload);
+    expect(processIncoming).not.toHaveBeenCalled();
     expect(beforeSnapshots).toHaveLength(1);
     expect(beforeSnapshots[0]).toBe(requestPayload);
     expect(afterSnapshots).toHaveLength(1);
   });
 
   it('allows provider-mode direct path to apply lightweight thinking overrides without relay conversion', async () => {
-    const { handle, processIncoming } = createHandle('openai-responses');
+    const { handle, processIncoming, processIncomingDirect } = createHandle('openai-responses');
     const requestPayload = {
       model: 'mimo-v2.5-pro',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
@@ -173,7 +180,8 @@ describe('provider-direct-pipeline', () => {
     );
 
     expect(result.actualBehavior).toBe('direct');
-    const sentPayload = processIncoming.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(processIncoming).not.toHaveBeenCalled();
+    const sentPayload = processIncomingDirect.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(sentPayload.input).toEqual(requestPayload.input);
     expect(sentPayload.reasoning).toEqual({ effort: 'high' });
     expect((sentPayload as { messages?: unknown }).messages).toBeUndefined();

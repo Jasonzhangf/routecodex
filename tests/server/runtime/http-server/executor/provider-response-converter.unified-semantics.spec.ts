@@ -494,4 +494,53 @@ describe('provider-response-converter unified semantics handoff', () => {
     expect(toolCalls?.[0]?.function?.name).toBe('exec_command');
     expect(body?.choices?.[0]?.finish_reason).toBe('tool_calls');
   });
+
+  it('failing-shape replay: preserves empty completed payload for downstream response-contract gate', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+    mockSyncReasoningStopModeFromRequest.mockClear();
+
+    mockConvertProviderResponse.mockResolvedValueOnce({
+      body: {
+        object: 'response',
+        id: 'resp_empty_output_contract_1',
+        status: 'completed',
+        output: []
+      }
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        requestId: 'req_empty_output_contract_1',
+        wantsStream: false,
+        requestSemantics: {} as any,
+        originalRequest: { model: 'gpt-5', input: 'hello' } as any,
+        response: { body: { status: 'completed', output: [] } } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect((converted as any).body).toMatchObject({
+      object: 'response',
+      id: 'resp_empty_output_contract_1',
+      status: 'completed',
+      output: []
+    });
+    expect(Array.isArray((converted as any).body?.output)).toBe(true);
+    expect((converted as any).body?.output).toHaveLength(0);
+  });
 });

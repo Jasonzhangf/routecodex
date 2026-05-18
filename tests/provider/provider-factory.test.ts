@@ -140,6 +140,68 @@ describe('ProviderFactory no fallback', () => {
     expect(provider?.config?.config?.auth?.accountAlias).toBe('1');
   });
 
+  test('qwenchat guest runtime strips sentinel guest pseudo-key and preserves rawType', () => {
+    const runtime: any = {
+      runtimeKey: 'qwenchat.key1',
+      providerId: 'qwenchat',
+      providerFamily: 'qwenchat',
+      providerType: 'openai',
+      compatibilityProfile: 'chat:qwenchat-web',
+      endpoint: 'https://chat.qwen.ai',
+      auth: {
+        type: 'apikey',
+        rawType: 'qwenchat-guest',
+        value: 'guest'
+      }
+    };
+
+    const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
+    expect(provider?.config?.config?.auth?.type).toBe('apikey');
+    expect(provider?.config?.config?.auth?.rawType).toBe('qwenchat-guest');
+    expect(provider?.config?.config?.auth?.apiKey).toBe('');
+  });
+
+  test('qwenchat guest runtime selects dedicated qwenchat web provider module', () => {
+    const runtime: any = {
+      runtimeKey: 'qwenchat.key1',
+      providerId: 'qwenchat',
+      providerFamily: 'qwenchat',
+      providerType: 'openai',
+      compatibilityProfile: 'chat:qwenchat-web',
+      endpoint: 'https://chat.qwen.ai',
+      auth: {
+        type: 'apikey',
+        rawType: 'qwenchat-guest',
+        value: 'guest'
+      }
+    };
+
+    const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
+    expect(provider?.config?.type).toBe('qwenchat-web-provider');
+    expect(provider?.config?.config?.overrides?.endpoint).toBe('/api/v2/chat/completions');
+  });
+
+  test('qwenchat guest runtime must override generic openai providerModule with dedicated qwenchat module', () => {
+    const runtime: any = {
+      runtimeKey: 'qwenchat.key1',
+      providerId: 'qwenchat',
+      providerFamily: 'qwen',
+      providerType: 'openai',
+      providerModule: 'openai',
+      compatibilityProfile: 'chat:qwenchat-web',
+      endpoint: 'https://chat.qwen.ai',
+      auth: {
+        type: 'apikey',
+        rawType: 'qwenchat-guest',
+        value: 'guest'
+      }
+    };
+
+    const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
+    expect(provider?.constructor?.name).toBe('QwenChatWebProvider');
+    expect(provider?.config?.type).toBe('qwenchat-web-provider');
+  });
+
   test('opencode zen-free placeholder key should normalize to public key mode', () => {
     const runtime: any = {
       runtimeKey: 'opencode-zen-free.key1',

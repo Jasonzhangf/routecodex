@@ -312,11 +312,6 @@ export function normalizeAnthropicToolChoice(value: unknown): Record<string, unk
 
   if (isPlainRecord(value)) {
     const cloned = cloneAnthropicSchema(value);
-    const rawType = typeof (cloned as any).type === 'string' ? String((cloned as any).type).trim() : '';
-    if (rawType) {
-      (cloned as any).type = rawType;
-      return cloned;
-    }
     const selectorType = typeof (cloned as any).type === 'string' ? String((cloned as any).type).trim() : '';
     const fn = (cloned as any).function;
     if (
@@ -327,6 +322,10 @@ export function normalizeAnthropicToolChoice(value: unknown): Record<string, unk
       String((fn as any).name).trim().length
     ) {
       return { type: 'tool', name: String((fn as any).name).trim() };
+    }
+    if (selectorType) {
+      (cloned as any).type = selectorType;
+      return cloned;
     }
     return cloned;
   }

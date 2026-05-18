@@ -875,10 +875,7 @@ fn reasoning_prepare_responses_request_envelope_prefers_ctx_over_metadata_and_de
     let request = output.request.as_object().cloned().unwrap();
     assert_eq!(request.get("stream").and_then(Value::as_bool), Some(false));
     assert_eq!(request.get("store").and_then(Value::as_bool), Some(false));
-    assert_eq!(
-        request.get("tool_choice").and_then(Value::as_str),
-        Some("required")
-    );
+    assert!(!request.contains_key("tool_choice"));
     assert_eq!(
         request.get("parallel_tool_calls").and_then(Value::as_bool),
         Some(false)
@@ -920,7 +917,12 @@ fn reasoning_prepare_responses_request_envelope_prefers_ctx_over_metadata_and_de
 #[test]
 fn reasoning_prepare_responses_request_envelope_keeps_chat_tool_controls_as_single_source() {
     let output = prepare_responses_request_envelope(PrepareResponsesRequestEnvelopeInput {
-        request: json!({}),
+        request: json!({
+            "tools": [{
+                "type": "function",
+                "function": { "name": "exec_command", "parameters": { "type": "object", "properties": {} } }
+            }]
+        }),
         context_system_instruction: None,
         extra_system_instruction: None,
         metadata_system_instruction: None,
@@ -978,6 +980,51 @@ fn reasoning_prepare_responses_request_envelope_keeps_chat_tool_controls_as_sing
             .and_then(|row| row.get("type"))
             .and_then(Value::as_str),
         Some("ctx-format")
+    );
+}
+
+#[test]
+fn reasoning_prepare_responses_request_envelope_drops_tool_choice_without_tools() {
+    let output = prepare_responses_request_envelope(PrepareResponsesRequestEnvelopeInput {
+        request: json!({}),
+        context_system_instruction: None,
+        extra_system_instruction: None,
+        metadata_system_instruction: None,
+        combined_system_instruction: None,
+        reasoning_instruction_segments: None,
+        context_parameters: Some(json!({
+            "tool_choice": "required",
+            "parallel_tool_calls": true
+        })),
+        chat_parameters: None,
+        metadata_parameters: None,
+        context_stream: None,
+        metadata_stream: None,
+        chat_stream: None,
+        chat_parameters_stream: None,
+        context_include: None,
+        metadata_include: None,
+        context_store: None,
+        metadata_store: None,
+        strip_host_fields: Some(false),
+        context_tool_choice: Some(json!("auto")),
+        metadata_tool_choice: Some(json!("required")),
+        context_parallel_tool_calls: Some(json!(true)),
+        metadata_parallel_tool_calls: Some(json!(false)),
+        context_response_format: None,
+        metadata_response_format: None,
+        context_service_tier: None,
+        metadata_service_tier: None,
+        context_truncation: None,
+        metadata_truncation: None,
+        context_metadata: None,
+        metadata_metadata: None,
+    });
+    let request = output.request.as_object().cloned().unwrap();
+    assert!(!request.contains_key("tool_choice"));
+    assert_eq!(
+        request.get("parallel_tool_calls").and_then(Value::as_bool),
+        Some(true)
     );
 }
 

@@ -10,11 +10,12 @@
 ## 覆盖范围
 适用于：自动续轮、tmux 注入、heartbeat 巡检、定时回查。
 
-## sm 生命周期
-1. 仅识别 `sm` marker（旧 `stopMessage` 语法已移除）。
-2. 清理优先、最后一条有效。
-3. 注入失败必须清理状态，防止循环。
-4. 解析失败 fail-closed，不污染有效状态。
+## stopless 生命周期
+1. 当前 stopless 默认开启，默认注入 `继续执行`，默认次数 2。
+2. `/goal active` 时收到 `finish_reason=stop`：不自动续轮。
+3. `/goal non-active` 时收到 `finish_reason=stop`：自动注入一次 `继续执行`。
+4. 非 `/goal` 时收到 `finish_reason=stop`：自动注入一次 `继续执行`。
+5. 注入失败必须清理状态，防止循环。
 
 ## heartbeat / DELIVERY 顺序
 1. 读取 `HEARTBEAT.md`。
@@ -30,7 +31,6 @@
 - `docs/stop-message-auto.md`
 - `docs/design/servertool-stopmessage-lifecycle.md`
 - `docs/design/rcc-unified-fence-marker-spec.md`
-- `docs/design/stopless-goal-runtime-refactor-plan.md`
 - `docs/design/servertool-unified-skeleton.md`
 - `docs/design/servertool-rust-only-architecture.md`
 - `docs/routing-instructions.md`

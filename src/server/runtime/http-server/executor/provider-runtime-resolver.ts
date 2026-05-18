@@ -49,6 +49,32 @@ export async function resolveProviderRuntimeOrThrow(options: {
 
   const handle = runtimeManager.getHandleByRuntimeKey(runtimeKey);
   if (!handle) {
+    const directHandle = runtimeManager.getHandleByRuntimeKey(target.providerKey);
+    if (directHandle) {
+      return { runtimeKey: target.providerKey, handle: directHandle };
+    }
+    const providerKeyParts = target.providerKey.split('.');
+    if (providerKeyParts.length >= 3) {
+      const modelScopedRuntimeKey = `${providerKeyParts[0]}.${providerKeyParts[1]}.${providerKeyParts[2]}`;
+      const modelScopedHandle = runtimeManager.getHandleByRuntimeKey(modelScopedRuntimeKey);
+      if (modelScopedHandle) {
+        return { runtimeKey: modelScopedRuntimeKey, handle: modelScopedHandle };
+      }
+    }
+    const normalizedProviderKey = target.providerKey.replace(/\.key(\d+)\./i, '.$1.');
+    if (normalizedProviderKey !== target.providerKey) {
+      const normalizedHandle = runtimeManager.getHandleByRuntimeKey(normalizedProviderKey);
+      if (normalizedHandle) {
+        return { runtimeKey: normalizedProviderKey, handle: normalizedHandle };
+      }
+    }
+    const normalizedRuntimeKey = runtimeKey.replace(/\.key(\d+)$/i, '.$1');
+    if (normalizedRuntimeKey !== runtimeKey) {
+      const normalizedRuntimeHandle = runtimeManager.getHandleByRuntimeKey(normalizedRuntimeKey);
+      if (normalizedRuntimeHandle) {
+        return { runtimeKey: normalizedRuntimeKey, handle: normalizedRuntimeHandle };
+      }
+    }
     const runtimeMissingError = Object.assign(new Error(`Provider runtime ${runtimeKey} not found`), {
       code: 'ERR_PROVIDER_NOT_FOUND',
       requestId,

@@ -74,11 +74,13 @@ export interface ProviderHandle {
     initialize(): Promise<void>;
     cleanup(): Promise<void>;
     processIncoming(payload: Record<string, unknown>): Promise<unknown>;
+    processIncomingDirect?(payload: Record<string, unknown>): Promise<unknown>;
   };
 }
 
 export interface VirtualRouterArtifacts {
   config: unknown;
+  runtime?: Record<string, ProviderRuntimeProfile>;
   targetRuntime?: Record<string, ProviderRuntimeProfile>;
 }
 

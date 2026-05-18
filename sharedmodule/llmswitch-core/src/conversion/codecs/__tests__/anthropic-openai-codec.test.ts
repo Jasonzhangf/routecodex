@@ -208,6 +208,30 @@ describe('anthropic-openai-codec native wrapper', () => {
     ]);
   });
 
+  test('maps OpenAI function tool_choice shape into Anthropic tool selector shape', () => {
+    const result = buildAnthropicRequestFromOpenAIChat(
+      {
+        model: 'claude-3-7-sonnet',
+        messages: [{ role: 'user', content: 'run tool' }],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] }
+            }
+          }
+        ],
+        tool_choice: {
+          type: 'function',
+          function: { name: 'exec_command' }
+        }
+      } as any
+    );
+
+    expect((result as any).tool_choice).toEqual({ type: 'tool', name: 'exec_command' });
+  });
+
   test('converts governed chat response back to anthropic using stored alias map', async () => {
     const codec = new AnthropicOpenAIConversionCodec({});
     const result = await codec.convertResponse(

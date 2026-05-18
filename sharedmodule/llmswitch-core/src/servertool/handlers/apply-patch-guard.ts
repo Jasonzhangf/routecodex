@@ -176,7 +176,7 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
           entryEndpoint: ctx.entryEndpoint,
           injection: {
             ops: [
-              { op: 'preserve_tools' },
+              { op: 'preserve_tools' }, { op: 'append_assistant_message', required: true },
               { op: 'append_tool_messages_from_tool_outputs', required: true },
               {
                 op: 'inject_system_text',

@@ -1,0 +1,10 @@
+{
+  "timestamp": "2026-05-17T09:07:59.382Z",
+  "versions": {
+    "routecodex": "0.90.1746"
+  },
+  "endpoint": "/v1/responses",
+  "requestId": "openai-responses-mini27.key1-MiniMax-M2.7-20260517T170758910-203277-1957",
+  "groupRequestId": "req_1779008878910_c148dc63",
+  "providerKey": "mini27.key1.MiniMax-M2.7"
+}

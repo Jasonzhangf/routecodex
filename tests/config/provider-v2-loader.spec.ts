@@ -338,6 +338,61 @@ describe('buildVirtualRouterInputV2', () => {
     expect(configs.duck.provider.id).toBe('duck');
   });
 
+  it('buildVirtualRouterInputV2 keeps provider-mode binding provider even if routing does not reference it', async () => {
+    const root = await createTempDir('provider-v2-');
+    const routingProviderDir = path.join(root, 'demo');
+    const directProviderDir = path.join(root, 'dbittai-gpt');
+    await fs.mkdir(routingProviderDir, { recursive: true });
+    await fs.mkdir(directProviderDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(routingProviderDir, 'config.v2.json'),
+      `${JSON.stringify({
+        version: '2.0.0',
+        providerId: 'demo',
+        provider: {
+          id: 'demo',
+          type: 'openai',
+          baseURL: 'https://demo.example.com'
+        }
+      }, null, 2)}\n`,
+      'utf8'
+    );
+    await fs.writeFile(
+      path.join(directProviderDir, 'config.v2.json'),
+      `${JSON.stringify({
+        version: '2.0.0',
+        providerId: 'dbittai-gpt',
+        provider: {
+          id: 'dbittai-gpt',
+          type: 'responses',
+          baseURL: 'https://dbittai.com/v1'
+        }
+      }, null, 2)}\n`,
+      'utf8'
+    );
+
+    const userConfig: UnknownRecord = {
+      httpserver: {
+        ports: [
+          { port: 5555, mode: 'provider', providerBinding: 'dbittai-gpt.key1.gpt-5.4' }
+        ]
+      },
+      virtualrouter: {
+        routingPolicyGroups: {
+          default: {
+            routing: {
+              default: [{ id: 'primary', targets: ['demo.gpt-4o'] }]
+            }
+          }
+        }
+      }
+    };
+
+    const input = await buildVirtualRouterInputV2(userConfig, root);
+    expect(Object.keys(input.providers).sort()).toEqual(['dbittai-gpt', 'demo']);
+  });
+
   it('rejects duplicate provider ids across suffixed config files', async () => {
     const root = await createTempDir('provider-v2-');
     const providerDir = path.join(root, 'openai');

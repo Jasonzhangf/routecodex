@@ -235,6 +235,19 @@ class ResponsesConversationStore {
     this.detachEntry(entry);
   }
 
+  releaseRequestPayload(requestId?: string): void {
+    if (!requestId) return;
+    const entry = this.requestMap.get(requestId);
+    if (!entry) return;
+    entry.basePayload = {
+      ...(entry.routeHint ? { routeHint: entry.routeHint } : {}),
+      ...(entry.lastResponseId ? { previous_response_id: entry.lastResponseId } : {})
+    };
+    entry.tools = undefined;
+    entry.updatedAt = Date.now();
+    this.attachEntryScopes(entry);
+  }
+
   resumeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
     this.prune();
     const scopeKeys = buildScopeKeys(args);
@@ -402,6 +415,13 @@ export function clearResponsesConversationByRequestId(requestId?: string): void 
   store.clearRequest(requestId);
 }
 
+export function releaseResponsesConversationRequestPayload(requestId?: string): void {
+  if (RESPONSES_DEBUG && requestId) {
+    console.log('[responses-store] release-payload', requestId);
+  }
+  store.releaseRequestPayload(requestId);
+}
+
 export function rebindResponsesConversationRequestId(oldId?: string, newId?: string): void {
   if (RESPONSES_DEBUG && oldId && newId) {
     console.log('[responses-store] rebind', oldId, '->', newId);
@@ -424,3 +444,6 @@ export function materializeLatestResponsesContinuationByScope(args: RestoreBySco
 }
 
 export { store as responsesConversationStore };
+
+// Expose raw store for memory-observer diagnostics
+(globalThis as Record<string, unknown>)["__rccResponsesConversationStore"] = store;

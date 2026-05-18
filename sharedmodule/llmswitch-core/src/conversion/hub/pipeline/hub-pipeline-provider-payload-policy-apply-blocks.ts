@@ -97,6 +97,11 @@ export function finalizeProviderPayloadWithPolicy(args: {
     rt,
   );
 
+  providerPayload = stripUnsupportedBuiltinWebSearchToolsForProtocol(
+    providerPayload,
+    args.outboundProtocol,
+  );
+
   recordHubPolicyObservation({
     policy: args.effectivePolicy,
     providerProtocol: args.outboundProtocol,
@@ -107,4 +112,46 @@ export function finalizeProviderPayloadWithPolicy(args: {
   });
 
   return providerPayload;
+}
+
+function stripUnsupportedBuiltinWebSearchToolsForProtocol(
+  payload: Record<string, unknown>,
+  outboundProtocol: string,
+): Record<string, unknown> {
+  if (outboundProtocol === 'anthropic-messages') {
+    return payload;
+  }
+  const tools = Array.isArray(payload.tools) ? payload.tools : null;
+  if (!tools) {
+    return payload;
+  }
+  const filtered = tools.filter((tool) => {
+    const type = String((tool as any)?.type || '').trim().toLowerCase();
+    return type !== 'web_search' && type !== 'web_search_preview';
+  });
+  if (filtered.length === tools.length) {
+    return payload;
+  }
+  if (filtered.length === 0 && requiresDeclaredTools(payload.tool_choice)) {
+    return payload;
+  }
+  return {
+    ...payload,
+    tools: filtered,
+  };
+}
+
+function requiresDeclaredTools(toolChoice: unknown): boolean {
+  if (typeof toolChoice === 'string') {
+    const normalized = toolChoice.trim().toLowerCase();
+    return normalized === 'auto' || normalized === 'required';
+  }
+  if (!toolChoice || typeof toolChoice !== 'object') {
+    return false;
+  }
+  const type = String((toolChoice as any).type || '').trim().toLowerCase();
+  if (type === 'auto' || type === 'required' || type === 'function') {
+    return true;
+  }
+  return false;
 }

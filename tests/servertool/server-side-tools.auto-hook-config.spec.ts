@@ -71,7 +71,6 @@ describe('servertool skeleton config', () => {
 
     const toolSpecs = listServertoolToolSpecs();
     expect(toolSpecs.some((entry) => entry.name === 'reasoning_stop_guard')).toBe(true);
-    expect(toolSpecs.some((entry) => entry.name === 'stopless_goal_guard')).toBe(true);
   });
 
   test('native auto hook planner respects config primary order', () => {

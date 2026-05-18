@@ -50,6 +50,48 @@ function resolveReferencedProviderIdsFromRouting(routing: VirtualRouterRoutingCo
   return providerIds;
 }
 
+function resolveProviderIdsFromProviderPorts(userConfig: UnknownRecord): Set<string> {
+  const ids = new Set<string>();
+  const httpserver = isRecord(userConfig.httpserver) ? (userConfig.httpserver as UnknownRecord) : undefined;
+  const ports = Array.isArray(httpserver?.ports) ? (httpserver!.ports as unknown[]) : [];
+  for (const portRaw of ports) {
+    if (!isRecord(portRaw)) {
+      continue;
+    }
+    const mode = typeof portRaw.mode === 'string' ? portRaw.mode.trim().toLowerCase() : '';
+    if (mode !== 'provider') {
+      continue;
+    }
+    const binding = typeof portRaw.providerBinding === 'string' ? portRaw.providerBinding.trim() : '';
+    if (!binding) {
+      continue;
+    }
+    const providerId = binding.split('.', 1)[0]?.trim();
+    if (providerId) {
+      ids.add(providerId);
+    }
+  }
+  return ids;
+}
+
+function withRoutePolicyGroupTag(routeEntry: unknown, groupId: string): unknown {
+  if (!routeEntry || typeof routeEntry !== 'object') {
+    return routeEntry;
+  }
+  if (Array.isArray(routeEntry)) {
+    return routeEntry.map((item) => withRoutePolicyGroupTag(item, groupId));
+  }
+  const record = routeEntry as UnknownRecord;
+  const routeParams = isRecord(record.routeParams) ? { ...(record.routeParams as UnknownRecord) } : {};
+  if (typeof routeParams.routePolicyGroup !== 'string' || !routeParams.routePolicyGroup.trim()) {
+    routeParams.routePolicyGroup = groupId;
+  }
+  return {
+    ...record,
+    routeParams,
+  };
+}
+
 /**
  * Per-port routing: collect ALL groups into global routing config.
  * Per-port allowedProviders filter restricts routing at request time.
@@ -61,20 +103,23 @@ function extractRoutingFromUserConfig(userConfig: UnknownRecord): VirtualRouterR
     throw new Error('[config] v2 config requires virtualrouter.routingPolicyGroups');
   }
   const groupEntries = Object.entries(groupsNode)
-    .filter(([, groupNode]) => isRecord(groupNode))
-    .map(([, groupNode]) => groupNode as UnknownRecord);
+    .filter(([groupId, groupNode]) => Boolean(groupId.trim()) && isRecord(groupNode))
+    .map(([groupId, groupNode]) => [groupId.trim(), groupNode as UnknownRecord] as const);
   if (groupEntries.length === 0) {
     throw new Error('[config] v2 config requires virtualrouter.routingPolicyGroups with at least one group');
   }
   // Collect routing from ALL groups into a flat RoutingPools config.
   // Per-port allowedProviders filter will restrict routing at request time.
   const routing: VirtualRouterRoutingConfig = {};
-  for (const groupNode of groupEntries) {
+  for (const [groupId, groupNode] of groupEntries) {
     const groupRouting = isRecord(groupNode.routing) ? (groupNode.routing as VirtualRouterRoutingConfig) : undefined;
     if (!groupRouting) continue;
     for (const [routeType, routeEntry] of Object.entries(groupRouting)) {
       if (!routeEntry || typeof routeEntry !== 'object') continue;
-      routing[routeType] = routeEntry as any;
+            const taggedRouteEntry = withRoutePolicyGroupTag(routeEntry, groupId) as any;
+      const taggedRouteArray = Array.isArray(taggedRouteEntry) ? taggedRouteEntry : [taggedRouteEntry];
+      const existing = Array.isArray(routing[routeType]) ? routing[routeType] as any[] : [];
+      routing[routeType] = [...existing, ...taggedRouteArray] as any;
     }
   }
   if (!Object.keys(routing).length) {
@@ -97,6 +142,9 @@ export async function buildVirtualRouterInputV2(
 ): Promise<VirtualRouterInput> {
   const routing = extractRoutingFromUserConfig(userConfig);
   const referencedProviderIds = resolveReferencedProviderIdsFromRouting(routing);
+  for (const providerId of resolveProviderIdsFromProviderPorts(userConfig)) {
+    referencedProviderIds.add(providerId);
+  }
 
   const providerConfigs = await loadProviderConfigsV2(providerRootDir);
   const providers: VirtualRouterProvidersConfig = {};

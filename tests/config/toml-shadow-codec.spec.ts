@@ -37,6 +37,30 @@ describe('toml shadow codec', () => {
     ).toBeTruthy();
   });
 
+  it('parses multiline arrays with inline tables used by provider auth entries', () => {
+    const parsed = parseTomlRecord(`
+      version = "2.0.0"
+      providerId = "dbittai-gpt"
+
+      [provider]
+      id = "dbittai-gpt"
+      type = "responses"
+
+      [provider.auth]
+      type = "apikey"
+      entries = [
+        { alias = "key1", apiKey = "\${CRS_OAI_KEY1}" }
+      ]
+    `);
+
+    const provider = parsed.provider as Record<string, unknown>;
+    const auth = provider.auth as Record<string, unknown>;
+    expect(auth.type).toBe('apikey');
+    expect(auth.entries).toEqual([
+      { alias: 'key1', apiKey: '${CRS_OAI_KEY1}' }
+    ]);
+  });
+
   it('decodes semantically equivalent user config from JSON and TOML shadow files', async () => {
     const root = await mkTmp('routecodex-toml-shadow-user-');
     const jsonPath = path.join(root, 'config.json');

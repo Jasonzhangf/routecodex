@@ -109,13 +109,9 @@ pub(crate) fn build_route_queue(
         queue.insert(0, "video".to_string());
     }
 
-    if features.has_image_attachment {
-        if has_multimodal_targets {
-            if !queue.iter().any(|v| v == "multimodal") {
-                queue.insert(0, "multimodal".to_string());
-            }
-        } else if has_vision_targets && !queue.iter().any(|v| v == "vision") {
-            queue.insert(0, "vision".to_string());
+    if features.has_image_attachment && has_multimodal_targets {
+        if !queue.iter().any(|v| v == "multimodal") {
+            queue.insert(0, "multimodal".to_string());
         }
     }
 
@@ -372,5 +368,90 @@ mod tests {
                 "default".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn image_attachment_prefers_multimodal_and_does_not_auto_prepend_vision() {
+        let routing = parse_routing(&Map::from_iter([
+            (
+                "multimodal".to_string(),
+                Value::Array(vec![serde_json::json!({
+                    "id": "multimodal",
+                    "priority": 100,
+                    "targets": ["provider.mm"]
+                })]),
+            ),
+            (
+                "vision".to_string(),
+                Value::Array(vec![serde_json::json!({
+                    "id": "vision",
+                    "priority": 100,
+                    "targets": ["provider.vision"]
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![serde_json::json!({
+                    "id": "default",
+                    "priority": 100,
+                    "targets": ["provider.default"]
+                })]),
+            ),
+        ]));
+        let features = RoutingFeatures {
+            has_image_attachment: true,
+            ..Default::default()
+        };
+
+        let queue = build_route_queue(
+            "coding",
+            &["default".to_string()],
+            &features,
+            &routing,
+        );
+
+        assert_eq!(
+            queue,
+            vec![
+                "multimodal".to_string(),
+                "coding".to_string(),
+                "default".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn image_attachment_without_multimodal_targets_does_not_auto_route_to_vision() {
+        let routing = parse_routing(&Map::from_iter([
+            (
+                "vision".to_string(),
+                Value::Array(vec![serde_json::json!({
+                    "id": "vision",
+                    "priority": 100,
+                    "targets": ["provider.vision"]
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![serde_json::json!({
+                    "id": "default",
+                    "priority": 100,
+                    "targets": ["provider.default"]
+                })]),
+            ),
+        ]));
+        let features = RoutingFeatures {
+            has_image_attachment: true,
+            ..Default::default()
+        };
+
+        let queue = build_route_queue(
+            "coding",
+            &["default".to_string()],
+            &features,
+            &routing,
+        );
+
+        assert_eq!(queue, vec!["coding".to_string(), "default".to_string()]);
     }
 }

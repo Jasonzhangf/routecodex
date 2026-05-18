@@ -12,6 +12,10 @@ function createMockProviderHandle(protocol: ProviderProtocol): ProviderHandle {
     status: 200,
     body: { ...payload, _routed: true },
   }));
+  const processIncomingDirect = jest.fn(async (payload: Record<string, unknown>) => ({
+    status: 200,
+    body: { ...payload, _routed: true, _direct: true },
+  }));
   return {
     runtimeKey: 'runtime.' + protocol,
     providerId: 'mock',
@@ -23,6 +27,7 @@ function createMockProviderHandle(protocol: ProviderProtocol): ProviderHandle {
       initialize: async () => {},
       cleanup: async () => {},
       processIncoming,
+      processIncomingDirect,
     },
   };
 }
@@ -81,6 +86,7 @@ describe('router-direct-pipeline', () => {
       const input = {
         portConfig: createRouterPortConfig(),
         providerPayload: { model: 'gpt-4', messages: [{ role: 'user', content: 'hello' }], reasoning: { effort: 'medium' } },
+        requestPayload: { model: 'gpt-4o', messages: [{ role: 'user', content: 'raw' }] },
         target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: openaiHandle.runtimeKey, processMode: 'chat' },
         routingDecision: { routeName: 'default', pool: ['openai.gpt-4'] },
         processMode: 'chat',
@@ -89,10 +95,10 @@ describe('router-direct-pipeline', () => {
       };
       const result = await executeRouterDirectPipeline(input);
       expect(result.used).toBe(true);
-      expect(openaiHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
+      expect(openaiHandle.instance.processIncomingDirect).toHaveBeenCalledTimes(1);
       const ctx = result.auditContext;
       expect(ctx.observedFields).toBeDefined();
-      expect(ctx.originalPayload).toEqual(input.providerPayload);
+      expect(ctx.originalPayload).toEqual(input.requestPayload);
       expect(ctx.providerKey).toBe('openai.gpt-4');
       expect(ctx.inboundProtocol).toBe('openai-chat');
       expect(ctx.providerProtocol).toBe('openai-chat');
@@ -103,6 +109,7 @@ describe('router-direct-pipeline', () => {
       const input = {
         portConfig: createRouterPortConfig(),
         providerPayload: { model: 'claude-3', messages: [{ role: 'user', content: 'hello' }] },
+        requestPayload: { model: 'claude-3', messages: [{ role: 'user', content: 'raw' }] },
         target: { providerKey: 'anthropic.claude-3', providerType: 'anthropic', runtimeKey: anthropicHandle.runtimeKey, processMode: 'chat' },
         routingDecision: { routeName: 'default' },
         processMode: 'chat',
@@ -119,6 +126,7 @@ describe('router-direct-pipeline', () => {
       const input = {
         portConfig: createRouterPortConfig('relay'),
         providerPayload: { model: 'gpt-4', messages: [{ role: 'user', content: 'hello' }] },
+        requestPayload: { model: 'gpt-4', messages: [{ role: 'user', content: 'raw' }] },
         target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: openaiHandle.runtimeKey, processMode: 'chat' },
         routingDecision: { routeName: 'default' },
         processMode: 'chat',
@@ -138,6 +146,7 @@ describe('router-direct-pipeline', () => {
       const input = {
         portConfig: config,
         providerPayload: { model: 'gpt-4' },
+        requestPayload: { model: 'gpt-4' },
         target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: openaiHandle.runtimeKey },
         routingDecision: {},
         processMode: 'chat',
@@ -155,6 +164,7 @@ describe('router-direct-pipeline', () => {
       const input = {
         portConfig: createRouterPortConfig(),
         providerPayload: { model: 'gpt-4' },
+        requestPayload: { model: 'gpt-4', messages: [{ role: 'user', content: 'raw' }] },
         target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: openaiHandle.runtimeKey },
         routingDecision: {},
         processMode: 'chat',
@@ -167,7 +177,7 @@ describe('router-direct-pipeline', () => {
       expect(result.used).toBe(true);
       expect(beforeSnapshots).toHaveLength(1);
       expect(afterSnapshots).toHaveLength(1);
-      expect(beforeSnapshots[0].ctx.originalPayload).toEqual(input.providerPayload);
+      expect(beforeSnapshots[0].ctx.originalPayload).toEqual(input.requestPayload);
       expect(beforeSnapshots[0].ctx).toBe(afterSnapshots[0].ctx);
     });
   });
@@ -178,6 +188,7 @@ describe('router-direct-pipeline', () => {
       const input = {
         portConfig: createRouterPortConfig(),
         providerPayload: { model: 'gpt-5', reasoning: { effort: 'high' } },
+        requestPayload: { model: 'gpt-5.4', input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }] },
         target: { providerKey: 'tab.gpt-5', providerType: 'responses', runtimeKey: handle.runtimeKey },
         routingDecision: { routeName: 'default' },
         processMode: 'chat',
@@ -186,7 +197,7 @@ describe('router-direct-pipeline', () => {
       };
       const result = await executeRouterDirectPipeline(input);
       expect(result.used).toBe(true);
-      expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
+      expect(handle.instance.processIncomingDirect).toHaveBeenCalledTimes(1);
     });
 
     it('skips when chat inbound targets responses provider', async () => {
@@ -194,6 +205,7 @@ describe('router-direct-pipeline', () => {
       const input = {
         portConfig: createRouterPortConfig(),
         providerPayload: { model: 'gpt-5' },
+        requestPayload: { model: 'gpt-5.4' },
         target: { providerKey: 'tab.gpt-5', providerType: 'responses', runtimeKey: handle.runtimeKey },
         routingDecision: {},
         processMode: 'chat',
@@ -211,6 +223,7 @@ describe('router-direct-pipeline', () => {
       const input = {
         portConfig: createRouterPortConfig(),
         providerPayload: { model: 'gpt-5', reasoning: { effort: 'high' } },
+        requestPayload: { model: 'gpt-5.4', input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }] },
         target: { providerKey: 'tab.gpt-5', providerType: 'responses', runtimeKey: handle.runtimeKey },
         routingDecision: { routeName: 'default' },
         processMode: 'chat',
@@ -221,7 +234,12 @@ describe('router-direct-pipeline', () => {
       expect(result.used).toBe(true);
       expect(result.response).toBeDefined();
       expect(result.response.status).toBe(200);
-    expect(result.response.body).toEqual({ model: 'gpt-5', reasoning: { effort: 'high' }, _routed: true });
+    expect(result.response.body).toEqual({
+      model: 'gpt-5.4',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+      _routed: true,
+      _direct: true,
+    });
     });
   });
 });

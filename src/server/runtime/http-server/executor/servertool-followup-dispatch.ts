@@ -203,7 +203,9 @@ function materializeFollowupRequestSemantics(args: {
   const serverToolFollowup =
     isServerToolFollowup(args.requestSemantics)
     || fromMetadata.serverToolFollowup
-    || fromBaseMetadata.serverToolFollowup;
+    || fromBaseMetadata.serverToolFollowup
+    || Boolean(fromMetadata.followupSource)
+    || Boolean(fromBaseMetadata.followupSource);
   const followupSource = fromMetadata.followupSource ?? fromBaseMetadata.followupSource;
   const stoplessGoalStatus = fromMetadata.stoplessGoalStatus ?? fromBaseMetadata.stoplessGoalStatus;
 
@@ -245,6 +247,9 @@ function sanitizeFollowupRequestSemantics(
   delete nextRequestParameters.model;
   delete nextRequestParameters.max_tokens;
   delete nextRequestParameters.max_output_tokens;
+  delete nextRequestParameters.parallel_tool_calls;
+  delete nextRequestParameters.tool_choice;
+  delete nextRequestParameters.reasoning;
   if (Object.keys(nextRequestParameters).length === Object.keys(requestParameters).length) {
     return requestSemantics;
   }
@@ -325,6 +330,18 @@ function sanitizeFollowupRootBodyRequestParameters(
   }
   if ('max_output_tokens' in nextBody) {
     delete nextBody.max_output_tokens;
+    changed = true;
+  }
+  if ('parallel_tool_calls' in nextBody) {
+    delete nextBody.parallel_tool_calls;
+    changed = true;
+  }
+  if ('tool_choice' in nextBody) {
+    delete nextBody.tool_choice;
+    changed = true;
+  }
+  if ('reasoning' in nextBody) {
+    delete nextBody.reasoning;
     changed = true;
   }
   return changed ? nextBody : body;

@@ -1,0 +1,99 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.90.1746",
+    "buildTime": "2026-05-17T09:08:08.260Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "req_1779008878910_c148dc63",
+    "providerKey": "mini27.key1.MiniMax-M2.7",
+    "providerId": "mini27"
+  },
+  "url": "http://guizhouyun.site:2080/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "[REDACTED]:16",
+    "User-Agent": "codex-tui/0.130.0 (Mac OS 26.4.1; arm64) iTerm2/3.6.9 (codex-tui; 0.130.0)",
+    "originator": "codex-tui",
+    "session_id": "019e34fa-1e7a-7eb0-bab2-0752ac6ff649",
+    "conversation_id": "019e34fa-1e7a-7eb0-bab2-0752ac6ff649",
+    "Accept": "application/json"
+  },
+  "body": {
+    "data": {
+      "id": "0658b870431b5b00127be079eab57551",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "name": "MiniMax AI",
+            "tool_calls": [
+              {
+                "id": "call_function_jeitnsszfo79_1",
+                "type": "function",
+                "function": {
+                  "name": "exec_command",
+                  "arguments": "{\"cmd\": \"which camo && camo --version\", \"shell\": \"zsh\"}"
+                },
+                "index": 0
+              }
+            ],
+            "audio_content": "",
+            "reasoning_content": "让我尝试使用 camo 来登录 qwenchat 并获取 cookie。首先检查 camo 是否可用。",
+            "reasoning_details": [
+              {
+                "type": "reasoning.text",
+                "id": "reasoning-text-1",
+                "format": "MiniMax-response-v1",
+                "index": 0,
+                "text": "让我尝试使用 camo 来登录 qwenchat 并获取 cookie。首先检查 camo 是否可用。"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1779008880,
+      "model": "MiniMax-M2.7",
+      "object": "chat.completion",
+      "usage": {
+        "total_tokens": 29559,
+        "total_characters": 0,
+        "prompt_tokens": 29493,
+        "completion_tokens": 66,
+        "completion_tokens_details": {
+          "reasoning_tokens": 25
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 23739
+        }
+      },
+      "input_sensitive": false,
+      "output_sensitive": false,
+      "input_sensitive_type": 0,
+      "output_sensitive_type": 0,
+      "output_sensitive_int": 0,
+      "base_resp": {
+        "status_code": 0,
+        "status_msg": ""
+      }
+    },
+    "status": 200,
+    "headers": {
+      "alb_receive_time": "1779008880.042",
+      "alb_request_id": "78e72fc8a4196a6c8708ce76f618ec20b451102c",
+      "connection": "keep-alive",
+      "content-length": "1134",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Sun, 17 May 2026 09:08:02 GMT",
+      "minimax-request-id": "e23d6b56909f86472c9a0845c98557a3",
+      "server": "nginx/1.18.0 (Ubuntu)",
+      "strict-transport-security": "max-age=15552000; includeSubDomains",
+      "trace-id": "0658b870431b5b00127be079eab57551",
+      "vary": "Accept-Encoding",
+      "x-mm-request-id": "2045675862602289817_1779008880otden5",
+      "x-oneapi-request-id": "2026051717075396910045073810172",
+      "x-session-id": "8eccfdb1a461a4334f76e87e9974a9ee"
+    }
+  }
+}

@@ -41,7 +41,18 @@ export const CAMO_CLICK_TARGETS: Record<string, CamoClickTarget> = {
       'div[role="link"][data-identifier]',
       'div[role="button"][data-identifier]',
       '[data-profileindex]',
-      '[data-identifier] [role="link"]'
+      '[data-identifier] [role="link"]',
+      '[data-account-index]'
+    ]
+  },
+  googleIdentifierNext: {
+    key: 'googleIdentifierNext',
+    selectors: [
+      '#identifierNext button',
+      '#identifierNext',
+      'button[jsname][type="button"]',
+      'div[role="button"][id*="identifierNext"]',
+      '[data-primary-action-label]'
     ]
   }
 };
@@ -550,4 +561,69 @@ export async function clickCamoGoogleAccountByHint(context: CamoActionContext, h
   }
   if (options.required) { logOAuthDebug(`[OAuth] camo-cli click-google-account-hint required but not matched hint=${normalizedHint}`); return false; }
   logOAuthDebug(`[OAuth] camo-cli click-google-account-hint not matched (non-required) hint=${normalizedHint}`); return true;
+}
+
+export async function fillGoogleIdentifierByHint(
+  context: CamoActionContext,
+  hint: string,
+  options: { retries: number; retryDelayMs: number; required: boolean }
+): Promise<boolean> {
+  const normalizedHint = String(hint || '').trim();
+  if (!normalizedHint) {
+    return !options.required;
+  }
+  const retries = options.retries > 0 ? options.retries : 1;
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    const markInput = runCamoDevtoolsEval(
+      context,
+      `(() => {
+        const visible = (el) => {
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          const s = getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden' && Number(s.opacity || '1') !== 0;
+        };
+        for (const n of Array.from(document.querySelectorAll('[data-rcx-google-identifier="1"]'))) {
+          n.removeAttribute('data-rcx-google-identifier');
+        }
+        const candidates = Array.from(document.querySelectorAll('#identifierId, input[type="email"], input[name="identifier"], input[autocomplete="username"]'));
+        const input = candidates.find((node) => visible(node));
+        if (!input) return 'not_found';
+        input.setAttribute('data-rcx-google-identifier', '1');
+        if (typeof input.scrollIntoView === 'function') input.scrollIntoView({ block: 'center', inline: 'center' });
+        return 'ok';
+      })()`
+    );
+    if (!markInput.ok || String(markInput.value || '').trim() !== 'ok') {
+      logOAuthDebug(`[OAuth] camo-cli fill-google-identifier input not found attempt=${attempt}/${retries}`);
+      if (attempt < retries && options.retryDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs));
+      }
+      continue;
+    }
+    const typeResult = runCamoCliCapture(context, ['type', context.profileId, '[data-rcx-google-identifier="1"]', normalizedHint, '--no-highlight']);
+    if (!typeResult.ok) {
+      logOAuthDebug(
+        `[OAuth] camo-cli fill-google-identifier type failed attempt=${attempt}/${retries} status=${typeResult.status ?? 'n/a'} error=${typeResult.errorText || typeResult.stderr}`
+      );
+      if (attempt < retries && options.retryDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs));
+      }
+      continue;
+    }
+    const nextClicked = await clickCamoTarget(context, CAMO_CLICK_TARGETS.googleIdentifierNext, {
+      retries: 2,
+      retryDelayMs: options.retryDelayMs,
+      required: false
+    });
+    logOAuthDebug(
+      `[OAuth] camo-cli fill-google-identifier ok hint=${normalizedHint} attempt=${attempt}/${retries} nextClicked=${nextClicked ? '1' : '0'}`
+    );
+    return true;
+  }
+  if (options.required) {
+    logOAuthDebug(`[OAuth] camo-cli fill-google-identifier required but failed hint=${normalizedHint}`);
+    return false;
+  }
+  return true;
 }

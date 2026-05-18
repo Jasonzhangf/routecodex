@@ -189,4 +189,35 @@ describe('responses-openai-codec native wrapper', () => {
     });
     expect((result as any).output[0].arguments).not.toContain('"command"');
   });
+}
+
+test('request context store prunes expired request ids', async () => {
+  const codec = new ResponsesOpenAIConversionCodec({});
+  const originalNow = Date.now;
+  let now = 1_000;
+  Date.now = () => now;
+  try {
+    await codec.convertRequest(
+      { model: 'gpt-4.1', input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'one' }] }] },
+      profile,
+      {
+        requestId: 'req_responses_codec_old',
+        entryEndpoint: '/v1/responses'
+      } as any
+    );
+    now += 6 * 60_000;
+    await codec.convertRequest(
+      { model: 'gpt-4.1', input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'two' }] }] },
+      profile,
+      {
+        requestId: 'req_responses_codec_new',
+        entryEndpoint: '/v1/responses'
+      } as any
+    );
+    expect(((codec as any).ctxMap as { size: number }).size).toBe(1);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
 });

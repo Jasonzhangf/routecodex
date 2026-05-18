@@ -71,15 +71,12 @@ impl RoutingClassifier {
         let reached_long_context = features.estimated_tokens >= self.long_context_threshold_tokens;
         let has_tool_activity =
             features.has_tools || (!latest_message_from_user && features.has_tool_call_responses);
-        let thinking_continuation = last_tool_category == "thinking";
         let has_visual =
             features.has_image_attachment
             || (features.has_video_attachment && features.has_remote_video_attachment);
-        // Jason 规则：当前轮是用户输入时始终优先 thinking，
-        // 但不再引用历史 last-tool continuation 影响本轮判断。
-        // （tools 仍可作为并行诊断信号，避免“thinking 与 tools 冲突”）
+        // Jason 规则：thinking 只看当前轮是否为 fresh user input。
+        // 历史轮（包括上一轮 assistant thinking/tool 延续）不得继承 thinking 命中。
         let thinking_from_user = latest_message_from_user;
-        let thinking_from_read = !thinking_from_user && thinking_continuation;
         let coding_continuation = last_tool_category == "coding";
         let search_continuation = last_tool_category == "search";
         let tools_continuation = last_tool_category == "other";
@@ -123,12 +120,8 @@ impl RoutingClassifier {
         ));
         evaluation.push((
             "thinking".to_string(),
-            thinking_from_user || thinking_from_read,
-            if thinking_from_user {
-                "thinking:user-input".to_string()
-            } else {
-                "thinking:last-tool-thinking".to_string()
-            },
+            thinking_from_user,
+            "thinking:user-input".to_string(),
         ));
         evaluation.push((
             "longcontext".to_string(),
@@ -308,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn previous_turn_read_continuation_routes_to_thinking() {
+    fn previous_turn_read_continuation_no_longer_routes_to_thinking() {
         let features = RoutingFeatures {
             latest_message_from_user: false,
             has_tools: true,
@@ -319,8 +312,9 @@ mod tests {
 
         let result = classifier().classify(&features);
 
-        assert_eq!(result.route_name, "thinking");
-        assert!(result.reasoning.contains("thinking:last-tool-thinking"));
+        assert_eq!(result.route_name, "tools");
+        assert!(result.reasoning.contains("tools:tool-request-detected"));
+        assert!(!result.reasoning.contains("thinking:user-input"));
     }
 
     #[test]

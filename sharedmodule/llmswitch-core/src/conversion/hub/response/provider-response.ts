@@ -47,7 +47,10 @@ import {
   measureHubStage,
   peekHubStageTopSummary
 } from '../pipeline/hub-stage-timing.js';
-import { recordResponsesResponse } from '../../shared/responses-conversation-store.js';
+import {
+  recordResponsesResponse,
+  releaseResponsesConversationRequestPayload
+} from '../../shared/responses-conversation-store.js';
 import type { ProviderInvoker } from '../../../servertool/types.js';
 import { saveChatProcessSessionActualUsage } from '../process/chat-process-session-usage.js';
 import {
@@ -597,6 +600,10 @@ export async function convertProviderResponse(
       // ignore non-contract conversation capture errors
     }
   }
+
+  // Release large request-side payload fields after the response is indexed, while
+  // preserving responseId/scope-based continuation metadata for future followups.
+  releaseResponsesConversationRequestPayload(options.context.requestId);
 
   // Phase 2 (shadow): response tool surface mismatch detection (client outbound).
   recordToolSurfaceShadowMismatch({

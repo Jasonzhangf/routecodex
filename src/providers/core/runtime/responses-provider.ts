@@ -10,6 +10,7 @@ import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { ServiceProfile, ProviderContext } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
+import { stripInternalKeysDeep } from '../../../utils/strip-internal-keys.js';
 import {
   attachProviderSseSnapshotStream,
   shouldCaptureProviderStreamSnapshots,
@@ -27,6 +28,7 @@ import {
   detectResponsesFailure,
   extractClientRequestId,
   extractEntryEndpoint,
+  extractResponsesDirectPassthroughFlag,
   extractResponsesConfig,
   extractStreamFlagFromBody,
   extractSubmitToolOutputsPayload,
@@ -103,7 +105,9 @@ export class ResponsesProvider extends HttpTransportProvider {
     }
 
     const targetUrl = buildTargetUrl(this.getEffectiveBaseUrl(), endpoint);
-    const finalBody = this.responsesClient.buildRequestBody(request);
+    const finalBody = extractResponsesDirectPassthroughFlag(request)
+      ? this.buildPassthroughResponsesBody(request)
+      : this.responsesClient.buildRequestBody(request);
     this.assertResponsesWireShape(finalBody);
 
     const explicitStream = extractStreamFlagFromBody(finalBody);
@@ -165,6 +169,164 @@ export class ResponsesProvider extends HttpTransportProvider {
       );
       throw normalizedError;
     }
+  }
+
+  async processIncomingDirect(request: UnknownObject): Promise<UnknownObject> {
+    const directRequest = { ...(request as Record<string, unknown>) };
+    const endpoint = this.getEffectiveEndpoint();
+    const baseHeaders = await this.buildRequestHeaders();
+    const headers = await this.finalizeRequestHeaders(baseHeaders, directRequest);
+    const context = this.createProviderContext();
+    const entryEndpoint = extractEntryEndpoint(directRequest) ?? '/v1/responses';
+    const targetUrl = buildTargetUrl(this.getEffectiveBaseUrl(), endpoint);
+    const finalBody = this.buildPassthroughResponsesBody(directRequest);
+    this.applyDirectProviderOverrides(finalBody, directRequest);
+    const explicitStream = extractStreamFlagFromBody(finalBody);
+
+    await this.snapshotPhase('provider-request', context, finalBody, headers, targetUrl, entryEndpoint);
+
+    try {
+      if (explicitStream === true) {
+        return await this.sendDirectSsePassthroughRequest({
+          body: finalBody,
+          headers,
+          context,
+          targetUrl,
+          entryEndpoint,
+          httpClient: this.httpClient
+        }) as UnknownObject;
+      }
+
+      return await this.sendJsonRequest({
+        endpoint,
+        body: finalBody,
+        headers,
+        context,
+        targetUrl,
+        entryEndpoint,
+        httpClient: this.httpClient
+      }) as UnknownObject;
+    } catch (error) {
+      const normalizedError = normalizeUpstreamError(error);
+      await this.snapshotPhase(
+        'provider-error',
+        context,
+        {
+          status: normalizedError.statusCode ?? normalizedError.status ?? null,
+          code: normalizedError.code ?? null,
+          error: normalizedError.message
+        },
+        headers,
+        targetUrl,
+        entryEndpoint
+      );
+      throw normalizedError;
+    }
+  }
+
+  /**
+   * Direct mode SSE passthrough:
+   * keep upstream SSE stream as-is for client bridge (no provider-side SSE->JSON conversion).
+   */
+  private async sendDirectSsePassthroughRequest(options: {
+    body: Record<string, unknown>;
+    headers: Record<string, string>;
+    context: ProviderContext;
+    targetUrl: string;
+    entryEndpoint?: string;
+    httpClient: ResponsesHttpClient;
+  }): Promise<unknown> {
+    const { body, headers, context, targetUrl, entryEndpoint, httpClient } = options;
+    const stream = await httpClient.postStream(targetUrl, body, {
+      ...headers,
+      Accept: 'text/event-stream'
+    });
+
+    const streamForHost = shouldCaptureProviderStreamSnapshots()
+      ? attachProviderSseSnapshotStream(stream, {
+        requestId: context.requestId,
+        headers,
+        url: targetUrl,
+        entryEndpoint,
+        clientRequestId: extractClientRequestId(context),
+        providerKey: context.providerKey,
+        providerId: context.providerId
+      })
+      : stream;
+
+    await this.snapshotPhase(
+      'provider-response',
+      context,
+      {
+        mode: 'sse_passthrough',
+        clientStream: true
+      },
+      headers,
+      targetUrl,
+      entryEndpoint
+    );
+
+    return {
+      __sse_responses: streamForHost,
+      status: 200,
+      statusText: 'OK',
+      headers: {
+        'x-upstream-mode': 'sse',
+        'x-provider-stream-requested': '1'
+      },
+      url: targetUrl
+    };
+  }
+
+  private applyDirectProviderOverrides(
+    body: Record<string, unknown>,
+    request: Record<string, unknown>
+  ): void {
+    const metadata =
+      request.metadata && typeof request.metadata === 'object' && !Array.isArray(request.metadata)
+        ? (request.metadata as Record<string, unknown>)
+        : undefined;
+    const routeParams =
+      metadata?.routeParams && typeof metadata.routeParams === 'object' && !Array.isArray(metadata.routeParams)
+        ? (metadata.routeParams as Record<string, unknown>)
+        : undefined;
+
+    const routeModel = typeof routeParams?.model === 'string' ? routeParams.model.trim() : '';
+    const providerDefaultModel = typeof this.serviceProfile?.defaultModel === 'string'
+      ? this.serviceProfile.defaultModel.trim()
+      : '';
+    const modelOverride = routeModel || providerDefaultModel;
+    if (modelOverride) {
+      body.model = modelOverride;
+    }
+
+    const routeReasoningEffort =
+      typeof routeParams?.reasoningEffort === 'string' ? routeParams.reasoningEffort.trim() : '';
+    const topLevelReasoningEffort =
+      typeof request.reasoning_effort === 'string' ? request.reasoning_effort.trim() : '';
+    const reasoningEffort = routeReasoningEffort || topLevelReasoningEffort;
+    if (reasoningEffort) {
+      body.reasoning_effort = reasoningEffort;
+      const reasoning =
+        body.reasoning && typeof body.reasoning === 'object' && !Array.isArray(body.reasoning)
+          ? { ...(body.reasoning as Record<string, unknown>) }
+          : {};
+      reasoning.effort = reasoningEffort;
+      body.reasoning = reasoning;
+    }
+  }
+
+  private buildPassthroughResponsesBody(request: UnknownObject): Record<string, unknown> {
+    const body = stripInternalKeysDeep({ ...(request as Record<string, unknown>) }) as Record<string, unknown>;
+    if (body.metadata && typeof body.metadata === 'object') {
+      delete body.metadata;
+    }
+    const inboundModel = typeof body.model === 'string' ? body.model.trim() : '';
+    if (!inboundModel) {
+      throw new Error('provider-runtime-error: missing model from direct passthrough responses payload');
+    }
+    body.model = inboundModel;
+    return body;
   }
 
   private assertResponsesWireShape(body: Record<string, unknown>): void {

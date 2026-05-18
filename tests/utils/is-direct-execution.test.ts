@@ -1,5 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { isDirectExecution } from '../../src/utils/is-direct-execution.js';
@@ -26,16 +27,20 @@ describe('isDirectExecution', () => {
   });
 
   test('matches symlink argv1 against realpath import meta url', () => {
-    const baseDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp-is-direct-'));
-    const realDir = path.join(baseDir, 'real');
-    const linkDir = path.join(baseDir, 'current');
-    fs.mkdirSync(realDir, { recursive: true });
-    const realFile = path.join(realDir, 'index.js');
-    fs.writeFileSync(realFile, 'export {};', 'utf8');
-    fs.symlinkSync(realDir, linkDir);
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-is-direct-'));
+    try {
+      const realDir = path.join(baseDir, 'real');
+      const linkDir = path.join(baseDir, 'current');
+      fs.mkdirSync(realDir, { recursive: true });
+      const realFile = path.join(realDir, 'index.js');
+      fs.writeFileSync(realFile, 'export {};', 'utf8');
+      fs.symlinkSync(realDir, linkDir);
 
-    const argv1 = path.join(linkDir, 'index.js');
-    const metaUrl = pathToFileURL(realFile).href;
-    expect(isDirectExecution(metaUrl, argv1)).toBe(true);
+      const argv1 = path.join(linkDir, 'index.js');
+      const metaUrl = pathToFileURL(realFile).href;
+      expect(isDirectExecution(metaUrl, argv1)).toBe(true);
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
   });
 });

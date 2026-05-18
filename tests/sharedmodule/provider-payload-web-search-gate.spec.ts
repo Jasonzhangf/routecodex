@@ -49,6 +49,45 @@ describe('provider payload builtin web_search gating', () => {
     ]);
   });
 
+  test('strips builtin web_search on thinking/priority-thinking route ids (slash form)', () => {
+    const output = finalizeProviderPayloadWithPolicy({
+      ...baseArgs,
+      outboundProtocol: 'openai-responses',
+      formattedPayload: {
+        model: 'llmgate.deepseek-v4-pro',
+        tools: [
+          { type: 'web_search' },
+          { type: 'web_search_preview' },
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      } as any,
+      outboundAdapterContext: {
+        routeId: 'thinking/priority-thinking',
+        __rt: {
+          webSearch: {
+            engines: [
+              {
+                executionMode: 'direct',
+                directActivation: 'builtin',
+                modelId: 'llmgate.deepseek-v4-pro'
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    expect(output.tools).toEqual([
+      {
+        type: 'function',
+        function: { name: 'exec_command' }
+      }
+    ]);
+  });
+
   test('strips builtin web_search when search route has no matching direct-builtin capability', () => {
     const output = finalizeProviderPayloadWithPolicy({
       ...baseArgs,
@@ -85,6 +124,35 @@ describe('provider payload builtin web_search gating', () => {
         function: { name: 'exec_command' }
       }
     ]);
+  });
+
+  test('does not strip last builtin web_search when tool_choice requires declared tools', () => {
+    const output = finalizeProviderPayloadWithPolicy({
+      ...baseArgs,
+      outboundProtocol: 'openai-responses',
+      formattedPayload: {
+        model: 'llmgate.deepseek-v4-pro',
+        tool_choice: 'auto',
+        tools: [{ type: 'web_search' }]
+      } as any,
+      outboundAdapterContext: {
+        routeId: 'thinking.default',
+        __rt: {
+          webSearch: {
+            engines: [
+              {
+                executionMode: 'proxy',
+                directActivation: 'builtin',
+                modelId: 'llmgate.deepseek-v4-pro'
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    expect(output.tool_choice).toBe('auto');
+    expect(output.tools).toEqual([{ type: 'web_search' }]);
   });
 
   test('replaces canonical web_search with builtin only for anthropic direct-builtin search routes', () => {

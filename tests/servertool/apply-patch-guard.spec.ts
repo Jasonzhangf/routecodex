@@ -1,6 +1,8 @@
 import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
+import { buildServerToolFollowupChatPayloadFromInjection } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/followup-request-builder.js';
+import { inspectOpenAiChatToolHistory } from '../../sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize-tool-history.js';
 
 function makeCapturedChatRequest(): JsonObject {
   return {
@@ -137,6 +139,7 @@ describe('apply_patch servertool guard', () => {
     expect(followup?.injection?.ops).toEqual(
       expect.arrayContaining([
         { op: 'preserve_tools' },
+        { op: 'append_assistant_message', required: true },
         { op: 'append_tool_messages_from_tool_outputs', required: true },
         expect.objectContaining({ op: 'inject_system_text' })
       ])
@@ -144,5 +147,80 @@ describe('apply_patch servertool guard', () => {
     expect(String(followup?.metadata?.clientInjectSource || '')).toBe(
       'servertool.apply_patch_read_before_retry'
     );
+  });
+
+  test('followup payload replays assistant tool_calls before tool result to avoid orphan_tool_result', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-apply-patch-read-before-retry-shape',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      routeId: 'coding',
+      capturedChatRequest: {
+        ...makeCapturedChatRequest(),
+        messages: [
+          { role: 'user', content: 'edit AGENTS.md' },
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_apply_patch_prev',
+                type: 'function',
+                function: {
+                  name: 'apply_patch',
+                  arguments: JSON.stringify({ patch: '*** Begin Patch\n*** Update File: AGENTS.md\n@@\n-old\n+new\n*** End Patch' })
+                }
+              }
+            ]
+          },
+          {
+            role: 'tool',
+            tool_call_id: 'call_apply_patch_prev',
+            name: 'apply_patch',
+            content: "apply_patch verification failed: Failed to find context '-1,1 +1,1 @@' in AGENTS.md"
+          }
+        ]
+      } as any
+    } as any;
+
+    const chatResponse = makeApplyPatchToolCallResponse(
+      JSON.stringify({
+        patch: '*** Begin Patch\n*** Update File: AGENTS.md\n@@\n-older\n+newer\n*** End Patch'
+      })
+    );
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-apply-patch-read-before-retry-shape',
+      providerProtocol: 'openai-chat'
+    });
+
+    const followup = result.execution?.followup as any;
+    const payload = buildServerToolFollowupChatPayloadFromInjection({
+      adapterContext,
+      chatResponse: result.finalChatResponse as JsonObject,
+      injection: followup?.injection
+    });
+
+    expect(payload).toBeTruthy();
+    expect(Array.isArray((payload as any).messages)).toBe(true);
+    const messages = ((payload as any).messages ?? []) as Array<any>;
+    const assistantIndex = messages.findIndex(
+      (entry) =>
+        entry?.role === 'assistant' &&
+        Array.isArray(entry?.tool_calls) &&
+        entry.tool_calls.some((call: any) => call?.id === 'call_apply_patch_1')
+    );
+    const toolIndex = messages.findIndex(
+      (entry) =>
+        entry?.role === 'tool' &&
+        entry?.tool_call_id === 'call_apply_patch_1' &&
+        entry?.name === 'apply_patch'
+    );
+    expect(assistantIndex).toBeGreaterThanOrEqual(0);
+    expect(toolIndex).toBeGreaterThan(assistantIndex);
+    expect(inspectOpenAiChatToolHistory(messages)).toBeNull();
   });
 });

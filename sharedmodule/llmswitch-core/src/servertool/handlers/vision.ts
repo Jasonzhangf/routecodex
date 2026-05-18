@@ -1,7 +1,7 @@
 import type { JsonObject } from '../../conversion/hub/types/json.js';
 import type { ServerSideToolEngineOptions, ServerToolBackendPlan, ServerToolBackendResult, ServerToolHandler, ServerToolHandlerContext, ServerToolHandlerPlan } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
-import { cloneJson, extractTextFromChatLike } from '../server-side-tools.js';
+import { bindServertoolContractWithNative, cloneJson, extractTextFromChatLike } from '../server-side-tools.js';
 import {
   extractCapturedChatSeed
 } from './followup-request-builder.js';
@@ -10,6 +10,9 @@ import { reenterServerToolBackend } from '../reenter-backend.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
 
 const FLOW_ID = 'vision_flow';
+const VISION_SYSTEM_PROMPT = bindServertoolContractWithNative(
+  '你现在的任务只是描述图片内容，不要回答用户问题，不要提供建议，不要推理求解，不要做工具规划。用户提示词只用于帮助你理解关注重点；你只能描述图片中可见的信息。若有文字、数字、时间、版本号、路径、报错、界面结构，请尽量详细描述。看不清的内容明确说明无法辨认。若有多张图片，请按输入顺序分别输出，格式使用 [Image 1]、[Image 2]。'
+);
 
 const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promise<ServerToolHandlerPlan | null> => {
   if (!ctx.capabilities.reenterPipeline) {
@@ -58,6 +61,7 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
       if (!seed) {
         return null;
       }
+      const originalPrompt = extractOriginalUserPrompt(seed.messages);
       return {
         chatResponse: ctx.base,
         execution: {
@@ -67,7 +71,11 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
             entryEndpoint: ctx.entryEndpoint,
             injection: {
               ops: [
-                { op: 'inject_vision_summary', summary: visionSummary },
+                {
+                  op: 'rebuild_vision_followup',
+                  summary: visionSummary,
+                  ...(originalPrompt ? { originalPrompt } : {})
+                },
                 { op: 'drop_tool_by_name', name: 'vision' }
               ]
             }
@@ -120,9 +128,10 @@ function shouldRunVisionFlow(ctx: ServerToolHandlerContext): boolean {
       ? String((rt as any).routeName).trim().toLowerCase()
       : '';
   const resolvedRoute = routeId || routeHintFromRt || routeHintFromRecord || routeNameFromRt;
-  // If the request is already routed to a multimodal/vision capability pool,
-  // do not trigger the legacy vision auto-followup (it causes an unnecessary second hop).
-  if (resolvedRoute === 'vision' || resolvedRoute === 'multimodal') {
+  // `vision` route is the explicit two-hop summary lane:
+  // image -> vision provider -> summary -> servertool followup.
+  // Only `multimodal` means inline native multimodal and should skip this flow.
+  if (resolvedRoute === 'multimodal') {
     return false;
   }
   const followupRaw = (rt as any)?.serverToolFollowup;
@@ -378,11 +387,9 @@ function extractLatestUserMessageForVision(sourceMessages: unknown[]): JsonObjec
 }
 
 function buildVisionSystemMessage(): JsonObject | null {
-  const content =
-    '你是一名专业的图像分析助手。无论输入是界面截图、文档、图表、代码编辑器、应用窗口还是普通照片，都需要先用结构化、详细的自然语言完整描述画面内容（关键区域、文字信息、布局层次、颜色与对比度、元素之间的关系等），然后总结出与用户任务最相关的关键信息和潜在问题，最后给出具体、可执行的改进建议或结论，避免泛泛而谈。';
   return {
     role: 'system',
-    content
+    content: VISION_SYSTEM_PROMPT
   } as JsonObject;
 }
 
@@ -397,37 +404,101 @@ function buildVisionUserMessage(source: JsonObject): JsonObject | null {
   const message: Record<string, unknown> = { role };
 
   if (Array.isArray(rawContent)) {
-    const textParts: unknown[] = [];
-    const imageParts: unknown[] = [];
-
-    for (const part of rawContent) {
-      if (!part || typeof part !== 'object' || Array.isArray(part)) {
-        textParts.push(part);
-        continue;
-      }
-      const record = part as { type?: unknown };
-      const typeValue = typeof record.type === 'string' ? record.type.toLowerCase() : '';
-      if (typeValue.includes('image')) {
-        imageParts.push(part);
-      } else {
-        textParts.push(part);
-      }
-    }
-
-    const combined: unknown[] = [];
-    if (textParts.length) combined.push(...textParts);
-    if (imageParts.length) combined.push(...imageParts);
-
-    if (!combined.length) {
+    const imageParts = extractImageParts(rawContent);
+    if (!imageParts.length) {
       return null;
     }
-
-    message.content = combined;
+    message.content = [
+      {
+        type: 'input_text',
+        text: buildVisionPromptHint(rawContent)
+      },
+      ...imageParts
+    ];
   } else if (typeof rawContent === 'string' && rawContent.trim().length) {
-    message.content = rawContent.trim();
+    return null;
   } else {
     return null;
   }
 
   return message as JsonObject;
+}
+
+function extractImageParts(rawContent: unknown[]): JsonObject[] {
+  const imageParts: JsonObject[] = [];
+  for (const part of rawContent) {
+    if (!part || typeof part !== 'object' || Array.isArray(part)) {
+      continue;
+    }
+    const record = part as { type?: unknown };
+    const typeValue = typeof record.type === 'string' ? record.type.toLowerCase() : '';
+    if (!typeValue.includes('image')) {
+      continue;
+    }
+    imageParts.push(cloneJson(part as JsonObject));
+  }
+  return imageParts;
+}
+
+function buildVisionPromptHint(rawContent: unknown): string {
+  const prompt = extractUserPromptFromContent(rawContent);
+  return [
+    '用户原始提示词如下，它只用于帮助你理解关注重点：',
+    prompt || '（无文本提示词）',
+    '',
+    '请根据这个提示词理解用户想关注什么，但不要回答该问题，不要做任何处理，只描述图片中可见内容。',
+    '若有多张图片，请按顺序分别输出，格式为 [Image 1]、[Image 2]。'
+  ].join('\n');
+}
+
+function extractUserPromptFromContent(rawContent: unknown): string {
+  if (typeof rawContent === 'string') {
+    return rawContent.trim();
+  }
+  if (!Array.isArray(rawContent)) {
+    return '';
+  }
+  const textParts: string[] = [];
+  for (const part of rawContent) {
+    if (typeof part === 'string') {
+      const text = part.trim();
+      if (text) {
+        textParts.push(text);
+      }
+      continue;
+    }
+    if (!part || typeof part !== 'object' || Array.isArray(part)) {
+      continue;
+    }
+    const typeValue =
+      typeof (part as { type?: unknown }).type === 'string'
+        ? String((part as { type?: unknown }).type).trim().toLowerCase()
+        : '';
+    if (typeValue.includes('image')) {
+      continue;
+    }
+    const record = part as Record<string, unknown>;
+    for (const key of ['text', 'input_text', 'output_text', 'content']) {
+      const value = record[key];
+      if (typeof value === 'string' && value.trim()) {
+        textParts.push(value.trim());
+        break;
+      }
+    }
+  }
+  return textParts.join('\n').trim();
+}
+
+function extractOriginalUserPrompt(messages: JsonObject[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) {
+      continue;
+    }
+    const role = (msg as { role?: unknown }).role;
+    if (typeof role === 'string' && role.trim().toLowerCase() === 'user') {
+      return extractUserPromptFromContent((msg as { content?: unknown }).content);
+    }
+  }
+  return '';
 }

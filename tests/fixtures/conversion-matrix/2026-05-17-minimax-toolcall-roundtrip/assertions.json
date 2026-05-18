@@ -1,0 +1,12 @@
+{
+  "case": "2026-05-17-minimax-toolcall-roundtrip",
+  "direction": [
+    "request-roundtrip",
+    "response-roundtrip"
+  ],
+  "assert": {
+    "preserve_tools_when_tool_choice_requires": true,
+    "preserve_tool_choice_shape": true,
+    "preserve_tool_call_pairing": true
+  }
+}

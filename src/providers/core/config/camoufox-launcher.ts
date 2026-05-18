@@ -13,6 +13,7 @@ import { logOAuthDebug } from '../../auth/oauth-logger.js';
 import {
   CAMO_CLICK_TARGETS,
   clickCamoGoogleAccountByHint,
+  fillGoogleIdentifierByHint,
   hasCamoGoogleSignInPrompt,
   clickCamoGoogleSignInBySelector,
   clickCamoTarget,
@@ -310,7 +311,7 @@ function buildProfileId(provider?: string | null, alias?: string | null): string
 }
 
 const DISABLED_CAMOUFOX_AUTO_MODE = new Set(['0', 'false', 'no', 'off', 'manual', 'none']);
-const REMOVED_CAMOUFOX_AUTO_MODE = new Set(['qwen']);
+const REMOVED_CAMOUFOX_AUTO_MODE = new Set<string>();
 
 function resolveDefaultCamoufoxAutoMode(provider?: string | null): string {
   const family = getProviderFamily(provider);
@@ -353,6 +354,14 @@ function resolvePreferredOAuthProfileId(
   alias?: string | null,
   explicitProfileId?: string | null
 ): string {
+  const envProfile = String(
+    process.env.ROUTECODEX_CAMOUFOX_OAUTH_PROFILE_ID ||
+    process.env.RCC_CAMOUFOX_OAUTH_PROFILE_ID ||
+    ''
+  ).trim();
+  if (envProfile) {
+    return envProfile;
+  }
   const explicit = String(explicitProfileId || '').trim();
   if (explicit) {
     return explicit;
@@ -1142,7 +1151,16 @@ async function maybeAdvanceGoogleAuth(options: {
       retryDelayMs,
       required: autoModeEnabled && hasEmailHint
     });
-    if (!hintClicked) {
+    if (!hintClicked && hasEmailHint) {
+      const typedByHint = await fillGoogleIdentifierByHint(options.actionContext, accountHint, {
+        retries: signInRetryCount,
+        retryDelayMs: signInRetryDelayMs,
+        required: autoModeEnabled
+      });
+      if (!typedByHint) {
+        return false;
+      }
+    } else if (!hintClicked) {
       return false;
     }
   }

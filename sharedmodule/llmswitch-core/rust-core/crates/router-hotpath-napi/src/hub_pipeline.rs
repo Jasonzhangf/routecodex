@@ -461,6 +461,71 @@ fn build_router_metadata_input(input: &Value) -> Result<Value, String> {
     }
 
     if let Some(metadata_obj) = metadata_node.as_object() {
+        if let Some(route_policy_group) = metadata_obj
+            .get("routecodexRoutingPolicyGroup")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+        {
+            out.insert(
+                "routecodexRoutingPolicyGroup".to_string(),
+                Value::String(route_policy_group),
+            );
+        }
+
+        if let Some(routecodex_local_port) = metadata_obj
+            .get("routecodexLocalPort")
+            .and_then(|v| v.as_i64())
+        {
+            out.insert(
+                "routecodexLocalPort".to_string(),
+                Value::Number(routecodex_local_port.into()),
+            );
+        }
+
+        if let Some(routecodex_port_mode) = metadata_obj
+            .get("routecodexPortMode")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+        {
+            out.insert(
+                "routecodexPortMode".to_string(),
+                Value::String(routecodex_port_mode),
+            );
+        }
+
+        if let Some(routecodex_port_binding) = metadata_obj
+            .get("routecodexPortBinding")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+        {
+            out.insert(
+                "routecodexPortBinding".to_string(),
+                Value::String(routecodex_port_binding),
+            );
+        }
+
+        if let Some(allowed_providers) = metadata_obj
+            .get("allowedProviders")
+            .and_then(|v| v.as_array())
+        {
+            let normalized: Vec<Value> = allowed_providers
+                .iter()
+                .filter_map(|entry| entry.as_str())
+                .map(|entry| entry.trim().to_string())
+                .filter(|entry| !entry.is_empty())
+                .map(Value::String)
+                .collect();
+            if !normalized.is_empty() {
+                out.insert(
+                    "allowedProviders".to_string(),
+                    Value::Array(normalized),
+                );
+            }
+        }
+
         if let Some(forced_provider_key) = metadata_obj
             .get("__shadowCompareForcedProviderKey")
             .and_then(|v| v.as_str())
@@ -3702,6 +3767,56 @@ mod tests {
                     .filter_map(|entry| entry.as_str())
                     .collect::<Vec<_>>()),
             Some(vec!["qwen.1", "qwen.2"])
+        );
+    }
+
+    #[test]
+    fn test_build_router_metadata_input_preserves_routecodex_port_routing_metadata() {
+        let input = json!({
+            "requestId": "req-4",
+            "metadata": {
+                "routecodexRoutingPolicyGroup": "gateway_priority_5555",
+                "routecodexLocalPort": 5555,
+                "routecodexPortMode": "router",
+                "routecodexPortBinding": "dbittai-gpt.key1.gpt-5.3-codex",
+                "allowedProviders": [
+                    "dbittai-gpt",
+                    "mini27",
+                    "",
+                    null
+                ]
+            }
+        });
+        let output = build_router_metadata_input(&input).expect("router metadata input");
+        let row = output.as_object().expect("output object");
+        assert_eq!(
+            row.get("routecodexRoutingPolicyGroup")
+                .and_then(|v| v.as_str()),
+            Some("gateway_priority_5555")
+        );
+        assert_eq!(
+            row.get("routecodexLocalPort")
+                .and_then(|v| v.as_i64()),
+            Some(5555)
+        );
+        assert_eq!(
+            row.get("routecodexPortMode")
+                .and_then(|v| v.as_str()),
+            Some("router")
+        );
+        assert_eq!(
+            row.get("routecodexPortBinding")
+                .and_then(|v| v.as_str()),
+            Some("dbittai-gpt.key1.gpt-5.3-codex")
+        );
+        assert_eq!(
+            row.get("allowedProviders")
+                .and_then(|v| v.as_array())
+                .map(|items| items
+                    .iter()
+                    .filter_map(|entry| entry.as_str())
+                    .collect::<Vec<_>>()),
+            Some(vec!["dbittai-gpt", "mini27"])
         );
     }
 

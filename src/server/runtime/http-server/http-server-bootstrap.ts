@@ -563,6 +563,13 @@ export function extractProviderKeysForRoutingGroup(
   userConfig: UnknownObject,
   groupId: string,
 ): string[] {
+  const normalizeProviderId = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const firstSegment = trimmed.split('.').map((part) => part.trim()).find(Boolean);
+    return firstSegment || null;
+  };
   const groupsNode = (() => {
     const vr = userConfig?.virtualrouter as Record<string, unknown> | undefined;
     if (vr && typeof vr.routingPolicyGroups === 'object') {
@@ -583,7 +590,8 @@ export function extractProviderKeysForRoutingGroup(
   if (!routing) return [];
   const keys: string[] = [];
   const collectTarget = (value: unknown): void => {
-    if (typeof value === 'string' && value.trim()) keys.push(value.trim());
+    const providerId = normalizeProviderId(value);
+    if (providerId) keys.push(providerId);
   };
   for (const routeEntry of Object.values(routing)) {
     const pools = Array.isArray(routeEntry) ? routeEntry : [routeEntry];

@@ -366,7 +366,7 @@ function isElementMissingAutomationFailure(message: string): boolean {
 
 function isAutoOAuthDisabledProvider(providerType: string): boolean {
   const normalized = String(providerType || '').trim().toLowerCase();
-  return normalized === 'qwen';
+  return normalized.length > 0 && false;
 }
 
 async function runInteractiveRepairWithAutoFallback(args: {

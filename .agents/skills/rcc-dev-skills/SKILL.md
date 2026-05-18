@@ -203,6 +203,49 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - 2026-05-16（Jason 约束）：新增且必要的文档与代码，默认直接纳入 track（git add）；不再为“是否加入跟踪”单独询问。
 ## PipeDebug 诊断流程
 
+### 回归样本抽取与自动化（2026-05-17）
+
+#### 何时必须抽样（触发条件）
+满足任一条件就必须抽取真实样本进入 `tests/fixtures/` 并接入 matrix：
+1. 同类错误出现第 2 次（例如重复 `400 tool_choice requires tools`、`EMPTY_ASSISTANT_RESPONSE`）。
+2. 命中工具链关键失败（tools 丢失、tool_choice 形状异常、tool_call/tool_result 配对断裂）。
+3. 命中跨协议 roundtrip 失败（responses<>chat<>anthropic/gemini/openai-chat 首尾语义不等价）。
+4. 命中 servertool/stopless/followup 链路异常（必须有 live sample 回放）。
+
+#### 抽取来源与最小文件集
+优先从真实运行样本目录抽取（不要手造）：
+- `~/.rcc/codex-samples/**/req_*/provider-request*.json`
+- `~/.rcc/codex-samples/**/req_*/provider-response*.json`
+- 必要时补 `__runtime.json`（用于 route/tool gating 证据）
+
+每条 fixture 至少包含：
+1. `request`（上游发送前真实 payload）
+2. `response`（上游返回真实 payload）
+3. `expectation`（要验证的 shape 断言，不写业务语义猜测）
+
+#### 目录与命名规范（强制）
+- 目录：`tests/fixtures/conversion-matrix/<yyyy-mm-dd>-<case-slug>/`
+- 文件：
+  - `provider-request.json`
+  - `provider-response.json`
+  - `assertions.json`（仅写 shape contract）
+- case-slug 必须包含错误关键字：如 `tool-choice-without-tools` / `empty-assistant-output`。
+
+#### 自动抽取执行步骤（固定流程）
+1. 用 requestId 在 `~/.rcc/codex-samples`/`~/.rcc/errorsamples` 定位原始目录。
+2. 执行自动抽取脚本复制最小文件集到 `tests/fixtures/conversion-matrix/...`：
+   `node scripts/tests/extract-conversion-matrix-fixture.mjs --source-dir="<req_dir>" --case="<case-slug>"`
+3. 在 `tests/sharedmodule/responses-cross-protocol-audit-matrix.spec.ts` 增加 `it.each(fixtures)` 驱动用例：
+   - request roundtrip 断言
+   - response roundtrip 断言
+   - tools/tool_choice/tool_call_id 连续性断言
+4. 运行定向回归；失败即阻断，不允许“先合并后补样本”。
+
+#### 边界规则
+- 只做 **shape contract** 断言：字段存在性、类型、配对关系、首尾协议等价。
+- 禁止把“模型内容质量”写进该 matrix（避免把非确定性内容当回归门禁）。
+- 样本若含敏感信息，做最小脱敏（key/token/path），但不得改动结构与字段关系。
+
 ### 错误请求复测铁律（先复测，再结论）
 
 1. **先抓原样本，不准盲改**

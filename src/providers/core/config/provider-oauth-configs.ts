@@ -9,6 +9,8 @@ import { OAuthDeviceFlowStrategyFactory } from '../strategies/oauth-device-flow.
 import { OAuthAuthCodeFlowStrategyFactory } from '../strategies/oauth-auth-code-flow.js';
 import { OAuthHybridFlowStrategyFactory } from '../strategies/oauth-hybrid-flow.js';
 
+let oauthConfigsInitialized = false;
+
 function registerOAuthFlowFactories(): void {
   OAuthFlowConfigManager.registerFlowFactory(OAuthFlowType.DEVICE_CODE, new OAuthDeviceFlowStrategyFactory());
   OAuthFlowConfigManager.registerFlowFactory(OAuthFlowType.AUTHORIZATION_CODE, new OAuthAuthCodeFlowStrategyFactory());
@@ -49,14 +51,19 @@ function registerProviderOAuthConfigs(): void {
 }
 
 export function initializeOAuthConfigs(): void {
+  if (oauthConfigsInitialized) {
+    return;
+  }
   registerOAuthFlowFactories();
   registerProviderOAuthConfigs();
+  oauthConfigsInitialized = true;
 }
 
 export function getProviderOAuthConfig(
   providerId: string,
   overrides: Record<string, unknown> = {}
 ): OAuthFlowConfig {
+  initializeOAuthConfigs();
   return OAuthFlowConfigManager.createConfig(providerId, overrides);
 }
 

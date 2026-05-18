@@ -103,6 +103,20 @@ export function extractEntryEndpoint(source: unknown): string | undefined {
   return undefined;
 }
 
+export function extractResponsesDirectPassthroughFlag(source: unknown): boolean {
+  if (!source || typeof source !== 'object') {
+    return false;
+  }
+  const metadata = (source as { metadata?: unknown }).metadata;
+  if (metadata && typeof metadata === 'object') {
+    const candidate = (metadata as Record<string, unknown>).__responsesDirectPassthrough;
+    if (candidate === true) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function extractSubmitToolOutputsPayload(request: UnknownObject): SubmitToolOutputsPayload | null {
   if (!request || typeof request !== 'object') {
     return null;

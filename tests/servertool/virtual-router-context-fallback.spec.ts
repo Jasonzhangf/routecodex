@@ -147,4 +147,54 @@ describe('virtual-router context routing fallback', () => {
     const picked = engine.route(request, metadata).target.providerKey;
     expect([providerA, providerB]).toContain(picked);
   });
+
+  it('keeps unique provider routable even when routing filters would otherwise exhaust pool', () => {
+    const soleProvider = 'mock.sole.gpt-5.2';
+
+    const engine = new VirtualRouterEngine();
+    engine.initialize({
+      routing: {
+        default: [{ id: 'primary', targets: [soleProvider], priority: 100, mode: 'priority' }]
+      },
+      providers: {
+        [soleProvider]: {
+          providerKey: soleProvider,
+          providerType: 'responses',
+          endpoint: 'https://example.invalid',
+          auth: { type: 'apiKey', value: 'test' },
+          outboundProfile: 'openai-responses',
+          modelId: 'gpt-5.2',
+          serverToolsDisabled: true
+        }
+      },
+      classifier: {
+        longContextThresholdTokens: 180000,
+        thinkingKeywords: [],
+        backgroundKeywords: []
+      },
+      loadBalancing: { strategy: 'priority' },
+      health: { maxFailures: 3, cooldownMs: 5_000, fatalCooldownMs: 10_000 }
+    } as any);
+
+    const request: any = {
+      model: 'gpt-5.2',
+      messages: [{ role: 'user', content: 'tool request' }],
+      tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }],
+      parameters: {},
+      metadata: { originalEndpoint: '/v1/responses' }
+    };
+
+    const metadata: any = {
+      requestId: 'req_ctx_single_provider_guard',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      routeHint: 'default',
+      serverToolRequired: true,
+      excludedProviderKeys: [soleProvider]
+    };
+
+    const routed = engine.route(request, metadata);
+    expect(routed.target.providerKey).toBe(soleProvider);
+    expect(routed.decision.reasoning).toContain('single-provider-guard');
+  });
 });

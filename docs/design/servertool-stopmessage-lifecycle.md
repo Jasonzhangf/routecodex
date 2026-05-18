@@ -1,10 +1,10 @@
-# ServerTool / StopMessage Lifecycle (tmux-only)
+# ServerTool / Stopless Lifecycle (tmux-only, simplified)
 
 ## 1. Scope
 
 This document defines the only valid lifecycle for:
 
-- `stopMessage`
+- simplified stopless auto-continue
 - `clock` client injection
 - `continue_execution` client injection
 
@@ -12,7 +12,7 @@ Design goals:
 
 1. Trigger logic stays in Chat Process response orchestration.
 2. Execution path is tmux stdin injection only.
-3. `stopMessage` does not use nested reenter model requests.
+3. stopless does not use nested reenter model requests.
 4. State is scoped by `tmux:<sessionId>` only.
 
 ## 2. Current Code Entry Points
@@ -29,36 +29,35 @@ Design goals:
 1. Client starts via `routecodex codex` / `routecodex claude` inside tmux.
 2. Client request carries tmux metadata (`tmuxSessionId` family fields / headers).
 3. Server resolves tmux session and marks `clientInjectReady=true`.
-4. User sends `<**sm:...**>` instruction.
-5. Chat-process parser saves instruction state under `tmux:<sessionId>`.
-6. Model response reaches response orchestration.
-7. StopMessage matcher runs in chat-process servertool stage.
-8. If matched, build reviewer followup text.
-9. Dispatch to client injection (tmux stdin) directly.
-10. Injection success: increment `used`, keep/update state.
-11. Injection failure: clear stopMessage state for that tmux scope, skip followup.
-12. Main request must still complete (no request-level hard failure only because stopMessage inject failed).
+4. stopless default state exists under `tmux:<sessionId>`.
+5. Model response reaches response orchestration.
+6. stopless matcher runs in chat-process servertool stage.
+7. If `finish_reason=stop`:
+   - `/goal active` => skip
+   - `/goal non-active` => inject `继续执行`
+   - non-`/goal` => inject `继续执行`
+8. Dispatch to client injection (tmux stdin) directly.
+9. Injection success: increment `used`, keep/update state.
+10. Injection failure: clear stopless state for that tmux scope, skip followup.
+11. Main request must still complete.
 
 ## 4. Hard Rules
 
 1. Split dispatch:
 - Normal servertools (e.g. search/vision) may use `reenterPipeline`.
-- `stopMessage/clock/continue_execution` must use client injection dispatcher only.
+- simplified stopless / `clock` / `continue_execution` must use client injection dispatcher only.
 
 2. Continue-execution stripping:
 - `continue_execution` 的 tool_call 对客户端必须透明；响应侧在 chat process 的
   `resp_process_stage2_finalize` 统一剥离该 tool_call，并将对应 choice 的
   `finish_reason` 从 `tool_calls` 修正为 `stop`。
 
-2. No fallback:
+3. No fallback:
 - No old session-based fallback compare.
 - No daemon-only fallback for stopMessage matching.
 
-3. Scope:
+4. Scope:
 - All stopMessage state read/write keys are `tmux:<sessionId>`.
-
-4. Set behavior:
-- If tmux scope missing when setting stopMessage: drop set instruction, keep request normal.
 
 5. Trigger behavior:
 - If tmux not ready at trigger time: clear stale state and skip followup (no loop).

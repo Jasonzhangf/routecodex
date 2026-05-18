@@ -65,6 +65,13 @@ function validateUpdateGoalArguments(parsed: Record<string, unknown> | null) {
       missingFields: ['status']
     });
   }
+  if (String(parsed.status).trim().toLowerCase() !== 'complete') {
+    return buildToolValidationFailure({
+      reason: 'invalid_status',
+      message: 'update_goal requires status=\"complete\".',
+      missingFields: ['status']
+    });
+  }
   return { ok: true, normalizedArgs: JSON.stringify(parsed) };
 }
 

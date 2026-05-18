@@ -76,6 +76,81 @@ describe('servertool followup request builder', () => {
     expect(texts).toEqual(expect.arrayContaining(['[Image omitted]', '[Vision] a cat']));
   });
 
+  test('rebuild_vision_followup rewrites single-image request into summary plus original prompt', () => {
+    const capturedChatRequest: any = {
+      model: 'gpt-test',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: '帮我看这张图里的版本号' },
+            { type: 'input_image', image_url: 'data:image/png;base64,AAA' }
+          ]
+        }
+      ],
+      parameters: {}
+    };
+
+    const followup: any = buildServerToolFollowupChatPayloadFromInjection({
+      adapterContext: { capturedChatRequest },
+      chatResponse: { id: 'resp', choices: [] } as any,
+      injection: {
+        ops: [
+          {
+            op: 'rebuild_vision_followup',
+            summary: '- 顶部显示版本号 v1.2.3',
+            originalPrompt: '帮我看这张图里的版本号'
+          }
+        ]
+      } as any
+    });
+
+    expect(followup).toBeTruthy();
+    expect(followup.messages).toHaveLength(1);
+    expect(followup.messages[0]).toEqual({
+      role: 'user',
+      content: '图片内容为：\n[Image]:\n- 顶部显示版本号 v1.2.3\n\n用户请求：\n帮我看这张图里的版本号'
+    });
+  });
+
+  test('rebuild_vision_followup preserves multi-image numbering in summary payload', () => {
+    const capturedChatRequest: any = {
+      model: 'gpt-test',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: '比较两张图版本号差异' },
+            { type: 'input_image', image_url: 'data:image/png;base64,AAA' },
+            { type: 'input_image', image_url: 'data:image/png;base64,BBB' }
+          ]
+        }
+      ],
+      parameters: {}
+    };
+
+    const followup: any = buildServerToolFollowupChatPayloadFromInjection({
+      adapterContext: { capturedChatRequest },
+      chatResponse: { id: 'resp', choices: [] } as any,
+      injection: {
+        ops: [
+          {
+            op: 'rebuild_vision_followup',
+            summary: '[Image 1]:\n- 第一张版本号 v1.2.3\n\n[Image 2]:\n- 第二张版本号 v1.2.4',
+            originalPrompt: '比较两张图版本号差异'
+          }
+        ]
+      } as any
+    });
+
+    expect(followup).toBeTruthy();
+    expect(followup.messages).toHaveLength(1);
+    expect(followup.messages[0]).toEqual({
+      role: 'user',
+      content: '图片内容为：\n[Image 1]:\n- 第一张版本号 v1.2.3\n\n[Image 2]:\n- 第二张版本号 v1.2.4\n\n用户请求：\n比较两张图版本号差异'
+    });
+  });
+
   test('append_user_text followup scrubs historical image payloads before marker analysis', () => {
     const capturedChatRequest: any = {
       model: 'gpt-test',

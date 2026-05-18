@@ -302,7 +302,7 @@ fn normalize_model_capabilities(value: Option<&Value>) -> Option<HashMap<String,
                             return None;
                         }
                         let mapped = match normalized.as_str() {
-                            "vision" => "multimodal".to_string(),
+                            "vision" => "vision".to_string(),
                             "websearch" | "web-search" => "web_search".to_string(),
                             "websearch-direct" | "web_search_direct" | "web-search-direct" => {
                                 "web_search_direct".to_string()

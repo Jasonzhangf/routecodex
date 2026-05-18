@@ -2027,6 +2027,9 @@ async function main(): Promise<void> {
     console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
   });
 
+  // Memory observer — periodic heap diagnostics for leak detection
+  const { startMemoryObserver } = await import('./utils/memory-observer.js');
+  startMemoryObserver();
   // Start the server
   await app.start();
   startParentExitGuard(app);
