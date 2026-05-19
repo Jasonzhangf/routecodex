@@ -238,6 +238,17 @@ export async function runReenterFollowup(args: {
   | { kind: 'completed'; result: { chat: JsonObject; executed: true; flowId?: string } }
   | { kind: 'followup_body'; followupBody?: JsonObject }
 > {
+  const resolveFollowupBodyCandidate = (
+    followup: { body?: JsonObject; __sse_responses?: unknown; format?: string } | undefined
+  ): JsonObject | undefined => {
+    if (!followup || typeof followup !== 'object') {
+      return undefined;
+    }
+    if (followup.body && typeof followup.body === 'object') {
+      return followup.body as JsonObject;
+    }
+    return undefined;
+  };
   const RED = '\u001b[31m';
   const RESET = '\u001b[0m';
   const shouldLogFollowupLifecycleStage = (stage: string): boolean => {
@@ -392,16 +403,14 @@ export async function runReenterFollowup(args: {
           })
       );
       disconnectWatcher.cancel();
+      const attemptBodyCandidate = resolveFollowupBodyCandidate(followup);
       lifecycle('attempt_result', {
         attempt,
-        hasBody: Boolean(followup && followup.body && typeof followup.body === 'object'),
+        hasBody: Boolean(attemptBodyCandidate),
         hasSse: Boolean(followup && (followup as Record<string, unknown>).__sse_responses)
       });
       if (args.retryEmptyFollowupOnce) {
-        const body =
-          followup && followup.body && typeof followup.body === 'object'
-            ? (followup.body as JsonObject)
-            : undefined;
+        const body = attemptBodyCandidate;
         if (body && args.isEmptyClientResponsePayload(body)) {
           lastEmptyFollowupBody = body;
           void persistEmptyFollowupSample({
@@ -536,10 +545,7 @@ export async function runReenterFollowup(args: {
     }
   }
 
-  const followupBody =
-    followup && followup.body && typeof followup.body === 'object'
-      ? (followup.body as JsonObject)
-      : undefined;
+  const followupBody = resolveFollowupBodyCandidate(followup);
   const terminalLastError = lastError && isTerminalFollowupError(lastError) ? lastError : undefined;
   if (terminalLastError && !followupBody) {
     if (args.isStopMessageFlow) {

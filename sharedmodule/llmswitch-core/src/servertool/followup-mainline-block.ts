@@ -222,7 +222,6 @@ export async function runFollowupMainline(args: {
   }
 
   const metadata: JsonObject = {
-    stream: false,
     ...(args.execution.followup.metadata ?? {})
   };
   const followupInjectionPlan =

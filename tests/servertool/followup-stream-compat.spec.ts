@@ -1,0 +1,37 @@
+import { describe, expect, test } from '@jest/globals';
+import { Readable } from 'node:stream';
+
+import { reenterServerToolBackend } from '../../sharedmodule/llmswitch-core/src/servertool/reenter-backend.js';
+import { isEmptyClientResponsePayload } from '../../sharedmodule/llmswitch-core/src/servertool/followup-response-block.js';
+
+describe('servertool followup stream compatibility', () => {
+  test('reenter backend does not force stream=false when metadata stream is not provided', async () => {
+    const reenterPipeline = async (options: {
+      entryEndpoint: string;
+      requestId: string;
+      body: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+    }) => ({ body: { ok: true, metadata: options.metadata } });
+
+    const result = await reenterServerToolBackend({
+      reenterPipeline,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req_followup_stream_compat_1',
+      body: { model: 'gpt-5.3-codex', input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }] },
+      providerProtocol: 'openai-responses',
+      metadata: {}
+    });
+
+    const metadata = (result.body as Record<string, unknown>).metadata as Record<string, unknown>;
+    expect(metadata.stream).toBeUndefined();
+    expect((metadata.__rt as Record<string, unknown>).serverToolFollowup).toBe(true);
+  });
+
+  test('empty-check treats sse wrapper payload as non-empty for downstream decode path', () => {
+    const payload = {
+      __sse_responses: Readable.from(['event: message\ndata: {"type":"response.completed"}\n\n'])
+    } as Record<string, unknown>;
+    expect(isEmptyClientResponsePayload(payload)).toBe(false);
+  });
+});
+

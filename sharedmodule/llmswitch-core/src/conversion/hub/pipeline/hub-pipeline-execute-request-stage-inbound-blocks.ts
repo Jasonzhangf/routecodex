@@ -68,8 +68,10 @@ export async function captureInboundContextSnapshot<TContext = Record<string, un
       rawRequest: args.rawRequest,
       adapterContext: args.inboundAdapterContext,
     });
-    // Inline persistResponsesConversationRequestContext
-    {
+    const providerProtocol = resolveHubClientProtocolWithNative(args.inboundAdapterContext.entryEndpoint);
+    if (providerProtocol === "openai-responses") {
+      // Persist conversation context only for responses protocol.
+      // Capturing non-responses requests here leaks requestMap entries with no response_id lifecycle.
       const reqId = typeof args.inboundAdapterContext.requestId === 'string'
         ? args.inboundAdapterContext.requestId.trim() : undefined;
       if (reqId) {

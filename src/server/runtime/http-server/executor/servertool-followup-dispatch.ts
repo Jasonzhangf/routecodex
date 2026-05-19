@@ -284,13 +284,30 @@ function materializeFollowupRequestSemantics(args: {
     || Boolean(fromMetadata.followupSource)
     || Boolean(fromBaseMetadata.followupSource);
   const followupSource = fromMetadata.followupSource ?? fromBaseMetadata.followupSource;
-  const stoplessGoalStatus = fromMetadata.stoplessGoalStatus ?? fromBaseMetadata.stoplessGoalStatus;
+  const stoplessGoalStatus =
+    fromMetadata.stoplessGoalStatus
+    ?? fromBaseMetadata.stoplessGoalStatus
+    ?? readManagedStoplessGoalStatusFromSemantics(args.requestSemantics);
+  const goalActive = stoplessGoalStatus === 'active';
 
   if (!args.requestSemantics && !serverToolFollowup && !followupSource && !stoplessGoalStatus) {
     return undefined;
   }
 
   const nextSemantics = cloneJsonRecord((args.requestSemantics ?? {}) as Record<string, unknown>);
+  if (goalActive) {
+    const routecodex =
+      nextSemantics.__routecodex && typeof nextSemantics.__routecodex === 'object' && !Array.isArray(nextSemantics.__routecodex)
+        ? ({ ...(nextSemantics.__routecodex as Record<string, unknown>) } as Record<string, unknown>)
+        : {};
+    delete routecodex.serverToolFollowup;
+    delete routecodex.serverToolFollowupSource;
+    nextSemantics.__routecodex = {
+      ...routecodex,
+      stoplessGoalStatus: 'active'
+    };
+    return nextSemantics;
+  }
   if (!serverToolFollowup && !followupSource && !stoplessGoalStatus) {
     return nextSemantics;
   }

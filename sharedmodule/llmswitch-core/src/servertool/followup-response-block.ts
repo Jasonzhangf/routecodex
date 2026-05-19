@@ -57,6 +57,12 @@ export function isEmptyClientResponsePayload(payload: JsonObject): boolean {
   if (!payload || typeof payload !== 'object') {
     return true;
   }
+  if (
+    Object.prototype.hasOwnProperty.call(payload as Record<string, unknown>, '__sse_responses')
+    || Object.prototype.hasOwnProperty.call(payload as Record<string, unknown>, '__sse_stream')
+  ) {
+    return false;
+  }
   if (Object.prototype.hasOwnProperty.call(payload as Record<string, unknown>, 'error')) {
     return false;
   }

@@ -19,7 +19,6 @@ export async function reenterServerToolBackend(args: {
     typeof args.routeHint === 'string' && args.routeHint.trim().length ? args.routeHint.trim() : undefined;
   const merged: JsonObject = {
     providerProtocol: args.providerProtocol as any,
-    stream: false,
     ...(routeHint ? { routeHint } : {}),
     ...(args.metadata ?? {})
   };

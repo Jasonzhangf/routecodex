@@ -616,6 +616,51 @@ describe('servertool followup dispatch helper', () => {
     );
   });
 
+  it('disables servertool followup semantics when stopless goal is active (from request semantics)', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: { body: input.body, metadata: input.metadata }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_followup_dispatch_goal_active_disables_followup',
+      body: {
+        model: 'gpt-5.3-codex',
+        max_tokens: 8192,
+        input: 'continue'
+      },
+      metadata: {
+        __rt: {
+          serverToolFollowup: true,
+          clientInjectSource: 'servertool.stop_message'
+        }
+      },
+      requestSemantics: {
+        stoplessGoalState: { status: 'active' },
+        __routecodex: {
+          serverToolFollowup: true,
+          serverToolFollowupSource: 'servertool.stop_message'
+        }
+      },
+      executeNested
+    });
+
+    const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
+    const routecodex = (nestedInput?.metadata?.requestSemantics as any)?.__routecodex ?? {};
+    expect(routecodex.stoplessGoalStatus).toBe('active');
+    expect(routecodex.serverToolFollowup).toBeUndefined();
+    expect(routecodex.serverToolFollowupSource).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.__routecodex?.serverToolFollowup).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.__routecodex?.serverToolFollowupSource).toBeUndefined();
+  });
+
   it('reenter path throws when nested pipeline returns HTTP error body instead of success payload', async () => {
     mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
     const executeNested = jest.fn(async () => ({
