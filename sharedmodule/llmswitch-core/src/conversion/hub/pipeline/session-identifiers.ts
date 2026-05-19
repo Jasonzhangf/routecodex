@@ -1,5 +1,5 @@
 import {
-  coerceClientHeadersWithNative,
+  coerceClientHeadersWithNative as __nativeNormalizeClientHeaders,
   extractSessionIdentifiersFromMetadataWithNative,
   findHeaderValueWithNative,
   normalizeHeaderKeyWithNative,
@@ -17,8 +17,8 @@ export function extractSessionIdentifiersFromMetadata(
   return extractSessionIdentifiersFromMetadataWithNative(metadata);
 }
 
-export function coerceClientHeaders(raw: unknown): Record<string, string> | undefined {
-  return coerceClientHeadersWithNative(raw);
+export function normalizeClientHeaders(raw: unknown): Record<string, string> | undefined {
+  return __nativeNormalizeClientHeaders(raw);
 }
 
 export function pickHeader(

@@ -133,6 +133,10 @@ impl ProviderRegistry {
         if let Some(comp) = profile.compatibility_profile.clone() {
             target.insert("compatibilityProfile".to_string(), Value::String(comp));
         }
+        target.insert(
+            "supportsMultimodal".to_string(),
+            Value::Bool(self.has_capability(provider_key, "multimodal")),
+        );
         if let Some(runtime) = profile.runtime_key.clone() {
             target.insert("runtimeKey".to_string(), Value::String(runtime.clone()));
             target.insert(

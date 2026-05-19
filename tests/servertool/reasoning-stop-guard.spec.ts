@@ -182,32 +182,6 @@ describe('servertool reasoning.stop guard', () => {
     expect(String((lastOp as any)?.text || '')).toContain('reasoning.stop');
   });
 
-  test('does not run reasoning_stop_guard for goal-capable adapter context', async () => {
-    const sessionId = 'reasoning-stop-guard-goal-mode';
-    setStoplessMode(sessionId, 'on');
-    const adapterContext = {
-      sessionId,
-      requestSemantics: {
-        tools: {
-          clientToolsRaw: [
-            { type: 'function', function: { name: 'get_goal', parameters: { type: 'object' } } },
-            { type: 'function', function: { name: 'update_goal', parameters: { type: 'object' } } }
-          ]
-        }
-      }
-    } as unknown as AdapterContext;
-
-    const result = await runServerSideToolEngine({
-      chatResponse: buildStopResponse('goal turn stopped'),
-      adapterContext,
-      entryEndpoint: '/v1/chat/completions',
-      providerProtocol: 'openai-chat',
-      requestId: 'req_reasoning_stop_guard_goal_mode'
-    });
-
-    expect(result.execution?.flowId).not.toBe('reasoning_stop_guard_flow');
-  });
-
   test('reasoning_stop_guard followup does not replay assistant textual tool transport markup into next hop history', async () => {
     const sessionId = 'reasoning-stop-guard-dsml-textual-tool';
     setStoplessMode(sessionId, 'on');

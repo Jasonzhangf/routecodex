@@ -201,3 +201,105 @@ fn test_pinned_alias_lookup_and_unpin_json_api() {
     };
 
 }
+
+#[test]
+fn test_strip_latest_chat_media_when_target_is_not_multimodal() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "text-only",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "look"},
+                        {"type": "image_url", "image_url": {"url": "https://example.com/a.png"}}
+                    ]
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: None,
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: None,
+            entry_endpoint: None,
+            route_id: None,
+            rt: Some(json!({ "supportsMultimodal": false })),
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert_eq!(
+        result.payload["messages"][0]["content"],
+        json!([
+            {"type": "text", "text": "look"},
+            {"type": "text", "text": "[Image omitted]"}
+        ])
+    );
+}
+
+#[test]
+fn test_strip_latest_responses_media_when_target_is_not_multimodal() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "text-only",
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "look"},
+                        {"type": "input_image", "image_url": "https://example.com/a.png"}
+                    ]
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: None,
+            provider_protocol: Some("openai-responses".to_string()),
+            request_id: None,
+            entry_endpoint: None,
+            route_id: None,
+            rt: Some(json!({ "supportsMultimodal": false })),
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert_eq!(
+        result.payload["input"][0]["content"],
+        json!([
+            {"type": "input_text", "text": "look"},
+            {"type": "input_text", "text": "[Image omitted]"}
+        ])
+    );
+}

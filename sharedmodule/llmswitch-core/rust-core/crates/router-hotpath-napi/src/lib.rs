@@ -39,9 +39,11 @@ mod gemini_openai_codec;
 mod hub_bridge_actions;
 mod hub_bridge_policies;
 mod hub_chat_envelope_validator;
+// heartbeat directive parser is temporarily disabled (not in active path).
+// Re-enable after dedicated Rust module cleanup lands.
 mod failure_policy;
-mod hub_goal_tools;
 mod hub_pipeline;
+mod hub_provider_response_helpers;
 mod hub_pipeline_session_identifiers;
 mod hub_pipeline_target_utils;
 mod hub_protocol_spec_semantics;
@@ -62,6 +64,7 @@ mod hub_resp_outbound_sse_stream;
 mod hub_semantic_mapper_chat;
 mod hub_snapshot_hooks;
 mod hub_standardized_bridge;
+mod hub_submit_tool_outputs;
 mod hub_text_markup_normalizer;
 mod hub_tool_governance_semantics;
 mod hub_tool_session_compat;
@@ -104,6 +107,23 @@ mod virtual_router_stop_message_instruction;
 mod virtual_router_stop_message_state_codec;
 mod web_search_mode;
 use crate::virtual_router_engine::routing::resolve_sticky_key as resolve_virtual_router_sticky_key;
+
+#[napi(js_name = "resolveHeartbeatDirectiveJson")]
+pub fn resolve_heartbeat_directive_json(input_json: String) -> NapiResult<String> {
+    // Heartbeat directives are temporarily disabled.
+    // Keep native export stable for loader required-exports contract.
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = serde_json::json!({
+        "action": "none",
+        "intervalMs": Value::Null,
+        "tmuxSessionId": Value::Null,
+        "workdir": Value::Null,
+        "contentChanged": false,
+        "messages": input.get("messages").cloned().unwrap_or(Value::Null)
+    });
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct QuotaBucketInputEntry {

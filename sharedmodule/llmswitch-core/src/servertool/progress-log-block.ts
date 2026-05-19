@@ -78,15 +78,20 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     const stage = resolveStage(step, message);
     const result = normalizeResult(message);
     const color = shouldUseGoldProgressHighlight(flowId) ? args.gold : args.yellow;
-    try {
-      console.log(
-        `${color}[servertool] requestId=${args.requestId} tool=${tool} stage=${stage} result=${result}${args.reset}`
-      );
-    } catch (error) {
-      args.logNonBlocking('log_progress_console', error, {
-        requestId: args.requestId,
-        flowId: flowId || 'none'
-      });
+    const isStopMessageFlow = tool === 'stop_message_auto';
+    const isFailure = result.startsWith('failed') || result.includes('error');
+    const shouldPrintConsole = !isStopMessageFlow || isFailure;
+    if (shouldPrintConsole) {
+      try {
+        console.log(
+          `${color}[servertool] requestId=${args.requestId} tool=${tool} stage=${stage} result=${result}${args.reset}`
+        );
+      } catch (error) {
+        args.logNonBlocking('log_progress_console', error, {
+          requestId: args.requestId,
+          flowId: flowId || 'none'
+        });
+      }
     }
     appendServerToolProgressFileEvent({
       requestId: args.requestId,

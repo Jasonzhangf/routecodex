@@ -9,6 +9,7 @@ import type { UnknownObject } from '../../../types/common-types.js';
 export const WINDSURF_DEFAULT_BASE_URL = 'http://localhost:3003';
 export const WINDSURF_DEFAULT_COMPLETION_ENDPOINT = '/v1/chat/completions';
 export const WINDSURF_COMPATIBILITY_PROFILE = 'chat:windsurf';
+export const WINDSURF_DEFAULT_LS_PORT = 42100;
 
 export enum WindsurfErrorCode {
   AUTH_FAILED = 'WINDSURF_AUTH_FAILED',
@@ -33,6 +34,8 @@ export interface WindsurfAccountEntry {
   tokenFile?: string;
 }
 
+export type WindsurfTransportBackend = 'http' | 'grpc';
+
 export interface WindsurfProviderRuntimeOptions {
   enableThinking?: boolean;
   defaultReasoningEffort?: 'xhigh' | 'high' | 'medium' | 'low';
@@ -41,6 +44,16 @@ export interface WindsurfProviderRuntimeOptions {
   toolEmulationStrict?: boolean;
   healthCheckEndpoint?: string;
   healthCheckTimeoutMs?: number;
+  /** gRPC transport: target LS port (default 42100) */
+  lsPort?: number;
+  /** gRPC transport: CSRF token for LS auth */
+  csrfToken?: string;
+  /** Transport mode: 'http' (→:3003) or 'grpc' (→:42100). Default auto-detect. */
+  transportBackend?: WindsurfTransportBackend;
+  /** gRPC poll interval for streaming chunks (ms) */
+  pollIntervalMs?: number;
+  /** gRPC poll max wait (ms) */
+  pollMaxWaitMs?: number;
 }
 
 export function normalizeWindsurfProviderRuntimeOptions(
@@ -58,8 +71,13 @@ export function normalizeWindsurfProviderRuntimeOptions(
     preserveUpstreamIdentity: typeof raw.preserveUpstreamIdentity === 'boolean' ? raw.preserveUpstreamIdentity : undefined,
     toolEmulationStrict: typeof raw.toolEmulationStrict === 'boolean' ? raw.toolEmulationStrict : undefined,
     healthCheckEndpoint: typeof raw.healthCheckEndpoint === 'string' ? raw.healthCheckEndpoint : undefined,
-   healthCheckTimeoutMs: typeof raw.healthCheckTimeoutMs === 'number' && raw.healthCheckTimeoutMs > 0 ? raw.healthCheckTimeoutMs : undefined,
- };
+    healthCheckTimeoutMs: typeof raw.healthCheckTimeoutMs === 'number' && raw.healthCheckTimeoutMs > 0 ? raw.healthCheckTimeoutMs : undefined,
+    lsPort: typeof raw.lsPort === 'number' && raw.lsPort > 0 ? Math.floor(raw.lsPort) : undefined,
+    csrfToken: typeof raw.csrfToken === 'string' ? raw.csrfToken.trim() : undefined,
+    transportBackend: (raw.transportBackend === 'http' || raw.transportBackend === 'grpc') ? raw.transportBackend : undefined,
+    pollIntervalMs: typeof raw.pollIntervalMs === 'number' && raw.pollIntervalMs > 0 ? Math.floor(raw.pollIntervalMs) : undefined,
+    pollMaxWaitMs: typeof raw.pollMaxWaitMs === 'number' && raw.pollMaxWaitMs > 0 ? Math.floor(raw.pollMaxWaitMs) : undefined,
+  };
 }
 
 /** 运行时身份判定：给定字段组合是否命中 Windsurf 家族 */

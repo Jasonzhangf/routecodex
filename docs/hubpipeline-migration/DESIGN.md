@@ -23,25 +23,9 @@ native-compat-action-semantics.ts  ✅ 无 fixApplyPatchToolCallsWithNative expo
 
 **结论**：P1-3 无需操作——legacy fixer 已被清理，validator.ts 纯本地 normalize。
 
-### P1-1 Counter Ledger 语义（Jason 确认）
+### P1-1 Counter Ledger 语义（已废弃）
 
-**两条独立计数链**：
-
-| 计数链 | 触发条件 | 清零时机 |
-|-------|---------|---------|
-| **Codex goal counters** | /goal active 状态 | 进入 active 清零，退出 active 清零，valid tool call 成功后清零 |
-| **RCC consecutiveNoProgress** | RCC stopless 状态 | 进入 stopless 清零，退出 stopless 清零，连续无进度累加，成功后清零 |
-
-**语义规则**：
-- 两条计数链彼此独立，互不干扰
-- `get_goal` / `request_user_input` 是只读接口，**不改 counter**
-- `consecutiveIrrecoverableErrors` / `consecutiveValidationFailures` 属于 RCC stopless 计数
-- `update_goal active` 时清零 Codex counters
-- 连续错误（irrecoverable/validation）累加；遇到成功则清零
-
-**applyGoalLedgersToValidatedProjection 修复方向**：
-- validation 失败时：**不清零** counters（保留计数用于错误上报）
-- valid transition 时：**清零** progress counters（success 释放）
+旧 `/goal` 生命周期计数链已删除；当前只保留 RCC stopless 的独立状态与计数，不再维护 `get_goal/create_goal/update_goal` 相关 ledger。
 - stop / pause / complete：清零当前计数链
 
 ---

@@ -96,6 +96,7 @@ describe('router-direct-pipeline', () => {
       const result = await executeRouterDirectPipeline(input);
       expect(result.used).toBe(true);
       expect(openaiHandle.instance.processIncomingDirect).toHaveBeenCalledTimes(1);
+      expect(openaiHandle.instance.processIncomingDirect).toHaveBeenCalledWith(input.requestPayload);
       const ctx = result.auditContext;
       expect(ctx.observedFields).toBeDefined();
       expect(ctx.originalPayload).toEqual(input.requestPayload);
@@ -198,6 +199,7 @@ describe('router-direct-pipeline', () => {
       const result = await executeRouterDirectPipeline(input);
       expect(result.used).toBe(true);
       expect(handle.instance.processIncomingDirect).toHaveBeenCalledTimes(1);
+      expect(handle.instance.processIncomingDirect).toHaveBeenCalledWith(input.requestPayload);
     });
 
     it('skips when chat inbound targets responses provider', async () => {

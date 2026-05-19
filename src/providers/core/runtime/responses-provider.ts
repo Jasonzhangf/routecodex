@@ -113,11 +113,13 @@ export class ResponsesProvider extends HttpTransportProvider {
     const explicitStream = extractStreamFlagFromBody(finalBody);
     const streamingPreference = this.responsesClient.getStreamingPreference();
     const useSse: boolean =
-      streamingPreference === 'always'
-        ? true
-        : streamingPreference === 'never'
-          ? false
-          : explicitStream === true;
+      explicitStream === false
+        ? false
+        : streamingPreference === 'always'
+          ? true
+          : streamingPreference === 'never'
+            ? false
+            : explicitStream === true;
 
     const providerStream = explicitStream === true;
     this.responsesClient.ensureStreamFlag(finalBody, useSse);

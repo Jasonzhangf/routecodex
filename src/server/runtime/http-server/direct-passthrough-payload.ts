@@ -29,6 +29,12 @@ export function applyMinimalDirectOverrides(
     routeParams?: Record<string, unknown>;
   }
 ): Record<string, unknown> {
-  void options;
+  const providerPayload =
+    options?.providerPayload && isRecord(options.providerPayload)
+      ? (options.providerPayload as Record<string, unknown>)
+      : undefined;
+  if (providerPayload) {
+    return cloneRecord(providerPayload);
+  }
   return cloneRecord(payload);
 }

@@ -565,12 +565,14 @@ describe('servertool followup dispatch helper', () => {
     expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.parallel_tool_calls).toBeUndefined();
     expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.tool_choice).toBeUndefined();
     expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.reasoning).toBeUndefined();
+    expect((nestedInput?.body?.semantics as any)?.responses?.requestParameters?.stream).toBeUndefined();
     expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.model).toBeUndefined();
     expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.max_tokens).toBeUndefined();
     expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.max_output_tokens).toBeUndefined();
     expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.parallel_tool_calls).toBeUndefined();
     expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.tool_choice).toBeUndefined();
     expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.reasoning).toBeUndefined();
+    expect((nestedInput?.metadata?.requestSemantics as any)?.responses?.requestParameters?.stream).toBeUndefined();
     expect((nestedInput?.body?.semantics as any)?.__routecodex?.serverToolFollowup).toBe(true);
     expect((nestedInput?.metadata?.requestSemantics as any)?.__routecodex?.serverToolFollowup).toBe(true);
   });
@@ -644,6 +646,161 @@ describe('servertool followup dispatch helper', () => {
       status: 502,
       requestExecutorProviderErrorStage: 'provider.followup'
     });
+  });
+
+  it('reenter path must not retry when nested followup fails with terminal HTTP 403', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async () => ({
+      status: 403,
+      body: {
+        error: {
+          message: 'HTTP 403: {"error":{"message":"token cannot use model minimax"}}',
+          code: 'HTTP_403',
+          upstreamCode: 'HTTP_403'
+        }
+      }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    await expect(
+      executeServerToolReenterPipeline({
+        entryEndpoint: '/v1/responses',
+        fallbackEntryEndpoint: '/v1/responses',
+        requestId: 'req_followup_dispatch_terminal_403_no_retry',
+        body: { model: 'MiniMax-M2.7', input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }] },
+        metadata: {
+          __shadowCompareForcedProviderKey: 'mini27.key1.MiniMax-M2.7'
+        },
+        executeNested
+      })
+    ).rejects.toMatchObject({
+      code: 'HTTP_403',
+      upstreamCode: 'HTTP_403',
+      status: 403
+    });
+
+    expect(executeNested).toHaveBeenCalledTimes(1);
+  });
+
+  it('reenter path strips SSE accept header when followup payload is non-streaming', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: { headers: input.headers, stream: input.body?.stream }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_followup_dispatch_strip_sse_accept',
+      body: {
+        model: 'gpt-5.3-codex',
+        stream: false,
+        input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }]
+      },
+      metadata: {
+        __rt: { serverToolFollowup: true },
+        clientHeaders: {
+          accept: 'text/event-stream',
+          authorization: 'Bearer test-token',
+          'content-type': 'application/json'
+        }
+      },
+      executeNested
+    });
+
+    const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
+    expect(nestedInput?.body?.stream).toBe(false);
+    expect(nestedInput?.headers?.accept).toBeUndefined();
+    expect(nestedInput?.headers?.authorization).toBe('Bearer test-token');
+    expect(nestedInput?.headers?.['content-type']).toBe('application/json');
+  });
+
+  it('reenter path must not retry when nested followup fails with terminal CONTEXT_LENGTH_EXCEEDED', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async () => ({
+      status: 400,
+      body: {
+        error: {
+          message: '[hub_response] invalid params, context window exceeds limit',
+          code: 'CONTEXT_LENGTH_EXCEEDED',
+          upstreamCode: 'context_length_exceeded'
+        }
+      }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    await expect(
+      executeServerToolReenterPipeline({
+        entryEndpoint: '/v1/responses',
+        fallbackEntryEndpoint: '/v1/responses',
+        requestId: 'req_followup_dispatch_terminal_context_length_no_retry',
+        body: { model: 'MiniMax-M2.7', input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }] },
+        metadata: {
+          __shadowCompareForcedProviderKey: 'mini27.key1.MiniMax-M2.7'
+        },
+        executeNested
+      })
+    ).rejects.toMatchObject({
+      code: 'CONTEXT_LENGTH_EXCEEDED',
+      upstreamCode: 'context_length_exceeded',
+      status: 400
+    });
+
+    expect(executeNested).toHaveBeenCalledTimes(1);
+  });
+
+  it('reenter path strips stale tmux injection metadata from stop_followup reenter requests', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: { metadata: input.metadata }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_followup_dispatch_strip_tmux_metadata',
+      body: {
+        model: 'gpt-5.3-codex',
+        stream: false,
+        input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }]
+      },
+      metadata: {
+        __rt: { serverToolFollowup: true, clientInjectSource: 'servertool.stop_message' },
+        clientInjectOnly: true,
+        clientInjectText: '继续执行',
+        clientTmuxSessionId: 'tmux_legacy',
+        tmuxSessionId: 'tmux_legacy',
+        inboundStream: true,
+        clientAcceptsSse: true,
+        stream: true
+      },
+      executeNested
+    });
+
+    const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
+    expect(nestedInput?.metadata?.clientInjectOnly).toBeUndefined();
+    expect(nestedInput?.metadata?.clientInjectText).toBeUndefined();
+    expect(nestedInput?.metadata?.clientTmuxSessionId).toBeUndefined();
+    expect(nestedInput?.metadata?.tmuxSessionId).toBeUndefined();
+    expect(nestedInput?.metadata?.inboundStream).toBeUndefined();
+    expect(nestedInput?.metadata?.clientAcceptsSse).toBeUndefined();
+    expect(nestedInput?.metadata?.stream).toBeUndefined();
   });
 
 

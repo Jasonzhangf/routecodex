@@ -4,7 +4,6 @@ import type {
 } from "../types/standardized.js";
 import type { NormalizedRequest } from "./hub-pipeline.js";
 import {
-  repairIncompleteToolCalls,
   stripHistoricalImageAttachments,
   stripHistoricalVisualToolOutputs,
 } from "../process/chat-process-media.js";
@@ -20,10 +19,8 @@ export function sanitizeStandardizedRequestMessages(
 ): StandardizedRequest {
   return {
     ...standardizedRequest,
-    messages: repairIncompleteToolCalls(
-      stripHistoricalVisualToolOutputs(
-        stripHistoricalImageAttachments(standardizedRequest.messages),
-      ),
+    messages: stripHistoricalVisualToolOutputs(
+      stripHistoricalImageAttachments(standardizedRequest.messages),
     ),
   };
 }

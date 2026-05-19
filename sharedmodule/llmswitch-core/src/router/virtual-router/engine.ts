@@ -118,26 +118,14 @@ export class VirtualRouterEngine {
       raw = this.nativeProxy.route(JSON.stringify(request), JSON.stringify(nativeMetadata));
     } catch (error) {
       const normalized = normalizeNativeVirtualRouterError(error);
-      const forced = this.tryForceSingleProviderDecisionWhenPoolExhausted(normalized, metadata);
-      if (forced) {
-        return forced;
-      }
       throw normalized;
     }
     if (typeof raw !== 'string') {
       const normalized = normalizeNativeVirtualRouterError(raw);
-      const forced = this.tryForceSingleProviderDecisionWhenPoolExhausted(normalized, metadata);
-      if (forced) {
-        return forced;
-      }
       throw normalized;
     }
     if (raw.startsWith('Error:') || raw.startsWith(VIRTUAL_ROUTER_ERROR_PREFIX)) {
       const normalized = normalizeNativeVirtualRouterError(raw);
-      const forced = this.tryForceSingleProviderDecisionWhenPoolExhausted(normalized, metadata);
-      if (forced) {
-        return forced;
-      }
       throw normalized;
     }
     const parsed = JSON.parse(raw) as {
@@ -163,49 +151,6 @@ export class VirtualRouterEngine {
       });
     }
     return parsed;
-  }
-
-  private tryForceSingleProviderDecisionWhenPoolExhausted(
-    error: Error,
-    metadata: RouterMetadataInput
-  ): { target: TargetMetadata; decision: RoutingDecision; diagnostics: RoutingDiagnostics } | null {
-    if (!(error instanceof VirtualRouterError)) {
-      return null;
-    }
-    const message = String(error.message || '');
-    const isPoolExhausted =
-      error.code === VirtualRouterErrorCode.PROVIDER_NOT_AVAILABLE &&
-      message.includes('No available providers after applying routing instructions');
-    if (!isPoolExhausted) {
-      return null;
-    }
-
-    const keys = this.registry.listKeys();
-    if (keys.length !== 1) {
-      return null;
-    }
-
-    const providerKey = keys[0]!;
-    const target = this.registry.buildTarget(providerKey);
-    const routeName = (typeof metadata.routeHint === 'string' && metadata.routeHint.trim()) || 'default';
-    const reasoning = 'single-provider-guard: preserve unique candidate despite pool filters';
-    const decision: RoutingDecision = {
-      routeName,
-      providerKey,
-      confidence: 1,
-      reasoning,
-      fallback: false,
-      pool: [providerKey]
-    };
-    const diagnostics: RoutingDiagnostics = {
-      routeName,
-      providerKey,
-      reasoning,
-      fallback: false,
-      pool: [providerKey],
-      confidence: 1
-    };
-    return { target, decision, diagnostics };
   }
 
   getStopMessageState(metadata: RouterMetadataInput): StopMessageStateSnapshot | null {

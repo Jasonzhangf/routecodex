@@ -11,6 +11,7 @@ import {
   stripMarkerSyntaxFromText,
   type MarkerSyntaxMatch
 } from '../../shared/marker-lifecycle.js';
+import { resolveHeartbeatDirectiveWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-semantic-mappers.js';
 
 type HeartbeatDirective =
   | { action: 'on' }
@@ -34,23 +35,18 @@ function suffixSanitize(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
-function readTmuxSessionId(
-  primary?: Record<string, unknown> | null,
-  fallback?: Record<string, unknown> | null
-): string | undefined {
+function readTmuxSessionId(source?: Record<string, unknown> | null): string | undefined {
+  if (!source || typeof source !== 'object') {
+    return undefined;
+  }
+  const record = source as Record<string, unknown>;
   const candidates = [
-    primary?.tmuxSessionId,
-    primary?.clientTmuxSessionId,
-    primary?.tmux_session_id,
-    primary?.client_tmux_session_id,
-    fallback?.tmuxSessionId,
-    fallback?.clientTmuxSessionId,
-    fallback?.tmux_session_id,
-    fallback?.client_tmux_session_id,
-    primary?.stopMessageClientInjectSessionScope,
-    primary?.stop_message_client_inject_session_scope,
-    fallback?.stopMessageClientInjectSessionScope,
-    fallback?.stop_message_client_inject_session_scope
+    record.tmuxSessionId,
+    record.clientTmuxSessionId,
+    record.tmux_session_id,
+    record.client_tmux_session_id,
+    record.stopMessageClientInjectSessionScope,
+    record.stop_message_client_inject_session_scope
   ];
   for (const candidate of candidates) {
     if (typeof candidate !== 'string') {
@@ -327,10 +323,18 @@ export async function applyHeartbeatDirectives(
   }
 
   const stripped = stripHeartbeatDirectivesFromContent(targetMessage.content);
-  const directives = stripped.markers
-    .map((marker) => marker.parsed)
-    .filter((directive): directive is HeartbeatDirective => Boolean(directive));
-  if (directives.length < 1 && stripped.content === targetMessage.content) {
+  const nativeDirective = resolveHeartbeatDirectiveWithNative({
+    messages,
+    metadata: metadata || {}
+  });
+  const lastDirective = nativeDirective.action === 'off'
+    ? ({ action: 'off' } as HeartbeatDirective)
+    : nativeDirective.action === 'on' && typeof nativeDirective.interval_ms === 'number'
+      ? ({ action: 'on', intervalMs: nativeDirective.interval_ms } as HeartbeatDirective)
+      : nativeDirective.action === 'on'
+        ? ({ action: 'on' } as HeartbeatDirective)
+        : undefined;
+  if (!lastDirective && stripped.content === targetMessage.content) {
     return request;
   }
 
@@ -340,14 +344,12 @@ export async function applyHeartbeatDirectives(
     content: stripped.content
   };
 
-  const lastDirective = directives[directives.length - 1];
-  const tmuxSessionId = readTmuxSessionId(
-    metadata,
-    request.metadata && typeof request.metadata === 'object' && !Array.isArray(request.metadata)
-      ? (request.metadata as Record<string, unknown>)
-      : null
-  );
-  const workdir = readWorkdirFromRecord(metadata)
+  const tmuxSessionId = typeof nativeDirective.tmux_session_id === 'string' && nativeDirective.tmux_session_id.trim().length
+    ? nativeDirective.tmux_session_id.trim()
+    : readTmuxSessionId(metadata);
+  const workdir = typeof nativeDirective.workdir === 'string' && nativeDirective.workdir.trim().length
+    ? nativeDirective.workdir.trim()
+    : readWorkdirFromRecord(metadata)
     || readWorkdirFromRecord(
       request.metadata && typeof request.metadata === 'object' && !Array.isArray(request.metadata)
         ? (request.metadata as Record<string, unknown>)

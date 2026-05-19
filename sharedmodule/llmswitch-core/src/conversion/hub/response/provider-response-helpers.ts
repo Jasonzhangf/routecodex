@@ -107,7 +107,7 @@ function readStructuredProviderBusinessError(payload: ChatCompletionLike): {
   return null;
 }
 
-export async function coerceClientPayloadToCanonicalChatCompletionOrThrow(args: {
+export async function normalizeClientPayloadToCanonicalChatCompletionOrThrow(args: {
   payload: ChatCompletionLike;
   scope: string;
   context: AdapterContext;

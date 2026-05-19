@@ -92,7 +92,7 @@ export async function maybeRunTransparentBootstrapReplay(args: {
   reenterPipeline?: (options: {
     entryEndpoint: string;
     requestId: string;
-    body: JsonObject;
+    body?: JsonObject;
     metadata?: JsonObject;
   }) => Promise<{ body?: JsonObject; __sse_responses?: unknown; format?: string }>;
   coerceFollowupPayloadStream: (payload: JsonObject, stream: boolean) => JsonObject;

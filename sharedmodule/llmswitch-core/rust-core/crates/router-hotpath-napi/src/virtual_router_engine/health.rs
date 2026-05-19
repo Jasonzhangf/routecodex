@@ -332,7 +332,7 @@ impl Default for ProviderHealthConfigNormalized {
 }
 
 const DEFAULT_FAILURE_THRESHOLD: i64 = 3;
-const DEFAULT_COOLDOWN_MS: i64 = 30 * 60_000;
+pub(crate) const DEFAULT_COOLDOWN_MS: i64 = 30 * 60_000;
 const DEFAULT_FATAL_COOLDOWN_MS: i64 = 120_000;
 
 #[cfg(test)]

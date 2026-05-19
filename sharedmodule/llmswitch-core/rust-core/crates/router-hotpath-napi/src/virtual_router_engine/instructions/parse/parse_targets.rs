@@ -232,41 +232,88 @@ pub(crate) fn parse_target(target: &str) -> Option<InstructionTarget> {
             process_mode: None,
         });
     }
-    let idx = first_dot.unwrap();
-    if idx == 0 || idx >= trimmed.len() - 1 {
+    let parts: Vec<&str> = trimmed
+        .split('.')
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .collect();
+    if parts.is_empty() {
         return None;
     }
-    let provider = trimmed[..idx].trim().to_string();
-    let remainder = trimmed[idx + 1..].trim().to_string();
-    if provider.is_empty() || !is_valid_identifier(&provider) || remainder.is_empty() {
+    let provider = parts[0].to_string();
+    if provider.is_empty() || !is_valid_identifier(&provider) {
         return None;
     }
-    if Regex::new(r"^\d+$").unwrap().is_match(&remainder) {
-        if let Ok(parsed) = remainder.parse::<i64>() {
-            if parsed > 0 {
-                return Some(InstructionTarget {
-                    provider: Some(provider),
-                    key_alias: None,
-                    key_index: Some(parsed),
-                    model: None,
-                    path_length: Some(2),
-                    process_mode: None,
-                });
+    if parts.len() == 1 {
+        return Some(InstructionTarget {
+            provider: Some(provider),
+            key_alias: None,
+            key_index: None,
+            model: None,
+            path_length: Some(1),
+            process_mode: None,
+        });
+    }
+    if parts.len() == 2 {
+        let second = parts[1].to_string();
+        if second.is_empty() {
+            return None;
+        }
+        if Regex::new(r"^\d+$").unwrap().is_match(&second) {
+            if let Ok(parsed) = second.parse::<i64>() {
+                if parsed > 0 {
+                    return Some(InstructionTarget {
+                        provider: Some(provider),
+                        key_alias: None,
+                        key_index: Some(parsed),
+                        model: None,
+                        path_length: Some(2),
+                        process_mode: None,
+                    });
+                }
             }
         }
+        if !Regex::new(r"^[a-zA-Z0-9_.-]+$").unwrap().is_match(&second) {
+            return None;
+        }
+        return Some(InstructionTarget {
+            provider: Some(provider),
+            key_alias: None,
+            key_index: None,
+            model: Some(second),
+            path_length: Some(2),
+            process_mode: None,
+        });
     }
-    if !Regex::new(r"^[a-zA-Z0-9_.-]+$")
-        .unwrap()
-        .is_match(&remainder)
-    {
+
+    let key_alias = parts[1].to_string();
+    if key_alias.is_empty() || !is_valid_identifier(&key_alias) {
+        return None;
+    }
+    let model = parts[2..].join(".");
+    if model.is_empty() || !Regex::new(r"^[a-zA-Z0-9_.-]+$").unwrap().is_match(&model) {
         return None;
     }
     Some(InstructionTarget {
         provider: Some(provider),
-        key_alias: None,
+        key_alias: Some(key_alias),
         key_index: None,
-        model: Some(remainder),
-        path_length: Some(2),
+        model: Some(model),
+        path_length: Some(3),
         process_mode: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_target;
+
+    #[test]
+    fn parse_target_supports_provider_alias_model_triplet() {
+        let parsed = parse_target("mini27.key1.MiniMax-M2.7").expect("must parse");
+        assert_eq!(parsed.provider.as_deref(), Some("mini27"));
+        assert_eq!(parsed.key_alias.as_deref(), Some("key1"));
+        assert_eq!(parsed.model.as_deref(), Some("MiniMax-M2.7"));
+        assert_eq!(parsed.path_length, Some(3));
+    }
 }

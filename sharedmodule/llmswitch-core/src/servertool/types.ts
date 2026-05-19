@@ -61,7 +61,7 @@ export interface ServerSideToolEngineOptions {
   reenterPipeline?: (options: {
     entryEndpoint: string;
     requestId: string;
-    body: JsonObject;
+    body?: JsonObject;
     metadata?: JsonObject;
   }) => Promise<{
     body?: JsonObject;

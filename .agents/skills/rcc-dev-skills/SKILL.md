@@ -13,7 +13,122 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - L81-L100 `diagnosis`: PipeDebug 诊断流程
 - L101-L160 `restart`: 服务器重启与热加载（SIGUSR2）
 - L161-L240 `snapshot-startup`: Snapshot 启动策略（默认轻量 + 显式 stage）
-- L241+ `hard-guard`: fallback / 静默失败治理硬规则
+- L241-L340 `stopless-skeleton`: servertool stopless/followup 骨架、改动点、测试矩阵
+- L341+ `hard-guard`: fallback / 静默失败治理硬规则
+
+## Servertool Stopless/Followup 骨架（唯一改动导航）
+
+### 0) 目标
+- stopless/followup 的请求必须“从同一入口进、同一入口出”：
+  `HTTP /v1/responses -> Hub Pipeline -> servertool orchestration -> reenter /v1/responses`
+- 禁止在半路手工造第二套 payload 语义；只允许基于 origin snapshot 做 delta。
+
+### 1) 分层骨架（按阶段）
+1. **Origin 捕获层（请求进入时）**
+   - 文件：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-adapter-context-metadata-blocks.ts`
+   - 职责：保存 `capturedChatRequest` 到 `adapterContext` + `origin-request-store`
+   - 改这里的触发：followup 重建缺历史/模型/tools
+
+2. **Origin 存储层（生命周期）**
+   - 文件：`sharedmodule/llmswitch-core/src/servertool/origin-request-store.ts`
+   - 职责：按 scope 存取 origin snapshot（TTL + 容量）
+   - 改这里的触发：缓存泄漏、生命周期、跨轮丢 seed
+
+3. **Delta 组装层（唯一构建 followup payload）**
+   - 文件：`sharedmodule/llmswitch-core/src/servertool/followup-origin-delta.ts`
+   - 职责：`seed + injection ops -> followup payload(messages)`，统一 tool/text/system/vision 增量函数
+   - 改这里的触发：tool_call/tool_result 配对错误、文本增量错误、附件/vision 增量错误
+
+4. **Shape 归一层（responses 入口合法化）**
+   - 文件：`sharedmodule/llmswitch-core/src/servertool/followup-shape-guard.ts`
+   - 职责：`messages -> input`、assistant.tool_calls -> function_call、tool -> function_call_output
+   - 改这里的触发：`bodyHasMessages=true bodyHasInput=false`、shape 非法 400
+
+5. **Reenter 执行层（重入 + 重试 + client disconnect）**
+   - 文件：`sharedmodule/llmswitch-core/src/servertool/reenter-followup-block.ts`
+   - 职责：统一 followup 重入、超时、终止条件、失败落盘证据
+   - 改这里的触发：重试风暴、client 断开后仍重试、orphan_tool_result 证据采集
+
+6. **编排层（策略入口）**
+   - 文件：`sharedmodule/llmswitch-core/src/servertool/followup-mainline-block.ts`
+   - 职责：选择 executionMode（reenter/client inject）、拼装 metadata、调用 reenter block
+   - 改这里的触发：不触发 stopless、触发次数策略错误、/goal active 行为错误
+
+### 2) 改动规则（防乱改）
+1. 先判定故障阶段，再改对应唯一层；禁止跨层散改。
+2. payload 语义问题优先查 1-4 层，不要先改 retry/router/provider。
+3. 重试/超时/断开问题只改第 5 层。
+4. stopless 触发策略只改第 6 层（不要在 handler、provider、router 各写一份）。
+
+### 3) 测试矩阵（新增位置固定）
+1. **shape 单元回放**  
+   - `sharedmodule/llmswitch-core/scripts/tests/servertool-followup-shape-replay.mjs`  
+   - 覆盖：text/tool_call/tool_result/multimodal/dedupe
+2. **样本审计（日志+fixture）**  
+   - `scripts/tests/stopless-delta-shape-audit.mjs`  
+   - 覆盖：真实日志里 bodyHasInput/bodyHasMessages 合法性
+3. **黑盒 e2e（当前构建物）**  
+   - `scripts/tests/stopless-followup-blackbox.mjs`  
+   - 覆盖：是否真实触发 followup、是否真正重入 /v1/responses
+4. **故障重放（orphan）**  
+   - `scripts/tests/replay-orphan-followup-sample.mjs`  
+   - 覆盖：已捕获失败样本的 deterministic replay
+5. **origin store 合约测试**  
+   - `tests/servertool/origin-request-store.spec.ts`
+
+### 4) 失败证据固化（必须保留）
+- 文件：`sharedmodule/llmswitch-core/src/servertool/reenter-followup-block.ts`
+- 规则：仅在 `orphan_tool_result` 失败时落盘
+  `tmp/servertool-followup-failures/<followupRequestId>.json`
+- 用途：线上失败 -> 本地 1:1 replay；禁止“凭感觉修”。
+
+## 标准错误处理流程（强制顺序，先测后改）
+
+> 任何 servertool/stopless/followup 问题，一律按以下顺序执行；顺序错误视为流程违规。
+
+### S0. 先定错误类别（不改代码）
+1. shape 错误：`bodyHasMessages=true && bodyHasInput=false`、400 invalid request shape
+2. 配对错误：`orphan_tool_result` / tool_call_id 不匹配
+3. 空响应错误：`SERVERTOOL_EMPTY_FOLLOWUP`
+4. 路由/配额错误：`PROVIDER_NOT_AVAILABLE` / `context_length_exceeded` 等
+
+### S1. 先补测试（不改代码）
+1. **复现测试先红**：必须先新增或更新对应回放测试，让当前问题稳定失败。
+2. 测试入口优先级：
+   - shape/配对：`sharedmodule/llmswitch-core/scripts/tests/servertool-followup-shape-replay.mjs`
+   - 真样本审计：`scripts/tests/stopless-delta-shape-audit.mjs`
+   - 黑盒触发：`scripts/tests/stopless-followup-blackbox.mjs`
+   - 故障回放：`scripts/tests/replay-orphan-followup-sample.mjs` 或新建等价 replay
+3. 没有“先红”的测试证据，不允许进入改代码阶段。
+
+### S2. 固化回归样本（不改业务逻辑）
+1. 把失败请求最小样本固化到可重放位置（request/response/payload）。
+2. 若线上样本难捕获，先加**最小诊断落盘**（仅失败分支）再复现一次抓样本。
+3. 样本必须可由脚本一键重放，不允许人工口头复现。
+
+### S3. 最小修改代码（唯一阶段点）
+1. 只改命中阶段的唯一文件（按上文 1~6 层映射）。
+2. 禁止跨层扩散修复；禁止加 fallback；禁止“顺手优化无关代码”。
+3. 修改后先跑 S1 的红用例，必须转绿。
+
+### S4. 回归闭环（必须）
+1. 定向回归：新补测试 + 相关历史回归全部绿。
+2. 构建链路：`build -> install:global -> restart --port 5555`
+3. 黑盒复验：`stopless-followup-blackbox` 必跑，确认 followup 真实触发。
+4. 日志验收：必须有 `payload_normalized`、`bodyHasInput=true`、`stage=final result=completed` 或明确失败分类。
+
+### S5. 交付报告格式（固定）
+1. 复现证据（哪条测试先红）
+2. 样本固化位置（路径）
+3. 唯一修改点（文件+原因）
+4. 回归结果（哪些测试转绿）
+5. 线上/黑盒验证结论
+
+### 反模式（禁止）
+1. 先改代码再补测试
+2. 没有样本就“猜修复”
+3. 单测绿就宣称线上修复
+4. 一次改多个阶段文件导致真源不清
 
 ## 本技能硬护栏（fallback / 静默失败）
 
@@ -200,6 +315,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - 5555 ban 不生效真源补充（2026-05-18）：如果 **5555/quota 路由**上出现“`provider-switch` 已显示 exclude，但下一轮仍继续命中同 provider”，先看 Rust `virtual_router_engine/engine/events.rs::handle_provider_error()` 是否在 `quota_view.is_some()` 时提前 `return`。这会导致 **provider error 事件根本没进 health_manager / provider-health.json**，表现成“从来没 ban 过”。唯一真修复点就是移除这条 quota 短路，不能去 TS/Host 补第二套 ban。
 - 503 ban 黑盒回归真源（2026-05-18）：这类问题不能只看 unit。必须重放真实链：`/v1/responses -> 5555 router relay -> request-executor -> upstream 503 -> provider-health.json persist -> restart -> 再次请求`。固定回归入口：`node scripts/tests/provider-503-ban-blackbox.mjs`；通过标准是 **第 1 次 hit dbittai 后 reroute 到 crs，第 2 次直接跳过 dbittai，重启后仍跳过 dbittai**。
 - provider failure 黑盒入口更新（2026-05-18）：503/502 统一黑盒入口已收敛为 `node scripts/tests/provider-failure-ban-blackbox.mjs`。默认 gate 503；需要继续追 502 时追加 `--include-502`。
+- 非多模态目标媒体泄漏排查（2026-05-19）：若 forced text-only provider 仍收到 `input_image/image_url`，先查 `hub-pipeline-adapter-context-metadata-blocks.ts` 是否把 metadata `__rt` 整体覆盖掉 target 注入的 `supportsMultimodal=false`。唯一正确修复点是 **adapterContext.__rt 合并且保留 target 派生字段优先级**；不要在 router-direct 或 provider shell 再补第二次 strip。
 - 502 冷却排查门禁（2026-05-18）：若 502 风暴看起来“不进 3 次冷却”，先查 `src/providers/core/runtime/provider-failure-policy-impl.ts::isProviderFailureHealthNeutral()`；这里**绝不能**再把 `classification==='recoverable'` 整体当成 health-neutral，否则 502/500/504 全部不会进入 health_manager。若去掉后仍提前切 backup，则继续追“重复计数/第二 cooldown 面”，不要在别处补 ban。
 - Snapshot 固定文件并发写精华（2026-04-18）：`__runtime.json` 这类**固定文件名**若会被 Rust hook 与 TS mirror 共同落盘，必须使用**create-if-missing / 原子链接或 rename**；禁止对同一路径直接 `fs::write` 覆盖，否则会出现“前半段旧 JSON + 后半段新尾巴”的拼接坏样本。
 - Snapshot 双实现扫描动作（2026-04-18）：排查样本坏文件时，先 grep 同名文件是否同时存在 **native hook 写盘** 与 **host mirror 写盘** 两套实现；如果两边都写同一路径，只允许一边 `create_new`，另一边只能幂等跳过。
@@ -703,11 +819,11 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - **验证铁律**：每条 MAIN_PATH_RISK 必须有三段证据：(1) catch body 原文、(2) 错误传播路径（throw/return+status/console.error）、(3) 调用方如何感知错误。缺一不可。
 - Port-mode /admin/ports 真源排查：若 listener 明明已在 runtime port 启动，但 `/admin/ports` 仍显示磁盘旧端口，先对照 `RouteCodexHttpServer.getPortConfigs()` 的 **src/dist 产物**与 `userConfig.httpserver.port` 覆盖顺序；不要去 PortRegistry 或 handler 层补“显示修复”，那会制造第二真源。
 - Provider-direct relay 边界：`provider-direct-pipeline.ts::convertProtocolForRelay()` 是跨协议 relay 的唯一 owner。若只实现了某几个协议对（当前 `openai-chat ↔ anthropic-messages`），其余组合必须在这里 fail-fast；只改文档或在 transport 末端兜底都不算收口。
-- `/goal` transport boundary（2026-05-14）：遇到 Codex goal tools（`get_goal/create_goal/update_goal/request_user_input`）时，RouteCodex 只能做透明传输；不得 seed/inject/enforce `reasoning.stop`，不得跑 `reasoning_stop_guard`，不得用 stopless finalization 判定 goal 完成。goal-capable 判定真源在 Rust native `hub_goal_tools.rs`，TS 只保留薄壳。
-- managed stopless goal / goal-capable 边界（2026-05-14）：`managed stopless goal` 只代表会话里已有 `stoplessGoalState`，**不等于** 当前请求是 `goal-capable tools`。恢复 followup root tools 时，只有真正 `goal-capable` 才能走 `get_goal/request_user_input` 专用分支；managed goal 仍必须按普通 followup 规则恢复 `exec_command/apply_patch/...`，否则会把真实 client tools 错误缩成 `reasoning.stop` 残影。
+- `/goal` 历史实现拆除边界（2026-05-19）：旧 `goal-capable` 判定链、`hub_goal_tools.rs`、Host 侧 `create_goal/update_goal` 投影与 followup 专用分支都已删除。现在 `/goal` 只允许保留**状态面**（如 `stoplessGoalState` / `/goal active` 检查）与**历史污染 scrub**；若再看到 `goal-capable`、`hub_goal_tools.rs`、`create_goal/update_goal` 执行面，直接按残留旧实现处理并物理删除。
+- managed stopless goal 边界（2026-05-19）：`managed stopless goal` 只表示会话里已有 `stoplessGoalState`，**永远不再**代表某种特殊 tool surface。恢复 followup root tools 时，一律按普通 followup 规则恢复真实 client tools（如 `exec_command/apply_patch/...`）；禁止再走任何 `/goal` 专用 followup 分支。
 - validator shape-only 铁律（2026-05-14）：`provider-response-tool-validation-blocks.ts` 只能做 **object + required fields + primitive type** 校验；禁止在这里做 declared-tool 审计、shell wrapper 修复、apply_patch 多形态兼容猜测、completion evidence 质量判断。若需要连续错误停机/无进展收敛，唯一正确落点是 goal state / runtime owner，不是 validator。
 
-- stopless-goal 边界（2026-05-14）：`provider-response-tool-validation-blocks.ts` 只负责 tool args 最小 shape；`provider-response-converter.ts` 只负责已验证 `create_goal/update_goal` 的状态投影。**连续错误/无进展/forced stopped 不得塞进 validator 或 converter**，必须留给独立 runtime/goal-state owner。
+- stopless-goal 边界（2026-05-19）：`provider-response-tool-validation-blocks.ts` 只负责 tool args 最小 shape；`provider-response-converter.ts` 不再承接旧 `/goal` 生命周期投影。**连续错误/无进展/forced stopped 不得塞进 validator 或 converter**，必须留给独立 runtime/stopless state owner。
 - apply_patch 引导优先级（2026-05-16）：`exec_command` 文案必须把“禁止通过 shell/bash -lc/heredoc 调 apply_patch（含 `apply_patch <<PATCH`）”放在最前面；否则模型会继续把文件编辑塞回 shell。
 - apply_patch shape 一致性铁律（2026-05-16）：请求文案可继续“prefer patch, input alias accepted”，但 Host validator / Rust resp governance / tool validator 的**归一输出必须统一镜像成 `{patch,input}` 同值**；任何一层只吐 `patch`，都会把下游 `missing field input` 假错误重新注回历史。
 - malformed shell-like message history 清理铁律（2026-05-16）：若 `messages[].assistant.tool_calls[*].function.arguments` 对 `exec_command/shell_command` 已不是有效 JSON，且配对 tool 输出已落 `failed to parse function arguments...`，必须在 Rust inbound history normalize **物理删除该 assistant tool_call 与配对 tool message**；只清理 `responses input` 不清理 `messages`，MiniMax 会直接报 `provider_status_2013 invalid function arguments json string`。

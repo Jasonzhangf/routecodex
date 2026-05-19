@@ -19,6 +19,15 @@ function makeSnapshot(overrides?: Partial<OriginSnapshot>): Omit<OriginSnapshot,
     parameters: { temperature: 0.7 },
     entryEndpoint: '/v1/chat/completions',
     providerProtocol: 'openai-chat',
+    capturedChatRequest: {
+      model: 'gpt-4o',
+      input: [
+        {
+          role: 'user',
+          content: [{ type: 'input_text', text: 'hi' }]
+        }
+      ]
+    },
     ...overrides
   };
 }
@@ -73,5 +82,22 @@ describe('origin-request-store', () => {
 
     const loaded = loadOriginSnapshot(SESSION_ID);
     expect(loaded!.model).toBe('gpt-4-turbo');
+  });
+
+  test('snapshot keeps raw capturedChatRequest for followup rebuild', () => {
+    clearOriginSnapshot(SESSION_ID);
+    saveOriginSnapshot(
+      SESSION_ID,
+      makeSnapshot({
+        capturedChatRequest: {
+          model: 'gpt-5.3-codex',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }]
+        } as any
+      })
+    );
+    const loaded = loadOriginSnapshot(SESSION_ID);
+    expect(loaded?.capturedChatRequest).toBeTruthy();
+    expect((loaded?.capturedChatRequest as any)?.model).toBe('gpt-5.3-codex');
+    expect(Array.isArray((loaded?.capturedChatRequest as any)?.input)).toBe(true);
   });
 });

@@ -44,6 +44,10 @@ import {
 } from '../pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.js';
 import { applyResponseBlacklistWithNative } from '../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
 import {
+  hasNewGovernedServerToolCallsWithNative,
+  responsesPayloadRequiresSubmitToolOutputsWithNative
+} from '../../../router/virtual-router/engine-selection/native-hub-pipeline-semantic-mappers.js';
+import {
   measureHubStage,
   peekHubStageTopSummary
 } from '../pipeline/hub-stage-timing.js';
@@ -54,7 +58,7 @@ import {
 import type { ProviderInvoker } from '../../../servertool/types.js';
 import { saveChatProcessSessionActualUsage } from '../process/chat-process-session-usage.js';
 import {
-  coerceClientPayloadToCanonicalChatCompletionOrThrow,
+  normalizeClientPayloadToCanonicalChatCompletionOrThrow,
   maybeCommitClockReservationFromContext,
   resolveProviderResponseContextSignals,
   type ClientProtocol as ResponseClientProtocol,
@@ -208,83 +212,12 @@ function attachHubStageTopToContext(context: AdapterContext, requestId: string):
   };
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function extractServerToolCallSignaturesFromMessage(message: unknown, out: Set<string>): void {
-  const row = asRecord(message);
-  const toolCalls = Array.isArray(row?.tool_calls) ? row.tool_calls : [];
-  for (const entry of toolCalls) {
-    const toolCall = asRecord(entry);
-    const fn = asRecord(toolCall?.function)
-      ?? asRecord(toolCall?.functionCall)
-      ?? asRecord(toolCall?.function_call);
-    const name = typeof fn?.name === 'string' ? fn.name.trim() : '';
-    if (!name || !isRegisteredServerToolName(name)) {
-      continue;
-    }
-    const id = typeof toolCall?.id === 'string' ? toolCall.id.trim() : '';
-    const args =
-      typeof fn?.arguments === 'string'
-        ? fn.arguments
-        : typeof fn?.input === 'string'
-          ? fn.input
-          : typeof fn?.args === 'string'
-            ? fn.args
-            : '';
-    out.add(id || `${name}:${args}`);
-  }
-}
-
-function extractServerToolCallSignatures(payload: unknown): Set<string> {
-  const signatures = new Set<string>();
-  const row = asRecord(payload);
-  const choices = Array.isArray(row?.choices) ? row.choices : [];
-  for (const choice of choices) {
-    const choiceRow = asRecord(choice);
-    extractServerToolCallSignaturesFromMessage(choiceRow?.message, signatures);
-  }
-  const messages = Array.isArray(row?.messages) ? row.messages : [];
-  for (const message of messages) {
-    extractServerToolCallSignaturesFromMessage(message, signatures);
-  }
-  return signatures;
-}
-
 function hasNewGovernedServerToolCalls(beforePayload: unknown, afterPayload: unknown): boolean {
-  const before = extractServerToolCallSignatures(beforePayload);
-  const after = extractServerToolCallSignatures(afterPayload);
-  if (after.size === 0) {
-    return false;
-  }
-  for (const signature of after) {
-    if (!before.has(signature)) {
-      return true;
-    }
-  }
-  return false;
+  return hasNewGovernedServerToolCallsWithNative(beforePayload, afterPayload);
 }
 
 function responsesPayloadRequiresSubmitToolOutputs(payload: unknown): boolean {
-  const row = asRecord(payload);
-  const requiredAction = asRecord(row?.required_action);
-  const submitToolOutputs = asRecord(requiredAction?.submit_tool_outputs);
-  const submitToolCalls = Array.isArray(submitToolOutputs?.tool_calls) ? submitToolOutputs.tool_calls : [];
-  if (submitToolCalls.some((entry) => asRecord(entry))) {
-    return true;
-  }
-  const output = Array.isArray(row?.output) ? row.output : [];
-  return output.some((entry) => {
-    const item = asRecord(entry);
-    if (!item) {
-      return false;
-    }
-    const type = typeof item.type === 'string' ? item.type.trim().toLowerCase() : '';
-    return type === 'function_call' || type === 'tool_call';
-  });
+  return responsesPayloadRequiresSubmitToolOutputsWithNative(payload);
 }
 
 export interface ProviderResponseConversionOptions {
@@ -312,7 +245,7 @@ export interface ProviderResponseConversionOptions {
   reenterPipeline?: (options: {
     entryEndpoint: string;
     requestId: string;
-    body: JsonObject;
+    body?: JsonObject;
     metadata?: JsonObject;
   }) => Promise<ProviderResponseConversionResult>;
   clientInjectDispatch?: (options: {
@@ -480,7 +413,7 @@ export async function convertProviderResponse(
 
   // Hard gate: response-side chat_process requires an OpenAI-chat-like surface (choices[].message).
   // ServerTool followups must never replace the canonical chat completion with a client-protocol shape.
-  effectiveChatResponse = await coerceClientPayloadToCanonicalChatCompletionOrThrow({
+  effectiveChatResponse = await normalizeClientPayloadToCanonicalChatCompletionOrThrow({
     payload: effectiveChatResponse as ChatCompletionLike,
     scope: 'chat_process.response.entry',
     context: options.context,

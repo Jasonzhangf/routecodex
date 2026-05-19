@@ -1,5 +1,6 @@
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../handlers/types.js';
 import { asRecord } from '../provider-utils.js';
+import { isClientDisconnectAbortError } from '../executor-provider.js';
 import { runClientInjectionFlowBeforeReenter } from './client-injection-flow.js';
 import { buildServerToolNestedRequestMetadata } from './servertool-followup-metadata.js';
 import {
@@ -7,7 +8,6 @@ import {
   getNestedFollowupAbortSignal,
   resolveServerToolNestedFollowupTimeoutMs
 } from './servertool-followup-fail-fast.js';
-import { isGoalCapableRequestSemantics } from './goal-capable-request.js';
 
 type ServerToolNestedExecute = (input: PipelineExecutionInput) => Promise<PipelineExecutionResult>;
 
@@ -34,6 +34,35 @@ function computeExponentialBackoffMs(attempt: number): number {
   return SAME_PROVIDER_FOLLOWUP_BACKOFF_BASE_MS * (2 ** (safeAttempt - 1));
 }
 
+function readNumericStatusFromError(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object' || Array.isArray(error)) {
+    return undefined;
+  }
+  const record = error as Record<string, unknown>;
+  const statusCandidates = [record.status, record.statusCode];
+  for (const candidate of statusCandidates) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      return Math.floor(candidate);
+    }
+  }
+  return undefined;
+}
+
+function isTerminalFollowupDispatchError(error: unknown): boolean {
+  const status = readNumericStatusFromError(error);
+  if (typeof status === 'number' && status >= 400 && status < 500) {
+    return true;
+  }
+  if (!error || typeof error !== 'object' || Array.isArray(error)) {
+    return false;
+  }
+  const record = error as Record<string, unknown>;
+  const code = typeof record.code === 'string' ? record.code.trim().toLowerCase() : '';
+  const upstreamCode =
+    typeof record.upstreamCode === 'string' ? record.upstreamCode.trim().toLowerCase() : '';
+  return code === 'provider_not_available' || upstreamCode === 'provider_not_available';
+}
+
 
 function cloneStringHeaders(headers: unknown): Record<string, string> | undefined {
   if (!headers || typeof headers !== 'object' || Array.isArray(headers)) {
@@ -49,6 +78,29 @@ function cloneStringHeaders(headers: unknown): Record<string, string> | undefine
   return Object.keys(cloned).length ? cloned : undefined;
 }
 
+function stripSseRequestHeadersForNonStreamingFollowup(
+  headers: Record<string, string> | undefined,
+  body: Record<string, unknown> | undefined
+): Record<string, string> | undefined {
+  if (!headers) {
+    return headers;
+  }
+  const stream = body?.stream;
+  if (stream !== false) {
+    return headers;
+  }
+  const next: Record<string, string> = {};
+  for (const [headerName, headerValue] of Object.entries(headers)) {
+    const key = headerName.trim().toLowerCase();
+    const value = headerValue.trim().toLowerCase();
+    if (key === 'accept' && value.includes('text/event-stream')) {
+      continue;
+    }
+    next[headerName] = headerValue;
+  }
+  return Object.keys(next).length ? next : undefined;
+}
+
 function asObjectBody(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -57,6 +109,22 @@ function asObjectBody(value: unknown): Record<string, unknown> {
 
 function cloneJsonRecord<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function clonePipelineInputForRetry(input: PipelineExecutionInput): PipelineExecutionInput {
+  const cloned = cloneJsonRecord(input);
+  const sourceMetadata =
+    input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+      ? (input.metadata as Record<string, unknown>)
+      : undefined;
+  const targetMetadata =
+    cloned.metadata && typeof cloned.metadata === 'object' && !Array.isArray(cloned.metadata)
+      ? (cloned.metadata as Record<string, unknown>)
+      : undefined;
+  if (sourceMetadata && targetMetadata && sourceMetadata.clientConnectionState && typeof sourceMetadata.clientConnectionState === 'object') {
+    targetMetadata.clientConnectionState = sourceMetadata.clientConnectionState;
+  }
+  return cloned;
 }
 
 function readToolName(tool: unknown): string {
@@ -254,10 +322,34 @@ function restoreFollowupRootToolsIfNeeded(
   const rootTools = Array.isArray(body.tools) ? body.tools : undefined;
   const fullTools = mergeUniqueTools(clientToolsRaw, semanticsTools);
 
-  if (followupSource === 'servertool.stopless_goal_continue' && !isGoalCapableRequestSemantics(requestSemantics)) {
-    // Non-/goal stopless followup must run with a complete tool set.
-    // Make it happen by force-restoring from semantics tool truth (clientToolsRaw/baseline/canonical),
-    // and merge existing root tools if present.
+  if (!fullTools?.length) {
+    return body;
+  }
+  const rootToolNames = (rootTools ?? []).map((tool) => readToolName(tool)).filter(Boolean);
+  const hasOnlyReasoningStopRoot =
+    rootToolNames.length === 1 && rootToolNames[0] === 'reasoning.stop';
+  const fullToolNameSet = new Set(fullTools.map((tool) => readToolName(tool)).filter(Boolean));
+  const looksLikeGoalToolSet =
+    fullToolNameSet.has('get_goal')
+    && fullToolNameSet.has('update_goal')
+    && fullToolNameSet.has('request_user_input');
+  if (followupSource === 'servertool.reasoning_stop_continue') {
+    const merged = mergeUniqueTools(fullTools, rootTools);
+    if (merged?.length) {
+      return {
+        ...body,
+        tools: merged
+      };
+    }
+    return body;
+  }
+  if (followupSource === 'servertool.reasoning_stop_guard' && hasOnlyReasoningStopRoot) {
+    if (looksLikeGoalToolSet) {
+      return {
+        ...body,
+        tools: fullTools
+      };
+    }
     const merged = mergeUniqueTools(fullTools, rootTools);
     if (merged?.length) {
       return {
@@ -266,11 +358,7 @@ function restoreFollowupRootToolsIfNeeded(
       };
     }
   }
-
-  if (!fullTools?.length) {
-    return body;
-  }
-  if (isGoalCapableRequestSemantics(requestSemantics) || isManagedStoplessGoalRequestSemantics(requestSemantics)) {
+  if (isManagedStoplessGoalRequestSemantics(requestSemantics)) {
     return {
       ...body,
       tools: fullTools
@@ -289,11 +377,51 @@ function restoreFollowupRootToolsIfNeeded(
   };
 }
 
+function stripResponsesOnlyRequestSettings(
+  body: Record<string, unknown>,
+  requestSemantics: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  if (!isServerToolFollowup(requestSemantics)) {
+    return body;
+  }
+  const out: Record<string, unknown> = { ...body };
+  delete out.max_tokens;
+  delete out.max_output_tokens;
+  delete out.parallel_tool_calls;
+  delete out.tool_choice;
+  delete out.reasoning;
+
+  const semantics =
+    out.semantics && typeof out.semantics === 'object' && !Array.isArray(out.semantics)
+      ? ({ ...(out.semantics as Record<string, unknown>) } as Record<string, unknown>)
+      : undefined;
+  const responses =
+    semantics?.responses && typeof semantics.responses === 'object' && !Array.isArray(semantics.responses)
+      ? ({ ...(semantics.responses as Record<string, unknown>) } as Record<string, unknown>)
+      : undefined;
+  const requestParameters =
+    responses?.requestParameters && typeof responses.requestParameters === 'object' && !Array.isArray(responses.requestParameters)
+      ? ({ ...(responses.requestParameters as Record<string, unknown>) } as Record<string, unknown>)
+      : undefined;
+  if (requestParameters) {
+    delete requestParameters.model;
+    delete requestParameters.max_tokens;
+    delete requestParameters.max_output_tokens;
+    delete requestParameters.parallel_tool_calls;
+    delete requestParameters.tool_choice;
+    delete requestParameters.reasoning;
+    responses!.requestParameters = requestParameters;
+    semantics!.responses = responses!;
+    out.semantics = semantics!;
+  }
+  return out;
+}
+
 function cloneNestedBodyWithSemantics(
   body: Record<string, unknown> | undefined,
   requestSemantics: Record<string, unknown> | undefined
 ): Record<string, unknown> {
-  const out = restoreFollowupRootToolsIfNeeded(body ? { ...body } : {}, requestSemantics);
+  let out = restoreFollowupRootToolsIfNeeded(body ? { ...body } : {}, requestSemantics);
   if (
     requestSemantics
     && typeof requestSemantics === 'object'
@@ -302,6 +430,7 @@ function cloneNestedBodyWithSemantics(
   ) {
     out.semantics = requestSemantics;
   }
+  out = stripResponsesOnlyRequestSettings(out, requestSemantics);
   return out;
 }
 
@@ -407,6 +536,17 @@ function buildServerToolNestedInput(args: {
         }
       : undefined
   });
+  if (args.mode === 'reenter' && isServerToolFollowup(materializedRequestSemantics)) {
+    delete nestedMetadata.clientInjectOnly;
+    delete nestedMetadata.clientInjectText;
+    delete nestedMetadata.clientTmuxSessionId;
+    delete nestedMetadata.tmuxSessionId;
+    delete nestedMetadata.clientTmuxTarget;
+    delete nestedMetadata.tmuxTarget;
+    delete nestedMetadata.inboundStream;
+    delete nestedMetadata.clientAcceptsSse;
+    delete nestedMetadata.stream;
+  }
 
   const baseProviderKeyCandidate =
     typeof (args.baseMetadata as Record<string, unknown> | undefined)?.providerKey === 'string'
@@ -417,6 +557,32 @@ function buildServerToolNestedInput(args: {
   const pinnedProviderKey = baseProviderKeyCandidate || extraProviderKeyCandidate;
   if (pinnedProviderKey && !readForcedProviderKey(nestedMetadata)) {
     nestedMetadata.__shadowCompareForcedProviderKey = pinnedProviderKey;
+  }
+  const metadataRequestSemantics =
+    nestedMetadata.requestSemantics && typeof nestedMetadata.requestSemantics === 'object' && !Array.isArray(nestedMetadata.requestSemantics)
+      ? ({ ...(nestedMetadata.requestSemantics as Record<string, unknown>) } as Record<string, unknown>)
+      : undefined;
+  if (metadataRequestSemantics) {
+    const responses =
+      metadataRequestSemantics.responses && typeof metadataRequestSemantics.responses === 'object' && !Array.isArray(metadataRequestSemantics.responses)
+        ? ({ ...(metadataRequestSemantics.responses as Record<string, unknown>) } as Record<string, unknown>)
+        : undefined;
+    const requestParameters =
+      responses?.requestParameters && typeof responses.requestParameters === 'object' && !Array.isArray(responses.requestParameters)
+        ? ({ ...(responses.requestParameters as Record<string, unknown>) } as Record<string, unknown>)
+        : undefined;
+    if (requestParameters) {
+      delete requestParameters.model;
+      delete requestParameters.stream;
+      delete requestParameters.max_tokens;
+      delete requestParameters.max_output_tokens;
+      delete requestParameters.parallel_tool_calls;
+      delete requestParameters.tool_choice;
+      delete requestParameters.reasoning;
+      responses!.requestParameters = requestParameters;
+      metadataRequestSemantics.responses = responses!;
+      nestedMetadata.requestSemantics = metadataRequestSemantics;
+    }
   }
 
   const portModeCandidate =
@@ -441,6 +607,11 @@ function buildServerToolNestedInput(args: {
     };
   }
 
+  const body = cloneNestedBodyWithSemantics(args.body, materializedRequestSemantics);
+  const headers = stripSseRequestHeadersForNonStreamingFollowup(
+    cloneStringHeaders(nestedMetadata.clientHeaders),
+    body
+  ) ?? {};
   return {
     nestedEntry,
     nestedMetadata,
@@ -448,9 +619,9 @@ function buildServerToolNestedInput(args: {
       entryEndpoint: nestedEntry,
       method: 'POST',
       requestId: args.requestId,
-      headers: cloneStringHeaders(nestedMetadata.clientHeaders) ?? {},
+      headers,
       query: {},
-      body: cloneNestedBodyWithSemantics(args.body, materializedRequestSemantics),
+      body,
       metadata: nestedMetadata
     }
   };
@@ -503,17 +674,30 @@ export async function executeServerToolReenterPipeline(args: {
   let nestedResult: PipelineExecutionResult | undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    // Important: each retry must start from an immutable snapshot of nested input.
+    // Downstream pipeline stages may mutate `input.body` in-place (append tool traces, etc.).
+    // Reusing the same object would accumulate history drift across retries.
+    const nestedInputAttempt = clonePipelineInputForRetry(nestedInput);
     try {
-      nestedResult = await awaitNestedExecutionWithFailFast({
-        promise: args.executeNested(nestedInput),
-        abortSignal: getNestedFollowupAbortSignal(nestedMetadata),
+      const attemptResult = await awaitNestedExecutionWithFailFast({
+        promise: args.executeNested(nestedInputAttempt),
+        abortSignal: getNestedFollowupAbortSignal(
+          nestedInputAttempt.metadata as Record<string, unknown> | undefined
+        ),
         timeoutMs: resolveServerToolNestedFollowupTimeoutMs(),
         requestId: args.requestId
       });
-      throwIfNestedPipelineReturnedError(nestedResult);
+      throwIfNestedPipelineReturnedError(attemptResult);
+      nestedResult = attemptResult;
       break;
     } catch (error) {
       lastError = error;
+      if (isClientDisconnectAbortError(error)) {
+        break;
+      }
+      if (isTerminalFollowupDispatchError(error)) {
+        break;
+      }
       const isLastAttempt = attempt >= maxAttempts;
       if (isLastAttempt) {
         break;

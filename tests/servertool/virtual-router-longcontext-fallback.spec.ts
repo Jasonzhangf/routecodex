@@ -1,7 +1,7 @@
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
 
 describe('virtual-router longcontext fallback', () => {
-  it('falls back to default when longcontext pool is depleted (e.g. 429 cooldown)', () => {
+  it('keeps longcontext route when longcontext pool is still available after non-fatal 429', () => {
     const providerLong = 'mock.long.gpt-5.2';
     const providerDefault = 'mock.default.gpt-5.2';
 
@@ -67,7 +67,6 @@ describe('virtual-router longcontext fallback', () => {
     });
 
     const second = engine.route(request, metadata);
-    expect(second.target.providerKey).toBe(providerDefault);
+    expect(second.target.providerKey).toBe(providerLong);
   });
 });
-

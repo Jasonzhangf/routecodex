@@ -131,6 +131,8 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
     const res = new MockResponse();
     const stream = new PassThrough();
+    const clearRequest = jest.fn();
+    (globalThis as Record<string, unknown>).__rccResponsesConversationStore = { clearRequest };
 
     const closed = new Promise<void>((resolve) => {
       res.on('close', () => setTimeout(resolve, 0));
@@ -157,6 +159,8 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[response.sse][req-stream-client-close] client_close'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"closeBeforeStreamEnd":true'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"sawTerminalEvent":false'));
+    expect(clearRequest).toHaveBeenCalledWith('req-stream-client-close');
+    delete (globalThis as Record<string, unknown>).__rccResponsesConversationStore;
   });
 
   it('does not enforce stopless contract inside raw SSE handler path', async () => {
@@ -253,5 +257,49 @@ describe('sendPipelineResponse SSE completion logging', () => {
     const output = chunks.join('');
     expect(output).not.toContain('event: error');
     expect(output).not.toContain('STOPLESS_FINALIZATION_MISSING');
+  });
+
+  it('passes structured non-stream errors through SSE without rewriting them to HTTP_502', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      writeSnapshotViaHooks: async () => undefined
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const chunks: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 503,
+        body: {
+          error: {
+            message: 'Server is still starting',
+            code: 'server_starting'
+          }
+        }
+      } as any,
+      'req-startup-structured-error',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    await finished;
+
+    const output = chunks.join('');
+    expect(output).toContain('event: error');
+    expect(output).toContain('"status":503');
+    expect(output).toContain('"code":"server_starting"');
+    expect(output).toContain('"request_id":"req-startup-structured-error"');
+    expect(output).not.toContain('sse_bridge_error');
+    expect(output).not.toContain('"status":502');
   });
 });

@@ -147,8 +147,7 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                             "stop_message_flow": {
                                 "stickyProvider": true,
                                 "seedLoopPayload": true,
-                                "retryEmptyFollowupOnce": true,
-                                "ignoreRequiresActionFollowup": true
+                                "retryEmptyFollowupOnce": true
                             },
                             "clock_hold_flow": {
                                 "stickyProvider": true,

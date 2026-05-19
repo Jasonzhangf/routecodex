@@ -7,10 +7,8 @@ type StopMessageLoopStateLike = {
 export function evaluateStopMessageLoopGuard(args: {
   loopState: StopMessageLoopStateLike | null;
   nowMs?: number;
-  stageTimeoutMs: number;
   warnThreshold: number;
   failThreshold: number;
-  onStageTimeout: (elapsedMs: number) => never;
   onLoopLimit: (elapsedMs: number, repeatCount: number) => never;
 }): { shouldInjectWarning: boolean } {
   if (!args.loopState) {
@@ -20,10 +18,6 @@ export function evaluateStopMessageLoopGuard(args: {
     typeof args.loopState.startedAtMs === 'number' && Number.isFinite(args.loopState.startedAtMs)
       ? Math.max(0, (args.nowMs ?? Date.now()) - args.loopState.startedAtMs)
       : 0;
-  if (elapsedMs >= args.stageTimeoutMs) {
-    return args.onStageTimeout(elapsedMs);
-  }
-
   const pairRepeatCount =
     typeof args.loopState.stopPairRepeatCount === 'number' && Number.isFinite(args.loopState.stopPairRepeatCount)
       ? Math.max(0, Math.floor(args.loopState.stopPairRepeatCount))

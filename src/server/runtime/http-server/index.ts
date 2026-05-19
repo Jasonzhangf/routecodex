@@ -348,6 +348,12 @@ export class RouteCodexHttpServer {
       },
       getHubPipeline: () => this.hubPipeline,
       getModuleDependencies: () => this.getModuleDependencies(),
+      executeNestedInput: (nestedInput) => this.executePortAwarePipeline(
+        typeof nestedInput.metadata?.routecodexLocalPort === 'number'
+          ? nestedInput.metadata.routecodexLocalPort
+          : undefined,
+        nestedInput
+      ),
       logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => {
         this.logStage(stage, requestId, details);
       },
@@ -1040,7 +1046,6 @@ export class RouteCodexHttpServer {
             : undefined,
       },
     );
-
     // Try the router-direct pipeline
     const directOutcome = await executeRouterDirectPipeline({
       portConfig,

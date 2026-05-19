@@ -39,7 +39,7 @@ export interface ServerToolOrchestrationOptions {
   reenterPipeline?: (options: {
     entryEndpoint: string;
     requestId: string;
-    body: JsonObject;
+    body?: JsonObject;
     metadata?: JsonObject;
   }) => Promise<{
     body?: JsonObject;
@@ -64,7 +64,6 @@ export interface ServerToolOrchestrationResult {
   flowId?: string;
 }
 
-const STOP_MESSAGE_STAGE_TIMEOUT_MS = 900_000;
 const STOP_MESSAGE_LOOP_WARN_THRESHOLD = 5;
 const STOP_MESSAGE_LOOP_FAIL_THRESHOLD = 10;
 
@@ -250,7 +249,6 @@ export async function runServerToolOrchestration(
     finalChatResponse: engineResult.finalChatResponse,
     flowId,
     totalSteps,
-    stopMessageStageTimeoutMs: STOP_MESSAGE_STAGE_TIMEOUT_MS,
     stopMessageLoopWarnThreshold: STOP_MESSAGE_LOOP_WARN_THRESHOLD,
     stopMessageLoopFailThreshold: STOP_MESSAGE_LOOP_FAIL_THRESHOLD,
     stageRecorder: options.stageRecorder,

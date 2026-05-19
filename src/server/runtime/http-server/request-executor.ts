@@ -232,6 +232,7 @@ export type RequestExecutorDeps = {
   };
   getHubPipeline(): HubPipeline | null;
   getModuleDependencies(): ModuleDependencies;
+  executeNestedInput?: (input: PipelineExecutionInput) => Promise<PipelineExecutionResult>;
   logStage(stage: string, requestId: string, details?: Record<string, unknown>): void;
   shouldLogStageEvent?(stage: string): boolean;
   stats: StatsManager;
@@ -927,7 +928,12 @@ export class HubRequestExecutor implements RequestExecutor {
             source: 'provider_response',
             attempt
           }));
-          const usageFromProvider = extractUsageFromResult(normalized, mergedMetadata);
+          const usageFromProvider = extractUsageFromResult(normalized, {
+            ...mergedMetadata,
+            providerProtocol,
+            providerType: handle.providerType,
+            providerKey: target.providerKey
+          });
           logStage('provider.usage_extract.completed', input.requestId, {
             providerKey: target.providerKey,
             source: 'provider_response',
@@ -1234,7 +1240,11 @@ export class HubRequestExecutor implements RequestExecutor {
   }): Promise<PipelineExecutionResult> {
     return convertProviderResponseWithBridge(options, {
       runtimeManager: this.deps.runtimeManager,
-      executeNested: (nestedInput) => this.execute(nestedInput)
+      executeNested: (nestedInput) => (
+        this.deps.executeNestedInput
+          ? this.deps.executeNestedInput(nestedInput)
+          : this.execute(nestedInput)
+      )
     });
   }
 

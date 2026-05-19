@@ -13,6 +13,7 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
 
 export type OriginSnapshot = {
+  capturedChatRequest?: JsonObject;
   model?: string;
   messages: JsonObject[];
   tools?: JsonObject[];
@@ -26,6 +27,27 @@ export type OriginSnapshot = {
 
 // In-memory store (Phase 1); tmux/file persistence follows in Phase 2
 const snapshotStore = new Map<string, OriginSnapshot>();
+const MAX_ORIGIN_SNAPSHOTS = 512;
+const ORIGIN_SNAPSHOT_TTL_MS = 30 * 60 * 1000;
+
+function pruneExpiredSnapshots(now = Date.now()): void {
+  for (const [key, snapshot] of snapshotStore.entries()) {
+    if (!snapshot || !Number.isFinite(snapshot.savedAt) || now - snapshot.savedAt > ORIGIN_SNAPSHOT_TTL_MS) {
+      snapshotStore.delete(key);
+    }
+  }
+}
+
+function trimSnapshotStoreToCapacity(): void {
+  if (snapshotStore.size <= MAX_ORIGIN_SNAPSHOTS) {
+    return;
+  }
+  const entries = [...snapshotStore.entries()].sort((a, b) => a[1].savedAt - b[1].savedAt);
+  const deleteCount = Math.max(0, entries.length - MAX_ORIGIN_SNAPSHOTS);
+  for (let i = 0; i < deleteCount; i += 1) {
+    snapshotStore.delete(entries[i][0]);
+  }
+}
 
 /**
  * Save an origin request snapshot by session scope.
@@ -39,11 +61,13 @@ export function saveOriginSnapshot(
     return false;
   }
   const key = sessionScope.trim();
+  pruneExpiredSnapshots();
   snapshotStore.set(key, {
     ...snapshot,
     sessionScope: key,
     savedAt: Date.now()
   });
+  trimSnapshotStoreToCapacity();
   return true;
 }
 
@@ -55,6 +79,7 @@ export function loadOriginSnapshot(sessionScope: string): OriginSnapshot | undef
   if (!sessionScope || typeof sessionScope !== 'string' || !sessionScope.trim()) {
     return undefined;
   }
+  pruneExpiredSnapshots();
   return snapshotStore.get(sessionScope.trim());
 }
 
@@ -65,6 +90,7 @@ export function hasOriginSnapshot(sessionScope: string): boolean {
   if (!sessionScope || typeof sessionScope !== 'string' || !sessionScope.trim()) {
     return false;
   }
+  pruneExpiredSnapshots();
   return snapshotStore.has(sessionScope.trim());
 }
 

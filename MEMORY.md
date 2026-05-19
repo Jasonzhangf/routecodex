@@ -1512,11 +1512,6 @@ Tags: mimo, save-restore, mirror-assistant, chat-process-request-sanitizer, shap
 
 Tags: anthropic, tool_use, empty-assistant, request-executor-response-contract, shape-normalization, no-sentence-matching, no-second-surface, 2026-05-13
 
-## 2026-05-14 `/goal` transport vs stopless boundary
-
-- `/goal` 代理承接的唯一正确边界是 **goal-capable tools transport**：识别 `get_goal/create_goal/update_goal/request_user_input` 后，RouteCodex 只保真传输 tools / tool_calls / tool_outputs / followup payload；goal 生命周期、续轮与完成判定归 Codex runtime。禁止把 `reasoning.stop` 重命名或映射成 `/goal`。
-- llmswitch-core 的 goal-capable 判定真源在 Rust native（`router-hotpath-napi/src/hub_goal_tools.rs`）；TS 只允许薄壳调用。goal mode 下必须跳过 stopless seed、reasoning.stop 注入、reasoning_stop_guard、stopless finalization missing；旧 stopless 只能作为 non-goal legacy 保留并由回归测试覆盖。
-
 - 2026-05-14: client tool validator 边界必须固定为 **shape-only**。可复用规则：`provider-response-tool-validation-blocks.ts` 只允许检查 JSON object、required fields、基础 primitive type；禁止做 tool declared 审计、禁止修 shell wrapper、禁止把 `input.input/input.patches` 猜成 `apply_patch.patch`、禁止审 evidence/summary 质量。runtime 治理（连续错误/无进展/forced stopped）必须放在 goal state owner，不准塞回 validator。
 
 Tags: validator, shape-only, no-audit, no-compat-guess, goal-state-owner, 2026-05-14

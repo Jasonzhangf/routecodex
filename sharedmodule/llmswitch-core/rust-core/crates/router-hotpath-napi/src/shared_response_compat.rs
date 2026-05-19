@@ -658,14 +658,14 @@ pub fn normalize_tool_call_ids_json(payload_json: String) -> NapiResult<String> 
 /// Input: JSON object with optional messages array.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SanitizeMessagesOutput {
-    messages: Vec<Value>,
-    removed_assistant_turns: i64,
-    removed_empty_assistant_turns: i64,
-    removed_template_assistant_turns: i64,
-    removed_duplicate_mirror_assistant_turns: i64,
-    removed_historical_goal_turns: i64,
-    did_mutate_message_shapes: bool,
+pub(crate) struct SanitizeMessagesOutput {
+    pub(crate) messages: Vec<Value>,
+    pub(crate) removed_assistant_turns: i64,
+    pub(crate) removed_empty_assistant_turns: i64,
+    pub(crate) removed_template_assistant_turns: i64,
+    pub(crate) removed_duplicate_mirror_assistant_turns: i64,
+    pub(crate) removed_historical_goal_turns: i64,
+    pub(crate) did_mutate_message_shapes: bool,
 }
 
 fn extract_message_text(content: &Value) -> String {
@@ -701,7 +701,10 @@ fn is_template_assistant_text(text: &str) -> bool {
         || (n.contains("i'm ready to help you with whatever you need") && n.contains("what would you like me to do"))
 }
 
-fn is_goal_tool_name(name: &str) -> bool {
+// Legacy /goal transport cleanup only.
+// This is not an executable goal lifecycle anymore; it only strips stale
+// historical goal-control turns from old saved history before the latest user turn.
+fn is_legacy_goal_tool_name(name: &str) -> bool {
     matches!(
         name.trim().to_ascii_lowercase().as_str(),
         "get_goal" | "create_goal" | "update_goal" | "request_user_input"
@@ -751,7 +754,7 @@ fn read_assistant_tool_call_goal_ids(msg: &Value) -> Option<Vec<String>> {
             .and_then(|v| v.as_str())
             .map(|v| v.trim().to_ascii_lowercase())
             .unwrap_or_default();
-        if !is_goal_tool_name(&name) {
+        if !is_legacy_goal_tool_name(&name) {
             return None;
         }
         let Some(call_id) = tool_row
@@ -827,7 +830,7 @@ fn should_drop_historical_goal_turn(
 
     if message_type == "function_call" {
         let name = read_message_name(msg);
-        if is_goal_tool_name(&name) {
+        if is_legacy_goal_tool_name(&name) {
             if let Some(call_id) = read_message_call_id(msg) {
                 dropped_goal_call_ids.insert(call_id);
             }
@@ -849,7 +852,7 @@ fn should_drop_historical_goal_turn(
 
     if role == "tool" {
         let name = read_message_name(msg);
-        if is_goal_tool_name(&name) {
+        if is_legacy_goal_tool_name(&name) {
             return true;
         }
     }
@@ -895,7 +898,7 @@ fn collect_mirror_indices(messages: &[Value]) -> Vec<bool> {
     result
 }
 
-fn sanitize_chat_process_messages_value(input: &Value) -> SanitizeMessagesOutput {
+pub(crate) fn sanitize_chat_process_messages_value(input: &Value) -> SanitizeMessagesOutput {
     let messages = match input.get("messages").and_then(|v| v.as_array()) {
         Some(a) => a.clone(),
         None => return SanitizeMessagesOutput { messages: vec![], removed_assistant_turns: 0, removed_empty_assistant_turns: 0, removed_template_assistant_turns: 0, removed_duplicate_mirror_assistant_turns: 0, removed_historical_goal_turns: 0, did_mutate_message_shapes: false },

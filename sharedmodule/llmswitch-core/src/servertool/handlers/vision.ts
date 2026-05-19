@@ -2,18 +2,14 @@ import type { JsonObject } from '../../conversion/hub/types/json.js';
 import type { ServerSideToolEngineOptions, ServerToolBackendPlan, ServerToolBackendResult, ServerToolHandler, ServerToolHandlerContext, ServerToolHandlerPlan } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
 import { bindServertoolContractWithNative, cloneJson, extractTextFromChatLike } from '../server-side-tools.js';
-import {
-  extractCapturedChatSeed
-} from '../followup-seed.js';
+import { extractCapturedChatSeed } from '../followup-seed.js';
 import { containsImageAttachment } from '../../conversion/hub/process/chat-process-media.js';
 import { reenterServerToolBackend } from '../reenter-backend.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
-
 const FLOW_ID = 'vision_flow';
 const VISION_SYSTEM_PROMPT = bindServertoolContractWithNative(
   '你现在的任务只是描述图片内容，不要回答用户问题，不要提供建议，不要推理求解，不要做工具规划。用户提示词只用于帮助你理解关注重点；你只能描述图片中可见的信息。若有文字、数字、时间、版本号、路径、报错、界面结构，请尽量详细描述。看不清的内容明确说明无法辨认。若有多张图片，请按输入顺序分别输出，格式使用 [Image 1]、[Image 2]。'
 );
-
 const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promise<ServerToolHandlerPlan | null> => {
   if (!ctx.capabilities.reenterPipeline) {
     return null;
@@ -21,17 +17,14 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
   if (!shouldRunVisionFlow(ctx)) {
     return null;
   }
-
   const captured = getCapturedRequest(ctx.adapterContext);
   if (!captured) {
     return null;
   }
-
   const analysisPayload = buildVisionAnalysisPayload(captured);
   if (!analysisPayload) {
     return null;
   }
-
   const backend: ServerToolBackendPlan = {
     kind: 'vision_analysis',
     requestIdSuffix: ':vision',
@@ -97,40 +90,83 @@ export async function executeVisionBackendPlan(args: {
   if (!options.reenterPipeline) {
     return { kind: 'vision_analysis', response: {} };
   }
+  const pinnedMetadata = buildPinnedVisionBackendMetadata(options.adapterContext, plan.payload);
   const response = await reenterServerToolBackend({
     reenterPipeline: options.reenterPipeline,
     entryEndpoint: plan.entryEndpoint,
     requestId: `${options.requestId}${plan.requestIdSuffix}`,
     body: plan.payload,
     providerProtocol: 'openai-chat',
-    routeHint: 'vision'
+    routeHint: 'vision',
+    ...(pinnedMetadata ? { metadata: pinnedMetadata } : {})
   });
   return { kind: 'vision_analysis', response };
 }
 
+function buildPinnedVisionBackendMetadata(
+  adapterContext: unknown,
+  payload: JsonObject
+): JsonObject | undefined {
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    return undefined;
+  }
+  const record = adapterContext as Record<string, unknown>;
+  const target =
+    record.target && typeof record.target === 'object' && !Array.isArray(record.target)
+      ? (record.target as Record<string, unknown>)
+      : undefined;
+  const providerKey =
+    readNonEmptyString(target?.providerKey)
+    ?? readNonEmptyString(target?.providerId)
+    ?? readNonEmptyString(record.targetProviderKey)
+    ?? readNonEmptyString(record.providerKey);
+  const modelId =
+    readNonEmptyString(target?.modelId)
+    ?? readNonEmptyString(record.assignedModelId)
+    ?? readNonEmptyString(record.modelId)
+    ?? readNonEmptyString(record.originalModelId)
+    ?? (typeof payload.model === 'string' && payload.model.trim() ? payload.model.trim() : undefined);
+  const routecodexPortMode = readNonEmptyString(record.routecodexPortMode);
+
+  if (!providerKey && !modelId && !routecodexPortMode) {
+    return undefined;
+  }
+
+  const metadata: Record<string, unknown> = {};
+  if (providerKey) {
+    metadata.__shadowCompareForcedProviderKey = providerKey;
+    metadata.providerKey = providerKey;
+    metadata.targetProviderKey = providerKey;
+  }
+  if (modelId) {
+    metadata.assignedModelId = modelId;
+    metadata.modelId = modelId;
+    metadata.target = {
+      ...(providerKey ? { providerKey } : {}),
+      modelId
+    };
+    payload.model = modelId;
+  }
+  if (routecodexPortMode) {
+    metadata.routecodexPortMode = routecodexPortMode;
+  }
+  return metadata as JsonObject;
+}
+function readNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
 function shouldRunVisionFlow(ctx: ServerToolHandlerContext): boolean {
   const record = ctx.adapterContext as unknown as Record<string, unknown>;
   const rt = readRuntimeMetadata(record);
-  const routeId =
-    typeof (ctx.adapterContext as { routeId?: unknown }).routeId === 'string'
-      ? String((ctx.adapterContext as { routeId?: unknown }).routeId).trim().toLowerCase()
-      : '';
-  const routeHintFromRt =
-    typeof (rt as any)?.routeHint === 'string'
-      ? String((rt as any).routeHint).trim().toLowerCase()
-      : '';
-  const routeHintFromRecord =
-    typeof (record as any).routeHint === 'string'
-      ? String((record as any).routeHint).trim().toLowerCase()
-      : '';
-  const routeNameFromRt =
-    typeof (rt as any)?.routeName === 'string'
-      ? String((rt as any).routeName).trim().toLowerCase()
-      : '';
+  const routeId = typeof (ctx.adapterContext as { routeId?: unknown }).routeId === 'string' ? String((ctx.adapterContext as { routeId?: unknown }).routeId).trim().toLowerCase() : '';
+  const routeHintFromRt = typeof (rt as any)?.routeHint === 'string' ? String((rt as any).routeHint).trim().toLowerCase() : '';
+  const routeHintFromRecord = typeof (record as any).routeHint === 'string' ? String((record as any).routeHint).trim().toLowerCase() : '';
+  const routeNameFromRt = typeof (rt as any)?.routeName === 'string' ? String((rt as any).routeName).trim().toLowerCase() : '';
   const resolvedRoute = routeId || routeHintFromRt || routeHintFromRecord || routeNameFromRt;
-  // `vision` route is the explicit two-hop summary lane:
-  // image -> vision provider -> summary -> servertool followup.
-  // Only `multimodal` means inline native multimodal and should skip this flow.
   if (resolvedRoute === 'multimodal') {
     return false;
   }
@@ -143,57 +179,44 @@ function shouldRunVisionFlow(ctx: ServerToolHandlerContext): boolean {
   if (isImageGenerationRequest(record, rt, captured)) {
     return false;
   }
-
   const seed = captured ? extractCapturedChatSeed(captured) : null;
-  const hasImageAttachment = Boolean(
-    seed && Array.isArray(seed.messages) && containsImageAttachment(seed.messages as any)
-  );
+  const hasImageAttachment = Boolean(seed && Array.isArray(seed.messages) && containsImageAttachment(seed.messages as any));
   if (!hasImageAttachment) {
     return false;
   }
-  const hasVideoAttachment =
-    latestUserTurnContainsVideo(seed && Array.isArray(seed.messages) ? (seed.messages as unknown[]) : []) ||
-    record.hasVideoAttachment === true ||
-    (rt as any)?.hasVideoAttachment === true;
+  const hasVideoAttachment = latestUserTurnContainsVideo(seed && Array.isArray(seed.messages) ? (seed.messages as unknown[]) : []) || record.hasVideoAttachment === true || (rt as any)?.hasVideoAttachment === true;
   if (hasVideoAttachment) {
     return false;
   }
-
-  // 若当前已经使用具备内建多模态能力的 Provider（例如 Gemini/Claude/ChatGPT 路径），
-  // 且未显式 forceVision，则不再触发额外的 vision 二跳，避免同一轮请求跑两次。
   const forceVision = record.forceVision === true || record.forceVision === 'true';
   if (forceVision) {
     return true;
   }
-
-  const providerType =
-    typeof record.providerType === 'string' ? record.providerType.toLowerCase() : '';
-  const providerProtocol =
-    typeof record.providerProtocol === 'string' ? record.providerProtocol.toLowerCase() : '';
-  const modelId =
-    typeof record.modelId === 'string'
-      ? record.modelId.trim().toLowerCase()
-      : typeof record.assignedModelId === 'string'
-        ? record.assignedModelId.trim().toLowerCase()
-        : '';
-
-  const inlineMultimodal =
-    providerType === 'gemini' ||
-    providerType === 'responses' ||
-    providerProtocol === 'gemini-chat' ||
-    providerProtocol === 'openai-responses';
-
+  if (resolveInlineMultimodalSupport(record, rt)) {
+    return false;
+  }
+  const providerType = typeof record.providerType === 'string' ? record.providerType.toLowerCase() : '';
+  const providerProtocol = typeof record.providerProtocol === 'string' ? record.providerProtocol.toLowerCase() : '';
+  const modelId = typeof record.modelId === 'string' ? record.modelId.trim().toLowerCase() : typeof record.assignedModelId === 'string' ? record.assignedModelId.trim().toLowerCase() : '';
+  const inlineMultimodal = providerType === 'gemini' || providerType === 'responses' || providerProtocol === 'gemini-chat' || providerProtocol === 'openai-responses';
   if (inlineMultimodal) {
     return false;
   }
-
-  // Kimi K2.5 supports inline multimodal natively (image_url/video_url).
-  // When the routed model is kimi-k2.5, do not trigger the legacy vision detour.
   if (modelId === 'kimi-k2.5') {
     return false;
   }
-
   return true;
+}
+function resolveInlineMultimodalSupport(record: Record<string, unknown>, rt: Record<string, unknown> | undefined): boolean {
+  const target =
+    record.target && typeof record.target === 'object' && !Array.isArray(record.target)
+      ? (record.target as Record<string, unknown>)
+      : undefined;
+  for (const value of [target?.supportsMultimodal, (rt as any)?.supportsMultimodal]) {
+    if (value === true || value === 'true') return true;
+    if (value === false || value === 'false') return false;
+  }
+  return false;
 }
 
 function isImageGenerationRequest(

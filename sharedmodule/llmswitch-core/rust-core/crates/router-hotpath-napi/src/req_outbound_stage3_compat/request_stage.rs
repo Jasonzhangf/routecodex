@@ -23,6 +23,57 @@ use super::thinking_history::{
     should_apply_local_deepseek_thinking_history_compat,
 };
 use super::{CompatResult, ReqOutboundCompatInput};
+use crate::chat_process_media_semantics::{
+    strip_latest_responses_input_media, strip_latest_user_turn_media,
+};
+use serde_json::Value;
+
+fn read_supports_multimodal_from_rt(adapter_context: &super::AdapterContext) -> Option<bool> {
+    adapter_context
+        .rt
+        .as_ref()
+        .and_then(Value::as_object)
+        .and_then(|rt| rt.get("supportsMultimodal"))
+        .and_then(|value| match value {
+            Value::Bool(flag) => Some(*flag),
+            Value::String(raw) => match raw.trim().to_ascii_lowercase().as_str() {
+                "true" => Some(true),
+                "false" => Some(false),
+                _ => None,
+            },
+            _ => None,
+        })
+}
+
+fn strip_media_for_non_multimodal_target(
+    payload: Value,
+    adapter_context: &super::AdapterContext,
+) -> Value {
+    if read_supports_multimodal_from_rt(adapter_context) != Some(false) {
+        return payload;
+    }
+    let Some(root) = payload.as_object() else {
+        return payload;
+    };
+    let placeholder = "[Image omitted]".to_string();
+    if let Some(messages) = root.get("messages").and_then(Value::as_array) {
+        let stripped = strip_latest_user_turn_media(messages.clone(), placeholder.clone());
+        if stripped.changed {
+            let mut next = root.clone();
+            next.insert("messages".to_string(), Value::Array(stripped.messages));
+            return Value::Object(next);
+        }
+    }
+    if let Some(input_entries) = root.get("input").and_then(Value::as_array) {
+        let stripped = strip_latest_responses_input_media(input_entries.clone(), placeholder);
+        if stripped.changed {
+            let mut next = root.clone();
+            next.insert("input".to_string(), Value::Array(stripped.messages));
+            return Value::Object(next);
+        }
+    }
+    payload
+}
 
 pub fn run_req_outbound_stage3_compat(
     input: ReqOutboundCompatInput,
@@ -34,7 +85,7 @@ pub fn run_req_outbound_stage3_compat(
         ..
     } = input;
 
-    let mut payload = input_payload;
+    let mut payload = strip_media_for_non_multimodal_target(input_payload, &adapter_context);
     if should_apply_local_deepseek_thinking_history_compat(&payload, &adapter_context) {
         if let Some(root) = payload.as_object_mut() {
             ensure_reasoning_content_for_assistant_history(root);

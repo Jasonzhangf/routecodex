@@ -2,7 +2,7 @@ const TRUTHY = new Set(["1", "true", "yes", "on"]);
 const FALSY = new Set(["0", "false", "no", "off"]);
 const DEFAULT_INPUT_TOKEN_THRESHOLD = 120_000;
 
-function readBooleanEnv(names: string[], fallback: boolean): boolean {
+function readBooleanEnv(names: string[], defaultValue: boolean): boolean {
   for (const name of names) {
     const raw = process.env[name];
     if (raw === undefined) continue;
@@ -10,17 +10,17 @@ function readBooleanEnv(names: string[], fallback: boolean): boolean {
     if (TRUTHY.has(normalized)) return true;
     if (FALSY.has(normalized)) return false;
   }
-  return fallback;
+  return defaultValue;
 }
 
-function readPositiveIntEnv(names: string[], fallback: number): number {
+function readPositiveIntEnv(names: string[], defaultValue: number): number {
   for (const name of names) {
     const raw = process.env[name];
     if (raw === undefined) continue;
     const parsed = Number.parseInt(String(raw).trim(), 10);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
-  return fallback;
+  return defaultValue;
 }
 
 function getConfig() {

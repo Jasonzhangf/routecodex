@@ -193,8 +193,8 @@ describe('virtual-router context routing fallback', () => {
       excludedProviderKeys: [soleProvider]
     };
 
-    const routed = engine.route(request, metadata);
-    expect(routed.target.providerKey).toBe(soleProvider);
-    expect(routed.decision.reasoning).toContain('single-provider-guard');
+    expect(() => engine.route(request, metadata)).toThrow(
+      'No available providers after applying routing instructions'
+    );
   });
 });

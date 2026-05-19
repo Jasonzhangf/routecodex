@@ -26,8 +26,8 @@ describe('servertool followup flow policy', () => {
     expect(isStickyProviderFollowupFlowId('antigravity_thought_signature_bootstrap')).toBe(true);
   });
 
-  test('reads requires_action ignore policy from skeleton config', () => {
-    expect(shouldIgnoreRequiresActionFollowup('stop_message_flow')).toBe(true);
+  test('stop_message_flow does not ignore requires_action followups', () => {
+    expect(shouldIgnoreRequiresActionFollowup('stop_message_flow')).toBe(false);
   });
 
   test('reads no-followup policy from skeleton profiles', () => {

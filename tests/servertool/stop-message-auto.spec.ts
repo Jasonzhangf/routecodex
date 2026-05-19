@@ -345,13 +345,13 @@ describe('stop_message_auto servertool', () => {
     expect(result.execution?.flowId).toBe('stop_message_flow');
     const followup = result.execution?.followup as any;
     expect(followup).toBeDefined();
-    // stop_message now uses metadata-only followup (tmux injection), no servertool followup path
+    // stop_message now follows normal reenter path via followup injection plan.
     expect(followup.requestIdSuffix).toBe(':stop_followup');
     expect(followup.metadata).toBeDefined();
     expect(followup.entryEndpoint).toBeUndefined();
-    expect(followup.injection).toBeUndefined();
+    expect(followup.injection).toBeDefined();
     const injectMeta = readClientInjectMeta(followup);
-    expect(injectMeta.clientInjectOnly).toBe(true);
+    expect(injectMeta.clientInjectOnly).toBe(false);
     expect(injectMeta.clientInjectText).toBe('继续执行');
 
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
@@ -361,6 +361,97 @@ describe('stop_message_auto servertool', () => {
     // llmswitch-core main: stopMessage usage counter increments as soon as we decide to trigger followup.
     expect(persisted?.state?.stopMessageUsed).toBe(1);
     expect(typeof persisted?.state?.stopMessageLastUsedAt).toBe('number');
+  });
+
+  test('stop followup pins exact routed provider/model instead of alias metadata fields', async () => {
+    const sessionId = 'stopmessage-spec-session-exact-provider-pin';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 2,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const capturedChatRequest: JsonObject = {
+      model: 'MiniMax-M2.7',
+      input: [
+        {
+          role: 'user',
+          content: [{ type: 'input_text', text: 'hi' }]
+        }
+      ]
+    };
+
+    const chatResponse: JsonObject = {
+      id: 'resp-stop-pin-1',
+      object: 'response',
+      model: 'MiniMax-M2.7',
+      output: [
+        {
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'ok' }]
+        }
+      ],
+      finish_reason: 'stop'
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-pin-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      sessionId,
+      capturedChatRequest,
+      providerKey: 'mini27.key1.minimax',
+      targetProviderKey: 'mini27.key1.minimax',
+      modelId: 'minimax',
+      assignedModelId: 'minimax',
+      target: {
+        providerKey: 'mini27.key1.MiniMax-M2.7',
+        modelId: 'MiniMax-M2.7'
+      },
+      metadata: {
+        providerKey: 'mini27.key1.minimax',
+        targetProviderKey: 'mini27.key1.minimax',
+        assignedModelId: 'minimax',
+        target: {
+          providerKey: 'mini27.key1.MiniMax-M2.7',
+          modelId: 'MiniMax-M2.7'
+        }
+      },
+      __rt: {
+        __shadowCompareForcedProviderKey: 'mini27.key1.MiniMax-M2.7',
+        targetProviderKey: 'mini27.key1.MiniMax-M2.7',
+        assignedModelId: 'MiniMax-M2.7',
+        target: {
+          providerKey: 'mini27.key1.MiniMax-M2.7',
+          modelId: 'MiniMax-M2.7'
+        }
+      }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stopmessage-pin-1',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    const followup = result.execution?.followup as any;
+    expect(followup?.metadata?.__shadowCompareForcedProviderKey).toBe('mini27.key1.MiniMax-M2.7');
+    expect(followup?.metadata?.providerKey).toBe('mini27.key1.MiniMax-M2.7');
+    expect(followup?.metadata?.targetProviderKey).toBe('mini27.key1.MiniMax-M2.7');
+    expect(followup?.metadata?.modelId).toBe('MiniMax-M2.7');
+    expect(followup?.metadata?.assignedModelId).toBe('MiniMax-M2.7');
+    expect(followup?.metadata?.target?.providerKey).toBe('mini27.key1.MiniMax-M2.7');
+    expect(followup?.metadata?.target?.modelId).toBe('MiniMax-M2.7');
   });
 
   test.skip('codex backend uses session workdir as spawn cwd', async () => {
@@ -455,7 +546,7 @@ describe('stop_message_auto servertool', () => {
       expect(result.execution?.flowId).toBe('stop_message_flow');
       const followup = result.execution?.followup as any;
       const injectMeta = readClientInjectMeta(followup);
-      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectOnly).toBe(false);
       expect(injectMeta.clientInjectText).toBe('继续执行');
       expect(injectMeta.clientInjectText).toBe('继续执行');
     } finally {
@@ -560,10 +651,9 @@ describe('stop_message_auto servertool', () => {
 
       expect(result.mode).toBe('tool_flow');
       const followup = result.execution?.followup as any;
-      // injection ops removed - metadata-only followup for tmux injection
-    expect(followup?.injection).toBeUndefined();
+      expect(followup?.injection).toBeDefined();
       const injectMeta = readClientInjectMeta(followup);
-      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectOnly).toBe(false);
       expect(injectMeta.clientInjectText).toContain('继续执行');
       expect(injectMeta.clientInjectText).toBe('继续执行');
     } finally {
@@ -676,7 +766,7 @@ describe('stop_message_auto servertool', () => {
       // injection ops removed - metadata-only followup for tmux injection
     expect(followup?.injection).toBeUndefined();
       const injectMeta = readClientInjectMeta(followup);
-      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectOnly).toBe(false);
       expect(injectMeta.clientInjectText).toBe('继续执行');
       expect(injectMeta.clientInjectText).toBe('继续执行');
 
@@ -1355,7 +1445,7 @@ describe('stop_message_auto servertool', () => {
     const followup = result.execution?.followup as any;
     expect(followup).toBeDefined();
     const injectMeta = readClientInjectMeta(followup);
-    expect(injectMeta.clientInjectOnly).toBe(true);
+    expect(injectMeta.clientInjectOnly).toBe(false);
     expect(injectMeta.clientInjectText.length).toBeGreaterThan(0);
   });
 
@@ -1494,6 +1584,68 @@ describe('stop_message_auto servertool', () => {
 
     expect(result.mode).toBe('passthrough');
     expect(result.execution?.flowId).toBeUndefined();
+  });
+
+  test('stop_message followup pins exact routed provider and model from adapter context', async () => {
+    const sessionId = 'stopmessage-spec-session-pin';
+    const capturedChatRequest = {
+      model: 'minimax',
+      messages: [
+        {
+          role: 'user',
+          content: '继续执行'
+        }
+      ]
+    };
+    const chatResponse = {
+      id: 'chatcmpl-stop-pin',
+      object: 'chat.completion',
+      model: 'MiniMax-M2.7',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-pin',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      providerKey: 'mini27.key1.minimax',
+      targetProviderKey: 'mini27.key1.MiniMax-M2.7',
+      routecodexPortMode: 'router',
+      target: {
+        providerKey: 'mini27.key1.MiniMax-M2.7',
+        modelId: 'MiniMax-M2.7'
+      },
+      capturedChatRequest
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stopmessage-pin',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.execution?.flowId).toBe('stop_message_flow');
+    const followup = result.execution?.followup as any;
+    expect(followup?.metadata?.__shadowCompareForcedProviderKey).toBe('mini27.key1.MiniMax-M2.7');
+    expect(followup?.metadata?.targetProviderKey).toBe('mini27.key1.MiniMax-M2.7');
+    expect(followup?.metadata?.assignedModelId).toBe('MiniMax-M2.7');
+    expect(followup?.metadata?.target).toEqual({
+      providerKey: 'mini27.key1.MiniMax-M2.7',
+      modelId: 'MiniMax-M2.7'
+    });
+    expect(followup?.metadata?.routecodexPortMode).toBe('router');
   });
 
   test('skips stop_message retrigger on stop_message_flow followup hops', async () => {

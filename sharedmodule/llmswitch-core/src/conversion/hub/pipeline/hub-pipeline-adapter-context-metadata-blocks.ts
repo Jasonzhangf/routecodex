@@ -5,6 +5,7 @@ import {
   resolveAdapterContextObjectCarriersWithNative,
 } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
 import { cloneRuntimeMetadata } from "../../runtime-metadata.js";
+import { isJsonObject, type JsonValue } from "../types/json.js";
 import { saveOriginSnapshot } from "../../../servertool/origin-request-store.js";
 import { resolveServertoolPersistentScopeKey } from "../../../servertool/state-scope.js";
 
@@ -47,7 +48,14 @@ export function applyMetadataAdapterContextFields(args: {
   }
   const rt = cloneRuntimeMetadata(metadata);
   if (rt) {
-    (adapterContext as Record<string, unknown>).__rt = rt as unknown;
+    const existingRt = (adapterContext as Record<string, unknown>).__rt;
+    const preservedRt = isJsonObject(existingRt as JsonValue | undefined)
+      ? (existingRt as Record<string, unknown>)
+      : undefined;
+    (adapterContext as Record<string, unknown>).__rt = {
+      ...rt,
+      ...preservedRt,
+    } as unknown;
   }
   if (adapterObjectCarriers.capturedChatRequest) {
     (adapterContext as Record<string, unknown>).capturedChatRequest =
@@ -55,13 +63,16 @@ export function applyMetadataAdapterContextFields(args: {
     // Persist origin snapshot for followup re-entry (Phase 1+).
     const scope = resolveServertoolPersistentScopeKey(adapterContext);
     if (scope && adapterObjectCarriers.capturedChatRequest) {
+      const captured = adapterObjectCarriers.capturedChatRequest as Record<string, unknown>;
+      const capturedMessages = Array.isArray(captured.messages) ? (captured.messages as unknown[]) : [];
       saveOriginSnapshot(scope, {
         requestId: adapterContext.requestId ?? String(Date.now()),
         sessionScope: scope,
-        model: (adapterObjectCarriers.capturedChatRequest as Record<string, unknown>)?.model as string | undefined,
-        messages: ((((adapterObjectCarriers.capturedChatRequest as Record<string, unknown>)?.messages as unknown[]) ?? []) as any),
-        tools: ((((adapterObjectCarriers.capturedChatRequest as Record<string, unknown>)?.tools as unknown[]) ?? []) as any),
-        parameters: (((adapterObjectCarriers.capturedChatRequest as Record<string, unknown>)?.parameters as Record<string, unknown>) ?? undefined) as any,
+        capturedChatRequest: captured as any,
+        model: captured?.model as string | undefined,
+        messages: (capturedMessages as any),
+        tools: (((captured?.tools as unknown[]) ?? []) as any),
+        parameters: ((captured?.parameters as Record<string, unknown>) ?? undefined) as any,
         entryEndpoint: adapterContext.entryEndpoint,
         providerProtocol: adapterContext.providerProtocol,
       });

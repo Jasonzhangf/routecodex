@@ -30,9 +30,3 @@ export function containsImageAttachment(
   }
   return analyzeChatProcessMedia(messages).containsCurrentTurnImage === true;
 }
-
-export function repairIncompleteToolCalls(
-  messages: StandardizedMessage[],
-): StandardizedMessage[] {
-  return messages;
-}

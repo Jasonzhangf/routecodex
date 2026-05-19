@@ -20,7 +20,6 @@ import { sanitizeFollowupText } from './followup-sanitize.js';
 import {
   getCapturedRequest,
   hasCompactionFlag,
-  persistStopMessageState,
   readServerToolFollowupFlowId,
   resolveClientConnectionState,
   resolveDefaultStopMessageSnapshot,
@@ -30,11 +29,8 @@ import {
   resolveStickyKey,
   readRuntimeStopMessageStageMode
 } from './stop-message-auto/runtime-utils.js';
-import { loadRoutingInstructionStateSync } from '../../router/virtual-router/sticky-session-store.js';
 import { readStoplessGoalState } from './stopless-goal-state.js';
 import {
-  applyStopMessageSnapshotToState,
-  createStopMessageState,
   normalizeStopMessageStageMode,
   resolveStopMessageSnapshot
 } from './stop-message-auto/routing-state.js';
@@ -43,16 +39,23 @@ export { extractBlockedReportFromMessagesForTests } from './stop-message-auto/bl
 
 const STOPMESSAGE_DEBUG = resolveStopMessageDebugEnabled() ?? (process.env.ROUTECODEX_STOPMESSAGE_DEBUG || '').trim() === '1';
 const STOPMESSAGE_IMPLICIT_GEMINI = false;
-const STOPMESSAGE_DEFAULT_ENABLED = resolveStopMessageDefaultEnabled() ?? true;
-const STOPMESSAGE_DEFAULT_TEXT = (() => {
+const FLOW_ID = 'stop_message_flow';
+const STOP_MESSAGE_EXECUTION_APPEND = '继续执行';
+
+function resolveStopMessageDefaultEnabledLive(): boolean {
+  return resolveStopMessageDefaultEnabled() ?? true;
+}
+
+function resolveStopMessageDefaultTextLive(): string {
   const fromConfig = resolveStopMessageDefaultText();
   if (typeof fromConfig === 'string' && fromConfig.trim().length > 0) {
     return fromConfig.trim();
   }
   const raw = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_TEXT;
   return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : '继续执行';
-})();
-const STOPMESSAGE_DEFAULT_MAX_REPEATS = (() => {
+}
+
+function resolveStopMessageDefaultMaxRepeatsLive(): number {
   const fromConfig = resolveStopMessageDefaultMaxRepeats();
   if (Number.isFinite(fromConfig) && Number(fromConfig) > 0) {
     return Math.floor(Number(fromConfig));
@@ -60,9 +63,7 @@ const STOPMESSAGE_DEFAULT_MAX_REPEATS = (() => {
   const raw = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_MAX_REPEATS;
   const parsed = typeof raw === 'string' ? Number(raw.trim()) : Number.NaN;
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 2;
-})();
-const FLOW_ID = 'stop_message_flow';
-const STOP_MESSAGE_EXECUTION_APPEND = '继续执行';
+}
 
 function debugLog(message: string, extra?: JsonObject): void {
   if (!STOPMESSAGE_DEBUG) {
@@ -76,9 +77,123 @@ function debugLog(message: string, extra?: JsonObject): void {
   }
 }
 
+function emitStopFollowupPinLog(args: {
+  adapterContext: unknown;
+  pinnedTarget: { providerKey?: string; modelId?: string; routecodexPortMode?: string };
+  followupText: string;
+}): void {
+  try {
+    const record =
+      args.adapterContext && typeof args.adapterContext === 'object' && !Array.isArray(args.adapterContext)
+        ? (args.adapterContext as Record<string, unknown>)
+        : {};
+    const metadata =
+      record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
+        ? (record.metadata as Record<string, unknown>)
+        : {};
+    const runtime = readRuntimeMetadata(record) ?? {};
+    const target =
+      record.target && typeof record.target === 'object' && !Array.isArray(record.target)
+        ? (record.target as Record<string, unknown>)
+        : {};
+    const runtimeTarget =
+      runtime.target && typeof runtime.target === 'object' && !Array.isArray(runtime.target)
+        ? (runtime.target as Record<string, unknown>)
+        : {};
+    const metadataTarget =
+      metadata.target && typeof metadata.target === 'object' && !Array.isArray(metadata.target)
+        ? (metadata.target as Record<string, unknown>)
+        : {};
+    console.log('[servertool.followup.pin.stop_handler]', JSON.stringify({
+      requestId:
+        (typeof record.requestId === 'string' && record.requestId)
+        || (typeof runtime.requestId === 'string' && runtime.requestId)
+        || (typeof metadata.requestId === 'string' && metadata.requestId)
+        || undefined,
+      pinnedProviderKey: args.pinnedTarget.providerKey,
+      pinnedModelId: args.pinnedTarget.modelId,
+      routecodexPortMode: args.pinnedTarget.routecodexPortMode,
+      followupText: args.followupText
+    }));
+  } catch {
+    // ignore logging failure
+  }
+}
+
 function enforceStopMessageExecutionFollowupText(text: string): string {
   const rawBase = sanitizeFollowupText(text);
   return sanitizeFollowupText(rawBase) || STOP_MESSAGE_EXECUTION_APPEND;
+}
+
+function readPinnedTargetFromAdapterContext(adapterContext: unknown): {
+  providerKey?: string;
+  modelId?: string;
+  routecodexPortMode?: string;
+} {
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    return {};
+  }
+  const record = adapterContext as Record<string, unknown>;
+  const metadata =
+    record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
+      ? (record.metadata as Record<string, unknown>)
+      : undefined;
+  const runtime = readRuntimeMetadata(record);
+  const metadataTarget =
+    metadata?.target && typeof metadata.target === 'object' && !Array.isArray(metadata.target)
+      ? (metadata.target as Record<string, unknown>)
+      : undefined;
+  const runtimeTarget =
+    runtime?.target && typeof runtime.target === 'object' && !Array.isArray(runtime.target)
+      ? (runtime.target as Record<string, unknown>)
+      : undefined;
+  const target =
+    record.target && typeof record.target === 'object' && !Array.isArray(record.target)
+      ? (record.target as Record<string, unknown>)
+      : undefined;
+  const providerKey =
+    (typeof record.__shadowCompareForcedProviderKey === 'string' && record.__shadowCompareForcedProviderKey.trim()
+      ? record.__shadowCompareForcedProviderKey.trim()
+      : '')
+    || (typeof runtime?.__shadowCompareForcedProviderKey === 'string' && runtime.__shadowCompareForcedProviderKey.trim()
+      ? runtime.__shadowCompareForcedProviderKey.trim()
+      : '')
+    || (typeof target?.providerKey === 'string' && target.providerKey.trim() ? target.providerKey.trim() : '')
+    || (typeof metadataTarget?.providerKey === 'string' && metadataTarget.providerKey.trim() ? metadataTarget.providerKey.trim() : '')
+    || (typeof runtimeTarget?.providerKey === 'string' && runtimeTarget.providerKey.trim() ? runtimeTarget.providerKey.trim() : '')
+    || (typeof target?.providerId === 'string' && target.providerId.trim() ? target.providerId.trim() : '')
+    || (typeof metadataTarget?.providerId === 'string' && metadataTarget.providerId.trim() ? metadataTarget.providerId.trim() : '')
+    || (typeof runtimeTarget?.providerId === 'string' && runtimeTarget.providerId.trim() ? runtimeTarget.providerId.trim() : '')
+    || (typeof record.targetProviderKey === 'string' && record.targetProviderKey.trim() ? record.targetProviderKey.trim() : '')
+    || (typeof metadata?.targetProviderKey === 'string' && metadata.targetProviderKey.trim() ? metadata.targetProviderKey.trim() : '')
+    || (typeof runtime?.targetProviderKey === 'string' && runtime.targetProviderKey.trim() ? runtime.targetProviderKey.trim() : '')
+    || (typeof record.providerKey === 'string' && record.providerKey.trim() ? record.providerKey.trim() : '')
+    || (typeof metadata?.providerKey === 'string' && metadata.providerKey.trim() ? metadata.providerKey.trim() : '')
+    || (typeof runtime?.providerKey === 'string' && runtime.providerKey.trim() ? runtime.providerKey.trim() : '')
+    || undefined;
+  const modelId =
+    (typeof target?.modelId === 'string' && target.modelId.trim() ? target.modelId.trim() : '')
+    || (typeof metadataTarget?.modelId === 'string' && metadataTarget.modelId.trim() ? metadataTarget.modelId.trim() : '')
+    || (typeof runtimeTarget?.modelId === 'string' && runtimeTarget.modelId.trim() ? runtimeTarget.modelId.trim() : '')
+    || (typeof record.assignedModelId === 'string' && record.assignedModelId.trim() ? record.assignedModelId.trim() : '')
+    || (typeof metadata?.assignedModelId === 'string' && metadata.assignedModelId.trim() ? metadata.assignedModelId.trim() : '')
+    || (typeof runtime?.assignedModelId === 'string' && runtime.assignedModelId.trim() ? runtime.assignedModelId.trim() : '')
+    || (typeof record.modelId === 'string' && record.modelId.trim() ? record.modelId.trim() : '')
+    || (typeof metadata?.modelId === 'string' && metadata.modelId.trim() ? metadata.modelId.trim() : '')
+    || (typeof runtime?.modelId === 'string' && runtime.modelId.trim() ? runtime.modelId.trim() : '')
+    || (typeof record.originalModelId === 'string' && record.originalModelId.trim() ? record.originalModelId.trim() : '')
+    || (typeof metadata?.originalModelId === 'string' && metadata.originalModelId.trim() ? metadata.originalModelId.trim() : '')
+    || (typeof runtime?.originalModelId === 'string' && runtime.originalModelId.trim() ? runtime.originalModelId.trim() : '')
+    || undefined;
+  const routecodexPortMode =
+    typeof record.routecodexPortMode === 'string' && record.routecodexPortMode.trim()
+      ? record.routecodexPortMode.trim()
+      : undefined;
+  return {
+    ...(providerKey ? { providerKey } : {}),
+    ...(modelId ? { modelId } : {}),
+    ...(routecodexPortMode ? { routecodexPortMode } : {})
+  };
 }
 
 const handler: ServerToolHandler = async (
@@ -131,28 +246,35 @@ const handler: ServerToolHandler = async (
     const followupFlowId = readServerToolFollowupFlowId(rt);
     if (followupFlowId) {
       debugLog('followup_request_allowed', { followupFlowId } as JsonObject);
+      return markSkip('skip_servertool_followup_hop');
     }
 
     const strictSessionScope = resolveStopMessageSessionScope(record, rt);
     const stickyKey = strictSessionScope || resolveStickyKey(record, rt);
-    let stickyState = stickyKey ? loadRoutingInstructionStateSync(stickyKey) : null;
     const runtimeStopMessageState = resolveRuntimeStopMessageState(rt);
-    let snapshot = resolveStopMessageSnapshot(stickyState) ?? runtimeStopMessageState;
-    const stickyMode = normalizeStopMessageStageMode(stickyState?.stopMessageStageMode);
+    let snapshot = resolveStopMessageSnapshot(undefined) ?? runtimeStopMessageState;
+    const stickyMode = normalizeStopMessageStageMode(undefined);
     const runtimeMode = readRuntimeStopMessageStageMode(rt);
     const explicitMode = stickyMode ?? runtimeMode;
 
+    if (explicitMode === 'off') {
+      return markSkip('skip_stopmessage_mode_off');
+    }
+
     if (!snapshot) {
+      if (explicitMode === 'on' || explicitMode === 'auto') {
+        return markSkip('skip_explicit_mode_without_snapshot');
+      }
       const implicit = STOPMESSAGE_IMPLICIT_GEMINI
         ? resolveImplicitGeminiStopMessageSnapshot(ctx, record)
         : null;
-      const defaultSnapshot = STOPMESSAGE_DEFAULT_ENABLED
+      const defaultSnapshot = resolveStopMessageDefaultEnabledLive()
         ? resolveDefaultStopMessageSnapshot(ctx, {
-            text: STOPMESSAGE_DEFAULT_TEXT,
-            maxRepeats: STOPMESSAGE_DEFAULT_MAX_REPEATS
+            text: resolveStopMessageDefaultTextLive(),
+            maxRepeats: resolveStopMessageDefaultMaxRepeatsLive()
           })
         : null;
-      const fallback = implicit
+      const snapshotCandidate = implicit
         ? {
             text: implicit.text,
             maxRepeats: implicit.maxRepeats,
@@ -175,27 +297,15 @@ const handler: ServerToolHandler = async (
               aiMode: 'off' as const
             }
           : null;
-      snapshot = fallback ?? {
-        text: STOPMESSAGE_DEFAULT_TEXT,
-        maxRepeats: STOPMESSAGE_DEFAULT_MAX_REPEATS,
-        used: 0,
-        source: 'default',
-        updatedAt: Date.now(),
-        stageMode: 'on' as const,
-        aiMode: 'off' as const
-      };
-      if (stickyKey) {
-        stickyState = applyStopMessageSnapshotToState(stickyState, snapshot);
-        persistStopMessageState(stickyKey, stickyState);
+      snapshot = snapshotCandidate;
+      if (!snapshot) {
+        return markSkip('skip_no_stopmessage_snapshot');
       }
-    } else if (!stickyState && stickyKey && snapshot) {
-      stickyState = applyStopMessageSnapshotToState(stickyState, snapshot);
-      persistStopMessageState(stickyKey, stickyState);
     }
 
     const mode = snapshot.stageMode ?? 'on';
     const textRaw = typeof snapshot.text === 'string' ? snapshot.text.trim() : '';
-    const text = textRaw || STOP_MESSAGE_EXECUTION_APPEND;
+    const text = textRaw;
     const maxRepeats =
       typeof snapshot.maxRepeats === 'number' && Number.isFinite(snapshot.maxRepeats)
         ? Math.max(1, Math.floor(snapshot.maxRepeats))
@@ -214,29 +324,17 @@ const handler: ServerToolHandler = async (
       used
     });
 
+    if (mode === 'off') {
+      return markSkip('skip_stopmessage_mode_off');
+    }
+    if (!text.length) {
+      return markSkip('skip_stopmessage_empty_text');
+    }
+    if (!(maxRepeats > 0)) {
+      return markSkip('skip_stopmessage_invalid_repeats');
+    }
+
     if (used >= maxRepeats) {
-      if (stickyKey) {
-        const resetState =
-          stickyState ??
-          createStopMessageState({
-            text,
-            maxRepeats,
-            used,
-            ...(snapshot.source ? { source: snapshot.source } : {}),
-            ...(snapshot.updatedAt ? { updatedAt: snapshot.updatedAt } : {}),
-            ...(snapshot.lastUsedAt ? { lastUsedAt: snapshot.lastUsedAt } : {}),
-            ...(snapshot.stageMode ? { stageMode: snapshot.stageMode } : {}),
-            aiMode: 'off'
-          });
-        resetState.stopMessageText = text;
-        resetState.stopMessageMaxRepeats = maxRepeats;
-        resetState.stopMessageUsed = 0;
-        resetState.stopMessageStageMode = mode;
-        resetState.stopMessageAiMode = 'off';
-        resetState.stopMessageAiSeedPrompt = undefined;
-        resetState.stopMessageAiHistory = undefined;
-        persistStopMessageState(stickyKey, resetState);
-      }
       return markSkip('skip_reached_max_repeats');
     }
 
@@ -246,7 +344,7 @@ const handler: ServerToolHandler = async (
       return markSkip('skip_not_stop_finish_reason');
     }
 
-    const effectiveGoalState = stickyState?.stoplessGoalState ?? readStoplessGoalState(ctx.adapterContext).state;
+    const effectiveGoalState = readStoplessGoalState(ctx.adapterContext).state;
     const hasManagedGoal = Boolean(effectiveGoalState && effectiveGoalState.status !== 'idle');
     if (hasManagedGoal && effectiveGoalState?.status === 'active') {
       return markSkip('skip_goal_active');
@@ -263,53 +361,43 @@ const handler: ServerToolHandler = async (
     const nextUsed = used + 1;
     updateCompare({ used: nextUsed, decision: 'trigger', reason: 'triggered' });
 
-    if (stickyKey) {
-      const nextState =
-        stickyState ??
-        createStopMessageState({
-          text,
-          maxRepeats,
-          used,
-          ...(snapshot.source ? { source: snapshot.source } : {}),
-          ...(snapshot.updatedAt ? { updatedAt: snapshot.updatedAt } : {}),
-          ...(snapshot.lastUsedAt ? { lastUsedAt: snapshot.lastUsedAt } : {}),
-          ...(snapshot.stageMode ? { stageMode: snapshot.stageMode } : {}),
-          aiMode: 'off'
-        });
-      const now = Date.now();
-      nextState.stopMessageText = text;
-      nextState.stopMessageMaxRepeats = maxRepeats;
-      nextState.stopMessageUsed = Math.min(nextUsed, maxRepeats);
-      nextState.stopMessageStageMode = mode;
-      nextState.stopMessageAiMode = 'off';
-      nextState.stopMessageLastUsedAt = now;
-      nextState.stopMessageAiSeedPrompt = undefined;
-      nextState.stopMessageAiHistory = undefined;
-      persistStopMessageState(stickyKey, nextState);
-    }
-
     const connectionState = resolveClientConnectionState(record.clientConnectionState);
+    const pinnedTarget = readPinnedTargetFromAdapterContext(ctx.adapterContext);
+    emitStopFollowupPinLog({
+      adapterContext: ctx.adapterContext,
+      pinnedTarget,
+      followupText
+    });
     return {
       flowId: FLOW_ID,
       finalize: async () => ({
         chatResponse: ctx.base,
         execution: {
           flowId: FLOW_ID,
-          ...(stickyKey
-            ? {
-                stopMessageReservation: {
-                  stickyKey,
-                  previousState: stickyState
-                    ? (JSON.parse(JSON.stringify(stickyState)) as Record<string, unknown>)
-                    : null
-                }
-              }
-            : {}),
           followup: {
             requestIdSuffix: ':stop_followup',
+            injection: {
+              ops: [
+                { op: 'append_assistant_message', required: false },
+                { op: 'append_user_text', text: followupText }
+              ]
+            },
             metadata: {
               ...(connectionState ? { clientConnectionState: connectionState as JsonObject } : {}),
-              clientInjectOnly: true,
+              ...(pinnedTarget.providerKey ? {
+                __shadowCompareForcedProviderKey: pinnedTarget.providerKey,
+                providerKey: pinnedTarget.providerKey,
+                targetProviderKey: pinnedTarget.providerKey
+              } : {}),
+              ...(pinnedTarget.modelId ? {
+                assignedModelId: pinnedTarget.modelId,
+                modelId: pinnedTarget.modelId,
+                target: {
+                  ...(pinnedTarget.providerKey ? { providerKey: pinnedTarget.providerKey } : {}),
+                  modelId: pinnedTarget.modelId
+                }
+              } : {}),
+              ...(pinnedTarget.routecodexPortMode ? { routecodexPortMode: pinnedTarget.routecodexPortMode } : {}),
               clientInjectText: followupText,
               clientInjectSource: 'servertool.stop_message'
             } as JsonObject

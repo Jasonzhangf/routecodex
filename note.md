@@ -4020,3 +4020,105 @@ Next slice:
 - 第二真源已定位：`shared_response_compat.rs` 的 goal-history scrub 只覆盖 Responses `function_call` 形状，未覆盖 chat `assistant.tool_calls` 形状；导致 assistant `get_goal` tool_call 保留、对应 tool result 被删，后续 `sync_responses_context_from_canonical_messages` 在 Rust history pairing 阶段抛 `dangling_tool_call`。
 - 已在 Rust sanitizer 增补 assistant.tool_calls 旧 goal 清理，并完成本地 same-shape 验证：sanitize 后旧 `get_goal` assistant/tool 对消失，`syncResponsesContextFromCanonicalMessagesWithNative(...)` 成功。
 
+
+## 2026-05-19 SSE client_close requestMap retention fix
+- 当前 heap/rss 持续上涨的新真因已收敛：不是普通成功请求残留，而是 `/v1/responses` SSE 在 `response.sse.client_close` 且 `closeBeforeStreamEnd=true` 时，Hub 已经 capture 了 request entry，但 `provider-response.ts::finalizeResponsesConversationRequestRetention()` 永远不会执行，导致没有 `lastResponseId` 的大 input entry 挂在 `requestMap`。
+- 唯一正确修复点在 host SSE 生命周期收尾 `src/server/handlers/handler-response-utils.ts`：只有这里同时知道“客户端提前断开”且仍持有当前 requestId；在这里清理 store 才能覆盖 normal/error/client_close 三类结束中的唯一缺口。改 `onRequestEnd` 会误删成功请求保留态，改 provider-response 则根本进不到该路径。
+- 已实现：仅当 `entryEndpoint==/v1/responses` 且 `closeBeforeStreamEnd=true` 时，直接清掉 `__rccResponsesConversationStore` 对应 request entry，避免 `pendingNoResponseId/retainedInputItems` 累积；并补了 handler SSE close 回归断言。
+
+[2026-05-19 06:46:34] 502 root cause continuation: latest server-5520.log still shows CLIENT_TOOL_ARGS_INVALID -> update_goal status=complete... across crs/deepseek/minimax, proving provider-agnostic historical /goal contamination. Confirmed passthrough responses sync in Rust hub_pipeline was missing goal-history scrub; historical /goal must be removed from replay history, not from current goal-state control plane. Also found cargo test blocker in events.rs test referencing deleted DEFAULT_RECOVERABLE_COOLDOWN_MS; real cooldown source is health.rs DEFAULT_COOLDOWN_MS / manager config.
+
+## 2026-05-19 `/goal` legacy implementation removal
+- 旧 `/goal` 执行面已继续物理拆除：Host 侧 `goal-capable-request.ts`、Rust `hub_goal_tools.rs`、followup 专用分支、`create_goal/update_goal` 相关校验/投影与对应回归已被删除；当前仅保留 `stoplessGoalState` 状态面与 Rust `shared_response_compat.rs` 的历史污染 scrub。
+- 仍需牢记：`request_user_input` 不是 `/goal` 专属工具，不能误删；当前保留它仅作为普通客户端工具。真正应该继续拦截的是旧历史里的 `get_goal/create_goal/update_goal/request_user_input` 组合污染。
+- 本轮最小验证已过：`cargo test -p router-hotpath-napi goal_mode_user_turn_is_not_demoted_by_stale_servertool_followup_flag` 与 `cargo test -p router-hotpath-napi test_sync_responses_context_from_canonical_messages_strips_historical_goal_turns` 均通过。
+
+## 2026-05-19 stopless 内建 followup 链无效（最新样本取证）
+- 最新 stop 样本：`~/.rcc/codex-samples/openai-responses/mini27.key1.MiniMax-M2.7/req_1779146081572_28a46b95/provider-response.json`，`finish_reason=stop`。
+- 同批日志真证据在 `~/.rcc/logs/server-5520.log`：
+  - `[servertool][stop_watch] ... flow=stop_message_flow`
+  - `tool=stop_message_auto stage=match result=matched`
+  - `tool=stop_message_auto stage=match result=rebuilt_followup_from_capturedchatrequest`
+  - `tool=stop_message_auto stage=final result=completed_client_inject_only`
+- 说明 stopless 不是“reenter 失败”，而是**实现上被强制导向 client inject only**。
+- 代码真源：`sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts` finalize 返回 `metadata.clientInjectOnly=true` + `clientInjectSource='servertool.stop_message'`。
+- followup 主线 `followup-runtime-block.ts` 只有 `clientInjectSource==='servertool.stopless_goal_continue'` 才强制 `reenter`；`servertool.stop_message` 会落入 `client_inject_only`。
+- 因此“内建 followup 链无效”的根因不是主线坏了，而是 stop_message handler 根本没接到 reenter 语义。
+
+- 2026-05-19 stopless reenter clean path:
+  - 真源修复点在 `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts::materializeBodyFromFollowupInjectionPlan()`。
+  - mainline 已不再 rebuild；真正的 followup body 只能在请求入口由 capturedChatRequest + metadata.__rt.serverToolFollowupInjectionPlan 重建。
+  - 额外修复：entry materializer 必须从 `metadata.__rt.serverToolFinalChatResponse` 读取上一轮 assistant message；只读 `baseMetadata.serverToolFinalChatResponse` 会丢失 assistant 历史，导致 stopless followup 少一轮 assistant 上下文。
+- 2026-05-19 stop_message_auto 当前活真源修正：JS 源文件仍被 src/*.js 直引，TS 改动不会自动影响 Jest/运行时；stop-message-auto 的 followup-hop skip、invalid sticky key skip、metadata.sessionId 非可信 scope 拦截、以及 live env default repeat 读取，必须同时改 `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts` 与同路径 `.js`。
+- 新 contract 回归：`tests/servertool/stop-message-auto.goal-default.spec.ts` 固定验证两条——`/goal active` 不自动续；非 `/goal active` 默认续 2 次，第 3 次停并把 `stopMessageUsed` 归零。
+- 2026-05-19 stop_message followup stage-timeout 真因：不是 provider 慢，而是 `servertool-followup-dispatch.ts` 对 forced same-provider followup 一律最多重试 3 次，连 `host.response_contract` 的 `EMPTY_ASSISTANT_RESPONSE` 也被 200ms/400ms 重试，叠加 host 全局 backoff 后把 stopless stage 时间烧空。唯一修复点在 dispatch retry gate：`host.response_contract` / `provider.followup` 这种非可恢复 followup 错误必须首错即抛，不能进入 same-provider retry。
+[2026-05-19 08:xx] stop_message non-essential timeout removal: removed TS-side stopMessage stage-timeout guard and timeout-specific error branch from servertool followup path; retained only loop-limit guard and generic followup timeout. Reason: user explicitly required minimal necessary code only; stage-timeout branch was legacy non-essential code, not part of required stopless contract.
+
+## 2026-05-19 SSE structured error passthrough regression
+- 新增 handler 回归：`tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts` 验证 `forceSSE && !expectsStream` 且 body 已有结构化 `error` 时，必须原样透传 `status/code/request_id`，不能再桥接成通用 `HTTP_502/sse_bridge_error`。
+- 唯一正确修改点仍是 `src/server/handlers/handler-response-utils.ts`：这里只有 SSE 非流式错误会被桥接重写；provider/router/retry/stop_message 都不是本问题的改动点。
+
+## 2026-05-19 stopless requires_action short-circuit removal
+- 最新 stopless 失效真因不是未触发，而是 `stop_message_flow` 在 Rust native skeleton 中被错误配置了 `ignoreRequiresActionFollowup: true`，导致 reenter followup 一旦返回 `requires_action` 就在 `followup-mainline-block.ts` 被 `completed_stopmessage_ignore_requires_action_reenter` 短路。
+- 唯一正确修复点：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs` 删除该错误策略；TS 仅消费 native 计划，不是根改点。
+[2026-05-19 stopless followup shape audit]
+- 活证据：Rust skeleton `stop_message_flow` 当前 profile 仅有 `stickyProvider/seedLoopPayload/retryEmptyFollowupOnce`，没有 `clientInjectOnly`，所以骨架层 outcomeMode 默认是 `reenter`。
+- 唯一真实错位在 host reenter 入口 `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts::materializeBodyFromFollowupInjectionPlan()`：它把 `capturedChatRequest` 用 `extractCapturedChatSeedLocal()` 降成 `messages`/纯文本，丢失 `/v1/responses` 原始 `input` item shape。
+- 这会让 stop_followup 不是“从 /v1/responses 入再从 /v1/responses 出”，而是半路 chat-seed 化重建，再送去 responses 入口，最终出现空 assistant / shape 错误。
+- 修复方向：对 `/v1/responses` followup 直接 clone 原始 body，再对 `input` 追加 assistant/user item；不再走 messages seed rebuild。chat/messages 路径维持原逻辑。
+
+[2026-05-19 stopless provider pin audit]
+- followup same-provider pin 真源继续收窄到 host `servertool-followup-dispatch.ts::buildServerToolNestedInput()`。
+- 旧逻辑只优先 `baseMetadata.providerKey/extra.providerKey`，会把真实命中的 `target.providerKey=mini27.key1.MiniMax-M2.7` 被 alias `mini27.key1.minimax` 覆盖。
+- 已改为 followup pin 优先级：base.target.providerKey -> base.target.providerId -> base.targetProviderKey -> base.providerKey -> extra.target.providerKey -> extra.target.providerId -> extra.targetProviderKey -> extra.providerKey。
+- 新回归：当 base metadata 同时携带 alias providerKey 与 exact target.providerKey 时，followup 必须 pin exact target.providerKey。
+
+## 2026-05-19 direct/router followup cleanup
+- 最新活日志证明 MiniMax alias drift 已修，但 crs 又暴露第二类真因：followup body/model 与 route metadata 仍复用错误的 direct/router 共用语义。
+- 真实样本 `req_1779157231169_6cfb2fdb` 主请求 upstream body.model=`gpt-5.3-codex`，但 stop_followup body.model 漂到 `gpt-5.4`；说明错的不只是 providerKey pin，还有 followup body.model 未被 exact routed target 覆盖。
+- 已做物理清理：`servertool-followup-dispatch.ts` 新增 exact model pin（target.modelId/assignedModelId 优先）并在 nested body 强制覆盖；`followup-runtime-block.ts` 删除 non-router followup 的 routeHint 继承，direct/provider followup 不再复用 relay routeHint 语义。
+
+## 2026-05-19 10:44 403 vision alias drift
+- Jason 指正后先复核 direct 可用性：最新成功样本 `~/.rcc/codex-samples/openai-responses/mini27.key1.MiniMax-M2.7/req_1779158605606_cef0422f/provider-request.json` 与 `req_1779158623504_3ee5b117/provider-request.json` 都是 `meta.providerKey=mini27.key1.MiniMax-M2.7` + `body.model=MiniMax-M2.7`，说明 exact provider 本身可用，403 不是 token/模型本体坏。
+- 最新 403 真因仍是 servertool vision 二跳 alias drift：`server-5520.log` 10:43:25/43/55/09 明确显示主请求 `default -> mini27.key1.MiniMax-M2.7.MiniMax-M2.7`，随后 `vision/forced -> mini27.key1.minimax.minimax`，最终 upstream 403 `该令牌无权使用模型：minimax`。
+- 最小修复点落在 `sharedmodule/llmswitch-core/src/servertool/handlers/vision.ts|js::executeVisionBackendPlan()`：vision backend reenter 之前从 adapterContext 提取 exact routed `target.providerKey/modelId`，强制写入 `metadata.__shadowCompareForcedProviderKey/targetProviderKey/assignedModelId`，并把 backend payload.model 覆盖为 exact model。这里是唯一正确位置，因为 403 发生在 vision analysis hop 本身，stop_message/general followup dispatch 根本不经过这条 backend 路径。
+
+## 2026-05-19 stop_followup alias drift + responses shape regression (latest live evidence)
+- 最新活日志 `~/.rcc/logs/server-5520.log` 11:05:28 / 11:05:37 / 11:06:49 明确显示：主请求命中 `mini27.key1.MiniMax-M2.7`，但 stop_message followup 仍漂到 `search/forced -> mini27.key1.minimax.minimax`，随后 `SERVERTOOL_EMPTY_FOLLOWUP reason=HTTP_403`。
+- 最新坏样本 `~/.rcc/codex-samples/openai-responses/mini27.key1.minimax/openai-responses-mini27.key1-MiniMax-M2.7-20260519T110528470-207711-2941_stop_followup/provider-request.json` 证明两层真因同时存在：
+  1. `meta.providerKey=mini27.key1.minimax` + `body.model=minimax`，exact target pin 被 alias 覆盖；
+  2. `entryEndpoint=/v1/responses` 但 body 仍是 `messages[]`，不是原始 `input[]`，说明 followup 仍被半路 chat 化重建。
+- 已定位唯一真源修改点：
+  1. `sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts::resolveAdapterContextProviderKey()` 之前错误地先取 `providerKey/targetProviderKey(alias)`，再取 `target.providerKey(exact)`，会把 stop_message 已写入的 exact forced provider 覆盖成 alias；现已改为优先 `target.providerKey/providerId`。
+  2. `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs::build_captured_chat_request_snapshot()` 之前物理丢掉 `input`，导致 `/v1/responses` followup 只能退化成 `messages`；现已保留 `input` 字段。
+- 回归：
+  - `cargo test -p router-hotpath-napi test_build_captured_chat_request_snapshot_preserves_shape --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` 通过；
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/servertool/followup-runtime-provider-pin.spec.ts` 通过；
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts` 通过。
+
+## 2026-05-19 stopless pin drift investigation
+- User要求：加日志 + replay复现。
+- 目标：定位 stop_followup 从 exact target 漂移到错误 provider/model 的唯一覆盖点。
+
+## 2026-05-19 stopless followup drift: logging probe
+- Added pinpoint logs:
+  - `convert.captured_request.shape`
+  - `convert.reenter.base_metadata.shape`
+  - `hub.run.input`
+- Purpose: prove whether stopless followup loses responses `input` shape before dispatch, or loses `__shadowCompareForcedProviderKey` before Hub Pipeline route select.
+- Existing live evidence remains split:
+  - dispatch log said `bodyHasInput=false bodyHasMessages=true`
+  - recorded followup provider-request sample later showed provider payload already became `/v1/responses` `input[]` with model `gpt-5.4`
+- Therefore the next proof target is pre-Hub-Pipeline nested input shape + forced-provider metadata visibility.
+
+## 2026-05-19 multimodal image routing live verification
+- 新规则核验分两部分：
+  1. 多模态目标已命中时，必须直发图片，不再触发 legacy `:vision` 二跳；
+  2. 非多模态目标出站前，必须把最新 user turn 的图片替换为占位符，不能把原始图片继续发给 text-only upstream。
+- 真证据（live black-box）：2026-05-19 13:16:05 向 `http://127.0.0.1:5555/v1/responses` 发送含 `input_image` 的最小请求，日志命中 `default -> mini27.key1.MiniMax-M2.7`，reason=`multimodal:visual-content|thinking:user-input`，且没有出现 `:vision` followup；样本 `~/.rcc/codex-samples/openai-responses/mini27.key1.MiniMax-M2.7/req_1779167765082_c3851ba0/provider-request.json` 证明图片被原样直发到多模态 upstream。
+- 真证据（native compat proof）：直接调用 `runReqOutboundStage3CompatWithNative` 且 `adapterContext.__rt.supportsMultimodal=false`，输出把 `input_image` 替换成 `input_text: [Image omitted]`。这说明“无多模态目标时剥离附件”的唯一真源仍在 Rust `req_outbound_stage3_compat/request_stage.rs`，不是 Host/TS 临时改写。
+
+## 2026-05-19 forced non-multimodal image leak root cause
+- 真源确认：`hub-pipeline-adapter-context-metadata-blocks.ts` 在 `applyTargetAdapterContextFields()` 之后又用 metadata `__rt` 整体覆盖 adapterContext `__rt`，把 target 注入的 `supportsMultimodal=false` 覆盖丢失。
+- 结果：Rust `req_outbound_stage3_compat` 读不到 `adapter_context.rt.supportsMultimodal=false`，因此 forced 非多模态 provider 的 `providerPayload` 仍保留 image，router-direct 即便已改为发送 `providerPayload` 也仍会把图片打进 text-only provider。
+- 唯一正确修复点：仍在 `hub-pipeline-adapter-context-metadata-blocks.ts` 合并 `__rt`，并让 target 派生字段优先于 metadata runtime 载荷；别处补 strip/补判断都会变成第二语义面。

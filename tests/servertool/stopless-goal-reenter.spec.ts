@@ -1,6 +1,7 @@
 import { describe, expect, test } from '@jest/globals';
 import { resolveFollowupExecutionMode } from '../../sharedmodule/llmswitch-core/src/servertool/followup-runtime-block.js';
 import { resolveFollowupFlowDecision } from '../../sharedmodule/llmswitch-core/src/servertool/followup-flow-policy.js';
+import { shouldShortCircuitRequiresActionFollowup } from '../../sharedmodule/llmswitch-core/src/servertool/finalize-followup-block.js';
 
 describe('stopless re-enter path (no tmux inject)', () => {
   test('stopless_goal_continue returns reenter execution mode regardless of skeleton config', () => {
@@ -15,16 +16,34 @@ describe('stopless re-enter path (no tmux inject)', () => {
     expect(mode).toBe('reenter');
   });
 
-  test('stop_message_flow still resolves to client_inject_only when metadata asks inject (unaffected by stopless change)', () => {
+  test('stop_message_flow defaults to reenter when stopless metadata does not force client inject', () => {
     const decision = resolveFollowupFlowDecision('stop_message_flow');
-    const metadata = { clientInjectOnly: true } as any;
+    const metadata = { clientInjectSource: 'servertool.stop_message' } as any;
     const mode = resolveFollowupExecutionMode({
       flowId: 'stop_message_flow',
       decision,
       metadata,
-      readClientInjectOnly: (m) => (m as any)?.clientInjectOnly === true,
+      readClientInjectOnly: () => false,
     });
-    expect(mode).toBe('client_inject_only');
+    expect(mode).toBe('reenter');
+  });
+
+  test('stop_message_flow followup is not short-circuited on requires_action', () => {
+    const decision = resolveFollowupFlowDecision('stop_message_flow');
+    const shouldShortCircuit = shouldShortCircuitRequiresActionFollowup({
+      flowId: 'stop_message_flow',
+      decision,
+      followupBody: {
+        status: 'requires_action',
+        required_action: {
+          submit_tool_outputs: {
+            tool_calls: []
+          }
+        }
+      } as any,
+      hasRequiresActionShape: () => true
+    });
+    expect(shouldShortCircuit).toBe(false);
   });
 
   test('continue_execution_flow returns reenter (no tmux inject)', () => {

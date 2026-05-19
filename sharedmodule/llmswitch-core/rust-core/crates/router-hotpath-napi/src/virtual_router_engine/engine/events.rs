@@ -493,6 +493,7 @@ const ANTIGRAVITY_AUTH_VERIFY_BAN_MS: i64 = 24 * 60 * 60_000;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::virtual_router_engine::health;
     use serde_json::{json, Map, Value};
 
     fn build_test_core(provider_key: &str, model_id: &str) -> VirtualRouterEngineCore {
@@ -603,8 +604,8 @@ mod tests {
             .cooldown_expires_at
             .expect("recoverable cooldown expiry");
         let ttl = expiry - started_at;
-        assert!(ttl >= DEFAULT_RECOVERABLE_COOLDOWN_MS - 2_000, "ttl={ttl}");
-        assert!(ttl <= DEFAULT_RECOVERABLE_COOLDOWN_MS + 5_000, "ttl={ttl}");
+        assert!(ttl >= health::DEFAULT_COOLDOWN_MS - 2_000, "ttl={ttl}");
+        assert!(ttl <= health::DEFAULT_COOLDOWN_MS + 5_000, "ttl={ttl}");
     }
 
     #[test]

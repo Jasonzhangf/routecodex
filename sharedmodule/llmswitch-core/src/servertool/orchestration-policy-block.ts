@@ -101,15 +101,6 @@ export function resolveAdapterContextProviderKey(adapterContext: unknown): strin
     return '';
   }
   const record = adapterContext as Record<string, unknown>;
-  const direct =
-    typeof record.providerKey === 'string' && record.providerKey.trim().length
-      ? record.providerKey.trim()
-      : typeof record.targetProviderKey === 'string' && record.targetProviderKey.trim().length
-        ? record.targetProviderKey.trim()
-        : '';
-  if (direct) {
-    return direct;
-  }
   const target =
     record.target && typeof record.target === 'object' && !Array.isArray(record.target)
       ? (record.target as Record<string, unknown>)
@@ -124,6 +115,15 @@ export function resolveAdapterContextProviderKey(adapterContext: unknown): strin
     if (targetProviderKey) {
       return targetProviderKey;
     }
+  }
+  const direct =
+    typeof record.targetProviderKey === 'string' && record.targetProviderKey.trim().length
+      ? record.targetProviderKey.trim()
+      : typeof record.providerKey === 'string' && record.providerKey.trim().length
+        ? record.providerKey.trim()
+        : '';
+  if (direct) {
+    return direct;
   }
   return '';
 }

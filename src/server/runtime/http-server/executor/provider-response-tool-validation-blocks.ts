@@ -51,30 +51,6 @@ export function buildToolValidationFailure(args: {
   };
 }
 
-function validateUpdateGoalArguments(parsed: Record<string, unknown> | null) {
-  if (!parsed) {
-    return buildToolValidationFailure({
-      reason: 'invalid_update_goal_arguments',
-      message: 'update_goal requires a JSON object arguments payload.'
-    });
-  }
-  if (!Object.prototype.hasOwnProperty.call(parsed, 'status') || typeof parsed.status !== 'string') {
-    return buildToolValidationFailure({
-      reason: 'missing_status',
-      message: 'update_goal requires status as a string.',
-      missingFields: ['status']
-    });
-  }
-  if (String(parsed.status).trim().toLowerCase() !== 'complete') {
-    return buildToolValidationFailure({
-      reason: 'invalid_status',
-      message: 'update_goal requires status=\"complete\".',
-      missingFields: ['status']
-    });
-  }
-  return { ok: true, normalizedArgs: JSON.stringify(parsed) };
-}
-
 export function containsBroadKillCommand(cmd: string): boolean {
   const text = String(cmd || '').trim();
   if (!text) {
@@ -333,16 +309,6 @@ export function validateCanonicalClientToolCall(
         });
       }
       return { ok: true, normalizedArgs: JSON.stringify({ explanation: parsed?.explanation, plan: parsed.plan }) };
-    }
-    case 'create_goal': {
-      if (!parsed || (typeof parsed.objective !== 'string' && typeof parsed.goal !== 'string')) {
-        return buildToolValidationFailure({
-          reason: 'missing_objective',
-          message: 'create_goal requires objective as a string.',
-          missingFields: ['objective']
-        });
-      }
-      return { ok: true, normalizedArgs: JSON.stringify(parsed) };
     }
     case 'shell_command':
     case 'bash': {

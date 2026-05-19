@@ -196,6 +196,16 @@ export function applyFollowupRuntimeMetadata(args: {
     typeof adapterRuntime?.routeHint === 'string' ? String(adapterRuntime.routeHint).trim() : '';
   const runtimeRouteName =
     typeof adapterRuntime?.routeName === 'string' ? String(adapterRuntime.routeName).trim() : '';
+  const followupMode =
+    (typeof (args.metadata as Record<string, unknown>).routecodexPortMode === 'string'
+      ? String((args.metadata as Record<string, unknown>).routecodexPortMode).trim().toLowerCase()
+      : '')
+    || (typeof adapterRecord?.routecodexPortMode === 'string'
+      ? String(adapterRecord.routecodexPortMode).trim().toLowerCase()
+      : '')
+    || (typeof adapterRuntime?.serverToolFollowupMode === 'string'
+      ? String(adapterRuntime.serverToolFollowupMode).trim().toLowerCase()
+      : '');
   const routeHint =
     (typeof (args.metadata as Record<string, unknown>).routeHint === 'string'
       ? String((args.metadata as Record<string, unknown>).routeHint).trim()
@@ -212,8 +222,10 @@ export function applyFollowupRuntimeMetadata(args: {
     (rt as Record<string, unknown>).serverToolLoopState = args.loopState;
   }
   (args.metadata as any).__hubEntry = 'chat_process';
-  if (routeHint) {
+  if (followupMode === 'router' && routeHint) {
     (args.metadata as Record<string, unknown>).routeHint = routeHint;
+  } else if ((args.metadata as Record<string, unknown>).routeHint !== undefined) {
+    delete (args.metadata as Record<string, unknown>).routeHint;
   }
   (rt as Record<string, unknown>).serverToolOriginalEntryEndpoint =
     (typeof args.originalEntryEndpoint === 'string' && args.originalEntryEndpoint.trim().length

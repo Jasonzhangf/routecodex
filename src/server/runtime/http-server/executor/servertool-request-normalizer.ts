@@ -1,7 +1,4 @@
 import { syncStoplessGoalStateFromRequest } from '../../../../modules/llmswitch/bridge.js';
-import { isGoalCapableRequestPayload } from './goal-capable-request.js';
-
-const RCC_FENCE_OPEN = '<**rcc**>';
 
 function readSessionLikeToken(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -16,23 +13,6 @@ function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
     return undefined;
   }
   return value as Record<string, unknown>;
-}
-
-function hasRccFenceInPayload(payload: unknown): boolean {
-  if (!payload) {
-    return false;
-  }
-  const raw =
-    typeof payload === 'string'
-      ? payload
-      : (() => {
-          try {
-            return JSON.stringify(payload);
-          } catch {
-            return '';
-          }
-        })();
-  return raw.includes(RCC_FENCE_OPEN);
 }
 
 export function backfillAdapterContextSessionIdentifiersFromOriginalRequest(
@@ -80,12 +60,6 @@ export function syncStoplessGoalStateFromCapturedRequest(
   baseContext: Record<string, unknown>,
   onError?: (error: unknown) => void
 ): void {
-  if (
-    isGoalCapableRequestPayload(baseContext.capturedChatRequest)
-    && hasRccFenceInPayload(baseContext.capturedChatRequest)
-  ) {
-    return;
-  }
   try {
     syncStoplessGoalStateFromRequest(baseContext);
   } catch (error) {

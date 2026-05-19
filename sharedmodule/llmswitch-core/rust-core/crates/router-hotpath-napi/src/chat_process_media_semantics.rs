@@ -402,3 +402,155 @@ pub fn strip_responses_context_input_historical_media(
         messages: if changed { next_entries } else { input_entries },
     }
 }
+
+pub fn strip_latest_user_turn_media(
+    messages: Vec<Value>,
+    placeholder_text: String,
+) -> ChatProcessMediaStripOutput {
+    if messages.is_empty() {
+        return ChatProcessMediaStripOutput {
+            changed: false,
+            messages,
+        };
+    }
+
+    let latest_user_index = messages.iter().rposition(|message| read_role(message) == "user");
+    let Some(latest_user_index) = latest_user_index else {
+        return ChatProcessMediaStripOutput {
+            changed: false,
+            messages,
+        };
+    };
+
+    let mut next_messages = messages.clone();
+    let placeholder = if placeholder_text.trim().is_empty() {
+        "[Image omitted]".to_string()
+    } else {
+        placeholder_text
+    };
+
+    let message = match next_messages[latest_user_index].as_object_mut() {
+        Some(value) => value,
+        None => {
+            return ChatProcessMediaStripOutput {
+                changed: false,
+                messages,
+            }
+        }
+    };
+    let content_parts = match message.get_mut("content").and_then(|v| v.as_array_mut()) {
+        Some(value) => value,
+        None => {
+            return ChatProcessMediaStripOutput {
+                changed: false,
+                messages,
+            }
+        }
+    };
+
+    let mut changed = false;
+    let mut filtered: Vec<Value> = Vec::with_capacity(content_parts.len());
+    for part in content_parts.iter() {
+        if part_type_contains_media(part) {
+            changed = true;
+            let mut replacement = serde_json::Map::new();
+            replacement.insert("type".to_string(), Value::String("text".to_string()));
+            replacement.insert(
+                "text".to_string(),
+                Value::String(placeholder_text_for_part(part, &placeholder)),
+            );
+            filtered.push(Value::Object(replacement));
+        } else {
+            filtered.push(part.clone());
+        }
+    }
+
+    if !changed {
+        return ChatProcessMediaStripOutput {
+            changed: false,
+            messages,
+        };
+    }
+
+    *content_parts = filtered;
+    ChatProcessMediaStripOutput {
+        changed: true,
+        messages: next_messages,
+    }
+}
+
+pub fn strip_latest_responses_input_media(
+    input_entries: Vec<Value>,
+    placeholder_text: String,
+) -> ChatProcessMediaStripOutput {
+    if input_entries.is_empty() {
+        return ChatProcessMediaStripOutput {
+            changed: false,
+            messages: input_entries,
+        };
+    }
+
+    let latest_user_index =
+        input_entries.iter().rposition(|entry| read_message_entry_role(entry) == "user");
+    let Some(latest_user_index) = latest_user_index else {
+        return ChatProcessMediaStripOutput {
+            changed: false,
+            messages: input_entries,
+        };
+    };
+
+    let mut next_entries = input_entries.clone();
+    let placeholder = if placeholder_text.trim().is_empty() {
+        "[Image omitted]".to_string()
+    } else {
+        placeholder_text
+    };
+    let entry = match next_entries[latest_user_index].as_object_mut() {
+        Some(value) => value,
+        None => {
+            return ChatProcessMediaStripOutput {
+                changed: false,
+                messages: input_entries,
+            }
+        }
+    };
+    let content = match entry.get_mut("content").and_then(|v| v.as_array_mut()) {
+        Some(value) => value,
+        None => {
+            return ChatProcessMediaStripOutput {
+                changed: false,
+                messages: input_entries,
+            }
+        }
+    };
+
+    let mut changed = false;
+    let mut filtered: Vec<Value> = Vec::with_capacity(content.len());
+    for part in content.iter() {
+        if part_type_contains_media(part) {
+            changed = true;
+            let mut replacement = serde_json::Map::new();
+            replacement.insert("type".to_string(), Value::String("input_text".to_string()));
+            replacement.insert(
+                "text".to_string(),
+                Value::String(placeholder_text_for_part(part, &placeholder)),
+            );
+            filtered.push(Value::Object(replacement));
+        } else {
+            filtered.push(part.clone());
+        }
+    }
+
+    if !changed {
+        return ChatProcessMediaStripOutput {
+            changed: false,
+            messages: input_entries,
+        };
+    }
+
+    *content = filtered;
+    ChatProcessMediaStripOutput {
+        changed: true,
+        messages: next_entries,
+    }
+}

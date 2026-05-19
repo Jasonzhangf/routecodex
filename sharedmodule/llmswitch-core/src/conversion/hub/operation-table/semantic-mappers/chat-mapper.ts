@@ -11,7 +11,6 @@ import {
 } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-semantic-mappers.js';
 import {
   maybeAugmentApplyPatchErrorContent,
-  tryMapOpenaiChatToChatFast,
   type ChatPayload
 } from './chat-mapper-fastpath.js';
 
@@ -20,10 +19,6 @@ export { maybeAugmentApplyPatchErrorContent };
 export class ChatSemanticMapper implements SemanticMapper {
   async toChat(format: FormatEnvelope, ctx: AdapterContext): Promise<ChatEnvelope> {
     const payload = (format.payload ?? {}) as ChatPayload;
-    const fastMapped = tryMapOpenaiChatToChatFast(payload, ctx);
-    if (fastMapped) {
-      return fastMapped;
-    }
     return mapOpenaiChatToChatWithNative(
       payload as Record<string, unknown>,
       ctx as unknown as Record<string, unknown>

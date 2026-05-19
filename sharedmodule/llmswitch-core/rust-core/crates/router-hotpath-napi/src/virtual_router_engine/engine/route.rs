@@ -20,7 +20,7 @@ use crate::virtual_router_engine::instructions::{
 use crate::virtual_router_engine::provider_registry::ProviderRegistry;
 use crate::virtual_router_engine::routing::{
     extract_excluded_provider_keys, extract_key_alias,
-    filter_candidates_by_state, parse_direct_provider_model,
+    filter_candidates_by_state, is_server_tool_followup_request, parse_direct_provider_model,
     resolve_instruction_process_mode_for_selection, resolve_instruction_target,
     resolve_session_scope, resolve_sticky_key, resolve_stop_message_scope,
     should_fallback_direct_model_for_media,
@@ -477,7 +477,9 @@ impl VirtualRouterEngineCore {
                 } else {
                     let mut classification = self.classifier.classify(&features);
                     if let Some(route_hint) = resolve_route_hint(metadata) {
-                        if !self.routing.get(&route_hint).is_empty() {
+                        if !self.routing.get(&route_hint).is_empty()
+                            && !is_server_tool_followup_request(metadata)
+                        {
                             classification.route_name = route_hint.clone();
                             classification.reasoning = append_reasoning_tag(
                                 &classification.reasoning,
@@ -502,7 +504,9 @@ impl VirtualRouterEngineCore {
             } else {
                 let mut classification = self.classifier.classify(&features);
                 if let Some(route_hint) = resolve_route_hint(metadata) {
-                    if !self.routing.get(&route_hint).is_empty() {
+                    if !self.routing.get(&route_hint).is_empty()
+                        && !is_server_tool_followup_request(metadata)
+                    {
                         classification.route_name = route_hint.clone();
                         classification.reasoning = append_reasoning_tag(
                             &classification.reasoning,

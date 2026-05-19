@@ -115,11 +115,12 @@ pub(crate) fn build_route_queue(
         }
     }
 
-    let should_fallback_tool_route_to_tools = is_tool_route_with_tools_fallback(requested_route_trimmed)
-        && has_tools_targets
-        && !route_has_targets(routing, requested_route_trimmed);
+    let should_fallback_tool_route_to_tools =
+        is_tool_route_with_tools_fallback(requested_route_trimmed) && has_tools_targets;
     if should_fallback_tool_route_to_tools && !queue.iter().any(|v| v == "tools") {
-        if let Some(default_index) = queue
+        if let Some(requested_index) = queue.iter().position(|route| route == requested_route_trimmed) {
+            queue.insert(requested_index + 1, "tools".to_string());
+        } else if let Some(default_index) = queue
             .iter()
             .position(|route| route == super::super::classifier::DEFAULT_ROUTE)
         {

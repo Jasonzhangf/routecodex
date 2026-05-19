@@ -43,7 +43,7 @@ const TRUTHY = new Set(['1', 'true', 'yes', 'on']);
 const FALSY = new Set(['0', 'false', 'no', 'off']);
 const DEFAULT_HEAVY_INPUT_THRESHOLD = 120_000;
 
-function readBooleanEnv(names: string[], fallback: boolean): boolean {
+function readBooleanEnv(names: string[], defaultValue: boolean): boolean {
   for (const name of names) {
     const raw = process.env[name];
     if (raw === undefined) {
@@ -57,10 +57,10 @@ function readBooleanEnv(names: string[], fallback: boolean): boolean {
       return false;
     }
   }
-  return fallback;
+  return defaultValue;
 }
 
-function readPositiveIntEnv(names: string[], fallback: number): number {
+function readPositiveIntEnv(names: string[], defaultValue: number): number {
   for (const name of names) {
     const raw = process.env[name];
     if (raw === undefined) {
@@ -71,7 +71,7 @@ function readPositiveIntEnv(names: string[], fallback: number): number {
       return parsed;
     }
   }
-  return fallback;
+  return defaultValue;
 }
 
 function shouldUseNativeBuild(ctx: AdapterContext): boolean {
@@ -324,21 +324,13 @@ export function buildAnthropicFormatEnvelopeFromChat(
         elapsedMs: Date.now() - nativeBuildStartedAt,
         forceLog: forceDetailLog,
       });
-    } catch {
+    } catch (error) {
       logHubStageTiming(requestId, 'req_outbound.anthropic.build_request_native', 'completed', {
         elapsedMs: Date.now() - nativeBuildStartedAt,
         forceLog: true,
-        fallbackToJs: true,
+        nativeBuildFailed: true,
       });
-      logHubStageTiming(requestId, 'req_outbound.anthropic.build_request_js_fallback', 'start');
-      const jsFallbackStartedAt = Date.now();
-      payloadSource = buildAnthropicRequestFromOpenAIChat(baseRequest, {
-        requestId,
-      });
-      logHubStageTiming(requestId, 'req_outbound.anthropic.build_request_js_fallback', 'completed', {
-        elapsedMs: Date.now() - jsFallbackStartedAt,
-        forceLog: forceDetailLog,
-      });
+      throw error;
     }
   } else {
     logHubStageTiming(requestId, 'req_outbound.anthropic.build_request_js', 'start');

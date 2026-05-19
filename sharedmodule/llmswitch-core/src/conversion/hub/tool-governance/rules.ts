@@ -14,17 +14,17 @@ function clonePattern(pattern: RegExp): RegExp {
   return new RegExp(pattern.source, flags);
 }
 
-function mapAllowedCharacters(token: unknown, fallback: RegExp): RegExp {
+function mapAllowedCharacters(token: unknown, default_: RegExp): RegExp {
   const normalized = String(token || '').trim().toLowerCase();
   if (normalized === 'lower_snake') {
     return clonePattern(LOWER_SNAKE);
   }
-  return clonePattern(fallback);
+  return clonePattern(default_);
 }
 
 function mapNativeRules(
   nativeRules: NativeToolGovernanceRules | undefined,
-  fallback: { allowedCharacters: RegExp; defaultName: string; maxNameLength: number }
+  defaults: { allowedCharacters: RegExp; defaultName: string; maxNameLength: number }
 ): NonNullable<ToolGovernanceRegistry['openai-chat']>['request'] | undefined {
   if (!nativeRules || typeof nativeRules !== 'object') {
     return undefined;
@@ -33,12 +33,12 @@ function mapNativeRules(
     maxNameLength:
       typeof nativeRules.maxNameLength === 'number' && Number.isFinite(nativeRules.maxNameLength)
         ? Math.max(1, Math.floor(nativeRules.maxNameLength))
-        : fallback.maxNameLength,
-    allowedCharacters: mapAllowedCharacters(nativeRules.allowedCharacters, fallback.allowedCharacters),
+        : defaults.maxNameLength,
+    allowedCharacters: mapAllowedCharacters(nativeRules.allowedCharacters, defaults.allowedCharacters),
     defaultName:
       typeof nativeRules.defaultName === 'string' && nativeRules.defaultName.trim().length
         ? nativeRules.defaultName.trim()
-        : fallback.defaultName,
+        : defaults.defaultName,
     trimWhitespace: nativeRules.trimWhitespace !== false,
     ...(nativeRules.forceCase === 'lower' || nativeRules.forceCase === 'upper'
       ? { forceCase: nativeRules.forceCase }
@@ -53,31 +53,21 @@ function mapProtocolNode(
 ): NonNullable<ToolGovernanceRegistry['openai-chat']> {
   const defaultName = 'tool';
   const maxNameLength = 64;
-  const fallbackBase = {
+  const defaultRules = {
     allowedCharacters: options.allowedCharacters,
     defaultName,
     maxNameLength
   };
-  const request = mapNativeRules(nativeNode?.request, fallbackBase) ?? {
-    ...fallbackBase,
-    trimWhitespace: true,
-    onViolation: 'truncate',
-    ...(options.forceCase ? { forceCase: options.forceCase } : {})
-  };
-  const response = mapNativeRules(nativeNode?.response, fallbackBase) ?? {
-    ...fallbackBase,
-    trimWhitespace: true,
-    onViolation: 'truncate',
-    ...(options.forceCase ? { forceCase: options.forceCase } : {})
-  };
+  const request = mapNativeRules(nativeNode?.request, defaultRules);
+  const response = mapNativeRules(nativeNode?.response, defaultRules);
   if (options.forceCase) {
     request.forceCase = options.forceCase;
     response.forceCase = options.forceCase;
   }
-  return {
-    request,
-    response
-  };
+  if (!request || !response) {
+    throw new Error('Tool governance: failed to resolve governance rules for protocol node');
+  }
+  return { request, response };
 }
 
 function mapNativeRegistry(nativeRegistry: NativeToolGovernanceRegistry): ToolGovernanceRegistry {

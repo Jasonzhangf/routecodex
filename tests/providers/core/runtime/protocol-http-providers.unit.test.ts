@@ -113,6 +113,52 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     expect(captured.metadata).toBeUndefined();
   });
 
+  test('ResponsesProvider honors explicit stream=false even when provider streaming preference is always', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-stream-false',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        responses: { streaming: 'always' },
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      post: async (_url: string, body: any) => {
+        provider.__captured = { mode: 'json', body };
+        return {
+          data: {
+            id: 'resp_1',
+            object: 'response',
+            status: 'completed',
+            model: body.model,
+            output: []
+          }
+        };
+      },
+      postStream: async () => {
+        throw new Error('MUST_NOT_USE_SSE_WHEN_STREAM_FALSE');
+      }
+    };
+
+    const outbound = await provider.sendRequestInternal({
+      model: 'gpt-5.3-codex',
+      stream: false,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }]
+    });
+
+    expect(provider.__captured?.mode).toBe('json');
+    expect(provider.__captured?.body?.stream).toBeUndefined();
+    expect((outbound as any)?.data?.status).toBe('completed');
+  });
+
   test('HttpTransportProvider/anthropic derives SSE intent from context metadata and request stream flags', () => {
     const config: OpenAIStandardConfig = {
       id: 'test-anthropic',

@@ -133,14 +133,13 @@ function buildHubNodeResult(options: {
   };
 }
 
-function deriveAdapterContext(context: HubNodeContext, fallbackProtocol: string): AdapterContext {
+function deriveAdapterContext(context: HubNodeContext, plannedProtocol: string): AdapterContext {
   const requestContext = (context.request.context ?? {}) as Record<string, unknown>;
   const metadata = (requestContext.metadata ?? {}) as Record<string, unknown>;
   const target = metadata.target as TargetMetadata | undefined;
-  const providerProtocol =
-    (target?.outboundProfile as string | undefined) ||
-    (typeof metadata.providerProtocol === 'string' ? (metadata.providerProtocol as string) : undefined) ||
-    fallbackProtocol;
+  const targetProtocol = typeof target?.outboundProfile === 'string' ? target.outboundProfile.trim() : '';
+  const metadataProtocol = typeof metadata.providerProtocol === 'string' ? String(metadata.providerProtocol).trim() : '';
+  const providerProtocol = targetProtocol || metadataProtocol || plannedProtocol;
 
   const streamingHint =
     metadata.stream === true ? 'force' : metadata.stream === false ? 'disable' : 'auto';

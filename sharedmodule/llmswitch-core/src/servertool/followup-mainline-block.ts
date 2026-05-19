@@ -7,6 +7,7 @@ import {
   applyClientInjectOnlyMetadata,
   applyFollowupRuntimeMetadata,
   assertAutoLimitNotExceeded,
+  materializeFollowupPayload,
   resolveFollowupExecutionMode,
   resolveFollowupAttemptCount,
   resolveFollowupEntryEndpoint,
@@ -38,6 +39,10 @@ import {
   isEmptyClientResponsePayload
 } from './followup-response-block.js';
 import {
+  applyFollowupDeltaPlan,
+  loadFollowupOriginSeed
+} from './followup-origin-delta.js';
+import {
   appendStopMessageLoopWarning,
   buildStopMessageLoopPayload
 } from './stop-message-loop-payload-block.js';
@@ -51,7 +56,6 @@ import { isAdapterClientDisconnected } from './timeout-error-block.js';
 import { resolveFollowupFlowDecision } from './followup-flow-policy.js';
 import { clearStopMessageState } from './handlers/stop-message-auto/routing-state.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
-import { loadOriginSnapshot } from './origin-request-store.js';
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
@@ -112,14 +116,13 @@ export async function runFollowupMainline(args: {
   finalChatResponse: JsonObject;
   flowId: string;
   totalSteps: number;
-  stopMessageStageTimeoutMs: number;
   stopMessageLoopWarnThreshold: number;
   stopMessageLoopFailThreshold: number;
   stageRecorder?: StageRecorder;
   reenterPipeline?: (options: {
     entryEndpoint: string;
     requestId: string;
-    body: JsonObject;
+    body?: JsonObject;
     metadata?: JsonObject;
   }) => Promise<{ body?: JsonObject; __sse_responses?: unknown; format?: string }>;
   clientInjectDispatch?: (options: {
@@ -144,48 +147,12 @@ export async function runFollowupMainline(args: {
   const isStopMessageFlow = args.execution.flowId === 'stop_message_flow';
   const followupPlan = args.execution.followup;
   const followupEntryEndpoint = resolveFollowupEntryEndpoint(args.execution.followup, args.entryEndpoint);
-
-  // Origin-only mode gate (Phase-1/2):
-  // - when ROUTECODEX_SERVERTOOL_FOLLOWUP_ORIGIN_ONLY=1, we must rebuild followup from
-  //   origin snapshot (store -> adapterContext capturedChatRequest) and fail-fast if missing.
-  // - default path remains origin-first too, but allows in-memory adapterContext snapshot.
-  const originOnlyEnv =
-    process.env.ROUTECODEX_SERVERTOOL_FOLLOWUP_ORIGIN_ONLY === '1'
-    || process.env.LLMSWITCHCORE_SERVERTOOL_FOLLOWUP_ORIGIN_ONLY === '1';
-
-  // Origin-only mode: followup must be rebuilt from capturedChatRequest (origin snapshot).
-  let followupPayloadRaw: JsonObject | null = null;
-  const persistentScopeKey = resolveServertoolPersistentScopeKey(args.adapterContext);
-  const storedSnapshot = persistentScopeKey ? loadOriginSnapshot(persistentScopeKey) : undefined;
-  const captured =
-    (storedSnapshot as unknown as Record<string, unknown> | undefined)
-    ?? ((args.adapterContext as Record<string, unknown> | null)?.capturedChatRequest as Record<string, unknown> | undefined);
-  if (captured && typeof captured === 'object' && !Array.isArray(captured)) {
-    const rec = captured as Record<string, unknown>;
-    const messages = Array.isArray(rec.messages) ? (rec.messages as JsonObject[]) : null;
-    if (messages && messages.length > 0) {
-      const originPayload: JsonObject = { messages };
-      if (typeof rec.model === 'string' && rec.model) originPayload.model = rec.model;
-      if (Array.isArray(rec.tools)) originPayload.tools = rec.tools;
-      if (rec.parameters && typeof rec.parameters === 'object') {
-        originPayload.parameters = rec.parameters as JsonObject;
-      }
-      followupPayloadRaw = originPayload;
-      args.onLogProgress(1, args.totalSteps, 'rebuilt followup from capturedChatRequest', {
-        flowId: args.execution.flowId,
-        messageCount: messages.length,
-        source: 'origin_snapshot'
-      });
-    }
-  }
-
-  if (!followupPayloadRaw && originOnlyEnv) {
-    args.onLogProgress(1, args.totalSteps, 'origin-only followup missing snapshot (fail-fast)', {
-      flowId: args.execution.flowId,
-      source: 'origin_snapshot',
-      persistentScopeKey: persistentScopeKey ?? null
-    });
-  }
+  let followupPayloadRaw: JsonObject | null =
+    followupPlan && typeof followupPlan === 'object' && !Array.isArray(followupPlan) && 'payload' in followupPlan
+      ? (((followupPlan as { payload?: unknown }).payload && typeof (followupPlan as { payload?: unknown }).payload === 'object' && !Array.isArray((followupPlan as { payload?: unknown }).payload))
+        ? ((followupPlan as { payload: JsonObject }).payload)
+        : null)
+      : null;
 
   const loopPayload = resolveLoopPayload({
     flowId: args.execution.flowId,
@@ -229,17 +196,8 @@ export async function runFollowupMainline(args: {
   if (isStopMessageFlow && loopState) {
     shouldInjectStopLoopWarning = evaluateStopMessageLoopGuard({
       loopState,
-      stageTimeoutMs: args.stopMessageStageTimeoutMs,
       warnThreshold: args.stopMessageLoopWarnThreshold,
       failThreshold: args.stopMessageLoopFailThreshold,
-      onStageTimeout: (elapsedMs) => {
-        throw createStopMessageFetchFailedError({
-          requestId: args.requestId,
-          reason: 'stage_timeout',
-          elapsedMs,
-          timeoutMs: args.stopMessageStageTimeoutMs
-        });
-      },
       onLoopLimit: (elapsedMs, repeatCount) => {
         throw createStopMessageFetchFailedError({
           requestId: args.requestId,
@@ -267,6 +225,12 @@ export async function runFollowupMainline(args: {
     stream: false,
     ...(args.execution.followup.metadata ?? {})
   };
+  const followupInjectionPlan =
+    followupPlan && typeof followupPlan === 'object' && !Array.isArray(followupPlan) && 'injection' in followupPlan
+      ? (((followupPlan as { injection?: unknown }).injection && typeof (followupPlan as { injection?: unknown }).injection === 'object' && !Array.isArray((followupPlan as { injection?: unknown }).injection))
+        ? ((followupPlan as { injection: JsonObject }).injection)
+        : null)
+      : null;
   const forceTmuxClientInjectFollowup = applyClientInjectOnlyMetadata({
     flowId: args.execution.flowId,
     decision,
@@ -288,7 +252,6 @@ export async function runFollowupMainline(args: {
     adapterContext: args.adapterContext,
     resolveProviderKey: resolveAdapterContextProviderKey
   });
-
   const maxAttempts = resolveFollowupAttemptCount(args.execution.flowId, decision);
   const retryEmptyFollowupOnce = maxAttempts > 1;
   const followupRequestId = buildFollowupRequestId(args.requestId, args.execution.followup.requestIdSuffix);
@@ -298,7 +261,48 @@ export async function runFollowupMainline(args: {
     metadata,
     readClientInjectOnly
   });
-  if (!followupPayloadRaw && executionMode === 'reenter') {
+  if (followupInjectionPlan && executionMode === 'client_inject_only' && !followupPayloadRaw) {
+    followupPayloadRaw = materializeFollowupPayload({
+      followupPlan,
+      buildInjectionPayload: (injection) => {
+        const seed = loadFollowupOriginSeed(args.adapterContext);
+        if (!seed) {
+          return null;
+        }
+        return applyFollowupDeltaPlan({
+          adapterContext: args.adapterContext,
+          finalChatResponse: args.finalChatResponse,
+          seed,
+          injection: injection as any
+        });
+      }
+    }).payload;
+  }
+  if (followupInjectionPlan && executionMode === 'reenter' && !followupPayloadRaw) {
+    const seed = loadFollowupOriginSeed(args.adapterContext);
+    const injection = JSON.parse(JSON.stringify(followupInjectionPlan)) as Record<string, unknown>;
+    if (seed && shouldInjectStopLoopWarning) {
+      const ops = Array.isArray(injection.ops) ? (injection.ops as Array<Record<string, unknown>>) : [];
+      ops.push({
+        op: 'inject_system_text',
+        text: [
+          `检测到 stopMessage 请求/响应参数已连续 ${loopState?.stopPairRepeatCount ?? args.stopMessageLoopWarnThreshold} 轮一致。`,
+          '请立即尝试跳出循环（换路径、换验证方法、或直接给结论）。',
+          `若继续达到 ${args.stopMessageLoopFailThreshold} 轮一致，将返回 fetch failed 网络错误并停止自动续跑。`
+        ].join('\n')
+      });
+      injection.ops = ops;
+    }
+    if (seed) {
+      followupPayloadRaw = applyFollowupDeltaPlan({
+        adapterContext: args.adapterContext,
+        finalChatResponse: args.finalChatResponse,
+        seed,
+        injection: injection as any
+      });
+    }
+  }
+  if (!followupPayloadRaw && executionMode === 'reenter' && !followupInjectionPlan) {
     args.onLogProgress(5, args.totalSteps, 'failed (missing followup payload; fail-fast)', { flowId: args.flowId });
     throw createMissingFollowupPayloadError({
       flowId: args.execution.flowId,
@@ -363,7 +367,6 @@ export async function runFollowupMainline(args: {
     isStopMessageFlow,
     shouldInjectStopLoopWarning,
     stopLoopWarnThreshold: args.stopMessageLoopWarnThreshold,
-    stopMessageStageTimeoutMs: args.stopMessageStageTimeoutMs,
     loopState,
     finalChatResponse: args.finalChatResponse,
     execution: args.execution,

@@ -2,10 +2,7 @@ import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../h
 import type { ProviderHandle } from '../types.js';
 import { asRecord } from '../provider-utils.js';
 import {
-  parseToolArgsRecord,
-  validateCanonicalClientToolCall,
   isImagePathLike,
-  buildMissingFields,
   containsBroadKillCommand
 } from './provider-response-tool-validation-blocks.js';
 import {
@@ -45,10 +42,7 @@ import {
 
 import {
   asFlatRecord,
-  collectConvertedProviderToolCalls,
-  tryParseJsonLikeString,
   hasStoplessDirectiveInRequestPayload,
-  collectDeclaredToolNames,
   findNestedRawString,
   findNestedErrorMarker,
   normalizeRecoveredToolCalls,
@@ -101,45 +95,6 @@ function readFiniteNonNegativeNumber(value: unknown): number | undefined {
 
 function normalizeGoalCounter(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
-}
-
-function buildGoalToolTransitionError(args: {
-  toolName: string;
-  validationReason: string;
-  validationMessage: string;
-  missingFields?: string[];
-}): never {
-  const err = new Error(args.validationMessage) as Error & {
-    code?: string;
-    status?: number;
-    statusCode?: number;
-    retryable?: boolean;
-    toolName?: string;
-    validationReason?: string;
-    validationMessage?: string;
-    missingFields?: string[];
-    upstreamCode?: string;
-    details?: Record<string, unknown>;
-  };
-  err.code = 'CLIENT_TOOL_ARGS_INVALID';
-  err.status = 502;
-  err.statusCode = 502;
-  err.retryable = false;
-  err.upstreamCode = 'CLIENT_TOOL_ARGS_INVALID';
-  err.toolName = args.toolName;
-  err.validationReason = args.validationReason;
-  err.validationMessage = args.validationMessage;
-  if (args.missingFields?.length) {
-    err.missingFields = args.missingFields;
-  }
-  err.details = {
-    ...(err.details ?? {}),
-    toolName: args.toolName,
-    validationReason: args.validationReason,
-    validationMessage: args.validationMessage,
-    ...(args.missingFields?.length ? { missingFields: args.missingFields } : {})
-  };
-  throw err;
 }
 
 function buildHostForcedStoppedGoalState(args: {
@@ -398,242 +353,6 @@ function persistGoalIrrecoverableErrorLedger(args: {
   });
 }
 
-/**
- * 清零 Codex Goal counters（仅 active 状态管理）
- * consecutiveIrrecoverableErrors + consecutiveValidationFailures
- * 不清零 consecutiveNoProgress（RCC stopless 独立管理）
- */
-function applyCodexGoalLedgers(args: {
-  existingGoal?: StoplessGoalProjection;
-  nextState: StoplessGoalProjection;
-}): StoplessGoalProjection {
-  return {
-    ...args.nextState,
-    consecutiveIrrecoverableErrors: undefined,
-    consecutiveValidationFailures: undefined,
-    // consecutiveNoProgress 由 RCC stopless-guard 独立管理，不清零
-  };
-}
-
-/**
- * 清零 RCC Stopless counter
- * consecutiveNoProgress：连续无进度（模型要求停止的次数）
- */
-function applyRccStoplessLedger(args: {
-  existingGoal?: StoplessGoalProjection;
-  nextState: StoplessGoalProjection;
-}): StoplessGoalProjection {
-  return {
-    ...args.nextState,
-    consecutiveNoProgress: undefined,
-  };
-}
-
-function projectValidatedGoalStateFromConvertedBody(args: {
-  payload: unknown;
-  adapterContext: Record<string, unknown>;
-  pipelineMetadata?: Record<string, unknown>;
-  declaredToolNames?: Set<string>;
-}): StoplessGoalProjection | undefined {
-  const toolCalls = collectConvertedProviderToolCalls(args.payload);
-  let lastCreateGoalArgs: Record<string, unknown> | undefined;
-  let lastUpdateGoalArgs: Record<string, unknown> | undefined;
-  for (const toolCall of toolCalls) {
-    const normalizedName = toolCall.name.trim().toLowerCase();
-    if (normalizedName !== 'create_goal' && normalizedName !== 'update_goal') {
-      continue;
-    }
-    const validation = validateCanonicalClientToolCall(
-      toolCall.name,
-      toolCall.argumentsText,
-      args.declaredToolNames
-    );
-    if (!validation.ok) {
-      buildGoalToolTransitionError({
-        toolName: toolCall.name,
-        validationReason: validation.reason || 'invalid_tool_arguments',
-        validationMessage:
-          validation.message
-          || `Converted provider tool call has invalid client arguments: ${toolCall.name}`,
-        missingFields: validation.missingFields
-      });
-    }
-    const parsed = asFlatRecord(
-      tryParseJsonLikeString(
-        typeof validation.normalizedArgs === 'string'
-          ? validation.normalizedArgs
-          : toolCall.argumentsText
-      )
-    );
-    if (!parsed) {
-      continue;
-    }
-    if (normalizedName === 'create_goal') {
-      lastCreateGoalArgs = parsed;
-      continue;
-    }
-    lastUpdateGoalArgs = parsed;
-  }
-
-  const existingGoal = readCurrentGoalState({
-    adapterContext: args.adapterContext,
-    pipelineMetadata: args.pipelineMetadata
-  });
-  if (!lastUpdateGoalArgs && !lastCreateGoalArgs) {
-    return undefined;
-  }
-
-  if (lastUpdateGoalArgs) {
-    const status = readNonEmptyString(lastUpdateGoalArgs.status)?.toLowerCase();
-    if (status !== 'complete') {
-      return undefined;
-    }
-
-    const objective =
-      readNonEmptyString(lastUpdateGoalArgs.objective)
-      ?? readNonEmptyString(lastUpdateGoalArgs.goal)
-      ?? readNonEmptyString(existingGoal?.objective);
-    if (!objective) {
-      return undefined;
-    }
-
-    const createdAt =
-      readFiniteNonNegativeNumber(existingGoal?.createdAt)
-      ?? Date.now();
-    const updatedAt = Date.now();
-
-    const nextState: StoplessGoalProjection = {
-      status: 'completed',
-      objective,
-      updatedAt,
-      createdAt,
-    };
-    const completionEvidence =
-      readNonEmptyString(lastUpdateGoalArgs.completion_evidence)
-      ?? readNonEmptyString(lastUpdateGoalArgs.completionEvidence);
-    const completionSummary =
-      readNonEmptyString(lastUpdateGoalArgs.completion_summary)
-      ?? readNonEmptyString(lastUpdateGoalArgs.completionSummary);
-    const ssotAssessment =
-      readNonEmptyString(lastUpdateGoalArgs.ssot_assessment)
-      ?? readNonEmptyString(lastUpdateGoalArgs.ssotAssessment);
-    const missingFields = buildMissingFields([
-      completionEvidence ? undefined : 'completion_evidence',
-      completionSummary ? undefined : 'completion_summary',
-      ssotAssessment ? undefined : 'ssot_assessment'
-    ]);
-    if (missingFields?.length) {
-      buildGoalToolTransitionError({
-        toolName: 'update_goal',
-        validationReason: 'missing_completion_evidence',
-        validationMessage: 'update_goal status=complete requires completion_evidence, completion_summary, and ssot_assessment.',
-        missingFields
-      });
-    }
-    nextState.completionEvidence = completionEvidence;
-    nextState.completionSummary = completionSummary;
-    nextState.latestNote = completionSummary;
-    nextState.ssotAssessment = ssotAssessment;
-    return nextState;
-  }
-
-  const createObjective =
-    readNonEmptyString(lastCreateGoalArgs?.objective)
-    ?? readNonEmptyString(lastCreateGoalArgs?.goal);
-  if (!createObjective) {
-    return undefined;
-  }
-  const nowMs = Date.now();
-  const nextState: StoplessGoalProjection = {
-    status: 'active' as const,
-    objective: createObjective,
-    latestNote: createObjective,
-    updatedAt: nowMs,
-    createdAt: nowMs,
-  };
-  // 清零 Codex counters
-  const afterCodex = applyCodexGoalLedgers({ existingGoal, nextState });
-  // 清零 RCC counter
-  return applyRccStoplessLedger({ existingGoal, nextState: afterCodex });
-}
-
-function syncProjectedGoalStateBackToPipelineMetadata(args: {
-  payload: unknown;
-  adapterContext: Record<string, unknown>;
-  pipelineMetadata?: Record<string, unknown>;
-  declaredToolNames?: Set<string>;
-}): StoplessGoalProjection | undefined {
-  const projected = projectValidatedGoalStateFromConvertedBody({
-    payload: args.payload,
-    adapterContext: args.adapterContext,
-    pipelineMetadata: args.pipelineMetadata,
-    declaredToolNames: args.declaredToolNames
-  });
-  if (!projected) {
-    return undefined;
-  }
-  return writeProjectedGoalState({
-    adapterContext: args.adapterContext,
-    pipelineMetadata: args.pipelineMetadata,
-    state: projected
-  });
-}
-
-function validateHostManagedConvertedToolCallsOrThrow(args: {
-  payload: unknown;
-  declaredToolNames?: Set<string>;
-}): void {
-  const toolCalls = collectConvertedProviderToolCalls(args.payload);
-  for (const toolCall of toolCalls) {
-    const normalizedName = toolCall.name.trim().toLowerCase();
-    if (normalizedName !== 'create_goal' && normalizedName !== 'update_goal') {
-      continue;
-    }
-    const validation = validateCanonicalClientToolCall(
-      toolCall.name,
-      toolCall.argumentsText,
-      args.declaredToolNames
-    );
-    if (!validation.ok) {
-      const err = new Error(
-        validation.message
-          ? `Converted provider tool call has invalid client arguments at ${toolCall.path}: ${toolCall.name}. ${validation.message}`
-          : `Converted provider tool call has invalid client arguments at ${toolCall.path}: ${toolCall.name} (${validation.reason || 'invalid_tool_arguments'})`
-      ) as Error & {
-        code?: string;
-        status?: number;
-        statusCode?: number;
-        retryable?: boolean;
-        toolName?: string;
-        validationReason?: string;
-        validationMessage?: string;
-        missingFields?: string[];
-        upstreamCode?: string;
-        details?: Record<string, unknown>;
-      };
-      err.code = 'CLIENT_TOOL_ARGS_INVALID';
-      err.status = 502;
-      err.statusCode = 502;
-      err.retryable = false;
-      err.upstreamCode = 'CLIENT_TOOL_ARGS_INVALID';
-      err.toolName = toolCall.name;
-      err.validationReason = validation.reason || 'invalid_tool_arguments';
-      err.validationMessage = validation.message;
-      if (validation.missingFields?.length) {
-        err.missingFields = validation.missingFields;
-      }
-      err.details = {
-        ...(err.details ?? {}),
-        toolName: toolCall.name,
-        validationReason: validation.reason || 'invalid_tool_arguments',
-        ...(validation.message ? { validationMessage: validation.message } : {}),
-        ...(validation.missingFields?.length ? { missingFields: validation.missingFields } : {})
-      };
-      throw err;
-    }
-  }
-}
-
 function logProviderResponseConverterNonBlockingError(
   stage: string,
   error: unknown,
@@ -725,7 +444,6 @@ function syncAdapterContextRuntimeBackToPipelineMetadata(options: {
     ...(Array.isArray(adapterRt?.hubStageTop) && adapterRt.hubStageTop.length > 0
       ? { hubStageTop: adapterRt.hubStageTop }
       : {}),
-    ...(typeof adapterRt?.goalMode === 'boolean' ? { goalMode: adapterRt.goalMode } : {}),
     ...(typeof adapterRt?.stoplessGoalStatus === 'string' && adapterRt.stoplessGoalStatus.trim()
       ? { stoplessGoalStatus: adapterRt.stoplessGoalStatus.trim() }
       : {}),
@@ -740,6 +458,7 @@ export type ConvertProviderResponseOptions = {
   entryEndpoint?: string;
   providerProtocol: string;
   providerType?: string;
+  providerKey?: string;
   requestId: string;
   serverToolsEnabled?: boolean;
   wantsStream: boolean;
@@ -970,7 +689,7 @@ export async function convertProviderResponseIfNeeded(
     const reenterPipeline = async (reenterOpts: {
       entryEndpoint: string;
       requestId: string;
-      body: Record<string, unknown>;
+      body?: Record<string, unknown>;
       metadata?: Record<string, unknown>;
     }): Promise<{ body?: Record<string, unknown>; __sse_responses?: unknown; format?: string }> => {
       const reenterStartMs = Date.now();
@@ -987,7 +706,6 @@ export async function convertProviderResponseIfNeeded(
         baseMetadata: metadataBag,
         requestSemantics: options.requestSemantics,
         executeNested: deps.executeNested,
-        runClientInjectBeforeNested: false,
         onMergeRuntimeMetaError: (error, details) => {
           logProviderResponseConverterNonBlockingError('reenter.buildNestedMetadata.mergeRuntimeMeta', error, {
             requestId: details.requestId,
@@ -1087,20 +805,16 @@ export async function convertProviderResponseIfNeeded(
         entryEndpoint: options.entryEndpoint || entry
       });
     }
-    const declaredToolNames = collectDeclaredToolNames(baseContext);
-    validateHostManagedConvertedToolCallsOrThrow({
-      payload: converted.body ?? body,
-      declaredToolNames
-    });
-    syncProjectedGoalStateBackToPipelineMetadata({
-      payload: converted.body ?? body,
-      adapterContext,
-      pipelineMetadata: options.pipelineMetadata,
-      declaredToolNames
-    });
     if (converted.__sse_responses) {
       const usage = converted.body
-        ? extractUsageFromResult({ body: converted.body })
+        ? extractUsageFromResult(
+          { body: converted.body },
+          {
+            providerProtocol: options.providerProtocol,
+            providerType: options.providerType,
+            providerKey: options.providerKey
+          }
+        )
         : undefined;
       const finishReason = deriveFinishReason(converted.body);
       logPipelineStage('convert.sse_wrapper_detected', options.requestId, {

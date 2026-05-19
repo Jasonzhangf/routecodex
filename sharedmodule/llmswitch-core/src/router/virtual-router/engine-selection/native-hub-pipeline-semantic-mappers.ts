@@ -111,3 +111,49 @@ export function augmentApplyPatchErrorContentWithNative(
     typeof toolName === 'string' ? toolName : ''
   ]);
 }
+
+export function buildSubmitToolOutputsPayloadWithNative(input: {
+  chatEnvelope: Record<string, unknown>;
+  adapterContext: Record<string, unknown>;
+  responsesContext: Record<string, unknown>;
+}): Record<string, unknown> {
+  return invokeRecordCapability('buildSubmitToolOutputsPayloadJson', [input]);
+}
+
+export function resolveHeartbeatDirectiveWithNative(input: {
+  messages: unknown;
+  metadata: Record<string, unknown>;
+}): Record<string, unknown> {
+  return invokeRecordCapability('resolveHeartbeatDirectiveJson', [input]);
+}
+
+export function extractToolSignaturesFromPayloadWithNative(payload: unknown): string[] {
+  const raw = invokeStringCapability('extractToolSignaturesFromPayloadJson', [safeStringify(payload) ?? '{}']);
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export function hasNewGovernedServerToolCallsWithNative(beforePayload: unknown, afterPayload: unknown): boolean {
+  const raw = invokeStringCapability('hasNewGovernedServerToolCallsJson', [
+    safeStringify(beforePayload) ?? '{}',
+    safeStringify(afterPayload) ?? '{}'
+  ]);
+  try {
+    return JSON.parse(raw) === true;
+  } catch {
+    return false;
+  }
+}
+
+export function responsesPayloadRequiresSubmitToolOutputsWithNative(payload: unknown): boolean {
+  const raw = invokeStringCapability('responsesPayloadRequiresSubmitToolOutputsJson', [safeStringify(payload) ?? '{}']);
+  try {
+    return JSON.parse(raw) === true;
+  } catch {
+    return false;
+  }
+}

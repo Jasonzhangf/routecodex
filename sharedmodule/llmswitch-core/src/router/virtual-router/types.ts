@@ -565,12 +565,12 @@ export interface RoutingDecision {
   pool: string[];
   poolId?: string;
 }
-
 export interface TargetMetadata {
   providerKey: string;
   providerType: string;
   outboundProfile: string;
   compatibilityProfile?: string;
+  supportsMultimodal?: boolean;
   runtimeKey?: string;
   concurrencyScopeKey?: string;
   modelId: string;

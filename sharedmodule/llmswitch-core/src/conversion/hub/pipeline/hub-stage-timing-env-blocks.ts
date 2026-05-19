@@ -5,9 +5,9 @@ const DEFAULT_HUB_STAGE_LOG_MIN_MS = 50;
 const DEFAULT_HUB_STAGE_TOP_N = 5;
 const DEFAULT_HUB_STAGE_TOP_MIN_MS = 5;
 
-function resolveBool(raw: string | undefined, fallback: boolean): boolean {
+function resolveBool(raw: string | undefined, defaultValue: boolean): boolean {
   if (raw === undefined) {
-    return fallback;
+    return defaultValue;
   }
   const normalized = String(raw).trim().toLowerCase();
   if (truthy.has(normalized)) {
@@ -16,16 +16,16 @@ function resolveBool(raw: string | undefined, fallback: boolean): boolean {
   if (falsy.has(normalized)) {
     return false;
   }
-  return fallback;
+  return defaultValue;
 }
 
-function readIntEnv(name: string, fallback: number): number {
+function readIntEnv(name: string, defaultValue: number): number {
   const raw = process.env[name];
   const parsed = Number.parseInt(String(raw ?? "").trim(), 10);
   if (Number.isFinite(parsed) && parsed > 0) {
     return parsed;
   }
-  return fallback;
+  return defaultValue;
 }
 
 export function isHubStageTimingEnabled(): boolean {

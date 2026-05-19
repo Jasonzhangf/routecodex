@@ -14,7 +14,6 @@ export {
   extractStopMessageClearInstruction
 } from './routing-instructions/parse.js';
 export {
-  applyRoutingInstructions,
   serializeRoutingInstructionState,
   deserializeRoutingInstructionState
 } from './routing-instructions/state.js';

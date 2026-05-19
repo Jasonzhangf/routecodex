@@ -29,7 +29,7 @@ describe('direct-passthrough-payload', () => {
     });
   });
 
-  it('keeps direct payload transparent on ingress side (no route/provider overrides)', () => {
+  it('uses providerPayload as router-direct outbound truth when provided', () => {
     const result = applyMinimalDirectOverrides(
       {
         model: 'gpt-5.4',
@@ -53,12 +53,13 @@ describe('direct-passthrough-payload', () => {
     );
 
     expect(result).toEqual({
-      model: 'gpt-5.4',
-      previous_response_id: 'resp_prev',
-      input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+      model: 'dbittai-gpt.key1.gpt-5.3-codex',
+      thinking: { type: 'enabled', budget_tokens: 2048 },
+      reasoning_effort: 'low',
+      instructions: 'must-not-copy',
+      tools: [{ name: 'must-not-copy' }],
     });
-    expect((result as Record<string, unknown>).instructions).toBeUndefined();
-    expect((result as Record<string, unknown>).tools).toBeUndefined();
+    expect((result as Record<string, unknown>).previous_response_id).toBeUndefined();
     expect((result as Record<string, unknown>).foo).toBeUndefined();
   });
 });

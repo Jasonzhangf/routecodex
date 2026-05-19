@@ -74,6 +74,26 @@ function logSseClientCloseDiagnosis(
   }
 }
 
+function cleanupAbandonedResponsesConversation(
+  requestLabel: string,
+  options: {
+    entryEndpoint?: string;
+    closeBeforeStreamEnd: boolean;
+  }
+): void {
+  if (!options.closeBeforeStreamEnd || options.entryEndpoint !== '/v1/responses') {
+    return;
+  }
+  try {
+    const store = (globalThis as Record<string, unknown>)['__rccResponsesConversationStore'] as
+      | { clearRequest?: (requestId?: string) => void }
+      | undefined;
+    store?.clearRequest?.(requestLabel);
+  } catch (error) {
+    logResponseNonBlockingError(`response.sse.client_close.clear_responses_conversation:${requestLabel}`, error);
+  }
+}
+
 function formatTimestamp(): string {
   const now = new Date();
   const hours = String(now.getHours()).padStart(2, '0');
@@ -285,6 +305,49 @@ function sendSseBridgeError(res: Response, requestLabel: string, status = 502): 
   }
 }
 
+function extractStructuredSseErrorPayload(body: unknown, requestLabel: string, status: number): Record<string, unknown> | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return null;
+  }
+  const record = body as Record<string, unknown>;
+  const error =
+    record.error && typeof record.error === 'object' && !Array.isArray(record.error)
+      ? (record.error as Record<string, unknown>)
+      : undefined;
+  if (!error) {
+    return null;
+  }
+  const payloadError: Record<string, unknown> = {
+    ...error,
+    request_id:
+      typeof error.request_id === 'string' && error.request_id.trim()
+        ? error.request_id
+        : requestLabel
+  };
+  return {
+    type: 'error',
+    status,
+    error: payloadError
+  };
+}
+
+function sendStructuredSseError(res: Response, requestLabel: string, payload: Record<string, unknown>): void {
+  res.status(200);
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  try {
+    res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
+  } catch (error) {
+    logResponseNonBlockingError(`sendStructuredSseError:write:${requestLabel}`, error);
+  }
+  try {
+    res.end();
+  } catch (error) {
+    logResponseNonBlockingError(`sendStructuredSseError:end:${requestLabel}`, error);
+  }
+}
+
 export function hasSsePayload(body: unknown): body is SsePayloadShape {
   return Boolean(body && typeof body === 'object' && '__sse_responses' in (body as Record<string, unknown>));
 }
@@ -380,7 +443,13 @@ export function sendPipelineResponse(
 
   if (forceSSE && !expectsStream) {
     logPipelineStage('response.sse.missing', requestLabel, { status });
-    logResponseCompleted({ status: 200, mode: 'sse', reason: 'missing_stream', bridgeStatus: 502 });
+    const structuredErrorPayload = extractStructuredSseErrorPayload(body, requestLabel, status);
+    logResponseCompleted({
+      status: 200,
+      mode: 'sse',
+      reason: structuredErrorPayload ? 'structured_error_passthrough' : 'missing_stream',
+      bridgeStatus: structuredErrorPayload ? status : 502
+    });
     if (captureClientResponse) {
       void writeServerSnapshot({
         phase: 'client-response.error',
@@ -389,7 +458,7 @@ export function sendPipelineResponse(
         data: {
           mode: 'sse',
           status: 200,
-          payload: {
+          payload: structuredErrorPayload ?? {
             type: 'error',
             status: 502,
             error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' }
@@ -398,6 +467,10 @@ export function sendPipelineResponse(
       }).catch((error) => {
         logResponseNonBlockingError(`writeServerSnapshot:sse_missing:${requestLabel}`, error);
       });
+    }
+    if (structuredErrorPayload) {
+      sendStructuredSseError(res, requestLabel, structuredErrorPayload);
+      return;
     }
     sendSseBridgeError(res, requestLabel, 502);
     return;
@@ -602,6 +675,10 @@ export function sendPipelineResponse(
       if (closeBeforeStreamEnd) {
         logSseClientCloseDiagnosis(requestLabel, {
           ...details,
+          closeBeforeStreamEnd
+        });
+        cleanupAbandonedResponsesConversation(requestLabel, {
+          entryEndpoint,
           closeBeforeStreamEnd
         });
         logPipelineStage('response.sse.client_close', requestLabel, {

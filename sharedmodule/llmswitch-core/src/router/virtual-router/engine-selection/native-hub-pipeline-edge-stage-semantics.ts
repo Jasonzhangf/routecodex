@@ -64,8 +64,6 @@ function parseRecord(raw: string): Record<string, unknown> | null {
 function parseFormatEnvelopePayload(
   raw: string,
   direction: "request" | "response",
-  fallbackProtocol: string,
-  fallbackPayload: Record<string, unknown>,
 ): Record<string, unknown> | null {
   const parsed = parseJson("parseFormatEnvelopePayload", raw);
   if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -80,13 +78,19 @@ function parseFormatEnvelopePayload(
   const protocol =
     typeof env.format === "string" && env.format.trim().length
       ? env.format.trim()
-      : fallbackProtocol;
+      : null;
+  if (!protocol) {
+    return null;
+  }
   const payload =
     env.payload &&
     typeof env.payload === "object" &&
     !Array.isArray(env.payload)
       ? (env.payload as Record<string, unknown>)
-      : fallbackPayload;
+      : null;
+  if (!payload) {
+    return null;
+  }
   const out: Record<string, unknown> = {
     protocol,
     direction,
@@ -421,8 +425,6 @@ export function parseRespInboundFormatEnvelopeWithNative(input: {
     const parsed = parseFormatEnvelopePayload(
       raw,
       "response",
-      input.protocol,
-      input.payload,
     );
     return parsed ?? fail("invalid payload");
   } catch (error) {

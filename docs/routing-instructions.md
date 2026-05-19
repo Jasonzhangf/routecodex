@@ -247,7 +247,6 @@ stopless start
 **实现锚点：**
 
 - `docs/design/rcc-unified-fence-marker-spec.md`
-- `docs/design/stopless-goal-runtime-refactor-plan.md`
 
 ## 目标标识格式
 

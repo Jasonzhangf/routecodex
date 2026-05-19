@@ -2,6 +2,12 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {
+  normalizeServertoolFollowupPayloadShape,
+  validateServertoolFollowupPayloadShape
+} from './followup-shape-guard.js';
 
 function readTrimmedString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -80,6 +86,80 @@ function isTerminalFollowupError(error: unknown): boolean {
   return false;
 }
 
+function sanitizeFileSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 220) || 'unknown';
+}
+
+async function persistFollowupFailureSample(args: {
+  requestId: string;
+  followupRequestId: string;
+  flowId?: string;
+  attempt: number;
+  errorMessage: string;
+  payload: JsonObject;
+}): Promise<void> {
+  try {
+    const root = path.resolve(process.cwd(), 'tmp/servertool-followup-failures');
+    await fs.mkdir(root, { recursive: true });
+    const name = sanitizeFileSegment(args.followupRequestId || args.requestId);
+    const file = path.join(root, `${name}.json`);
+    await fs.writeFile(
+      file,
+      `${JSON.stringify(
+        {
+          requestId: args.requestId,
+          followupRequestId: args.followupRequestId,
+          flowId: args.flowId,
+          attempt: args.attempt,
+          errorMessage: args.errorMessage,
+          payload: args.payload
+        },
+        null,
+        2
+      )}\n`,
+      'utf8'
+    );
+    console.error('[servertool.followup.failure.sample]', JSON.stringify({ file, requestId: args.requestId }));
+  } catch {
+    // non-blocking diagnostics only
+  }
+}
+
+async function persistEmptyFollowupSample(args: {
+  requestId: string;
+  followupRequestId: string;
+  flowId?: string;
+  attempt: number;
+  body?: JsonObject;
+  payload: JsonObject;
+}): Promise<void> {
+  try {
+    const root = path.resolve(process.cwd(), 'tmp/servertool-followup-empty');
+    await fs.mkdir(root, { recursive: true });
+    const name = sanitizeFileSegment(args.followupRequestId || args.requestId);
+    const file = path.join(root, `${name}.attempt-${args.attempt}.json`);
+    await fs.writeFile(
+      file,
+      `${JSON.stringify(
+        {
+          requestId: args.requestId,
+          followupRequestId: args.followupRequestId,
+          flowId: args.flowId,
+          attempt: args.attempt,
+          body: args.body ?? null,
+          payload: args.payload
+        },
+        null,
+        2
+      )}\n`,
+      'utf8'
+    );
+    console.error('[servertool.followup.empty.sample]', JSON.stringify({ file, requestId: args.requestId }));
+  } catch {
+    // non-blocking diagnostics only
+  }
+}
+
 export async function runReenterFollowup(args: {
   adapterContext: AdapterContext;
   requestId: string;
@@ -94,7 +174,6 @@ export async function runReenterFollowup(args: {
   isStopMessageFlow: boolean;
   shouldInjectStopLoopWarning: boolean;
   stopLoopWarnThreshold: number;
-  stopMessageStageTimeoutMs: number;
   loopState: {
     startedAtMs?: number;
     stopPairRepeatCount?: number;
@@ -104,7 +183,7 @@ export async function runReenterFollowup(args: {
   reenterPipeline?: (options: {
     entryEndpoint: string;
     requestId: string;
-    body: JsonObject;
+    body?: JsonObject;
     metadata?: JsonObject;
   }) => Promise<{ body?: JsonObject; __sse_responses?: unknown; format?: string }>;
   coerceFollowupPayloadStream: (payload: JsonObject, stream: boolean) => JsonObject;
@@ -133,10 +212,9 @@ export async function runReenterFollowup(args: {
   }) => Error;
   createStopMessageFetchFailedError: (options: {
     requestId: string;
-    reason: 'stage_timeout' | 'loop_limit';
+    reason: 'loop_limit';
     elapsedMs?: number;
     repeatCount?: number;
-    timeoutMs?: number;
     attempt?: number;
     maxAttempts?: number;
   }) => Error;
@@ -160,6 +238,38 @@ export async function runReenterFollowup(args: {
   | { kind: 'completed'; result: { chat: JsonObject; executed: true; flowId?: string } }
   | { kind: 'followup_body'; followupBody?: JsonObject }
 > {
+  const RED = '\u001b[31m';
+  const RESET = '\u001b[0m';
+  const shouldLogFollowupLifecycleStage = (stage: string): boolean => {
+    if (!stage) return false;
+    return (
+      stage.includes('failed')
+      || stage.includes('error')
+      || stage.includes('retry')
+      || stage.includes('empty')
+      || stage === 'attempt_error'
+      || stage === 'payload_validation_failed'
+    );
+  };
+  const lifecycle = (stage: string, extra?: Record<string, unknown>): void => {
+    if (!shouldLogFollowupLifecycleStage(stage)) {
+      return;
+    }
+    try {
+      const payload = JSON.stringify({
+        requestId: args.requestId,
+        followupRequestId: args.followupRequestId,
+        flowId: args.flowId,
+        stage,
+        entryEndpoint: args.followupEntryEndpoint,
+        ...extra
+      });
+      console.error(`${RED}[servertool.followup.lifecycle]${RESET} ${payload}`);
+    } catch {
+      // non-blocking
+    }
+  };
+
   if (!args.reenterPipeline) {
     const wrapped = new ProviderProtocolError('[servertool] followup requires reenter pipeline', {
       code: 'SERVERTOOL_FOLLOWUP_FAILED',
@@ -187,48 +297,75 @@ export async function runReenterFollowup(args: {
     wrapped.status = 502;
     throw wrapped;
   }
+  lifecycle('payload_received', {
+    hasRawPayload: true,
+    rawHasInput: Array.isArray((args.followupPayloadRaw as Record<string, unknown>).input),
+    rawHasMessages: Array.isArray((args.followupPayloadRaw as Record<string, unknown>).messages)
+  });
 
-  let followupPayload = args.coerceFollowupPayloadStream(args.followupPayloadRaw, args.metadata.stream === true);
-  if (args.shouldInjectStopLoopWarning && args.loopState) {
+  const normalizedShapePayload = normalizeServertoolFollowupPayloadShape({
+    entryEndpoint: args.followupEntryEndpoint,
+    payload: args.followupPayloadRaw
+  });
+  lifecycle('payload_normalized', {
+    hasNormalizedPayload: Boolean(normalizedShapePayload),
+    normalizedHasInput: Array.isArray((normalizedShapePayload as Record<string, unknown> | null | undefined)?.input),
+    normalizedHasMessages: Array.isArray((normalizedShapePayload as Record<string, unknown> | null | undefined)?.messages)
+  });
+  const shapeValidation = validateServertoolFollowupPayloadShape({
+    entryEndpoint: args.followupEntryEndpoint,
+    payload: normalizedShapePayload
+  });
+  if (shapeValidation.ok === false) {
+    const violation = shapeValidation.violation;
+    const wrapped = new ProviderProtocolError('[servertool] followup payload shape invalid', {
+      code: 'SERVERTOOL_FOLLOWUP_INVALID_SHAPE',
+      category: 'INTERNAL_ERROR',
+      details: {
+        flowId: args.flowId,
+        requestId: args.requestId,
+        reason: violation.reason,
+        violationCode: violation.code
+      }
+    }) as ProviderProtocolError & { status?: number };
+    wrapped.status = 502;
+    lifecycle('payload_validation_failed', {
+      violationCode: violation.code,
+      reason: violation.reason
+    });
+    throw wrapped;
+  }
+  lifecycle('payload_validation_passed');
+
+  let followupPayload = args.coerceFollowupPayloadStream(
+    (normalizedShapePayload ?? args.followupPayloadRaw) as JsonObject,
+    args.metadata.stream === true
+  );
+  if (followupPayload && args.shouldInjectStopLoopWarning && args.loopState) {
     args.appendStopMessageLoopWarning(
       followupPayload,
       args.loopState.stopPairRepeatCount ?? args.stopLoopWarnThreshold
     );
   }
-  followupPayload = args.applyHubFollowupPolicyShadow({
-    requestId: args.followupRequestId,
-    entryEndpoint: args.followupEntryEndpoint,
-    flowId: args.flowId,
-    payload: followupPayload,
-    stageRecorder: args.stageRecorder
-  });
+  if (followupPayload) {
+    followupPayload = args.applyHubFollowupPolicyShadow({
+      requestId: args.followupRequestId,
+      entryEndpoint: args.followupEntryEndpoint,
+      flowId: args.flowId,
+      payload: followupPayload,
+      stageRecorder: args.stageRecorder
+    });
+  }
 
   let followup:
     | { body?: JsonObject; __sse_responses?: unknown; format?: string }
     | undefined;
   let lastError: unknown;
+  let lastEmptyFollowupBody: JsonObject | undefined;
+  let emptySamplePersisted = false;
 
   for (let attempt = 1; attempt <= args.maxAttempts; attempt += 1) {
-    const elapsedBeforeAttempt =
-      args.isStopMessageFlow && args.loopState && typeof args.loopState.startedAtMs === 'number' && Number.isFinite(args.loopState.startedAtMs)
-        ? Math.max(0, Date.now() - args.loopState.startedAtMs)
-        : 0;
-    if (args.isStopMessageFlow && elapsedBeforeAttempt >= args.stopMessageStageTimeoutMs) {
-      throw args.createStopMessageFetchFailedError({
-        requestId: args.requestId,
-        reason: 'stage_timeout',
-        elapsedMs: elapsedBeforeAttempt,
-        timeoutMs: args.stopMessageStageTimeoutMs,
-        attempt,
-        maxAttempts: args.maxAttempts
-      });
-    }
-
-    const attemptTimeoutMs =
-      args.isStopMessageFlow && args.stopMessageStageTimeoutMs > elapsedBeforeAttempt
-        ? Math.max(1, Math.min(args.followupTimeoutMs, args.stopMessageStageTimeoutMs - elapsedBeforeAttempt))
-        : args.followupTimeoutMs;
-
+    lifecycle('attempt_start', { attempt, maxAttempts: args.maxAttempts });
     const disconnectWatcher = args.createClientDisconnectWatcher({
       adapterContext: args.adapterContext,
       requestId: args.requestId,
@@ -238,41 +375,48 @@ export async function runReenterFollowup(args: {
       const followupPromise = args.reenterPipeline({
         entryEndpoint: args.followupEntryEndpoint,
         requestId: args.followupRequestId,
-        body: followupPayload,
+        ...(followupPayload ? { body: followupPayload } : {}),
         metadata: args.metadata
       });
       followup = await args.withTimeout(
         Promise.race([followupPromise, disconnectWatcher.promise]),
-        attemptTimeoutMs,
+        args.followupTimeoutMs,
         () =>
-          args.isStopMessageFlow
-            ? args.createStopMessageFetchFailedError({
-                requestId: args.requestId,
-                reason: 'stage_timeout',
-                elapsedMs: elapsedBeforeAttempt,
-                timeoutMs: args.stopMessageStageTimeoutMs,
-                attempt,
-                maxAttempts: args.maxAttempts
-              })
-            : args.createServerToolTimeoutError({
-                requestId: args.requestId,
-                phase: 'followup',
-                timeoutMs: attemptTimeoutMs,
-                flowId: args.flowId,
-                attempt,
-                maxAttempts: args.maxAttempts
-              })
+          args.createServerToolTimeoutError({
+            requestId: args.requestId,
+            phase: 'followup',
+            timeoutMs: args.followupTimeoutMs,
+            flowId: args.flowId,
+            attempt,
+            maxAttempts: args.maxAttempts
+          })
       );
       disconnectWatcher.cancel();
+      lifecycle('attempt_result', {
+        attempt,
+        hasBody: Boolean(followup && followup.body && typeof followup.body === 'object'),
+        hasSse: Boolean(followup && (followup as Record<string, unknown>).__sse_responses)
+      });
       if (args.retryEmptyFollowupOnce) {
         const body =
           followup && followup.body && typeof followup.body === 'object'
             ? (followup.body as JsonObject)
             : undefined;
         if (body && args.isEmptyClientResponsePayload(body)) {
+          lastEmptyFollowupBody = body;
+          void persistEmptyFollowupSample({
+            requestId: args.requestId,
+            followupRequestId: args.followupRequestId,
+            flowId: args.flowId,
+            attempt,
+            body,
+            payload: followupPayload
+          });
+          emptySamplePersisted = true;
           followup = undefined;
           lastError = new Error('SERVERTOOL_EMPTY_FOLLOWUP');
           if (attempt < args.maxAttempts) {
+            lifecycle('attempt_retry_empty_followup', { attempt });
             continue;
           }
         }
@@ -281,6 +425,49 @@ export async function runReenterFollowup(args: {
       break;
     } catch (error) {
       disconnectWatcher.cancel();
+      if (
+        error &&
+        typeof error === 'object' &&
+        !Array.isArray(error) &&
+        (error as { message?: unknown }).message &&
+        followupPayload
+      ) {
+        const msg = String((error as { message?: unknown }).message || '');
+        if (msg.includes('orphan_tool_result')) {
+          void persistFollowupFailureSample({
+            requestId: args.requestId,
+            followupRequestId: args.followupRequestId,
+            flowId: args.flowId,
+            attempt,
+            errorMessage: msg,
+            payload: followupPayload
+          });
+          try {
+            console.error(
+              '[servertool.followup.orphan.debug]',
+              JSON.stringify({
+                requestId: args.requestId,
+                followupRequestId: args.followupRequestId,
+                flowId: args.flowId,
+                attempt,
+                payloadModel: (followupPayload as Record<string, unknown>).model,
+                hasInput: Array.isArray((followupPayload as Record<string, unknown>).input),
+                hasMessages: Array.isArray((followupPayload as Record<string, unknown>).messages),
+                inputSize: Array.isArray((followupPayload as Record<string, unknown>).input)
+                  ? ((followupPayload as Record<string, unknown>).input as unknown[]).length
+                  : 0,
+                preview: JSON.stringify(followupPayload).slice(0, 4000)
+              })
+            );
+          } catch {
+            // best effort diagnostic only
+          }
+        }
+      }
+      lifecycle('attempt_error', {
+        attempt,
+        message: error instanceof Error ? error.message : String(error ?? 'unknown')
+      });
       if (args.isServerToolClientDisconnectedError(error) || args.isAdapterClientDisconnected(args.adapterContext)) {
         args.onLogProgress(5, 5, 'completed (client disconnected)', { flowId: args.flowId, attempt });
         return {
@@ -353,7 +540,36 @@ export async function runReenterFollowup(args: {
     followup && followup.body && typeof followup.body === 'object'
       ? (followup.body as JsonObject)
       : undefined;
+  const terminalLastError = lastError && isTerminalFollowupError(lastError) ? lastError : undefined;
+  if (terminalLastError && !followupBody) {
+    if (args.isStopMessageFlow) {
+      args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);
+      args.onLogProgress(5, 5, 'failed (stopMessage followup terminal error; state cleared)', {
+        flowId: args.flowId
+      });
+    }
+    throw terminalLastError;
+  }
   if (args.retryEmptyFollowupOnce && (!followupBody || args.isEmptyClientResponsePayload(followupBody))) {
+    if (terminalLastError) {
+      if (args.isStopMessageFlow) {
+        args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);
+        args.onLogProgress(5, 5, 'failed (stopMessage followup terminal error; state cleared)', {
+          flowId: args.flowId
+        });
+      }
+      throw terminalLastError;
+    }
+    if (followupPayload && !emptySamplePersisted) {
+      void persistEmptyFollowupSample({
+        requestId: args.requestId,
+        followupRequestId: args.followupRequestId,
+        flowId: args.flowId,
+        attempt: args.maxAttempts,
+        body: followupBody ?? lastEmptyFollowupBody,
+        payload: followupPayload
+      });
+    }
     if (args.isStopMessageFlow) {
       args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);
       args.onLogProgress(5, 5, 'failed (stopMessage followup empty; state cleared)', { flowId: args.flowId });
@@ -370,6 +586,9 @@ export async function runReenterFollowup(args: {
       lastError
     });
   }
-
+  lifecycle('followup_completed', {
+    hasBody: Boolean(followupBody),
+    isEmpty: Boolean(followupBody && args.isEmptyClientResponsePayload(followupBody))
+  });
   return { kind: 'followup_body', followupBody };
 }

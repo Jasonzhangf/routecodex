@@ -207,6 +207,74 @@ describe('vision_auto servertool followup (entry-aware)', () => {
     expect(userContent).toHaveLength(2);
   });
 
+  test('vision analysis hop pins exact routed provider and model from adapter context', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-vision-pin-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      providerType: 'openai',
+      providerKey: 'mini27.key1.minimax',
+      targetProviderKey: 'mini27.key1.MiniMax-M2.7',
+      routecodexPortMode: 'router',
+      target: {
+        providerKey: 'mini27.key1.MiniMax-M2.7',
+        modelId: 'MiniMax-M2.7'
+      },
+      capturedChatRequest: {
+        ...makeCapturedChatRequestWithImage(),
+        model: 'minimax'
+      }
+    } as any;
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-vision-pin-1',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    } as any;
+
+    let analysisHop: any;
+    await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-vision-pin-1',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async (opts: any) => {
+        if (String(opts.requestId).includes(':vision_followup')) {
+          return { body: {} as JsonObject };
+        }
+        analysisHop = opts;
+        return {
+          body: {
+            id: 'chatcmpl-vision-analysis',
+            object: 'chat.completion',
+            model: 'MiniMax-M2.7',
+            choices: [
+              {
+                index: 0,
+                message: { role: 'assistant', content: 'vision summary' },
+                finish_reason: 'stop'
+              }
+            ]
+          } as JsonObject
+        };
+      }
+    });
+
+    expect(analysisHop?.body?.model).toBe('MiniMax-M2.7');
+    expect(analysisHop?.metadata?.__shadowCompareForcedProviderKey).toBe('mini27.key1.MiniMax-M2.7');
+    expect(analysisHop?.metadata?.targetProviderKey).toBe('mini27.key1.MiniMax-M2.7');
+    expect(analysisHop?.metadata?.assignedModelId).toBe('MiniMax-M2.7');
+    expect(analysisHop?.metadata?.routeHint).toBe('vision');
+  });
+
   test('multi-image followup preserves numbered placeholders and raw prompt', async () => {
     const adapterContext: AdapterContext = {
       requestId: 'req-vision-multi-1',
@@ -355,6 +423,56 @@ describe('vision_auto servertool followup (entry-aware)', () => {
       adapterContext,
       entryEndpoint: '/v1/responses',
       requestId: 'req-multimodal-route-1',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => {
+        reentered = true;
+        return { body: {} as JsonObject };
+      }
+    });
+
+    expect(orchestration.executed).toBe(false);
+    expect(reentered).toBe(false);
+  });
+
+  test('target supportsMultimodal skips legacy vision two-hop flow even on default route', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-multimodal-target-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      providerType: 'openai',
+      routeHint: 'default',
+      supportsMultimodal: true,
+      target: {
+        providerKey: 'mini27.key1.MiniMax-M2.7',
+        modelId: 'MiniMax-M2.7',
+        supportsMultimodal: true
+      },
+      __rt: {
+        supportsMultimodal: true
+      },
+      hasImageAttachment: true,
+      capturedChatRequest: makeCapturedChatRequestWithImage()
+    } as any;
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-multimodal-target-1',
+      object: 'chat.completion',
+      model: 'MiniMax-M2.7',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    } as any;
+
+    let reentered = false;
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-multimodal-target-1',
       providerProtocol: 'openai-chat',
       reenterPipeline: async () => {
         reentered = true;

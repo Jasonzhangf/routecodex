@@ -77,6 +77,25 @@ export async function runHubPipeline(
   }
 
   const payload = asRecord(input.body);
+  const rt =
+    metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+      ? (metadata.__rt as Record<string, unknown>)
+      : undefined;
+  if (
+    metadata.__shadowCompareForcedProviderKey
+    || rt?.serverToolFollowup === true
+    || String(input.requestId).includes(':stop_followup')
+  ) {
+    console.log('[hub.run.input]', JSON.stringify({
+      requestId: input.requestId,
+      entryEndpoint: input.entryEndpoint,
+      bodyModel: typeof payload?.model === 'string' ? payload.model : undefined,
+      followupText:
+        typeof metadata.clientInjectText === 'string' && metadata.clientInjectText.trim().length > 0
+          ? metadata.clientInjectText.trim()
+          : undefined
+    }));
+  }
   const pipelineInput: PipelineExecutionInput & {
     payload: Record<string, unknown>;
     endpoint: string;

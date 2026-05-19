@@ -5,11 +5,6 @@ import {
   backfillAdapterContextSessionIdentifiersFromOriginalRequest,
   syncStoplessGoalStateFromCapturedRequest
 } from './servertool-request-normalizer.js';
-import {
-  hasGoalCapableTools,
-  isGoalCapableRequestPayload,
-  isGoalCapableRequestSemantics
-} from './goal-capable-request.js';
 
 function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -45,7 +40,7 @@ function shouldReplaceCapturedChatRequestTools(args: {
   baseContext: Record<string, unknown>;
   existingTools?: unknown[];
   clientToolsRaw?: unknown[];
-  goalCapable?: boolean;
+  forceReplace?: boolean;
 }): boolean {
   const existingTools = Array.isArray(args.existingTools) ? args.existingTools : undefined;
   const clientToolsRaw = Array.isArray(args.clientToolsRaw) ? args.clientToolsRaw : undefined;
@@ -55,13 +50,7 @@ function shouldReplaceCapturedChatRequestTools(args: {
   if (!existingTools?.length) {
     return true;
   }
-  if (args.goalCapable) {
-    if (!hasGoalCapableTools(args.clientToolsRaw)) {
-      return false;
-    }
-    if (!hasGoalCapableTools(args.existingTools)) {
-      return true;
-    }
+  if (args.forceReplace) {
     const existingNames = existingTools.map(readToolName).filter(Boolean);
     const clientNames = new Set(clientToolsRaw.map(readToolName).filter(Boolean));
     return existingNames.length < clientNames.size && existingNames.every((name) => clientNames.has(name));
@@ -115,7 +104,7 @@ function backfillCapturedChatRequestToolsFromRequestSemantics(
   baseContext: Record<string, unknown>,
   requestSemantics: unknown,
   options?: {
-    goalCapable?: boolean;
+    forceReplace?: boolean;
   }
 ): void {
   const capturedChatRequest = asFlatRecord(baseContext.capturedChatRequest);
@@ -130,7 +119,7 @@ function backfillCapturedChatRequestToolsFromRequestSemantics(
     baseContext,
     existingTools,
     clientToolsRaw,
-    goalCapable: options?.goalCapable
+    forceReplace: options?.forceReplace
   })) {
     return;
   }
@@ -148,19 +137,6 @@ function preferOriginalRequestForStoplessGoalSync(
     return;
   }
   if (hasRccFenceInRequestPayload(baseContext.capturedChatRequest)) {
-    return;
-  }
-  baseContext.capturedChatRequest = originalRequest as Record<string, unknown>;
-}
-
-function preferOriginalRequestForGoalTools(
-  baseContext: Record<string, unknown>,
-  originalRequest: unknown
-): void {
-  if (!isGoalCapableRequestPayload(originalRequest)) {
-    return;
-  }
-  if (isGoalCapableRequestPayload(baseContext.capturedChatRequest)) {
     return;
   }
   baseContext.capturedChatRequest = originalRequest as Record<string, unknown>;
@@ -192,27 +168,15 @@ export function buildServerToolAdapterContext(args: {
     ...metadataBag
   };
 
-  if (!asFlatRecord(baseContext.capturedChatRequest) && asFlatRecord(args.originalRequest)) {
-    baseContext.capturedChatRequest = args.originalRequest;
-  }
-
   backfillAdapterContextSessionIdentifiersFromOriginalRequest(baseContext, args.originalRequest);
-  const goalCapable =
-    isGoalCapableRequestPayload(args.originalRequest)
-    || isGoalCapableRequestPayload(baseContext.capturedChatRequest)
-    || isGoalCapableRequestSemantics(args.requestSemantics);
-  if (goalCapable) {
-    preferOriginalRequestForGoalTools(baseContext, args.originalRequest);
-  } else {
-    preferOriginalRequestForStoplessGoalSync(baseContext, args.originalRequest);
-  }
+  preferOriginalRequestForStoplessGoalSync(baseContext, args.originalRequest);
   syncStoplessGoalStateFromCapturedRequest(baseContext, args.onReasoningStopSeedError);
-  const managedStoplessGoal = !goalCapable && hasManagedStoplessGoalInContext(baseContext);
+  const managedStoplessGoal = hasManagedStoplessGoalInContext(baseContext);
   backfillCapturedChatRequestToolsFromRequestSemantics(
     baseContext,
     args.requestSemantics,
-    goalCapable || managedStoplessGoal
-      ? { goalCapable }
+    managedStoplessGoal
+      ? { forceReplace: true }
       : undefined
   );
 
@@ -247,7 +211,6 @@ export function buildServerToolAdapterContext(args: {
   baseContext.__rt = {
     ...rt,
     ...(followupFlag ? { serverToolFollowup: true } : {}),
-    ...(goalCapable ? { goalMode: true } : {}),
     ...(clientProtocol ? { clientProtocol } : {}),
     stopMessageClientInjectReady: stopMessageInjectReadiness.ready,
     stopMessageClientInjectReason: stopMessageInjectReadiness.reason,

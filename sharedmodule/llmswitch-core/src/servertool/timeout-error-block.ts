@@ -154,18 +154,13 @@ export function createServerToolTimeoutError(options: {
 
 export function createStopMessageFetchFailedError(options: {
   requestId: string;
-  reason: 'stage_timeout' | 'loop_limit';
+  reason: 'loop_limit';
   elapsedMs?: number;
   repeatCount?: number;
-  timeoutMs?: number;
   attempt?: number;
   maxAttempts?: number;
 }): ProviderProtocolError & { status?: number } {
-  const baseMessage =
-    options.reason === 'loop_limit'
-      ? 'fetch failed: network error (stopMessage loop detected)'
-      : 'fetch failed: network error (stopMessage exceeded stage timeout)';
-  const err = new ProviderProtocolError(baseMessage, {
+  const err = new ProviderProtocolError('fetch failed: network error (stopMessage loop detected)', {
     code: 'SERVERTOOL_TIMEOUT',
     category: 'EXTERNAL_ERROR',
     details: {
@@ -176,9 +171,6 @@ export function createStopMessageFetchFailedError(options: {
         : {}),
       ...(typeof options.repeatCount === 'number' && Number.isFinite(options.repeatCount)
         ? { repeatCount: Math.max(0, Math.floor(options.repeatCount)) }
-        : {}),
-      ...(typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs)
-        ? { timeoutMs: Math.max(0, Math.floor(options.timeoutMs)) }
         : {}),
       ...(typeof options.attempt === 'number' && Number.isFinite(options.attempt)
         ? { attempt: Math.max(1, Math.floor(options.attempt)) }

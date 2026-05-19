@@ -50,21 +50,6 @@ fn read_tool_name(tool: &Value) -> Option<String> {
     Some(trimmed.to_ascii_lowercase())
 }
 
-fn has_goal_capable_tools(request: &Value) -> bool {
-    let Some(tools) = request.get("tools").and_then(|v| v.as_array()) else {
-        return false;
-    };
-    tools.iter().any(|tool| {
-        matches!(
-            read_tool_name(tool).as_deref(),
-            Some("get_goal")
-                | Some("create_goal")
-                | Some("update_goal")
-                | Some("request_user_input")
-        )
-    })
-}
-
 fn get_message_turn_state(
     messages: &[Value],
 ) -> (
@@ -429,8 +414,7 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
             .as_ref()
             .and_then(|tool| tool.snippet.clone()),
         last_assistant_tool_label,
-        latest_message_from_user: latest_message_role == "user"
-            && (!is_server_tool_followup_request(metadata) || has_goal_capable_tools(request)),
+        latest_message_from_user: latest_message_role == "user",
         metadata: metadata_copy,
     }
 }
@@ -933,8 +917,6 @@ mod tests {
                 { "role": "user", "content": "继续规划并输出 /goal 提示词" }
             ],
             "tools": [
-                { "type": "function", "function": { "name": "get_goal" } },
-                { "type": "function", "function": { "name": "request_user_input" } },
                 { "type": "function", "function": { "name": "exec_command" } }
             ]
         });

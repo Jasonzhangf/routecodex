@@ -158,10 +158,10 @@ describe('direct passthrough route-level', () => {
 
     expect(directResult.used).toBe(true);
     expect(sentPayload).toEqual({
-      model: 'raw-model',
-      previous_response_id: 'resp_prev_router',
-      input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+      model: 'gpt-5.3-codex',
+      reasoning: { effort: 'high' },
+      instructions: 'must-not-copy',
     });
-    expect((sentPayload as Record<string, unknown>).instructions).toBeUndefined();
+    expect((sentPayload as Record<string, unknown>).previous_response_id).toBeUndefined();
   });
 });

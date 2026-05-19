@@ -1,5 +1,9 @@
-use crate::hub_bridge_actions::{build_bridge_history, BuildBridgeHistoryInput};
+use crate::hub_bridge_actions::{
+    build_bridge_history, convert_bridge_input_to_chat_messages, BridgeInputToChatInput,
+    BuildBridgeHistoryInput,
+};
 use crate::hub_standardized_bridge::normalize_chat_envelope_tool_calls;
+use crate::shared_response_compat::sanitize_chat_process_messages_value;
 use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecutionMode};
 use chrono;
 use regex::Regex;
@@ -832,6 +836,12 @@ fn build_captured_chat_request_snapshot(input: &Value) -> Result<Value, String> 
         "messages".to_string(),
         row.get("messages").cloned().unwrap_or(Value::Null),
     );
+    if row.contains_key("input") {
+        out.insert(
+            "input".to_string(),
+            row.get("input").cloned().unwrap_or(Value::Null),
+        );
+    }
     if let Some(tools) = row.get("tools") {
         out.insert("tools".to_string(), tools.clone());
     } else {
@@ -878,12 +888,21 @@ fn coerce_standardized_request_from_payload(input: &Value) -> Result<Value, Stri
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
         .ok_or_else(|| "[HubPipeline] outbound stage requires payload.model".to_string())?;
-    let messages = payload
-        .get("messages")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .ok_or_else(|| "[HubPipeline] outbound stage requires payload.messages[]".to_string())?;
     let tools = payload.get("tools").and_then(|v| v.as_array()).cloned();
+    let messages = if let Some(messages) = payload.get("messages").and_then(|v| v.as_array()).cloned() {
+        messages
+    } else if let Some(input_items) = payload.get("input").and_then(|v| v.as_array()).cloned() {
+        convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
+            input: input_items,
+            tools: tools.clone(),
+            tool_result_fallback_text: None,
+            normalize_function_name: Some("responses".to_string()),
+            allow_pending_terminal_tool_call: Some(true),
+        })?
+        .messages
+    } else {
+        return Err("[HubPipeline] outbound stage requires payload.messages[] or payload.input[]".to_string());
+    };
     let parameters = payload
         .get("parameters")
         .and_then(|v| v.as_object())
@@ -1837,6 +1856,12 @@ fn sync_responses_context_from_canonical_messages(request: &Value) -> Result<Val
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
+    let sanitized_messages = sanitize_chat_process_messages_value(&Value::Object({
+        let mut envelope = Map::new();
+        envelope.insert("messages".to_string(), Value::Array(messages));
+        envelope
+    }))
+    .messages;
     let tools = next_request
         .get("tools")
         .and_then(|v| v.as_array())
@@ -1867,7 +1892,7 @@ fn sync_responses_context_from_canonical_messages(request: &Value) -> Result<Val
     };
 
     let bridge = build_bridge_history(BuildBridgeHistoryInput {
-        messages,
+        messages: sanitized_messages,
         tools,
         allow_pending_terminal_tool_call: Some(true),
     })?;
@@ -4060,6 +4085,7 @@ mod tests {
         let input = json!({
             "model": "glm-5",
             "messages": [{ "role": "user", "content": "hi" }],
+            "input": [{ "role": "user", "content": [{ "type": "input_text", "text": "hi" }] }],
             "tools": [{ "type": "function", "function": { "name": "x" } }],
             "tool_choice": { "type": "function", "function": { "name": "x" } },
             "semantics": {
@@ -4079,6 +4105,12 @@ mod tests {
         assert_eq!(row.get("model").and_then(|v| v.as_str()), Some("glm-5"));
         assert_eq!(
             row.get("messages")
+                .and_then(|v| v.as_array())
+                .map(|v| v.len()),
+            Some(1)
+        );
+        assert_eq!(
+            row.get("input")
                 .and_then(|v| v.as_array())
                 .map(|v| v.len()),
             Some(1)
@@ -4262,6 +4294,72 @@ mod tests {
             Some(0)
         );
         assert!(!raw_payload.contains_key("parameters"));
+    }
+
+    #[test]
+    fn test_coerce_standardized_request_from_payload_accepts_responses_input_shape() {
+        let input = json!({
+            "payload": {
+                "model": "deepseek-v4-pro",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "继续执行" }
+                        ]
+                    }
+                ],
+                "tools": [
+                    { "type": "function", "function": { "name": "exec_command" } }
+                ],
+                "parameters": {}
+            },
+            "normalized": {
+                "id": "req-responses-input",
+                "entryEndpoint": "/v1/responses",
+                "stream": false,
+                "processMode": "chat",
+                "routeHint": "coding"
+            }
+        });
+
+        let output = coerce_standardized_request_from_payload(&input)
+            .expect("coerce standardized request output");
+        let row = output.as_object().expect("output object");
+        let standardized = row
+            .get("standardizedRequest")
+            .and_then(|v| v.as_object())
+            .expect("standardizedRequest object");
+        let raw_payload = row
+            .get("rawPayload")
+            .and_then(|v| v.as_object())
+            .expect("rawPayload object");
+
+        assert_eq!(
+            standardized
+                .get("messages")
+                .and_then(|v| v.as_array())
+                .map(|v| v.len()),
+            Some(1)
+        );
+        assert_eq!(
+            standardized
+                .get("messages")
+                .and_then(|v| v.as_array())
+                .and_then(|v| v.first())
+                .and_then(|v| v.get("role"))
+                .and_then(|v| v.as_str()),
+            Some("user")
+        );
+        assert_eq!(
+            raw_payload
+                .get("messages")
+                .and_then(|v| v.as_array())
+                .and_then(|v| v.first())
+                .and_then(|v| v.get("content"))
+                .and_then(|v| v.as_str()),
+            Some("继续执行")
+        );
     }
 
     #[test]
@@ -5318,6 +5416,59 @@ mod tests {
         assert_eq!(input.len(), 1);
         assert_eq!(input[0]["type"], "function_call");
         assert_eq!(input[0]["call_id"], "call_keep_me");
+    }
+
+    #[test]
+    fn test_sync_responses_context_from_canonical_messages_strips_historical_goal_turns() {
+        let request = json!({
+            "messages": [
+                { "role": "user", "content": "继续执行" },
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_goal_old",
+                            "type": "function",
+                            "function": {
+                                "name": "get_goal",
+                                "arguments": "{}"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_goal_old",
+                    "name": "get_goal",
+                    "content": "{\"goal\":{\"status\":\"paused\",\"threadId\":\"t1\"}}"
+                },
+                { "role": "assistant", "content": "Jason，目标处于 paused 状态。" },
+                { "role": "user", "content": "继续执行" }
+            ],
+            "tools": [
+                { "type": "function", "function": { "name": "get_goal", "parameters": { "type": "object" } } },
+                { "type": "function", "function": { "name": "exec_command", "parameters": { "type": "object" } } }
+            ],
+            "semantics": {
+                "responses": {
+                    "context": {
+                        "existing": true
+                    }
+                }
+            }
+        });
+        let output = sync_responses_context_from_canonical_messages(&request).unwrap();
+        let input = output
+            .get("semantics")
+            .and_then(|v| v.get("responses"))
+            .and_then(|v| v.get("context"))
+            .and_then(|v| v.get("input"))
+            .and_then(|v| v.as_array())
+            .expect("responses context input");
+        let serialized = serde_json::to_string(input).expect("serialize input");
+        assert!(!serialized.contains("get_goal"));
+        assert!(!serialized.contains("call_goal_old"));
+        assert!(serialized.contains("继续执行"));
     }
 
     #[test]

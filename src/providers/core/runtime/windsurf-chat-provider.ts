@@ -1,9 +1,11 @@
 /**
  * WindsurfChatProvider
  *
- * WindsurfAPI 的 HTTP Transport Provider。
- * 职责：HTTP 发送（stream/non-stream）到 WindsurfAPI、请求头注入、重试、错误上报。
- * 禁止：工具路由、语义修复、账号池管理。
+ * 支持两种 transport backend:
+ *   - HTTP  → WindsurfAPI :3003 (OpenAI Chat Completions API)
+ *   - gRPC  → Language Server :lsPort (绕过 WindsurfAPI，直接调 LS gRPC)
+ *
+ * 通过 config.extensions.windsurf.transportBackend 切换，默认 HTTP。
  */
 
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
@@ -15,10 +17,17 @@ import {
   WINDSURF_COMPATIBILITY_PROFILE,
   WINDSURF_DEFAULT_BASE_URL,
   WINDSURF_DEFAULT_COMPLETION_ENDPOINT,
+  WINDSURF_DEFAULT_LS_PORT,
+  type WindsurfTransportBackend,
 } from '../contracts/windsurf-provider-contract.js';
 import { HttpTransportProvider } from './http-transport-provider.js';
+import { startGrpcStream, type WindsurfMessage } from './grpc/windsurf-grpc-bridge.js';
 
 export class WindsurfChatProvider extends HttpTransportProvider {
+  private _transportBackend: WindsurfTransportBackend | undefined;
+  private _lsPort: number = WINDSURF_DEFAULT_LS_PORT;
+  private _csrfToken: string = '';
+
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     const cfg: OpenAIStandardConfig = {
       ...config,
@@ -34,7 +43,26 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       },
     };
     super(cfg, dependencies, 'windsurf-chat-provider');
+
+    const ext = normalizeWindsurfProviderRuntimeOptions(
+      config.config.extensions as UnknownObject | undefined
+    );
+    this._transportBackend = ext.transportBackend;
+    this._lsPort = ext.lsPort ?? WINDSURF_DEFAULT_LS_PORT;
+    this._csrfToken = ext.csrfToken ?? '';
   }
+
+  // ─── Transport detection ────────────────────────────────
+
+  private get isGrpcMode(): boolean {
+    return this._transportBackend === 'grpc';
+  }
+
+  private get isHttpMode(): boolean {
+    return this._transportBackend === 'http' || !this._transportBackend;
+  }
+
+  // ─── Service profile ───────────────────────────────────
 
   protected override getServiceProfile() {
     const base = super.getServiceProfile();
@@ -48,15 +76,35 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     };
   }
 
+  // ─── Health check ─────────────────────────────────────
+
   public override async checkHealth(): Promise<boolean> {
     const ext = normalizeWindsurfProviderRuntimeOptions(
       this.config.config.extensions as UnknownObject | undefined
     );
+
+    if (this.isGrpcMode) {
+      // gRPC health: try grpcUnary to LS port
+      try {
+        const { grpcUnary } = await import('./grpc/grpc-client.js');
+        const empty = Buffer.alloc(0);
+        await grpcUnary(this._lsPort, this._csrfToken, '/exa.language_server_pb.LanguageServerService/Heartbeat', Buffer.concat([Buffer.from([0,0,0,0,0]), empty]), 3000);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    // HTTP health
     const endpoint = ext.healthCheckEndpoint || '/v1/models';
     const timeout = ext.healthCheckTimeoutMs ?? 5000;
-    const url = endpoint.startsWith('http') ? endpoint : `${this.config.config.baseUrl || WINDSURF_DEFAULT_BASE_URL}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
+    const url = endpoint.startsWith('http')
+      ? endpoint
+      : `${this.config.config.baseUrl || WINDSURF_DEFAULT_BASE_URL}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
     return this.performHealthCheck(url);
   }
+
+  // ─── SSE intent detection ──────────────────────────────
 
   protected override wantsUpstreamSse(request: UnknownObject, context: ProviderContext): boolean {
     const streamIntent = this.readStreamIntent(request);
@@ -73,5 +121,131 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       return Boolean((request as Record<string, unknown>).stream);
     }
     return false;
+  }
+
+  // ─── gRPC streaming override ───────────────────────────
+  //
+  // Subclass of HttpTransportProvider can't easily override sendRequestInternal
+  // (it's private). Instead we override the SSE wrapper which calls sendRequestInternal.
+  // For gRPC mode, we bypass the entire HTTP layer and stream directly via gRPC.
+
+  protected override async wrapUpstreamSseResponse(
+    stream: NodeJS.ReadableStream,
+    context: ProviderContext,
+  ): Promise<UnknownObject> {
+    if (!this.isGrpcMode) {
+      return super.wrapUpstreamSseResponse(stream, context);
+    }
+
+    // For gRPC mode, the stream parameter is actually a custom emitter
+    // passed through from sendRequestInternal. We re-emit via SSE format.
+    const { Readable } = await import('stream');
+    const sseStream = new Readable();
+    sseStream._read = () => {};
+
+    const sseEmit = (text: string) => {
+      sseStream.push(`data: ${JSON.stringify({
+        choices: [{ delta: { content: text }, index: 0, finish_reason: null }],
+        model: (context as any).model || '',
+      })}\n\n`);
+    };
+
+    const sseDone = () => {
+      sseStream.push(`data: ${JSON.stringify({
+        choices: [{ delta: {}, index: 0, finish_reason: 'stop' }],
+        model: (context as any).model || '',
+      })}\n\n`);
+      sseStream.push(null);
+    };
+
+    // Pass the emitter via context so the caller can feed chunks
+    (context as any)._grpcBridgeEmitter = { sseEmit, sseDone };
+    return sseStream as unknown as UnknownObject;
+  }
+
+  // ─── Tool call conversion ─────────────────────────────
+  //
+  // In gRPC mode, tool_calls are passed as text to the LS (RawGetChatMessage
+  // doesn't support native tool_calls). The caller should provide tools via
+  // the OpenAI tools[] field; we convert them to text in preprocessRequest.
+
+  protected override preprocessRequest(request: UnknownObject): UnknownObject | Promise<UnknownObject> {
+    if (!this.isGrpcMode) {
+      return super.preprocessRequest(request);
+    }
+
+    // gRPC mode: convert tools[] to text preamble, strip HTTP-specific fields
+    const req = { ...request } as Record<string, unknown>;
+    const body = (req.body as Record<string, unknown>) || req;
+    const tools = body.tools as Array<Record<string, unknown>> | undefined;
+
+    if (Array.isArray(tools) && tools.length > 0) {
+      const preamble = tools.map(t => {
+        const fn = (t.function as Record<string, string>) || {};
+        return `- ${fn.name || t.type || 'unknown'}: ${fn.description || ''}\n  params: ${fn.parameters ? JSON.stringify(fn.parameters) : '{}'}`;
+      }).join('\n');
+      body.tools_preamble = `[Available tools]\n${preamble}`;
+      delete body.tools;
+    }
+
+    return req;
+  }
+
+  // ─── Model mapping ────────────────────────────────────
+  //
+  // Windsurf model → enum. This is a simplified mapping.
+  // Full model catalog is at WindsurfAPI/src/models.js.
+
+  private resolveModelEnum(modelName: string | undefined): number {
+    if (!modelName) return 0;
+    const name = modelName.toLowerCase();
+    if (name.includes('claude-4.5-opus-thinking')) return 392;
+    if (name.includes('claude-4.5-opus')) return 391;
+    if (name.includes('claude-4.5-sonnet-thinking')) return 354;
+    if (name.includes('claude-4.5-sonnet')) return 353;
+    if (name.includes('claude-4.5-haiku')) return 0;
+    if (name.includes('claude-4.1-opus-thinking')) return 329;
+    if (name.includes('claude-4.1-opus')) return 328;
+    if (name.includes('claude-4-opus-thinking')) return 291;
+    if (name.includes('claude-4-opus')) return 290;
+    if (name.includes('claude-4-sonnet-thinking')) return 282;
+    if (name.includes('claude-4-sonnet')) return 281;
+    if (name.includes('claude-3.7-sonnet-thinking')) return 227;
+    if (name.includes('claude-3.7-sonnet')) return 226;
+    if (name.includes('claude-3.5-sonnet')) return 166;
+    if (name.includes('claude-3.7-haiku')) return 0;
+    if (name.includes('claude-3-haiku')) return 0;
+    return 0;
+  }
+
+  // ─── Public: start gRPC stream (for internal use) ───
+  //
+  // Called by the HTTP server layer via a custom context flag when in gRPC mode.
+  // The actual streaming is initiated via startGrpcStream; this method is
+  // a bridge between the provider interface and the gRPC layer.
+
+  public startGrpcChat(
+    apiKey: string,
+    messages: WindsurfMessage[],
+    modelName: string | undefined,
+    callbacks: {
+      onChunk: (text: string) => void;
+      onDone: () => void;
+      onError: (err: Error) => void;
+    },
+  ): void {
+    const modelEnum = this.resolveModelEnum(modelName);
+
+    startGrpcStream(apiKey, messages, {
+      lsPort: this._lsPort,
+      csrfToken: this._csrfToken,
+      modelEnum,
+      modelName,
+      onChunk: (text, done) => {
+        if (!done) callbacks.onChunk(text);
+        else callbacks.onDone();
+      },
+      onError: callbacks.onError,
+    });
   }
 }
