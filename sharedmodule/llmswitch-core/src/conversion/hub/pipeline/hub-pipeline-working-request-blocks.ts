@@ -7,7 +7,7 @@ import { syncResponsesContextFromCanonicalMessagesWithNative } from "../../../ro
 import {
   deriveWorkingRequestFlags,
   estimateInputTokensForWorkingRequest,
-} from "./hub-pipeline-chat-process-request-utils.js";
+} from "./hub-pipeline-working-request-analysis-blocks.js";
 
 export function finalizeWorkingRequestForOutbound(args: {
   request: StandardizedRequest | ProcessedRequest | Record<string, unknown>;

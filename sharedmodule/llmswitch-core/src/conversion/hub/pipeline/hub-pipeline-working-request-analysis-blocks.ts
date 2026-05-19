@@ -11,7 +11,7 @@ import {
   resolveHeavyInputTokenThreshold,
   roughEstimateInputTokensFromRequest,
 } from "./hub-pipeline-heavy-input-fastpath.js";
-import { logHubPipelineNonBlockingError } from "./hub-pipeline-runtime-blocks.js";
+import { logHubPipelineNonBlockingError } from "./hub-pipeline-runtime-hooks-blocks.js";
 
 export function estimateInputTokensForWorkingRequest(args: {
   workingRequest: StandardizedRequest | ProcessedRequest;

@@ -23,7 +23,6 @@ export type {
   NormalizedRequest,
   ProviderProtocol,
 } from "./hub-pipeline-types.js";
-export { __unsafeBuildAdapterContextForTest } from "./hub-pipeline-test-seams.js";
 
 export class HubPipeline {
   private readonly routerEngine: VirtualRouterEngine;

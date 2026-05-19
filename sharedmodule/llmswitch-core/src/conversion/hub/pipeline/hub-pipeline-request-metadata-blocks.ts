@@ -1,6 +1,6 @@
 import type { StandardizedRequest } from "../types/standardized.js";
 import { readRuntimeMetadata } from "../../runtime-metadata.js";
-import { logHubPipelineNonBlockingError } from "./hub-pipeline-runtime-blocks.js";
+import { logHubPipelineNonBlockingError } from "./hub-pipeline-runtime-hooks-blocks.js";
 
 export function propagateApplyPatchToolModeToRequestMetadata(
   normalizedMetadata: Record<string, unknown> | undefined,

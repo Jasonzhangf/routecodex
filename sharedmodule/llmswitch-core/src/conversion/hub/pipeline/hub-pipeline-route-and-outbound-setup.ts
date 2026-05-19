@@ -6,7 +6,7 @@ import type {
 } from "./hub-pipeline.js";
 import { buildAdapterContextFromNormalized } from "./hub-pipeline-adapter-context.js";
 import { extractSessionIdentifiersFromMetadata } from "./session-identifiers.js";
-import { applyMaxTokensPolicyForRequest } from "./hub-pipeline-request-normalization-utils.js";
+import { applyMaxTokensPolicyForRequest } from "./hub-pipeline-max-tokens-policy.js";
 import {
   applyOutboundStreamPreferenceWithNative,
   resolveOutboundStreamIntentWithNative,

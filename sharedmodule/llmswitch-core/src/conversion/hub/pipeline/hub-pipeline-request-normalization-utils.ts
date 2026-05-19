@@ -6,7 +6,6 @@ import {
   resolveSseProtocolWithNative,
 } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
 
-export { applyMaxTokensPolicyForRequest } from "./hub-pipeline-max-tokens-policy.js";
 
 export type HubPipelineProviderProtocol =
   | "openai-chat"

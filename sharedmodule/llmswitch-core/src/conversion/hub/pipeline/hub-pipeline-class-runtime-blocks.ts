@@ -8,10 +8,13 @@ import type {
 } from "./hub-pipeline.js";
 import {
   executeHubPipelineRequest,
+} from "./hub-pipeline-runtime-execute-blocks.js";
+import {
+  logHubPipelineNonBlockingError,
   registerProviderRuntimeHooks,
   unregisterProviderRuntimeHooks,
   updateRouterRuntimeDeps,
-} from "./hub-pipeline-runtime-blocks.js";
+} from "./hub-pipeline-runtime-hooks-blocks.js";
 
 export function createHubPipelineRouterEngine(
   config: HubPipelineConfig,
