@@ -6,6 +6,9 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/conversion/runtime-metadata.js',
   () => ({
     ensureRuntimeMetadata: jest.fn((value: unknown) => value ?? {}),
+    readRuntimeMetadata: jest.fn((value: unknown) =>
+      value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined,
+    ),
   }),
 );
 
@@ -28,7 +31,10 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js',
   () => ({
+    buildReqInboundNodeResultWithNative: jest.fn(() => ({ stage: 'req_inbound' })),
     buildReqInboundSkippedNodeWithNative: jest.fn(() => ({ stage: 'req_inbound_skipped' })),
+    buildPassthroughAuditWithNative: jest.fn(() => ({ mode: 'passthrough' })),
+    buildToolGovernanceNodeResultWithNative: jest.fn((value: unknown) => value),
     coerceStandardizedRequestFromPayloadWithNative: jest.fn(({ payload }: { payload: Record<string, unknown> }) => ({
       standardizedRequest: {
         model: String(payload.model || 'test-model'),
@@ -40,9 +46,14 @@ jest.unstable_mockModule(
     liftResponsesResumeIntoSemanticsWithNative: jest.fn(() => {
       throw new Error('lift boom');
     }),
+    mergeClockReservationIntoMetadataWithNative: jest.fn(({ metadata }: { metadata: Record<string, unknown> }) => metadata),
     prepareRuntimeMetadataForServertoolsWithNative: jest.fn(
       ({ metadata }: { metadata?: Record<string, unknown> }) => ({ ...(metadata || {}) }),
     ),
+    resolveApplyPatchToolModeFromToolsWithNative: jest.fn(() => undefined),
+    resolveActiveProcessModeWithNative: jest.fn(() => 'chat'),
+    readResponsesResumeFromMetadataWithNative: jest.fn(() => undefined),
+    resolveHubClientProtocolWithNative: jest.fn(() => 'openai-chat'),
     syncResponsesContextFromCanonicalMessagesWithNative: jest.fn((value: unknown) => value),
   }),
 );
@@ -62,15 +73,12 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-chat-process-request-utils.js',
+  '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-chat-process-shared.js',
   () => ({
-    deriveWorkingRequestFlags: jest.fn(() => ({})),
-    estimateInputTokensForWorkingRequest: jest.fn(),
-    prepareReasoningStopRequestTooling: jest.fn(),
-    propagateApplyPatchToolModeToRequestMetadata: jest.fn(),
+    attachHubStageTopSummary: jest.fn(),
     resolveActiveProcessModeAndAudit: jest.fn(() => ({
-      activeProcessMode: 'normal',
-      passthroughAudit: {},
+      activeProcessMode: 'chat',
+      passthroughAudit: undefined,
     })),
     sanitizeStandardizedRequestMessages: jest.fn((value: unknown) => value),
   }),
@@ -104,6 +112,9 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.js',
   () => ({
     peekHubStageTopSummary: jest.fn(() => null),
+    measureHubStage: jest.fn(async (_requestId: string, _stage: string, fn: () => unknown) => await fn()),
+    logHubStageTiming: jest.fn(),
+    isHubStageTimingDetailEnabled: jest.fn(() => false),
   }),
 );
 
@@ -127,7 +138,7 @@ describe('executeChatProcessEntryPipeline', () => {
           metadata: {},
           entryEndpoint: '/v1/responses',
           stream: false,
-          processMode: 'default',
+          processMode: 'chat',
           routeHint: null,
         } as any,
         routerEngine: {} as any,
