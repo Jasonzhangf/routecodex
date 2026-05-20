@@ -21,6 +21,7 @@ import {
   type WindsurfTransportBackend,
 } from '../contracts/windsurf-provider-contract.js';
 import { HttpTransportProvider } from './http-transport-provider.js';
+import { ApiKeyAuthProvider } from '../../auth/apikey-auth.js';
 import { startGrpcStream, type WindsurfMessage } from './grpc/windsurf-grpc-bridge.js';
 
 export class WindsurfChatProvider extends HttpTransportProvider {
@@ -123,6 +124,50 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     return false;
   }
 
+
+
+  private classifyAuthFailure(error: unknown): 'permanent' | 'cooldown' | null {
+    const msg = String((error as { message?: string })?.message || error || '').toLowerCase();
+    if (/invalid api key|unauthorized|unauthenticated|authentication failed|auth failed/.test(msg)) {
+      return 'permanent';
+    }
+    if (/rate limit|too many requests|quota|temporar|timeout|econnreset|upstream unavailable/.test(msg)) {
+      return 'cooldown';
+    }
+    return null;
+  }
+
+  protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {
+    if (!this.isHttpMode) {
+      return super.sendRequestInternal(request);
+    }
+
+    try {
+      return await super.sendRequestInternal(request);
+    } catch (error) {
+      const authProvider = this.authProvider;
+      if (!(authProvider instanceof ApiKeyAuthProvider)) {
+        throw error;
+      }
+      const rotator = authProvider.getRotator();
+      const classification = this.classifyAuthFailure(error);
+      if (!rotator || !classification) {
+        throw error;
+      }
+      if (classification === 'permanent') {
+        rotator.disableCurrent('permanent');
+      } else {
+        rotator.disableCurrent('cooldown', 5 * 60 * 1000);
+      }
+      const nextKey = rotator.rotate();
+      if (!nextKey) {
+        throw error;
+      }
+      await authProvider.initialize();
+      return await super.sendRequestInternal(request);
+    }
+  }
+
   // ─── gRPC streaming override ───────────────────────────
   //
   // Subclass of HttpTransportProvider can't easily override sendRequestInternal
@@ -171,7 +216,12 @@ export class WindsurfChatProvider extends HttpTransportProvider {
 
   protected override async preprocessRequest(request: UnknownObject): Promise<UnknownObject> {
     if (!this.isGrpcMode) {
-      return super.preprocessRequest(request);
+      const req = await super.preprocessRequest(request);
+      const body = ((req as Record<string, unknown>).body as Record<string, unknown>) || (req as Record<string, unknown>);
+      if (typeof body.model === 'string' && body.model.startsWith('windsurf.')) {
+        body.model = body.model.slice('windsurf.'.length);
+      }
+      return req;
     }
 
     // gRPC mode: convert tools[] to text preamble, strip HTTP-specific fields
@@ -186,6 +236,10 @@ export class WindsurfChatProvider extends HttpTransportProvider {
       }).join('\n');
       body.tools_preamble = `[Available tools]\n${preamble}`;
       delete body.tools;
+    }
+
+    if (typeof body.model === 'string' && body.model.startsWith('windsurf.')) {
+      body.model = body.model.slice('windsurf.'.length);
     }
 
     return req;

@@ -215,6 +215,37 @@ export class ApiKeyRotator {
     this.entries = entries;
   }
 
+
+  private isEntryDisabled(entry: ApiKeyEntry): boolean {
+    if (!entry) return true;
+    if (entry.disabled === true) {
+      if (typeof entry.disabledUntil === 'number' && entry.disabledUntil > 0) {
+        if (Date.now() >= entry.disabledUntil) {
+          entry.disabled = false;
+          entry.disabledUntil = 0;
+          return false;
+        }
+      }
+      return true;
+    }
+    if (typeof entry.disabledUntil === 'number' && entry.disabledUntil > Date.now()) {
+      return true;
+    }
+    return false;
+  }
+
+  private findNextEnabledIndex(startIndex: number): number {
+    if (this.entries.length === 0) return -1;
+    for (let i = 0; i < this.entries.length; i++) {
+      const idx = (startIndex + i) % this.entries.length;
+      const entry = this.entries[idx];
+      if (entry && !this.isEntryDisabled(entry)) {
+        return idx;
+      }
+    }
+    return -1;
+  }
+
   /**
    * 添加条目
    */
@@ -226,11 +257,16 @@ export class ApiKeyRotator {
    * 获取当前 API Key（已解析环境变量）
    */
   getCurrentKey(): string | undefined {
-    const entry = this.entries[this.currentIndex];
-    if (!entry) {
+    const current = this.entries[this.currentIndex];
+    if (current && !this.isEntryDisabled(current)) {
+      return this.resolveEntry(current);
+    }
+    const next = this.findNextEnabledIndex(this.currentIndex);
+    if (next < 0) {
       return undefined;
     }
-    return this.resolveEntry(entry);
+    this.currentIndex = next;
+    return this.resolveEntry(this.entries[this.currentIndex]);
   }
 
   /**
@@ -240,7 +276,11 @@ export class ApiKeyRotator {
     if (this.entries.length === 0) {
       return undefined;
     }
-    this.currentIndex = (this.currentIndex + 1) % this.entries.length;
+    const next = this.findNextEnabledIndex((this.currentIndex + 1) % this.entries.length);
+    if (next < 0) {
+      return undefined;
+    }
+    this.currentIndex = next;
     return this.getCurrentKey();
   }
 
@@ -268,6 +308,30 @@ export class ApiKeyRotator {
    */
   getEntryCount(): number {
     return this.entries.length;
+  }
+
+
+  /**
+   * 禁用当前 key（支持永久或冷却）
+   */
+  disableCurrent(reason: 'permanent' | 'cooldown', cooldownMs = 0): void {
+    const entry = this.entries[this.currentIndex];
+    if (!entry) return;
+    if (reason === 'permanent') {
+      entry.disabled = true;
+      entry.disabledUntil = Number.MAX_SAFE_INTEGER;
+      return;
+    }
+    const now = Date.now();
+    entry.disabled = true;
+    entry.disabledUntil = now + Math.max(0, Math.floor(cooldownMs));
+  }
+
+  /**
+   * 当前可用 key 数
+   */
+  getEnabledCount(): number {
+    return this.entries.filter((e) => e && !this.isEntryDisabled(e)).length;
   }
 
   /**

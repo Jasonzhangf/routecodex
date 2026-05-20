@@ -1,4 +1,6 @@
+import { jest } from '@jest/globals';
 import { WindsurfChatProvider } from '../../../../src/providers/core/runtime/windsurf-chat-provider.ts';
+import { HttpTransportProvider } from '../../../../src/providers/core/runtime/http-transport-provider.ts';
 
 const deps: any = {
   logger: { logModule: () => {}, logProviderRequest: () => {} },
@@ -63,5 +65,69 @@ describe('WindsurfChatProvider', () => {
     } as any, deps);
 
     expect((provider as any).resolveModelEnum('gpt-5.4-high')).toBe(391);
+  });
+
+  test('http mode strips windsurf. model prefix', async () => {
+    const provider = new WindsurfChatProvider({
+      type: 'openai-standard',
+      config: {
+        providerType: 'openai',
+        baseUrl: 'http://localhost:3003',
+        model: 'windsurf.gpt-5.4-high',
+        auth: { type: 'apikey', apiKey: 'test-key' },
+        extensions: {
+          transportBackend: 'http',
+        }
+      }
+    } as any, deps);
+
+    const request: any = {
+      body: {
+        model: 'windsurf.gpt-5.4-high',
+        messages: [{ role: 'user', content: 'hi' }],
+      }
+    };
+
+    const processed = await (provider as any).preprocessRequest(request);
+    expect(processed.body.model).toBe('gpt-5.4-high');
+  });
+
+  test('http auth failure rotates only once before retry', async () => {
+    const provider = new WindsurfChatProvider({
+      type: 'openai-standard',
+      config: {
+        providerType: 'openai',
+        baseUrl: 'http://localhost:3003',
+        model: 'windsurf.gpt-5.4-high',
+        auth: {
+          type: 'apikey',
+          apiKey: '',
+          entries: [
+            { alias: 'key1', apiKey: 'sk-key-111111' },
+            { alias: 'key2', apiKey: 'sk-key-222222' },
+            { alias: 'key3', apiKey: 'sk-key-333333' },
+          ],
+        },
+        extensions: {
+          transportBackend: 'http',
+        }
+      }
+    } as any, deps);
+
+    await (provider as any).initialize();
+    expect((provider as any).authProvider.buildHeaders().Authorization).toContain('sk-key-111111');
+
+    const spy = jest.spyOn(HttpTransportProvider.prototype as any, 'sendRequestInternal');
+    spy
+      .mockRejectedValueOnce(new Error('invalid api key'))
+      .mockResolvedValueOnce({ ok: true });
+
+    try {
+      const result = await (provider as any).sendRequestInternal({ body: { model: 'windsurf.gpt-5.4-high' } });
+      expect(result).toEqual({ ok: true });
+      expect((provider as any).authProvider.buildHeaders().Authorization).toContain('sk-key-222222');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

@@ -62,6 +62,10 @@ export interface ApiKeyEntry {
   env?: string;
   headerName?: string;
   prefix?: string;
+  /** 永久禁用（冷却中或确认无效） */
+  disabled?: boolean;
+  /** 禁用到指定时间戳（ms），0/null 表示不禁用 */
+  disabledUntil?: number;
 }
 
 export interface OAuthAuthConfig {

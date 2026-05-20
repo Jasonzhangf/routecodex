@@ -2,6 +2,7 @@
  * ApiKeyRotator 单元测试
  */
 
+import { jest } from '@jest/globals';
 import { ApiKeyRotator, ApiKeyAuthProvider, createApiKeyRotator } from '../../../src/providers/auth/apikey-auth.js';
 import type { ApiKeyAuthConfig } from '../../../src/providers/profile/provider-profile.js';
 
@@ -119,6 +120,42 @@ describe('ApiKeyRotator', () => {
       
       rotator.rotate();
       expect(rotator.getCurrentKey()).toBe('sk-env');
+    });
+  });
+
+  describe('禁用与冷却', () => {
+    it('应该跳过被永久禁用的 key', () => {
+      const rotator = new ApiKeyRotator([
+        { alias: 'key1', apiKey: 'sk-test1' },
+        { alias: 'key2', apiKey: 'sk-test2' },
+        { alias: 'key3', apiKey: 'sk-test3' }
+      ]);
+
+      rotator.disableCurrent('permanent');
+      expect(rotator.getEnabledCount()).toBe(2);
+      expect(rotator.getCurrentKey()).toBe('sk-test2');
+      expect(rotator.rotate()).toBe('sk-test3');
+      expect(rotator.rotate()).toBe('sk-test2');
+    });
+
+    it('冷却结束后应该重新启用 key', () => {
+      jest.useFakeTimers();
+      try {
+        const rotator = new ApiKeyRotator([
+          { alias: 'key1', apiKey: 'sk-test1' },
+          { alias: 'key2', apiKey: 'sk-test2' }
+        ]);
+
+        rotator.disableCurrent('cooldown', 1000);
+        expect(rotator.getEnabledCount()).toBe(1);
+        expect(rotator.getCurrentKey()).toBe('sk-test2');
+
+        jest.advanceTimersByTime(1001);
+        expect(rotator.rotate()).toBe('sk-test1');
+        expect(rotator.getEnabledCount()).toBe(2);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 });
