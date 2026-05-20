@@ -1101,6 +1101,17 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           aggregatedUsage = providerResponseResult.aggregatedUsage;
 
+          const convertedStatus = providerResponseResult.convertedStatus;
+          if (
+            input.entryEndpoint?.includes('/v1/responses') &&
+            typeof convertedStatus === 'number' &&
+            Number.isFinite(convertedStatus) &&
+            convertedStatus >= 400 &&
+            convertedStatus < 500
+          ) {
+            await clearResponsesConversationByRequestId(input.requestId || executorRequestId);
+          }
+
           recordAttempt({ usage: aggregatedUsage, error: false });
           for (const scope of sessionStormBackoffScopes ?? []) {
             clearSessionStormBackoff(scope);

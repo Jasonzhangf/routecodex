@@ -45,6 +45,11 @@ export async function writeSnapshotViaHooks(channelOrOptions: string | AnyRecord
   await writer(options);
 }
 
+type ResponsesConversationStoreLike = {
+  clearRequest?: (requestId?: string) => void;
+  rebindRequestId?: (oldId: string, newId: string) => void;
+};
+
 type ResponsesConversationModule = {
   resumeResponsesConversation?: (
     responseId: string,
@@ -60,6 +65,13 @@ type ResponsesConversationModule = {
   rebindResponsesConversationRequestId?: (oldId: string, newId: string) => void;
   clearResponsesConversationByRequestId?: (requestId?: string) => void;
 };
+
+function readGlobalResponsesConversationStore(): ResponsesConversationStoreLike | null {
+  const store = (globalThis as Record<string, unknown>).__rccResponsesConversationStore;
+  return store && typeof store === 'object' && !Array.isArray(store)
+    ? (store as ResponsesConversationStoreLike)
+    : null;
+}
 
 let cachedResponsesConversationModule: ResponsesConversationModule | null = null;
 
@@ -89,6 +101,11 @@ export async function rebindResponsesConversationRequestId(oldId?: string, newId
   if (!oldId || !newId || oldId === newId) {
     return;
   }
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.rebindRequestId === 'function') {
+    globalStore.rebindRequestId(oldId, newId);
+    return;
+  }
   const mod = await getResponsesConversationModule();
   const fn = mod.rebindResponsesConversationRequestId;
   if (typeof fn === 'function') {
@@ -98,6 +115,11 @@ export async function rebindResponsesConversationRequestId(oldId?: string, newId
 
 export async function clearResponsesConversationByRequestId(requestId?: string): Promise<void> {
   if (!requestId) {
+    return;
+  }
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.clearRequest === 'function') {
+    globalStore.clearRequest(requestId);
     return;
   }
   const mod = await getResponsesConversationModule();

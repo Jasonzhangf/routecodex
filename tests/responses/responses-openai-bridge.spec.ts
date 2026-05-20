@@ -41,6 +41,26 @@ describe('buildResponsesRequestFromChat (responses bridge)', () => {
     expect((result.request as any).previous_response_id).toBeUndefined();
   });
 
+  it('strips previous_response_id when runtime target protocol is chat even if route semantics contains responses continuation', () => {
+    const payload = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: '继续执行' }],
+      semantics: {
+        continuation: {
+          resumeFrom: {
+            previousResponseId: 'resp_prev_wrongly_carried'
+          }
+        }
+      }
+    };
+
+    const result = buildResponsesRequestFromChat(payload, {
+      targetProtocol: 'openai-chat'
+    } as any);
+
+    expect((result.request as any).previous_response_id).toBeUndefined();
+  });
+
   it('preserves apply_patch arguments when converting tool_calls to Responses input', () => {
     const patchText = [
       '*** Begin Patch',

@@ -30,7 +30,7 @@ export function resolveProviderRequestContext(options: {
     providerPayload,
     mergedMetadata
   } = options;
-  const providerProtocol = (target.outboundProfile as ProviderProtocol) || handle.providerProtocol;
+  const providerProtocol = handle.providerProtocol || (target.outboundProfile as ProviderProtocol);
   const metadataModel =
     mergedMetadata?.target && typeof mergedMetadata.target === 'object'
       ? (mergedMetadata.target as Record<string, unknown>).clientModelId

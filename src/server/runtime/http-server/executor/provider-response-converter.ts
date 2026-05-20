@@ -933,11 +933,40 @@ export async function convertProviderResponseIfNeeded(
       detailUpstreamCode,
       detailReason
     });
-    const isServerToolFollowupFailure = convertErrorPlan.handled
-      && requestExecutorProviderErrorStage === 'provider.followup';
+    const effectiveErrorStage =
+      typeof errRecord.requestExecutorProviderErrorStage === 'string'
+        ? errRecord.requestExecutorProviderErrorStage
+        : typeof detailRecord?.requestExecutorProviderErrorStage === 'string'
+          ? detailRecord.requestExecutorProviderErrorStage
+          : requestExecutorProviderErrorStage;
+    const isServerToolFollowupFailure = effectiveErrorStage === 'provider.followup';
     const followupLogDetails = isServerToolFollowupFailure
       ? extractServerToolFollowupErrorLogDetails(error)
       : undefined;
+    const effectiveGoalState = adapterContext
+      ? readCurrentGoalState({
+          adapterContext,
+          pipelineMetadata: options.pipelineMetadata
+        })
+      : undefined;
+
+    if (
+      effectiveGoalState?.status === 'active'
+      && effectiveErrorStage === 'provider.followup'
+      && errRecord.retryable !== true
+      && adapterContext
+    ) {
+      persistGoalIrrecoverableErrorLedger({
+        adapterContext,
+        pipelineMetadata: options.pipelineMetadata,
+        currentGoal: effectiveGoalState,
+        requestId: options.requestId,
+        code: followupLogDetails?.code || errCode,
+        upstreamCode: followupLogDetails?.upstreamCode || upstreamCode || detailUpstreamCode,
+        reason: followupLogDetails?.reason || detailReason,
+        message
+      });
+    }
 
     if (convertErrorPlan.handled) {
       if (isSseDecodeError || isContextLengthExceeded) {
@@ -964,35 +993,6 @@ export async function convertProviderResponseIfNeeded(
           '[RequestExecutor] Fatal conversion error, bubbling as HTTP error',
           error
         );
-      }
-      const effectiveGoalState = adapterContext
-        ? readCurrentGoalState({
-            adapterContext,
-            pipelineMetadata: options.pipelineMetadata
-          })
-        : undefined;
-      const effectiveErrorStage =
-        typeof errRecord.requestExecutorProviderErrorStage === 'string'
-          ? errRecord.requestExecutorProviderErrorStage
-          : typeof detailRecord?.requestExecutorProviderErrorStage === 'string'
-            ? detailRecord.requestExecutorProviderErrorStage
-            : requestExecutorProviderErrorStage;
-      if (
-        effectiveGoalState?.status === 'active'
-        && effectiveErrorStage === 'provider.followup'
-        && errRecord.retryable !== true
-        && adapterContext
-      ) {
-        persistGoalIrrecoverableErrorLedger({
-          adapterContext,
-          pipelineMetadata: options.pipelineMetadata,
-          currentGoal: effectiveGoalState,
-          requestId: options.requestId,
-          code: followupLogDetails?.code || errCode,
-          upstreamCode: followupLogDetails?.upstreamCode || upstreamCode || detailUpstreamCode,
-          reason: followupLogDetails?.reason || detailReason,
-          message
-        });
       }
       throw error;
     }
