@@ -5,7 +5,6 @@ import {
   captureReqInboundResponsesContextSnapshotWithNative,
   normalizeProviderProtocolTokenWithNative
 } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
-import { captureResponsesRequestContext } from '../../../../../shared/responses-conversation-store.js';
 import type {
   ContextCaptureHandler,
   ContextCaptureOptions,
@@ -46,20 +45,6 @@ export function captureResponsesContextSnapshot(
     requestId: options.adapterContext.requestId,
     toolCallIdStyle: (options.adapterContext as Record<string, unknown>).toolCallIdStyle as string | undefined,
   }) as unknown as ResponsesRequestContext;
-  const requestId = options.adapterContext.requestId;
-  if (requestId) {
-    captureResponsesRequestContext({
-      requestId,
-      payload: options.rawRequest as unknown as Record<string, unknown>,
-      context: context as unknown as Record<string, unknown>,
-      sessionId: typeof (options.adapterContext as Record<string, unknown>).sessionId === 'string'
-        ? String((options.adapterContext as Record<string, unknown>).sessionId) : undefined,
-      conversationId: typeof (options.adapterContext as Record<string, unknown>).conversationId === 'string'
-        ? String((options.adapterContext as Record<string, unknown>).conversationId) : undefined,
-      routeHint: typeof (options.adapterContext as Record<string, unknown>).routeId === 'string'
-        ? String((options.adapterContext as Record<string, unknown>).routeId) : undefined,
-    });
-  }
   return context;
 }
 
