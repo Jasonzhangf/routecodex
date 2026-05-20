@@ -77,6 +77,41 @@ export async function handleProviderQuotaErrorEvent(
     ctx.quotaStates.get(providerKey) ??
     createInitialQuotaState(providerKey, ctx.staticConfigs.get(providerKey), nowMs);
 
+  const detailsRecord =
+    event.details && typeof event.details === 'object'
+      ? (event.details as Record<string, unknown>)
+      : {};
+  const weeklyQuotaExhausted =
+    code === 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED'
+    || String(detailsRecord.quotaScope || '').trim().toLowerCase() === 'weekly'
+    || String(detailsRecord.quotaReason || '').trim().toLowerCase() === 'windsurf_weekly_exhausted';
+
+  if (weeklyQuotaExhausted) {
+    const rawCooldownMs = detailsRecord.cooldownOverrideMs;
+    const cooldownMs =
+      typeof rawCooldownMs === 'number' && Number.isFinite(rawCooldownMs) && rawCooldownMs > 0
+        ? rawCooldownMs
+        : 24 * 60 * 60_000;
+    const nextState: QuotaState = {
+      ...previous,
+      inPool: false,
+      reason: 'blacklist',
+      cooldownUntil: null,
+      cooldownKeepsPool: undefined,
+      blacklistUntil: nowMs + cooldownMs,
+      lastErrorSeries: 'E429',
+      lastErrorCode: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+      lastErrorAtMs: nowMs,
+      consecutiveErrorCount:
+        typeof previous.consecutiveErrorCount === 'number' && previous.consecutiveErrorCount > 0
+          ? previous.consecutiveErrorCount + 1
+          : 1
+    };
+    ctx.quotaStates.set(providerKey, nextState);
+    ctx.schedulePersist(nowMs);
+    return;
+  }
+
   if (isAkBlocked434(event)) {
     const blacklistMs = readPositiveNumberFromEnv('ROUTECODEX_434_BLACKLIST_MS', 30 * 24 * 60 * 60_000);
     const nextState: QuotaState = {
@@ -310,10 +345,6 @@ export async function handleProviderQuotaErrorEvent(
   };
 
   const appliedState = applyQuotaErrorEvent(previous, errorForQuota, nowMs);
-  const detailsRecord =
-    event.details && typeof event.details === 'object'
-      ? (event.details as Record<string, unknown>)
-      : {};
   const errorClassification =
     typeof detailsRecord.errorClassification === 'string'
       ? detailsRecord.errorClassification.trim().toLowerCase()
