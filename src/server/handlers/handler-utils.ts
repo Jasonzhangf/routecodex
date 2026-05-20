@@ -253,7 +253,10 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
   const resolvedId = formatRequestId(requestId);
   const formatted = formatErrorForConsole(error);
   const rawMeta = extractRawErrorMeta(error);
-  const summary = rawMeta?.rawErrorSnippet ?? formatted.text;
+  const rawSnippet = rawMeta?.rawErrorSnippet;
+  const summary = shouldUseRawSnippetAsSummary(rawSnippet, formatted.text)
+    ? String(rawSnippet)
+    : formatted.text;
   const fields = extractErrorLogFields(error, summary);
   const fieldSuffix = [
     typeof fields.statusCode === 'number' ? `status=${fields.statusCode}` : undefined,
@@ -275,6 +278,42 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
     };
     const metaLine = `[http.error.meta] ${JSON.stringify(payload)}`;
     console.error(colorizeRequestLog(metaLine, resolvedId) || metaLine);
+  }
+}
+
+function shouldUseRawSnippetAsSummary(rawSnippet: string | undefined, fallbackText: string): boolean {
+  if (!rawSnippet || typeof rawSnippet !== 'string') {
+    return false;
+  }
+  const trimmed = rawSnippet.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (!isCodeOnlyShellError(trimmed)) {
+    return true;
+  }
+  // code-only shell error loses diagnostics; prefer richer normalized text.
+  return !fallbackText || !fallbackText.trim();
+}
+
+function isCodeOnlyShellError(value: string): boolean {
+  if (!(value.startsWith('{') && value.endsWith('}'))) {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    const errorNode = parsed?.error;
+    if (!errorNode || typeof errorNode !== 'object' || Array.isArray(errorNode)) {
+      return false;
+    }
+    const errorRecord = errorNode as Record<string, unknown>;
+    const keys = Object.keys(errorRecord);
+    if (keys.length !== 1 || keys[0] !== 'code') {
+      return false;
+    }
+    return typeof errorRecord.code === 'string' && errorRecord.code.trim().length > 0;
+  } catch {
+    return false;
   }
 }
 
@@ -434,10 +473,24 @@ export async function resolveReportedRouteErrorHttpResponse(args: {
   onReportError?: (error: unknown) => void;
 }): Promise<HttpErrorPayload> {
   let mapped = mapErrorToHttp(args.normalizedError);
+  const isValidHttpErrorPayload = (candidate: HttpErrorPayload | undefined): candidate is HttpErrorPayload => {
+    if (!candidate || typeof candidate !== 'object') {
+      return false;
+    }
+    if (typeof candidate.status !== 'number' || !Number.isFinite(candidate.status)) {
+      return false;
+    }
+    const body = candidate.body;
+    const error = body?.error;
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+    return typeof error.message === 'string' && error.message.trim().length > 0;
+  };
   try {
     const { reportRouteError } = await import('../../error-handling/route-error-hub.js');
     const { http } = await reportRouteError(args.routePayload, { includeHttpResult: true });
-    if (http) {
+    if (isValidHttpErrorPayload(http)) {
       mapped = http;
     }
   } catch (error) {

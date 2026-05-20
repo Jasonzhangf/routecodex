@@ -7,16 +7,162 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 
 ## 索引概要
 - L1-L20 `purpose`: RouteCodex/llmswitch-core 开发技能索引
-- L21-L40 `chat-process`: Chat Process 定义与阶段说明
-- L41-L60 `tool-governance`: 工具治理唯一真源位置
-- L61-L80 `heredoc`: Heredoc 工具引导/收割架构
-- L81-L100 `diagnosis`: PipeDebug 诊断流程
-- L101-L160 `restart`: 服务器重启与热加载（SIGUSR2）
-- L161-L240 `snapshot-startup`: Snapshot 启动策略（默认轻量 + 显式 stage）
-- L241-L340 `stopless-skeleton`: servertool stopless/followup 骨架、改动点、测试矩阵
-- L341+ `hard-guard`: fallback / 静默失败治理硬规则
+- L21-L55 `closed-loop-refactor`: 标准重构/修复闭环（分步→修改→编译→构建→验证→下一步）
+- L56-L75 `chat-process`: Chat Process 定义与阶段说明
+- L76-L95 `tool-governance`: 工具治理唯一真源位置
+- L96-L115 `heredoc`: Heredoc 工具引导/收割架构
+- L116-L135 `diagnosis`: PipeDebug 诊断流程
+- L136-L195 `restart`: 服务器重启与热加载（SIGUSR2）
+- L196-L275 `snapshot-startup`: Snapshot 启动策略（默认轻量 + 显式 stage）
+- L276-L375 `stopless-skeleton`: servertool stopless/followup 骨架、改动点、测试矩阵
+- L376+ `hard-guard`: fallback / 静默失败治理硬规则
+
+## 标准重构 / 修复闭环（强制顺序）
+
+> 适用于 Hub Pipeline / Virtual Router / servertool / provider runtime / Rust 化收口。  
+> 必须按顺序推进；没有上一步证据，不允许跳下一步。
+
+### R0. 分步拆解（先定边界，不写代码）
+1. 先把问题拆成最小阶段：入口、归一、治理、路由、provider payload、response contract、servertool orchestration。
+2. 先确认唯一真源文件，再决定改动范围；禁止“先改一圈再看”。
+3. 若改动跨多个阶段，必须显式说明每一段为什么必要；否则视为散改。
+
+### R1. 先复现 / 先补测试（不改实现）
+1. 先拿原 requestId / codex-sample / errorsample / 最小 fixture 复现。
+2. 先补会红的测试：
+   - shape / sanitize / compat：单测或 same-shape replay
+   - followup / stopless / 路由：黑盒 replay 或样本回放
+3. 没有“先红”证据，不进入修改阶段。
+
+### R2. 最小修改（只改唯一真源）
+1. 只改命中的唯一阶段文件。
+2. 禁止顺手修 unrelated 逻辑。
+3. 禁止 fallback / 降级 / 双路径补偿。
+4. 若发现旧错误实现、重复设计、死代码，确认替代真源后物理删除。
+
+### R3. 编译（先过最小静态门禁）
+1. 先跑目标模块最小测试。
+2. 再跑最小编译门禁：
+   - Rust 侧：`cargo test` / native build（若命中 rust-core）
+   - TS 侧：目标路径 jest / ts build
+3. 编译不过，不进入构建安装。
+
+### R4. 构建 / 安装
+1. 需要落到真实运行时的改动，必须执行：
+   - `build`
+   - `install:global`
+   - 受管 `restart --port 5555`（必要时 5520）
+2. 禁止把“源码测试通过”当成“运行态已修复”。
+
+### R5. 验证（必须包含原错误形状）
+1. 必须复测原错误请求或 same-shape 样本。
+2. 至少包含：
+   - 1 条 failing-shape replay
+   - 1 条 control replay
+   - 1 次真实入口 smoke（如 `/v1/responses`）
+3. 验证内容包括：
+   - 返回码 / finish_reason
+   - provider-request / provider-response 形状
+   - 日志阶段是否变成目标形态
+
+### R6. 再做下一步
+1. 只有 R5 完成后，才允许继续下一个问题或下一阶段重构。
+2. 若 R5 失败，回到 R0，重新判定真源；禁止在错误假设上连续打补丁。
+3. 汇报格式固定为：
+   - 复现证据
+   - 唯一修改点
+   - 编译 / 构建 / 安装结果
+   - 回归 / 实机验证结果
+   - 下一步
+
+## 开发与重构统一流程（强制 5 步，新增）
+
+> 适用于所有功能开发、重构、Rust 化迁移。必须严格串行，禁止跳步。
+
+1. **先对齐测试**
+   - 先明确本次改动的测试边界：单测、定向回放、回归集、E2E。
+   - 先准备“会红/可证明”的测试或样本，再进入实现。
+
+2. **分片修改**
+   - 每次只做一个最小可验证切片（单阶段、单真源、单责任）。
+   - 禁止跨阶段大杂烩修改；禁止顺手改 unrelated 逻辑。
+
+3. **每片后过单测与回归**
+   - 每个切片完成后必须立即运行：目标单测 + 对应回归。
+   - 未通过不得进入下一片；必须先在当前片内修复。
+
+4. **端到端验证**
+   - 切片级测试通过后，必须做真实入口 E2E 验证（含关键日志与形状断言）。
+   - 对 Rust 化任务，必须补充 deterministic / rustification 审计门禁。
+
+5. **再做下一步开发**
+   - 只有在第 4 步证据完备后，才允许进入下一开发片。
+   - 汇报必须包含：测试对齐结果、切片改动点、单测/回归结果、E2E 结果、下一步。
 
 ## Servertool Stopless/Followup 骨架（唯一改动导航）
+
+### 最近一次多轮事故修复沉淀（2026-05-19）
+
+> 目的：把这次“反复改错位置/线上报新错”的经验固化为**唯一路径**，下次按图索骥，禁止散改。
+
+#### A. 问题簇与唯一修复点映射
+1. **followup payload 被强制 `stream:false`，上游仍回 SSE，导致 empty followup**
+   - 现象：
+     - `SERVERTOOL_EMPTY_FOLLOWUP`
+     - 样本中 `payload.stream=false` + `body.__sse_responses`
+   - 唯一修复点：
+     - `sharedmodule/llmswitch-core/src/servertool/followup-mainline-block.ts`
+     - `sharedmodule/llmswitch-core/src/servertool/reenter-backend.ts`
+     - `sharedmodule/llmswitch-core/src/servertool/followup-response-block.ts`
+   - 修复原则：
+     - followup 不强制改 stream；
+     - SSE wrapper 不能被空响应判定误杀。
+
+2. **把 SSE wrapper 当 canonical body 继续流转，触发 `MALFORMED_RESPONSE`**
+   - 现象：
+     - `[hub_response] Non-canonical response payload at chat_process.response.entry`
+   - 唯一修复点：
+     - `sharedmodule/llmswitch-core/src/servertool/reenter-followup-block.ts`
+   - 修复原则：
+     - 不得把 wrapper 当 body；
+     - 只允许 canonical `followup.body` 进入后续 contract 检查。
+
+3. **`/goal active` 时仍被标记为 servertool followup（错误参与）**
+   - 现象：
+     - goal active 场景下仍进入 followup 参与路径
+   - 唯一修复点：
+     - `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts`
+   - 修复原则：
+     - goal active 时必须清除 `serverToolFollowup/serverToolFollowupSource` 标记；
+     - 仅保留 `stoplessGoalStatus=active`，不参与 followup 标记链。
+
+4. **Hub pipeline 运行时函数名错误导致全局 502**
+   - 现象：
+     - `createHubSnapshotStageRecorder is not defined`
+   - 唯一修复点：
+     - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-route-and-outbound-payload-blocks.ts`
+   - 修复原则：
+     - 使用当前模块真实导出的 recorder API（`createOutboundSnapshotStageRecorder`）；
+     - 修编译时必须同时过运行时 smoke。
+
+#### B. 本次确认后的“功能归属边界”
+1. **followup stream / empty / retry 判定**：只在 `servertool/*followup*` 系列文件处理。
+2. **canonical response contract**：只在 `conversion/hub/response/*` 与 reenter 出口对接，不跨层补丁。
+3. **goal active 是否参与 followup**：只在 `server/runtime/http-server/executor/servertool-followup-dispatch.ts` 判定。
+4. **pipeline 组装函数引用**：只在 `conversion/hub/pipeline/*route-and-outbound*` 处理，不在 servertool 兜底。
+
+#### C. 强制执行流程（这类问题专用）
+1. 先抓失败样本（`tmp/servertool-followup-empty/*.json` 或 requestId 同形样本）。
+2. 先补回归测试（至少 1 条会红）。
+3. 只改命中阶段唯一文件。
+4. 本地定向测试转绿后，才允许 `build:min -> install:global -> restart 5555/5520`。
+5. 线上复测 requestId 同类日志，不再出现原始错误码才可宣称完成。
+
+#### D. 禁止事项（本次教训）
+1. 禁止在一个回合里同时改 stream 语义、canonical contract、goal 路由三层以上逻辑。
+2. 禁止“编译通过=修复完成”；必须看运行时日志是否变更为目标形态。
+3. 禁止把 wrapper 直接塞进 canonical payload。
+4. 禁止在 `/goal active` 下保留 followup 标记。
 
 ### 0) 目标
 - stopless/followup 的请求必须“从同一入口进、同一入口出”：

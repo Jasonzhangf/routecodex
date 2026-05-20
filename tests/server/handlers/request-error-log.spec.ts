@@ -36,5 +36,32 @@ describe('logRequestError diagnostics', () => {
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('code=SSE_TO_JSON_ERROR'));
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('upstreamCode=EPIPE'));
   });
-});
 
+  it('does not let code-only rawErrorSnippet override richer error message', () => {
+    const err: any = new Error('HTTP 502: {"error":{"message":"Upstream request failed","type":"upstream_error"}}');
+    err.code = 'HTTP_502';
+    err.rawErrorSnippet = '{"error":{"code":"HTTP_502"}}';
+
+    logRequestError('/v1/responses', 'req_code_only_shell', err);
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Upstream request failed'));
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('failed: {"error":{"code":"HTTP_502"}}'));
+  });
+
+  it('does not let code-only response.data shell override richer error message', () => {
+    const err: any = new Error('HTTP 502: {"error":{"message":"Upstream request failed","type":"upstream_error"}}');
+    err.code = 'HTTP_502';
+    err.response = {
+      data: {
+        error: {
+          code: 'HTTP_502'
+        }
+      }
+    };
+
+    logRequestError('/v1/responses', 'req_response_data_shell', err);
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Upstream request failed'));
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('failed: {"error":{"code":"HTTP_502"}}'));
+  });
+});

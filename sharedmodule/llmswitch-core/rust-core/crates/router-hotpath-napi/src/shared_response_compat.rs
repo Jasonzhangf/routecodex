@@ -788,6 +788,19 @@ fn is_goal_history_assistant_text(text: &str) -> bool {
         || normalized.contains("mark the goal complete")
 }
 
+fn is_historical_goal_control_user_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let normalized = trimmed.to_ascii_lowercase();
+    normalized.contains("<goal_context>")
+        || normalized.contains("</goal_context>")
+        || normalized.contains("<turn_aborted>")
+        || normalized.contains("</turn_aborted>")
+        || normalized.contains("<untrusted_objective>")
+}
+
 fn latest_user_index(messages: &[Value]) -> Option<usize> {
     messages
         .iter()
@@ -816,6 +829,10 @@ fn should_drop_historical_goal_turn(
     }
 
     if role == "assistant" && is_goal_history_assistant_text(&content_text) {
+        return true;
+    }
+
+    if role == "user" && is_historical_goal_control_user_text(&content_text) {
         return true;
     }
 
@@ -916,6 +933,32 @@ pub(crate) fn sanitize_chat_process_messages_value(input: &Value) -> SanitizeMes
             continue;
         }
         let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
+        if role == "tool" {
+            let Some(obj) = msg.as_object() else {
+                out.push(msg.clone());
+                continue;
+            };
+            let canonical_id = obj
+                .get("tool_call_id")
+                .or_else(|| obj.get("call_id"))
+                .or_else(|| obj.get("tool_use_id"))
+                .or_else(|| obj.get("id"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            if let Some(tool_call_id) = canonical_id {
+                let mut nm = obj.clone();
+                let existing = nm.get("tool_call_id").and_then(|v| v.as_str()).map(|s| s.trim().to_string());
+                nm.insert("tool_call_id".to_string(), Value::String(tool_call_id.clone()));
+                if existing.as_deref() != Some(tool_call_id.as_str()) {
+                    did_mut = true;
+                }
+                out.push(Value::Object(nm));
+                continue;
+            }
+            out.push(msg.clone());
+            continue;
+        }
         if role != "assistant" { out.push(msg.clone()); continue; }
         if let Some(calls) = msg.get("tool_calls").and_then(|v| v.as_array()) {
             if !calls.is_empty() {
@@ -926,9 +969,15 @@ pub(crate) fn sanitize_chat_process_messages_value(input: &Value) -> SanitizeMes
                     let id = obj.get("id").or_else(|| obj.get("call_id")).or_else(|| obj.get("tool_call_id"))
                         .and_then(|v| v.as_str()).map(|s| s.trim().to_string());
                     if let Some(id) = id {
-                        let mut n = obj.clone(); n.remove("call_id"); n.remove("tool_call_id");
+                        let mut n = obj.clone();
+                        let had_call_id_alias = n.remove("call_id").is_some();
+                        let had_tool_call_id_alias = n.remove("tool_call_id").is_some();
+                        let existing_id = n.get("id").and_then(|v| v.as_str()).map(|s| s.trim().to_string());
                         n.insert("id".to_string(), Value::String(id.clone()));
-                        ncalls.push(Value::Object(n)); changed = true;
+                        if had_call_id_alias || had_tool_call_id_alias || existing_id.as_deref() != Some(id.as_str()) {
+                            changed = true;
+                        }
+                        ncalls.push(Value::Object(n));
                     } else { ncalls.push(c.clone()); }
                 }
                 if changed { did_mut = true; }
@@ -1119,6 +1168,86 @@ pub fn enforce_lmstudio_responses_fc_tool_call_ids_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitize_chat_process_messages_drops_historical_user_goal_control_turns() {
+        let raw = serde_json::json!({
+            "messages": [
+                { "role": "user", "content": "普通历史" },
+                { "role": "user", "content": "<goal_context>\nContinue working toward the active thread goal.\n<untrusted_objective>\n历史目标\n</untrusted_objective>\n</goal_context>" },
+                { "role": "user", "content": "<turn_aborted>\nThe user interrupted the previous turn on purpose.\n</turn_aborted>" },
+                { "role": "user", "content": "继续执行" }
+            ]
+        });
+
+        let output = sanitize_chat_process_messages_value(&raw);
+
+        assert_eq!(output.removed_historical_goal_turns, 2);
+        assert_eq!(output.removed_assistant_turns, 2);
+        assert_eq!(output.messages.len(), 2);
+        assert_eq!(output.messages[0]["content"], "普通历史");
+        assert_eq!(output.messages[1]["content"], "继续执行");
+    }
+
+    #[test]
+    fn sanitize_chat_process_messages_does_not_mark_mutation_for_already_canonical_tool_calls() {
+        let raw = serde_json::json!({
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": { "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" }
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let output = sanitize_chat_process_messages_value(&raw);
+
+        assert!(!output.did_mutate_message_shapes);
+        assert_eq!(output.removed_assistant_turns, 0);
+        assert_eq!(output.messages[0]["tool_calls"][0]["id"], "call_1");
+    }
+
+    #[test]
+    fn sanitize_chat_process_messages_normalizes_tool_role_call_id_aliases() {
+        let raw = serde_json::json!({
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": { "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" }
+                        }
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "call_id": "call_1",
+                    "content": [{ "type": "text", "text": "ok" }]
+                },
+                {
+                    "role": "tool",
+                    "id": "call_2",
+                    "content": [{ "type": "text", "text": "orphan" }]
+                }
+            ]
+        });
+
+        let output = sanitize_chat_process_messages_value(&raw);
+
+        assert!(output.did_mutate_message_shapes);
+        assert_eq!(output.messages[1]["tool_call_id"], "call_1");
+        assert_eq!(output.messages[2]["tool_call_id"], "call_2");
+    }
 
     #[test]
     fn lmstudio_responses_fc_ids_normalizes_call_and_output_ids() {

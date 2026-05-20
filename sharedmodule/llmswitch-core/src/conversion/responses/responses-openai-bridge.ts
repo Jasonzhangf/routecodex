@@ -480,8 +480,10 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
     typeof bridgeDecisions.previousResponseId === 'string' && bridgeDecisions.previousResponseId.trim().length > 0
       ? bridgeDecisions.previousResponseId.trim()
       : readPreviousResponseIdFromChatSemantics(chat as Record<string, unknown>);
+  const stripHostFields = shouldStripHostManagedFields(ctx);
+  const continuationPreviousResponseId = stripHostFields ? '' : previousResponseId;
   const resumedDeltaInput =
-    previousResponseId.length > 0
+    continuationPreviousResponseId.length > 0
       ? readResumeDeltaInputFromChatSemantics(chat as Record<string, unknown>)
       : undefined;
 
@@ -523,7 +525,7 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   }
 
   const history =
-    (previousResponseId ? undefined : historySeed) ??
+    (continuationPreviousResponseId ? undefined : historySeed) ??
     (convertMessagesToBridgeInput({
       messages,
       tools: Array.isArray(out.tools) ? (out.tools as Array<Record<string, unknown>>) : undefined,
@@ -546,7 +548,7 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
 
   // 不追加 metadata，以便 roundtrip 与原始 payload 对齐；系统提示直接写入 instructions。
   const inputForUpstream =
-    previousResponseId.length > 0 && Array.isArray(resumedDeltaInput)
+    continuationPreviousResponseId.length > 0 && Array.isArray(resumedDeltaInput)
       ? resumedDeltaInput
       : input;
   assertNoSyntheticOrMalformedBridgeInput(
@@ -564,8 +566,8 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   if (upstreamInput.length) {
     out.input = upstreamInput;
   }
-  if (previousResponseId.length > 0) {
-    out.previous_response_id = previousResponseId;
+  if (continuationPreviousResponseId.length > 0) {
+    out.previous_response_id = continuationPreviousResponseId;
   }
   const streamFromChat = typeof (chat as any).stream === 'boolean' ? ((chat as any).stream as boolean) : undefined;
   const streamFromParameters = (chat as any)?.parameters && typeof ((chat as any).parameters as any)?.stream === 'boolean'
@@ -592,7 +594,6 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
     (ctx as any)?.serviceTier !== undefined ? (ctx as any).serviceTier : (ctx as any)?.service_tier;
   const contextTruncation =
     (ctx as any)?.truncation !== undefined ? (ctx as any).truncation : (ctx as any)?.truncation_mode;
-  const stripHostFields = shouldStripHostManagedFields(ctx);
   const preparedEnvelope = prepareResponsesRequestEnvelopeWithNative({
     request: out as Record<string, unknown>,
     contextSystemInstruction: ctx?.systemInstruction,

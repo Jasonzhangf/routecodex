@@ -61,6 +61,7 @@ describe('sanitizeChatProcessRequest', () => {
       removedEmptyAssistantTurns: 1,
       removedTemplateAssistantTurns: 1,
       removedDuplicateMirrorAssistantTurns: 0,
+      removedHistoricalGoalTurns: 0,
       removedToolTurns: 0,
       removedEmptyToolTurns: 0,
       removedOrphanToolTurns: 0,
@@ -264,6 +265,33 @@ describe('sanitizeChatProcessRequest', () => {
     expect(out.metadata?.chatProcessSanitizer).toMatchObject({
       removedHistoricalGoalTurns: 4,
       removedAssistantTurns: 4
+    });
+  });
+
+  it('removes historical user goal_context and turn_aborted control turns before the latest user turn', () => {
+    const input: any = {
+      messages: [
+        { role: 'user', content: '普通历史' },
+        {
+          role: 'user',
+          content: '<goal_context>\nContinue working toward the active thread goal.\n<untrusted_objective>\n历史目标\n</untrusted_objective>\n</goal_context>'
+        },
+        {
+          role: 'user',
+          content: '<turn_aborted>\nThe user interrupted the previous turn on purpose.\n</turn_aborted>'
+        },
+        { role: 'user', content: '继续执行' }
+      ]
+    };
+
+    const out: any = sanitizeChatProcessRequest(input);
+
+    expect(out.messages).toHaveLength(2);
+    expect(out.messages[0]).toMatchObject({ role: 'user', content: '普通历史' });
+    expect(out.messages[1]).toMatchObject({ role: 'user', content: '继续执行' });
+    expect(out.metadata?.chatProcessSanitizer).toMatchObject({
+      removedHistoricalGoalTurns: 2,
+      removedAssistantTurns: 2
     });
   });
 

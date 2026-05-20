@@ -1,4 +1,7 @@
-import { finalizeProviderPayloadWithPolicy } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-provider-payload-policy-apply-blocks.js';
+import {
+  buildRequestStageProviderPayload,
+  finalizeProviderPayloadWithPolicy,
+} from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage-provider-payload.js';
 
 describe('provider payload builtin web_search gating', () => {
   const baseArgs = {
@@ -199,6 +202,70 @@ describe('provider payload builtin web_search gating', () => {
         type: 'function',
         function: { name: 'exec_command' }
       }
+    ]);
+  });
+
+  test('passthrough outbound payload also strips builtin web_search on non-anthropic protocols', async () => {
+    const result = await buildRequestStageProviderPayload({
+      normalized: {
+        id: 'provider-payload-web-search-gate-passthrough',
+        providerProtocol: 'openai-responses',
+        metadata: {},
+      } as any,
+      hooks: {
+        createSemanticMapper: () => ({}),
+        contextMetadataKey: 'messages',
+      } as any,
+      config: {
+        virtualRouter: {},
+      } as any,
+      workingRequest: {
+        model: 'llmgate.deepseek-v4-pro',
+        messages: [],
+        metadata: {},
+      } as any,
+      rawRequest: {
+        model: 'llmgate.deepseek-v4-pro',
+        stream: true,
+        tool_choice: 'auto',
+        tools: [
+          { type: 'web_search' },
+          {
+            type: 'function',
+            function: { name: 'exec_command' },
+          },
+        ],
+      } as any,
+      contextSnapshot: undefined,
+      activeProcessMode: 'passthrough',
+      passthroughAudit: undefined,
+      outboundProtocol: 'openai-responses',
+      outboundAdapterContext: {
+        routeId: 'thinking.default',
+        __rt: {
+          webSearch: {
+            engines: [
+              {
+                executionMode: 'proxy',
+                directActivation: 'builtin',
+                modelId: 'llmgate.deepseek-v4-pro',
+              },
+            ],
+          },
+        },
+      },
+      outboundStream: true,
+      outboundRecorder: undefined,
+      semanticMapper: {},
+      effectivePolicy: undefined,
+      shadowCompareBaselineMode: undefined,
+    });
+
+    expect(result.providerPayload.tools).toEqual([
+      {
+        type: 'function',
+        function: { name: 'exec_command' },
+      },
     ]);
   });
 });
