@@ -359,8 +359,17 @@ export function detectAssistantSanitizationPlaceholder(body: unknown): PayloadCo
   };
 }
 
-function containsReasoningStopFinalizedMarker(_value: unknown): boolean {
-  return false;
+function containsReasoningStopFinalizedMarker(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.includes('[app.finished:reasoning.stop]');
+  }
+  if (Array.isArray(value)) {
+    return value.some((entry) => containsReasoningStopFinalizedMarker(entry));
+  }
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  return Object.values(value as Record<string, unknown>).some((entry) => containsReasoningStopFinalizedMarker(entry));
 }
 
 export async function persistPayloadContractProviderSnapshots(args: {

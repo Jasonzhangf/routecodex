@@ -64,6 +64,5 @@ export function syncStoplessGoalStateFromCapturedRequest(
     syncStoplessGoalStateFromRequest(baseContext);
   } catch (error) {
     onError?.(error);
-    throw error;
   }
 }

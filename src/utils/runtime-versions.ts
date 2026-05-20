@@ -4,6 +4,14 @@ import { fileURLToPath } from 'node:url';
 
 let cachedLlmsVersion: string | null | undefined;
 
+function getImportMetaUrlUnsafe(): string | undefined {
+  try {
+    return Function('return import.meta.url')() as string | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function resolveLlmswitchCoreVersion(): string | undefined {
   if (cachedLlmsVersion !== undefined) {
     return cachedLlmsVersion ?? undefined;
@@ -11,7 +19,11 @@ export function resolveLlmswitchCoreVersion(): string | undefined {
   cachedLlmsVersion = null;
 
   try {
-    const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+    const metaUrl = getImportMetaUrlUnsafe();
+    const moduleDir =
+      typeof metaUrl === 'string' && metaUrl.length > 0
+        ? path.dirname(fileURLToPath(metaUrl))
+        : path.resolve(process.cwd(), 'src', 'utils');
     const packageRoot = path.resolve(moduleDir, '..', '..');
     const candidates = [
       path.resolve(process.cwd(), 'sharedmodule', 'llmswitch-core', 'package.json'),

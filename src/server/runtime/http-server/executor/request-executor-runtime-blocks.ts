@@ -153,8 +153,26 @@ export function emitRequestExecutorVirtualRouterConcurrencyLog(args: {
   });
 }
 
+function isAlreadyClientFinalResponseBody(body: unknown): boolean {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return false;
+  }
+  const record = body as Record<string, unknown>;
+  const object = typeof record.object === 'string' ? record.object.trim() : '';
+  if (object === 'chat.completion' || object === 'response' || object === 'message') {
+    return true;
+  }
+  if (object === 'chat.completion.chunk' || object === 'response.chunk') {
+    return true;
+  }
+  return false;
+}
+
 export function shouldBypassProviderResponseConversion(normalized: PipelineExecutionResult): boolean {
-  return typeof normalized.status === 'number' && normalized.status >= 400;
+  if (typeof normalized.status === 'number' && normalized.status >= 400) {
+    return true;
+  }
+  return isAlreadyClientFinalResponseBody(normalized.body);
 }
 
 export function normalizeStoplessLogMode(value: unknown): StoplessLogMode | undefined {

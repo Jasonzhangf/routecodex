@@ -14,11 +14,22 @@ import type { LlmsImpl } from '../core-loader.js';
 
 type AnyRecord = Record<string, unknown>;
 
-function resolveModuleLoaderPath(): string {
+function getImportMetaUrlUnsafe(): string | undefined {
   try {
-    return new URL(import.meta.url).pathname;
+    return Function('return import.meta.url')() as string | undefined;
   } catch {
-    // continue to stack / cwd fallback
+    return undefined;
+  }
+}
+
+function resolveModuleLoaderPath(): string {
+  const metaUrl = getImportMetaUrlUnsafe();
+  if (typeof metaUrl === 'string' && metaUrl.length > 0) {
+    try {
+      return new URL(metaUrl).pathname;
+    } catch {
+      // continue to stack / cwd fallback
+    }
   }
   if (typeof __filename === 'string' && __filename.length > 0) {
     return __filename;
@@ -45,11 +56,15 @@ function resolveModuleLoaderPath(): string {
 }
 
 function createNodeRequire() {
-  try {
-    return createRequire(import.meta.url);
-  } catch {
-    return createRequire(resolveModuleLoaderPath());
+  const metaUrl = getImportMetaUrlUnsafe();
+  if (typeof metaUrl === 'string' && metaUrl.length > 0) {
+    try {
+      return createRequire(metaUrl);
+    } catch {
+      // continue to path fallback
+    }
   }
+  return createRequire(resolveModuleLoaderPath());
 }
 
 const nodeRequire = createNodeRequire();

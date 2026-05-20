@@ -16,7 +16,7 @@ function readServerToolFollowupSource(requestSemantics?: Record<string, unknown>
 
 function isReasoningStopFollowupTurn(requestSemantics?: Record<string, unknown>): boolean {
   const source = readServerToolFollowupSource(requestSemantics);
-  return false;
+  return source === 'servertool.reasoning_stop_continue';
 }
 
 function hasNonEmptyArray(value: unknown): boolean {
@@ -124,7 +124,7 @@ export function isRequiredToolCallTurn(requestSemantics?: Record<string, unknown
   }
 
   const source = readServerToolFollowupSource(requestSemantics);
-  return false;
+  return source === 'servertool.reasoning_stop_continue';
 }
 
 export function isToolResultFollowupTurn(requestSemantics?: Record<string, unknown>): boolean {

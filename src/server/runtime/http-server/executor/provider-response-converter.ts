@@ -36,9 +36,7 @@ import {
   extractServerToolFollowupErrorLogDetails,
   finalizeServerToolBridgeConvertError
 } from './servertool-followup-error.js';
-import {
-  normalizeResponsesToolCallArgumentsForClientWithNative
-} from '../../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
+import { requireCoreDist } from '../../../../modules/llmswitch/bridge.js';
 
 import {
   asFlatRecord,
@@ -82,6 +80,27 @@ const GOAL_NO_PROGRESS_STOP_THRESHOLD = 5;
 const REPEATED_VALIDATION_FAILURE_ERROR_CLASS = 'repeated_validation_failure';
 const REPEATED_IRRECOVERABLE_ERROR_CLASS = 'repeated_irrecoverable_error';
 const REPEATED_NO_PROGRESS_STOP_ERROR_CLASS = 'repeated_no_progress_stop';
+
+type NativeRespSemanticsModule = {
+  normalizeResponsesToolCallArgumentsForClientWithNative?: (
+    responsesPayload: unknown,
+    toolsRaw: unknown[]
+  ) => Record<string, unknown>;
+};
+
+function normalizeResponsesToolCallArgumentsForClientWithNative(
+  responsesPayload: unknown,
+  toolsRaw: unknown[]
+): Record<string, unknown> {
+  const mod = requireCoreDist<NativeRespSemanticsModule>(
+    'router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics'
+  );
+  const fn = mod.normalizeResponsesToolCallArgumentsForClientWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] normalizeResponsesToolCallArgumentsForClientWithNative not available');
+  }
+  return fn(responsesPayload, toolsRaw);
+}
 
 function readNonEmptyString(value: unknown): string | undefined {
   if (typeof value !== 'string') {

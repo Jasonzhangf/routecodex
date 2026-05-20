@@ -274,7 +274,8 @@ export async function processProviderSendFailure(
         runtimeKey: args.runtimeKey,
         retryError,
         holdOnLastAvailable429: retryExecutionPlan.holdOnLastAvailable429,
-        explicitSingletonPool: Array.isArray(args.routePoolForAttempt) && args.routePoolForAttempt.length === 1
+        explicitSingletonPool: Array.isArray(args.routePoolForAttempt) && args.routePoolForAttempt.length === 1,
+        preserveSameProviderRetry: retryExecutionPlan.retrySwitchPlan?.switchAction === 'retry_same_provider'
       }
       : null;
   const allowBlockingRecoverableRetryBeyondAttemptBudget =

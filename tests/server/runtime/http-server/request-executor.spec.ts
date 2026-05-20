@@ -269,9 +269,12 @@ describe('HubRequestExecutor failover', () => {
       status: 429
     });
     expect(windsurfWeeklyQuotaExecutionPlan).toEqual(expect.objectContaining({
-      shouldRetry: false,
+      shouldRetry: true,
       excludedCurrentProvider: true,
       holdOnLastAvailable429: false
+    }));
+    expect(windsurfWeeklyQuotaExecutionPlan.retrySwitchPlan).toEqual(expect.objectContaining({
+      switchAction: 'exclude_and_reroute'
     }));
     expect(Array.from(windsurfWeeklyQuotaExcluded)).toEqual(['windsurf.ws-pro-1.gpt-5.4-medium']);
   });

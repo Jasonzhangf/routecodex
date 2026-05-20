@@ -8,9 +8,6 @@
 import { importCoreDist, requireCoreDist } from './module-loader.js';
 import type { AnyRecord } from './module-loader.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
-import {
-  extractSessionIdentifiersFromMetadataWithNative
-} from '../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/engine-selection/native-hub-pipeline-session-identifiers-semantics.js';
 
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
@@ -163,9 +160,38 @@ export function readStoplessGoalState(adapterContext: unknown): unknown {
 
 type SessionIdentifiers = { sessionId?: string; conversationId?: string };
 
+function readNormalizedMetadataToken(source: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+  if (!source || typeof source !== 'object') {
+    return undefined;
+  }
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+  }
+  return undefined;
+}
+
 export function extractSessionIdentifiersFromMetadata(meta: Record<string, unknown> | undefined): SessionIdentifiers {
   try {
-    return extractSessionIdentifiersFromMetadataWithNative(meta);
+    const sessionId = readNormalizedMetadataToken(meta, [
+      'sessionId',
+      'session_id',
+      'tmuxSessionId',
+      'clientTmuxSessionId'
+    ]);
+    const conversationId = readNormalizedMetadataToken(meta, [
+      'conversationId',
+      'conversation_id'
+    ]);
+    return {
+      ...(sessionId ? { sessionId } : {}),
+      ...(conversationId ? { conversationId } : {})
+    };
   } catch (error) {
     throw buildStateIntegrationFailure('session_identifiers.extract.invoke', error);
   }

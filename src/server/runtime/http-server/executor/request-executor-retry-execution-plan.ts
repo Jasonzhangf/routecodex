@@ -19,6 +19,36 @@ import type {
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
 
+function isTerminalQuotaRerouteCandidate(args: {
+  error: unknown;
+  retryError: RetryErrorSnapshot;
+  status?: number;
+}): boolean {
+  const record =
+    args.error && typeof args.error === 'object' && !Array.isArray(args.error)
+      ? (args.error as Record<string, unknown>)
+      : undefined;
+  const code = String(record?.code ?? args.retryError.errorCode ?? '').trim().toUpperCase();
+  const upstreamCode = String(record?.upstreamCode ?? args.retryError.upstreamCode ?? '').trim().toUpperCase();
+  const rateLimitKind = String(record?.rateLimitKind ?? '').trim().toLowerCase();
+  const quotaScope = String(record?.quotaScope ?? '').trim().toLowerCase();
+  const quotaReason = String(record?.quotaReason ?? '').trim().toLowerCase();
+  const status =
+    typeof args.status === 'number'
+      ? args.status
+      : (typeof record?.status === 'number' ? (record.status as number) : args.retryError.statusCode);
+  return (
+    status === 429
+    && (
+      code === 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED'
+      || upstreamCode === 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED'
+      || rateLimitKind === 'daily_limit'
+      || quotaScope === 'weekly'
+      || quotaReason === 'windsurf_weekly_exhausted'
+    )
+  );
+}
+
 type RuntimeManager = {
   resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
 };
@@ -66,42 +96,100 @@ export async function resolveProviderRetryExecutionPlan(args: {
     maxContextOverflowRetries: args.maxContextOverflowRetries
   });
   args.recordAttempt({ error: true });
-  if (!eligibilityPlan.shouldRetry) {
-    return {
-      shouldRetry: false,
-      blockingRecoverable: eligibilityPlan.blockingRecoverable,
-      excludedCurrentProvider: false,
-      holdOnLastAvailable429: false,
-      retryBackoffMs: 0,
-      recoverableBackoffMs: 0
-    };
-  }
+
   const exclusionPlan = hostContractFailure
     ? {
-      excludedCurrentProvider: false
-    }
+        excludedCurrentProvider: false
+      }
     : args.forceExcludeCurrentProviderOnRetry
       ? {
-        excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
-          providerKey: args.providerKey,
-          excludedProviderKeys: args.excludedProviderKeys
-        })
-      }
+          excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
+            providerKey: args.providerKey,
+            excludedProviderKeys: args.excludedProviderKeys
+          })
+        }
       : resolveProviderRetryExclusionPlan({
-        providerKey: args.providerKey,
-        status: args.status,
-        error: args.error,
-        classification,
-        promptTooLong: Boolean(args.promptTooLong),
-        routePool: args.routePool,
-        excludedProviderKeys: args.excludedProviderKeys
-      });
+          providerKey: args.providerKey,
+          status: args.status,
+          error: args.error,
+          classification,
+          promptTooLong: Boolean(args.promptTooLong),
+          routePool: args.routePool,
+          excludedProviderKeys: args.excludedProviderKeys
+        });
+
   const holdOnLastAvailable429 = isLastAvailableProvider429({
     providerKey: args.providerKey,
     routePool: args.routePool,
     excludedProviderKeys: args.excludedProviderKeys,
     retryError: args.retryError
   });
+
+  const terminalQuotaReroute =
+    !eligibilityPlan.shouldRetry
+    && exclusionPlan.excludedCurrentProvider
+    && !holdOnLastAvailable429
+    && hasAlternativeRouteCandidate({
+      providerKey: args.providerKey,
+      routePool: args.routePool,
+      excludedProviderKeys: args.excludedProviderKeys
+    })
+    && isTerminalQuotaRerouteCandidate({
+      error: args.error,
+      retryError: args.retryError,
+      status: args.status
+    });
+
+  if (!eligibilityPlan.shouldRetry && !terminalQuotaReroute) {
+    const keepTerminalExclusion =
+      exclusionPlan.excludedCurrentProvider
+      && (args.status === 429 || args.forceExcludeCurrentProviderOnRetry === true);
+    return {
+      shouldRetry: false,
+      blockingRecoverable: eligibilityPlan.blockingRecoverable,
+      excludedCurrentProvider: keepTerminalExclusion,
+      holdOnLastAvailable429,
+      retryBackoffMs: 0,
+      recoverableBackoffMs: 0
+    };
+  }
+
+  if (terminalQuotaReroute) {
+    const retryBackoffPlan = await resolveProviderRetryBackoffPlan({
+      error: args.error,
+      retryError: args.retryError,
+      providerKey: args.providerKey,
+      runtimeKey: args.runtimeKey,
+      stage: args.stage,
+      attempt: args.attempt,
+      forceProviderScopedBackoff: true,
+      forceAttemptScopedBackoff: false,
+      abortSignal: args.abortSignal,
+      logNonBlockingError: args.logNonBlockingError
+    });
+    const retrySwitchPlan = buildProviderRetrySwitchPlan({
+      runtimeKey: args.runtimeKey,
+      routePool: args.routePool,
+      runtimeManager: args.runtimeManager,
+      excludedProviderKeys: args.excludedProviderKeys,
+      excludedCurrentProvider: true,
+      promptTooLong: args.promptTooLong,
+      error: args.error,
+      retryError: args.retryError,
+      backoffScope: retryBackoffPlan.backoffScope
+    });
+    return {
+      shouldRetry: true,
+      blockingRecoverable: false,
+      excludedCurrentProvider: true,
+      holdOnLastAvailable429,
+      retryBackoffMs: retryBackoffPlan.retryBackoffMs,
+      recoverableBackoffMs: retryBackoffPlan.recoverableBackoffMs,
+      backoffScope: retryBackoffPlan.backoffScope,
+      retrySwitchPlan
+    };
+  }
+
   if (
     classification === 'unrecoverable'
     && !exclusionPlan.excludedCurrentProvider
@@ -116,6 +204,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       recoverableBackoffMs: 0
     };
   }
+
   const retryBackoffPlan = await resolveProviderRetryBackoffPlan({
     error: args.error,
     retryError: args.retryError,
@@ -142,11 +231,16 @@ export async function resolveProviderRetryExecutionPlan(args: {
   if (
     retrySwitchPlan.switchAction === 'retry_same_provider'
     && !exclusionPlan.excludedCurrentProvider
+    && args.status !== 429
     && hasAlternativeRouteCandidate({
       providerKey: args.providerKey,
       routePool: args.routePool,
       excludedProviderKeys: args.excludedProviderKeys
     })
+    && (
+      (typeof args.providerKey === 'string' && args.providerKey.startsWith('windsurf.'))
+      || (typeof args.runtimeKey === 'string' && args.runtimeKey.startsWith('windsurf.'))
+    )
   ) {
     applyRetryExclusionForCurrentProvider({
       providerKey: args.providerKey,

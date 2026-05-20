@@ -178,15 +178,15 @@ export function resolveSessionStormBackoffBaseMs(): number {
   if (Number.isFinite(parsed) && parsed > 0) {
     return parsed;
   }
-  return process.env.NODE_ENV === 'test' ? 200 : 1_000;
+  return 1_000;
 }
 
 export function resolveSessionStormBackoffBaseMsForError(error?: unknown): number {
   if (isClientToolArgsInvalidStorm(error)) {
-    return process.env.NODE_ENV === 'test' ? 200 : 1_000;
+    return resolveSessionStormBackoffBaseMs();
   }
   if (isDeterministicMalformedResponseStorm(error)) {
-    return process.env.NODE_ENV === 'test' ? 200 : 1_000;
+    return resolveSessionStormBackoffBaseMs();
   }
   return resolveSessionStormBackoffBaseMs();
 }
@@ -204,23 +204,25 @@ export function resolveSessionStormBackoffMaxMs(): number {
 }
 
 export function resolveSessionStormHardBlockMsForError(error?: unknown): number {
-  void error;
+  if (isClientToolArgsInvalidStorm(error)) {
+    return resolveSessionStormBackoffBaseMs();
+  }
   return 0;
 }
 
 export function resolveSessionStormBackoffMaxMsForError(error?: unknown): number {
   if (isClientToolArgsInvalidStorm(error)) {
-    return resolveSessionStormHardBlockMsForError(error) || (process.env.NODE_ENV === 'test' ? 1_000 : 5_000);
+    return resolveSessionStormHardBlockMsForError(error) || 1_000;
   }
   if (isDeterministicMalformedResponseStorm(error)) {
-    return process.env.NODE_ENV === 'test' ? 1_000 : 5_000;
+    return 5_000;
   }
   return resolveSessionStormBackoffMaxMs();
 }
 
 function pruneExpiredSessionStormBackoff(now = Date.now()): void {
   for (const [existingKey, state] of sessionStormBackoffState.entries()) {
-    if (now - state.updatedAtMs >= SESSION_STORM_BACKOFF_TTL_MS || state.nextAllowedAtMs <= now) {
+    if (now - state.updatedAtMs >= SESSION_STORM_BACKOFF_TTL_MS || state.nextAllowedAtMs < now) {
       sessionStormBackoffState.delete(existingKey);
     }
   }
@@ -268,8 +270,11 @@ export function peekSessionStormBackoffWaitMs(key: string): number {
     return 0;
   }
   const now = Date.now();
-  if (now - state.updatedAtMs >= SESSION_STORM_BACKOFF_TTL_MS || state.nextAllowedAtMs <= now) {
+  if (now - state.updatedAtMs >= SESSION_STORM_BACKOFF_TTL_MS) {
     sessionStormBackoffState.delete(key);
+    return 0;
+  }
+  if (state.nextAllowedAtMs <= now) {
     return 0;
   }
   return Math.max(0, state.nextAllowedAtMs - now);

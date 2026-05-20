@@ -544,7 +544,6 @@ export class HubRequestExecutor implements RequestExecutor {
           throw pipelineError;
         }
         blockingSingletonRecoverablePoolCooldown = false;
-        blockingRecoverableRouteHoldState = null;
         const resolvedPipelineAttempt = resolveRequestExecutorPipelineAttempt({
           inputRequestId: input.requestId,
           providerRequestId,
@@ -557,6 +556,7 @@ export class HubRequestExecutor implements RequestExecutor {
           initialRoutePool,
           excludedProviderKeys,
           lastError,
+          blockingRecoverableRouteHoldState,
           throwIfClientAbortSignalAborted,
           logStage: (stage, requestId, details) => logStage(stage, requestId, details),
           extractRetryErrorSnapshot,
@@ -567,6 +567,7 @@ export class HubRequestExecutor implements RequestExecutor {
           initialRoutePool = resolvedPipelineAttempt.initialRoutePool;
           continue;
         }
+        blockingRecoverableRouteHoldState = null;
         initialRoutePool = resolvedPipelineAttempt.initialRoutePool;
         const {
           mergedMetadata,

@@ -4,6 +4,7 @@ import { resolveExcludedProviderReselectionPlan } from './request-executor-resel
 import { applyRetryExclusionForCurrentProvider, hasAlternativeRouteCandidate } from './request-executor-retry-decision.js';
 import { buildProviderTransportBackoffKey, peekProviderTransportBackoffWaitMs } from './request-executor-retry-state.js';
 import type { RetryErrorSnapshot } from './request-executor-error-types.js';
+import type { BlockingRecoverableRouteHoldState } from './request-executor-error-types.js';
 
 type PipelineAttemptTarget = HubPipelineResult['target'];
 
@@ -34,6 +35,7 @@ export function resolveRequestExecutorPipelineAttempt(args: {
   initialRoutePool: string[] | null;
   excludedProviderKeys: Set<string>;
   lastError: unknown;
+  blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
   throwIfClientAbortSignalAborted: (abortSignal: AbortSignal | undefined) => void;
   logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => void;
   extractRetryErrorSnapshot: (error: unknown) => RetryErrorSnapshot;
@@ -78,13 +80,19 @@ export function resolveRequestExecutorPipelineAttempt(args: {
     providerTransportBackoffKey
       ? peekProviderTransportBackoffWaitMs(providerTransportBackoffKey)
       : 0;
+  const preserveSameProviderRetry =
+    args.blockingRecoverableRouteHoldState?.preserveSameProviderRetry === true
+    && (
+      (args.blockingRecoverableRouteHoldState.providerKey && args.blockingRecoverableRouteHoldState.providerKey === target?.providerKey)
+      || (args.blockingRecoverableRouteHoldState.runtimeKey && args.blockingRecoverableRouteHoldState.runtimeKey === targetRuntimeKey)
+    );
   if (pendingTransportBackoffMs > 0 && target?.providerKey) {
     const hasAlternativeCandidate = hasAlternativeRouteCandidate({
       providerKey: target.providerKey,
       routePool: routePoolForAttempt,
       excludedProviderKeys: args.excludedProviderKeys
     });
-    if (hasAlternativeCandidate) {
+    if (hasAlternativeCandidate && !preserveSameProviderRetry) {
       applyRetryExclusionForCurrentProvider({
         providerKey: target.providerKey,
         excludedProviderKeys: args.excludedProviderKeys

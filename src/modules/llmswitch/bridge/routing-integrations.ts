@@ -9,6 +9,14 @@ import { fileURLToPath } from 'url';
 import { importCoreDist, resolveImplForSubpath } from './module-loader.js';
 import type { AnyRecord, LlmsImpl } from './module-loader.js';
 
+function getImportMetaUrlUnsafe(): string | undefined {
+  try {
+    return Function('return import.meta.url')() as string | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 type VirtualRouterBootstrapModule = {
   bootstrapVirtualRouterConfig?: (input: AnyRecord) => AnyRecord;
 };
@@ -61,10 +69,14 @@ export async function getHubPipelineCtorForImpl(impl: LlmsImpl): Promise<HubPipe
 export function resolveBaseDir(): string {
   const env = String(process.env.ROUTECODEX_BASEDIR || process.env.RCC_BASEDIR || '').trim();
   if (env) return env;
-  try {
-    const __filename = fileURLToPath(import.meta.url);
-    return path.resolve(path.dirname(__filename), '../../../..');
-  } catch {
-    return process.cwd();
+  const metaUrl = getImportMetaUrlUnsafe();
+  if (typeof metaUrl === 'string' && metaUrl.length > 0) {
+    try {
+      const __filename = fileURLToPath(metaUrl);
+      return path.resolve(path.dirname(__filename), '../../../..');
+    } catch {
+      // fall through
+    }
   }
+  return process.cwd();
 }

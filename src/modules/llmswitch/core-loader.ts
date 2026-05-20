@@ -23,11 +23,22 @@ const corePackageDirByImpl: Record<LlmsImpl, string | null> = {
   engine: null
 };
 
-function resolveCoreLoaderModulePath(): string {
+function getImportMetaUrlUnsafe(): string | undefined {
   try {
-    return new URL(import.meta.url).pathname;
+    return Function('return import.meta.url')() as string | undefined;
   } catch {
-    // continue to stack / cwd fallback
+    return undefined;
+  }
+}
+
+function resolveCoreLoaderModulePath(): string {
+  const metaUrl = getImportMetaUrlUnsafe();
+  if (typeof metaUrl === 'string' && metaUrl.length > 0) {
+    try {
+      return new URL(metaUrl).pathname;
+    } catch {
+      // continue to stack / cwd fallback
+    }
   }
   if (typeof __filename === 'string' && __filename.length > 0) {
     return __filename;
