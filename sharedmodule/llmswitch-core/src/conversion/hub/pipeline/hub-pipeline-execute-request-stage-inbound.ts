@@ -12,8 +12,11 @@ import { isCompactionRequest } from "../../compaction-detect.js";
 import { resolveApplyPatchToolModeFromToolsWithNative, findMappableSemanticsKeysWithNative, prepareRuntimeMetadataForServertoolsWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
 import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 import { requireJsonObjectPayload } from "./hub-pipeline-shared-guards.js";
-import { resolveActiveProcessModeAndAudit, sanitizeStandardizedRequestMessages } from "./hub-pipeline-chat-process-shared.js";
-import { readRuntimeMetadata } from "../../runtime-metadata.js";
+import {
+  propagateApplyPatchToolModeToRequestMetadata,
+  resolveActiveProcessModeAndAudit,
+  sanitizeStandardizedRequestMessages,
+} from "./hub-pipeline-chat-process-request-utils.js";
 import { runReqInboundStage1FormatParse } from "./stages/req_inbound/req_inbound_stage1_format_parse/index.js";
 import { runReqInboundStage2SemanticMap } from "./stages/req_inbound/req_inbound_stage2_semantic_map/index.js";
 import type { JsonValue } from "../types/json.js";
@@ -30,24 +33,6 @@ import { syncResponsesContextFromCanonicalMessagesWithNative } from "../../../ro
 import { containsImageAttachment } from "../process/chat-process-media.js";
 import { decideHeavyInputFastpath } from "../../../router/virtual-router/engine-selection/native-router-hotpath.js";
 import { markHeavyInputFastpath } from "./hub-pipeline-heavy-input-fastpath.js";
-
-
-function propagateApplyPatchToolModeToRequestMetadata(
-  normalizedMetadata: Record<string, unknown> | undefined,
-  standardizedRequest: StandardizedRequest,
-): void {
-  try {
-    const rt = readRuntimeMetadata((normalizedMetadata ?? {}) as Record<string, unknown>);
-    const mode = String((rt as any)?.applyPatchToolMode || "").trim().toLowerCase();
-    if (mode === "schema") {
-      (standardizedRequest.metadata as Record<string, unknown>).applyPatchToolMode = mode;
-    }
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? "unknown");
-    console.warn(`[hub-pipeline] propagateApplyPatchToolModeToRequestMetadata failed (non-blocking): ${reason}`);
-  }
-}
-
 
 function createHubSnapshotStageRecorder(args: {
   normalized: NormalizedRequest;

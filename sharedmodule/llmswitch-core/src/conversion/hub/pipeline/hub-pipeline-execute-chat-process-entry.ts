@@ -3,18 +3,12 @@ import type { ProcessedRequest, StandardizedRequest } from "../types/standardize
 import type { VirtualRouterEngine } from "../../../router/virtual-router/engine.js";
 import type { HubPipelineConfig, HubPipelineNodeResult, HubPipelineResult, NormalizedRequest } from "./hub-pipeline.js";
 import type { StageRecorder } from "../format-adapters/index.js";
-import type { AdapterContext } from "../types/chat-envelope.js";
-import { shouldRecordSnapshots } from "../../snapshot-utils.js";
-import { createSnapshotRecorder } from "../snapshot-recorder.js";
 import { executeRouteAndBuildOutbound } from "./hub-pipeline-route-and-outbound.js";
 import { buildAdapterContextFromNormalized } from './hub-pipeline-adapter-context.js';
-import { readRuntimeMetadata } from "../../runtime-metadata.js";
 import {
   buildReqInboundSkippedNodeWithNative,
   coerceStandardizedRequestFromPayloadWithNative as __nativeNormalizeStdReq,
-  findMappableSemanticsKeysWithNative,
   liftResponsesResumeIntoSemanticsWithNative,
-  prepareRuntimeMetadataForServertoolsWithNative,
 } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
 import { requireJsonObjectPayload, requireRequestStageHooks } from "./hub-pipeline-shared-guards.js";
 import { finalizeWorkingRequestForOutbound } from "./hub-pipeline-execute-request-stage-inbound.js";
@@ -30,50 +24,19 @@ import {
   resolveActiveProcessModeAndAudit,
   sanitizeStandardizedRequestMessages,
 } from "./hub-pipeline-chat-process-shared.js";
-
-
-
-function propagateApplyPatchToolModeToRequestMetadata(
-  normalizedMetadata: Record<string, unknown> | undefined,
-  standardizedRequest: StandardizedRequest,
-): void {
-  try {
-    const rt = readRuntimeMetadata((normalizedMetadata ?? {}) as Record<string, unknown>);
-    const mode = String((rt as any)?.applyPatchToolMode || "").trim().toLowerCase();
-    if (mode === "schema") {
-      (standardizedRequest.metadata as Record<string, unknown>).applyPatchToolMode = mode;
-    }
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? "unknown");
-    console.warn(`[hub-pipeline] propagateApplyPatchToolModeToRequestMetadata failed (non-blocking): ${reason}`);
-  }
-}
+import {
+  assertNoMappableSemanticsInMetadata,
+  createChatProcessSnapshotRecorder,
+  prepareChatProcessRuntimeMetadata,
+} from "./hub-pipeline-chat-process-entry-blocks.js";
+import { propagateApplyPatchToolModeToRequestMetadata } from "./hub-pipeline-request-metadata-blocks.js";
 
 function mergeRuntimeMetadataPatch(base: Record<string, unknown>, patch: Record<string, unknown>): void { Object.assign(base, patch); }
-
-function createHubSnapshotStageRecorder(args: {
-  normalized: NormalizedRequest;
-  adapterContext: AdapterContext;
-  warningLabel: string;
-}): StageRecorder | undefined {
-  const { normalized, adapterContext, warningLabel } = args;
-  if (normalized.externalStageRecorder) return normalized.externalStageRecorder;
-  if (normalized.disableSnapshots === true) return undefined;
-  if (!shouldRecordSnapshots()) return undefined;
-  const effectiveEndpoint = normalized.entryEndpoint || adapterContext.entryEndpoint || "/v1/chat/completions";
-  try {
-    return createSnapshotRecorder(adapterContext, effectiveEndpoint);
-  } catch (snapshotError) {
-    console.warn(`[hub-pipeline] ${warningLabel} failed (non-blocking): ${snapshotError instanceof Error ? snapshotError.message : String(snapshotError)}`);
-    return undefined;
-  }
-}
 
 function createChatProcessEntryNodeResults(): HubPipelineNodeResult[] { return [buildReqInboundSkippedNodeWithNative({ reason: "stage=outbound" }) as unknown as HubPipelineNodeResult]; }
 
 function prepareChatProcessEntryExecutionContext(args: { normalized: NormalizedRequest; config: HubPipelineConfig; standardizedRequestBase: StandardizedRequest; rawPayload: Record<string, unknown>; }): { metaBase: Record<string, unknown>; standardizedRequest: StandardizedRequest; activeProcessMode: "chat" | "passthrough"; passthroughAudit?: Record<string, unknown>; stageRecorder: ReturnType<typeof createHubSnapshotStageRecorder>; } {
-  const metaBase = prepareRuntimeMetadataForServertoolsWithNative({ metadata: args.normalized.metadata, webSearchConfig: args.config.virtualRouter?.webSearch as any, execCommandGuard: args.config.virtualRouter?.execCommandGuard as any, clockConfig: args.config.virtualRouter?.clock as any });
-  args.normalized.metadata = metaBase;
+  const metaBase = prepareChatProcessRuntimeMetadata({ normalized: args.normalized, config: args.config });
   let standardizedRequest: StandardizedRequest = args.standardizedRequestBase;
   const { activeProcessMode, passthroughAudit } = resolveActiveProcessModeAndAudit({ normalized: args.normalized, requestMessages: standardizedRequest.messages, rawPayload: args.rawPayload });
   standardizedRequest = sanitizeStandardizedRequestMessages(standardizedRequest);
@@ -87,7 +50,7 @@ function prepareChatProcessEntryExecutionContext(args: { normalized: NormalizedR
   }
   propagateApplyPatchToolModeToRequestMetadata(metaBase, standardizedRequest);
   const adapterContext = buildAdapterContextFromNormalized(args.normalized);
-  const stageRecorder = createHubSnapshotStageRecorder({ normalized: args.normalized, adapterContext, warningLabel: "Snapshot recorder creation" });
+  const stageRecorder = createChatProcessSnapshotRecorder({ normalized: args.normalized, adapterContext, warningLabel: "Snapshot recorder creation" });
   return { metaBase, standardizedRequest, activeProcessMode, passthroughAudit, stageRecorder };
 }
 
@@ -121,7 +84,9 @@ export async function executeChatProcessEntryPipeline(args: { normalized: Normal
   const nodeResults: HubPipelineNodeResult[] = createChatProcessEntryNodeResults();
   const { rawPayloadInput, rawPayload, standardizedRequestBase } = normalizeChatProcessEntryPayload(normalized);
   const { metaBase, standardizedRequest, activeProcessMode, passthroughAudit, stageRecorder } = prepareChatProcessEntryExecutionContext({ normalized, config, standardizedRequestBase, rawPayload });
-  if (activeProcessMode !== "passthrough") { const present = findMappableSemanticsKeysWithNative(metaBase); if (present.length) throw new Error(`[HubPipeline][semantic_gate] Mappable semantics must not be stored in metadata (chat_process.request.entry): ${present.join(", ")}`); }
+  if (activeProcessMode !== "passthrough") {
+    assertNoMappableSemanticsInMetadata(metaBase);
+  }
   const processedRequest = await executeChatProcessGovernancePhase({ normalized, standardizedRequest, rawPayload, metadata: metaBase, stageRecorder, activeProcessMode, passthroughAudit, nodeResults });
   const { workingRequest, hasImageAttachment, serverToolRequired } = finalizeWorkingRequestForOutbound({ request: (processedRequest ?? standardizedRequest) as unknown as Record<string, unknown>, normalized });
   const outbound = await executeRouteAndBuildOutbound({ normalized, hooks, routerEngine, config, workingRequest, nodeResults, inboundRecorder: stageRecorder, activeProcessMode, serverToolRequired, hasImageAttachment, passthroughAudit, rawRequest: rawPayloadInput, contextSnapshot: undefined, semanticMapper: hooks.createSemanticMapper(), effectivePolicy: resolveChatProcessEffectivePolicy(normalized, config), shadowCompareBaselineMode: undefined, routeSelectTiming: { enabled: false } });
