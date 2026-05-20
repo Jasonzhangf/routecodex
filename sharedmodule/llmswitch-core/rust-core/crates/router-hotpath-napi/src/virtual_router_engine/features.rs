@@ -429,7 +429,32 @@ fn estimate_request_tokens(request: &Value, latest_user_text: &str) -> i64 {
     }
     let message_estimate = (total_chars as f64 / 4.0).ceil() as i64;
     let responses_estimate = estimate_responses_context_tokens(request);
-    message_estimate.max(responses_estimate).max(0)
+    // Some tool-heavy turns keep most payload in structured fields
+    // (tool_calls arguments, function_call_output, rich input blocks),
+    // while message-text extraction only sees plain text and underestimates context.
+    // Use a structured estimation over core request carriers as a guardrail.
+    let mut structured_chars: usize = 0;
+    if let Some(messages) = request.get("messages") {
+        structured_chars += estimate_structured_chars(messages);
+    }
+    if let Some(input) = request.get("input") {
+        structured_chars += estimate_structured_chars(input);
+    }
+    if let Some(tools) = request.get("tools") {
+        structured_chars += estimate_structured_chars(tools);
+    }
+    if let Some(semantics) = request.get("semantics") {
+        structured_chars += estimate_structured_chars(semantics);
+    }
+    let structured_estimate = if structured_chars == 0 {
+        0
+    } else {
+        (structured_chars as f64 / 3.2).ceil() as i64
+    };
+    message_estimate
+        .max(responses_estimate)
+        .max(structured_estimate)
+        .max(0)
 }
 
 fn estimate_responses_context_tokens(request: &Value) -> i64 {
@@ -532,6 +557,41 @@ mod tests {
         assert!(
             features.estimated_tokens >= 180_000,
             "expected large payload to exceed longcontext threshold, got {}",
+            features.estimated_tokens
+        );
+    }
+
+    #[test]
+    fn estimate_tokens_accounts_for_structured_tool_payload_without_metadata_hint() {
+        let big_args = "z".repeat(700_000);
+        let request = json!({
+            "model": "glm-5",
+            "messages": [
+                { "role": "user", "content": "run tool" }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "description": "tool",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "cmd": {
+                                    "type": "string",
+                                    "description": big_args
+                                }
+                            }
+                        }
+                    }
+                }
+            ]
+        });
+        let features = build_routing_features(&request, &json!({}));
+        assert!(
+            features.estimated_tokens >= 180_000,
+            "expected structured payload to exceed longcontext threshold, got {}",
             features.estimated_tokens
         );
     }
