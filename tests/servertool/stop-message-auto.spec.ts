@@ -1588,6 +1588,18 @@ describe('stop_message_auto servertool', () => {
 
   test('stop_message followup pins exact routed provider and model from adapter context', async () => {
     const sessionId = 'stopmessage-spec-session-pin';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 2,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
     const capturedChatRequest = {
       model: 'minimax',
       messages: [

@@ -96,10 +96,13 @@ export function resolveFollowupExecutionMode(args: {
   if (decision.outcomeMode === 'skip' || decision.noFollowup) {
     return 'skip';
   }
-  // stopless followup must continue via normal request re-enter path,
-  // not tmux/client inject.
+  // goal-managed stopless continue keeps normal re-enter path.
   if (injectSource === 'servertool.stopless_goal_continue') {
     return 'reenter';
+  }
+  // plain stop_message auto-continue is tmux/client inject only.
+  if (args.flowId === 'stop_message_flow') {
+    return 'client_inject_only';
   }
   if (
     args.readClientInjectOnly(args.metadata) ||
@@ -160,7 +163,7 @@ export function applyClientInjectOnlyMetadata(args: {
   normalizeClientInjectText: (value: unknown, fallback?: string) => string;
 }): { forced: boolean } {
   const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
-  if (!decision.clientInjectOnly || args.readClientInjectOnly(args.metadata)) {
+  if ((args.flowId !== 'stop_message_flow' && !decision.clientInjectOnly) || args.readClientInjectOnly(args.metadata)) {
     return { forced: false };
   }
   const record = args.metadata as Record<string, unknown>;

@@ -67,6 +67,37 @@ function buildAdapterContext(sessionId: string): AdapterContext {
   } as any;
 }
 
+function buildGoalOnlyStickyState(status: 'active' | 'completed'): RoutingInstructionState {
+  return {
+    stoplessGoalState: {
+      status,
+      objective: `${status}-goal`,
+      createdAt: 100,
+      updatedAt: 100
+    },
+    forcedTarget: undefined,
+    stickyTarget: undefined,
+    preferTarget: undefined,
+    allowedProviders: new Set<string>(),
+    disabledProviders: new Set<string>(),
+    disabledKeys: new Map<string, Set<string | number>>(),
+    disabledModels: new Map<string, Set<string>>(),
+    stopMessageSource: undefined,
+    stopMessageText: undefined,
+    stopMessageMaxRepeats: undefined,
+    stopMessageUsed: undefined,
+    stopMessageUpdatedAt: undefined,
+    stopMessageLastUsedAt: undefined,
+    stopMessageStageMode: undefined,
+    stopMessageAiMode: undefined,
+    stopMessageAiSeedPrompt: undefined,
+    stopMessageAiHistory: undefined,
+    preCommandSource: undefined,
+    preCommandScriptPath: undefined,
+    preCommandUpdatedAt: undefined
+  };
+}
+
 describe('stop_message_auto goal-active/default-repeat contract', () => {
   beforeEach(() => {
     fs.rmSync(SESSION_DIR, { recursive: true, force: true });
@@ -119,14 +150,76 @@ describe('stop_message_auto goal-active/default-repeat contract', () => {
     expect(adapterContext.stoplessGoalState).toMatchObject({ status: 'active' });
   });
 
-  test('非 /goal active 默认只续两次，第三次停并归零', async () => {
-    const sessionId = 'default-repeat-2';
+  test('非 /goal 场景默认不自动续', async () => {
+    const sessionId = 'non-goal-default-skip';
 
-    const first = await runServerSideToolEngine({
+    const result = await runServerSideToolEngine({
       chatResponse: buildStopChatResponse(),
       adapterContext: buildAdapterContext(sessionId),
       entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-default-repeat-1',
+      requestId: 'req-non-goal-default-skip',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
+    expect(readState(sessionId)).toBeUndefined();
+  });
+
+  test('非 /goal 场景即使 sticky 里有 completed goal 也不自动续', async () => {
+    const sessionId = 'non-goal-sticky-completed-skip';
+    writeRoutingStateForSession(sessionId, buildGoalOnlyStickyState('completed'));
+
+    const result = await runServerSideToolEngine({
+      chatResponse: buildStopChatResponse(),
+      adapterContext: buildAdapterContext(sessionId),
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-non-goal-sticky-completed-skip',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
+    expect(readState(sessionId)?.stoplessGoalState).toMatchObject({ status: 'completed' });
+    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
+  });
+
+  test('非 /goal 场景即使 sticky 里有 active goal 也不自动续', async () => {
+    const sessionId = 'non-goal-sticky-active-skip';
+    writeRoutingStateForSession(sessionId, buildGoalOnlyStickyState('active'));
+
+    const result = await runServerSideToolEngine({
+      chatResponse: buildStopChatResponse(),
+      adapterContext: buildAdapterContext(sessionId),
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-non-goal-sticky-active-skip',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
+    expect(readState(sessionId)?.stoplessGoalState).toMatchObject({ status: 'active' });
+    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
+  });
+
+  test('/goal non-active 默认自动续，并按次数归零', async () => {
+    const sessionId = 'goal-completed-default-repeat-2';
+    const now = Date.now();
+    const buildNonActiveGoalContext = () => ({
+      ...buildAdapterContext(sessionId),
+      stoplessGoalState: {
+        status: 'completed',
+        objective: 'finished goal',
+        createdAt: now,
+        updatedAt: now
+      }
+    }) as any;
+
+    const first = await runServerSideToolEngine({
+      chatResponse: buildStopChatResponse(),
+      adapterContext: buildNonActiveGoalContext(),
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-goal-completed-repeat-1',
       providerProtocol: 'openai-chat'
     });
     expect(first.mode).toBe('tool_flow');
@@ -135,24 +228,27 @@ describe('stop_message_auto goal-active/default-repeat contract', () => {
 
     const second = await runServerSideToolEngine({
       chatResponse: buildStopChatResponse(),
-      adapterContext: buildAdapterContext(sessionId),
+      adapterContext: buildNonActiveGoalContext(),
       entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-default-repeat-2',
+      requestId: 'req-goal-completed-repeat-2',
       providerProtocol: 'openai-chat'
     });
     expect(second.mode).toBe('tool_flow');
     expect(second.execution?.flowId).toBe('stop_message_flow');
-    expect(readState(sessionId)?.stopMessageUsed).toBe(2);
+    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
+    expect(readState(sessionId)?.stopMessageText).toBeUndefined();
+    expect(readState(sessionId)?.stopMessageMaxRepeats).toBeUndefined();
 
     const third = await runServerSideToolEngine({
       chatResponse: buildStopChatResponse(),
-      adapterContext: buildAdapterContext(sessionId),
+      adapterContext: buildNonActiveGoalContext(),
       entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-default-repeat-3',
+      requestId: 'req-goal-completed-repeat-3',
       providerProtocol: 'openai-chat'
     });
     expect(third.mode).toBe('passthrough');
     expect(third.execution).toBeUndefined();
-    expect(readState(sessionId)?.stopMessageUsed).toBe(0);
+    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
+    expect(readState(sessionId)?.stopMessageSource).toBe('default_exhausted');
   });
 });

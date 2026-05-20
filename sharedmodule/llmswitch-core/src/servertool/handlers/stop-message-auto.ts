@@ -20,6 +20,7 @@ import { sanitizeFollowupText } from './followup-sanitize.js';
 import {
   getCapturedRequest,
   hasCompactionFlag,
+  persistStopMessageState,
   readServerToolFollowupFlowId,
   resolveClientConnectionState,
   resolveDefaultStopMessageSnapshot,
@@ -30,7 +31,10 @@ import {
   readRuntimeStopMessageStageMode
 } from './stop-message-auto/runtime-utils.js';
 import { readStoplessGoalState } from './stopless-goal-state.js';
+import { loadRoutingInstructionStateSync } from '../../router/virtual-router/sticky-session-store.js';
 import {
+  applyStopMessageSnapshotToState,
+  clearStopMessageState,
   normalizeStopMessageStageMode,
   resolveStopMessageSnapshot
 } from './stop-message-auto/routing-state.js';
@@ -41,6 +45,163 @@ const STOPMESSAGE_DEBUG = resolveStopMessageDebugEnabled() ?? (process.env.ROUTE
 const STOPMESSAGE_IMPLICIT_GEMINI = false;
 const FLOW_ID = 'stop_message_flow';
 const STOP_MESSAGE_EXECUTION_APPEND = '继续执行';
+
+function isPersistentStickyKey(value: unknown): value is string {
+  return typeof value === 'string' && (
+    value.startsWith('tmux:') || value.startsWith('session:') || value.startsWith('conversation:')
+  );
+}
+
+function collectPersistedStopMessageCandidateKeys(args: {
+  strictSessionScope?: string;
+  fallbackStickyKey?: string;
+  record: {
+    tmuxSessionId?: unknown;
+    clientTmuxSessionId?: unknown;
+    sessionId?: unknown;
+    conversationId?: unknown;
+  };
+}): string[] {
+  const candidateKeys: string[] = [];
+  const push = (value: unknown): void => {
+    if (!isPersistentStickyKey(value)) {
+      return;
+    }
+    if (!candidateKeys.includes(value)) {
+      candidateKeys.push(value);
+    }
+  };
+
+  const hasDirectTmuxSessionId = typeof args.record.tmuxSessionId === 'string' && args.record.tmuxSessionId.trim();
+  const hasDirectClientTmuxSessionId = typeof args.record.clientTmuxSessionId === 'string' && args.record.clientTmuxSessionId.trim();
+  const hasDirectSessionId = typeof args.record.sessionId === 'string' && args.record.sessionId.trim();
+  const hasDirectConversationId = typeof args.record.conversationId === 'string' && args.record.conversationId.trim();
+
+  if (hasDirectTmuxSessionId) {
+    push(`tmux:${String(args.record.tmuxSessionId).trim()}`);
+  }
+  if (hasDirectClientTmuxSessionId) {
+    push(`tmux:${String(args.record.clientTmuxSessionId).trim()}`);
+  }
+  if (hasDirectSessionId) {
+    push(`tmux:${String(args.record.sessionId).trim()}`);
+    push(`session:${String(args.record.sessionId).trim()}`);
+  }
+  if (hasDirectConversationId) {
+    push(`conversation:${String(args.record.conversationId).trim()}`);
+  }
+  if (candidateKeys.length > 0) {
+    push(args.strictSessionScope);
+    push(args.fallbackStickyKey);
+  }
+
+  return candidateKeys;
+}
+
+function loadPersistedStopMessageSnapshot(args: {
+  strictSessionScope?: string;
+  fallbackStickyKey?: string;
+  record: {
+    tmuxSessionId?: unknown;
+    clientTmuxSessionId?: unknown;
+    sessionId?: unknown;
+    conversationId?: unknown;
+  };
+}): ReturnType<typeof resolveStopMessageSnapshot> {
+  const candidateKeys = collectPersistedStopMessageCandidateKeys(args);
+  for (const key of candidateKeys) {
+    const snapshot = resolveStopMessageSnapshot(loadRoutingInstructionStateSync(key));
+    if (snapshot) {
+      return snapshot;
+    }
+  }
+  return null;
+}
+
+function loadPersistedStopMessageTombstone(args: {
+  strictSessionScope?: string;
+  fallbackStickyKey?: string;
+  record: {
+    tmuxSessionId?: unknown;
+    clientTmuxSessionId?: unknown;
+    sessionId?: unknown;
+    conversationId?: unknown;
+  };
+}): {
+  exhaustedDefault: boolean;
+} {
+  const candidateKeys = collectPersistedStopMessageCandidateKeys(args);
+
+  for (const key of candidateKeys) {
+    const state = loadRoutingInstructionStateSync(key);
+    if (!state) {
+      continue;
+    }
+    if (state.stopMessageSource === 'default_exhausted') {
+      return { exhaustedDefault: true };
+    }
+  }
+  return { exhaustedDefault: false };
+}
+
+function persistSnapshotUsage(args: {
+  stickyKey?: string;
+  snapshot: {
+    text: string;
+    maxRepeats: number;
+    source?: string;
+    stageMode?: 'on' | 'off' | 'auto';
+    aiMode?: 'on' | 'off';
+  };
+  used: number;
+  resetLastUsedAt?: boolean;
+}): void {
+  if (!isPersistentStickyKey(args.stickyKey)) {
+    return;
+  }
+  const now = Date.now();
+  const nextState = applyStopMessageSnapshotToState(null, {
+    text: args.snapshot.text,
+    maxRepeats: args.snapshot.maxRepeats,
+    used: args.used,
+    source: args.snapshot.source,
+    stageMode: args.snapshot.stageMode,
+    aiMode: args.snapshot.aiMode ?? 'off',
+    updatedAt: now,
+    ...(args.resetLastUsedAt ? {} : { lastUsedAt: now })
+  });
+  persistStopMessageState(args.stickyKey, nextState);
+}
+
+function clearPersistedStopMessageSnapshot(args: {
+  stickyKey?: string;
+  snapshot: {
+    text: string;
+    maxRepeats: number;
+    source?: string;
+    stageMode?: 'on' | 'off' | 'auto';
+    aiMode?: 'on' | 'off';
+  };
+}): void {
+  if (!isPersistentStickyKey(args.stickyKey)) {
+    return;
+  }
+  const now = Date.now();
+  const nextState = applyStopMessageSnapshotToState(null, {
+    text: args.snapshot.text,
+    maxRepeats: args.snapshot.maxRepeats,
+    used: 0,
+    source: args.snapshot.source,
+    stageMode: args.snapshot.stageMode,
+    aiMode: args.snapshot.aiMode ?? 'off',
+    updatedAt: now
+  });
+  clearStopMessageState(nextState, now);
+  if (args.snapshot.source === 'default') {
+    nextState.stopMessageSource = 'default_exhausted';
+  }
+  persistStopMessageState(args.stickyKey, nextState);
+}
 
 function resolveStopMessageDefaultEnabledLive(): boolean {
   return resolveStopMessageDefaultEnabled() ?? true;
@@ -196,6 +357,57 @@ function readPinnedTargetFromAdapterContext(adapterContext: unknown): {
   };
 }
 
+function isDirectStoplessGoalStateSnapshot(value: unknown): value is {
+  status: string;
+  objective: string;
+  updatedAt: number;
+  createdAt: number;
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.status === 'string' &&
+    typeof record.objective === 'string' &&
+    typeof record.updatedAt === 'number' &&
+    Number.isFinite(record.updatedAt) &&
+    typeof record.createdAt === 'number' &&
+    Number.isFinite(record.createdAt)
+  );
+}
+
+function readRequestScopedGoalState(adapterContext: unknown): {
+  state?: {
+    status: string;
+    objective: string;
+    updatedAt: number;
+    createdAt: number;
+  };
+  explicit: boolean;
+} {
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    return { explicit: false };
+  }
+  const record = adapterContext as Record<string, unknown>;
+  const directState = isDirectStoplessGoalStateSnapshot(record.stoplessGoalState)
+    ? record.stoplessGoalState
+    : undefined;
+  const rt =
+    record.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
+      ? (record.__rt as Record<string, unknown>)
+      : undefined;
+  const source =
+    typeof rt?.stoplessGoalStateSource === 'string'
+      ? rt.stoplessGoalStateSource.trim().toLowerCase()
+      : '';
+  const explicit = Boolean(directState) && source !== 'persisted';
+  return {
+    ...(directState ? { state: directState } : {}),
+    explicit
+  };
+}
+
 const handler: ServerToolHandler = async (
   ctx: ServerToolHandlerContext
 ): Promise<ServerToolHandlerPlan | null> => {
@@ -251,8 +463,25 @@ const handler: ServerToolHandler = async (
 
     const strictSessionScope = resolveStopMessageSessionScope(record, rt);
     const stickyKey = strictSessionScope || resolveStickyKey(record, rt);
+    const persistedStopMessageState = loadPersistedStopMessageSnapshot({
+      strictSessionScope,
+      fallbackStickyKey: stickyKey,
+      record
+    });
+    const persistedStopMessageTombstone = loadPersistedStopMessageTombstone({
+      strictSessionScope,
+      fallbackStickyKey: stickyKey,
+      record
+    });
     const runtimeStopMessageState = resolveRuntimeStopMessageState(rt);
-    let snapshot = resolveStopMessageSnapshot(undefined) ?? runtimeStopMessageState;
+    const requestScopedGoal = readRequestScopedGoalState(ctx.adapterContext);
+    const effectiveGoalState = requestScopedGoal.state;
+    const hasManagedGoal = Boolean(
+      requestScopedGoal.explicit &&
+      effectiveGoalState &&
+      effectiveGoalState.status !== 'idle'
+    );
+    let snapshot = persistedStopMessageState ?? runtimeStopMessageState;
     const stickyMode = normalizeStopMessageStageMode(undefined);
     const runtimeMode = readRuntimeStopMessageStageMode(rt);
     const explicitMode = stickyMode ?? runtimeMode;
@@ -268,7 +497,11 @@ const handler: ServerToolHandler = async (
       const implicit = STOPMESSAGE_IMPLICIT_GEMINI
         ? resolveImplicitGeminiStopMessageSnapshot(ctx, record)
         : null;
-      const defaultSnapshot = resolveStopMessageDefaultEnabledLive()
+      const shouldUseGoalDefault = hasManagedGoal && effectiveGoalState?.status !== 'active';
+      if (shouldUseGoalDefault && persistedStopMessageTombstone.exhaustedDefault) {
+        return markSkip('skip_goal_default_exhausted');
+      }
+      const defaultSnapshot = shouldUseGoalDefault && resolveStopMessageDefaultEnabledLive()
         ? resolveDefaultStopMessageSnapshot(ctx, {
             text: resolveStopMessageDefaultTextLive(),
             maxRepeats: resolveStopMessageDefaultMaxRepeatsLive()
@@ -335,6 +568,16 @@ const handler: ServerToolHandler = async (
     }
 
     if (used >= maxRepeats) {
+      clearPersistedStopMessageSnapshot({
+        stickyKey,
+        snapshot: {
+          text,
+          maxRepeats,
+          source: snapshot.source,
+          stageMode: mode,
+          aiMode: snapshot.aiMode ?? 'off'
+        }
+      });
       return markSkip('skip_reached_max_repeats');
     }
 
@@ -344,8 +587,6 @@ const handler: ServerToolHandler = async (
       return markSkip('skip_not_stop_finish_reason');
     }
 
-    const effectiveGoalState = readStoplessGoalState(ctx.adapterContext).state;
-    const hasManagedGoal = Boolean(effectiveGoalState && effectiveGoalState.status !== 'idle');
     if (hasManagedGoal && effectiveGoalState?.status === 'active') {
       return markSkip('skip_goal_active');
     }
@@ -359,6 +600,30 @@ const handler: ServerToolHandler = async (
 
     const followupText = enforceStopMessageExecutionFollowupText(STOP_MESSAGE_EXECUTION_APPEND);
     const nextUsed = used + 1;
+    if (nextUsed >= maxRepeats) {
+      clearPersistedStopMessageSnapshot({
+        stickyKey,
+        snapshot: {
+          text,
+          maxRepeats,
+          source: snapshot.source,
+          stageMode: mode,
+          aiMode: snapshot.aiMode ?? 'off'
+        }
+      });
+    } else {
+      persistSnapshotUsage({
+        stickyKey,
+        snapshot: {
+          text,
+          maxRepeats,
+          source: snapshot.source,
+          stageMode: mode,
+          aiMode: snapshot.aiMode ?? 'off'
+        },
+        used: nextUsed
+      });
+    }
     updateCompare({ used: nextUsed, decision: 'trigger', reason: 'triggered' });
 
     const connectionState = resolveClientConnectionState(record.clientConnectionState);

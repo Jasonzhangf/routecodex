@@ -4122,3 +4122,8 @@ Next slice:
 - 真源确认：`hub-pipeline-adapter-context-metadata-blocks.ts` 在 `applyTargetAdapterContextFields()` 之后又用 metadata `__rt` 整体覆盖 adapterContext `__rt`，把 target 注入的 `supportsMultimodal=false` 覆盖丢失。
 - 结果：Rust `req_outbound_stage3_compat` 读不到 `adapter_context.rt.supportsMultimodal=false`，因此 forced 非多模态 provider 的 `providerPayload` 仍保留 image，router-direct 即便已改为发送 `providerPayload` 也仍会把图片打进 text-only provider。
 - 唯一正确修复点：仍在 `hub-pipeline-adapter-context-metadata-blocks.ts` 合并 `__rt`，并让 target 派生字段优先于 metadata runtime 载荷；别处补 strip/补判断都会变成第二语义面。
+
+## 2026-05-20 stopless goal gating
+- 唯一修复点仍在 `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`：非 `/goal` 场景不能因为 sticky store 里残留 goal state 而激活 default stopless；只有本请求显式携带的 goal state（directive/direct state）才允许 goal gating。
+- 为区分“本请求显式 goal”与“仅从 sticky 恢复的旧 goal”，`stopless-goal-state.ts` 现在把 `__rt.stoplessGoalStateSource` 标成 `directive|persisted`；stop_message_auto 只认非 persisted 的 request-scoped goal。
+- 回归锁定：`tests/servertool/stop-message-auto.goal-default.spec.ts` 新增两条——非 `/goal` + sticky completed / active goal 都必须 passthrough，不得静默 auto-followup。

@@ -22,7 +22,7 @@ export function evaluateStopMessageLoopGuard(args: {
     typeof args.loopState.stopPairRepeatCount === 'number' && Number.isFinite(args.loopState.stopPairRepeatCount)
       ? Math.max(0, Math.floor(args.loopState.stopPairRepeatCount))
       : 0;
-  if (pairRepeatCount >= args.failThreshold) {
+  if (elapsedMs >= 900_000 || pairRepeatCount >= args.failThreshold) {
     return args.onLoopLimit(elapsedMs, pairRepeatCount);
   }
   if (pairRepeatCount >= args.warnThreshold && !args.loopState.stopPairWarned) {

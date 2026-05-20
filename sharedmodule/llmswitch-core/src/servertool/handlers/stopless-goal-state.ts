@@ -331,6 +331,7 @@ function applyGoalStateToAdapterRecord(args: {
   args.record.__rt = {
     ...rt,
     ...(args.hadDirective ? { stoplessGoalHadDirective: true } : {}),
+    stoplessGoalStateSource: args.hadDirective ? 'directive' : 'persisted',
     ...(args.state?.status ? { stoplessGoalStatus: args.state.status } : {}),
     ...(args.directiveTypes.length > 0 ? { stoplessGoalDirectiveTypes: args.directiveTypes } : {})
   };
