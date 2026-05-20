@@ -5,7 +5,6 @@ import {
   buildServertoolPendingInjectionConfig,
   getDefaultServertoolSkeletonDocument,
   getServertoolToolSpec,
-  listServertoolToolSpecs,
   normalizeServerToolRegistrationSpec
 } from '../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js';
 import '../../sharedmodule/llmswitch-core/src/servertool/handlers/recursive-detection-guard.js';
@@ -28,15 +27,15 @@ describe('servertool skeleton config', () => {
     expect(buildServertoolPendingInjectionConfig()).toEqual({
       messageKinds: ['assistant_tool_calls', 'tool_outputs']
     });
-    expect(buildServertoolFollowupConfig()).toMatchObject({
-      genericInjectionOps: ['append_assistant_message', 'append_tool_messages_from_tool_outputs'],
-      flowPolicy: {
-        profilesByFlowId: {
-          stopless_goal_continue_flow: {
-            stickyProvider: true
-          }
-        }
-      }
+    const followup = buildServertoolFollowupConfig();
+    expect(followup.genericInjectionOps).toEqual([
+      'append_assistant_message',
+      'append_tool_messages_from_tool_outputs'
+    ]);
+    expect(followup.flowPolicy.profilesByFlowId.stop_message_flow).toMatchObject({
+      stickyProvider: true,
+      seedLoopPayload: true,
+      retryEmptyFollowupOnce: true
     });
   });
 
@@ -45,7 +44,7 @@ describe('servertool skeleton config', () => {
       trigger: 'tool_call'
     });
     expect(spec).toMatchObject({
-      name: 'reasoning.stop',
+      name: 'reasoning_stop',
       enabled: true,
       trigger: 'tool_call',
       executionMode: 'guarded',
@@ -68,9 +67,7 @@ describe('servertool skeleton config', () => {
         stripAfterExecute: true
       }
     });
-
-    const toolSpecs = listServertoolToolSpecs();
-    expect(toolSpecs.some((entry) => entry.name === 'reasoning_stop_guard')).toBe(true);
+    expect(getServertoolToolSpec('reasoning_stop')).toBeNull();
   });
 
   test('native auto hook planner respects config primary order', () => {

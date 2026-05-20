@@ -28,8 +28,52 @@ const mockBridgeModule = () => ({
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
 
-describe('provider-response-converter goal active followup HTTP_400 guard', () => {
-  it('stops active goal after repeated irrecoverable provider.followup HTTP_400 failures', async () => {
+function buildBaseOptions(pipelineMetadata: Record<string, unknown>, requestId = 'req_goal_followup'): any {
+  return {
+    entryEndpoint: '/v1/responses',
+    providerProtocol: 'openai-responses',
+    requestId,
+    wantsStream: true,
+    processMode: 'standard',
+    requestSemantics: {
+      __routecodex: {
+        serverToolFollowup: true,
+        serverToolFollowupSource: 'servertool.stop_message_auto',
+      },
+    },
+    originalRequest: {
+      model: 'gpt-5.3-codex',
+      input: '继续执行',
+    },
+    response: {
+      body: {
+        id: 'resp_followup_1',
+        object: 'response',
+        status: 'completed',
+        output: [],
+      },
+    },
+    pipelineMetadata,
+  };
+}
+
+async function loadConverter() {
+  const mod = await import('../../../../../src/server/runtime/http-server/executor/provider-response-converter.js');
+  return mod.convertProviderResponseIfNeeded;
+}
+
+function createDeps() {
+  return {
+    runtimeManager: {
+      resolveRuntimeKey: () => undefined,
+      getHandleByRuntimeKey: () => undefined,
+    },
+    executeNested: async () => ({ body: { ok: true } } as any),
+  };
+}
+
+describe('provider-response-converter goal active stopless guard', () => {
+  it('stops active goal after 5 consecutive followup HTTP_400 failures', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockPersistStoplessGoalStateSnapshot.mockReset();
@@ -54,9 +98,7 @@ describe('provider-response-converter goal active followup HTTP_400 guard', () =
       throw buildFollowup400();
     });
 
-    const { convertProviderResponseIfNeeded } = await import(
-      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
-    );
+    const convertProviderResponseIfNeeded = await loadConverter();
 
     const pipelineMetadata: Record<string, unknown> = {
       sessionId: 'goal-followup-http400',
@@ -68,66 +110,206 @@ describe('provider-response-converter goal active followup HTTP_400 guard', () =
       },
     };
 
-    const baseOptions = {
-      entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses',
-      requestId: 'req_goal_followup_http400',
-      wantsStream: true,
-      processMode: 'standard',
-      requestSemantics: {
-        __routecodex: {
-          serverToolFollowup: true,
-          serverToolFollowupSource: 'servertool.stop_message_auto',
-        },
-      } as any,
-      originalRequest: {
-        model: 'gpt-5.3-codex',
-        input: '继续执行',
-      },
-      response: {
-        body: {
-          id: 'resp_followup_1',
-          object: 'response',
-          status: 'completed',
-          output: [],
-        },
-      } as any,
-      pipelineMetadata,
-    };
+    for (let index = 1; index <= 4; index += 1) {
+      await expect(
+        convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, `req_goal_followup_http400_${index}`), createDeps() as any)
+      ).rejects.toThrow('previous_response_id is only supported on Responses WebSocket v2');
+      expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('active');
+      expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveIrrecoverableErrors).toBe(index);
+    }
 
     await expect(
-      convertProviderResponseIfNeeded(baseOptions as any, {
-        runtimeManager: {
-          resolveRuntimeKey: () => undefined,
-          getHandleByRuntimeKey: () => undefined,
-        },
-        executeNested: async () => ({ body: { ok: true } } as any),
-      })
-    ).rejects.toThrow('previous_response_id is only supported on Responses WebSocket v2');
-
-    expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('active');
-    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveIrrecoverableErrors).toBe(1);
-
-    await expect(
-      convertProviderResponseIfNeeded(
-        {
-          ...baseOptions,
-          requestId: 'req_goal_followup_http400_2',
-          pipelineMetadata,
-        } as any,
-        {
-          runtimeManager: {
-            resolveRuntimeKey: () => undefined,
-            getHandleByRuntimeKey: () => undefined,
-          },
-          executeNested: async () => ({ body: { ok: true } } as any),
-        }
-      )
+      convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_goal_followup_http400_5'), createDeps() as any)
     ).rejects.toThrow('previous_response_id is only supported on Responses WebSocket v2');
 
     expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('stopped');
     expect((pipelineMetadata.stoplessGoalState as any)?.errorClass).toBe('repeated_irrecoverable_error');
-    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveIrrecoverableErrors).toBe(2);
+    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveIrrecoverableErrors).toBe(5);
     expect(mockPersistStoplessGoalStateSnapshot).toHaveBeenCalled();
+  });
+
+  it('counts retryable HTTP_502 followup failures toward the same 5-error stop threshold', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockPersistStoplessGoalStateSnapshot.mockReset();
+
+    const buildFollowup502 = () =>
+      Object.assign(new Error('HTTP 502: {"error":{"message":"Upstream request failed","type":"upstream_error"}}'), {
+        code: 'HTTP_502',
+        status: 502,
+        statusCode: 502,
+        retryable: true,
+        upstreamCode: 'HTTP_502',
+        requestExecutorProviderErrorStage: 'provider.followup',
+      });
+
+    mockConvertProviderResponse.mockImplementation(async () => {
+      throw buildFollowup502();
+    });
+
+    const convertProviderResponseIfNeeded = await loadConverter();
+    const pipelineMetadata: Record<string, unknown> = {
+      sessionId: 'goal-followup-http502',
+      stoplessGoalState: {
+        status: 'active',
+        objective: 'keep going',
+        updatedAt: Date.now(),
+        createdAt: Date.now(),
+      },
+    };
+
+    for (let index = 1; index <= 5; index += 1) {
+      await expect(
+        convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, `req_goal_followup_http502_${index}`), createDeps() as any)
+      ).rejects.toThrow('Upstream request failed');
+    }
+
+    expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('stopped');
+    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveIrrecoverableErrors).toBe(5);
+  });
+
+  it('resets consecutive error count after a successful non-error followup turn', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockPersistStoplessGoalStateSnapshot.mockReset();
+
+    let call = 0;
+    mockConvertProviderResponse.mockImplementation(async () => {
+      call += 1;
+      if (call <= 2) {
+        throw Object.assign(new Error('HTTP 400: bad request'), {
+          code: 'HTTP_400',
+          status: 400,
+          statusCode: 400,
+          retryable: false,
+          upstreamCode: 'HTTP_400',
+          requestExecutorProviderErrorStage: 'provider.followup',
+        });
+      }
+      return {
+        body: {
+          id: 'resp_success_1',
+          object: 'response',
+          status: 'requires_action',
+          output: [{ type: 'function_call', name: 'apply_patch', arguments: '{}', call_id: 'call_1' }],
+        },
+      };
+    });
+
+    const convertProviderResponseIfNeeded = await loadConverter();
+    const pipelineMetadata: Record<string, unknown> = {
+      sessionId: 'goal-followup-reset-errors',
+      stoplessGoalState: {
+        status: 'active',
+        objective: 'keep going',
+        updatedAt: Date.now(),
+        createdAt: Date.now(),
+      },
+    };
+
+    await expect(convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_err_1'), createDeps() as any)).rejects.toThrow('bad request');
+    await expect(convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_err_2'), createDeps() as any)).rejects.toThrow('bad request');
+    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveIrrecoverableErrors).toBe(2);
+
+    const result = await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_reset_success'), createDeps() as any);
+    expect((result as any).body?.status).toBe('requires_action');
+    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveIrrecoverableErrors).toBe(0);
+    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveNoProgress).toBe(0);
+    expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('active');
+  });
+
+  it('stops active goal after 5 consecutive finish_reason=stop responses', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockPersistStoplessGoalStateSnapshot.mockReset();
+
+    mockConvertProviderResponse.mockImplementation(async () => ({
+      body: {
+        id: 'resp_stop_1',
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'done' }],
+          },
+        ],
+      },
+    }));
+
+    const convertProviderResponseIfNeeded = await loadConverter();
+    const pipelineMetadata: Record<string, unknown> = {
+      sessionId: 'goal-followup-stop-streak',
+      stoplessGoalState: {
+        status: 'active',
+        objective: 'keep going',
+        updatedAt: Date.now(),
+        createdAt: Date.now(),
+      },
+    };
+
+    for (let index = 1; index <= 4; index += 1) {
+      const result = await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, `req_stop_${index}`), createDeps() as any);
+      expect((result as any).body?.status).toBe('completed');
+      expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('active');
+      expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveNoProgress).toBe(index);
+    }
+
+    await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_stop_5'), createDeps() as any);
+    expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('stopped');
+    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveNoProgress).toBe(5);
+    expect((pipelineMetadata.stoplessGoalState as any)?.errorClass).toBe('repeated_no_progress_stop');
+  });
+
+  it('resets stop streak when followup yields tool_calls progress', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockPersistStoplessGoalStateSnapshot.mockReset();
+
+    let call = 0;
+    mockConvertProviderResponse.mockImplementation(async () => {
+      call += 1;
+      if (call <= 2 || call >= 4) {
+        return {
+          body: {
+            id: `resp_stop_${call}`,
+            object: 'response',
+            status: 'completed',
+            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] }],
+          },
+        };
+      }
+      return {
+        body: {
+          id: 'resp_tool_1',
+          object: 'response',
+          status: 'requires_action',
+          output: [{ type: 'function_call', name: 'apply_patch', arguments: '{}', call_id: 'call_reset_1' }],
+        },
+      };
+    });
+
+    const convertProviderResponseIfNeeded = await loadConverter();
+    const pipelineMetadata: Record<string, unknown> = {
+      sessionId: 'goal-followup-stop-reset',
+      stoplessGoalState: {
+        status: 'active',
+        objective: 'keep going',
+        updatedAt: Date.now(),
+        createdAt: Date.now(),
+      },
+    };
+
+    await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_stop_reset_1'), createDeps() as any);
+    await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_stop_reset_2'), createDeps() as any);
+    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveNoProgress).toBe(2);
+
+    await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_stop_reset_tool'), createDeps() as any);
+    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveNoProgress).toBe(0);
+
+    await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_stop_reset_3'), createDeps() as any);
+    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveNoProgress).toBe(1);
+    expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('active');
   });
 });

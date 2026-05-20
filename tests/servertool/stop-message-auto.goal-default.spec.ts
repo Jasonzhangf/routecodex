@@ -202,6 +202,24 @@ describe('stop_message_auto goal-active/default-repeat contract', () => {
     expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
   });
 
+  test('/goal active 即使来自 persisted sticky state 也不自动续', async () => {
+    const sessionId = 'goal-active-persisted-skip';
+    writeRoutingStateForSession(sessionId, buildGoalOnlyStickyState('active'));
+
+    const result = await runServerSideToolEngine({
+      chatResponse: buildStopChatResponse(),
+      adapterContext: buildAdapterContext(sessionId),
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-goal-active-persisted-skip',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
+    expect(readState(sessionId)?.stoplessGoalState).toMatchObject({ status: 'active' });
+    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
+  });
+
   test('/goal non-active 默认自动续，并按次数归零', async () => {
     const sessionId = 'goal-completed-default-repeat-2';
     const now = Date.now();

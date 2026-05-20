@@ -4127,3 +4127,24 @@ Next slice:
 - 唯一修复点仍在 `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`：非 `/goal` 场景不能因为 sticky store 里残留 goal state 而激活 default stopless；只有本请求显式携带的 goal state（directive/direct state）才允许 goal gating。
 - 为区分“本请求显式 goal”与“仅从 sticky 恢复的旧 goal”，`stopless-goal-state.ts` 现在把 `__rt.stoplessGoalStateSource` 标成 `directive|persisted`；stop_message_auto 只认非 persisted 的 request-scoped goal。
 - 回归锁定：`tests/servertool/stop-message-auto.goal-default.spec.ts` 新增两条——非 `/goal` + sticky completed / active goal 都必须 passthrough，不得静默 auto-followup。
+
+## 2026-05-20 longcontext priority config alignment
+- 用户要求把 5555 的 longcontext 改回 mode=priority，与 thinking/coding 一致。先改配置真源，不混入其他日志/路由语义改动。
+
+## 2026-05-20 priority strict-availability semantics
+- 用户确认 priority 真语义：只有“当前 provider 不可用”才允许降级到下一个。
+- 明确不触发降级：429、502。
+- 允许触发降级的真条件：inPool=false、cooldownUntil 生效、blacklistUntil 生效、health manager trip/unavailable、显式排除或路由不匹配。
+- 后续 priority 红测与 Rust selection 真源修复必须以该语义为准，不能按错误码做降级。
+
+## 2026-05-20 stopless exit policy update
+- 用户确认 /goal active 下 stopless 需要更强参与：连续错误 5 次退出；连续 finish_reason=stop 5 次退出；中间只要有打断/有效推进则计数归零。
+- 后续必须先补红测，再改 stopless 状态真源；禁止在日志层或 handler 外围做补丁式计数。
+## 2026-05-20 stopless /goal active stronger exit policy
+- 唯一真源修改点确认在 `src/server/runtime/http-server/executor/provider-response-converter.ts`：这里是 followup 响应/错误第一次被 host 统一归因并持有 `stoplessGoalState` 的位置，适合做连续错误/连续 stop 的唯一计数；改 handler/log 层都会变成第二语义面。
+- 已先补红测再改实现：`tests/server/runtime/http-server/executor/provider-response-converter.goal-followup-http400.spec.ts` 覆盖 `/goal active` 下连续 5 次 HTTP_400 停止、连续 5 次 HTTP_502 停止、连续 5 次 finish_reason=stop 停止、以及 success/tool_calls 打断后计数归零。
+- 新语义：连续错误阈值从 2 提升到 5；validation 阈值同步到 5；非错误但 `finish_reason=stop` 视为 no-progress，连续 5 次强制 stopped；中间只要出现非 stop 的有效推进（如 tool_calls / requires_action）就把 error/no-progress 计数清零。
+## 2026-05-20 reasoning.stop legacy test cleanup
+- `tests/servertool/reasoning-stop-guard.spec.ts` 与 `tests/servertool/stopless-reasoning-stop-guard.spec.ts` 当前属于死契约测试：其断言依赖的 `sharedmodule/llmswitch-core/src/servertool/handlers/reasoning-stop*.ts` 与 `stopless-goal-guard.ts` 已在 `29e3a969c` 被物理删除，但测试未同步清理，导致整片假红并统一退化成 `passthrough`。
+- 唯一正确修复不是“补回旧实现”，而是物理删除这批过期测试并把 skeleton/config 断言改到现行 stopless contract：当前活 contract 只看 `stoplessGoalState` + `stop_message_auto` / followup policy，不再依赖旧 `reasoning.stop` guard 链。
+- 已验证活测试组合：`tests/servertool/server-side-tools.auto-hook-config.spec.ts`、`tests/servertool/stop-message-auto.goal-default.spec.ts`、`tests/server/runtime/http-server/executor/provider-response-converter.goal-followup-http400.spec.ts` 全绿。

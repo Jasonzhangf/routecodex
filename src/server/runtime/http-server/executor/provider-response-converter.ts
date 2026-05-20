@@ -76,10 +76,12 @@ type StoplessGoalProjection = {
   createdAt: number;
 };
 
-const GOAL_IRRECOVERABLE_ERROR_STOP_THRESHOLD = 2;
-const GOAL_VALIDATION_FAILURE_STOP_THRESHOLD = 2;
+const GOAL_IRRECOVERABLE_ERROR_STOP_THRESHOLD = 5;
+const GOAL_VALIDATION_FAILURE_STOP_THRESHOLD = 5;
+const GOAL_NO_PROGRESS_STOP_THRESHOLD = 5;
 const REPEATED_VALIDATION_FAILURE_ERROR_CLASS = 'repeated_validation_failure';
 const REPEATED_IRRECOVERABLE_ERROR_CLASS = 'repeated_irrecoverable_error';
+const REPEATED_NO_PROGRESS_STOP_ERROR_CLASS = 'repeated_no_progress_stop';
 
 function readNonEmptyString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -211,6 +213,62 @@ function writeProjectedGoalState(args: {
   return args.state;
 }
 
+function persistGoalProgressLedger(args: {
+  adapterContext: Record<string, unknown>;
+  pipelineMetadata?: Record<string, unknown>;
+  currentGoal: StoplessGoalProjection;
+  requestId: string;
+  finishReason?: string;
+}): StoplessGoalProjection {
+  const normalizedFinishReason = readNonEmptyString(args.finishReason)?.toLowerCase();
+  const nowMs = Date.now();
+  if (normalizedFinishReason === 'stop') {
+    const nextCount = normalizeGoalCounter(args.currentGoal.consecutiveNoProgress) + 1;
+    const details = [
+      'Goal followup produced finish_reason=stop without observable progress.',
+      `request_id=${args.requestId}`,
+      'finish_reason=stop'
+    ].join('\n');
+    const state =
+      nextCount >= GOAL_NO_PROGRESS_STOP_THRESHOLD
+        ? buildHostForcedStoppedGoalState({
+            currentGoal: args.currentGoal,
+            errorClass: REPEATED_NO_PROGRESS_STOP_ERROR_CLASS,
+            blockingEvidence: details,
+            counterField: 'consecutiveNoProgress',
+            counterValue: nextCount
+          })
+        : ({
+            ...args.currentGoal,
+            status: 'active',
+            latestNote: details,
+            consecutiveIrrecoverableErrors: 0,
+            consecutiveValidationFailures: 0,
+            consecutiveNoProgress: nextCount,
+            updatedAt: nowMs,
+            createdAt: readFiniteNonNegativeNumber(args.currentGoal.createdAt) ?? nowMs
+          } as StoplessGoalProjection);
+    return writeProjectedGoalState({
+      adapterContext: args.adapterContext,
+      pipelineMetadata: args.pipelineMetadata,
+      state
+    });
+  }
+
+  return writeProjectedGoalState({
+    adapterContext: args.adapterContext,
+    pipelineMetadata: args.pipelineMetadata,
+    state: {
+      ...args.currentGoal,
+      consecutiveIrrecoverableErrors: 0,
+      consecutiveValidationFailures: 0,
+      consecutiveNoProgress: 0,
+      updatedAt: nowMs,
+      createdAt: readFiniteNonNegativeNumber(args.currentGoal.createdAt) ?? nowMs
+    }
+  });
+}
+
 function hasGoalPersistenceScope(adapterContext: Record<string, unknown>): boolean {
   const directScope = readNonEmptyString(adapterContext.stopMessageClientInjectSessionScope)
     ?? readNonEmptyString(adapterContext.stopMessageClientInjectScope);
@@ -295,9 +353,9 @@ function persistGoalValidationLedger(args: {
           ...args.currentGoal,
           status: 'active',
           latestNote: details,
+          consecutiveIrrecoverableErrors: 0,
           consecutiveValidationFailures: nextCount,
-          consecutiveIrrecoverableErrors: undefined,
-          consecutiveNoProgress: undefined,
+          consecutiveNoProgress: 0,
           updatedAt: Date.now(),
           createdAt: readFiniteNonNegativeNumber(args.currentGoal.createdAt) ?? Date.now()
         } as StoplessGoalProjection);
@@ -341,8 +399,8 @@ function persistGoalIrrecoverableErrorLedger(args: {
           status: 'active',
           latestNote: details,
           consecutiveIrrecoverableErrors: nextCount,
-          consecutiveValidationFailures: undefined,
-          consecutiveNoProgress: undefined,
+          consecutiveValidationFailures: 0,
+          consecutiveNoProgress: 0,
           updatedAt: Date.now(),
           createdAt: readFiniteNonNegativeNumber(args.currentGoal.createdAt) ?? Date.now()
         } as StoplessGoalProjection);
@@ -830,6 +888,22 @@ export async function convertProviderResponseIfNeeded(
         })
       });
     }
+    const effectiveGoalState = adapterContext
+      ? readCurrentGoalState({
+          adapterContext,
+          pipelineMetadata: options.pipelineMetadata
+        })
+      : undefined;
+    if (effectiveGoalState?.status === 'active' && adapterContext) {
+      const finishReason = deriveFinishReason(converted.body ?? body);
+      persistGoalProgressLedger({
+        adapterContext,
+        pipelineMetadata: options.pipelineMetadata,
+        currentGoal: effectiveGoalState,
+        requestId: options.requestId,
+        finishReason
+      });
+    }
     return attachTimingBreakdown({
       ...options.response,
       body: converted.body ?? body
@@ -939,7 +1013,10 @@ export async function convertProviderResponseIfNeeded(
         : typeof detailRecord?.requestExecutorProviderErrorStage === 'string'
           ? detailRecord.requestExecutorProviderErrorStage
           : requestExecutorProviderErrorStage;
-    const isServerToolFollowupFailure = effectiveErrorStage === 'provider.followup';
+    const routecodexSemantics = asFlatRecord(options.requestSemantics?.__routecodex);
+    const isServerToolFollowupRequest = routecodexSemantics?.serverToolFollowup === true;
+    const isServerToolFollowupFailure =
+      effectiveErrorStage === 'provider.followup' || isServerToolFollowupRequest;
     const followupLogDetails = isServerToolFollowupFailure
       ? extractServerToolFollowupErrorLogDetails(error)
       : undefined;
@@ -952,8 +1029,7 @@ export async function convertProviderResponseIfNeeded(
 
     if (
       effectiveGoalState?.status === 'active'
-      && effectiveErrorStage === 'provider.followup'
-      && errRecord.retryable !== true
+      && (effectiveErrorStage === 'provider.followup' || isServerToolFollowupRequest)
       && adapterContext
     ) {
       persistGoalIrrecoverableErrorLedger({
