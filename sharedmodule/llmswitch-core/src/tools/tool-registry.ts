@@ -74,7 +74,7 @@ const detectForbiddenWrite = (script: string): boolean => {
   return false;
 };
 
-const isImagePath = (value: unknown): boolean => typeof value === 'string';
+const isImagePath = (value: unknown): boolean => typeof value === 'string' && /\.(png|jpe?g|gif|webp|bmp|svg|tiff?)$/i.test(value.trim());
 
 export interface ToolValidationResult {
   ok: boolean;
