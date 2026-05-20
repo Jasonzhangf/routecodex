@@ -227,6 +227,53 @@ describe('HubRequestExecutor failover', () => {
     });
     expect(Array.from(windsurfTransportBackoffExcluded)).toEqual(['windsurf.ws-pro-1.gpt-5.4-medium']);
     __requestExecutorTestables.clearProviderTransportBackoff(windsurfTransportBackoffKey!);
+
+    const windsurfWeeklyQuotaExcluded = new Set<string>();
+    const windsurfWeeklyQuotaExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+      error: Object.assign(
+        new Error('Your weekly usage quota has been exhausted. Please ensure Windsurf is up to date for the best experience, or visit windsurf.com to manage your plan.'),
+        {
+          code: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+          upstreamCode: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+          status: 429,
+          retryable: false,
+          rateLimitKind: 'daily_limit',
+          cooldownOverrideMs: 24 * 60 * 60_000,
+          quotaScope: 'weekly',
+          quotaReason: 'windsurf_weekly_exhausted'
+        }
+      ),
+      retryError: {
+        statusCode: 429,
+        errorCode: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+        upstreamCode: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+        reason: 'Your weekly usage quota has been exhausted.'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      providerKey: 'windsurf.ws-pro-1.gpt-5.4-medium',
+      runtimeKey: 'windsurf.ws-pro-1',
+      logicalRequestChainKey: 'req-windsurf-weekly-quota-reroute',
+      logicalChainRetryLimitStageRequestId: 'req-windsurf-weekly-quota-reroute',
+      routePool: [
+        'windsurf.ws-pro-1.gpt-5.4-medium',
+        'windsurf.ws-pro-2.gpt-5.4-medium',
+        'windsurf.ws-pro-3.gpt-5.4-medium'
+      ],
+      runtimeManager: {
+        resolveRuntimeKey: (providerKey?: string) => providerKey ? providerKey.split('.gpt-')[0] : undefined
+      },
+      excludedProviderKeys: windsurfWeeklyQuotaExcluded,
+      recordAttempt,
+      logStage: () => undefined,
+      status: 429
+    });
+    expect(windsurfWeeklyQuotaExecutionPlan).toEqual(expect.objectContaining({
+      shouldRetry: false,
+      excludedCurrentProvider: true,
+      holdOnLastAvailable429: false
+    }));
+    expect(Array.from(windsurfWeeklyQuotaExcluded)).toEqual(['windsurf.ws-pro-1.gpt-5.4-medium']);
   });
 
   test('propagates concurrency busy state by runtime/alias scope instead of provider target key', async () => {
