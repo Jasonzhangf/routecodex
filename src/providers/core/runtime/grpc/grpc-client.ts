@@ -9,10 +9,15 @@ import { randomUUID } from 'crypto';
 export const LS_SERVICE = '/exa.language_server_pb.LanguageServerService';
 
 export function grpcFrame(payload: Buffer): Buffer {
+  const len = payload.length;
   return Buffer.concat([
     Buffer.from([0]),
-    Buffer.from([0, 0, 0, 0]),
-    Buffer.from([0, 0, 0, 0]),
+    Buffer.from([
+      (len >>> 24) & 0xff,
+      (len >>> 16) & 0xff,
+      (len >>> 8) & 0xff,
+      len & 0xff,
+    ]),
     payload,
   ]);
 }

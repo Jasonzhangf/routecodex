@@ -169,7 +169,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
   // doesn't support native tool_calls). The caller should provide tools via
   // the OpenAI tools[] field; we convert them to text in preprocessRequest.
 
-  protected override preprocessRequest(request: UnknownObject): UnknownObject | Promise<UnknownObject> {
+  protected override async preprocessRequest(request: UnknownObject): Promise<UnknownObject> {
     if (!this.isGrpcMode) {
       return super.preprocessRequest(request);
     }
@@ -204,6 +204,7 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     if (name.includes('claude-4.5-sonnet-thinking')) return 354;
     if (name.includes('claude-4.5-sonnet')) return 353;
     if (name.includes('claude-4.5-haiku')) return 0;
+    if (name.includes('gpt-5.4-high')) return 391;
     if (name.includes('claude-4.1-opus-thinking')) return 329;
     if (name.includes('claude-4.1-opus')) return 328;
     if (name.includes('claude-4-opus-thinking')) return 291;

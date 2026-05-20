@@ -113,6 +113,25 @@ function repairZeroAmbiguityShellWrapper(command: string): string {
   return trimmed;
 }
 
+
+function extractWrappedShellCommand(command: string): string | null {
+  const trimmed = String(command || '').trim();
+  const wrappers = [/^(?:bash|sh|zsh)\s+-lc\s+([\s\S]+)$/i, /^(?:bash|sh|zsh)\s+-c\s+([\s\S]+)$/i];
+  for (const re of wrappers) {
+    const m = re.exec(trimmed);
+    if (!m) continue;
+    const raw = (m[1] || '').trim();
+    if (!raw) return '';
+    const first = raw[0];
+    const last = raw[raw.length - 1];
+    if ((first === "'" && last === "'") || (first === '"' && last === '"') || (first === '`' && last === '`')) {
+      return raw.slice(1, -1);
+    }
+    return raw;
+  }
+  return null;
+}
+
 function splitShellTokens(command: string): string[] {
   const tokens: string[] = [];
   let current = '';
@@ -325,18 +344,30 @@ function detectPolicyViolation(command: string, options?: ExecCommandValidationO
   if (invalidShellWrapper) {
     return invalidShellWrapper;
   }
-  const policyViolation = detectPolicyRuleViolation(command, options);
-  if (policyViolation) {
-    return policyViolation;
+
+  const candidates = [command];
+  const wrapped = extractWrappedShellCommand(command);
+  if (wrapped) candidates.push(wrapped);
+
+  for (const candidate of candidates) {
+    const policyViolation = detectPolicyRuleViolation(candidate, options);
+    if (policyViolation) {
+      return policyViolation;
+    }
+    if (GIT_RESET_HARD_PATTERN.test(candidate)) {
+      return {
+        reason: 'forbidden_git_reset_hard',
+        message:
+          'Command blocked: `git reset --hard` is destructive. Use `git reset --mixed <ref>` or file-scoped restore commands instead.'
+      };
+    }
+    const checkoutViolation = evaluateGitCheckoutScope(candidate);
+    if (checkoutViolation) {
+      return checkoutViolation;
+    }
   }
-  if (GIT_RESET_HARD_PATTERN.test(command)) {
-    return {
-      reason: 'forbidden_git_reset_hard',
-      message:
-        'Command blocked: `git reset --hard` is destructive. Use `git reset --mixed <ref>` or file-scoped restore commands instead.'
-    };
-  }
-  return evaluateGitCheckoutScope(command);
+
+  return null;
 }
 
 export function validateExecCommandArgs(
@@ -365,9 +396,8 @@ export function validateExecCommandArgs(
     return { ok: false, reason: normalized.reason };
   }
 
-  const command = repairZeroAmbiguityShellWrapper(
-    typeof normalized.normalized.cmd === 'string' ? normalized.normalized.cmd : ''
-  );
+  const rawCommand = typeof normalized.normalized.cmd === 'string' ? normalized.normalized.cmd : '';
+  const command = repairZeroAmbiguityShellWrapper(rawCommand);
   const violation = detectPolicyViolation(command, options);
   if (violation) {
     return { ok: false, reason: violation.reason, message: violation.message };
