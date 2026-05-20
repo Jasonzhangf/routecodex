@@ -13,10 +13,10 @@ import { resolveApplyPatchToolModeFromToolsWithNative, findMappableSemanticsKeys
 import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 import { requireJsonObjectPayload } from "./hub-pipeline-shared-guards.js";
 import {
-  propagateApplyPatchToolModeToRequestMetadata,
   resolveActiveProcessModeAndAudit,
   sanitizeStandardizedRequestMessages,
 } from "./hub-pipeline-chat-process-request-utils.js";
+import { propagateApplyPatchToolModeToRequestMetadata } from "./hub-pipeline-request-metadata-blocks.js";
 import { runReqInboundStage1FormatParse } from "./stages/req_inbound/req_inbound_stage1_format_parse/index.js";
 import { runReqInboundStage2SemanticMap } from "./stages/req_inbound/req_inbound_stage2_semantic_map/index.js";
 import type { JsonValue } from "../types/json.js";

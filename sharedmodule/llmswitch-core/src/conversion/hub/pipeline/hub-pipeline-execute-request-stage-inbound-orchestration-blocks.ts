@@ -4,10 +4,10 @@ import type { ProcessedRequest, StandardizedRequest } from "../types/standardize
 import type { HubPipelineConfig, HubPipelineNodeResult, NormalizedRequest } from "./hub-pipeline.js";
 import type { RequestStageHooks } from "./hub-pipeline-stage-hooks.js";
 import {
-  propagateApplyPatchToolModeToRequestMetadata,
   resolveActiveProcessModeAndAudit,
   sanitizeStandardizedRequestMessages,
 } from "./hub-pipeline-chat-process-request-utils.js";
+import { propagateApplyPatchToolModeToRequestMetadata } from "./hub-pipeline-request-metadata-blocks.js";
 import type { AdapterContext } from "../types/chat-envelope.js";
 import type { HubPolicyConfig } from "../policy/policy-engine.js";
 import { runInboundSemanticPipeline } from "./hub-pipeline-execute-request-stage-inbound-semantic-blocks.js";
