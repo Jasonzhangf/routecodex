@@ -370,4 +370,5 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
     "registerResponsesPassthroughJson",
     "consumeResponsesPassthroughJson",
     "consumeResponsesPassthroughByAliasesJson",
+    "decideHeavyInputFastpathJson",
 ] as const;

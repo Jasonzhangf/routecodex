@@ -6,6 +6,8 @@ use std::time::Instant;
 
 const MAX_PAYLOAD_SIZE_BYTES: usize = 50 * 1024 * 1024;
 
+const DEFAULT_HEAVY_INPUT_TOKEN_THRESHOLD: i64 = 120_000;
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UnifiedInboundInput {
@@ -30,6 +32,146 @@ pub struct TimingInfo {
     pub stage2_semantic_map_ms: u64,
     pub stage2_to_standardized_ms: u64,
     pub total_ms: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeavyInputFastpathDecisionInput {
+    pub request: Value,
+    #[serde(default)]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeavyInputFastpathDecisionOutput {
+    pub estimated_tokens: i64,
+    pub should_mark: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+fn parse_bool_env(name: &str) -> Option<bool> {
+    match std::env::var(name) {
+        Ok(raw) => {
+            let normalized = raw.trim().to_ascii_lowercase();
+            if matches!(normalized.as_str(), "1" | "true" | "yes" | "on") {
+                Some(true)
+            } else if matches!(normalized.as_str(), "0" | "false" | "no" | "off") {
+                Some(false)
+            } else {
+                None
+            }
+        }
+        Err(_) => None,
+    }
+}
+
+fn parse_positive_i64_env(name: &str) -> Option<i64> {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<i64>().ok())
+        .filter(|v| *v > 0)
+}
+
+fn is_heavy_input_fastpath_enabled() -> bool {
+    parse_bool_env("ROUTECODEX_HUB_FASTPATH_HEAVY_INPUT")
+        .or_else(|| parse_bool_env("RCC_HUB_FASTPATH_HEAVY_INPUT"))
+        .unwrap_or(true)
+}
+
+fn resolve_heavy_input_threshold() -> i64 {
+    parse_positive_i64_env("ROUTECODEX_HUB_FASTPATH_INPUT_TOKEN_THRESHOLD")
+        .or_else(|| parse_positive_i64_env("RCC_HUB_FASTPATH_INPUT_TOKEN_THRESHOLD"))
+        .unwrap_or(DEFAULT_HEAVY_INPUT_TOKEN_THRESHOLD)
+}
+
+fn estimate_text_tokens(value: &Value) -> i64 {
+    match value {
+        Value::String(s) => ((s.len() as f64) / 4.0).ceil() as i64,
+        Value::Array(arr) => arr.iter().map(estimate_text_tokens).sum(),
+        Value::Object(obj) => {
+            if let Some(Value::String(text)) = obj.get("text") {
+                return ((text.len() as f64) / 4.0).ceil() as i64;
+            }
+            if let Some(Value::String(content)) = obj.get("content") {
+                return ((content.len() as f64) / 4.0).ceil() as i64;
+            }
+            obj.values().map(estimate_text_tokens).sum()
+        }
+        _ => 0,
+    }
+}
+
+fn rough_estimate_input_tokens_from_request(request: &Value) -> i64 {
+    let Some(obj) = request.as_object() else {
+        return 0;
+    };
+    let mut total = 0;
+    if let Some(messages) = obj.get("messages") {
+        total += estimate_text_tokens(messages);
+    }
+    if let Some(input) = obj.get("input") {
+        total += estimate_text_tokens(input);
+    }
+    if let Some(instructions) = obj.get("instructions") {
+        total += estimate_text_tokens(instructions);
+    }
+    if total <= 0 {
+        total += estimate_text_tokens(request);
+    }
+    total.max(0)
+}
+
+fn read_estimated_tokens_from_metadata(metadata: &Value) -> Option<i64> {
+    let obj = metadata.as_object()?;
+    for key in ["estimatedInputTokens", "estimatedTokens", "estimated_tokens"] {
+        if let Some(v) = obj.get(key).and_then(|x| x.as_f64()) {
+            if v.is_finite() && v > 0.0 {
+                return Some(v.floor() as i64);
+            }
+        }
+    }
+    None
+}
+
+pub fn decide_heavy_input_fastpath(
+    input: HeavyInputFastpathDecisionInput,
+) -> HeavyInputFastpathDecisionOutput {
+    let estimated_tokens = rough_estimate_input_tokens_from_request(&input.request).max(0);
+    let threshold = resolve_heavy_input_threshold();
+    let enabled = is_heavy_input_fastpath_enabled() && threshold > 0;
+    let should_mark = enabled && estimated_tokens >= threshold;
+
+    if should_mark {
+        return HeavyInputFastpathDecisionOutput {
+            estimated_tokens,
+            should_mark: true,
+            reason: Some("rough_estimate".to_string()),
+        };
+    }
+
+    HeavyInputFastpathDecisionOutput {
+        estimated_tokens: read_estimated_tokens_from_metadata(&input.metadata)
+            .unwrap_or(estimated_tokens),
+        should_mark: false,
+        reason: None,
+    }
+}
+
+#[napi]
+pub fn decide_heavy_input_fastpath_json(input_json: String) -> napi::Result<String> {
+    if input_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Input JSON cannot be empty"));
+    }
+
+    let input: HeavyInputFastpathDecisionInput = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+
+    let output = decide_heavy_input_fastpath(input);
+
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
 
 fn validate_payload_size_fast(raw_request: &Value) -> Result<(), String> {
@@ -252,8 +394,17 @@ pub fn process_unified_inbound_fast_json(input_json: String) -> napi::Result<Str
 
 #[cfg(test)]
 mod tests {
-    use super::chat_envelope_to_standardized_fast;
+    use super::{
+        chat_envelope_to_standardized_fast, decide_heavy_input_fastpath,
+        HeavyInputFastpathDecisionInput,
+    };
     use serde_json::{json, Value};
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn chat_envelope_to_standardized_fast_normalizes_exec_and_apply_patch_shapes() {
@@ -313,5 +464,70 @@ mod tests {
         let patch_input = patch_args["input"].as_str().expect("patch input");
         assert!(patch_input.starts_with("*** Begin Patch"));
         assert!(patch_input.contains("*** Add File: note.txt"));
+    }
+
+    #[test]
+    fn decide_heavy_input_fastpath_marks_when_request_estimate_crosses_threshold() {
+        let _guard = env_lock().lock().expect("env lock");
+        std::env::set_var("ROUTECODEX_HUB_FASTPATH_HEAVY_INPUT", "1");
+        std::env::set_var("ROUTECODEX_HUB_FASTPATH_INPUT_TOKEN_THRESHOLD", "100");
+
+        let output = decide_heavy_input_fastpath(HeavyInputFastpathDecisionInput {
+            request: json!({
+                "messages": [{ "role": "user", "content": "x".repeat(2400) }]
+            }),
+            metadata: json!({}),
+        });
+
+        assert!(output.estimated_tokens >= 100);
+        assert!(output.should_mark);
+        assert_eq!(output.reason.as_deref(), Some("rough_estimate"));
+
+        std::env::remove_var("ROUTECODEX_HUB_FASTPATH_HEAVY_INPUT");
+        std::env::remove_var("ROUTECODEX_HUB_FASTPATH_INPUT_TOKEN_THRESHOLD");
+    }
+
+    #[test]
+    fn decide_heavy_input_fastpath_preserves_metadata_estimate_without_mark_below_threshold() {
+        let _guard = env_lock().lock().expect("env lock");
+        std::env::set_var("ROUTECODEX_HUB_FASTPATH_HEAVY_INPUT", "1");
+        std::env::set_var("ROUTECODEX_HUB_FASTPATH_INPUT_TOKEN_THRESHOLD", "1000");
+
+        let output = decide_heavy_input_fastpath(HeavyInputFastpathDecisionInput {
+            request: json!({
+                "messages": [{ "role": "user", "content": "short" }]
+            }),
+            metadata: json!({
+                "estimatedInputTokens": 777
+            }),
+        });
+
+        assert_eq!(output.estimated_tokens, 777);
+        assert!(!output.should_mark);
+        assert!(output.reason.is_none());
+
+        std::env::remove_var("ROUTECODEX_HUB_FASTPATH_HEAVY_INPUT");
+        std::env::remove_var("ROUTECODEX_HUB_FASTPATH_INPUT_TOKEN_THRESHOLD");
+    }
+
+    #[test]
+    fn decide_heavy_input_fastpath_respects_explicit_disable_without_secondary_override() {
+        let _guard = env_lock().lock().expect("env lock");
+        std::env::set_var("ROUTECODEX_HUB_FASTPATH_HEAVY_INPUT", "0");
+        std::env::remove_var("RCC_HUB_FASTPATH_HEAVY_INPUT");
+        std::env::set_var("ROUTECODEX_HUB_FASTPATH_INPUT_TOKEN_THRESHOLD", "10");
+
+        let output = decide_heavy_input_fastpath(HeavyInputFastpathDecisionInput {
+            request: json!({
+                "messages": [{ "role": "user", "content": "x".repeat(400) }]
+            }),
+            metadata: json!({}),
+        });
+
+        assert!(!output.should_mark);
+        assert!(output.estimated_tokens >= 10);
+
+        std::env::remove_var("ROUTECODEX_HUB_FASTPATH_HEAVY_INPUT");
+        std::env::remove_var("ROUTECODEX_HUB_FASTPATH_INPUT_TOKEN_THRESHOLD");
     }
 }

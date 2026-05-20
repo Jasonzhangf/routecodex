@@ -5,7 +5,8 @@ import {
   parseChatWebSearchIntentPayload,
   parseContinueExecutionInjectionPayload,
   parsePendingToolSyncPayload,
-  parseProviderKeyPayload
+  parseProviderKeyPayload,
+  parseDecideHeavyInputFastpathPayload
 } from './native-router-hotpath-analysis.js';
 import {
   isNativeDisabledByEnv,
@@ -181,4 +182,18 @@ export function sanitizeChatProcessMessagesWithNative(request: Record<string, un
 
 export function loadNativeRouterHotpathBindingForInternalUse(): unknown {
   return loadNativeRouterHotpathBinding();
+}
+
+
+export function decideHeavyInputFastpath(
+  request: Record<string, unknown>,
+  metadata: Record<string, unknown>
+): { estimatedTokens: number; shouldMark: boolean; reason?: string; source: 'native' } {
+  const parsed = callNativeJson(
+    'decideHeavyInputFastpathJson',
+    'decideHeavyInputFastpathJson',
+    [JSON.stringify({ request, metadata })],
+    parseDecideHeavyInputFastpathPayload
+  );
+  return { ...parsed, source: 'native' };
 }

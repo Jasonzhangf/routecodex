@@ -581,3 +581,13 @@ export function parseSanitizeMessagesPayload(raw: string): SanitizeMessagesPaylo
   if (!parsed || typeof parsed !== 'object') return null;
   return parsed as SanitizeMessagesPayload;
 }
+
+export interface DecideHeavyInputFastpathPayload { estimatedTokens: number; shouldMark: boolean; reason?: string; }
+
+export function parseDecideHeavyInputFastpathPayload(raw: string): DecideHeavyInputFastpathPayload | null {
+    const parsed = parseJson("parseDecideHeavyInputFastpathPayload", raw) as DecideHeavyInputFastpathPayload | null;
+    if (!parsed || typeof parsed.estimatedTokens !== "number" || typeof parsed.shouldMark !== "boolean") {
+        return null;
+    }
+    return parsed;
+}

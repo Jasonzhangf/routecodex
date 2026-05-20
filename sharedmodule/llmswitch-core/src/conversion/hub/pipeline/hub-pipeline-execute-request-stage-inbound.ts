@@ -28,9 +28,8 @@ import { measureHubStage } from "./hub-stage-timing.js";
 
 import { syncResponsesContextFromCanonicalMessagesWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
 import { containsImageAttachment } from "../process/chat-process-media.js";
-import { computeRequestTokens } from "../../../router/virtual-router/token-estimator.js";
-import { estimateSessionBoundTokens } from "../process/chat-process-session-usage.js";
-import { isHeavyInputFastpathEnabled, markHeavyInputFastpath, resolveHeavyInputTokenThreshold, roughEstimateInputTokensFromRequest } from "./hub-pipeline-heavy-input-fastpath.js";
+import { decideHeavyInputFastpath } from "../../../router/virtual-router/engine-selection/native-router-hotpath.js";
+import { markHeavyInputFastpath } from "./hub-pipeline-heavy-input-fastpath.js";
 
 
 function propagateApplyPatchToolModeToRequestMetadata(
@@ -196,20 +195,15 @@ export function finalizeWorkingRequestForOutbound(args: {
     const normalizedMetadata =
       (args.normalized.metadata as Record<string, unknown> | undefined) ??
       ((args.normalized.metadata = {}) as Record<string, unknown>);
-    try {
-      const fastpathEnabled = isHeavyInputFastpathEnabled();
-      const threshold = resolveHeavyInputTokenThreshold();
-      const roughEstimate = (fastpathEnabled && threshold > 0) ? roughEstimateInputTokensFromRequest(workingRequest) : undefined;
-      if (typeof roughEstimate === "number" && roughEstimate >= threshold) {
-        normalizedMetadata.estimatedInputTokens = roughEstimate;
-        markHeavyInputFastpath({ metadata: normalizedMetadata, estimatedInputTokens: roughEstimate, reason: "rough_estimate" });
-      } else {
-        const estimatedTokens = estimateSessionBoundTokens(workingRequest, normalizedMetadata) ?? computeRequestTokens(workingRequest, "");
-        if (typeof estimatedTokens === "number" && Number.isFinite(estimatedTokens) && estimatedTokens > 0) normalizedMetadata.estimatedInputTokens = estimatedTokens;
-      }
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error ?? "unknown");
-      console.warn(`[hub-pipeline] estimateInputTokensForWorkingRequest failed (non-blocking): ${reason}`);
+    const decision = decideHeavyInputFastpath(
+      workingRequest as unknown as Record<string, unknown>,
+      normalizedMetadata,
+    );
+    if (typeof decision.estimatedTokens === "number" && Number.isFinite(decision.estimatedTokens) && decision.estimatedTokens > 0) {
+      normalizedMetadata.estimatedInputTokens = Math.floor(decision.estimatedTokens);
+    }
+    if (decision.shouldMark === true) {
+      markHeavyInputFastpath({ metadata: normalizedMetadata, estimatedInputTokens: normalizedMetadata.estimatedInputTokens, reason: decision.reason ?? "rough_estimate" });
     }
   }
   const stdMetadata = (workingRequest as StandardizedRequest | ProcessedRequest | undefined)?.metadata as Record<string, unknown> | undefined;

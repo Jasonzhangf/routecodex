@@ -9,6 +9,7 @@ const ensureRuntimeMetadata = jest.fn((metadata: Record<string, unknown>) => {
   return metadata.__rt as Record<string, unknown>;
 });
 const isCompactionRequest = jest.fn(() => false);
+const decideHeavyInputFastpath = jest.fn(() => ({ estimatedTokens: 0, shouldMark: false, source: 'native' }));
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-adapter-context.js',
@@ -127,13 +128,20 @@ jest.unstable_mockModule(
   }),
 );
 
+const markHeavyInputFastpath = jest.fn();
+
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-heavy-input-fastpath.js',
   () => ({
-    isHeavyInputFastpathEnabled: jest.fn(() => false),
-    markHeavyInputFastpath: jest.fn(),
-    resolveHeavyInputTokenThreshold: jest.fn(() => 180000),
-    roughEstimateInputTokensFromRequest: jest.fn(() => undefined),
+    markHeavyInputFastpath,
+  }),
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath.js',
+  () => ({
+    decideHeavyInputFastpath,
+    loadNativeRouterHotpathBindingForInternalUse: jest.fn(() => ({})),
   }),
 );
 
@@ -167,6 +175,45 @@ jest.unstable_mockModule(
   }),
 );
 
+
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/conversion/hub/policy/protocol-spec.js',
+  () => ({
+    resolveHubProtocolSpec: jest.fn(() => ({
+      id: 'openai-chat',
+      providerOutbound: {
+        enforceEnabled: false,
+        reservedKeyPrefixes: [],
+        forbidWrappers: [],
+        flattenWrappers: [],
+      },
+      toolSurface: {
+        expectedToolFormat: 'openai',
+      },
+    })),
+    getProtocolSpecForPayload: jest.fn(() => ({
+      protocol: 'openai-chat',
+      allowedTopLevelFields: [],
+      allowedParametersWrapperKeys: [],
+      messageContentMode: 'openai',
+    })),
+  }),
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/conversion/protocol-field-allowlists.js',
+  () => ({
+    OPENAI_CHAT_ALLOWED_FIELDS: [],
+    ANTHROPIC_ALLOWED_FIELDS: [],
+    OPENAI_RESPONSES_ALLOWED_FIELDS: [],
+    GEMINI_ALLOWED_FIELDS: [],
+    OPENAI_RESPONSES_PARAMETERS_WRAPPER_ALLOW_KEYS: [],
+    OPENAI_CHAT_PARAMETERS_WRAPPER_ALLOW_KEYS: [],
+    ANTHROPIC_PARAMETERS_WRAPPER_ALLOW_KEYS: [],
+  }),
+);
+
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/conversion/compaction-detect.js',
   () => ({
@@ -179,6 +226,51 @@ const { executeRequestStageInbound } = await import(
 );
 
 describe('hub pipeline inbound runtime hints', () => {
+
+  it('uses native heavy-input fastpath decision and persists estimated tokens', async () => {
+    decideHeavyInputFastpath.mockReturnValueOnce({
+      estimatedTokens: 123456,
+      shouldMark: true,
+      reason: 'rough_estimate',
+      source: 'native',
+    });
+
+    const normalized = {
+      id: 'req_hint_heavy_input_native',
+      payload: {
+        messages: [{ role: 'user', content: 'x'.repeat(4000) }],
+      },
+      metadata: {},
+      processMode: 'chat',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      stream: false,
+      routeHint: undefined,
+    } as any;
+
+    await executeRequestStageInbound({
+      normalized,
+      hooks: {
+        createSemanticMapper: () => ({}),
+        captureContext: jest.fn(async () => undefined),
+      } as any,
+      config: {} as any,
+    });
+
+    expect(decideHeavyInputFastpath).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'x'.repeat(4000) }],
+      }),
+      normalized.metadata as Record<string, unknown>,
+    );
+    expect((normalized.metadata as Record<string, unknown>).estimatedInputTokens).toBe(123456);
+    expect(markHeavyInputFastpath).toHaveBeenCalledWith({
+      metadata: normalized.metadata,
+      estimatedInputTokens: 123456,
+      reason: 'rough_estimate',
+    });
+  });
   it('derives applyPatchToolMode from top-level tools on payload object', async () => {
     const payload = {
       tools: [{ type: 'function', function: { name: 'apply_patch' } }],
