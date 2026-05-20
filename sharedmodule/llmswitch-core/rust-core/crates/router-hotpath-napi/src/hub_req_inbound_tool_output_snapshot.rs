@@ -310,8 +310,8 @@ struct ToolOutputSnapshotBuildResult {
 fn build_req_inbound_tool_output_snapshot(
     payload: &mut Value,
     provider_protocol: &Value,
-) -> ToolOutputSnapshotBuildResult {
-    normalize_shell_like_tool_calls_before_governance(payload);
+) -> NapiResult<ToolOutputSnapshotBuildResult> {
+    normalize_shell_like_tool_calls_before_governance(payload)?;
     inject_tool_parse_diagnostics(payload);
 
     let mut snapshot = Map::new();
@@ -327,10 +327,10 @@ fn build_req_inbound_tool_output_snapshot(
         snapshot.insert("tool_outputs".to_string(), serialized);
     }
 
-    ToolOutputSnapshotBuildResult {
+    Ok(ToolOutputSnapshotBuildResult {
         snapshot,
         payload: payload.clone(),
-    }
+    })
 }
 
 #[napi]
@@ -350,6 +350,6 @@ pub fn build_req_inbound_tool_output_snapshot_json(
         serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let provider_protocol: Value = serde_json::from_str(&provider_protocol_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = build_req_inbound_tool_output_snapshot(&mut payload, &provider_protocol);
+    let output = build_req_inbound_tool_output_snapshot(&mut payload, &provider_protocol)?;
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }

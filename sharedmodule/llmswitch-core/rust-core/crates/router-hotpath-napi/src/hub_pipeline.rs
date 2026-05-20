@@ -873,7 +873,8 @@ fn coerce_standardized_request_from_payload(input: &Value) -> Result<Value, Stri
         .get("payload")
         .cloned()
         .ok_or_else(|| "payload must be object".to_string())?;
-    let payload = normalize_chat_envelope_tool_calls(&payload);
+    let payload = normalize_chat_envelope_tool_calls(&payload)
+        .map_err(|err| err.to_string())?;
     let payload = payload
         .as_object()
         .ok_or_else(|| "payload must be object".to_string())?;

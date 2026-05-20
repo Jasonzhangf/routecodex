@@ -36,6 +36,7 @@ mod compat_field_mapping;
 mod compat_harvest_tool_calls_from_text;
 mod compat_tool_schema;
 mod gemini_openai_codec;
+mod hashline;
 mod hub_bridge_actions;
 mod hub_bridge_policies;
 mod hub_chat_envelope_validator;
@@ -76,6 +77,7 @@ mod resp_process_stage1_tool_governance;
 mod resp_process_stage2_finalize;
 mod responses_openai_codec;
 mod servertool_skeleton_config;
+mod servertool_skeleton;
 mod shared_args_mapping;
 mod shared_bridge_instructions;
 mod shared_chat_output_normalizer;
@@ -1389,6 +1391,30 @@ pub fn compute_provider_backoff_ms_json(
     let classification: failure_policy::FailureClassification = serde_json::from_str(&classification_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     Ok(failure_policy::compute_backoff(classification, attempt, base_ms as u64, max_ms as u64) as i64)
+}
+
+#[napi(js_name = "filterOutExecutedServerToolCallsJson")]
+pub fn filter_out_executed_server_tool_calls_json(
+    finalized_payload_json: String,
+    orchestration_payload_json: String,
+) -> NapiResult<String> {
+    let finalized_payload: Value = serde_json::from_str(&finalized_payload_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let orchestration_payload: Value = serde_json::from_str(&orchestration_payload_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = servertool_skeleton::finalize_strip::filter_out_executed_servertool_calls(
+        &finalized_payload,
+        &orchestration_payload,
+    );
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi(js_name = "runHashlineNativeEditJson")]
+pub fn run_hashline_native_edit_json(input_json: String) -> NapiResult<String> {
+    let input: hashline::HashlineNativeEditInput = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = hashline::run_hashline_native_edit(input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 pub use responses_reasoning_registry::{

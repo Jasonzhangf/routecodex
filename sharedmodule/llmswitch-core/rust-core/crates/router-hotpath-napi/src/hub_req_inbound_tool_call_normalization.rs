@@ -3,6 +3,9 @@ use napi_derive::napi;
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+use crate::hashline::{self, HashlineNativeEditInput};
 use crate::resp_process_stage1_tool_governance::normalize_apply_patch_schema_args;
 
 fn normalize_shell_like_output_text(raw: &str) -> String {
@@ -256,6 +259,121 @@ fn is_apply_patch_tool_name(raw_name: &str) -> bool {
     raw_name.trim().eq_ignore_ascii_case("apply_patch")
 }
 
+fn looks_like_hashline_patch(raw: &str) -> bool {
+    let first = raw.lines().find(|line| !line.trim().is_empty()).unwrap_or("").trim_start();
+    matches!(first.chars().next(), Some('<') | Some('+') | Some('-') | Some('='))
+        && first.chars().nth(1).map(|ch| ch.is_whitespace()).unwrap_or(true)
+}
+
+fn read_apply_patch_source(args: &Map<String, Value>, raw_args: Option<&Value>) -> Option<String> {
+    args.get("patch")
+        .or_else(|| args.get("input"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .or_else(|| raw_args.and_then(extract_apply_patch_text_local))
+}
+
+fn extract_apply_patch_text_local(raw_args: &Value) -> Option<String> {
+    match raw_args {
+        Value::String(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        Value::Object(row) => row
+            .get("patch")
+            .or_else(|| row.get("input"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string()),
+        _ => None,
+    }
+}
+
+fn read_hashline_file_path(args: &Map<String, Value>) -> Option<String> {
+    read_trimmed_string(args.get("filePath"))
+        .or_else(|| read_trimmed_string(args.get("file_path")))
+        .or_else(|| {
+            args.get("input")
+                .and_then(Value::as_object)
+                .and_then(|row| read_trimmed_string(row.get("filePath")))
+        })
+        .or_else(|| {
+            args.get("input")
+                .and_then(Value::as_object)
+                .and_then(|row| read_trimmed_string(row.get("file_path")))
+        })
+}
+
+fn resolve_hashline_target_path(file_path: &str, workdir: Option<&str>) -> PathBuf {
+    let candidate = PathBuf::from(file_path);
+    if candidate.is_absolute() {
+        return candidate;
+    }
+    if let Some(base) = workdir {
+        return Path::new(base).join(candidate);
+    }
+    candidate
+}
+
+fn normalize_hashline_apply_patch_arguments(
+    raw_arguments: Option<&Value>,
+) -> Result<Option<String>, napi::Error> {
+    let args = parse_json_record(raw_arguments).unwrap_or_default();
+    let Some(patch_source) = read_apply_patch_source(&args, raw_arguments) else {
+        return Ok(None);
+    };
+    if !looks_like_hashline_patch(&patch_source) {
+        return Ok(None);
+    }
+
+    let file_path = read_hashline_file_path(&args).ok_or_else(|| {
+        napi::Error::from_reason(
+            "hashline apply_patch requires explicit filePath/file_path in arguments".to_string(),
+        )
+    })?;
+    let workdir = read_workdir_from_args(&args);
+    let resolved_path = resolve_hashline_target_path(file_path.as_str(), workdir.as_deref());
+    let file_content = fs::read_to_string(&resolved_path).map_err(|err| {
+        napi::Error::from_reason(format!(
+            "hashline apply_patch failed to read target file `{}`: {}",
+            resolved_path.display(),
+            err
+        ))
+    })?;
+
+    let result = hashline::run_hashline_native_edit(HashlineNativeEditInput {
+        patch: patch_source,
+        file_path,
+        file_content,
+    });
+    if !result.ok {
+        let message = result
+            .error
+            .as_ref()
+            .map(|err| format!("{}: {}", format!("{:?}", err.code), err.message))
+            .unwrap_or_else(|| "hashline native edit failed".to_string());
+        return Err(napi::Error::from_reason(message));
+    }
+    let normalized_patch = result.normalized_patch.ok_or_else(|| {
+        napi::Error::from_reason(
+            "hashline native edit returned ok without normalized patch".to_string(),
+        )
+    })?;
+    let mut out = Map::new();
+    out.insert("patch".to_string(), Value::String(normalized_patch.clone()));
+    out.insert("input".to_string(), Value::String(normalized_patch));
+    serde_json::to_string(&Value::Object(out))
+        .map(Some)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 fn is_shell_like_tool_name_token(name: Option<String>) -> bool {
     let normalized = name.unwrap_or_default().trim().to_string();
     if normalized.is_empty() {
@@ -380,23 +498,29 @@ fn normalize_shell_like_function_call_arguments(
 fn normalize_apply_patch_function_call_arguments(
     raw_name: &str,
     raw_arguments: Option<&Value>,
-) -> Option<(String, String)> {
+) -> Result<Option<(String, String)>, napi::Error> {
     if !is_apply_patch_tool_name(raw_name) {
-        return None;
+        return Ok(None);
     }
-    Some((
+    if let Some(arguments) = normalize_hashline_apply_patch_arguments(raw_arguments)? {
+        return Ok(Some(("apply_patch".to_string(), arguments)));
+    }
+    Ok(Some((
         "apply_patch".to_string(),
         normalize_apply_patch_schema_args(raw_arguments).0,
-    ))
+    )))
 }
 
-fn normalize_message_tool_calls(payload: &mut Value, requested_tool_names: &HashSet<String>) {
+fn normalize_message_tool_calls(
+    payload: &mut Value,
+    requested_tool_names: &HashSet<String>,
+) -> Result<(), napi::Error> {
     let Some(messages) = payload
         .as_object_mut()
         .and_then(|root| root.get_mut("messages"))
         .and_then(|node| node.as_array_mut())
     else {
-        return;
+        return Ok(());
     };
 
     let mut shell_tool_call_ids = HashSet::<String>::new();
@@ -471,7 +595,7 @@ fn normalize_message_tool_calls(payload: &mut Value, requested_tool_names: &Hash
             if let Some((resolved_name, arguments)) = normalize_apply_patch_function_call_arguments(
                 raw_name.as_str(),
                 fn_row.get("arguments"),
-            ) {
+            )? {
                 if resolved_name != raw_name {
                     fn_row.insert("name".to_string(), Value::String(resolved_name));
                 }
@@ -493,18 +617,19 @@ fn normalize_message_tool_calls(payload: &mut Value, requested_tool_names: &Hash
     }
 
     prune_message_tool_history(messages);
+    Ok(())
 }
 
 fn normalize_responses_input_function_calls(
     payload: &mut Value,
     requested_tool_names: &HashSet<String>,
-) {
+) -> Result<(), napi::Error> {
     let Some(input_items) = payload
         .as_object_mut()
         .and_then(|root| root.get_mut("input"))
         .and_then(|node| node.as_array_mut())
     else {
-        return;
+        return Ok(());
     };
 
     let mut dropped_call_ids: HashSet<String> = HashSet::new();
@@ -538,7 +663,7 @@ fn normalize_responses_input_function_calls(
                         normalize_apply_patch_function_call_arguments(
                             raw_name.as_str(),
                             item_row.get("arguments"),
-                        )
+                        )?
                     {
                         if resolved_name != raw_name {
                             item_row.insert("name".to_string(), Value::String(resolved_name));
@@ -595,12 +720,16 @@ fn normalize_responses_input_function_calls(
 
     prune_responses_input_tool_history(&mut normalized_items);
     *input_items = normalized_items;
+    Ok(())
 }
 
-pub(crate) fn normalize_shell_like_tool_calls_before_governance(payload: &mut Value) {
+pub(crate) fn normalize_shell_like_tool_calls_before_governance(
+    payload: &mut Value,
+) -> Result<(), napi::Error> {
     let requested_tool_names = collect_requested_tool_names(payload);
-    normalize_message_tool_calls(payload, &requested_tool_names);
-    normalize_responses_input_function_calls(payload, &requested_tool_names);
+    normalize_message_tool_calls(payload, &requested_tool_names)?;
+    normalize_responses_input_function_calls(payload, &requested_tool_names)?;
+    Ok(())
 }
 
 #[napi]
@@ -609,7 +738,7 @@ pub fn normalize_shell_like_tool_calls_before_governance_json(
 ) -> NapiResult<String> {
     let mut payload: Value =
         serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    normalize_shell_like_tool_calls_before_governance(&mut payload);
+    normalize_shell_like_tool_calls_before_governance(&mut payload)?;
     serde_json::to_string(&payload).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -624,7 +753,10 @@ pub fn is_shell_like_tool_name_token_json(name_json: String) -> NapiResult<Strin
 #[cfg(test)]
 mod tests {
     use super::normalize_shell_like_tool_calls_before_governance;
+    use crate::hashline::compute_line_hash;
     use serde_json::{json, Value};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn normalizes_exec_command_from_input_string_shape() {
@@ -647,7 +779,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
             .as_str()
             .expect("arguments text");
@@ -677,7 +809,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
             .as_str()
             .expect("arguments text");
@@ -701,7 +833,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let args_text = payload["input"][0]["arguments"]
             .as_str()
             .expect("arguments text");
@@ -732,7 +864,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
             .as_str()
             .expect("arguments text");
@@ -762,7 +894,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let messages = payload["messages"].as_array().expect("messages array");
         assert!(messages.is_empty());
     }
@@ -797,7 +929,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let items = payload["input"].as_array().expect("input items");
         assert_eq!(items.len(), 2);
         assert_eq!(items[0]["call_id"], "call_keep");
@@ -836,7 +968,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let items = payload["input"].as_array().expect("input items");
         assert_eq!(items.len(), 2);
         assert_eq!(items[0]["call_id"], "call_good");
@@ -867,7 +999,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
             .as_str()
             .expect("arguments text");
@@ -900,7 +1032,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
             .as_str()
             .expect("arguments text");
@@ -928,7 +1060,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let out = payload["input"][1]["output"].as_str().expect("output text");
         assert_eq!(
             out,
@@ -955,7 +1087,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let out = payload["input"][1]["output"].as_str().expect("output text");
         assert_eq!(out, "Command: bash -lc 'echo done'\nOutput:\ndone\n");
     }
@@ -980,7 +1112,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let out = payload["input"][1]["output"].as_str().expect("output text");
         assert_eq!(
             out,
@@ -1018,7 +1150,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let out = payload["messages"][1]["content"]
             .as_str()
             .expect("tool content");
@@ -1292,5 +1424,84 @@ mod tests {
         let args: Value = serde_json::from_str(args_text).expect("args object");
         assert_eq!(args["session_id"], 42);
         assert_eq!(args["chars"], "echo ok\n");
+    }
+
+    #[test]
+    fn hashline_apply_patch_requires_explicit_filepath() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
+          "messages": [
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_hashline_missing_path",
+                  "type": "function",
+                  "function": {
+                    "name": "apply_patch",
+                    "arguments": "{\"patch\":\"= 1 123\\nreplaced\"}"
+                  }
+                }
+              ]
+            }
+          ]
+        });
+
+        let err = normalize_shell_like_tool_calls_before_governance(&mut payload)
+            .expect_err("should fail without filePath");
+        assert!(
+            err.reason.contains("filePath/file_path"),
+            "unexpected error: {}",
+            err.reason
+        );
+    }
+
+    #[test]
+    fn hashline_apply_patch_normalizes_with_filepath_and_cwd() {
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_millis();
+        let temp_dir = std::env::temp_dir().join(format!("routecodex-hashline-test-{}", millis));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let target_path = temp_dir.join("note.txt");
+        fs::write(&target_path, "hello").expect("write seed file");
+
+        let anchor = compute_line_hash("hello");
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
+          "messages": [
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_hashline_ok",
+                  "type": "function",
+                  "function": {
+                    "name": "apply_patch",
+                    "arguments": {
+                      "patch": format!("= 1 {}\nworld", anchor),
+                      "filePath": "note.txt",
+                      "cwd": temp_dir.to_string_lossy().to_string()
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments text");
+        let args: Value = serde_json::from_str(args_text).expect("args object");
+        let patch = args["patch"].as_str().expect("patch");
+        assert!(patch.starts_with("*** Begin Patch"));
+        assert!(patch.contains("*** Update File: note.txt"));
+        assert!(patch.contains("+world"));
+
+        let _ = fs::remove_file(&target_path);
+        let _ = fs::remove_dir(&temp_dir);
     }
 }

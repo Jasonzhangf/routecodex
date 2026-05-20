@@ -425,10 +425,10 @@ fn hub_state_context_populated(state: &Map<String, Value>) -> bool {
     false
 }
 
-pub(crate) fn normalize_chat_envelope_tool_calls(chat: &Value) -> Value {
+pub(crate) fn normalize_chat_envelope_tool_calls(chat: &Value) -> Result<Value, napi::Error> {
     let mut chat_normalized = chat.clone();
-    normalize_shell_like_tool_calls_before_governance(&mut chat_normalized);
-    chat_normalized
+    normalize_shell_like_tool_calls_before_governance(&mut chat_normalized)?;
+    Ok(chat_normalized)
 }
 
 fn chat_envelope_to_standardized_impl(
@@ -448,7 +448,7 @@ fn chat_envelope_to_standardized_impl(
         .unwrap_or_default();
     let model = extract_model(&parameters)?;
 
-    let chat_normalized = normalize_chat_envelope_tool_calls(chat);
+    let chat_normalized = normalize_chat_envelope_tool_calls(chat)?;
     let chat_row = chat_normalized
         .as_object()
         .cloned()

@@ -292,7 +292,8 @@ fn chat_envelope_to_standardized_fast(
     chat_envelope: &Value,
     adapter_context: &Value,
 ) -> Result<Value, String> {
-    let chat_envelope = normalize_chat_envelope_tool_calls(chat_envelope);
+    let chat_envelope = normalize_chat_envelope_tool_calls(chat_envelope)
+        .map_err(|err| err.to_string())?;
 
     let model = chat_envelope
         .get("model")
