@@ -7,7 +7,7 @@ import {
   mergeClockReservationIntoMetadataWithNative,
 } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
 import { replaceMutableRecord } from "./hub-pipeline-mutable-record-utils.js";
-import { logHubPipelineNonBlockingError } from "./hub-pipeline-runtime-blocks.js";
+
 
 type ToolGovernanceNodeResult = {
   success: boolean;
@@ -30,10 +30,8 @@ export function propagateClockReservationToMetadata(
     });
     replaceMutableRecord(metadata, next);
   } catch (error) {
-    logHubPipelineNonBlockingError(
-      "propagateClockReservationToMetadata",
-      error,
-    );
+    const reason = error instanceof Error ? error.message : String(error ?? "unknown");
+    console.warn(`[hub-pipeline] propagateClockReservationToMetadata failed (non-blocking): ${reason}`);
   }
 }
 
