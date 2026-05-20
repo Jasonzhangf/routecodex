@@ -21,6 +21,10 @@ type ErrorWithMetadata = Error & {
   status?: number;
   statusCode?: number;
   retryable?: boolean;
+  rateLimitKind?: string;
+  cooldownOverrideMs?: number;
+  quotaScope?: string;
+  quotaReason?: string;
   /**
    * 粗粒度错误类别：EXTERNAL_ERROR / TOOL_ERROR / INTERNAL_ERROR。
    * 当错误来自 llmswitch-core 的 ProviderProtocolError 时会自动携带。
@@ -83,6 +87,30 @@ function buildProviderErrorEvent(options: EmitOptions): ProviderErrorEventExtend
     mergedDetails = {
       ...(mergedDetails ?? {}),
       protocolErrorCode: err.code.toUpperCase()
+    };
+  }
+  if (typeof err.rateLimitKind === 'string' && err.rateLimitKind.trim().length) {
+    mergedDetails = {
+      ...(mergedDetails ?? {}),
+      rateLimitKind: err.rateLimitKind.trim()
+    };
+  }
+  if (typeof err.cooldownOverrideMs === 'number' && Number.isFinite(err.cooldownOverrideMs) && err.cooldownOverrideMs > 0) {
+    mergedDetails = {
+      ...(mergedDetails ?? {}),
+      cooldownOverrideMs: err.cooldownOverrideMs
+    };
+  }
+  if (typeof err.quotaScope === 'string' && err.quotaScope.trim().length) {
+    mergedDetails = {
+      ...(mergedDetails ?? {}),
+      quotaScope: err.quotaScope.trim()
+    };
+  }
+  if (typeof err.quotaReason === 'string' && err.quotaReason.trim().length) {
+    mergedDetails = {
+      ...(mergedDetails ?? {}),
+      quotaReason: err.quotaReason.trim()
     };
   }
   

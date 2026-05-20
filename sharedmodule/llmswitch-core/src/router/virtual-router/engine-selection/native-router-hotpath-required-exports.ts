@@ -309,6 +309,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "resolveGovernanceContextJson",
   "resolveStopMessageSessionScopeJson",
   "resolveServertoolStickyKeyJson",
+  "planStopMessagePersistedLookupJson",
   "resolveVirtualRouterStickyKeyJson",
   "VirtualRouterEngineProxy",
   "ensureProtocolStateJson",

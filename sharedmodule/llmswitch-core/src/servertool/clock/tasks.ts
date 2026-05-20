@@ -386,16 +386,16 @@ export async function listClockSessionIds(): Promise<string[]> {
     .filter((entry) => entry.name !== 'ntp-state.json')
     .filter((entry) => (typeof entry.isFile === 'function' ? entry.isFile() : true))
     .map(async (entry) => {
-      const fallbackSessionId = entry.name.slice(0, -'.json'.length).trim();
+      const defaultSessionId = entry.name.slice(0, -'.json'.length).trim();
       try {
         const raw = await readJsonFile(path.join(clockDir, entry.name));
         const sessionId =
           raw && typeof raw === 'object' && typeof (raw as { sessionId?: unknown }).sessionId === 'string'
             ? String((raw as { sessionId?: unknown }).sessionId).trim()
             : '';
-        return sessionId || fallbackSessionId;
+        return sessionId || defaultSessionId;
       } catch {
-        return fallbackSessionId;
+        return defaultSessionId;
       }
     }));
   return Array.from(new Set(sessionIds.filter(Boolean))).sort((a, b) => a.localeCompare(b));

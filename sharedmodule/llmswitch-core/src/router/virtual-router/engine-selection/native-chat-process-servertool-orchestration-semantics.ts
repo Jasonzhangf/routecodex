@@ -10,7 +10,8 @@ import {
   parseServertoolFollowupRuntimePlanPayload,
   parseServertoolAutoHookQueuesPayload,
   parseServertoolOutcomePlanPayload,
-  parseServertoolResponseStagePayload
+  parseServertoolResponseStagePayload,
+  parseStopMessagePersistedLookupPlanPayload
 } from './native-router-hotpath-analysis.js';
 
 export type NativeChatWebSearchPlan = {
@@ -67,6 +68,10 @@ export type NativeServertoolFollowupRuntimePlan = ReturnType<typeof parseServert
   : never;
 
 export type NativeServertoolSkeletonDocument = Record<string, unknown>;
+
+export type NativeStopMessagePersistedLookupPlan = ReturnType<typeof parseStopMessagePersistedLookupPlanPayload> extends infer T
+  ? Exclude<T, null>
+  : never;
 
 const NON_BLOCKING_SERVERTOOL_ORCHESTRATION_LOG_THROTTLE_MS = 60_000;
 const nonBlockingServertoolOrchestrationLogState = new Map<string, number>();
@@ -388,6 +393,26 @@ export function resolveServertoolStickyKeyWithNative(
     const response = invokeNativeStringCapabilityWithJsonArgs(capability, [metadata]);
     const parsed = parseStringOrUndefined(response);
     return parsed === null ? fail('invalid payload') : parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planStopMessagePersistedLookupWithNative(input: {
+  record: Record<string, unknown>;
+  runtimeMetadata?: Record<string, unknown>;
+  options?: {
+    includeSnapshotLookup?: boolean;
+    includeTombstoneLookup?: boolean;
+  };
+}): NativeStopMessagePersistedLookupPlan {
+  const capability = 'planStopMessagePersistedLookupJson';
+  const fail = (reason?: string) => failNativeRequired<NativeStopMessagePersistedLookupPlan>(capability, reason);
+  try {
+    const response = invokeNativeStringCapabilityWithJsonArgs(capability, [input]);
+    const parsed = parseStopMessagePersistedLookupPlanPayload(response);
+    return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

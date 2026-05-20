@@ -129,7 +129,7 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
   applyDefaultStageTimingMode();
   server.userConfig = asRecord(userConfig);
   server.ensureProviderProfilesFromUserConfig();
-  const routerInput = server.resolveVirtualRouterInput(server.userConfig);
+  const routerInput = await server.resolveVirtualRouterInput(server.userConfig);
   const bootstrapArtifacts = await server.bootstrapVirtualRouter(routerInput);
   enforceNoMockRuntimeInServer({
     runtimeMap: bootstrapArtifacts?.targetRuntime,
@@ -157,10 +157,7 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(`[provider-traffic] failed to reset state on runtime setup (non-blocking): ${reason}`);
   }
-  const preloadedBridgeModules = await preloadCriticalBridgeRuntimeModules();
-  console.log(
-    `[llmswitch-bridge] preloaded critical modules: ${preloadedBridgeModules.loaded.join(', ')}`
-  );
+  await preloadCriticalBridgeRuntimeModules();
   const hubCtor = await server.ensureHubPipelineCtor();
   const hubConfig: { virtualRouter: unknown; [key: string]: unknown } = {
     virtualRouter: bootstrapArtifacts.config

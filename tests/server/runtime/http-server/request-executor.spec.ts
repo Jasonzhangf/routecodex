@@ -83,6 +83,152 @@ describe('HubRequestExecutor failover', () => {
     setServerToolEnabled(previousServerToolState.enabled, previousServerToolState.updatedBy);
   });
 
+
+  test('reselects alternative windsurf key when transport backoff is still active on newly selected target', async () => {
+    const recordAttempt = () => undefined;
+
+    const sameProviderAltKeyExcluded = new Set<string>();
+    const sameProviderAltKeyExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+      error: Object.assign(new Error('fetch failed'), {
+        code: 'HTTP_502',
+        statusCode: 502
+      }),
+      retryError: {
+        statusCode: 502,
+        errorCode: 'HTTP_502',
+        reason: 'fetch failed'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      providerKey: 'windsurf.ws-pro-1.gpt-5.5-medium',
+      runtimeKey: 'windsurf.ws-pro-1',
+      logicalRequestChainKey: 'req-windsurf-same-provider-next-key',
+      logicalChainRetryLimitStageRequestId: 'req-windsurf-same-provider-next-key',
+      routePool: [
+        'windsurf.ws-pro-1.gpt-5.5-medium',
+        'windsurf.ws-pro-2.gpt-5.5-medium',
+        'windsurf.ws-pro-3.gpt-5.5-medium'
+      ],
+      runtimeManager: {
+        resolveRuntimeKey: (providerKey?: string) => providerKey ? providerKey.split('.gpt-')[0] : undefined
+      },
+      excludedProviderKeys: sameProviderAltKeyExcluded,
+      recordAttempt,
+      logStage: () => undefined,
+      status: 502
+    });
+    expect(sameProviderAltKeyExecutionPlan).toEqual(expect.objectContaining({
+      shouldRetry: true,
+      excludedCurrentProvider: false,
+      retrySwitchPlan: expect.objectContaining({
+        switchAction: 'retry_same_provider',
+        decisionLabel: 'recoverable_backoff_same_provider'
+      })
+    }));
+    expect(Array.from(sameProviderAltKeyExcluded)).toEqual(['windsurf.ws-pro-1.gpt-5.5-medium']);
+
+    const windsurfStreamCancelExcluded = new Set<string>();
+    const windsurfStreamCancelExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+      error: Object.assign(new Error('The pending stream has been canceled'), {
+        code: 'ERR_HTTP2_STREAM_CANCEL',
+        upstreamCode: 'ERR_HTTP2_STREAM_CANCEL'
+      }),
+      retryError: {
+        errorCode: 'ERR_HTTP2_STREAM_CANCEL',
+        upstreamCode: 'ERR_HTTP2_STREAM_CANCEL',
+        reason: 'The pending stream has been canceled'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      providerKey: 'windsurf.ws-pro-1.gpt-5.4-medium',
+      runtimeKey: 'windsurf.ws-pro-1',
+      logicalRequestChainKey: 'req-windsurf-stream-cancel-reroute',
+      logicalChainRetryLimitStageRequestId: 'req-windsurf-stream-cancel-reroute',
+      routePool: [
+        'windsurf.ws-pro-1.gpt-5.4-medium',
+        'windsurf.ws-pro-2.gpt-5.4-medium',
+        'windsurf.ws-pro-3.gpt-5.4-medium'
+      ],
+      runtimeManager: {
+        resolveRuntimeKey: (providerKey?: string) => providerKey ? providerKey.split('.gpt-')[0] : undefined
+      },
+      excludedProviderKeys: windsurfStreamCancelExcluded,
+      recordAttempt,
+      logStage: () => undefined,
+      status: undefined
+    });
+    expect(windsurfStreamCancelExecutionPlan).toEqual(expect.objectContaining({
+      shouldRetry: true,
+      excludedCurrentProvider: true,
+      retrySwitchPlan: expect.objectContaining({
+        switchAction: 'exclude_and_reroute'
+      })
+    }));
+    expect(Array.from(windsurfStreamCancelExcluded)).toEqual(['windsurf.ws-pro-1.gpt-5.4-medium']);
+
+    const windsurfTransportBackoffExcluded = new Set<string>();
+    const windsurfTransportBackoffKey = __requestExecutorTestables.buildProviderTransportBackoffKey({
+      providerKey: 'windsurf.ws-pro-1.gpt-5.4-medium',
+      runtimeKey: 'windsurf.ws-pro-1'
+    });
+    expect(typeof windsurfTransportBackoffKey).toBe('string');
+    __requestExecutorTestables.consumeProviderTransportBackoffMs(windsurfTransportBackoffKey!, {
+      error: Object.assign(new Error('The pending stream has been canceled'), {
+        code: 'ERR_HTTP2_STREAM_CANCEL'
+      }),
+      statusCode: undefined
+    });
+    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(windsurfTransportBackoffKey!)).toBeGreaterThan(0);
+
+    const backoffReselectionPlan = __requestExecutorTestables.resolveRequestExecutorPipelineAttempt({
+      inputRequestId: 'req-windsurf-transport-backoff-reselect',
+      providerRequestId: 'req-windsurf-transport-backoff-reselect',
+      attempt: 2,
+      metadataForAttempt: {},
+      pipelineResult: {
+        requestId: 'req-windsurf-transport-backoff-reselect',
+        metadata: {},
+        routingDecision: {
+          routeName: 'thinking',
+          pool: [
+            'windsurf.ws-pro-1.gpt-5.4-medium',
+            'windsurf.ws-pro-2.gpt-5.4-medium',
+            'windsurf.ws-pro-3.gpt-5.4-medium'
+          ]
+        },
+        providerPayload: { body: { model: 'gpt-5.4-medium' } },
+        target: {
+          providerKey: 'windsurf.ws-pro-1.gpt-5.4-medium',
+          runtimeKey: 'windsurf.ws-pro-1',
+          compatibilityProfile: 'chat:windsurf'
+        }
+      } as any,
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'req-windsurf-transport-backoff-reselect',
+      clientAbortSignal: undefined,
+      initialRoutePool: null,
+      excludedProviderKeys: windsurfTransportBackoffExcluded,
+      lastError: Object.assign(new Error('The pending stream has been canceled'), {
+        code: 'ERR_HTTP2_STREAM_CANCEL'
+      }),
+      throwIfClientAbortSignalAborted: () => undefined,
+      logStage: () => undefined,
+      extractRetryErrorSnapshot: __requestExecutorTestables.extractRetryErrorSnapshot,
+      hubStartedAtMs: Date.now() - 10,
+      pipelineLabel: 'hub'
+    });
+    expect(backoffReselectionPlan).toEqual({
+      kind: 'retry_next_attempt',
+      initialRoutePool: [
+        'windsurf.ws-pro-1.gpt-5.4-medium',
+        'windsurf.ws-pro-2.gpt-5.4-medium',
+        'windsurf.ws-pro-3.gpt-5.4-medium'
+      ]
+    });
+    expect(Array.from(windsurfTransportBackoffExcluded)).toEqual(['windsurf.ws-pro-1.gpt-5.4-medium']);
+    __requestExecutorTestables.clearProviderTransportBackoff(windsurfTransportBackoffKey!);
+  });
+
   test('propagates concurrency busy state by runtime/alias scope instead of provider target key', async () => {
     let busyCallback: ((scopeKey: string, busy: boolean) => void) | null = null;
     const fakeTrafficGovernor: ProviderTrafficGovernorLike = {
@@ -1212,6 +1358,7 @@ describe('HubRequestExecutor failover', () => {
         })
       }));
       expect(Array.from(networkExcluded)).toEqual([]);
+
 
       const notFoundExcluded = new Set<string>();
       const notFoundExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({

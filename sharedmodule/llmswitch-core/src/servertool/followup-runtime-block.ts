@@ -160,7 +160,7 @@ export function applyClientInjectOnlyMetadata(args: {
   metadata: JsonObject;
   defaultText: string;
   readClientInjectOnly: (metadata: JsonObject) => boolean;
-  normalizeClientInjectText: (value: unknown, fallback?: string) => string;
+  normalizeClientInjectText: (value: unknown) => string;
 }): { forced: boolean } {
   const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
   if ((args.flowId !== 'stop_message_flow' && !decision.clientInjectOnly) || args.readClientInjectOnly(args.metadata)) {
@@ -168,7 +168,7 @@ export function applyClientInjectOnlyMetadata(args: {
   }
   const record = args.metadata as Record<string, unknown>;
   record.clientInjectOnly = true;
-  record.clientInjectText = args.normalizeClientInjectText(record.clientInjectText ?? args.defaultText, 'continue');
+  record.clientInjectText = args.normalizeClientInjectText(record.clientInjectText ?? args.defaultText);
   if (typeof record.clientInjectSource !== 'string') {
     record.clientInjectSource = decision.clientInjectSource ?? 'servertool.heartbeat';
   }

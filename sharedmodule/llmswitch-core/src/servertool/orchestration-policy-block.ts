@@ -10,10 +10,10 @@ import { inspectStopGatewaySignal } from './stop-gateway-context.js';
 
 const FOLLOWUP_ERROR_REASON_MAX_LENGTH = 220;
 
-function parseTimeoutMs(raw: unknown, fallback: number): number {
+function parseTimeoutMs(raw: unknown): number {
   const n = typeof raw === 'string' ? Number(raw.trim()) : typeof raw === 'number' ? raw : Number.NaN;
   if (!Number.isFinite(n) || n <= 0) {
-    return fallback;
+    throw new Error('parseTimeoutMs: invalid timeout value');
   }
   return Math.floor(n);
 }
@@ -42,21 +42,19 @@ function isStopFinishReasonWithoutToolCalls(base: unknown): boolean {
 }
 
 export function resolveServerToolTimeoutMs(): number {
-  return parseTimeoutMs(
-    process.env.ROUTECODEX_SERVERTOOL_TIMEOUT_MS ||
-      process.env.RCC_SERVERTOOL_TIMEOUT_MS ||
-      process.env.LLMSWITCH_SERVERTOOL_TIMEOUT_MS,
-    0
-  );
+  const raw = process.env.ROUTECODEX_SERVERTOOL_TIMEOUT_MS ||
+    process.env.RCC_SERVERTOOL_TIMEOUT_MS ||
+    process.env.LLMSWITCH_SERVERTOOL_TIMEOUT_MS;
+  if (!raw) return 0;
+  return parseTimeoutMs(raw);
 }
 
-export function resolveServerToolFollowupTimeoutMs(_fallback: number): number {
-  return parseTimeoutMs(
-    process.env.ROUTECODEX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS ||
-      process.env.RCC_SERVERTOOL_FOLLOWUP_TIMEOUT_MS ||
-      process.env.LLMSWITCH_SERVERTOOL_FOLLOWUP_TIMEOUT_MS,
-    0
-  );
+export function resolveServerToolFollowupTimeoutMs(): number {
+  const raw = process.env.ROUTECODEX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS ||
+    process.env.RCC_SERVERTOOL_FOLLOWUP_TIMEOUT_MS ||
+    process.env.LLMSWITCH_SERVERTOOL_FOLLOWUP_TIMEOUT_MS;
+  if (!raw) return 0;
+  return parseTimeoutMs(raw);
 }
 
 export function readClientInjectOnly(metadata: JsonObject): boolean {
@@ -64,13 +62,15 @@ export function readClientInjectOnly(metadata: JsonObject): boolean {
   return parsed === true;
 }
 
-export function normalizeClientInjectText(value: unknown, fallback = '继续执行'): string {
-  const text =
-    typeof value === 'string' && value.trim().length > 0
-      ? value.trim()
-      : fallback;
-  const sanitized = sanitizeFollowupText(text);
-  return sanitized || fallback;
+export function normalizeClientInjectText(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error('normalizeClientInjectText: value must be a non-empty string');
+  }
+  const sanitized = sanitizeFollowupText(value.trim());
+  if (!sanitized) {
+    throw new Error('normalizeClientInjectText: sanitized result is empty');
+  }
+  return sanitized;
 }
 
 export function compactFollowupErrorReason(value: unknown): string | undefined {

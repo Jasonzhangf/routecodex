@@ -104,12 +104,12 @@ async function processHeartbeatStateFile(
   at: number,
 ): Promise<void> {
   const raw = await readJsonFile(filePath);
-  const fallbackTmuxSessionId = path.basename(filePath).replace(/\.json$/i, "");
-  const state = coerceHeartbeatState(raw, fallbackTmuxSessionId);
+  const resolvedTmuxSessionId = path.basename(filePath).replace(/\.json$/i, "");
+  const state = coerceHeartbeatState(raw, resolvedTmuxSessionId);
   const tmuxSessionId = readString(state.tmuxSessionId);
   if (!tmuxSessionId) {
     await appendHeartbeatHistoryEvent({
-      tmuxSessionId: fallbackTmuxSessionId,
+      tmuxSessionId: resolvedTmuxSessionId,
       source: "daemon.tick",
       action: "state_invalid",
       outcome: "failed",

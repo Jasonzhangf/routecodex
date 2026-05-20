@@ -232,10 +232,6 @@ export class ProviderFactory {
   }
 
   private static buildConfigFromRuntime(runtime: ProviderRuntimeProfile): OpenAIStandardConfig {
-    const baseUrl = (runtime.baseUrl || runtime.endpoint || '').trim();
-    if (!baseUrl || !baseUrl.trim()) {
-      throw new Error(`[ProviderFactory] runtime ${runtime.runtimeKey} missing baseUrl`);
-    }
     const providerType = normalizeProviderType(runtime.providerType);
     const providerFamily = normalizeProviderFamily(
       runtime.providerFamily,
@@ -243,6 +239,16 @@ export class ProviderFactory {
       runtime.providerKey,
       providerType
     );
+    const isWindsurfRuntime = isWindsurfRuntimeIdentity({
+      providerFamily,
+      providerId: runtime.providerId,
+      providerKey: runtime.providerKey,
+      compatibilityProfile: runtime.compatibilityProfile
+    });
+    const baseUrl = (runtime.baseUrl || runtime.endpoint || '').trim();
+    if (!baseUrl && !isWindsurfRuntime) {
+      throw new Error(`[ProviderFactory] runtime ${runtime.runtimeKey} missing baseUrl`);
+    }
     const authConfig = mapRuntimeAuthToConfig(runtime.auth, runtime.runtimeKey, runtime);
     const endpointOverride =
       runtime.endpoint && !/^https?:\/\//i.test(runtime.endpoint.trim())
@@ -278,8 +284,18 @@ export class ProviderFactory {
     ) {
       extensions.deepseek = deepseekOptions;
     }
+    const runtimeExtensions = (runtime as unknown as { extensions?: Record<string, unknown> }).extensions;
+    const nestedWindsurfOptions =
+      runtimeExtensions
+      && typeof runtimeExtensions === 'object'
+      && !Array.isArray(runtimeExtensions)
+      && runtimeExtensions.windsurf
+      && typeof runtimeExtensions.windsurf === 'object'
+      && !Array.isArray(runtimeExtensions.windsurf)
+        ? (runtimeExtensions.windsurf as Record<string, unknown>)
+        : runtimeExtensions;
     const windsurfOptions = normalizeWindsurfProviderRuntimeOptions(
-      (runtime as unknown as { extensions?: Record<string, unknown> }).extensions
+      nestedWindsurfOptions as Record<string, unknown> | undefined
     );
     if (
       windsurfOptions &&

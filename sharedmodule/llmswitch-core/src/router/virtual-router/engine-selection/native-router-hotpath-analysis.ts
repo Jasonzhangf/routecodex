@@ -143,6 +143,15 @@ export type ServertoolFollowupRuntimePlanPayload = {
   contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
 };
 
+export type StopMessagePersistedLookupPlanPayload = {
+  strictSessionScope?: string | null;
+  stickyKey?: string | null;
+  candidateKeys: string[];
+  lookupPolicy: string;
+  readStopMessageSnapshot: boolean;
+  readStopMessageTombstone: boolean;
+};
+
 
 const NON_BLOCKING_PARSE_LOG_THROTTLE_MS = 60_000;
 const nonBlockingParseLogState = new Map<string, number>();
@@ -252,6 +261,33 @@ export function parseClockClearDirectivePayload(raw: string): ClockClearDirectiv
   return {
     hadClear: parsed.hadClear,
     next: parsed.next
+  };
+}
+
+export function parseStopMessagePersistedLookupPlanPayload(raw: string): StopMessagePersistedLookupPlanPayload | null {
+  const parsed = parseJson('parseStopMessagePersistedLookupPlanPayload', raw) as {
+    strictSessionScope?: unknown;
+    stickyKey?: unknown;
+    candidateKeys?: unknown;
+    lookupPolicy?: unknown;
+    readStopMessageSnapshot?: unknown;
+    readStopMessageTombstone?: unknown;
+  } | typeof JSON_PARSE_FAILED;
+  if (parsed === JSON_PARSE_FAILED || !parsed || !Array.isArray(parsed.candidateKeys) || typeof parsed.lookupPolicy !== 'string' || typeof parsed.readStopMessageSnapshot !== 'boolean' || typeof parsed.readStopMessageTombstone !== 'boolean') {
+    return null;
+  }
+  const candidateKeys = parsed.candidateKeys
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim());
+  const strictSessionScope = typeof parsed.strictSessionScope === 'string' && parsed.strictSessionScope.trim().length > 0 ? parsed.strictSessionScope.trim() : null;
+  const stickyKey = typeof parsed.stickyKey === 'string' && parsed.stickyKey.trim().length > 0 ? parsed.stickyKey.trim() : null;
+  return {
+    strictSessionScope,
+    stickyKey,
+    candidateKeys,
+    lookupPolicy: parsed.lookupPolicy,
+    readStopMessageSnapshot: parsed.readStopMessageSnapshot,
+    readStopMessageTombstone: parsed.readStopMessageTombstone
   };
 }
 

@@ -18,6 +18,15 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - L376+ `hard-guard`: fallback / 静默失败治理硬规则
 
 ## 标准重构 / 修复闭环（强制顺序）
+## RCC 配置真源（新增，强制）
+
+1. RouteCodex 运行时 provider/router 配置真源优先看 `~/.rcc/`，不是仓库内 `config/`、不是 `~/.codex/config.toml`。
+2. 排查“某 provider 是否已配置/当前 targets 是什么/某端口命中什么路由”时，先读：
+   - `~/.rcc/config.toml`
+   - `~/.rcc/config.<provider>.toml`（如 `config.windsurf.toml`）
+3. 只有在需要核对运行时合并结果时，才把 `~/config/merged-config.<port>.json` 当作派生快照；它不是首要真源。
+4. 若本次任务暴露出 agent 先查错配置源，必须先纠正到 `~/.rcc`，再继续分析 provider/token/router 问题。
+
 
 > 适用于 Hub Pipeline / Virtual Router / servertool / provider runtime / Rust 化收口。  
 > 必须按顺序推进；没有上一步证据，不允许跳下一步。
@@ -978,3 +987,4 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - SSE decode stats null-contract（2026-05-17）：Rust `extract_decode_stats_json()` 在 payload 缺少 `__rccDecodeStats` 时必须返回字符串 `"null"`，不能抛 `Status::Ok("null")`；否则 TS `extractDecodeStatsWithNative()` 会把“无 stats”误报成 `native extractDecodeStatsJson is required but unavailable: null`。
 - provider ban 黑盒排查铁律（2026-05-18）：若 5555/5520 出现“同一个 provider 明明应该被 ban，却提前/重复/根本不 ban”，先跑 `scripts/tests/provider-failure-ban-blackbox.mjs`，并同时挂 `provider-runtime-ingress` observer 看**每次失败到底上报了几条 error event、stage 是什么**；不要只看 selection 日志猜。
 - provider 错误重复上报真源（2026-05-18）：主链 provider 失败可能同时来自 `base-provider.ts -> emitProviderError(stage=provider.http)` 与 `request-executor-provider-failure.ts -> emitProviderErrorAndWait(stage=provider.send)`；若黑盒显示 502 两次就提前 cooldown，先审 `src/providers/core/utils/provider-error-reporter.ts` 的单次错误去重 marker，禁止去 router selection/quota view 补第三语义面。
+- 高频周期日志禁令（2026-05-20）：**未经 Jason 明确要求，禁止任何 500ms/逐轮/按 poll tick 输出的运行态日志进入主链**，尤其是 provider poll / heartbeat / idle counter / step scan 这类周期调试信息。此类日志不允许“节流后保留”，默认必须物理删除；只有状态跃迁、最终退出、明确错误三类日志可保留。若需要排查，优先 requestId 定点样本或临时本地调试，不得把高频日志带入常规运行态。

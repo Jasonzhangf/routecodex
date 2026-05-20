@@ -27,6 +27,14 @@ struct ProviderAuthConfigJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    mobile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    account_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    account_alias: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     token_file: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     token_url: Option<String>,
@@ -99,6 +107,8 @@ struct ProviderRuntimeProfileJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     deepseek: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    extensions: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     server_tools_disabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     model_capabilities: Option<BTreeMap<String, Vec<String>>>,
@@ -148,6 +158,8 @@ struct ProviderProfileJson {
     anthropic_thinking_budgets: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     deepseek: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extensions: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     server_tools_disabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -202,6 +214,7 @@ struct NormalizedProvider {
     model_anthropic_thinking_budgets: Option<BTreeMap<String, Value>>,
     default_anthropic_thinking_budgets: Option<Value>,
     deepseek: Option<Value>,
+    extensions: Option<Value>,
     server_tools_disabled: bool,
     model_capabilities: Option<BTreeMap<String, Vec<String>>>,
 }
@@ -222,6 +235,10 @@ struct AuthTypeInfo {
 #[derive(Debug, Clone, Default)]
 struct AuthFieldDefaults {
     secret_ref: Option<String>,
+    mobile: Option<String>,
+    password: Option<String>,
+    account_file: Option<String>,
+    account_alias: Option<String>,
     token_file: Option<String>,
     token_url: Option<String>,
     device_code_url: Option<String>,
@@ -239,6 +256,10 @@ struct AuthCandidate {
     raw_type: Option<String>,
     value: Option<String>,
     secret_ref: Option<String>,
+    mobile: Option<String>,
+    password: Option<String>,
+    account_file: Option<String>,
+    account_alias: Option<String>,
     token_file: Option<String>,
     token_url: Option<String>,
     device_code_url: Option<String>,
@@ -401,6 +422,7 @@ fn build_provider_runtime_entries(
                         .default_anthropic_thinking_budgets
                         .clone(),
                     deepseek: normalized_provider.deepseek.clone(),
+                    extensions: normalized_provider.extensions.clone(),
                     server_tools_disabled: if normalized_provider.server_tools_disabled {
                         Some(true)
                     } else {
@@ -485,6 +507,7 @@ fn build_provider_profiles(
                 anthropic_thinking,
                 anthropic_thinking_budgets: anthropic_thinking_budgets.clone(),
                 deepseek: runtime.deepseek.clone(),
+                extensions: runtime.extensions.clone(),
                 server_tools_disabled: runtime.server_tools_disabled,
                 model_capabilities: runtime.model_capabilities.clone(),
             },
@@ -617,6 +640,7 @@ fn normalize_provider(
         model_anthropic_thinking_budgets,
         default_anthropic_thinking_budgets,
         deepseek,
+        extensions: normalize_provider_extensions(provider),
         server_tools_disabled,
         model_capabilities,
     })
@@ -833,6 +857,14 @@ fn extract_provider_auth_entries(
             value: read_optional_string(auth.get("value")),
             raw_type: base_raw_type_source.clone(),
             secret_ref: read_optional_string(auth.get("secretRef")),
+            mobile: read_optional_string(auth.get("mobile"))
+                .or_else(|| read_optional_string(auth.get("account")))
+                .or_else(|| read_optional_string(auth.get("username"))),
+            password: read_optional_string(auth.get("password")),
+            account_file: read_optional_string(auth.get("accountFile"))
+                .or_else(|| read_optional_string(auth.get("account_file"))),
+            account_alias: read_optional_string(auth.get("accountAlias"))
+                .or_else(|| read_optional_string(auth.get("account_alias"))),
             token_file: read_optional_string(auth.get("tokenFile"))
                 .or_else(|| read_optional_string(auth.get("file"))),
             token_url: read_optional_string(auth.get("tokenUrl"))
@@ -1012,6 +1044,10 @@ fn extract_provider_auth_entries(
 fn auth_candidate_has_material(candidate: &AuthCandidate) -> bool {
     candidate.value.is_some()
         || candidate.secret_ref.is_some()
+        || candidate.mobile.is_some()
+        || candidate.password.is_some()
+        || candidate.account_file.is_some()
+        || candidate.account_alias.is_some()
         || candidate.token_file.is_some()
         || candidate.token_url.is_some()
         || candidate.device_code_url.is_some()
@@ -1033,6 +1069,10 @@ fn auth_candidate_has_effective_material(
 ) -> bool {
     candidate.value.is_some()
         || candidate.secret_ref.is_some()
+        || candidate.mobile.is_some()
+        || candidate.password.is_some()
+        || candidate.account_file.is_some()
+        || candidate.account_alias.is_some()
         || candidate.token_file.is_some()
         || candidate.token_url.is_some()
         || candidate.device_code_url.is_some()
@@ -1047,6 +1087,10 @@ fn auth_candidate_has_effective_material(
             .map(|items| !items.is_empty())
             .unwrap_or(false)
         || defaults.secret_ref.is_some()
+        || defaults.mobile.is_some()
+        || defaults.password.is_some()
+        || defaults.account_file.is_some()
+        || defaults.account_alias.is_some()
         || defaults.token_file.is_some()
         || defaults.token_url.is_some()
         || defaults.device_code_url.is_some()
@@ -1091,6 +1135,14 @@ fn push_auth_entry_from_record(
             value: read_optional_string(record.get("value"))
                 .or_else(|| read_optional_string(record.get("apiKey"))),
             secret_ref: read_optional_string(record.get("secretRef")),
+            mobile: read_optional_string(record.get("mobile"))
+                .or_else(|| read_optional_string(record.get("account")))
+                .or_else(|| read_optional_string(record.get("username"))),
+            password: read_optional_string(record.get("password")),
+            account_file: read_optional_string(record.get("accountFile"))
+                .or_else(|| read_optional_string(record.get("account_file"))),
+            account_alias: read_optional_string(record.get("accountAlias"))
+                .or_else(|| read_optional_string(record.get("account_alias"))),
             token_file: read_optional_string(record.get("tokenFile")),
             token_url: read_optional_string(record.get("tokenUrl"))
                 .or_else(|| read_optional_string(record.get("token_url"))),
@@ -1192,6 +1244,22 @@ fn push_auth_entry(
         raw_type: Some(raw_type_source.clone()),
         oauth_provider_id,
         value: candidate.value.clone(),
+        mobile: candidate
+            .mobile
+            .clone()
+            .or_else(|| defaults.mobile.clone()),
+        password: candidate
+            .password
+            .clone()
+            .or_else(|| defaults.password.clone()),
+        account_file: candidate
+            .account_file
+            .clone()
+            .or_else(|| defaults.account_file.clone()),
+        account_alias: candidate
+            .account_alias
+            .clone()
+            .or_else(|| defaults.account_alias.clone()),
         secret_ref: candidate
             .secret_ref
             .clone()
@@ -1247,6 +1315,14 @@ fn collect_auth_defaults(auth: &Map<String, Value>) -> AuthFieldDefaults {
     AuthFieldDefaults {
         secret_ref: read_optional_string(auth.get("secretRef"))
             .or_else(|| read_optional_string(auth.get("file"))),
+        mobile: read_optional_string(auth.get("mobile"))
+            .or_else(|| read_optional_string(auth.get("account")))
+            .or_else(|| read_optional_string(auth.get("username"))),
+        password: read_optional_string(auth.get("password")),
+        account_file: read_optional_string(auth.get("accountFile"))
+            .or_else(|| read_optional_string(auth.get("account_file"))),
+        account_alias: read_optional_string(auth.get("accountAlias"))
+            .or_else(|| read_optional_string(auth.get("account_alias"))),
         token_file: read_optional_string(auth.get("tokenFile"))
             .or_else(|| read_optional_string(auth.get("file"))),
         token_url: read_optional_string(auth.get("tokenUrl"))
@@ -1391,6 +1467,50 @@ fn interpret_auth_type(value: Option<&str>) -> AuthTypeInfo {
 mod tests {
     use super::bootstrap_virtual_router_providers_json;
     use serde_json::{json, Value};
+
+    #[test]
+    fn bootstrap_preserves_windsurf_account_credentials_in_runtime_auth() {
+        let providers = json!({
+            "windsurf": {
+                "id": "windsurf",
+                "enabled": true,
+                "type": "openai",
+                "providerModule": "windsurf-chat-provider",
+                "baseURL": "https://server.self-serve.windsurf.com",
+                "extensions": {
+                    "windsurf": {
+                        "transportBackend": "grpc",
+                        "lsPort": 42101,
+                        "csrfToken": "csrf-token"
+                    }
+                },
+                "auth": {
+                    "type": "windsurf-account",
+                    "entries": [
+                        {
+                            "alias": "ws-pro-1",
+                            "type": "windsurf-account",
+                            "account": "2094423@qq.com",
+                            "password": "welcome4zcam#"
+                        }
+                    ]
+                }
+            }
+        });
+
+        let output = bootstrap_virtual_router_providers_json(providers.to_string()).expect("bootstrap should succeed");
+        let parsed: Value = serde_json::from_str(&output).expect("output json should parse");
+        let auth = &parsed["runtimeEntries"]["windsurf.ws-pro-1"]["auth"];
+        assert_eq!(auth["type"], "apiKey");
+        assert_eq!(auth["rawType"], "windsurf-account");
+        assert_eq!(auth["mobile"], "2094423@qq.com");
+        assert_eq!(auth["password"], "welcome4zcam#");
+        let extensions = &parsed["runtimeEntries"]["windsurf.ws-pro-1"]["extensions"]["windsurf"];
+        assert_eq!(extensions["transportBackend"], "grpc");
+        assert_eq!(extensions["lsPort"], 42101);
+        assert_eq!(extensions["csrfToken"], "csrf-token");
+    }
+
 
     #[test]
     fn bootstrap_preserves_qwenchat_guest_raw_type_in_runtime_auth() {
@@ -1663,6 +1783,81 @@ fn parse_claude_code_app_version_from_user_agent(user_agent: &str) -> Option<Str
         .and_then(|re| re.captures(user_agent.trim()))
         .and_then(|caps| caps.get(1))
         .map(|m| m.as_str().to_string())
+}
+
+fn normalize_provider_extensions(provider: &Map<String, Value>) -> Option<Value> {
+    let mut out = Map::new();
+    if let Some(deepseek) = normalize_deepseek_options(provider) {
+        out.insert("deepseek".to_string(), deepseek);
+    }
+    if let Some(windsurf) = normalize_windsurf_options(provider) {
+        out.insert("windsurf".to_string(), windsurf);
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(Value::Object(out))
+    }
+}
+
+fn normalize_windsurf_options(provider: &Map<String, Value>) -> Option<Value> {
+    let direct = as_object(provider.get("windsurf"));
+    let ext = as_object(as_object(provider.get("extensions")).and_then(|ext| ext.get("windsurf")));
+    let source = if direct.map(|value| !value.is_empty()).unwrap_or(false) {
+        direct
+    } else {
+        ext
+    };
+    let Some(source) = source else {
+        return None;
+    };
+    let mut out = Map::new();
+    if let Some(backend) = source
+        .get("transportBackend")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| value == "grpc" || value == "cascade-cloud")
+    {
+        out.insert("transportBackend".to_string(), Value::String(backend));
+    }
+    if let Some(ls_port) = source.get("lsPort").and_then(Value::as_i64).filter(|value| *value > 0) {
+        out.insert("lsPort".to_string(), Value::Number(ls_port.into()));
+    }
+    if let Some(csrf_token) = source
+        .get("csrfToken")
+        .and_then(Value::as_str)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        out.insert("csrfToken".to_string(), Value::String(csrf_token.to_string()));
+    }
+    if let Some(poll_interval_ms) = source.get("pollIntervalMs").and_then(Value::as_i64).filter(|value| *value > 0) {
+        out.insert("pollIntervalMs".to_string(), Value::Number(poll_interval_ms.into()));
+    }
+    if let Some(poll_max_wait_ms) = source.get("pollMaxWaitMs").and_then(Value::as_i64).filter(|value| *value > 0) {
+        out.insert("pollMaxWaitMs".to_string(), Value::Number(poll_max_wait_ms.into()));
+    }
+    if let Some(api_base_url) = source
+        .get("apiBaseUrl")
+        .and_then(Value::as_str)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        out.insert("apiBaseUrl".to_string(), Value::String(api_base_url.to_string()));
+    }
+    if let Some(api_base_url_fallback) = source
+        .get("apiBaseUrlFallback")
+        .and_then(Value::as_str)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        out.insert("apiBaseUrlFallback".to_string(), Value::String(api_base_url_fallback.to_string()));
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(Value::Object(out))
+    }
 }
 
 fn normalize_deepseek_options(provider: &Map<String, Value>) -> Option<Value> {

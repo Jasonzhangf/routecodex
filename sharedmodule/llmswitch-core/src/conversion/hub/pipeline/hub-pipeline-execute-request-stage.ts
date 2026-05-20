@@ -11,7 +11,7 @@ import {
 import {
   executeRouteAndBuildOutbound,
 } from "./hub-pipeline-route-and-outbound.js";
-import { attachHubStageTopSummary } from "./hub-pipeline-chat-process-shared.js";
+import { attachHubStageTopSummary } from "./hub-pipeline-chat-process-request-utils.js";
 
 export async function executeRequestStagePipeline<TContext = Record<string, unknown>>(args: {
   normalized: NormalizedRequest;

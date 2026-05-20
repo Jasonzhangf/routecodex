@@ -4,8 +4,7 @@ import { buildProcessedRequestFromChatResponse } from '../../../../response/chat
 import type { ProcessedRequest } from '../../../../types/standardized.js';
 import { recordStage } from '../../../stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../../hub-stage-timing.js';
-import { finalizeRespProcessChatResponseWithNative } from '../../../../../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
-import { filterOutExecutedServerToolCalls } from '../../../../../../servertool/strip-servertool-calls.js';
+import { finalizeRespProcessChatResponseWithNative, filterOutExecutedServerToolCallsWithNative } from '../../../../../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
 
 export type ChatReasoningMode = 'keep' | 'drop' | 'append_to_content';
 
@@ -47,7 +46,12 @@ export async function runRespProcessStage2Finalize(
   // tool_calls into client required_action/output surfaces.
   const stripSource = options.originalPayload ?? options.payload;
   if (stripSource && typeof stripSource === 'object') {
-    finalized = filterOutExecutedServerToolCalls(finalized, stripSource as JsonObject);
+    const stripped: unknown = filterOutExecutedServerToolCallsWithNative(finalized, stripSource as JsonObject);
+    if (stripped && typeof stripped === 'object' && !Array.isArray(stripped)) {
+      finalized = stripped as JsonObject;
+    } else {
+      throw new Error('resp_process.stage2 finalize returned non-object payload after servertool strip');
+    }
   }
   logHubStageTiming(options.requestId, 'resp_process.stage2_native_finalize', 'completed', {
     elapsedMs: Date.now() - nativeFinalizeStart,

@@ -1,4 +1,4 @@
-import { extractGrpcFrames, grpcFrame, stripGrpcFrame } from '../../../../src/providers/core/runtime/grpc/grpc-client.ts';
+import { extractGrpcFrames, grpcFrame, stripGrpcFrame, __grpcClientTestables } from '../../../../src/providers/core/runtime/grpc/grpc-client.ts';
 
 describe('grpc-client framing', () => {
   test('grpcFrame writes 1-byte compression flag plus 4-byte big-endian payload length', () => {
@@ -24,5 +24,16 @@ describe('grpc-client framing', () => {
   test('stripGrpcFrame returns payload bytes for a single framed buffer', () => {
     const payload = Buffer.from('single');
     expect(stripGrpcFrame(grpcFrame(payload)).equals(payload)).toBe(true);
+  });
+
+  test('grpc headers align with WindsurfAPI csrf header contract', () => {
+    const unaryHeaders = __grpcClientTestables.buildGrpcHeaders('/exa.Service/Foo', 'csrf-1', false);
+    expect(unaryHeaders['x-codeium-csrf-token']).toBe('csrf-1');
+    expect(unaryHeaders['x-csrf-token']).toBeUndefined();
+    expect(unaryHeaders['grpc-accept-encoding']).toBeUndefined();
+
+    const streamHeaders = __grpcClientTestables.buildGrpcHeaders('/exa.Service/Bar', 'csrf-2', true);
+    expect(streamHeaders['x-codeium-csrf-token']).toBe('csrf-2');
+    expect(streamHeaders['grpc-accept-encoding']).toBe('identity,gzip,deflate');
   });
 });

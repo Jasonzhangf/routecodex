@@ -150,6 +150,32 @@ struct ServertoolOutcomePlanOutput {
     primary_execution_mode: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StopMessagePersistedLookupPlannerInput {
+    record: Value,
+    runtime_metadata: Option<Value>,
+    options: Option<StopMessagePersistedLookupPlannerOptions>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StopMessagePersistedLookupPlannerOptions {
+    include_snapshot_lookup: Option<bool>,
+    include_tombstone_lookup: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StopMessagePersistedLookupPlanOutput {
+    strict_session_scope: Option<String>,
+    sticky_key: Option<String>,
+    candidate_keys: Vec<String>,
+    lookup_policy: String,
+    read_stop_message_snapshot: bool,
+    read_stop_message_tombstone: bool,
+}
+
 fn build_pending_injection_messages_resolved(
     message_kinds: &[String],
     executed_tool_calls: &[ServertoolOutcomeExecutedToolCallInput],
@@ -736,6 +762,89 @@ fn resolve_stop_message_session_scope(metadata: &Value) -> Option<String> {
     None
 }
 
+fn push_unique_scope_key(out: &mut Vec<String>, value: Option<String>) {
+    let Some(raw) = value else {
+        return;
+    };
+    let normalized = raw.trim();
+    if normalized.is_empty() {
+        return;
+    }
+    if !out.iter().any(|entry| entry == normalized) {
+        out.push(normalized.to_string());
+    }
+}
+
+fn collect_stop_message_persisted_candidate_keys(
+    direct_record: &Value,
+    resolver_metadata: &Value,
+) -> (Option<String>, Option<String>, Vec<String>) {
+    let strict_session_scope = resolve_stop_message_session_scope(resolver_metadata);
+    let sticky_key = Some(resolve_servertool_sticky_key(resolver_metadata)).filter(|v| !v.trim().is_empty());
+    let row = direct_record.as_object();
+    let mut candidate_keys: Vec<String> = Vec::new();
+
+    let direct_tmux_keys = [
+        row.and_then(|obj| obj.get("tmuxSessionId")).and_then(|v| v.as_str()),
+        row.and_then(|obj| obj.get("clientTmuxSessionId")).and_then(|v| v.as_str()),
+        row.and_then(|obj| obj.get("tmux_session_id")).and_then(|v| v.as_str()),
+        row.and_then(|obj| obj.get("client_tmux_session_id")).and_then(|v| v.as_str()),
+    ];
+    for value in direct_tmux_keys.into_iter().flatten() {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            push_unique_scope_key(&mut candidate_keys, Some(format!("tmux:{}", trimmed)));
+        }
+    }
+
+    if let Some(session_id) = row.and_then(|obj| obj.get("sessionId")).and_then(|v| v.as_str()) {
+        let trimmed = session_id.trim();
+        if !trimmed.is_empty() {
+            push_unique_scope_key(&mut candidate_keys, Some(format!("tmux:{}", trimmed)));
+            push_unique_scope_key(&mut candidate_keys, Some(format!("session:{}", trimmed)));
+        }
+    }
+
+    if let Some(conversation_id) = row.and_then(|obj| obj.get("conversationId")).and_then(|v| v.as_str()) {
+        let trimmed = conversation_id.trim();
+        if !trimmed.is_empty() {
+            push_unique_scope_key(&mut candidate_keys, Some(format!("conversation:{}", trimmed)));
+        }
+    }
+
+    if !candidate_keys.is_empty() {
+        push_unique_scope_key(&mut candidate_keys, strict_session_scope.clone());
+        push_unique_scope_key(&mut candidate_keys, sticky_key.clone());
+    }
+
+    (strict_session_scope, sticky_key, candidate_keys)
+}
+
+fn plan_stop_message_persisted_lookup(input: &StopMessagePersistedLookupPlannerInput) -> StopMessagePersistedLookupPlanOutput {
+    let merged_metadata = match (&input.record, &input.runtime_metadata) {
+        (Value::Object(record), Some(Value::Object(runtime))) => {
+            let mut out = runtime.clone();
+            for (k, v) in record {
+                out.insert(k.clone(), v.clone());
+            }
+            Value::Object(out)
+        }
+        (record, _) => record.clone(),
+    };
+
+    let (strict_session_scope, sticky_key, candidate_keys) =
+        collect_stop_message_persisted_candidate_keys(&input.record, &merged_metadata);
+    let options = input.options.as_ref();
+    StopMessagePersistedLookupPlanOutput {
+        strict_session_scope,
+        sticky_key,
+        candidate_keys,
+        lookup_policy: "strict_then_sticky_then_session_family".to_string(),
+        read_stop_message_snapshot: options.and_then(|o| o.include_snapshot_lookup).unwrap_or(true),
+        read_stop_message_tombstone: options.and_then(|o| o.include_tombstone_lookup).unwrap_or(true),
+    }
+}
+
 fn resolve_servertool_sticky_key(metadata: &Value) -> String {
     if let Some(scope) = resolve_stop_message_scope(metadata) {
         return scope;
@@ -1208,6 +1317,14 @@ pub fn resolve_servertool_sticky_key_json(metadata_json: String) -> NapiResult<S
     let metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = resolve_servertool_sticky_key(&metadata);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn plan_stop_message_persisted_lookup_json(input_json: String) -> NapiResult<String> {
+    let input: StopMessagePersistedLookupPlannerInput = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_stop_message_persisted_lookup(&input);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

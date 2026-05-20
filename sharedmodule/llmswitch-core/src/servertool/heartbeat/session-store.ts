@@ -210,13 +210,16 @@ export function buildHeartbeatState(tmuxSessionId: string): HeartbeatState {
 
 export function coerceHeartbeatState(
   raw: unknown,
-  fallbackTmuxSessionId: string,
+  requiredTmuxSessionId: string,
 ): HeartbeatState {
   const row =
     raw && typeof raw === "object" && !Array.isArray(raw)
       ? (raw as Record<string, unknown>)
       : {};
-  const tmuxSessionId = readString(row.tmuxSessionId) || fallbackTmuxSessionId;
+  const tmuxSessionId = readString(row.tmuxSessionId);
+  if (!tmuxSessionId) {
+    throw new Error('coerceHeartbeatState: tmuxSessionId is required but not found');
+  }
   const triggerCountRaw = Number(row.triggerCount);
   const scheduleDiagnostic = coerceScheduleDiagnostic(row.lastScheduleDiagnostic);
   return {
@@ -432,16 +435,12 @@ export async function listHeartbeatStates(): Promise<HeartbeatState[]> {
             merged.set(state.tmuxSessionId, state);
           }
         } catch (error) {
-          const fallback = buildHeartbeatState(tmuxSessionId);
-          const prev = merged.get(fallback.tmuxSessionId);
-          if (!prev || fallback.updatedAtMs >= prev.updatedAtMs) {
-            merged.set(fallback.tmuxSessionId, fallback);
-          }
           logHeartbeatSessionStoreNonBlocking("list_states.read_state_file", error, {
             dir,
             file: entry.name,
             tmuxSessionId,
           });
+          throw error;
         }
       }
     } catch (error) {

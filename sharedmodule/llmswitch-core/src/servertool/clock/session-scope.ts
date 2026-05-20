@@ -10,7 +10,7 @@ export function extractClockDaemonIdFromSessionScope(_sessionScope: string): str
 
 export function resolveClockSessionScope(
   primary?: Record<string, unknown> | null,
-  fallback?: Record<string, unknown> | null
+  defaultScope?: Record<string, unknown> | null
 ): string | null {
-  return resolveClockSessionScopeWithNative(primary, fallback);
+  return resolveClockSessionScopeWithNative(primary, defaultScope);
 }

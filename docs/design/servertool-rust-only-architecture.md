@@ -816,6 +816,127 @@ TS shell 只做：
 
 这样可以最早把“执行骨架真相”收回 Rust，而不是继续在 TS 里修补细节。
 
+## 面向能力较弱模型的 apply_patch 执行计划（审计后新增）
+
+本节目标：把本文重构路线拆成**低认知负担、强约束、可机械执行**的 patch 序列，降低“弱模型”在大改造任务中的偏航风险。
+
+### A. 适配原则（给弱模型的硬约束）
+
+1. **单 patch 单职责**  
+   每次 patch 只做一件事：要么“新增 Rust 文件骨架”，要么“切一条 TS 调用壳”，要么“删一个已失效导出”。
+
+2. **禁止跨层混改**  
+   单 patch 不允许同时改 `shared + handlers + runtime + TS shell` 四层；最多触达一层 Rust + 一处 TS 壳。
+
+3. **先加门禁再迁移**  
+   在删 TS 语义前，先加 fail-fast 审计脚本与 contract test；否则弱模型容易产生“看起来可跑”的假完成。
+
+4. **强模板提交说明**  
+   每个 patch 的 commit message 必须包含：`[scope] [ssot] [evidence]` 三段，避免弱模型遗漏验证语义。
+
+5. **无 fallback 文本检查**  
+   patch 后必须 grep `fallback|degrade|legacy path`，命中即失败，防止弱模型偷偷保留双路径。
+
+### B. Patch 序列（最小可执行切片）
+
+#### Patch 0：冻结与门禁（只增不删）
+
+- 新增：
+  - `scripts/verify-servertool-rust-only.sh`（或等价命名）
+  - CI 任务占位：`verify:servertool-rust-only`
+- 检查项：
+  - 拦截 `src/servertool/**/*.bak*`
+  - 拦截 TS runtime import `src/servertool/handlers/*.ts`
+  - 拦截 duplicate semantic 关键字白名单外扩散
+
+**验收证据**：本地与 CI 均能执行门禁脚本，且当前仓状态下输出可解释（允许先告警，后在后续 patch 清零）。
+
+#### Patch 1：建立 Rust skeleton 空壳
+
+- 仅新增目录与 `mod.rs` 串接，不迁移业务：
+  - `servertool/skeleton/{request_prepare,response_detect,internal_dispatch,outcome_resolve,finalize,strip,registry}.rs`
+- 仅做可编译最小骨架（空实现或 `todo!` 受控占位，但不可暴露到 runtime 主路径）。
+
+**验收证据**：Rust 编译通过；无 TS 行为变化。
+
+#### Patch 2：接入单一高层导出 `runServertoolResponseStageJson`
+
+- Rust：
+  - 导出函数签名与最小 contract（输入校验 + 空结果结构）
+- TS：
+  - `server-side-tools.ts` 仅新增调用壳，不改旧执行分支判定。
+
+**验收证据**：可通过开关/参数跑通 native call，日志可见请求与返回 shape。
+
+#### Patch 3：把 detect/extract 语义切到 Rust（仅这一件事）
+
+- Rust 接管：
+  - canonical response 识别
+  - tool_calls 抽取
+  - internal tool_call id 补全
+- TS 删除对应重复判定（仅删除 detect/extract 部分）。
+
+**验收证据**：对同一输入，TS 旧路径与 Rust 新路径产出一致快照（golden test）。
+
+#### Patch 4：把 dispatch planning 切到 Rust
+
+- Rust 接管：
+  - handler 可执行性判定
+  - include/exclude filter
+  - executable/skipped 计划块输出
+- TS 仅消费 plan 执行 bridge。
+
+**验收证据**：`planServertoolToolCallDispatchJson` contract test + 回归样例。
+
+#### Patch 5：把 outcome planning 切到 Rust
+
+- Rust 接管：
+  - mixed-tools 分支
+  - pending injection target/flow 选择
+- TS 仅 materialize payload，不再做分支决策。
+
+**验收证据**：mixed/pending 样例矩阵回归通过。
+
+#### Patch 6：finalize + strip 切换
+
+- Rust 接管：
+  - strip executed internal tools
+  - finish_reason / finalized marker invariant
+- TS 删除 duplicate strip/finalize 逻辑。
+
+**验收证据**：malformed tool_call fail-fast、生效 strip、client payload 不含已执行 internal calls。
+
+#### Patch 7：物理删除 TS 业务真相
+
+- 删除：
+  - `engine.ts` 业务语义
+  - `server-side-tools.ts` 业务语义
+  - `handlers/*.ts` 业务实现与 side-effect 注册链
+  - `.bak` 与 legacy import
+
+**验收证据**：门禁脚本全绿；runtime 不再 import TS business handlers。
+
+### C. 弱模型专用执行卡片（每次 patch 都要填）
+
+每个 patch 必须附以下卡片（可放 PR 模板）：
+
+1. **改动边界**：本 patch 只改哪些文件/目录。  
+2. **不改动声明**：明确不触达哪些层（防止越界）。  
+3. **语义真源声明**：本 patch 把哪一条语义迁到 Rust。  
+4. **删除清单**：删了哪些重复语义（若无，写“本 patch 不删除”）。  
+5. **验证证据**：最少一条 unit/contract + 一条 runtime/smoke。  
+6. **回归风险**：仅列真实剩余风险，不写空话。  
+
+### D. 审计结论（为何这样改）
+
+当前文档技术方向正确，但对弱模型存在三个执行风险：
+
+1. 阶段粒度偏大，容易一次 patch 跨层混改；  
+2. “先迁后验”空间过大，容易产生假完成；  
+3. 对每 patch 的输入/输出契约约束不够刚性。  
+
+新增本节后，迁移被重写为可机械执行的 0-7 patch 流程，且每步都有可验证证据与删除边界，符合“单一路径真源 + fail-fast + 无 fallback”硬护栏。
+
 ## 2026-05-06 首刀落地进展
 
 本轮已先把 **response-side detect / extract contract** 收回 native：
@@ -867,3 +988,593 @@ TS shell 只做：
 - finalize + strip 主编排
 
 这意味着首刀已把 **response-stage 的 detect/extract block** 从 TS 收回 Rust，但还没有完成完整 orchestration closeout。
+
+## strict-zero 扩围后的历史债清理优先级（2026-05-20 审计补充）
+
+本节用于承接“文档约束 -> 脚本门禁 -> CI 门禁 -> active runtime strict-zero”之后的**下一阶段物理清理顺序**。
+
+规则：
+
+1. 先清理 **active runtime 主语义链** 上仍残留的高频 `fallback` 命中；
+2. 一次只处理一个模块族，禁止 `stop-message-auto + clock + heartbeat` 混改；
+3. 每轮清理都必须满足：
+   - 命中数下降有证据；
+   - `verify:servertool-rust-only` 继续 PASS；
+   - 不通过“改名躲 grep”伪造清理结果；
+4. 只有在 Rust 真源已接住对应语义后，TS 侧历史实现才允许物理删除。
+
+### 当前高优先级债务队列（按命中数排序）
+
+#### P0：stop-message-auto 族（先做）
+
+- `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`：6
+- `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/ai-followup-pure-blocks.ts`：3
+- `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/blocked-report.ts`：3
+
+原因：
+
+- 该族直接处于 servertool followup / stop_message 生命周期主链；
+- 与 Rust-only skeleton 的 request/response/finalize 收口关系最紧；
+- 继续保留大量 TS fallback 语义，会阻碍 Patch 3-7 的“主链单真源”收敛。
+
+执行要求：
+
+- 先把 `fallback` 区分为：
+  - 真 fallback/降级语义；
+  - 仅变量命名/文本拼接中的“fallback”；
+- 仅当前者成立时才进入 Rust 化/删除计划；
+- 不允许为了过 grep 直接重命名而保持同样双路径语义。
+
+#### P1：clock / orchestration 族
+
+- `sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts`：6
+- `sharedmodule/llmswitch-core/src/servertool/clock/tasks.ts`：3
+- `sharedmodule/llmswitch-core/src/servertool/clock/daemon.ts`：2
+- `sharedmodule/llmswitch-core/src/servertool/clock/session-scope.ts`：2
+
+原因：
+
+- clock 已属于 Rust-only 目标架构中的核心 internal lifecycle tool；
+- 这些文件仍承载 session scope / timeout / due task 相关语义，属于后续必须收回 Rust 的块。
+
+执行要求：
+
+- 先拆“默认值参数 fallback”与“运行时降级语义 fallback”；
+- 如果只是局部 helper 参数名，不应误判为架构性 fallback；
+- 若涉及 scope resolve / pending injection / due window 判定，则必须按 Rust 真源迁移处理。
+
+#### P2：heartbeat / store 族
+
+- `sharedmodule/llmswitch-core/src/servertool/heartbeat/session-store.ts`：7
+- `sharedmodule/llmswitch-core/src/servertool/heartbeat/daemon.ts`：3
+- `sharedmodule/llmswitch-core/src/servertool/heartbeat/history-store.ts`：2
+
+原因：
+
+- 命中数高，但主要风险更偏存储/恢复/文件态兼容；
+- 与当前 response-side skeleton closeout 相比，优先级低于 stop-message-auto 与 clock 主链。
+
+执行要求：
+
+- 先确认哪些 `fallback` 只是文件名/sessionId 恢复型局部变量；
+- 若属于历史状态兼容逻辑，必须等对应 Rust codec/state 真源落地后再删。
+
+#### P3：非主链辅助文件
+
+- `sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts`：6
+- `sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts`：2
+- `sharedmodule/llmswitch-core/src/servertool/followup-runtime-block.ts`：1
+- `sharedmodule/llmswitch-core/src/servertool/origin-request-store.ts`：1
+
+原因：
+
+- 这些文件不是当前 strict-zero 主链入口；
+- 可在主链收口后再做命名/语义级去债，不应抢在主链前面。
+
+### 推荐下一刀
+
+下一刀只做：
+
+1. **审计 `stop-message-auto` 族的每一个 `fallback` 命中**；
+2. 对每个命中标注：
+   - 变量名/文案；
+   - 局部默认值；
+   - 真降级路径；
+   - 历史兼容路径；
+3. 产出“可直接删 / 需 Rust 接管后删 / 仅重命名无价值”三分类表。
+
+禁止在这一刀中同时改动 `clock` 或 `heartbeat`，否则弱模型极易跨模块混改，违反本文“单 patch 单职责”的执行约束。
+
+## stop-message-auto 族 fallback 命中分类表（2026-05-20 审计补充）
+
+本节是对 P0 队列的逐条审计结果，只做分类，不在本节直接改代码。
+
+### 审计范围
+
+1. `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
+2. `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/ai-followup-pure-blocks.ts`
+3. `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/blocked-report.ts`
+
+总命中数：12
+
+---
+
+### A. `stop-message-auto.ts`（6 处）
+
+#### 命中 1-6：`fallbackStickyKey`
+
+出现位置：
+
+- 类型字段声明：`fallbackStickyKey?: string;`
+- `collectPersistedStopMessageCandidateKeys(...)` 内部使用
+- `loadPersistedStopMessageSnapshot(...)` 参数
+- `loadPersistedStopMessageTombstone(...)` 参数
+- 两处调用点：`fallbackStickyKey: stickyKey`
+
+分类：**需 Rust 接管后删**
+
+原因：
+
+- 这里不是简单文案或局部默认值，而是 **strictSessionScope 未命中时，用 stickyKey 补充持久化 stop_message 状态读取候选键**；
+- 它直接参与：
+  - persisted stop_message snapshot 查找
+  - tombstone 查找
+  - session / tmux / conversation scope 回溯
+- 这属于 **state scope resolve + persisted state lookup** 语义，正是本文 Rust-only 目标架构里应收归：
+  - `servertool/state/session_scope.rs`
+  - `servertool/state/rebind.rs`
+  - `servertool/state/stop_message.rs`
+
+结论：
+
+- **不能仅重命名为 backup/secondary 就算清理完成**；
+- **也不能现在直接删除**，否则会改变 persisted stop_message 命中顺序与恢复行为；
+- 正确做法是：待 Rust state codec / scope resolve 真源接住后，再物理移除 TS 这套候选键回溯语义。
+
+---
+
+### B. `ai-followup-pure-blocks.ts`（3 处）
+
+#### 命中 7-9：局部变量 `fallback`
+
+出现形态：
+
+- `const fallback = extractUnknownText(...) || ...`
+- `if (fallback) chunks.push(fallback)`
+
+分类：**仅命名，不应作为架构性清理目标**
+
+原因：
+
+- 这里的 `fallback` 只是 **未知 content part 的文本提取链**；
+- 语义是“按多个字段顺序抽取文本”，不是运行时降级路径，也不是双实现补偿；
+- 它既不改变 servertool orchestration outcome，也不承担第二条业务路径。
+
+结论：
+
+- 不应为了 grep 指标单独改这里；
+- 若未来要改，最多是局部重命名为 `derivedText` / `extractedTextCandidate`，但**当前没有架构收益**；
+- 在 Rust-only closeout 语境下，这 3 处不应抢优先级。
+
+---
+
+### C. `blocked-report.ts`（3 处）
+
+#### 命中 10-12：局部变量 `fallbackText`
+
+出现形态：
+
+- `const fallbackText = ...`
+- `if (fallbackText) chunks.push(fallbackText)`
+
+分类：**仅命名，不应作为架构性清理目标**
+
+原因：
+
+- 这里是 blocked report 文本抽取时，对非 text/output_text/input_text item 做的补充字段读取；
+- 语义仍然是 **文本抽取 candidate**，不是 fallback runtime path；
+- 不涉及 pending injection、state migration、tool outcome、followup dispatch。
+
+结论：
+
+- 不应把这 3 处视为 Rust-only 主链风险；
+- 若未来为了降低 grep 噪音统一改名，可以作为独立纯重命名 patch 处理；
+- 当前阶段不值得优先消耗 patch 预算。
+
+---
+
+### 三分类总表
+
+#### 1. 需 Rust 接管后删
+
+- `stop-message-auto.ts` 中全部 `fallbackStickyKey`（6 处）
+
+#### 2. 仅命名噪音，当前不处理
+
+- `ai-followup-pure-blocks.ts` 中局部 `fallback`（3 处）
+- `blocked-report.ts` 中局部 `fallbackText`（3 处）
+
+#### 3. 可直接删
+
+- **当前无**
+
+原因：
+
+- 本轮 12 个命中里，没有一处属于“已无语义价值、删除后不影响行为”的死 fallback 路径；
+- 真正有架构意义的是 `fallbackStickyKey`，但它还绑定 persisted stop_message state 的读取语义，必须等 Rust state 真源先落地。
+
+---
+
+### 下一刀唯一范围
+
+基于本表，下一刀只能是下面二选一，且推荐顺序固定：
+
+1. **先做 stop_message state / session scope / stickyKey lookup 的 Rust 接管设计**；
+2. 接管后，再删除 `stop-message-auto.ts` 中 `fallbackStickyKey` 相关 TS 语义。
+
+不建议下一刀去改：
+
+- `ai-followup-pure-blocks.ts`
+- `blocked-report.ts`
+
+因为那只会减少 grep 噪音，不会减少真正的双真源风险。
+
+## `fallbackStickyKey` Rust 接管落点与 TS 替换点（2026-05-20 审计补充）
+
+本节回答两个问题：
+
+1. `fallbackStickyKey` 语义在 Rust-only 架构里应该落到哪里；
+2. TS 侧哪些位置在 Rust 接管后必须收缩或删除。
+
+### 一、现状判定
+
+当前 `fallbackStickyKey` 不是孤立变量，而是以下链路的一部分：
+
+```text
+record/runtimeMetadata
+  -> resolveStopMessageSessionScope(...)
+  -> strictSessionScope || resolveStickyKey(...)
+  -> collectPersistedStopMessageCandidateKeys(...)
+  -> loadPersistedStopMessageSnapshot(...)
+  -> loadPersistedStopMessageTombstone(...)
+```
+
+它承担的是：
+
+1. stop_message persisted state 候选键回溯；
+2. strict session scope 未命中时的 stickyKey 补充查找；
+3. snapshot / tombstone 的统一恢复入口。
+
+因此它不是“局部默认值”，而是 **state lookup policy**。
+
+---
+
+### 二、Rust 唯一落点
+
+按当前仓内已有 Rust 模块，唯一正确落点应拆成三块：
+
+#### 1. state codec 真源
+
+已有：
+
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_state_codec.rs`
+
+职责：
+
+- stop_message state 的字段 normalize / decode / encode；
+- `text/maxRepeats/used/stageMode/aiMode/updatedAt/lastUsedAt` 的唯一 codec 规则。
+
+本次结论：
+
+- 该文件应继续作为 **stop_message state shape 真源**；
+- 但它还**不等于** persisted lookup policy 真源。
+
+#### 2. servertool orchestration / routing resolve 真源
+
+已有：
+
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs`
+
+当前已见能力：
+
+- `resolve_session_scope`
+- `resolve_sticky_key`
+- `resolve_stop_message_scope`
+
+本次结论：
+
+- `fallbackStickyKey` 对应的第一落点必须在这里扩展出：
+  - **stop_message persisted candidate key planning**
+  - **strict scope + stickyKey 的有序候选链生成**
+- 也就是 Rust 不仅要返回单个 `stickyKey` / `scope`，还要返回：
+  - `candidateKeys[]`
+  - `primaryScope`
+  - `lookupPolicy`
+
+换句话说，**TS 不该再自己拼候选键列表**。
+
+#### 3. servertool skeleton state 子模块（设计目标落点）
+
+本文前面已定义目标模块：
+
+- `servertool/state/stop_message.rs`
+- `servertool/state/session_scope.rs`
+- `servertool/state/rebind.rs`
+
+本次结论：
+
+- 从长期架构看，`fallbackStickyKey` 真正应沉到这三个目标模块，而不是永久留在 `chat_servertool_orchestration.rs`；
+- 近期 patch 可先在 `chat_servertool_orchestration.rs` 实现高层 NAPI 导出；
+- 后续再把内部实现迁入：
+  - `stop_message.rs`：snapshot/tombstone lookup contract
+  - `session_scope.rs`：strict scope normalize / resolve
+  - `rebind.rs`：candidate key order 与 scope rebind 规则
+
+---
+
+### 三、建议新增的 Rust/NAPI 合约
+
+为了彻底替掉 `fallbackStickyKey` 相关 TS 语义，最小必要导出不应再只是单个 string resolve，而应新增一个高层 JSON 能力，例如：
+
+- `planStopMessagePersistedLookupJson`
+
+输入建议：
+
+- request/adapter record
+- runtime metadata
+- optional current routing state summary
+
+输出建议：
+
+```json
+{
+  "strictSessionScope": "tmux:xxx",
+  "stickyKey": "tmux:xxx",
+  "candidateKeys": ["tmux:xxx", "session:xxx", "conversation:xxx"],
+  "lookupPolicy": "strict_then_sticky_then_session_family",
+  "readStopMessageSnapshot": true,
+  "readStopMessageTombstone": true
+}
+```
+
+关键要求：
+
+1. **candidateKeys 顺序必须由 Rust 唯一决定**；
+2. TS 只消费该 plan，不再自己 `push(args.fallbackStickyKey)`；
+3. tombstone 与 snapshot 查找必须走同一 candidate policy，避免双份顺序漂移。
+
+---
+
+### 四、TS 侧替换点（必须收缩）
+
+#### 1. `stop-message-auto.ts`
+
+当前待替换点：
+
+- `collectPersistedStopMessageCandidateKeys(...)`
+- `loadPersistedStopMessageSnapshot(...)`
+- `loadPersistedStopMessageTombstone(...)`
+- `fallbackStickyKey` 参数与两处调用
+
+处理原则：
+
+- Rust plan 落地后，这三个 TS 函数都不应再保留主语义；
+- 最多只保留：
+  - 调 native
+  - 读本地 store
+  - 把结果回填为 snapshot/tombstone block
+
+也就是说：
+
+- **候选键生成删除**
+- **回溯顺序删除**
+- **fallbackStickyKey 字段删除**
+
+#### 2. `runtime-utils.ts`
+
+当前保留能力：
+
+- `resolveStopMessageSessionScopeWithNative(...)`
+- `resolveServertoolStickyKeyWithNative(...)`
+
+本次结论：
+
+- 这两个单点 resolve 能力不足以消除 TS lookup 语义；
+- 后续要新增一个更高层的 native 调用壳，例如：
+  - `planStopMessagePersistedLookupWithNative(...)`
+- 旧的 `resolveStopMessageSessionScope` / `resolveStickyKey` 可保留给其他调用方；
+- 但 stop-message-auto 主链应切到新的 lookup-plan 能力。
+
+#### 3. `routing-state.ts`
+
+当前职责：
+
+- state snapshot shape normalize
+- create/apply/clear stop_message state
+
+本次结论：
+
+- 这里暂时**不是首个删除点**；
+- 因为它更多是 state shape helper，而不是 candidate lookup policy；
+- 真正先删的是 `stop-message-auto.ts` 里的 lookup orchestration。
+
+---
+
+### 五、唯一正确迁移顺序
+
+必须按下面顺序做，不能反过来：
+
+1. Rust 新增 `planStopMessagePersistedLookupJson`（或等价高层能力）；
+2. TS `runtime-utils.ts` 增加对应 native bridge；
+3. `stop-message-auto.ts` 改为只消费 Rust 返回的 `candidateKeys` / `strictSessionScope` / `stickyKey`；
+4. 删除 `collectPersistedStopMessageCandidateKeys(...)`；
+5. 删除 `fallbackStickyKey` 参数与调用；
+6. 最后把 strict-zero 或专项门禁扩大到该文件。
+
+如果跳过第 1-3 步直接删 TS：
+
+- 会破坏 snapshot/tombstone 恢复顺序；
+- 会把 persisted stop_message 命中逻辑打散到别处；
+- 会形成新的“隐式 fallback”或查找漂移。
+
+---
+
+### 六、排他性结论
+
+`fallbackStickyKey` 的唯一正确修改处，不是在 `ai-followup-pure-blocks.ts`、`blocked-report.ts`、也不是简单重命名字段。
+
+唯一真源修改点是：
+
+1. **Rust：新增 stop_message persisted lookup plan 真源**
+2. **TS：删除 `stop-message-auto.ts` 内的 candidate key 编排语义**
+
+原因：
+
+- 问题根因不是单词 `fallback`，而是 **TS 仍在本地决定 stop_message persisted state 的候选查找顺序**；
+- 只改命名无法消除双真源；
+- 只删 TS 而不先补 Rust plan 会破坏行为；
+- 因此上述两点是当前唯一正确、且可验证闭环的修改路径。
+
+## `planStopMessagePersistedLookupJson` 合同草案（2026-05-20 审计补充）
+
+为消除 `fallbackStickyKey` 对应的 TS lookup policy，本设计要求新增一个高层 native 合同，而不是继续叠加零散 string resolver。
+
+### 目标
+
+替代当前 TS 主链中的：
+
+```text
+resolveStopMessageSessionScope
+  -> strictSessionScope || resolveStickyKey
+  -> collectPersistedStopMessageCandidateKeys
+  -> loadPersistedStopMessageSnapshot
+  -> loadPersistedStopMessageTombstone
+```
+
+### 建议导出
+
+- `planStopMessagePersistedLookupJson`
+
+### 输入草案
+
+```json
+{
+  "record": {
+    "sessionId": "optional",
+    "conversationId": "optional",
+    "tmuxSessionId": "optional",
+    "clientTmuxSessionId": "optional",
+    "metadata": {}
+  },
+  "runtimeMetadata": {},
+  "options": {
+    "includeSnapshotLookup": true,
+    "includeTombstoneLookup": true
+  }
+}
+```
+
+约束：
+
+1. TS 不得在传入前先拼 candidate key 列表；
+2. TS 不得在传入前先决定 fallback 回溯顺序；
+3. `options` 只表达用途，不表达排序。
+
+### 输出草案
+
+```json
+{
+  "strictSessionScope": "tmux:abc",
+  "stickyKey": "tmux:abc",
+  "candidateKeys": [
+    "tmux:abc",
+    "session:abc",
+    "conversation:xyz"
+  ],
+  "lookupPolicy": "strict_then_sticky_then_session_family",
+  "readStopMessageSnapshot": true,
+  "readStopMessageTombstone": true
+}
+```
+
+约束：
+
+1. `candidateKeys` 顺序必须由 Rust 唯一决定；
+2. snapshot / tombstone 必须共享同一组 `candidateKeys`；
+3. TS 只消费，不重排、不追加、不删改。
+
+### TS bridge 要求
+
+在：
+
+- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.ts`
+
+新增：
+
+- `planStopMessagePersistedLookupWithNative(...)`
+
+然后由：
+
+- `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts`
+
+提供 stop-message-auto 专用包装。
+
+### TS 删除顺序
+
+1. 新增 Rust contract
+2. 新增 TS bridge
+3. `stop-message-auto.ts` 改为消费 `candidateKeys`
+4. 删除 `collectPersistedStopMessageCandidateKeys(...)`
+5. 删除 `fallbackStickyKey` 参数与调用
+6. 再把该文件纳入更强门禁
+
+### 为什么这是唯一正确方案
+
+因为当前问题不是：
+
+- “TS 缺少一个 resolver”
+
+而是：
+
+- “TS 正在本地编排 persisted lookup policy”
+
+所以继续补：
+
+- `resolveStopMessageSessionScopeWithNative(...)`
+- `resolveServertoolStickyKeyWithNative(...)`
+
+这样的单点 string 能力，并不能消除双真源；只有把 **candidate key planning 本身** 提升为 Rust 高层合同，才能真正完成收口。
+
+### 文件级落地顺序（固定）
+
+实现该合同的 patch 顺序必须固定为：
+
+1. Rust：
+   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs`
+   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
+2. TS bridge：
+   - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts`
+   - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.ts`
+3. stop-message runtime 壳层：
+   - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts`
+4. stop-message 主链：
+   - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
+5. 最后才允许升级门禁：
+   - `scripts/verify-servertool-rust-only.mjs`
+
+禁止倒序：
+
+- 禁止先删 `fallbackStickyKey`
+- 禁止先改 `stop-message-auto.ts` 再补 Rust contract
+- 禁止在 TS bridge 或 runtime-utils 中复制 candidate key 编排
+
+### 删除点固定
+
+当 Rust contract 与 TS bridge 验证通过后，唯一正确删除点是：
+
+- `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
+  - `collectPersistedStopMessageCandidateKeys(...)`
+  - `fallbackStickyKey` 参数
+  - `fallbackStickyKey` 两处调用
+
+这三个删除点必须视为**同一组语义删除**，不可拆成“先删参数、后删编排”的半完成状态。

@@ -140,6 +140,20 @@ export async function resolveProviderRetryExecutionPlan(args: {
     backoffScope: retryBackoffPlan.backoffScope
   });
   if (
+    retrySwitchPlan.switchAction === 'retry_same_provider'
+    && !exclusionPlan.excludedCurrentProvider
+    && hasAlternativeRouteCandidate({
+      providerKey: args.providerKey,
+      routePool: args.routePool,
+      excludedProviderKeys: args.excludedProviderKeys
+    })
+  ) {
+    applyRetryExclusionForCurrentProvider({
+      providerKey: args.providerKey,
+      excludedProviderKeys: args.excludedProviderKeys
+    });
+  }
+  if (
     classification === 'unrecoverable'
     && retrySwitchPlan.switchAction === 'exclude_and_reroute'
     && !hasAlternativeRouteCandidate({

@@ -88,16 +88,6 @@ export class SessionReaper {
       this.timer.unref();
     }
 
-    logProcessLifecycle({
-      event: 'session_reaper_started',
-      source: 'session-client-reaper',
-      details: {
-        intervalMs: this.intervalMs,
-        gracePeriodMs: this.gracePeriodMs,
-        enableManagedTermination: this.enableManagedTermination
-      }
-    });
-
     // 立即执行一次清理
     void this.runCleanup().catch((err) => {
       logProcessLifecycle({

@@ -23,13 +23,14 @@ import {
   attachHubStageTopSummary,
   resolveActiveProcessModeAndAudit,
   sanitizeStandardizedRequestMessages,
-} from "./hub-pipeline-chat-process-shared.js";
+} from "./hub-pipeline-chat-process-request-utils.js";
 import {
   assertNoMappableSemanticsInMetadata,
   createChatProcessSnapshotRecorder,
   prepareChatProcessRuntimeMetadata,
 } from "./hub-pipeline-chat-process-entry-blocks.js";
 import { propagateApplyPatchToolModeToRequestMetadata } from "./hub-pipeline-request-metadata-blocks.js";
+import { createHubSnapshotStageRecorder } from "./hub-pipeline-snapshot-recorder-blocks.js";
 
 function mergeRuntimeMetadataPatch(base: Record<string, unknown>, patch: Record<string, unknown>): void { Object.assign(base, patch); }
 

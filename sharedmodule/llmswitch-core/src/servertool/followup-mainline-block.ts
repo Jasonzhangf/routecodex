@@ -234,7 +234,7 @@ export async function runFollowupMainline(args: {
     flowId: args.execution.flowId,
     decision,
     metadata,
-    defaultText: extractAppendUserTextFromFollowupPlan(followupPlan) ?? 'continue',
+    defaultText: extractAppendUserTextFromFollowupPlan(followupPlan),
     readClientInjectOnly,
     normalizeClientInjectText
   }).forced;

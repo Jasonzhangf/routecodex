@@ -29,6 +29,8 @@ jobs:
         run: npm run verify:repo-sanity
       - name: File line-limit gate (<500)
         run: npm run verify:file-line-limit
+      - name: Servertool Rust-only gate
+        run: npm run verify:servertool-rust-only
       - name: Ensure release llms module
         run: BUILD_MODE=release npm run llmswitch:ensure
       - name: Build (release)
@@ -61,6 +63,8 @@ jobs:
         run: npm run verify:repo-sanity
       - name: File line-limit gate (<500)
         run: npm run verify:file-line-limit
+      - name: Servertool Rust-only gate
+        run: npm run verify:servertool-rust-only
       - name: Ensure release llms module
         run: BUILD_MODE=release npm run llmswitch:ensure
       - name: Build (release)

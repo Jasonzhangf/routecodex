@@ -26,8 +26,7 @@ import {
   resolveDefaultStopMessageSnapshot,
   resolveImplicitGeminiStopMessageSnapshot,
   resolveRuntimeStopMessageState,
-  resolveStopMessageSessionScope,
-  resolveStickyKey,
+  planStopMessagePersistedLookup,
   readRuntimeStopMessageStageMode
 } from './stop-message-auto/runtime-utils.js';
 import { readStoplessGoalState } from './stopless-goal-state.js';
@@ -52,64 +51,11 @@ function isPersistentStickyKey(value: unknown): value is string {
   );
 }
 
-function collectPersistedStopMessageCandidateKeys(args: {
-  strictSessionScope?: string;
-  fallbackStickyKey?: string;
-  record: {
-    tmuxSessionId?: unknown;
-    clientTmuxSessionId?: unknown;
-    sessionId?: unknown;
-    conversationId?: unknown;
-  };
-}): string[] {
-  const candidateKeys: string[] = [];
-  const push = (value: unknown): void => {
-    if (!isPersistentStickyKey(value)) {
-      return;
-    }
-    if (!candidateKeys.includes(value)) {
-      candidateKeys.push(value);
-    }
-  };
-
-  const hasDirectTmuxSessionId = typeof args.record.tmuxSessionId === 'string' && args.record.tmuxSessionId.trim();
-  const hasDirectClientTmuxSessionId = typeof args.record.clientTmuxSessionId === 'string' && args.record.clientTmuxSessionId.trim();
-  const hasDirectSessionId = typeof args.record.sessionId === 'string' && args.record.sessionId.trim();
-  const hasDirectConversationId = typeof args.record.conversationId === 'string' && args.record.conversationId.trim();
-
-  if (hasDirectTmuxSessionId) {
-    push(`tmux:${String(args.record.tmuxSessionId).trim()}`);
-  }
-  if (hasDirectClientTmuxSessionId) {
-    push(`tmux:${String(args.record.clientTmuxSessionId).trim()}`);
-  }
-  if (hasDirectSessionId) {
-    push(`tmux:${String(args.record.sessionId).trim()}`);
-    push(`session:${String(args.record.sessionId).trim()}`);
-  }
-  if (hasDirectConversationId) {
-    push(`conversation:${String(args.record.conversationId).trim()}`);
-  }
-  if (candidateKeys.length > 0) {
-    push(args.strictSessionScope);
-    push(args.fallbackStickyKey);
-  }
-
-  return candidateKeys;
-}
-
-function loadPersistedStopMessageSnapshot(args: {
-  strictSessionScope?: string;
-  fallbackStickyKey?: string;
-  record: {
-    tmuxSessionId?: unknown;
-    clientTmuxSessionId?: unknown;
-    sessionId?: unknown;
-    conversationId?: unknown;
-  };
-}): ReturnType<typeof resolveStopMessageSnapshot> {
-  const candidateKeys = collectPersistedStopMessageCandidateKeys(args);
+function readPersistedStopMessageSnapshotFromCandidateKeys(candidateKeys: string[]): ReturnType<typeof resolveStopMessageSnapshot> {
   for (const key of candidateKeys) {
+    if (!isPersistentStickyKey(key)) {
+      continue;
+    }
     const snapshot = resolveStopMessageSnapshot(loadRoutingInstructionStateSync(key));
     if (snapshot) {
       return snapshot;
@@ -118,21 +64,13 @@ function loadPersistedStopMessageSnapshot(args: {
   return null;
 }
 
-function loadPersistedStopMessageTombstone(args: {
-  strictSessionScope?: string;
-  fallbackStickyKey?: string;
-  record: {
-    tmuxSessionId?: unknown;
-    clientTmuxSessionId?: unknown;
-    sessionId?: unknown;
-    conversationId?: unknown;
-  };
-}): {
+function readPersistedStopMessageTombstoneFromCandidateKeys(candidateKeys: string[]): {
   exhaustedDefault: boolean;
 } {
-  const candidateKeys = collectPersistedStopMessageCandidateKeys(args);
-
   for (const key of candidateKeys) {
+    if (!isPersistentStickyKey(key)) {
+      continue;
+    }
     const state = loadRoutingInstructionStateSync(key);
     if (!state) {
       continue;
@@ -461,18 +399,19 @@ const handler: ServerToolHandler = async (
       return markSkip('skip_servertool_followup_hop');
     }
 
-    const strictSessionScope = resolveStopMessageSessionScope(record, rt);
-    const stickyKey = strictSessionScope || resolveStickyKey(record, rt);
-    const persistedStopMessageState = loadPersistedStopMessageSnapshot({
-      strictSessionScope,
-      fallbackStickyKey: stickyKey,
-      record
+    const persistedLookupPlan = planStopMessagePersistedLookup(record, rt, {
+      includeSnapshotLookup: true,
+      includeTombstoneLookup: true
     });
-    const persistedStopMessageTombstone = loadPersistedStopMessageTombstone({
-      strictSessionScope,
-      fallbackStickyKey: stickyKey,
-      record
-    });
+    const strictSessionScope = persistedLookupPlan.strictSessionScope || undefined;
+    const stickyKey = persistedLookupPlan.stickyKey || undefined;
+    const candidateKeys = persistedLookupPlan.candidateKeys;
+    const persistedStopMessageState = persistedLookupPlan.readStopMessageSnapshot
+      ? readPersistedStopMessageSnapshotFromCandidateKeys(candidateKeys)
+      : null;
+    const persistedStopMessageTombstone = persistedLookupPlan.readStopMessageTombstone
+      ? readPersistedStopMessageTombstoneFromCandidateKeys(candidateKeys)
+      : { exhaustedDefault: false };
     const runtimeStopMessageState = resolveRuntimeStopMessageState(rt);
     const requestScopedGoal = readRequestScopedGoalState(ctx.adapterContext);
     const effectiveGoalState = requestScopedGoal.state;

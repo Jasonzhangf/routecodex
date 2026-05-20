@@ -1,6 +1,7 @@
 import type { JsonObject } from '../../../conversion/hub/types/json.js';
 import { readRuntimeMetadata } from '../../../conversion/runtime-metadata.js';
 import {
+  planStopMessagePersistedLookupWithNative,
   resolveStopMessageSessionScopeWithNative,
   resolveServertoolStickyKeyWithNative
 } from '../../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
@@ -26,6 +27,35 @@ export function resolveStickyKey(
   runtimeMetadata?: unknown
 ): string | undefined {
   return resolveServertoolStickyKeyWithNative(buildServertoolRoutingMetadata(record, runtimeMetadata)) || undefined;
+}
+
+export function planStopMessagePersistedLookup(
+  record: {
+    tmuxSessionId?: unknown;
+    clientTmuxSessionId?: unknown;
+    sessionId?: unknown;
+    conversationId?: unknown;
+    metadata?: unknown;
+    [key: string]: unknown;
+  },
+  runtimeMetadata?: unknown,
+  options?: {
+    includeSnapshotLookup?: boolean;
+    includeTombstoneLookup?: boolean;
+  }
+): {
+  strictSessionScope?: string | null;
+  stickyKey?: string | null;
+  candidateKeys: string[];
+  lookupPolicy: string;
+  readStopMessageSnapshot: boolean;
+  readStopMessageTombstone: boolean;
+} {
+  return planStopMessagePersistedLookupWithNative({
+    record: buildServertoolRoutingMetadata(record, runtimeMetadata),
+    runtimeMetadata: asRecord(runtimeMetadata) ?? undefined,
+    options
+  });
 }
 
 export function persistStopMessageState(stickyKey: string | undefined, state: RoutingInstructionState): void {

@@ -82,7 +82,7 @@ export function extractTextFromMessageContent(content: unknown): string {
       }
       continue;
     }
-    const fallbackText =
+    const blockedText =
       toNonEmptyText(record.content) ||
       toNonEmptyText(record.value) ||
       extractUnknownText(record.input) ||
@@ -90,8 +90,8 @@ export function extractTextFromMessageContent(content: unknown): string {
       extractUnknownText(record.args) ||
       extractUnknownText(record.patch) ||
       extractUnknownText(record.payload);
-    if (fallbackText) {
-      chunks.push(fallbackText);
+    if (blockedText) {
+      chunks.push(blockedText);
     }
   }
   return chunks.join('\n').trim();

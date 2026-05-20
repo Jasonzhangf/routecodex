@@ -1538,7 +1538,7 @@ fn extract_apply_patch_text_from_object(row: &Map<String, Value>) -> Option<Stri
         })
 }
 
-fn extract_apply_patch_text(raw_args: Option<&Value>) -> Option<String> {
+pub(crate) fn extract_apply_patch_text(raw_args: Option<&Value>) -> Option<String> {
     match raw_args {
         Some(Value::String(raw)) => {
             let trimmed = raw.trim();

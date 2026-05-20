@@ -29,12 +29,15 @@ function normalizeLimit(value: unknown): number {
   return Math.min(floored, 1000);
 }
 
-function coerceHistoryEvent(raw: unknown, fallbackTmuxSessionId: string): HeartbeatHistoryEvent | null {
+function coerceHistoryEvent(raw: unknown): HeartbeatHistoryEvent | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return null;
   }
   const row = raw as Record<string, unknown>;
-  const tmuxSessionId = readString(row.tmuxSessionId) || fallbackTmuxSessionId;
+  const tmuxSessionId = readString(row.tmuxSessionId);
+  if (!tmuxSessionId) {
+    return null;
+  }
   const source = readString(row.source);
   const action = readString(row.action);
   const outcome = readString(row.outcome);
@@ -139,7 +142,7 @@ export async function listHeartbeatHistory(args: {
     }
     try {
       const parsed = JSON.parse(line);
-      const event = coerceHistoryEvent(parsed, tmuxSessionId);
+      const event = coerceHistoryEvent(parsed);
       if (event) {
         indexedEvents.push({ event, lineIndex });
       }

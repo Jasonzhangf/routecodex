@@ -202,6 +202,68 @@ describe('ProviderFactory no fallback', () => {
     expect(provider?.config?.type).toBe('qwenchat-web-provider');
   });
 
+  test('windsurf cloud runtime does not require generic http baseUrl to initialize provider handle', () => {
+    ProviderFactory.clearInstanceCache();
+    const runtime: any = {
+      runtimeKey: 'windsurf.ws-pro-1',
+      providerId: 'windsurf',
+      providerType: 'openai',
+      providerModule: 'openai',
+      compatibilityProfile: 'chat:windsurf',
+      auth: {
+        type: 'apikey',
+        rawType: 'windsurf-account',
+        value: 'devin-session-token$windsurf-account-token'
+      },
+      extensions: {
+        windsurf: {
+          transportBackend: 'grpc',
+          lsPort: 42101,
+          csrfToken: 'csrf-token'
+        }
+      }
+    };
+
+    const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
+    expect(provider?.constructor?.name).toBe('WindsurfChatProvider');
+    expect(provider?.config?.type).toBe('windsurf-chat-provider');
+    expect(provider?.config?.config?.baseUrl).toBe('');
+    expect(provider?.config?.config?.auth?.apiKey).toBe('devin-session-token$windsurf-account-token');
+    expect(provider?.config?.config?.extensions?.windsurf?.transportBackend).toBe('grpc');
+    expect(provider?.config?.config?.extensions?.windsurf?.lsPort).toBe(42101);
+    expect(provider?.config?.config?.extensions?.windsurf?.csrfToken).toBe('csrf-token');
+  });
+
+  test('windsurf account runtime preserves account/password credentials into provider config', () => {
+    ProviderFactory.clearInstanceCache();
+    const runtime: any = {
+      runtimeKey: 'windsurf.ws-pro-3',
+      providerId: 'windsurf',
+      providerType: 'openai',
+      providerModule: 'openai',
+      compatibilityProfile: 'chat:windsurf',
+      auth: {
+        type: 'apikey',
+        rawType: 'windsurf-account',
+        value: '',
+        account: '2094423@qq.com',
+        password: 'welcome4zcam#'
+      },
+      extensions: {
+        windsurf: {
+          transportBackend: 'grpc',
+          lsPort: 42101,
+          csrfToken: 'csrf-token'
+        }
+      }
+    };
+
+    const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
+    expect(provider?.config?.config?.auth?.rawType).toBe('windsurf-account');
+    expect(provider?.config?.config?.auth?.account).toBe('2094423@qq.com');
+    expect(provider?.config?.config?.auth?.password).toBe('welcome4zcam#');
+  });
+
   test('opencode zen-free placeholder key should normalize to public key mode', () => {
     const runtime: any = {
       runtimeKey: 'opencode-zen-free.key1',

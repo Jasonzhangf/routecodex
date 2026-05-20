@@ -132,7 +132,12 @@ impl VirtualRouterEngineCore {
                 true
             }
             ProviderErrorClassification::Unrecoverable => {
-                self.health_manager.record_failure(provider_key, reason, now);
+                if let Some(cooldown_ms) = extract_cooldown_override_ms(event) {
+                    self.health_manager
+                        .trip_provider(provider_key, reason, Some(cooldown_ms), now);
+                } else {
+                    self.health_manager.record_failure(provider_key, reason, now);
+                }
                 let _ = self.apply_qwen_auth_family_blacklist(event);
                 self.persist_provider_health();
                 true
@@ -241,6 +246,13 @@ fn extract_cooldown_override_ms(event: &Value) -> Option<i64> {
         .get("cooldownOverrideMs")
         .and_then(as_i64_like)
         .filter(|value| *value > 0)
+        .or_else(|| {
+            event
+                .get("details")
+                .and_then(|v| v.get("cooldownOverrideMs"))
+                .and_then(as_i64_like)
+                .filter(|value| *value > 0)
+        })
 }
 
 fn as_i64_like(value: &Value) -> Option<i64> {

@@ -126,7 +126,7 @@ function normalizeAutoHookPhase(value: unknown): ServertoolAutoHookPhase {
   return 'default';
 }
 
-function normalizeInteger(value: unknown, fallback: number): number {
+function normalizeInteger(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return Math.floor(value);
   }
@@ -136,7 +136,7 @@ function normalizeInteger(value: unknown, fallback: number): number {
       return Math.floor(parsed);
     }
   }
-  return fallback;
+  throw new Error('normalizeInteger: invalid integer value');
 }
 
 export function getDefaultServertoolSkeletonDocument(): ServertoolSkeletonDocument {
@@ -186,10 +186,11 @@ export function normalizeServerToolRegistrationSpec(
     const phase = normalizeAutoHookPhase(
       toolSpec?.trigger.phase ?? options.hook?.phase ?? options.phase
     );
-    const priority = normalizeInteger(
-      toolSpec?.trigger.priority ?? options.hook?.priority ?? options.priority,
-      100
-    );
+    const rawPriority = toolSpec?.trigger.priority ?? options.hook?.priority ?? options.priority;
+    if (rawPriority === undefined || rawPriority === null) {
+      throw new Error('normalizeInteger: priority is required');
+    }
+    const priority = normalizeInteger(rawPriority);
     return {
       name: canonicalName,
       enabled,

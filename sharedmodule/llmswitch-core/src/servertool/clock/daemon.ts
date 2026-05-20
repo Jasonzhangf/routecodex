@@ -52,12 +52,15 @@ function readString(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
-function resolveStateSessionId(raw: unknown, fallbackFileSessionId: string): string {
+function resolveStateSessionId(raw: unknown, defaultFileSessionId: string): string {
   const rawSessionId =
     raw && typeof raw === "object"
       ? readString((raw as { sessionId?: unknown }).sessionId)
       : undefined;
-  return rawSessionId || fallbackFileSessionId;
+  if (!rawSessionId) {
+    throw new Error("resolveStateSessionId: sessionId is required but not found in raw payload");
+  }
+  return rawSessionId;
 }
 
 function resolveStateTmuxSessionId(raw: unknown, sessionId: string): string | undefined {

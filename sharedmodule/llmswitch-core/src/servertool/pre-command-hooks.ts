@@ -564,11 +564,11 @@ function runRuntimeScriptHook(
   try {
     parsed = JSON.parse(payload);
   } catch {
-    const fallback = payload.replace(/\\"/g, '"').trim();
+    const cleanedPayload = payload.replace(/\\"/g, '"').trim();
     const unwrapped =
-      fallback.startsWith('"') && fallback.endsWith('"') && fallback.length > 1
-        ? fallback.slice(1, -1)
-        : fallback;
+      cleanedPayload.startsWith('"') && cleanedPayload.endsWith('"') && cleanedPayload.length > 1
+        ? cleanedPayload.slice(1, -1)
+        : cleanedPayload;
     try {
       parsed = JSON.parse(unwrapped);
     } catch {

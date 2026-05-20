@@ -109,6 +109,32 @@ describe('provider-profile-loader', () => {
     }
   });
 
+
+  it('parses windsurf account auth with account/password fields', () => {
+    const config: Record<string, unknown> = {
+      providers: {
+        windsurf: {
+          type: 'openai',
+          providerModule: 'windsurf-chat-provider',
+          auth: {
+            type: 'windsurf-account',
+            account: '2094423@qq.com',
+            password: 'welcome4zcam#'
+          }
+        }
+      }
+    };
+
+    const result = buildProviderProfiles(config);
+    const profile = result.byId.windsurf;
+    expect(profile.auth.kind).toBe('apikey');
+    if (profile.auth.kind === 'apikey') {
+      expect(profile.auth.rawType).toBe('windsurf-account');
+      expect(profile.auth.mobile).toBe('2094423@qq.com');
+      expect(profile.auth.password).toBe('welcome4zcam#');
+    }
+  });
+
   it('defaults deepseek-web profile to contextFileEnabled when omitted', () => {
     const config: Record<string, unknown> = {
       providers: {

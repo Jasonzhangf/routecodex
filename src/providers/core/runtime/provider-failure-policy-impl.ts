@@ -46,7 +46,8 @@ const NETWORK_ERROR_CODE_SET = new Set([
   'EAI_AGAIN',
   'EPIPE',
   'ETIMEDOUT',
-  'ECONNABORTED'
+  'ECONNABORTED',
+  'ERR_HTTP2_STREAM_CANCEL'
 ]);
 
 const BLOCKING_RECOVERABLE_CODE_SET = new Set([
@@ -58,8 +59,30 @@ const BLOCKING_RECOVERABLE_CODE_SET = new Set([
   'HTTP_504',
   'SSE_TO_JSON_ERROR',
   'SSE_DECODE_ERROR',
-  'UPSTREAM_EMPTY_OUTPUT'
+  'UPSTREAM_EMPTY_OUTPUT',
+  'WINDSURF_GRPC_UNAVAILABLE',
+  'WINDSURF_RATE_LIMITED'
 ]);
+
+UNRECOVERABLE_CODE_SET.add('WINDSURF_GRPC_CONFIG_MISSING');
+UNRECOVERABLE_CODE_SET.add('WINDSURF_SESSION_TOKEN_NOT_INITIALIZED');
+UNRECOVERABLE_CODE_SET.add('WINDSURF_ACCOUNT_CREDENTIAL_MISSING');
+UNRECOVERABLE_CODE_SET.add('WINDSURF_NO_PASSWORD_SET');
+UNRECOVERABLE_CODE_SET.add('WINDSURF_POSTAUTH_FAILED');
+UNRECOVERABLE_CODE_SET.add('WINDSURF_SESSION_TOKEN_MISSING');
+
+function isWindsurfCanceledMessageLike(value: unknown): boolean {
+  if (typeof value !== 'string') {
+    return false;
+  }
+  const reason = value.trim().toLowerCase();
+  return reason.includes('pending stream has been canceled')
+    || reason.includes('err_http2_stream_cancel')
+    || reason.includes('initializecascadepanelstate: the pending stream has been canceled')
+    || reason.includes('addtrackedworkspace: the pending stream has been canceled')
+    || reason.includes('updateworkspacetrust: the pending stream has been canceled')
+    || reason.includes('heartbeat: the pending stream has been canceled');
+}
 
 function isHostFailureStage(stage?: string): boolean {
   return stage === 'host.response_contract';
@@ -223,6 +246,16 @@ export function resolveProviderFailureClassification(args: {
   const nestedMessage = typeof nested.message === 'string' ? nested.message.toLowerCase() : '';
 
   if (
+    errorCode === 'ERR_HTTP2_STREAM_CANCEL'
+    || upstreamCode === 'ERR_HTTP2_STREAM_CANCEL'
+    || nestedCode === 'ERR_HTTP2_STREAM_CANCEL'
+    || isWindsurfCanceledMessageLike(reason)
+    || isWindsurfCanceledMessageLike(nestedMessage)
+  ) {
+    return 'recoverable';
+  }
+
+  if (
     reason.includes('glm business error (514)')
     || errorCode === '514'
     || upstreamCode === '514'
@@ -260,6 +293,15 @@ export function resolveProviderFailureClassification(args: {
     errorCode === 'MALFORMED_RESPONSE'
     || upstreamCode === 'MALFORMED_RESPONSE'
     || nestedCode === 'MALFORMED_RESPONSE'
+  ) {
+    return 'unrecoverable';
+  }
+
+  if (
+    errorCode === 'WINDSURF_CLOUD_CHAT_NOT_IMPLEMENTED'
+    || upstreamCode === 'WINDSURF_CLOUD_CHAT_NOT_IMPLEMENTED'
+    || nestedCode === 'WINDSURF_CLOUD_CHAT_NOT_IMPLEMENTED'
+    || reason.includes('windsurf_cloud_chat_not_implemented')
   ) {
     return 'unrecoverable';
   }
@@ -657,6 +699,16 @@ export function resolveProviderFailureExclusionDecision(args: {
 }): ProviderFailureExclusionDecision {
   const normalizedErrorCode = normalizeProviderFailureCodeKey(args.errorCode);
   const normalizedUpstreamCode = normalizeProviderFailureCodeKey(args.upstreamCode);
+  const isWindsurfStreamCanceled =
+    normalizedErrorCode === 'ERR_HTTP2_STREAM_CANCEL'
+    || normalizedUpstreamCode === 'ERR_HTTP2_STREAM_CANCEL'
+    || isWindsurfCanceledMessageLike((args as { reason?: unknown }).reason);
+  if (isWindsurfStreamCanceled && args.hasAlternativeCandidate) {
+    return {
+      excludeCurrentProvider: true,
+      retryAction: 'reroute_explicit_alternative'
+    };
+  }
   const isHttp503 =
     args.statusCode === 503
     || normalizedErrorCode === 'HTTP_503'

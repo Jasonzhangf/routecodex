@@ -6,6 +6,7 @@ import type { ProviderProfile, ProviderProfileCollection } from '../../../provid
 import { buildProviderProfiles } from '../../../providers/profile/provider-profile-loader.js';
 import { logPipelineStage, shouldEmitStageEvent } from '../../utils/stage-logger.js';
 import { buildInfo } from '../../../build-info.js';
+import { buildVirtualRouterInputV2 } from '../../../config/virtual-router-builder.js';
 import {
   bootstrapVirtualRouterConfig,
   getHubPipelineCtor
@@ -26,9 +27,15 @@ function logBootstrapNonBlockingError(stage: string, error: unknown, details?: R
   }
 }
 
-export function resolveVirtualRouterInput(server: any, userConfig: UnknownObject): UnknownObject {
-  if (userConfig?.virtualrouter && typeof userConfig.virtualrouter === 'object') {
-    return userConfig.virtualrouter as UnknownObject;
+export async function resolveVirtualRouterInput(server: any, userConfig: UnknownObject): Promise<UnknownObject> {
+  const root = isRecord(userConfig) ? (userConfig as Record<string, unknown>) : {};
+  const vrNode = isRecord(root.virtualrouter) ? (root.virtualrouter as Record<string, unknown>) : null;
+  const hasRoutingPolicyGroups = Boolean(vrNode && isRecord(vrNode.routingPolicyGroups));
+  if (hasRoutingPolicyGroups) {
+    return (await buildVirtualRouterInputV2(root)) as UnknownObject;
+  }
+  if (vrNode) {
+    return vrNode as UnknownObject;
   }
   return userConfig;
 }

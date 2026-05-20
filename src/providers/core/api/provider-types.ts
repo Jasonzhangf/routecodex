@@ -110,6 +110,8 @@ export interface ProviderRuntimeAuth {
   oauthProviderId?: string;
   rawType?: string;
   mobile?: string;
+  account?: string;
+  username?: string;
   password?: string;
   accountFile?: string;
   accountAlias?: string;

@@ -1298,6 +1298,7 @@ export const __requestExecutorTestables = {
   resolveProviderRetryExclusionPlan,
   resolveExcludedProviderReselectionPlan,
   resolveProviderRetryExecutionPlan,
+  resolveRequestExecutorPipelineAttempt,
   buildProviderRetryTelemetryPlan,
   acquireRecoverableRetryWaiterSlotForTests,
   peekRecoverableRetryWaitersForTests,

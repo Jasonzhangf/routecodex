@@ -36,6 +36,9 @@ export function isDailyLimitRateLimitMessage(messageLower: string, upstreamLower
   return (
     haystack.includes('daily cost limit') ||
     haystack.includes('daily quota') ||
+    haystack.includes('weekly usage quota has been exhausted') ||
+    haystack.includes('weekly quota has been exhausted') ||
+    haystack.includes('weekly usage quota exhausted') ||
     haystack.includes('quota has been exhausted') ||
     haystack.includes('quota exceeded') ||
     haystack.includes('resource has been exhausted') ||

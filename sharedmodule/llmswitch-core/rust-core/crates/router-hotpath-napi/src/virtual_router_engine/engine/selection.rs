@@ -403,20 +403,7 @@ impl VirtualRouterEngineCore {
                     && dynamic_weight_map.is_none()
                     && !has_runtime_key_level_weights;
                 let selected = if effective_priority_mode {
-                    let route_key = format!("{}:{}:priority", route_name, pool.id);
-                    let priority_candidates = ordered_group_ids
-                        .first()
-                        .and_then(|group_id| grouped_candidates.get(group_id))
-                        .cloned()
-                        .unwrap_or_else(|| available.clone());
-                    self.load_balancer.select(
-                        &route_key,
-                        &priority_candidates,
-                        Some(sticky_for_lb),
-                        weight_map.as_ref(),
-                        |_| true,
-                        Some("round-robin"),
-                    )
+                    available.first().cloned()
                 } else if can_select_grouped && !ordered_group_ids.is_empty() {
                     let group_weights = build_group_weights(
                         &grouped_candidates,

@@ -28,6 +28,26 @@ import type {
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
 
+function extractProviderRateLimitKind(error: unknown): 'synthetic_cooldown' | 'daily_limit' | 'short_lived' | undefined {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+  const record = error as { rateLimitKind?: unknown; details?: unknown };
+  const direct = typeof record.rateLimitKind === 'string' ? record.rateLimitKind.trim().toLowerCase() : '';
+  if (direct === 'synthetic_cooldown' || direct === 'daily_limit' || direct === 'short_lived') {
+    return direct;
+  }
+  const details =
+    record.details && typeof record.details === 'object' && !Array.isArray(record.details)
+      ? (record.details as Record<string, unknown>)
+      : undefined;
+  const nested = typeof details?.rateLimitKind === 'string' ? details.rateLimitKind.trim().toLowerCase() : '';
+  if (nested === 'synthetic_cooldown' || nested === 'daily_limit' || nested === 'short_lived') {
+    return nested;
+  }
+  return undefined;
+}
+
 export function resolveRequestExecutorProviderErrorClassification(args: {
   error: unknown;
   retryError: RetryErrorSnapshot;
@@ -46,7 +66,8 @@ export function resolveRequestExecutorProviderErrorClassification(args: {
     upstreamCode:
       normalizeProviderFailureCodeKey((args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode)
       ?? normalizeProviderFailureCodeKey(args.retryError.upstreamCode),
-    reason: String(args.retryError.reason || (args.error as { message?: string } | undefined)?.message || '')
+    reason: String(args.retryError.reason || (args.error as { message?: string } | undefined)?.message || ''),
+    rateLimitKind: extractProviderRateLimitKind(args.error)
   });
 }
 

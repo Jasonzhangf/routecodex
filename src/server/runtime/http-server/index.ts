@@ -377,8 +377,8 @@ export class RouteCodexHttpServer {
     console.log('[RouteCodexHttpServer] Initialized (pipeline=hub)');
   }
 
-  private resolveVirtualRouterInput(userConfig: UnknownObject): UnknownObject {
-    return resolveVirtualRouterInput(this, userConfig);
+  private async resolveVirtualRouterInput(userConfig: UnknownObject): Promise<UnknownObject> {
+    return await resolveVirtualRouterInput(this, userConfig);
   }
 
   private getModuleDependencies(): ModuleDependencies {
@@ -920,9 +920,6 @@ export class RouteCodexHttpServer {
           this.config.server.host = runtimeConfig.host;
           process.env.ROUTECODEX_SERVER_PORT = String(boundPort);
         }
-        console.log(
-          `[RouteCodexHttpServer] Port listener started on ${runtimeConfig.host}:${boundPort} mode=${runtimeConfig.mode}`
-        );
         resolve(listener);
       });
 

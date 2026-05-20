@@ -64,7 +64,7 @@ export function extractResponsesOutputText(base: { [key: string]: unknown }): st
         if (text.trim().length) chunks.push(text.trim());
         continue;
       }
-      const fallback =
+      const extractedText =
         extractUnknownText((part as { text?: unknown }).text) ||
         extractUnknownText((part as { input?: unknown }).input) ||
         extractUnknownText((part as { arguments?: unknown }).arguments) ||
@@ -72,8 +72,8 @@ export function extractResponsesOutputText(base: { [key: string]: unknown }): st
         extractUnknownText((part as { patch?: unknown }).patch) ||
         extractUnknownText((part as { content?: unknown }).content) ||
         extractUnknownText((part as { value?: unknown }).value);
-      if (fallback) {
-        chunks.push(fallback);
+      if (extractedText) {
+        chunks.push(extractedText);
       }
     }
   }

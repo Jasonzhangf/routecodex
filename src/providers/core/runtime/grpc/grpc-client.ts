@@ -49,6 +49,28 @@ export interface GrpcStreamCallbacks {
 
 const _sessions = new Map<string, http2.ClientHttp2Session>();
 
+function buildGrpcHeaders(
+  path: string,
+  csrfToken: string,
+  streaming = false,
+): http2.OutgoingHttpHeaders {
+  const headers: http2.OutgoingHttpHeaders = {
+    [http2.constants.HTTP2_HEADER_METHOD]: http2.constants.HTTP2_METHOD_POST,
+    [http2.constants.HTTP2_HEADER_PATH]: path,
+    [http2.constants.HTTP2_HEADER_CONTENT_TYPE]: 'application/grpc',
+    [http2.constants.HTTP2_HEADER_USER_AGENT]: 'grpc-node/1.108.2',
+    'x-codeium-csrf-token': csrfToken,
+  };
+  if (streaming) {
+    headers['grpc-accept-encoding'] = 'identity,gzip,deflate';
+  }
+  return headers;
+}
+
+export const __grpcClientTestables = {
+  buildGrpcHeaders,
+};
+
 function getSession(port: number): http2.ClientHttp2Session {
   const key = 'localhost:' + String(port);
   let session = _sessions.get(key);
@@ -75,13 +97,7 @@ export async function grpcUnary(
 ): Promise<Buffer> {
   const client = getSession(port);
   return new Promise((resolve, reject) => {
-    const req = client.request({
-      [http2.constants.HTTP2_HEADER_METHOD]: http2.constants.HTTP2_METHOD_POST,
-      [http2.constants.HTTP2_HEADER_PATH]: path,
-      [http2.constants.HTTP2_HEADER_CONTENT_TYPE]: 'application/grpc',
-      [http2.constants.HTTP2_HEADER_USER_AGENT]: 'grpc-node/1.108.2',
-      'x-csrf-token': csrfToken,
-    });
+    const req = client.request(buildGrpcHeaders(path, csrfToken, false));
     const timer = setTimeout(() => { req.close(http2.constants.NGHTTP2_CANCEL); reject(new Error('gRPC unary timeout')); }, timeout);
     let full = Buffer.alloc(0);
     let trailers: Record<string, string> = {};
@@ -126,12 +142,7 @@ export function grpcStream(
     : null;
 
   const req = client.request({
-    [http2.constants.HTTP2_HEADER_METHOD]: http2.constants.HTTP2_METHOD_POST,
-    [http2.constants.HTTP2_HEADER_PATH]: path,
-    [http2.constants.HTTP2_HEADER_CONTENT_TYPE]: 'application/grpc',
-    [http2.constants.HTTP2_HEADER_USER_AGENT]: 'grpc-node/1.108.2',
-    'x-csrf-token': csrfToken,
-    'grpc-accept-encoding': 'identity,gzip,deflate',
+    ...buildGrpcHeaders(path, csrfToken, true),
   });
 
   const flushPending = () => {

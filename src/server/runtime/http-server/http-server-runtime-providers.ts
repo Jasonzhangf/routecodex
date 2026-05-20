@@ -21,6 +21,10 @@ type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   user_info_url?: unknown;
   refresh_url?: unknown;
   scope?: unknown;
+  account?: unknown;
+  username?: unknown;
+  accountFile?: unknown;
+  account_file?: unknown;
   accountAlias?: unknown;
   account_alias?: unknown;
 };
@@ -196,6 +200,21 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
   })();
 
   const failedRuntimeKeys = new Set<string>();
+  const windsurfInspectLoggedRuntimeKeys = new Set<string>();
+  const windsurfRuntimeProviderCounts = new Map<string, number>();
+
+  for (const [providerKeyRaw, runtime] of Object.entries(runtimeMap)) {
+    const providerKey = typeof providerKeyRaw === 'string' ? providerKeyRaw.trim() : '';
+    if (!providerKey || !isInRoutingScope(providerKey) || !runtime) {
+      continue;
+    }
+    const runtimeProfile = runtime as ProviderRuntimeProfile;
+    const runtimeKey = runtimeProfile.runtimeKey || providerKey;
+    if (!runtimeKey.startsWith('windsurf.')) {
+      continue;
+    }
+    windsurfRuntimeProviderCounts.set(runtimeKey, (windsurfRuntimeProviderCounts.get(runtimeKey) || 0) + 1);
+  }
 
   for (const [providerKeyRaw, runtime] of Object.entries(runtimeMap)) {
     const providerKey = typeof providerKeyRaw === 'string' ? providerKeyRaw.trim() : '';
@@ -210,6 +229,9 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
     }
     const runtimeProfile = runtime as ProviderRuntimeProfile;
     const runtimeKey = runtimeProfile.runtimeKey || providerKey;
+    if (runtimeKey.startsWith('windsurf.') && !windsurfInspectLoggedRuntimeKeys.has(runtimeKey)) {
+      windsurfInspectLoggedRuntimeKeys.add(runtimeKey);
+    }
 
     const authTypeFromRuntime =
       runtimeProfile && (runtimeProfile as any).auth && typeof (runtimeProfile as any).auth.type === 'string'
@@ -233,26 +255,6 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
             patchedRuntime && patchedRuntime.auth && typeof (patchedRuntime.auth as { type?: unknown }).type === 'string'
               ? String((patchedRuntime.auth as { type?: string }).type).trim()
               : null;
-          if (runtimeKey.startsWith('qwenchat.')) {
-            try {
-              console.warn('[qwenchat.debug] patchedRuntime', JSON.stringify({
-                providerKey,
-                runtimeKey,
-                providerId: patchedRuntime?.providerId ?? null,
-                providerType: patchedRuntime?.providerType ?? null,
-                providerFamily: patchedRuntime?.providerFamily ?? null,
-                compatibilityProfile: patchedRuntime?.compatibilityProfile ?? null,
-                providerModule: (patchedRuntime as { providerModule?: unknown })?.providerModule ?? null,
-                endpoint: patchedRuntime?.endpoint ?? null,
-                baseUrl: (patchedRuntime as { baseUrl?: unknown })?.baseUrl ?? null,
-                authType: patchedRuntime?.auth?.type ?? null,
-                authRawType: (patchedRuntime?.auth as { rawType?: unknown })?.rawType ?? null,
-                authValue: typeof patchedRuntime?.auth?.value === 'string' ? patchedRuntime.auth.value : null,
-              }));
-            } catch {
-              // non-blocking debug
-            }
-          }
           if (authTypeFromPatched) {
             runtimeKeyAuthType.set(runtimeKey, authTypeFromPatched);
           } else if (authTypeFromRuntime) {
@@ -289,6 +291,19 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
         server.providerRuntimeInitErrors.delete(runtimeKey);
       } catch (error) {
         const credentialMissing = isCredentialMissingInitError(error);
+        if (runtimeKey.startsWith('windsurf.')) {
+          try {
+            console.warn('[windsurf.runtime.init.fail]', JSON.stringify({
+              providerKey,
+              runtimeKey,
+              credentialMissing: credentialMissing.missing,
+              reason: credentialMissing.reason,
+              error: error instanceof Error ? error.message : String(error),
+            }));
+          } catch {
+            // non-blocking debug
+          }
+        }
         failedRuntimeKeys.add(runtimeKey);
         if (error instanceof Error) {
           server.providerRuntimeInitErrors.set(runtimeKey, error);
@@ -404,21 +419,6 @@ export async function createProviderHandle(
       ? (runtime.outboundProfile.trim() as ProviderProtocol)
       : undefined) ?? mapProviderProtocol(protocolType);
   const instance = ProviderFactory.createProviderFromRuntime(runtime, server.getModuleDependencies());
-  if (runtimeKey.startsWith('qwenchat.')) {
-    try {
-      const proto = Object.getPrototypeOf(instance as object) as { constructor?: { name?: string }; sendRequestInternal?: unknown };
-      console.warn('[qwenchat.debug] createProviderHandle.instance', JSON.stringify({
-        runtimeKey,
-        ctor: (instance as { constructor?: { name?: string } })?.constructor?.name ?? null,
-        protoCtor: proto?.constructor?.name ?? null,
-        hasProcessIncoming: typeof (instance as { processIncoming?: unknown }).processIncoming === 'function',
-        hasSendRequest: typeof (instance as { sendRequest?: unknown }).sendRequest === 'function',
-        hasProtoSendRequestInternal: typeof proto?.sendRequestInternal === 'function',
-      }));
-    } catch {
-      // non-blocking debug
-    }
-  }
   await instance.initialize();
   const providerId = runtime.providerId || runtimeKey.split('.')[0];
   return {
@@ -504,6 +504,19 @@ export async function resolveRuntimeAuth(server: any, runtime: ProviderRuntimePr
         ...(tokenFile ? { tokenFile } : {})
       };
     }
+    if (rawType === 'windsurf-account') {
+      return {
+        ...auth,
+        type: 'apikey',
+        rawType: auth.rawType ?? 'windsurf-account',
+        value: typeof auth.value === 'string' ? auth.value : '',
+        mobile: pickString(authRecord.mobile, authRecord.account, authRecord.username),
+        password: pickString(authRecord.password),
+        accountFile: pickString(authRecord.accountFile, authRecord.account_file),
+        accountAlias: pickString(authRecord.accountAlias, authRecord.account_alias, runtime.keyAlias),
+        tokenFile: pickString(authRecord.tokenFile, authRecord.token_file),
+      };
+    }
     const value = await server.resolveApiKeyValue(runtime, auth);
     return { ...auth, type: 'apikey', value };
   }
@@ -576,7 +589,7 @@ export async function resolveApiKeyValue(
       : typeof (auth as { type?: unknown })?.type === 'string'
         ? String((auth as { type?: string }).type).trim().toLowerCase()
         : '';
-  if (rawType === 'qwenchat-guest') {
+  if (rawType === 'qwenchat-guest' || rawType === 'windsurf-account') {
     return '';
   }
 

@@ -114,24 +114,36 @@ export function mapRuntimeAuthToConfig(
         ? openCodeZenResolved.apiKey
         : (isNonEmptyString(auth.value) ? auth.value.trim() : '');
 
-    if (rawType !== 'deepseek-account' && rawType !== 'qwenchat-guest' && !resolvedApiKey) {
+    if (rawType !== 'deepseek-account' && rawType !== 'qwenchat-guest' && rawType !== 'windsurf-account' && !resolvedApiKey) {
       const baseUrl =
         runtime && typeof (runtime as any).baseUrl === 'string'
           ? String((runtime as any).baseUrl).trim()
           : runtime && typeof (runtime as any).endpoint === 'string'
             ? String((runtime as any).endpoint).trim()
             : '';
-      const allowEmpty = isLocalBaseUrl(baseUrl) || rawType === 'deepseek-account' || rawType === 'qwenchat-guest';
+      const allowEmpty = isLocalBaseUrl(baseUrl) || rawType === 'deepseek-account' || rawType === 'qwenchat-guest' || rawType === 'windsurf-account';
       if (!allowEmpty) {
         throw new Error(`[ProviderFactory] runtime ${runtimeKey} missing inline apiKey value`);
       }
     }
+    const preserveInlineValueForRawType =
+      rawType === 'windsurf-account';
     const apiKeyAuth: ApiKeyAuthExtended = {
       type: 'apikey',
-      apiKey: rawType === 'deepseek-account' || rawType === 'qwenchat-guest' ? '' : resolvedApiKey,
+      apiKey:
+        rawType === 'deepseek-account' || rawType === 'qwenchat-guest'
+          ? ''
+          : preserveInlineValueForRawType
+            ? resolvedApiKey
+            : resolvedApiKey,
       rawType: openCodeZenResolved?.rawType ?? (rawType || auth.rawType),
       accountAlias: auth.accountAlias,
-      tokenFile: auth.tokenFile
+      tokenFile: auth.tokenFile,
+      mobile: auth.mobile,
+      account: (auth as ApiKeyAuthExtended & { account?: string }).account,
+      username: (auth as ApiKeyAuthExtended & { username?: string }).username,
+      password: auth.password,
+      accountFile: auth.accountFile,
     };
     return apiKeyAuth;
   }

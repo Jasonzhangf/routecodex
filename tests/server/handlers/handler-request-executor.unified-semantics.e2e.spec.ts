@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals
 import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { Readable } from 'node:stream';
 
 const { convertProviderResponse: coreConvertProviderResponse } = await import(
   '../../../sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.js'
@@ -342,6 +343,132 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
   });
 
 
+
+
+  it('keeps responses stream requests compatible when client does not advertise SSE accept', async () => {
+    const pipelineExecute = jest.fn(async (_input: any) => ({
+      providerPayload: {
+        model: 'claude-sonnet-4-5',
+        messages: [{ role: 'user', content: '继续执行 responses handler 非 SSE accept 流式整链验证' }]
+      },
+      standardizedRequest: {
+        model: 'claude-sonnet-4-5',
+        messages: [{ role: 'user', content: '继续执行 responses handler 非 SSE accept 流式整链验证' }]
+      },
+      processedRequest: {
+        model: 'claude-sonnet-4-5',
+        messages: [{ role: 'user', content: '继续执行 responses handler 非 SSE accept 流式整链验证' }]
+      },
+      target: {
+        providerKey: 'mock.anthropic.responses.stream',
+        providerType: 'anthropic',
+        outboundProfile: 'anthropic-messages',
+        runtimeKey: 'runtime:anthropic:responses:stream',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {
+        capturedChatRequest: {
+          model: 'claude-sonnet-4-5',
+          messages: [{ role: 'user', content: '继续执行 responses handler 非 SSE accept 流式整链验证' }]
+        }
+      }
+    }));
+
+    const processIncoming = jest.fn(async (payload: Record<string, unknown>) => ({
+      status: 200,
+      data: {
+        __sse_responses: Readable.from([
+          'event: response.output_text.delta\n',
+          `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'responses handler 非 SSE accept 流式整链响应' })}\n\n`,
+          'event: response.completed\n',
+          `data: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_stream_no_accept_1', object: 'response', status: 'completed' } })}\n\n`,
+          'data: [DONE]\n\n'
+        ])
+      }
+    }));
+
+    const handle = createProviderHandle({
+      runtimeKey: 'runtime:anthropic:responses:stream',
+      providerKey: 'mock.anthropic.responses.stream',
+      providerType: 'anthropic',
+      providerProtocol: 'anthropic-messages',
+      processIncoming
+    });
+
+    const executor = createRequestExecutor({
+      runtimeManager: {
+        resolveRuntimeKey: (_providerKey?: string, fallback?: string) => fallback,
+        getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === handle.runtimeKey ? handle : undefined)
+      },
+      getHubPipeline: () => ({
+        execute: pipelineExecute,
+        updateVirtualRouterConfig: jest.fn(),
+        dispose: jest.fn()
+      } as any),
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => ({ success: true }))
+        }
+      } as any),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    });
+
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    app.post('/v1/responses', (req, res) => {
+      void handleResponses(req as any, res as any, {
+        executePipeline: (input) => executor.execute(input as any),
+        errorHandling: null
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+
+    try {
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5',
+          stream: true,
+          input: [
+            {
+              role: 'user',
+              content: [{ type: 'input_text', text: '继续执行 responses handler 非 SSE accept 流式整链验证' }]
+            }
+          ]
+        })
+      });
+      const text = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toContain('text/event-stream');
+      expect(text).toContain('event: response.output_text.delta');
+      expect(text).toContain('responses handler 非 SSE accept 流式整链响应');
+      expect(text).toContain('event: response.completed');
+      expect(text).toContain('[DONE]');
+
+      expect(pipelineExecute).toHaveBeenCalledTimes(1);
+      const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
+      expect(pipelineInput.endpoint).toBe('/v1/responses');
+      expect(pipelineInput.metadata?.providerProtocol).toBe('openai-responses');
+      expect(pipelineInput.metadata?.stream).toBe(true);
+      expect(pipelineInput.metadata?.inboundStream).toBe(true);
+      expect(pipelineInput.metadata?.outboundStream).toBe(true);
+      expect(pipelineInput.metadata?.clientStream).toBeUndefined();
+      expect(pipelineInput.payload?.stream).toBe(true);
+
+      expect(processIncoming).toHaveBeenCalledTimes(1);
+      expect(processIncoming).toHaveBeenCalledWith(expect.objectContaining({
+        model: 'claude-sonnet-4-5',
+        messages: [{ role: 'user', content: '继续执行 responses handler 非 SSE accept 流式整链验证' }]
+      }));
+    } finally {
+      await closeServer(server);
+    }
+  });
 
   it('rewrites /v1/responses.submit_tool_outputs into a resumed /v1/responses pipeline request and preserves response continuity', async () => {
     mockResumeResponsesConversation.mockResolvedValue({

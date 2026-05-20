@@ -469,6 +469,27 @@ export function stripOrphanFunctionCallsTagWithNative(
     return fail(reason);
   }
 }
+
+export function filterOutExecutedServerToolCallsWithNative(
+  finalizedPayload: Record<string, unknown>,
+  orchestrationPayload: Record<string, unknown>
+): Record<string, unknown> {
+  const capability = 'filterOutExecutedServerToolCallsJson';
+  const fail = (reason?: string): Record<string, unknown> =>
+    failNativeRequired<Record<string, unknown>>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [
+      finalizedPayload ?? {},
+      orchestrationPayload ?? {}
+    ]);
+    const parsed = parseRecord(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export async function finalizeRespProcessChatResponseWithNative(
   input: NativeRespProcessFinalizeInput
 ): Promise<Record<string, unknown>> {

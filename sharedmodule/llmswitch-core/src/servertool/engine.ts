@@ -162,7 +162,7 @@ export async function runServerToolOrchestration(
     requestId: options.requestId
   });
   const effectiveServerToolTimeoutMs = shouldDisableTimeout ? 0 : serverToolTimeoutMs;
-  const followupTimeoutMs = resolveServerToolFollowupTimeoutMs(serverToolTimeoutMs);
+  const followupTimeoutMs = resolveServerToolFollowupTimeoutMs();
   const engineOptions: ServerSideToolEngineOptions = {
     chatResponse: options.chat,
     adapterContext: options.adapterContext,

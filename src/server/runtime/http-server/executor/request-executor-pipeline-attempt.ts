@@ -1,6 +1,8 @@
 import type { HubPipelineResult } from '../executor-pipeline.js';
 import { finalizeRequestExecutorAttemptMetadata } from './request-executor-attempt-state.js';
 import { resolveExcludedProviderReselectionPlan } from './request-executor-reselection-plan.js';
+import { applyRetryExclusionForCurrentProvider, hasAlternativeRouteCandidate } from './request-executor-retry-decision.js';
+import { buildProviderTransportBackoffKey, peekProviderTransportBackoffWaitMs } from './request-executor-retry-state.js';
 import type { RetryErrorSnapshot } from './request-executor-error-types.js';
 
 type PipelineAttemptTarget = HubPipelineResult['target'];
@@ -63,6 +65,44 @@ export function resolveRequestExecutorPipelineAttempt(args: {
 
   const providerPayload = args.pipelineResult.providerPayload;
   const target = args.pipelineResult.target;
+
+  const targetRuntimeKey =
+    target && typeof target.runtimeKey === 'string' && target.runtimeKey.trim()
+      ? target.runtimeKey.trim()
+      : undefined;
+  const providerTransportBackoffKey = buildProviderTransportBackoffKey({
+    providerKey: target?.providerKey,
+    runtimeKey: targetRuntimeKey
+  });
+  const pendingTransportBackoffMs =
+    providerTransportBackoffKey
+      ? peekProviderTransportBackoffWaitMs(providerTransportBackoffKey)
+      : 0;
+  if (pendingTransportBackoffMs > 0 && target?.providerKey) {
+    const hasAlternativeCandidate = hasAlternativeRouteCandidate({
+      providerKey: target.providerKey,
+      routePool: routePoolForAttempt,
+      excludedProviderKeys: args.excludedProviderKeys
+    });
+    if (hasAlternativeCandidate) {
+      applyRetryExclusionForCurrentProvider({
+        providerKey: target.providerKey,
+        excludedProviderKeys: args.excludedProviderKeys
+      });
+      args.logStage('provider.transport_backoff_target_reselected', args.providerRequestId, {
+        providerKey: target.providerKey,
+        runtimeKey: targetRuntimeKey,
+        waitMs: pendingTransportBackoffMs,
+        excluded: Array.from(args.excludedProviderKeys),
+        attempt: args.attempt
+      });
+      return {
+        kind: 'retry_next_attempt',
+        initialRoutePool
+      };
+    }
+  }
+
   if (!providerPayload || !target?.providerKey) {
     throw Object.assign(new Error('Virtual router did not produce a provider target'), {
       code: 'ERR_NO_PROVIDER_TARGET',
