@@ -85,6 +85,8 @@ class ResponsesConversationStore {
   private requestMap = new Map<string, ConversationEntry>();
   private responseIndex = new Map<string, ConversationEntry>();
   private scopeIndex = new Map<string, ConversationEntry>();
+  private pruneTimer: ReturnType<typeof setInterval> | null = null;
+  private lastPruneAt = 0;
 
   getDebugStats(): {
     requestMapSize: number;
@@ -347,6 +349,7 @@ class ResponsesConversationStore {
   }
 
   private prune(): void {
+    this.lastPruneAt = Date.now();
     const now = Date.now();
     for (const [, entry] of this.requestMap.entries()) {
       if (now - entry.updatedAt > TTL_MS) {
@@ -364,9 +367,29 @@ class ResponsesConversationStore {
       }
     }
   }
+
+  startPruneTimer(): void {
+    if (this.pruneTimer) return;
+    const PRUNE_INTERVAL_MS = 60_000; // 1min
+    this.pruneTimer = setInterval(() => {
+      this.prune();
+    }, PRUNE_INTERVAL_MS);
+  }
+
+  private stopPruneTimer(): void {
+    if (this.pruneTimer) {
+      clearInterval(this.pruneTimer);
+      this.pruneTimer = null;
+    }
+  }
+
+  getLastPruneAt(): number {
+    return this.lastPruneAt;
+  }
 }
 
 const store = new ResponsesConversationStore();
+store.startPruneTimer();
 const RESPONSES_DEBUG = (process.env.ROUTECODEX_RESPONSES_DEBUG || '').trim() === '1';
 const RESPONSES_WARN_THROTTLE_MS = 60_000;
 const responsesWarnAt = new Map<string, number>();
