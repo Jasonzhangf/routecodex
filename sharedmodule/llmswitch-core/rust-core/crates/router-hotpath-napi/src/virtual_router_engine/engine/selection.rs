@@ -25,6 +25,8 @@ use crate::virtual_router_engine::routing::{
 };
 use crate::virtual_router_engine::time_utils::now_ms;
 
+const DEFAULT_MODEL_CONTEXT_TOKENS: i64 = 200_000;
+
 fn read_requested_route_policy_group(metadata: &Value) -> Option<String> {
     metadata
         .get("routecodexRoutingPolicyGroup")
@@ -78,6 +80,36 @@ fn order_instruction_keys_by_default_route(
     remaining.sort();
     ordered.extend(remaining);
     ordered
+}
+
+fn classify_context_candidates(
+    provider_registry: &crate::virtual_router_engine::provider_registry::ProviderRegistry,
+    provider_keys: &[String],
+    estimated_tokens: i64,
+    warn_ratio: f64,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    if estimated_tokens <= 0 {
+        return (provider_keys.to_vec(), Vec::new(), Vec::new());
+    }
+    let mut safe = Vec::new();
+    let mut risky = Vec::new();
+    let mut overflow = Vec::new();
+    for key in provider_keys {
+        let limit = provider_registry
+            .get(key)
+            .and_then(|profile| profile.max_context_tokens)
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_MODEL_CONTEXT_TOKENS);
+        let ratio = estimated_tokens as f64 / limit as f64;
+        if ratio < warn_ratio {
+            safe.push(key.clone());
+        } else if ratio < 1.0 {
+            risky.push(key.clone());
+        } else {
+            overflow.push(key.clone());
+        }
+    }
+    (safe, risky, overflow)
 }
 
 impl VirtualRouterEngineCore {
@@ -233,6 +265,11 @@ impl VirtualRouterEngineCore {
             web_search_route_requested && default_pool_supports_web_search;
         let use_default_pool_multimodal_fallback =
             multimodal_route_requested && default_pool_supports_multimodal;
+        let longcontext_candidate_active = requested_route == "longcontext"
+            || classification
+                .candidates
+                .iter()
+                .any(|candidate| candidate == "longcontext");
 
         for route_name in route_queue {
             let mut pools = if requires_remote_video {
@@ -307,6 +344,25 @@ impl VirtualRouterEngineCore {
                         .collect();
                     if !alias_candidates.is_empty() {
                         available = alias_candidates;
+                    }
+                }
+                if longcontext_candidate_active {
+                    let (safe_context, risky_context, overflow_context) = classify_context_candidates(
+                        &self.provider_registry,
+                        &available,
+                        features.estimated_tokens,
+                        self.context_warn_ratio,
+                    );
+                    if !safe_context.is_empty() {
+                        available = safe_context;
+                    } else if !risky_context.is_empty() {
+                        available = risky_context;
+                    } else if self.context_hard_limit {
+                        continue;
+                    } else if route_name != DEFAULT_ROUTE && !overflow_context.is_empty() {
+                        continue;
+                    } else if !overflow_context.is_empty() {
+                        available = overflow_context;
                     }
                 }
                 if available.is_empty() {

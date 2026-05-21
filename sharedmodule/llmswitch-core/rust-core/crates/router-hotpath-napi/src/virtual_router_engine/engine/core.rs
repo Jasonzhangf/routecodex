@@ -14,6 +14,7 @@ use super::super::time_utils::now_ms;
 /// Default TTL for concurrency busy entries (60 seconds).
 /// Prevents leaked busy marks from permanently blocking a provider.
 const CONCURRENCY_BUSY_TTL_MS: i64 = 60_000;
+const DEFAULT_CONTEXT_WARN_RATIO: f64 = 0.9;
 
 pub(crate) struct VirtualRouterEngineCore {
     pub routing: RoutingPools,
@@ -24,6 +25,8 @@ pub(crate) struct VirtualRouterEngineCore {
     pub routing_instruction_state: HashMap<String, RoutingInstructionState>,
     pub web_search_force: bool,
     pub quota_view: Option<Ref<()>>,
+    pub context_warn_ratio: f64,
+    pub context_hard_limit: bool,
     pub(crate) concurrency_busy_keys: HashMap<String, i64>,  // key -> expires_at_ms
 }
 
@@ -38,6 +41,8 @@ impl VirtualRouterEngineCore {
             routing_instruction_state: HashMap::new(),
             web_search_force: false,
             quota_view: None,
+            context_warn_ratio: DEFAULT_CONTEXT_WARN_RATIO,
+            context_hard_limit: false,
             concurrency_busy_keys: HashMap::new(),
         }
     }
@@ -80,6 +85,20 @@ impl VirtualRouterEngineCore {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         self.web_search_force = web_search_force;
+        let context_routing = config.get("contextRouting").and_then(|v| v.as_object());
+        self.context_warn_ratio = context_routing
+            .and_then(|row| row.get("warnRatio").and_then(|v| v.as_f64()))
+            .or_else(|| {
+                context_routing.and_then(|row| row.get("warn_ratio").and_then(|v| v.as_f64()))
+            })
+            .map(|value| value.clamp(0.1, 0.99))
+            .unwrap_or(DEFAULT_CONTEXT_WARN_RATIO);
+        self.context_hard_limit = context_routing
+            .and_then(|row| row.get("hardLimit").and_then(|v| v.as_bool()))
+            .or_else(|| {
+                context_routing.and_then(|row| row.get("hard_limit").and_then(|v| v.as_bool()))
+            })
+            .unwrap_or(false);
         Ok(())
     }
 

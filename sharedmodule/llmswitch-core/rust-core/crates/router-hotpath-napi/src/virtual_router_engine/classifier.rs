@@ -194,6 +194,14 @@ fn build_classification(
         }
     }
     let mut candidates = vec![route.to_string()];
+    if route != "longcontext"
+        && evaluation
+            .iter()
+            .any(|(name, triggered, _)| name == "longcontext" && *triggered)
+        && !candidates.contains(&"longcontext".to_string())
+    {
+        candidates.push("longcontext".to_string());
+    }
     if !candidates.contains(&DEFAULT_ROUTE.to_string()) {
         candidates.push(DEFAULT_ROUTE.to_string());
     }
@@ -433,6 +441,14 @@ mod tests {
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
         assert!(result.reasoning.contains("longcontext:token-threshold"));
+        assert_eq!(
+            result.candidates,
+            vec![
+                "thinking".to_string(),
+                "longcontext".to_string(),
+                DEFAULT_ROUTE.to_string()
+            ]
+        );
     }
 
     #[test]
