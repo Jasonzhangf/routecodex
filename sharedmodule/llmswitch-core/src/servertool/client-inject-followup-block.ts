@@ -22,6 +22,7 @@ export async function runClientInjectOnlyFollowup(args: {
   metadata: JsonObject;
   followupTimeoutMs: number;
   isStopMessageFlow: boolean;
+  clearStateOnFollowupFailure: boolean;
   shouldInjectStopLoopWarning: boolean;
   stopLoopWarnThreshold: number;
   loopState: { stopPairRepeatCount?: number } | null;
@@ -56,6 +57,12 @@ export async function runClientInjectOnlyFollowup(args: {
   onLogProgress: (step: number, total: number, message: string, extra?: Record<string, unknown>) => void;
 }): Promise<{ chat: JsonObject; executed: true; flowId?: string } | null> {
   if (!args.clientInjectDispatch) {
+    if (args.clearStateOnFollowupFailure) {
+      args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);
+      args.onLogProgress(5, 5, 'failed (client inject dispatcher unavailable; state cleared)', {
+        flowId: args.flowId
+      });
+    }
     const wrapped = new ProviderProtocolError('[servertool] client inject dispatcher unavailable', {
       code: 'SERVERTOOL_FOLLOWUP_FAILED',
       category: 'INTERNAL_ERROR',
@@ -142,7 +149,7 @@ export async function runClientInjectOnlyFollowup(args: {
         flowId: args.flowId
       };
     }
-    if (args.isStopMessageFlow) {
+    if (args.clearStateOnFollowupFailure) {
       args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);
       args.onLogProgress(5, 5, 'failed (stopMessage client inject failed; state cleared)', { flowId: args.flowId });
     }

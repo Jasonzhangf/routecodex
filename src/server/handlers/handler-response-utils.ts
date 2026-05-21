@@ -1,4 +1,4 @@
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { Response } from 'express';
 import type { PipelineExecutionResult } from './types.js';
@@ -17,6 +17,8 @@ import {
   registerRequestLogContext
 } from '../utils/request-log-color.js';
 import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
+import { extractClientModelId } from '../runtime/http-server/executor/provider-response-utils.js';
+import { createResponsesJsonToSseConverter, importCoreDist, requireCoreDist } from '../../modules/llmswitch/bridge.js';
 
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);
 
@@ -53,6 +55,12 @@ type ChatUsageNormalizationResult = {
   payload: unknown;
   normalized: boolean;
   source?: 'body' | 'usage_log';
+};
+
+
+type ClientVisibleResponseRestoreContext = {
+  model?: string;
+  reasoningEffort?: string;
 };
 
 const SHOULD_LOG_HTTP_EVENTS = buildInfo.mode !== 'release'
@@ -217,6 +225,177 @@ function normalizeChatUsagePayload(
   };
 }
 
+export function normalizeResponsesJsonBody(
+  body: unknown,
+  entryEndpoint?: string,
+  requestLabel?: string,
+  resolveBridge: typeof requireCoreDist = requireCoreDist
+): unknown {
+  if (entryEndpoint !== '/v1/responses') {
+    return body;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return body;
+  }
+  if ((body as Record<string, unknown>).object !== 'chat.completion') {
+    return body;
+  }
+  const mod = resolveBridge<{ buildResponsesPayloadFromChat?: (payload: unknown, context?: Record<string, unknown>) => unknown }>(
+    'conversion/responses/responses-openai-bridge'
+  );
+  if (typeof mod.buildResponsesPayloadFromChat !== 'function') {
+    throw new Error('[handler-response] buildResponsesPayloadFromChat not available');
+  }
+  return mod.buildResponsesPayloadFromChat(body, {
+    requestId: requestLabel
+  });
+}
+
+
+function readReasoningEffortCandidate(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const effort = (value as Record<string, unknown>).effort;
+  return typeof effort === 'string' && effort.trim() ? effort.trim() : undefined;
+}
+
+function buildClientVisibleResponseRestoreContext(
+  metadata: Record<string, unknown> | undefined
+): ClientVisibleResponseRestoreContext | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+  const rawRequestBody =
+    metadata.__raw_request_body && typeof metadata.__raw_request_body === 'object' && !Array.isArray(metadata.__raw_request_body)
+      ? (metadata.__raw_request_body as Record<string, unknown>)
+      : undefined;
+  const clientModelId =
+    extractClientModelId(metadata)
+    ?? (typeof rawRequestBody?.model === 'string' && rawRequestBody.model.trim()
+      ? rawRequestBody.model.trim()
+      : undefined);
+  const reasoningEffort =
+    readReasoningEffortCandidate(metadata.reasoning)
+    ?? (metadata.target && typeof metadata.target === 'object' && !Array.isArray(metadata.target)
+      ? readReasoningEffortCandidate((metadata.target as Record<string, unknown>).reasoning)
+      : undefined)
+    ?? (metadata.originalRequest && typeof metadata.originalRequest === 'object' && !Array.isArray(metadata.originalRequest)
+      ? readReasoningEffortCandidate((metadata.originalRequest as Record<string, unknown>).reasoning)
+      : undefined)
+    ?? (rawRequestBody
+      ? readReasoningEffortCandidate(rawRequestBody.reasoning)
+      : undefined);
+  if (!clientModelId && !reasoningEffort) {
+    return undefined;
+  }
+  return {
+    ...(clientModelId ? { model: clientModelId } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {})
+  };
+}
+
+function restoreClientVisibleResponsePayload(
+  payload: unknown,
+  restore: ClientVisibleResponseRestoreContext | undefined
+): unknown {
+  if (!restore || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
+  }
+  const record = payload as Record<string, unknown>;
+  const response =
+    record.response && typeof record.response === 'object' && !Array.isArray(record.response)
+      ? (record.response as Record<string, unknown>)
+      : undefined;
+  if (!response) {
+    return payload;
+  }
+  const nextResponse: Record<string, unknown> = { ...response };
+  let changed = false;
+  if (restore.model && nextResponse.model !== restore.model) {
+    nextResponse.model = restore.model;
+    changed = true;
+  }
+  if (restore.reasoningEffort) {
+    const currentReasoning =
+      nextResponse.reasoning && typeof nextResponse.reasoning === 'object' && !Array.isArray(nextResponse.reasoning)
+        ? (nextResponse.reasoning as Record<string, unknown>)
+        : {};
+    if (currentReasoning.effort !== restore.reasoningEffort) {
+      nextResponse.reasoning = {
+        ...currentReasoning,
+        effort: restore.reasoningEffort
+      };
+      changed = true;
+    }
+  }
+  return changed ? { ...record, response: nextResponse } : payload;
+}
+
+function createClientVisibleSseRestoreStream(
+  stream: Readable,
+  restore: ClientVisibleResponseRestoreContext | undefined
+): Readable {
+  if (!restore) {
+    return stream;
+  }
+  let pending = '';
+  const transform = new Transform({
+    transform(chunk, _encoding, callback) {
+      try {
+        pending +=
+          typeof chunk === 'string'
+            ? chunk
+            : Buffer.isBuffer(chunk)
+              ? chunk.toString('utf8')
+              : chunk instanceof Uint8Array
+                ? Buffer.from(chunk).toString('utf8')
+                : String(chunk ?? '');
+        const parts = pending.split(/\n\n/);
+        pending = parts.pop() ?? '';
+        for (const part of parts) {
+          const frame = part + '\n\n';
+          const normalized = frame.replace(/\n\n$/, '');
+          const lines = normalized.split('\n');
+          const dataLineIndex = lines.findIndex((line) => line.startsWith('data: '));
+          if (dataLineIndex < 0) {
+            this.push(frame);
+            continue;
+          }
+          try {
+            const dataText = lines[dataLineIndex].slice('data: '.length);
+            const parsed = JSON.parse(dataText);
+            const restored = restoreClientVisibleResponsePayload(parsed, restore);
+            if (restored === parsed) {
+              this.push(frame);
+              continue;
+            }
+            lines[dataLineIndex] = `data: ${JSON.stringify(restored)}`;
+            this.push(`${lines.join('\n')}\n\n`);
+          } catch {
+            this.push(frame);
+          }
+        }
+        callback();
+      } catch (error) {
+        callback(error as Error);
+      }
+    },
+    flush(callback) {
+      try {
+        if (pending) {
+          this.push(pending);
+          pending = '';
+        }
+        callback();
+      } catch (error) {
+        callback(error as Error);
+      }
+    }
+  });
+  return stream.pipe(transform);
+}
+
 
 function updateSseTerminalTrackerFromChunk(
   chunk: unknown,
@@ -348,8 +527,118 @@ function sendStructuredSseError(res: Response, requestLabel: string, payload: Re
   }
 }
 
+function isResponsesJsonBody(body: unknown, entryEndpoint?: string): body is Record<string, unknown> {
+  if (entryEndpoint !== '/v1/responses') {
+    return false;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body) || hasSsePayload(body)) {
+    return false;
+  }
+  const record = body as Record<string, unknown>;
+  return record.object === 'response' || typeof record.output === 'object' || typeof record.status === 'string';
+}
+
+function isChatCompletionJsonBody(body: unknown): body is Record<string, unknown> {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || hasSsePayload(body)) {
+    return false;
+  }
+  return (body as Record<string, unknown>).object === 'chat.completion';
+}
+
+function streamResponsesJsonAsSse(args: {
+  res: Response;
+  requestLabel: string;
+  result: PipelineExecutionResult;
+  status: number;
+  entryEndpoint?: string;
+  logResponseCompleted: (details?: Record<string, unknown>) => void;
+}): boolean {
+  if (!isResponsesJsonBody(args.result.body, args.entryEndpoint)) {
+    if (!isChatCompletionJsonBody(args.result.body) || args.entryEndpoint !== '/v1/responses') {
+      return false;
+    }
+  }
+  const flushable = args.res as FlushableResponse;
+  args.res.status(args.status);
+  args.res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  args.res.setHeader('Cache-Control', 'no-cache, no-transform');
+  args.res.setHeader('Connection', 'keep-alive');
+  if (typeof flushable.flushHeaders === 'function') {
+    flushable.flushHeaders();
+  } else if (typeof flushable.flush === 'function') {
+    flushable.flush();
+  }
+  void (async () => {
+    try {
+      const converter = await createResponsesJsonToSseConverter();
+      const responsesPayload = isResponsesJsonBody(args.result.body, args.entryEndpoint)
+        ? args.result.body
+        : await (async () => {
+          const mod = await importCoreDist<{ buildResponsesPayloadFromChat?: (payload: unknown, context?: Record<string, unknown>) => unknown }>(
+            'conversion/responses/responses-openai-bridge'
+          );
+          if (typeof mod.buildResponsesPayloadFromChat !== 'function') {
+            throw new Error('[handler-response] buildResponsesPayloadFromChat not available');
+          }
+          return mod.buildResponsesPayloadFromChat(args.result.body, {
+            requestId: args.requestLabel
+          }) as Record<string, unknown>;
+        })();
+      const sse = await converter.convertResponseToJsonToSse(responsesPayload, {
+        requestId: args.requestLabel
+      });
+      const stream = toNodeReadable(sse);
+      if (!stream) {
+        sendSseBridgeError(args.res, args.requestLabel, 502);
+        return;
+      }
+      stream.on('end', () => {
+        if (!args.res.writableEnded && !args.res.destroyed) {
+          args.res.end();
+        }
+        args.logResponseCompleted({
+          status: args.status,
+          mode: 'sse',
+          finishReason: deriveFinishReason(args.result.body)
+        });
+      });
+      stream.on('error', (error: Error) => {
+        logResponseNonBlockingError(`response.sse.json_bridge.stream:${args.requestLabel}`, error);
+        if (!args.res.writableEnded && !args.res.destroyed) {
+          sendSseBridgeError(args.res, args.requestLabel, 502);
+        }
+      });
+      stream.pipe(args.res, { end: false });
+    } catch (error) {
+      logResponseNonBlockingError(`response.sse.json_bridge:${args.requestLabel}`, error);
+      if (!args.res.writableEnded && !args.res.destroyed) {
+        sendSseBridgeError(args.res, args.requestLabel, 502);
+      }
+    }
+  })();
+  return true;
+}
+
 export function hasSsePayload(body: unknown): body is SsePayloadShape {
   return Boolean(body && typeof body === 'object' && '__sse_responses' in (body as Record<string, unknown>));
+}
+
+function shouldDispatchSseToClient(
+  body: unknown,
+  result: PipelineExecutionResult,
+  forceSSE: boolean
+): boolean {
+  if (!hasSsePayload(body)) {
+    return false;
+  }
+  if (forceSSE) {
+    return true;
+  }
+  const metadata =
+    result.metadata && typeof result.metadata === 'object' && !Array.isArray(result.metadata)
+      ? (result.metadata as Record<string, unknown>)
+      : undefined;
+  return metadata?.outboundStream === true || metadata?.stream === true;
 }
 
 export function isAnalysisModeEnabled(): boolean {
@@ -374,7 +663,7 @@ export function sendPipelineResponse(
   const body = result.body;
   const requestLabel = formatRequestId(requestId);
   const forceSSE = options?.forceSSE === true;
-  const expectsStream = hasSsePayload(body);
+  const expectsStream = shouldDispatchSseToClient(body, result, forceSSE);
   const entryEndpoint = typeof options?.entryEndpoint === 'string' && options.entryEndpoint.trim()
     ? options.entryEndpoint.trim()
     : undefined;
@@ -442,6 +731,16 @@ export function sendPipelineResponse(
   };
 
   if (forceSSE && !expectsStream) {
+    if (streamResponsesJsonAsSse({
+      res,
+      requestLabel,
+      result,
+      status,
+      entryEndpoint,
+      logResponseCompleted
+    })) {
+      return;
+    }
     logPipelineStage('response.sse.missing', requestLabel, { status });
     const structuredErrorPayload = extractStructuredSseErrorPayload(body, requestLabel, status);
     logResponseCompleted({
@@ -479,8 +778,10 @@ export function sendPipelineResponse(
   logPipelineStage('response.dispatch.start', requestLabel, { status, stream: expectsStream, forced: forceSSE });
 
   if (expectsStream) {
-    const streamSource = body.__sse_responses;
+    const sseBody = body as SsePayloadShape & Record<string, unknown>;
+    const streamSource = sseBody.__sse_responses;
     const stream = toNodeReadable(streamSource);
+    const restoreContext = buildClientVisibleResponseRestoreContext(result.metadata);
     if (!stream) {
       logPipelineStage('response.sse.missing', requestLabel, {});
       logResponseCompleted({ status: 200, mode: 'sse', reason: 'missing_stream', bridgeStatus: 502 });
@@ -505,14 +806,15 @@ export function sendPipelineResponse(
       sendSseBridgeError(res, requestLabel, 502);
       return;
     }
+    const restoredStream = createClientVisibleSseRestoreStream(stream, restoreContext);
     const outboundStream = captureClientResponse
-      ? maybeAttachClientSseSnapshotStream(stream, {
+      ? maybeAttachClientSseSnapshotStream(restoredStream, {
         requestId: requestLabel,
         entryEndpoint,
         status,
         headers: result.headers
       })
-      : stream;
+      : restoredStream;
     applyHeaders(res, result.headers, true);
     const streamUsage = resolveNormalizedChatUsage(body, {
       entryEndpoint,
@@ -538,15 +840,13 @@ export function sendPipelineResponse(
     let streamEnded = false;
     const finishTracker: SseFinishReasonTracker = {
       finishReason:
-        body && typeof body === 'object' && typeof (body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY] === 'string'
-          ? String((body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY])
+        typeof sseBody[STREAM_LOG_FINISH_REASON_KEY] === 'string'
+          ? String(sseBody[STREAM_LOG_FINISH_REASON_KEY])
           : undefined,
-      seenTerminalEvent:
-        body && typeof body === 'object' && typeof (body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY] === 'string',
+      seenTerminalEvent: typeof sseBody[STREAM_LOG_FINISH_REASON_KEY] === 'string',
     };
     let totalTimer: NodeJS.Timeout | null = null;
     let keepaliveTimer: NodeJS.Timeout | null = null;
-    let terminalGraceTimer: NodeJS.Timeout | null = null;
     const terminalWatch: SseTerminalWatch = {
       sawTerminalChunk: false,
     };
@@ -597,10 +897,6 @@ export function sendPipelineResponse(
       if (keepaliveTimer) {
         clearInterval(keepaliveTimer);
         keepaliveTimer = null;
-      }
-      if (terminalGraceTimer) {
-        clearTimeout(terminalGraceTimer);
-        terminalGraceTimer = null;
       }
     };
 
@@ -695,38 +991,6 @@ export function sendPipelineResponse(
     };
     stream.on('data', (chunk: unknown) => {
       updateSseTerminalTrackerFromChunk(chunk, finishTracker, terminalWatch);
-      if (!terminalWatch.sawTerminalChunk || ended || streamEnded || terminalGraceTimer) {
-        return;
-      }
-      terminalGraceTimer = setTimeout(() => {
-        if (ended || streamEnded || !finishTracker.seenTerminalEvent) {
-          return;
-        }
-        ended = true;
-        streamEnded = true;
-        clearTimers();
-        getSessionExecutionStateTracker().recordSseStreamEnd(requestLabel, {
-          finishReason: finishTracker.finishReason,
-          terminal: true
-        });
-        if (!completedLogged) {
-          completedLogged = true;
-          logStreamRequestComplete(entryEndpoint, requestLabel, status, finishTracker.finishReason, requestLogContext);
-        }
-        try {
-          stream.destroy?.();
-        } catch (destroyError) {
-          logResponseNonBlockingError(`response.sse.terminal.destroy_stream:${requestLabel}`, destroyError);
-        }
-        if (!res.writableEnded && !res.destroyed) {
-          try {
-            res.end();
-          } catch (endError) {
-            logResponseNonBlockingError(`response.sse.terminal.end:${requestLabel}`, endError);
-          }
-        }
-      }, 250);
-      terminalGraceTimer.unref?.();
     });
     stream.on('error', (error: Error) => {
       ended = true;
@@ -833,7 +1097,8 @@ export function sendPipelineResponse(
   logPipelineStage('response.json.write', requestLabel, { status });
   // E1 boundary rule: internal env variables use "__*" and must never reach client payloads.
   // Preserve the SSE carrier key (it is handled above and never JSON-encoded).
-  const usageNormalized = normalizeChatUsagePayload(body, {
+  const normalizedJsonBody = normalizeResponsesJsonBody(body, entryEndpoint, requestLabel);
+  const usageNormalized = normalizeChatUsagePayload(normalizedJsonBody, {
     entryEndpoint,
     usageFallback: result.usageLogInfo?.usage
   });
@@ -843,7 +1108,7 @@ export function sendPipelineResponse(
     });
   }
   const clientBody = usageNormalized.payload;
-  const sanitized = stripInternalKeysDeep(clientBody, { preserveKeys: new Set(['__sse_responses']) });
+  const sanitized = stripInternalKeysDeep(clientBody);
   const jsonFinishReason = deriveFinishReason(clientBody);
   getSessionExecutionStateTracker().recordJsonResponseComplete(requestLabel, jsonFinishReason);
   if (captureClientResponse) {

@@ -159,10 +159,13 @@ export async function handleResponses(
     const acceptsSse = typeof req.headers['accept'] === 'string'
       && (req.headers['accept'] as string).includes('text/event-stream');
     const originalStream = payload?.stream === true;
-    // submit_tool_outputs is a synthetic entrypoint: do not infer streaming from Accept headers.
-    // Some upstreams (e.g. OpenAI-compatible local servers) do not implement streaming on submit paths.
-    const inboundStream = isSubmitToolOutputs ? originalStream : (acceptsSse || originalStream);
-    const outboundStream = originalStream;
+    // Responses API stream contract is driven by payload.stream, not Accept.
+    // Accept only indicates the client can consume SSE if stream=true.
+    // Do not upgrade stream=false requests into SSE-visible execution just because the client advertises SSE.
+    const outboundStream = typeof options.forceStream === 'boolean' ? options.forceStream : originalStream;
+    // submit_tool_outputs is a synthetic entrypoint: keep transport intent aligned with outbound stream.
+    // Some upstreams do not implement streaming on submit paths; we must not infer it from Accept headers.
+    const inboundStream = outboundStream;
     let resumeMeta: Record<string, unknown> | undefined;
     if (isSubmitToolOutputs) {
       const responseId = typeof payload?.response_id === 'string'
@@ -207,14 +210,14 @@ export async function handleResponses(
         return;
       }
     }
-    if (!isSubmitToolOutputs && (acceptsSse || options.forceStream) && (!originalStream || options.forceStream)) {
+    if (!isSubmitToolOutputs && options.forceStream === true && (!originalStream || options.forceStream)) {
       payload.stream = true;
     }
     isVideoRequest = payloadContainsVideoInput(payload);
     if (isVideoRequest) {
       requestTimeoutMs = Math.max(configuredRequestTimeoutMs ?? 0, VIDEO_REQUEST_TIMEOUT_MS);
     }
-    const wantsStream = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
+    const wantsStream = outboundStream;
 
     if (wantsStream && !isVideoRequest) {
       requestTimeoutMs = undefined;
@@ -280,7 +283,7 @@ export async function handleResponses(
           code: 'HTTP_REQUEST_TIMEOUT',
           status: 504
         });
-        const wantsStreamForError = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
+        const wantsStreamForError = outboundStream;
         try {
           logRequestError(entryEndpoint, requestId, err);
         } catch (loggingError) {
@@ -382,9 +385,7 @@ export async function handleResponses(
     const acceptsSse = typeof req.headers['accept'] === 'string'
       && (req.headers['accept'] as string).includes('text/event-stream');
     const originalStream = Boolean(req.body && typeof req.body === 'object' && (req.body as ResponsesPayload).stream === true);
-    const wantsStream = isSubmitToolOutputs
-      ? (options.forceStream === true || originalStream)
-      : (acceptsSse || originalStream || options.forceStream === true);
+    const wantsStream = options.forceStream === true || originalStream;
     if (res.headersSent) {
       if (wantsStream && !res.writableEnded) {
         await writeStartedSsePipelineError(res, ctx, error, entryEndpoint, requestId);

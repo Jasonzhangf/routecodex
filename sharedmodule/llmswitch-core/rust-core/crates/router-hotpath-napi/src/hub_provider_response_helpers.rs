@@ -98,12 +98,14 @@ fn has_new_governed_server_tool_calls(before: &Value, after: &Value) -> bool {
 fn responses_payload_requires_submit_tool_outputs(payload: &Value) -> bool {
     if let Some(output) = payload.get("output").and_then(|v| v.as_array()) {
         for entry in output {
-            if entry.as_object()
+            if let Some(kind) = entry
+                .as_object()
                 .and_then(|r| r.get("type"))
                 .and_then(|v| v.as_str())
-                == Some("function_calling")
             {
-                return true;
+                if kind == "function_calling" || kind == "function_call" {
+                    return true;
+                }
             }
         }
     }

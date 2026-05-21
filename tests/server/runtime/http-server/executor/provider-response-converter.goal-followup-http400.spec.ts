@@ -6,6 +6,9 @@ const mockPersistStoplessGoalStateSnapshot = jest.fn();
 const mockSyncReasoningStopModeFromRequest = jest.fn(() => 'off');
 const mockSyncStoplessGoalStateFromRequest = jest.fn(() => ({ stickyKey: 'session:goal-followup-http400', hadDirective: false, directiveTypes: [] }));
 const mockLoadRoutingInstructionStateSync = jest.fn(() => null);
+const mockRequireCoreDist = jest.fn(() => ({
+  normalizeResponsesToolCallArgumentsForClientWithNative: () => ({}),
+}));
 const mockReadStoplessGoalState = jest.fn((adapterContext: Record<string, unknown>) => {
   const sessionId = typeof adapterContext?.sessionId === 'string' ? adapterContext.sessionId : undefined;
   return {
@@ -22,6 +25,7 @@ const mockBridgeModule = () => ({
   persistStoplessGoalStateSnapshot: mockPersistStoplessGoalStateSnapshot,
   loadRoutingInstructionStateSync: mockLoadRoutingInstructionStateSync,
   readStoplessGoalState: mockReadStoplessGoalState,
+  requireCoreDist: mockRequireCoreDist,
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
 });
 

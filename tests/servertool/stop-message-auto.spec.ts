@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { jest } from '@jest/globals';
 import { runServerSideToolEngine as runServerSideToolEngineRaw } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
 import { runServerToolOrchestration as runServerToolOrchestrationRaw } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
@@ -11,6 +12,7 @@ import {
 import { buildResponsesRequestFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
 import { extractBlockedReportFromMessagesForTests } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.js';
 import { resolveStickyKey } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.js';
+import { resetStopMessageRuntimeConfigCacheForTests } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-sessions');
 const USER_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-userdir');
@@ -25,6 +27,8 @@ const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_BACKEND = process.env.ROUTECODEX_STOPMESS
 const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
 const ORIGINAL_STOPMESSAGE_DEFAULT_ENABLED = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED;
 const ORIGINAL_REASONING_STOP_GUARD_ENABLED = process.env.ROUTECODEX_REASONING_STOP_GUARD_ENABLED;
+const ORIGINAL_STOPMESSAGE_CONFIG_PATH = process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH;
+const STOPMESSAGE_CONFIG_PATH = path.join(SESSION_DIR, 'stop-message.json');
 
 function writeRoutingStateForSession(sessionId: string, state: RoutingInstructionState): void {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
@@ -60,7 +64,6 @@ function withTmuxAdapterContext<T>(adapterContext: T): T {
     (typeof metadata.tmuxSessionId === 'string' && String(metadata.tmuxSessionId).trim()) ||
     (typeof metadata.clientTmuxSessionId === 'string' && String(metadata.clientTmuxSessionId).trim()) ||
     (typeof metadata.client_tmux_session_id === 'string' && String(metadata.client_tmux_session_id).trim()) ||
-    (typeof record.sessionId === 'string' && record.sessionId.trim()) ||
     '';
   if (!tmuxSessionId) {
     return adapterContext;
@@ -92,28 +95,7 @@ async function runServerToolOrchestration(
 ): ReturnType<typeof runServerToolOrchestrationRaw> {
   const nextArgs = {
     ...args,
-    adapterContext: withTmuxAdapterContext(args.adapterContext),
-    ...(typeof (args as Record<string, unknown>).clientInjectDispatch === 'function'
-      ? {}
-      : {
-          clientInjectDispatch: async (dispatchArgs: {
-            entryEndpoint: string;
-            requestId: string;
-            body?: JsonObject;
-            metadata?: JsonObject;
-          }) => {
-            if (typeof (args as Record<string, unknown>).reenterPipeline !== 'function') {
-              return { ok: false as const, reason: 'client_inject_dispatcher_unavailable' };
-            }
-            await (args as Record<string, any>).reenterPipeline({
-              entryEndpoint: dispatchArgs.entryEndpoint,
-              requestId: dispatchArgs.requestId,
-              body: (dispatchArgs.body as JsonObject) ?? ({} as JsonObject),
-              metadata: dispatchArgs.metadata
-            });
-            return { ok: true as const };
-          }
-        })
+    adapterContext: withTmuxAdapterContext(args.adapterContext)
   } as Parameters<typeof runServerToolOrchestrationRaw>[0];
   return runServerToolOrchestrationRaw(nextArgs);
 }
@@ -162,6 +144,24 @@ function readClientInjectMeta(followup: any): { clientInjectOnly: boolean; clien
       ? String((metadata as Record<string, unknown>).clientInjectText)
       : '';
   return { clientInjectOnly, clientInjectText };
+}
+
+function buildStopChatResponse(id = 'chatcmpl-stopmessage-double-dispatch'): JsonObject {
+  return {
+    id,
+    object: 'chat.completion',
+    model: 'gpt-test',
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: 'ok'
+        },
+        finish_reason: 'stop'
+      }
+    ]
+  } as JsonObject;
 }
 
 describe('stop_message_auto servertool', () => {
@@ -234,6 +234,7 @@ describe('stop_message_auto servertool', () => {
   });
 
   afterAll(() => {
+    resetStopMessageRuntimeConfigCacheForTests();
     if (ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_ENABLED === undefined) {
       delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED;
     } else {
@@ -273,6 +274,11 @@ describe('stop_message_auto servertool', () => {
       delete process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED;
     } else {
       process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = ORIGINAL_STOPMESSAGE_DEFAULT_ENABLED;
+    }
+    if (ORIGINAL_STOPMESSAGE_CONFIG_PATH === undefined) {
+      delete process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH;
+    } else {
+      process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH = ORIGINAL_STOPMESSAGE_CONFIG_PATH;
     }
     if (ORIGINAL_REASONING_STOP_GUARD_ENABLED === undefined) {
       delete process.env.ROUTECODEX_REASONING_STOP_GUARD_ENABLED;
@@ -811,6 +817,64 @@ describe('stop_message_auto servertool', () => {
         fs.unlinkSync(mockCodexBinPath);
       }
     }
+  });
+
+
+  test('stop_message_flow uses clientInjectDispatch only and never reenterPipeline when both are available', async () => {
+    const sessionId = 'stopmessage-client-inject-only';
+    writeRoutingStateForSession(sessionId, {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 3,
+      stopMessageUsed: 0,
+      stopMessageStageMode: 'auto'
+    });
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-client-inject-only',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      tmuxSessionId: sessionId,
+      clientTmuxSessionId: sessionId,
+      clientInjectReady: true,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: '继续处理' }]
+      }
+    } as any;
+
+    const clientInjectDispatch = jest.fn(async () => ({ ok: true } as any));
+    const reenterPipeline = jest.fn(async () => ({
+      body: {
+        id: 'chatcmpl-stopmessage-should-not-reenter',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'should not run' }, finish_reason: 'stop' }]
+      } as JsonObject
+    }));
+
+    const result = await runServerToolOrchestration({
+      chat: buildStopChatResponse(),
+      adapterContext,
+      requestId: 'req-stopmessage-client-inject-only',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      clientInjectDispatch,
+      reenterPipeline
+    });
+
+    expect(result.executed).toBe(true);
+    expect(result.flowId).toBe('stop_message_flow');
+    expect(clientInjectDispatch).toHaveBeenCalledTimes(1);
+    expect(reenterPipeline).toHaveBeenCalledTimes(0);
+    const dispatchMeta = clientInjectDispatch.mock.calls[0]?.[0]?.metadata as Record<string, unknown> | undefined;
+    expect(dispatchMeta?.clientInjectOnly).toBe(true);
+    expect(dispatchMeta?.clientInjectSource).toBe('servertool.stop_message');
   });
 
   test.skip('main done marker does not terminate until ai-followup reviewer approves', async () => {
@@ -2325,11 +2389,24 @@ describe('stop_message_auto servertool', () => {
       requestId: 'req-stopmessage-client-inject-fail',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
-      sessionId,
+      tmuxSessionId: sessionId,
+      clientTmuxSessionId: sessionId,
+      clientInjectReady: true,
       capturedChatRequest
     } as any;
 
-    let reenterCalls = 0;
+    const enginePreview = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-stopmessage-client-inject-fail',
+      providerProtocol: 'openai-chat'
+    });
+    expect(enginePreview.mode).toBe('tool_flow');
+    expect(enginePreview.execution?.flowId).toBe('stop_message_flow');
+    expect(enginePreview.execution?.stopMessageReservation?.stickyKey).toBe(`tmux:${sessionId}`);
+
+    const clientInjectDispatch = jest.fn(async () => ({ ok: false as const, reason: 'inject_failed' }));
     await expect(
       runServerToolOrchestration({
         chat: chatResponse,
@@ -2337,24 +2414,34 @@ describe('stop_message_auto servertool', () => {
         requestId: 'req-stopmessage-client-inject-fail',
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
-        reenterPipeline: async () => {
-          reenterCalls += 1;
-          const error = new Error('inject failed') as Error & { code?: string };
-          error.code = 'SERVERTOOL_FOLLOWUP_FAILED';
-          throw error;
-        }
+        clientInjectDispatch
       })
     ).rejects.toMatchObject({
       code: 'SERVERTOOL_FOLLOWUP_FAILED'
     });
 
-    expect(reenterCalls).toBe(1);
-
+    expect(clientInjectDispatch).toHaveBeenCalledTimes(1);
     const stopStatePath = resolveStopStatePath(sessionId);
     if (fs.existsSync(stopStatePath)) {
-      const persisted = await readJsonFileWithRetry<{ state?: Record<string, unknown> }>(stopStatePath);
-      expect(persisted?.state?.stopMessageText).toBeUndefined();
-      expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
+      const persisted = await readJsonFileWithRetry<{ state?: Record<string, unknown> }>(
+        stopStatePath,
+        50,
+        10
+      );
+      let current = persisted;
+      for (let i = 0; i < 50; i += 1) {
+        if (
+          current?.state?.stopMessageText === undefined
+          && current?.state?.stopMessageMaxRepeats === undefined
+        ) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        current = await readJsonFileWithRetry<{ state?: Record<string, unknown> }>(stopStatePath, 50, 10);
+      }
+      const finalState = current;
+      expect(finalState?.state?.stopMessageText).toBeUndefined();
+      expect(finalState?.state?.stopMessageMaxRepeats).toBeUndefined();
     }
   });
 

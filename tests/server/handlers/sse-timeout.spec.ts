@@ -20,7 +20,13 @@ describe('HTTP SSE stream timeout', () => {
 
   it('ends stalled SSE streams with an error event', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-      writeSnapshotViaHooks: async () => undefined
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => ({
+        convertResponseToJsonToSse: async () => {
+          throw new Error('json_to_sse_not_expected_in_timeout_test');
+        }
+      }),
+      importCoreDist: async () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,

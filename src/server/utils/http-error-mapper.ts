@@ -211,6 +211,21 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
     });
   }
 
+  if (status === 501) {
+    return formatPayload(501, {
+      message: effectiveUpstreamMessage || baseMessage || 'Requested provider capability is not implemented',
+      code: upstreamCode || effectiveCode || 'not_implemented',
+      request_id: requestId,
+      provider_key: providerKey,
+      route_name: routeName,
+      provider_type: providerType,
+      upstream_status: upstream.status,
+      upstream_code: upstreamCode,
+      upstream_message: effectiveUpstreamMessage,
+      ...validationFields
+    });
+  }
+
   if (status >= 400 && status < 500) {
     return formatPayload(status, {
       message: effectiveUpstreamMessage || baseMessage || 'Upstream rejected the request',

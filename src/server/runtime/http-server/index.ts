@@ -58,6 +58,7 @@ import {
   applyMinimalDirectOverrides,
   resolveRawPayloadForDirect,
 } from './direct-passthrough-payload.js';
+import { normalizeProviderResponse } from './executor/provider-response-utils.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
@@ -126,7 +127,6 @@ import {
 import type { RouteErrorHub } from '../../../error-handling/route-error-hub.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import { runHubPipeline } from './executor-pipeline.js';
-import { normalizeProviderResponse } from './executor/provider-response-utils.js';
 import { convertProviderResponseIfNeeded } from './executor/provider-response-converter.js';
 import { extractUsageFromResult } from './executor/usage-aggregator.js';
 import { deriveFinishReason } from '../../utils/finish-reason.js';
@@ -1044,50 +1044,64 @@ export class RouteCodexHttpServer {
       },
     );
     // Try the router-direct pipeline
-    const directOutcome = await executeRouterDirectPipeline({
-      portConfig,
-      providerPayload,
-      requestPayload,
-      target: {
-        providerKey: target.providerKey,
-        providerType: target.providerType,
-        runtimeKey: target.runtimeKey,
-        processMode: target.processMode,
-      },
-      routingDecision,
-      processMode,
-      requestInfo: {
-        path: input.entryEndpoint,
-        headers: input.headers as Record<string, string | string[] | undefined>,
-      },
-      resolveProviderByRuntimeKey: (runtimeKey?: string) => {
-        if (!runtimeKey) return undefined;
-        return this.providerHandles.get(runtimeKey);
-      },
-      onSnapshotBefore: (payload, ctx) => {
-        this.logStage('router-direct.send.start', input.requestId, {
-          port: portConfig.port,
-          providerKey: ctx.providerKey,
-          inboundProtocol: ctx.inboundProtocol,
-          providerProtocol: ctx.providerProtocol,
-          routeName: ctx.routingDecision?.routeName,
-          observedFields: ctx.observedFields,
-        });
-      },
-      onSnapshotAfter: (response, ctx) => {
-        const responseRecord =
-          response && typeof response === 'object' ? (response as Record<string, unknown>) : undefined;
-        this.logStage('router-direct.send.completed', input.requestId, {
-          port: portConfig.port,
-          providerKey: ctx.providerKey,
-          inboundProtocol: ctx.inboundProtocol,
-          providerProtocol: ctx.providerProtocol,
-          routeName: ctx.routingDecision?.routeName,
-          status: typeof responseRecord?.status === 'number' ? responseRecord.status : undefined,
-          observedFields: ctx.observedFields,
-        });
-      },
-    });
+    let directOutcome: RouterDirectOutcome = { used: false, reason: 'uninitialized' };
+    const maxDirectAttempts = 2;
+    for (let directAttempt = 1; directAttempt <= maxDirectAttempts; directAttempt += 1) {
+      directOutcome = await executeRouterDirectPipeline({
+        portConfig,
+        providerPayload,
+        requestPayload,
+        target: {
+          providerKey: target.providerKey,
+          providerType: target.providerType,
+          runtimeKey: target.runtimeKey,
+          processMode: target.processMode,
+        },
+        routingDecision,
+        processMode,
+        requestInfo: {
+          path: input.entryEndpoint,
+          headers: input.headers as Record<string, string | string[] | undefined>,
+        },
+        resolveProviderByRuntimeKey: (runtimeKey?: string) => {
+          if (!runtimeKey) return undefined;
+          return this.providerHandles.get(runtimeKey);
+        },
+        onSnapshotBefore: (payload, ctx) => {
+          this.logStage('router-direct.send.start', input.requestId, {
+            port: portConfig.port,
+            providerKey: ctx.providerKey,
+            inboundProtocol: ctx.inboundProtocol,
+            providerProtocol: ctx.providerProtocol,
+            routeName: ctx.routingDecision?.routeName,
+            observedFields: ctx.observedFields,
+            directAttempt,
+          });
+        },
+        onSnapshotAfter: (response, ctx) => {
+          const responseRecord =
+            response && typeof response === 'object' ? (response as Record<string, unknown>) : undefined;
+          this.logStage('router-direct.send.completed', input.requestId, {
+            port: portConfig.port,
+            providerKey: ctx.providerKey,
+            inboundProtocol: ctx.inboundProtocol,
+            providerProtocol: ctx.providerProtocol,
+            routeName: ctx.routingDecision?.routeName,
+            status: typeof responseRecord?.status === 'number' ? responseRecord.status : undefined,
+            observedFields: ctx.observedFields,
+            directAttempt,
+          });
+        },
+      });
+      if (!directOutcome.used) {
+        break;
+      }
+      const normalizedDirectResponse = normalizeProviderResponse(directOutcome.response);
+      if (!this.isRecoverableRouterDirectHttp502(normalizedDirectResponse) || directAttempt >= maxDirectAttempts) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200 * directAttempt));
+    }
 
     if (!directOutcome.used) {
       this.logStage('router-direct.skipped', input.requestId, { reason: directOutcome.reason });
@@ -1100,6 +1114,24 @@ export class RouteCodexHttpServer {
       providerHandle: directOutcome.providerHandle,
       auditContext: directOutcome.auditContext,
     };
+  }
+
+  private isRecoverableRouterDirectHttp502(response: PipelineExecutionResult): boolean {
+    if (!response || typeof response !== 'object') {
+      return false;
+    }
+    if (response.status !== 502) {
+      return false;
+    }
+    const body = response.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return false;
+    }
+    const error = (body as Record<string, unknown>).error;
+    if (!error || typeof error !== 'object' || Array.isArray(error)) {
+      return false;
+    }
+    return String((error as Record<string, unknown>).code || '').trim().toUpperCase() === 'HTTP_502';
   }
 
   /**
@@ -1135,6 +1167,10 @@ export class RouteCodexHttpServer {
     // Response is passed through without outbound rewriting
     return {
       ...normalized,
+      metadata:
+        input.metadata && typeof input.metadata === 'object'
+          ? { ...(input.metadata as Record<string, unknown>) }
+          : normalized.metadata,
       usageLogInfo: {
         ...normalized.usageLogInfo ?? {},
         providerKey: auditContext.providerKey,
@@ -1182,6 +1218,10 @@ export class RouteCodexHttpServer {
     }
     return {
       ...normalized,
+      metadata:
+        input.metadata && typeof input.metadata === 'object'
+          ? { ...(input.metadata as Record<string, unknown>) }
+          : normalized.metadata,
       usageLogInfo: {
         ...(normalized.usageLogInfo ?? {}),
         providerKey: providerBinding,

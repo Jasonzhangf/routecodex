@@ -1103,13 +1103,21 @@ export class HubRequestExecutor implements RequestExecutor {
           aggregatedUsage = providerResponseResult.aggregatedUsage;
 
           const convertedStatus = providerResponseResult.convertedStatus;
-          if (
-            input.entryEndpoint?.includes('/v1/responses') &&
-            typeof convertedStatus === 'number' &&
-            Number.isFinite(convertedStatus) &&
-            convertedStatus >= 400 &&
-            convertedStatus < 500
-          ) {
+          const convertedBody =
+            converted.body && typeof converted.body === 'object' && !Array.isArray(converted.body)
+              ? (converted.body as Record<string, unknown>)
+              : undefined;
+          const convertedError =
+            convertedBody?.error && typeof convertedBody.error === 'object' && !Array.isArray(convertedBody.error)
+              ? (convertedBody.error as Record<string, unknown>)
+              : undefined;
+          const shouldClearResponsesConversation =
+            input.entryEndpoint?.includes('/v1/responses')
+            && (
+              (typeof convertedStatus === 'number' && Number.isFinite(convertedStatus) && convertedStatus >= 400)
+              || Boolean(convertedError)
+            );
+          if (shouldClearResponsesConversation) {
             await clearResponsesConversationByRequestId(input.requestId || executorRequestId);
           }
 
@@ -1192,7 +1200,7 @@ export class HubRequestExecutor implements RequestExecutor {
             contextOverflowRetries,
             cumulativeExternalLatencyMs
           } satisfies RequestExecutorFailureState, sendFailure);
-          lastError = failureState.lastError;
+          lastError = failureState.lastError ?? error;
           blockingRecoverableRouteHoldState = failureState.blockingRecoverableRouteHoldState;
           allowBlockingRecoverableRetryBeyondAttemptBudget =
             failureState.allowBlockingRecoverableRetryBeyondAttemptBudget;

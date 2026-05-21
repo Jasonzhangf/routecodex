@@ -8,11 +8,14 @@ import {
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
+import { resetStopMessageRuntimeConfigCacheForTests } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-goal-default');
+const STOPMESSAGE_CONFIG_PATH = path.join(SESSION_DIR, 'stop-message.json');
 const PREV_SESSION_DIR = process.env.ROUTECODEX_SESSION_DIR;
 const PREV_DEFAULT_ENABLED = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED;
 const PREV_DEFAULT_MAX = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_MAX_REPEATS;
+const PREV_CONFIG_PATH = process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH;
 
 function writeRoutingStateForSession(sessionId: string, state: RoutingInstructionState): void {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
@@ -101,13 +104,31 @@ function buildGoalOnlyStickyState(status: 'active' | 'completed'): RoutingInstru
 describe('stop_message_auto goal-active/default-repeat contract', () => {
   beforeEach(() => {
     fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+    resetStopMessageRuntimeConfigCacheForTests();
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
     process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '1';
-    process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_MAX_REPEATS = '2';
+    process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_MAX_REPEATS = '3';
+    process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH = STOPMESSAGE_CONFIG_PATH;
+    fs.mkdirSync(SESSION_DIR, { recursive: true });
+    fs.writeFileSync(
+      STOPMESSAGE_CONFIG_PATH,
+      JSON.stringify({
+        default: {
+          enabled: true,
+          text: '继续执行',
+          maxRepeats: 3
+        },
+        aiFollowup: {
+          enabled: false
+        }
+      }),
+      'utf8'
+    );
   });
 
   afterEach(() => {
     fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+    resetStopMessageRuntimeConfigCacheForTests();
     if (PREV_SESSION_DIR === undefined) {
       delete process.env.ROUTECODEX_SESSION_DIR;
     } else {
@@ -122,6 +143,11 @@ describe('stop_message_auto goal-active/default-repeat contract', () => {
       delete process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_MAX_REPEATS;
     } else {
       process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_MAX_REPEATS = PREV_DEFAULT_MAX;
+    }
+    if (PREV_CONFIG_PATH === undefined) {
+      delete process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH;
+    } else {
+      process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH = PREV_CONFIG_PATH;
     }
   });
 
@@ -150,24 +176,39 @@ describe('stop_message_auto goal-active/default-repeat contract', () => {
     expect(adapterContext.stoplessGoalState).toMatchObject({ status: 'active' });
   });
 
-  test('非 /goal 场景默认不自动续', async () => {
-    const sessionId = 'non-goal-default-skip';
-
-    const result = await runServerSideToolEngine({
+  test('非 /goal 场景默认自动续三次，并在耗尽后 tombstone', async () => {
+    const sessionId = 'non-goal-default-repeat-3';
+    const runOnce = (requestId: string) => runServerSideToolEngine({
       chatResponse: buildStopChatResponse(),
       adapterContext: buildAdapterContext(sessionId),
       entryEndpoint: '/v1/chat/completions',
-      requestId: 'req-non-goal-default-skip',
+      requestId,
       providerProtocol: 'openai-chat'
     });
+    const first = await runOnce('req-non-goal-default-repeat-1');
+    expect(first.mode).toBe('tool_flow');
+    expect(first.execution?.flowId).toBe('stop_message_flow');
+    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
 
-    expect(result.mode).toBe('passthrough');
-    expect(result.execution).toBeUndefined();
-    expect(readState(sessionId)).toBeUndefined();
+    const second = await runOnce('req-non-goal-default-repeat-2');
+    expect(second.mode).toBe('tool_flow');
+    expect(second.execution?.flowId).toBe('stop_message_flow');
+    expect(readState(sessionId)?.stopMessageUsed).toBe(2);
+
+    const third = await runOnce('req-non-goal-default-repeat-3');
+    expect(third.mode).toBe('tool_flow');
+    expect(third.execution?.flowId).toBe('stop_message_flow');
+    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
+    expect(readState(sessionId)?.stopMessageSource).toBe('default_exhausted');
+
+    const fourth = await runOnce('req-non-goal-default-repeat-4');
+    expect(fourth.mode).toBe('passthrough');
+    expect(fourth.execution).toBeUndefined();
+    expect(readState(sessionId)?.stopMessageSource).toBe('default_exhausted');
   });
 
-  test('非 /goal 场景即使 sticky 里有 completed goal 也不自动续', async () => {
-    const sessionId = 'non-goal-sticky-completed-skip';
+  test('非 /goal 场景即使 sticky 里有 completed goal 也默认自动续', async () => {
+    const sessionId = 'non-goal-sticky-completed-repeat';
     writeRoutingStateForSession(sessionId, buildGoalOnlyStickyState('completed'));
 
     const result = await runServerSideToolEngine({
@@ -178,14 +219,14 @@ describe('stop_message_auto goal-active/default-repeat contract', () => {
       providerProtocol: 'openai-chat'
     });
 
-    expect(result.mode).toBe('passthrough');
-    expect(result.execution).toBeUndefined();
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
     expect(readState(sessionId)?.stoplessGoalState).toMatchObject({ status: 'completed' });
-    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
+    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
   });
 
-  test('非 /goal 场景即使 sticky 里有 active goal 也不自动续', async () => {
-    const sessionId = 'non-goal-sticky-active-skip';
+  test('sticky 里有 active goal 时仍视为 goal active，不自动续', async () => {
+    const sessionId = 'sticky-active-goal-skip';
     writeRoutingStateForSession(sessionId, buildGoalOnlyStickyState('active'));
 
     const result = await runServerSideToolEngine({
@@ -220,8 +261,8 @@ describe('stop_message_auto goal-active/default-repeat contract', () => {
     expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
   });
 
-  test('/goal non-active 默认自动续，并按次数归零', async () => {
-    const sessionId = 'goal-completed-default-repeat-2';
+  test('/goal non-active 默认自动续三次，并按次数归零', async () => {
+    const sessionId = 'goal-completed-default-repeat-3';
     const now = Date.now();
     const buildNonActiveGoalContext = () => ({
       ...buildAdapterContext(sessionId),
@@ -253,9 +294,7 @@ describe('stop_message_auto goal-active/default-repeat contract', () => {
     });
     expect(second.mode).toBe('tool_flow');
     expect(second.execution?.flowId).toBe('stop_message_flow');
-    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
-    expect(readState(sessionId)?.stopMessageText).toBeUndefined();
-    expect(readState(sessionId)?.stopMessageMaxRepeats).toBeUndefined();
+    expect(readState(sessionId)?.stopMessageUsed).toBe(2);
 
     const third = await runServerSideToolEngine({
       chatResponse: buildStopChatResponse(),
@@ -264,9 +303,20 @@ describe('stop_message_auto goal-active/default-repeat contract', () => {
       requestId: 'req-goal-completed-repeat-3',
       providerProtocol: 'openai-chat'
     });
-    expect(third.mode).toBe('passthrough');
-    expect(third.execution).toBeUndefined();
+    expect(third.mode).toBe('tool_flow');
+    expect(third.execution?.flowId).toBe('stop_message_flow');
     expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
+    expect(readState(sessionId)?.stopMessageSource).toBe('default_exhausted');
+
+    const fourth = await runServerSideToolEngine({
+      chatResponse: buildStopChatResponse(),
+      adapterContext: buildNonActiveGoalContext(),
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-goal-completed-repeat-4',
+      providerProtocol: 'openai-chat'
+    });
+    expect(fourth.mode).toBe('passthrough');
+    expect(fourth.execution).toBeUndefined();
     expect(readState(sessionId)?.stopMessageSource).toBe('default_exhausted');
   });
 });

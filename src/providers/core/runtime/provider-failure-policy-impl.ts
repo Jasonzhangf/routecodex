@@ -284,6 +284,7 @@ export function resolveProviderFailureClassification(args: {
     reason.includes('[mimoweb] upstream assistant response was empty')
     || reason.includes('[mimoweb] upstream emitted tool markers but no tool calls could be harvested')
     || reason.includes('[mimoweb] upstream repeated prior tool call after tool_result')
+    || reason.includes('[windsurf] upstream repeated prior tool call after tool_result')
     || reason.includes('[mimoweb] serialized query exceeds empty-safe limit')
   ) {
     return 'special_400';

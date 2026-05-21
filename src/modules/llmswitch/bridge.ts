@@ -52,6 +52,7 @@ export {
   rebindResponsesConversationRequestId,
   clearResponsesConversationByRequestId,
   createResponsesSseToJsonConverter,
+  createResponsesJsonToSseConverter,
   reportProviderErrorToRouterPolicy,
   reportProviderSuccessToRouterPolicy,
   setProviderRuntimeQuotaHooks,

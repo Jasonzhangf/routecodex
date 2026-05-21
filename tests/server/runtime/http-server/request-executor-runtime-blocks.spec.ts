@@ -1,6 +1,7 @@
 import { describe, expect, jest, test } from '@jest/globals';
 import {
-  logProviderRetrySwitchCompact
+  logProviderRetrySwitchCompact,
+  shouldBypassProviderResponseConversion
 } from '../../../../src/server/runtime/http-server/executor/request-executor-runtime-blocks.js';
 
 describe('request-executor-runtime-blocks', () => {
@@ -33,5 +34,41 @@ describe('request-executor-runtime-blocks', () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+
+  test('does not bypass provider response conversion for chat.completion business-error bodies', () => {
+    expect(shouldBypassProviderResponseConversion({
+      status: 200,
+      body: {
+        object: 'chat.completion',
+        choices: null,
+        base_resp: {
+          status_code: 2056,
+          status_msg: 'usage limit exceeded'
+        },
+        usage: {
+          total_tokens: 0
+        }
+      }
+    })).toBe(false);
+  });
+
+  test('still bypasses provider response conversion for valid final chat.completion bodies', () => {
+    expect(shouldBypassProviderResponseConversion({
+      status: 200,
+      body: {
+        object: 'chat.completion',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: 'ok'
+            }
+          }
+        ]
+      }
+    })).toBe(true);
   });
 });

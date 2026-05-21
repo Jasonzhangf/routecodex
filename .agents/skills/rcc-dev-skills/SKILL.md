@@ -37,6 +37,12 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 3. 若改动跨多个阶段，必须显式说明每一段为什么必要；否则视为散改。
 
 ### R1. 先复现 / 先补测试（不改实现）
+0. **遇到问题默认直接补红测，不询问是否要先写测试。** 只有用户明确禁止时才例外。
+0.1 **若现有测试 helper 自带 fallback / 兼容桥 / 双路径补偿，先把 helper 清成 fail-fast 真相，再补红测；禁止让测试夹带 fallback 掩盖设计错误。**
+0.2 **贴出响应报错时，先审请求 shape，再审响应处理。** 强制顺序：
+   - 先抓 `provider-request` / outbound payload / same-shape fixture，确认请求字段、协议主形、历史消息、tools/tool_choice/stream 等是否已坏；
+   - 只有在请求 shape 被证明确实正确后，才允许继续查看响应分类、contract、错误映射与处理分支；
+   - 禁止看到 `502`、`EMPTY_ASSISTANT_RESPONSE`、`HTTP_502`、`completed+output=[]` 之类响应表象后，直接去修 response handler / error mapper / fallback。
 1. 先拿原 requestId / codex-sample / errorsample / 最小 fixture 复现。
 2. 先补会红的测试：
    - shape / sanitize / compat：单测或 same-shape replay
@@ -109,6 +115,22 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
    - 汇报必须包含：测试对齐结果、切片改动点、单测/回归结果、E2E 结果、下一步。
 
 ## Servertool Stopless/Followup 骨架（唯一改动导航）
+
+### 2026-05-21 SSE 断流纠偏（新增硬规则）
+
+1. **不要把“链路中存在 SSE”本身当成 bug**
+   - 对 `/v1/responses`：即使客户端请求 `stream=false`，内部 upstream/provider 仍可使用 SSE；这属于实现细节，不是故障。
+   - 真正要验证的是**客户端出站契约**：
+     - `stream=false` → 客户端最终必须拿到 JSON，而不是可见 SSE。
+     - `stream=true` → 客户端最终必须稳定收到完整 SSE，直到 `response.completed`。
+
+2. **看到客户端 SSE 反馈，不得误判为断流根因**
+   - Codex/TUI/调试客户端在流式阶段显示 SSE 反馈是正常现象。
+   - 只有在缺失 `response.completed`、过早 close、或 JSON/SSE 收口契约错误时，才算真 bug。
+
+3. **5555/5520 断流排查优先级**
+   - 先查公共层的 response contract / handler dispatch / SSE->JSON 或 JSON->SSE 收口。
+   - 禁止先把 provider 内部使用 SSE 定性为错误，更禁止为此把 provider 强行改成懂 SSE 的耦合实现。
 
 ### 最近一次多轮事故修复沉淀（2026-05-19）
 

@@ -8,10 +8,10 @@ import type { ModuleDependencies } from '../../../../src/modules/pipeline/interf
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-request-executor-error-reporting-sessions');
 
-const mockEmitProviderError = jest.fn();
+const mockEmitProviderErrorAndWait = jest.fn();
 
 jest.unstable_mockModule('../../../../src/providers/core/utils/provider-error-reporter.js', () => ({
-  emitProviderError: mockEmitProviderError
+  emitProviderErrorAndWait: mockEmitProviderErrorAndWait
 }));
 
 const {
@@ -80,7 +80,7 @@ function createExecutor(pipelineResult: PipelineExecutionResult, handle: Provide
 
 describe('HubRequestExecutor provider error reporting', () => {
   beforeEach(() => {
-    mockEmitProviderError.mockReset();
+    mockEmitProviderErrorAndWait.mockReset();
     __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
     fs.rmSync(SESSION_DIR, { recursive: true, force: true });
@@ -123,7 +123,7 @@ describe('HubRequestExecutor provider error reporting', () => {
       upstreamCode: 'client_inject_failed'
     });
 
-    expect(mockEmitProviderError).toHaveBeenCalledWith(
+    expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
       expect.objectContaining({
         stage: 'provider.followup',
         statusCode: 502,
@@ -177,7 +177,7 @@ describe('HubRequestExecutor provider error reporting', () => {
       statusCode: 502
     });
 
-    expect(mockEmitProviderError).toHaveBeenCalledWith(
+    expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
       expect.objectContaining({
         stage: 'provider.followup',
         statusCode: 502,
@@ -225,7 +225,7 @@ describe('HubRequestExecutor provider error reporting', () => {
       statusCode: 400
     });
 
-    expect(mockEmitProviderError).toHaveBeenCalledWith(
+    expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
       expect.objectContaining({
         stage: 'provider.send',
         statusCode: 400,
@@ -271,7 +271,7 @@ describe('HubRequestExecutor provider error reporting', () => {
         statusCode: 502
       });
 
-      expect(mockEmitProviderError).toHaveBeenCalledWith(
+      expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
         expect.objectContaining({
           stage: 'provider.send',
           statusCode: 502,
@@ -327,7 +327,7 @@ describe('HubRequestExecutor provider error reporting', () => {
         statusCode: 500
       });
 
-      expect(mockEmitProviderError).toHaveBeenCalledWith(
+      expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
         expect.objectContaining({
           stage: 'provider.send',
           statusCode: 500,
@@ -386,7 +386,7 @@ describe('HubRequestExecutor provider error reporting', () => {
       statusCode: 502
     });
 
-    expect(mockEmitProviderError).toHaveBeenCalledWith(
+    expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
       expect.objectContaining({
         stage: 'provider.followup',
         statusCode: 502,
@@ -442,7 +442,7 @@ describe('HubRequestExecutor provider error reporting', () => {
     expect(convertSpy).toHaveBeenCalledTimes(1);
     expect((pipeline.execute as jest.Mock).mock.calls.length).toBe(1);
     expect((handle.instance.processIncoming as jest.Mock).mock.calls.length).toBe(1);
-    expect(mockEmitProviderError).toHaveBeenCalledWith(
+    expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
       expect.objectContaining({
         stage: 'provider.followup',
         statusCode: 401,
@@ -485,8 +485,8 @@ describe('HubRequestExecutor provider error reporting', () => {
         statusCode: 429
       });
 
-      expect(mockEmitProviderError).toHaveBeenCalledTimes(1);
-      expect(mockEmitProviderError).toHaveBeenCalledWith(
+      expect(mockEmitProviderErrorAndWait).toHaveBeenCalledTimes(1);
+      expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
         expect.objectContaining({
           stage: 'provider.http',
           statusCode: 429,
@@ -557,7 +557,7 @@ describe('HubRequestExecutor provider error reporting', () => {
         requestExecutorProviderErrorStage: 'host.response_contract'
       });
 
-      expect(mockEmitProviderError).not.toHaveBeenCalled();
+      expect(mockEmitProviderErrorAndWait).not.toHaveBeenCalled();
     } finally {
       if (previousMaxAttempts === undefined) {
         delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
@@ -635,7 +635,7 @@ describe('HubRequestExecutor provider error reporting', () => {
         requestExecutorProviderErrorStage: 'host.response_contract'
       });
 
-      expect(mockEmitProviderError).not.toHaveBeenCalled();
+      expect(mockEmitProviderErrorAndWait).not.toHaveBeenCalled();
     } finally {
       if (previousMaxAttempts === undefined) {
         delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;

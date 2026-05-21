@@ -61,6 +61,16 @@ export function buildProviderExecutionSuccessResult(args: {
       : undefined;
   return {
     ...args.converted,
+    metadata: {
+      ...(args.mergedMetadata ?? {}),
+      ...(
+        args.converted.metadata
+        && typeof args.converted.metadata === 'object'
+        && !Array.isArray(args.converted.metadata)
+          ? args.converted.metadata
+          : {}
+      )
+    },
     usageLogInfo: {
       providerKey: args.providerKey,
       model: args.providerModel,
@@ -121,14 +131,26 @@ function throwProviderHttpError(converted: PipelineExecutionResult): never {
   const bodyForError = converted.body && typeof converted.body === 'object'
     ? (converted.body as Record<string, unknown>)
     : undefined;
-  const errMsg =
+  const errorNode =
     bodyForError && bodyForError.error && typeof bodyForError.error === 'object'
-      ? String((bodyForError.error as any).message || bodyForError.error || '')
+      ? (bodyForError.error as Record<string, unknown>)
+      : undefined;
+  const errMsg =
+    errorNode
+      ? String(errorNode.message || errorNode || '')
       : '';
   const statusCode = typeof converted.status === 'number' ? converted.status : 500;
   const errorToThrow: any = new Error(errMsg && errMsg.trim().length ? errMsg : `HTTP ${statusCode}`);
   errorToThrow.statusCode = statusCode;
   errorToThrow.status = statusCode;
+  const errorCode =
+    errorNode && typeof errorNode.code === 'string' && errorNode.code.trim().length
+      ? errorNode.code.trim()
+      : undefined;
+  if (errorCode) {
+    errorToThrow.code = errorCode;
+    errorToThrow.upstreamCode = errorCode;
+  }
   errorToThrow.response = { data: bodyForError };
   errorToThrow.requestExecutorProviderErrorStage = 'provider.http';
   throw errorToThrow;

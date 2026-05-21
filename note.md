@@ -52,6 +52,34 @@
 - `search` 不是直接掉 `default` 的 route。工具类专用 route miss 时应先落 `tools` 总兜底，再决定是否继续到 `default`；本轮唯一修复点先落在 Rust `virtual_router_engine/routing/config.rs::build_route_queue`，并同时补齐用户配置里的 `routing.search` 池。
 - `EMPTY_ASSISTANT_RESPONSE` 的错误日志不得把 `__sse_responses` 这类内部 stream carrier 整坨透传到 `rawError/rawErrorSnippet`；证据可保留，但必须在 host 日志序列化前剥离内部 carrier。
 
+## 2026-05-20 windsurf provider architecture correction
+
+- 用户明确纠偏：Provider 正确边界是 **Hub Pipeline -> provider -> 云端**，不应依赖任何本地 LS / localhost / 本地 gRPC 端口。
+- 已先改设计文档，再推进实现。
+- 已验证旧设计错误：
+  - `src/providers/core/runtime/windsurf-chat-provider.ts` 仍以 `InitializeCascadePanelState / StartCascade / SendUserCascadeMessage / GetCascadeTrajectory*` 为主链。
+  - `src/providers/core/contracts/windsurf-provider-contract.ts` 曾以 `lsPort/csrfToken` 为活 contract。
+- 已验证新的分层事实不能再写错：
+  1. **账号/模型目录面**：
+     - `server.codeium.com`
+     - `server.self-serve.windsurf.com`
+     - 接口：`GetUserStatus / GetCascadeModelConfigs / CheckUserMessageRateLimit`
+  2. **聊天主链面**：
+     - `cloudcode-pa.googleapis.com`
+     - `daily-cloudcode-pa.googleapis.com`
+     - 接口：`v1internal:loadCodeAssist`
+     - 模型拉取：`v1internal:fetchAvailableModels`
+- 证据：
+  - `~/Library/Application Support/Antigravity/logs/20260518T005824/window1/exthost/google.antigravity/Antigravity.log`
+  - 日志中连续出现：
+    - `https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist`
+    - `https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist`
+    - `https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels`
+- 当前闭环进度：
+  - 文档已从“云端=server.codeium/self-serve 全包”纠正为“账号/模型目录”和“聊天主链”分面设计。
+  - contract/factory/test 第一片已转到 cloud config truth，并通过 3 个定向测试。
+  - 下一步唯一正确修改点：`src/providers/core/runtime/windsurf-chat-provider.ts`，物理删除本地 LS 主链语义，改接 cloud chat 主链。
+
 ## 探索日期: 2026-05-08
 
 ## 继承链结构
@@ -4148,3 +4176,1051 @@ Next slice:
 - `tests/servertool/reasoning-stop-guard.spec.ts` 与 `tests/servertool/stopless-reasoning-stop-guard.spec.ts` 当前属于死契约测试：其断言依赖的 `sharedmodule/llmswitch-core/src/servertool/handlers/reasoning-stop*.ts` 与 `stopless-goal-guard.ts` 已在 `29e3a969c` 被物理删除，但测试未同步清理，导致整片假红并统一退化成 `passthrough`。
 - 唯一正确修复不是“补回旧实现”，而是物理删除这批过期测试并把 skeleton/config 断言改到现行 stopless contract：当前活 contract 只看 `stoplessGoalState` + `stop_message_auto` / followup policy，不再依赖旧 `reasoning.stop` guard 链。
 - 已验证活测试组合：`tests/servertool/server-side-tools.auto-hook-config.spec.ts`、`tests/servertool/stop-message-auto.goal-default.spec.ts`、`tests/server/runtime/http-server/executor/provider-response-converter.goal-followup-http400.spec.ts` 全绿。
+
+## 2026-05-20 windsurf multi-key auto-expansion regression
+- 用户现象：VR 已命中 `windsurf.ws-pro-2.gpt-5.5-medium`，但 Host runtime resolve 报 `Provider runtime windsurf.ws-pro-2 not found`。
+- 已验证：native/bridge `bootstrapVirtualRouterConfig` 对 `~/.rcc/provider/windsurf/config.v2.toml` 的多 entry 展开本身正常，`runtime/targetRuntime` 都能看到 `windsurf.ws-pro-1/ws-pro-2/ws-pro-3`。
+- 唯一错误修改点在 `src/server/runtime/http-server/http-server-runtime-setup.ts`：新增的 `mergeProviderV2Configs()` 把 `loadProviderConfigsV2()` 返回的顶层未展开 provider 重新注入 `routerInput.providers`，污染了原本应交给 VR bootstrap 自动展开的输入。
+- 唯一正确修复：物理删除 `mergeProviderV2Configs()` 及其调用，恢复 `resolveVirtualRouterInput(userConfig)` → `bootstrapVirtualRouter(routerInput)` 的单一路径真源；别处补映射/补 handle 都会变成症状补丁。
+- 额外记录：用户给的 `ott$...` 是 Windsurf Auth Token，不是最终 gRPC 直发 `api_key`；当前先按用户要求配置进 `ws-pro-3`，后续若直连 LS 校验失败，需要把 token 先注册/兑换成真正 `apiKey` 再落盘。
+
+## 2026-05-20 windsurf runtime init missing baseUrl
+- 5520 现网复现证据：`~/.rcc/logs/server-5520.log` 出现 `[windsurf.runtime.init.fail] reason="[ProviderFactory] runtime windsurf.ws-pro-* missing baseUrl"`，随后同请求链路报 `Provider runtime windsurf.ws-pro-* not found`。
+- 已确认 VR 多账号展开正常，唯一真源错误点落在 `src/providers/core/runtime/provider-factory.ts::buildConfigFromRuntime()`：这里把 gRPC-only Windsurf 误当 HTTP provider，强制要求 `baseUrl`，导致 handle 根本没创建。
+- 正确修复方向：仅在 Windsurf runtime identity 下放宽 `baseUrl` 前置校验，让 provider 依赖 runtime/service profile 完成初始化；不能去补 resolver/route/runtime map，因为那只是症状层。
+
+## 2026-05-20 windsurf 5520 switch key2 -> key3
+- 用户要求仅替换 5520 路由 targets：把 `ws-pro-2` 物理移出，换成 `ws-pro-3`；不混入 provider 实现修改。
+- 已改 `~/.rcc/config.toml` 的 `gateway_priority_5520` 各 routing targets（thinking/coding/tools/search/web_search/default）并 SIGUSR2 重启 5520。
+- 重启后日志已出现 `[windsurf.runtime.init.ok] runtimeKey=ws-pro-3`，证明 key3 已加载进 5520 运行态；下一步只需验证是否真实命中以及 502 真因。
+
+## 2026-05-20 windsurf provider architecture correction
+- 用户明确纠偏：Provider 的正确职责是 `Hub Pipeline -> Provider -> 云端/Cascade`，不应经过任何本地监听端口、本地 Language Server、本地 IDE session。
+- 已验证当前实现方向错误：
+  - `src/providers/core/runtime/windsurf-chat-provider.ts` 仍依赖 `lsPort/csrfToken/LanguageServerService`
+  - `~/.rcc/provider/windsurf/config.v2.toml` 中 `lsPort=42101` 现网无监听，说明“本地 LS 端口”为错误主链设计，不是可修参数。
+- 已先修设计文档真源：
+  - `docs/design/windsurf-provider-grpc-bridge.md`
+  - `docs/providers/windsurf-chat-provider-design.md`
+- 新硬约束：
+  1. Windsurf Provider 主链必须直连云端 endpoint
+  2. `lsPort/csrfToken/localhost LanguageServerService` 必须从活 contract 与实现中退出
+  3. 后续代码改动先补“禁止 localhost 链路”测试，再改实现
+
+## 2026-05-20 19:23:57 Windsurf auth correction
+- README 真源显示前两个凭证是账号/密码，不是 token。
+- 下一步：按参考项目登录链获取 session token，再用 status/models probe 验证。
+
+## 2026-05-20 19:24:42 Windsurf Jason probe
+- 准备同时验证 direct token probe 与账号密码登录链。
+
+## 2026-05-20 19:25:41 Windsurf token-only correction
+- 用户确认 ws-pro-3 是 token，本次按 token 本体直测，不再拼 email|token。
+
+## 2026-05-20 19:26:09 Windsurf password probe
+- 用户指定 2094423@qq.com / welcome4zcam# 按账号密码登录链验证。
+
+## 2026-05-20 19:35:31 Windsurf account mainline progress
+- 已完成 Rust bootstrap + TS runtime/provider 登录链改动。
+- 已过 tsc + Rust provider_bootstrap 定向回归。
+- 下一步：build/install/restart + 运行态 smoke。
+
+## 2026-05-20 19:38:45 Windsurf 3-account verification
+- 目标：逐个验证 3 个账号登录链 + probe，并区分 invalid/cooldown。
+
+[NOTE]
+- 2026-05-20 windsurf 501 retry-order fix: 501 WINDSURF_CLOUD_CHAT_NOT_IMPLEMENTED now classifies unrecoverable in provider-failure-policy-impl.ts; Rust priority selection no longer collapses same-provider-id model groups before honoring configured target order. Verified by tests/providers/core/runtime/provider-failure-policy.windsurf-not-implemented.spec.ts and tests/sharedmodule/priority-route-preserves-target-order.test.ts.
+
+## 2026-05-20 Windsurf chat 主链修复（当前轮）
+- 已确认真 blocker：`src/providers/core/runtime/windsurf-chat-provider.ts::sendRequestInternal()` 仍是 501 stub，5520 线上测没有意义。
+- 参考真源 `WindsurfAPI` 明确 chat 主链是 `StartCascade -> SendUserCascadeMessage -> GetCascadeTrajectorySteps/GetCascadeTrajectory/GetGeneratorMetadata`，走本地 LS gRPC，不是 cloud chat 直连。
+- 本轮目标：先补红测锁定“必须走 gRPC cascade 主链且不再抛 not implemented”，再最小实现 provider 主链；不做无效 live 测试。
+1. 修 http-server-bootstrap resolveVirtualRouterInput -> v2 build path
+2. 改 provider-merge spec，先断言会注入 windsurf provider-v2
+3. 跑定向测试
+4. 如通过，再 build/install/restart 5520 验证 csrfToken 是否进入 merged/runtime
+
+## 2026-05-20 windsurf csrfToken runtime bootstrap fix
+- 已确认 5520 provider-v2 注入链已修通后，新的唯一真源缺口在 Rust provider bootstrap：runtime profile 结构未承载 extensions.windsurf，导致 transportBackend/lsPort/csrfToken 在 runtimeEntries/targetRuntime 阶段丢失。
+- 唯一正确修复点：sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs。
+- 已补 runtime/profile 的 extensions 字段与 normalize_windsurf_options()，并通过 Rust/JS 定向回归。
+
+## 2026-05-20 windsurf login-chain alignment
+- 对齐 WindsurfAPI 真源：CheckUserLoginMethod -> /_devin-auth/connections fallback -> Auth1 password/login -> PostAuth(sessionToken)。
+- 修正 ws-pro-3 账号密码字段读取：provider config 真源是 account/password，不是只读 mobile/password。
+- 将 session_token_not_initialized / no_password_set / credential_missing / postauth_failed 收敛为不可恢复错误，避免同账号自旋。
+
+## 2026-05-20 windsurf login probe correction
+- 刚才手工 probe 用的是 dist 旧构建，不足以证明新补的 account/password 映射无效。
+- 先重编，再用新构建对 ws-pro-3 做真实登录探针。
+
+## 2026-05-20 windsurf ws-pro-3 live login success
+- 用新构建 dist 对 ws-pro-3(account/password) 做真实登录探针，已成功拿到 devin-session-token。
+- 这证明登录链已打通；接下来要验证 5520 在线请求是否仍卡在旧实例/旧重试逻辑。
+
+## 2026-05-20 windsurf cross-request reroute regression
+
+- 运行态新证据：5520 上连续 3 个新请求都先命中 `windsurf.ws-pro-1.gpt-5.4-medium`，首个请求虽记录 `switch=exclude_and_reroute`，但后续新请求仍回到 ws-pro-1。
+- 已确认 cross-request reselect gate 代码存在；真正漏点是 provider transport backoff 对 `ERR_HTTP2_STREAM_CANCEL` 默认只走 network base=500ms。新请求间隔 >500ms 时，跨请求 gate 读到的 wait=0，因此不会改投 ws-pro-2/ws-pro-3。
+- 本轮唯一真源修复点应落在 `src/providers/core/runtime/provider-failure-policy-backoff.ts`：为 `ERR_HTTP2_STREAM_CANCEL` 提供独立 provider-scope backoff 基线，而不是复用普通 network retry 500ms。
+
+## 2026-05-20 windsurf login probe evidence
+
+- 真实链路自测：`2094423@qq.com / welcome4zcam#` 可成功完成 `/_devin-auth/connections -> /_devin-auth/password/login -> WindsurfPostAuth`。
+- 证据：`password/login` 返回 200 且拿到 auth1 token；`WindsurfPostAuth` 在 new/legacy host 都返回 200，且都能解析出 `devin-session-token$...`。
+- 结论：账号本身可用；此前 `WINDSURF_SESSION_TOKEN_NOT_INITIALIZED` 不是账号坏，而是 RouteCodex provider 真实执行路径没有把登录链稳定跑通/持久化进后续 grpc 使用。
+
+## 2026-05-20 windsurf resolveCascadeApiKey fix
+
+- 唯一真源修改点：`src/providers/core/runtime/windsurf-chat-provider.ts::resolveCascadeApiKey()`。
+- 原因：账号密码型 provider 第一次进入时还没有 sessionToken，旧实现先 `readApiKey()` 再 `ensureWindsurfSessionCredential()`，会直接抛 `WINDSURF_SESSION_TOKEN_NOT_INITIALIZED`，导致真实登录链永远没机会执行。
+- 修法：先 `ensureWindsurfSessionCredential()`，再读 apiKey。
+
+## 2026-05-20 build complete
+
+- `npm run build:min` 已通过。
+- build-info 自动升级到 `0.90.1949`。
+
+## 2026-05-20 install global complete
+
+- `npm run install:global` 已通过。
+- 全局版本验证：`routecodex --version` = `0.90.1949`。
+## 2026-05-20 windsurf account config correction
+- 已把 ~/.rcc/provider/windsurf/config.v2.toml 的 ws-pro-1/ws-pro-2 从错误的 apikey 形态改为账号密码形态：
+  - ws-pro-1 = lopezbodhi4435@gmail.com / bZbMfJl1olXJ
+  - ws-pro-2 = candice63rfjones8ppco@gmail.com / ee12tG7WSsIK
+- 当前按同一 provider 主链对 3 个账号做真实登录链探针，先分离账号问题与 runtime/grpc 问题。
+## 2026-05-20 5520 restart race correction
+- 本轮 5520 启动失败不是 windsurf/provider 逻辑，而是我在 build/install 未结束前提前执行了 start，触发 `Cannot find module dist/index.js`。
+- 修正动作：必须等待 build+install 完成，再执行 scoped restart，再做 /v1/responses smoke。
+
+## 2026-05-20 windsurf gRPC移植真源偏差（ERR_HTTP2_STREAM_CANCEL）
+
+- 用户质疑“首个请求就 cancel 不合理”，复核 WindsurfAPI 真源后已确认这不是可接受常态，更像移植链路偏差。
+- 已核对到的第一硬差异：
+  - 参考实现 `WindsurfAPI/src/grpc.js` 发 header `x-codeium-csrf-token`
+  - 当前 RouteCodex `src/providers/core/runtime/grpc/grpc-client.ts` 发的是 `x-csrf-token`
+  - 这属于协议级不一致，是当前最优先真源。
+- 第二类差异：参考实现不是“直接打 gRPC”而是有完整 LS 生命周期管理：
+  - `ensureLs()`
+  - `warmupCascade()`
+  - transport cancel 时 `closeSessionForPort(port)` + 清 `workspaceInit/sessionId`
+- 当前行动原则：不再猜测 reroute/账号问题，先按 WindsurfAPI 真源完整对齐 gRPC header、LS session/warmup/reset 链，再用同 shape smoke 验证首跳是否仍 cancel。
+
+
+## 2026-05-20 windsurf auth/ls mainline alignment doc landed
+
+- 用户纠偏后的当前唯一主目标已固定：**先完整读 WindsurfAPI 的认证/鉴权/LS 初始化路径，先写设计文档，再实现**。
+- 新文档已落：`docs/design/windsurf-auth-ls-mainline-alignment.md`
+- 文档钉死的真源结论：
+  1. WindsurfAPI 邮箱密码链不是“密码即 key”，而是 `CheckUserLoginMethod -> password/login -> WindsurfPostAuth -> sessionToken`，后续以 `sessionToken` 作为 `apiKey` 真值。
+  2. cloud metadata (`GetUserStatus / GetCascadeModelConfigs / CheckUserMessageRateLimit`) 不是聊天主链，只是账号/目录/限额面。
+  3. 聊天主链必须先过 LS manager：`ensureLs -> getLsFor -> waitPortReady -> ready LS entry -> warmupCascade -> panel/cascade calls`。
+  4. 当前 RouteCodex 真正偏差不是 header/重试策略本身，而是 **缺失 WindsurfAPI 等价 LS manager 层**，却让 provider 直接持有 `cascadeWorkspaceInitPromise/cascadeSessionId` 等本应属于 LS 生命周期的状态。
+- 下一步唯一正确修改点：新增 `src/providers/core/runtime/windsurf-langserver-manager.ts`，再把 `windsurf-chat-provider.ts` 改成消费 ready LS entry，物理移除 provider 内部那套 ad-hoc LS/session 状态。
+
+## 2026-05-20 windsurf provider spec harness OOM
+- 新证据：`tests/providers/core/runtime/windsurf-chat-provider.spec.ts` 即使收缩到最小断言面，运行时仍在 Jest ESM/dynamic import 路径上 OOM，栈集中在 `Runtime_DynamicImportCall` / `ImportModuleDynamicallyWithPhase` / fs stat 微任务，不足以作为当前业务逻辑失败证据。
+- 结论：当前 provider spec harness 本身不可信，不能再拿它证明 windsurf 主链成败；应改为更轻的 helper/manager 层定向测试 + build/install/restart/live smoke 组合验证。
+- 已验证：`tests/providers/core/runtime/windsurf-langserver-manager.spec.ts` 单独可过；`./node_modules/.bin/tsc -p tsconfig.json --noEmit` 本轮为通过状态。
+
+## 2026-05-20 native finalize_strip export gap
+
+- 最新 5520 真正阻塞点已从 Windsurf 首跳取消推进到 llmswitch-core native 缺口：TS 侧强制要求 `filterOutExecutedServerToolCallsJson`，Rust 业务函数已存在于 `servertool_skeleton/finalize_strip.rs`，但 `router-hotpath-napi/src/lib.rs` 未导出。
+- 已在 `lib.rs` 新增 `filterOutExecutedServerToolCallsJson(finalized_payload_json, orchestration_payload_json)` NAPI 导出，直接桥接到 Rust 真源 `filter_out_executed_servertool_calls`。
+- 这是当前唯一正确修改点：改 TS caller / 改 provider / 改重试都只能绕过或掩盖当前 global convert.bridge 缺口，不能修复缺失 native 能力本身。
+
+## 2026-05-20 windsurf mainline verification progression
+- 最新 5520 运行态真证据：`~/.rcc/logs/server-5520.log:26976-26978` 显示 `thinking/gateway-priority-5520-thinking -> windsurf.ws-pro-1.gpt-5.4-medium.gpt-5.4-medium` 并返回 `status=200 finish_reason=stop`。
+- 这证明 Windsurf 主链已不再停留在 `InitializeCascadePanelState: The pending stream has been canceled` 首跳取消；此前该错误样本在同日志 `23766-25605` 仍存在，后续又推进到 `SendUserCascadeMessageRequest wire-format` 错误，再到 native export 缺口，最终到 22:31 成功完成。
+- `windsurf-chat-provider.spec.ts` 本轮再次 OOM，继续证明它是 Jest/ESM harness 问题，不可作为业务逻辑失败证据；当前应以 manager 单测 + build/install + 5520 live smoke 作为主证据链。
+
+## 2026-05-20 windsurf provider spec OOM fixed
+- `tests/providers/core/runtime/windsurf-chat-provider.spec.ts` 的 OOM 真因在于 `unstable_mockModule(grpc-client.js)` 内又回拉真实 `grpc-client.ts`，把庞大 ESM 依赖图重新导入 Jest。
+- 已改为纯最小 mock（仅保留 `grpcUnary/closeSessionForPort/grpcFrame/LS_SERVICE` 等当前断言所需导出），不再回拉真实模块。
+- 结果：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` 已 PASS 3/3。
+
+## 2026-05-20 windsurf stream evidence gap remains
+- 本轮两次 stream 抓取都未形成 Windsurf 主链有效验收证据：一次 client 侧 read timeout，一次日志命中的是 `router-direct:thinking -> crs.crsa.gpt-5.3-codex`，不是 Windsurf。
+- 因此当前只能确认 Windsurf non-stream 主链已打通；stream 路径仍需独立、可归因的 requestId + provider 日志证据。
+
+## 2026-05-20 responses stream=true without Accept:SSE compatibility proof
+- 用户补充约束：Hub Pipeline/handler 对 `stream=true && acceptsSse=false` 必须兼容。
+- 代码复核结果：`src/server/handlers/responses-handler.ts` 当前真链是 `inboundStream = acceptsSse || originalStream`，因此只要 body `stream=true`，即使客户端没发 `Accept: text/event-stream`，也会进入 SSE 响应主链。
+- 新增定向回归：`tests/server/handlers/responses-handler.stream-no-accept.spec.ts`。
+- 验证证据：Jest 日志明确出现 `started (stream=true acceptsSse=false)` 且随后 `completed (status=200, finish_reason=stop)`；说明 handler/hub 兼容契约成立。
+- 结论：22:36:50 那类 5520 样本不能直接归因到“acceptsSse=false 不兼容”，更可能是 provider/client disconnect 侧问题；后续若继续查，真源应继续落在 provider/transport，而不是先改 handler 的 stream 判定。
+
+## 2026-05-20 responses/hub pipeline SSE accept 兼容性已确认
+
+- 结论：`/v1/responses` 主链在 **`body.stream=true` 但客户端不发送 `Accept: text/event-stream`** 时，仍应保持 SSE/stream 语义；这不是当前 Windsurf 5520 问题的真因。
+- 证据：
+  1. `tests/server/handlers/responses-handler.stream-no-accept.spec.ts` 已覆盖该形状，并断言：
+     - `executePipeline` 看到的 `metadata.stream/inboundStream/outboundStream` 都为 `true`
+     - handler 返回 `Content-Type: text/event-stream`
+  2. `src/server/handlers/responses-handler.ts`
+     - `inboundStream = acceptsSse || originalStream`（非 submit_tool_outputs）
+     - 当 `originalStream=true` 时，即使 `acceptsSse=false` 也会走 stream 语义。
+- 因此：Hub Pipeline / handler 层关于 acceptsSse 的兼容已经成立；后续不要再把 Windsurf provider 的问题误判为 SSE accept 问题。
+
+## 2026-05-20 windsurf trust mainline proto drift fixed
+
+- 当前 Windsurf LS warmup 主链与 WindsurfAPI 真源对比后，已确认一个**协议层唯一偏差点**：
+  - `src/providers/core/runtime/grpc/windsurf-grpc-bridge.ts::buildUpdateWorkspaceTrustRequest`
+  - 之前签名被写成 `(apiKey, trusted, sessionId)`，调用时也直接传了布尔值；
+  - WindsurfAPI 真源是 `(apiKey, _ignoredWorkspaceUri, trusted, sessionId)`，虽然 proto 最终只编码 `metadata=1 + workspace_trusted=2`，但 RouteCodex 当前调用链把“workspaceUri 占位参数”整个抹掉，已经偏离真源主链形状。
+- 已修复：
+  - builder 签名改回与 WindsurfAPI 一致；
+  - `windsurf-langserver-manager.ts` 调用改为传 `file://<workspacePath>` + `trusted=true` + `sessionId`。
+- 为什么这是唯一正确修改点：
+  - 这不是 retry/router 问题，也不是 handler/SSE 问题；
+  - 错误发生在 LS warmup ownership 主链中，唯一应修的是 proto builder 与其唯一调用点；
+  - 在 provider 或 executor 层绕过不会让 LS trust 主链重新对齐真源。
+- 验证：
+  - `tests/providers/core/runtime/windsurf-langserver-manager.spec.ts`
+  - `tests/providers/core/runtime/windsurf-chat-provider.spec.ts`
+  - 两者均已通过。
+
+[2026-05-20 23:07:16] 当前 blocker 收敛：SendUserCascadeMessage 已成功，随后 pollCascadeToCompletion 在 ~1.6s 内收到 pending stream canceled。
+- 证据：requestId=openai-responses-windsurf.ws-pro-1-gpt-5.4-medium-20260520T230520722-218869-2647
+- 已排除：handler SSE 兼容、登录链、PostAuth、ensureCascadeWorkspace、StartCascade、SendUserCascadeMessage 首跳
+- 下一步：严格对齐 WindsurfAPI cascadeChat 的 poll / active-step / trajectory / rewarm 主链，不再漂移到 router 症状层。
+
+[2026-05-20 23:10:57] 用户新证据：server 启动阶段 windsurf.runtime.init.inspect 按每个 providerKey 刷屏；下一步唯一修复点应落在 runtime init logging，改为按 runtimeKey 聚合摘要，禁止逐 provider 展开日志。
+
+[2026-05-20 23:15:00] 用户反馈：当前主要刷屏源已收敛到 windsurf poll tick 每 500ms 一条；先物理降噪，只保留状态变化/进展/退出日志，再继续查空 completion 真问题。
+
+[2026-05-20 23:15:25] 用户明确要求：Windsurf poll 这种逐轮 tick 日志不需要，必须物理删除，不做节流版保留。
+
+[2026-05-20 23:15:51] 用户严厉纠偏：禁止 500ms/逐轮 poll/tick 调试日志；未经明确要求，禁止任何高频周期性日志进入运行态。该规则需写入项目本地规则，防止重复犯错。
+
+[2026-05-20 23:17:27] 用户新增硬要求：启动阶段 PortRegistry/Port listener/session_reaper/llmswitch-bridge preload/qwenchat.debug/windsurf.init.* 这类噪音日志默认禁止，需物理删除而非节流。
+
+[2026-05-20 23:19:46] 继续对齐 WindsurfAPI：已补 idle final sweep，进入 build/install/restart/单次 non-stream smoke 验证。
+
+[2026-05-20 23:32:00] 当前继续对齐 WindsurfAPI 主链的新发现：RouteCodex 的 buildCascadePrompt 对单轮请求仍错误地发送 `<human>...</human>` history 形状；reference 在 `convo.length<=1` 时直接发送纯用户文本，仅多轮时才包装历史与最新 human 标签。对于当前最小 hello smoke，这属于比 poll 更前置的真实 payload 偏差，可能直接导致 Cascade 空轨迹/idle_empty。下一步唯一修复点：先把单轮/多轮 prompt 组装对齐 reference，再补 parser 对 error step 的读取，随后做最小测试与 single smoke。
+[2026-05-20 23:38:00] 最新验证后，最小 hello 的 Windsurf prompt 已对齐为纯文本（日志中 promptChars=5），但 5520 单次 smoke 仍在 poll 阶段 30s 超时。当前唯一主方向继续收敛到 cascadeChat 的 poll/status/final-sweep 真源，不再回头查 auth/session/prompt 形状。
+[2026-05-20 23:43:00] 用户新增明确规则：Windsurf 返回 weekly usage quota exhausted 时，不是普通 502；必须按账号级配额耗尽处理，至少一日内拉黑，优先按一周冷却，并让路由避免继续命中同一账号。下一步唯一修复点：在 Windsurf provider 错误分类处打上稳定 quota exhausted 语义，并接入 virtual router health cooldown。
+
+## 2026-05-20 windsurf weekly quota cooldown + log suppression
+
+- 用户新增约束已确认：Windsurf `weekly usage quota exhausted` 先不要拉黑 7 天，改为 **按日冷却 24h**；因为这类周额度耗尽在一周内每天都会继续命中，运行时只需做到“当天不再重复命中”，次日再检查即可。
+- 用户新增约束已确认：Windsurf provider 默认日志不得继续刷 `begin/done/tick`；运行中最多保留失败原因级别证据，禁止 500ms poll 级刷屏。
+- 当前唯一修改面仍应限定在：
+  1. `src/providers/core/runtime/windsurf-chat-provider.ts`：weekly quota 分类、cooldownOverrideMs、日志收缩；
+  2. Rust virtual router provider error 事件落冷却处：确认 `cooldownOverrideMs` 真正用于 trip/cooldown。
+
+- 用户再次纠偏：问题不在“10 分钟是否允许”，而在 **状态机是否对齐 reference**。后续判断必须回到 WindsurfAPI 对 `trajectory status / steps / empty completion / error step` 的真实语义，不得只靠超时保护当完成。
+
+
+[2026-05-20 23:48:23] hashline 审计结论：当前仓库只有设计文档，无 hashline runtime 实现；唯一正确下一刀是先在 router-hotpath-napi 落 Rust hashline 真源骨架与 lib.rs 导出，再接 inbound apply_patch 单点，禁止先改 TS/config/guidance。
+
+- 2026-05-20 运行态收口：状态机对齐后进入 install:global -> restart 5520 -> 真实请求验证，不再继续扩大实现面。
+
+补记: weekly quota 未拉黑真源=executor classification 未读 error.rateLimitKind，且 provider_error event 未透传 cooldownOverrideMs/rateLimitKind/quota*；已开始修复。
+补记: 按 Jason 要求切换为红测优先，先补 weekly quota 的 alias 淘汰/轮转测试。
+补记: weekly quota 现已在 quota-daemon.events 真源改为 out-of-pool quotaDepleted，不再 keep-pool cooldown；红测已转绿。
+[2026-05-21] Jason 要求：weekly quota 后废 key 必须立即出池并轮转到 ws-pro-2/ws-pro-3；先红测，再改，再绿，再实机串行验证；不要口头结论。
+[2026-05-21] 当前继续检查两层：1) quota 状态是否真的落盘成 out-of-pool；2) 选择层是否仍忽略 quota 状态继续选 ws-pro-1。
+[2026-05-21] 收口 weekly ban 语义：Jason 明确要求 weekly ban，不只是出池冷却。已把 windsurf weekly quota 在 quota-daemon 真源从 cooldown/quotaDepleted 收口为 24h blacklist。
+
+
+## 2026-05-21 windsurf weekly quota reroute red-test
+
+- 目标：先红测再改，补齐 request-executor 在 `shouldRetry=false` 场景下仍需排除当前 provider 的语义，并验证 ws key 轮转。
+- 已确认当前真源缺口：`src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts` 在 `!eligibilityPlan.shouldRetry` 时直接返回，导致 weekly quota 这种不可恢复 429 虽然应 blacklist/exclude，但 `excludedCurrentProvider=false`，与用户要求和 spec 不一致。
+- 下一步：先跑 `tests/server/runtime/http-server/request-executor.spec.ts` 红测，锁定失败形状；再在 execution plan 唯一入口修正；绿测后再做 5520 实机确认 key 轮转。
+
+## 2026-05-21 continuation
+- Goal: red->fix->green remaining request-executor failures, then 5520 verify windsurf rotation/weekly ban.
+
+- Patched semantics followup detection, removed hidden same-provider exclusion, restored storm backoff base/expiry semantics.
+
+- Patched reasoning.stop finalized marker detection in response contract helper.
+
+- request-executor.spec.ts full green. Next: windsurf quota/key tests + tsc + 5520 runtime verify.
+
+- Found real quota shape at provider-quota.json.providers[*]. Earlier runtime skip of ws-pro-1 was due to persisted blacklist, not routing bug.
+
+## 2026-05-21 windsurf ws1 medium live evidence
+
+- 实机当前 `~/.rcc/quota/provider-quota.json` 仍显示：
+  - `windsurf.ws-pro-1.gpt-5.4-medium = { inPool:false, reason:blacklist, lastErrorCode:WINDSURF_WEEKLY_QUOTA_EXHAUSTED }`
+- 当前 5520 健康：`{"status":"ok","ready":true,"pipelineReady":true,"server":"routecodex","version":"0.90.1973"}`。
+- 实机调用：
+  - `POST http://127.0.0.1:5520/v1/responses {"model":"gpt-5.4-medium","input":"Reply with OK only.","stream":false}`
+  - 返回 `200 OK`，body=`OKOK`。
+- 这说明“weekly quota 后 ws1.medium 被出池并且请求可继续成功”在当前运行态是成立的；下一步要补的不是这个黑名单语义，而是：
+  1) 首枪 all-ok 时是否必须固定命中 ws1；
+  2) priority 池内 alias 是否仍错误轮转；
+  3) 是否存在 runtime/重启后残留状态导致 ws2 先于 ws1。
+
+## 2026-05-21 5520 final live verification: weekly quota reroute fixed
+- 环境：5520 运行 `0.90.1974`。
+- 红测链：`routecodex stop --port 5520` -> 手工把 `~/.rcc/quota/provider-quota.json` 中 `windsurf.ws-pro-1.gpt-5.4-medium` 改回 `inPool:true/reason:ok/blacklistUntil:null` -> `routecodex start --port 5520`。
+- 实机请求：`POST http://127.0.0.1:5520/v1/responses {"model":"gpt-5.4-medium","input":"Reply with OK only.","stream":false}`。
+- 运行态证据：
+  - 首枪命中 `windsurf.ws-pro-1.gpt-5.4-medium`；日志出现 `switch=exclude_and_reroute status=429 code=WINDSURF_WEEKLY_QUOTA_EXHAUSTED`。
+  - 随后自动切到 `windsurf.ws-pro-2.gpt-5.4-medium`，请求 `completed (status=200, finish_reason=stop)`。
+  - `provider-traffic` 证据：ws1 与 ws2 都有本次 requestId；ws3 未参与。
+  - `provider-quota.json` 证据：请求后 ws1 再次落为 `inPool:false reason:blacklist lastErrorCode:WINDSURF_WEEKLY_QUOTA_EXHAUSTED`，ws2/ws3 仍为 `ok`。
+- 结论：当前 bug 真源确认为 request-executor 在 weekly quota 429 后未继续 reroute；修复后 5520 实机已证明：ws1 weekly quota 会被 blacklist 并自动轮转到 ws2，客户端最终拿到 200，而不是直接 429。
+
+## 2026-05-21 windsurf weekly blacklist reroute verification
+
+- 当前安装态 5520 (`routecodex 0.90.1972`) 已有硬证据：`server-5520.log` 在 `2026-05-21 01:31:40` 先命中 `windsurf.ws-pro-1.gpt-5.4-medium`，收到 `429 WINDSURF_WEEKLY_QUOTA_EXHAUSTED`，随后 `provider-switch` 明确为 `switch=exclude_and_reroute`，同一请求继续命中 `windsurf.ws-pro-2.gpt-5.4-medium` 并最终 `200`。
+- 当前剩余要补的是“先红测再绿测”的回归门禁，而不是继续猜测路由顺序；运行态证据表明 weekly blacklist 后的 reroute 已成立。
+- 下一步唯一应做：补一条 request-executor/quota 启动恢复相关回归，随后重新 build/install，再用 5520 做 `recover ws1 -> 首枪 ws1 429 -> reroute ws2 200 -> 下一枪直接跳过 ws1` 的实机验证。
+
+[2026-05-21] 当前 5520 stream 失败已收敛：非流成功、流式命中 `sse_bridge_error`；唯一真源继续锁定在 `src/providers/core/runtime/windsurf-chat-provider.ts`。`wantsUpstreamSse()` 已声明要 SSE，但 `sendRequestInternal()`/`pollCascadeToCompletion()` 仍只返回 chat JSON，未返回 `__sse_responses`，导致 Host 强制 SSE 时无流可发。下一步按 Jason 要求先补红测，再在 windsurf provider 内复用 llmswitch-core JSON→SSE codec 补齐 stream 契约，然后 5520 实机复测。
+
+[2026-05-21 09:18:00] 5555 客户端断流定位：Codex 客户端报错源已确认是“stream closed before response.completed”。当前 5555 最小 curl smoke 可稳定收到 response.completed，但 Host SSE handler 存在 terminal 后 250ms 主动 end 的实现，怀疑在某些真实客户端/链路下会先于 completed 真正送达。已先补红测锁定“response.completed 后尾部 [DONE]/tail 不应被服务端提前截断”。
+[2026-05-21 09:21:00] 5555 真因红测已命中：`src/server/handlers/handler-response-utils.ts` 在检测到 `response.completed`/`response.done`/`[DONE]` 后会启动 250ms terminalGraceTimer，主动 `stream.destroy + res.end`。这会截断上游 trailing tail，已用定向单测证明 `[DONE]` 丢失。唯一修复点：删除该提前截断，让 HTTP handler 只以真实 upstream `end/close/error` 为终止真源。
+[2026-05-21 09:29:00] 新证据：用户当前“客户端一直断”对应的不是 5555 上 gpt-5.4 最小流，而是 Codex 实际在 5555 上反复请求 `model=gpt-5.3-codex` 的真实采样链。`~/.codex/log/codex-tui.log` 01:26:20~01:27:03 明确显示 `transport=responses_http api.path=responses` 多次 close 后最终报 `stream closed before response.completed`。下一步唯一方向：只复现并检查 5555 + gpt-5.3-codex 这条真实路由的 SSE 终止事件是否缺失。
+
+
+## 2026-05-21 5555 SSE client-facing restore
+- 先红后绿：`tests/server/handlers/responses-handler.gpt53-codex-stream-model-regression.spec.ts` 最初失败，证明 5555 在 provider override 后未将 streamed `response.*` 事件中的 `response.model` / `response.reasoning.effort` restore 回客户端原始语义。
+- 唯一修复点：`src/server/handlers/handler-response-utils.ts`。在 HTTP SSE 出口增加最小 transform，仅对客户端可见的 SSE `data:` JSON 中 `response` 对象恢复 `model` 与 `reasoning.effort`，不改上游流程、不改 provider payload。
+- 回归结果：上述红测转绿；`responses-handler.stream-closed-before-completed.regression` 与 `handler-response-utils.sse-finish-reason` 保持绿。
+
+- 新的 live 真红点已被钉死：`buildProviderExecutionSuccessResult()` 未把 `mergedMetadata` 回挂到最终 `PipelineExecutionResult.metadata`，导致真实 5555 SSE 出口虽有 restore transform，但 handler 读不到 `clientModelId/originalModelId`，live 仍回 provider model。
+- 唯一修复点：`src/server/runtime/http-server/executor/request-executor-provider-response.ts`，在成功结果构造时合并 `mergedMetadata` 与 `converted.metadata` 回传。
+- 新增红绿回归：`tests/server/runtime/http-server/executor/request-executor-provider-response.metadata-propagation.spec.ts`。
+
+- 新增红测证明：当 metadata 只有 `__raw_request_body.model/reasoning`、没有 `clientModelId/originalModelId` 时，SSE restore 之前只会恢复 reasoning，不会恢复 model。
+- 唯一修复点仍在 `src/server/handlers/handler-response-utils.ts::buildClientVisibleResponseRestoreContext()`：为 client model 增加 `__raw_request_body.model` 回退读取。
+
+- 新增红测证明 5555 live 真正命中的还有 `router-direct/provider-direct` 直通结果构造链，这两条路径此前同样未把 `input.metadata` 回传到最终 `PipelineExecutionResult.metadata`。
+- 唯一修复点：`src/server/runtime/http-server/index.ts::{buildRouterDirectResult, buildProviderDirectResult}`。
+- 新增回归：`tests/server/runtime/http-server/direct-result-metadata-propagation.spec.ts`。
+[2026-05-21 10:12:00] Jason 新线索已核对：昨晚 23:00 后改动中，5555/断流最可疑的新面不在 handler，而在 windsurf provider 自己新加了 synthetic SSE 返回链。证据：`src/providers/core/runtime/windsurf-chat-provider.ts` 新增 `readWindsurfStreamIntent()`、`wrapWindsurfCompletionAsSse()`、`buildWindsurfResponsesSseStream()`、`buildWindsurfResponsesCompletion()`，把 poll 得到的 JSON completion 直接在 provider 内拼成 `__sse_responses`；同窗口还改了 `responses-provider.ts` 让 providerStream 直接 passthrough SSE。当前只记为高优先级嫌疑，不下根因结论；下一步应先补红测锁定“真实 Codex /responses 形状下 provider 侧 synthetic SSE 是否缺少客户端所需事件序列或 contract 字段”，再决定是否回收这条 provider 侧拼流路径。
+
+[2026-05-21 10:18:00] Jason 关键纠偏：当前客户端界面看到的反馈本身是 SSE 形态，这不是异常信号；正确目标不是消灭内部/客户端链路中的 SSE，而是保证实现**兼容 SSE 并继续走完整链路**，直到稳定收到 `response.completed`。判定标准必须改为：1) `stream=false` 时允许内部 upstream/provider 使用 SSE，但对客户端必须正确收口为 JSON；2) `stream=true` 时客户端可见 SSE 必须完整持续到 `response.completed`，不能把“正在走 SSE”误判为断流根因。后续所有 5555/5520 断流排查必须优先检查公共层的客户端出站契约收口，而不是把 provider/internal SSE 使用本身当 bug。
+
+[2026-05-21 10:24:00] 5555/5520 SSE 断流当前唯一红点先被红测锁死：`tests/server/handlers/responses-handler.accept-header-stream-contract.regression.spec.ts` 证明 `/v1/responses` 在 `stream:false + Accept:text/event-stream` 时，被 `responses-handler.ts` 错误用 Accept 推成 SSE 客户端可见响应。唯一修复点先锁定在 handler：Responses API 的客户端流式契约必须只由 `payload.stream` / `forceStream` 驱动，Accept 只表示“可消费 SSE”，不能升级请求语义。
+
+[2026-05-21 10:27:00] 5520 stream=true 进一步红测已命中：公共 handler 在 `forceSSE=true` 且 provider 只返回 JSON completion（无 `__sse_responses`）时，直接报 `sse_bridge_error`。这证明剩余真源不在 windsurf provider，而在 `handler-response-utils.ts` 的客户端出站契约：Responses JSON body 必须在公共层经 llmswitch-core `ResponsesJsonToSseConverter` 编成 SSE，再回给客户端。
+
+[2026-05-21 10:39:00] 新实机证据：5520 `stream=true` 请求已成功 200（windsurf ws-pro-2, finish_reason=stop）；当前剩余阻塞变成 5555 在 `gpt-5.3-codex` 流式请求上返回 `HTTP_502`。下一步唯一方向：查 `~/.rcc/logs/server-5555.log` 对应 requestId `openai-responses-router-gpt-5.3-codex-20260521T103828612-219529-3307` / `...103820838-219528-3306` 的公共层/上游失败真因。
+
+
+## 2026-05-21 crs 502 + windsurf tools 调查
+
+- 证据1：10:38:38 的两个 HTTP_502 requestId（3306/3307）在 ~/.rcc/logs/server-5520.log，不是 5555 独立断流；同窗口后续 3309/3310/3311 同路由 crs.crsa.gpt-5.3-codex 连续成功，说明旧 SSE 断流主问题已止血，当前剩余是 direct/upstream 偶发 502 或本地 direct 包装瞬时异常。
+- 证据2：用户新增怀疑点是 windsurf 虽然 200 stop，但可能没有真正发送 tools，只是普通 chat 对话；日志里可见 reason=thinking:user-input|tools:tool-request-detected，但这只能证明路由认为有 tools，不能证明发到 windsurf/cascade 的实际 payload 还保留 tools。
+- 下一步唯一排查面：
+  1. 查 crs.crsa.gpt-5.3-codex direct provider/runtime 的 502 真源与是否缺少最小重试/错误归一；
+  2. 查 windsurf request build/request transform，确认 tools/function_call 是否在进入 provider 前或 provider 内被裁掉。
+[2026-05-21 11:02:00] windsurf 工具调用新证据：build/install/restart 后，5520 live 请求已不再报 empty completion，而是稳定 200 stop，但 assistant content 仅返回零宽字符/空内容，仍无 structured tool_calls。说明前一阶段修复（Responses tool schema -> tools_preamble + 文本 tool-call harvest）已吃到运行态，但剩余真源已收缩到 cascade 上游工具调用契约：当前 buildCascadePrompt/sendCascadeMessage/buildSendCascadeMessageRequest 传给 Windsurf/Cascade 的工具约束不足或格式不对，导致 upstream 没产出可 harvest 的 tool call。
+
+[2026-05-21 11:20:00] 已新增 docs/goals/windsurf-session-persistence-and-pool-plan.md：把 Windsurf session 持久化、批量账号池、失效感知、quota/auth/runtime 三层状态机、测试矩阵、provider 接入边界全部下沉为实现文档；后续 /goal 仅引用该文档，不再在 prompt 里重复实现细节。
+
+[2026-05-21 11:42:00] 对齐 windsurfapi 历史连续性：已在 windsurf-chat-provider.normalizeMessages() 增加 Responses 风格 assistant content[].type=function_call -> GPT native function_call 历史归一。此前仅支持 assistant.tool_calls 与 tool/function_call_output，导致 tool_result 前置 function_call 可能丢失，形成多轮重复工具调用。当前唯一修改点仍是 normalizeMessages，不碰 SSE/发送主链。
+
+[2026-05-21 11:47:00] 最小源码验证已通过：使用 tsx 直接实例化 WindsurfChatProvider 并调用 normalizeMessages()，确认 Responses assistant content[].type=function_call 已被归一为 GPT native function_call 历史，且与后续 tool/function_call_output 形成 assistant -> tool_result 连续链。下一步进入 build/install/restart/live。
+[2026-05-21 12:02:00] submit_tool_outputs 新进展：Rust retention helper 已修并回归转绿（`responses-submit-tool-outputs-retention.test.ts`、`responses-submit-tool-outputs-resume.mjs` 绿）；另一个前置真红点也已锁死并修复：`hub_resp_outbound_client_semantics.rs::resolve_client_protocol_for_response_entry()` 过去在 `is_followup=true` 时会把 `/v1/responses` 强制降成 `openai-chat`，已改为优先按 entry endpoint 保持 `openai-responses`，红测 `responses-followup-client-protocol.test.ts` 已绿。
+[2026-05-21 12:03:00] 但 5520 live 仍失败在更前/更外层：真实 `POST /v1/responses` 首轮返回体依然是 `chat.completion` + `tool_calls`，不是 `response/requires_action`；因此第二轮 submit_tool_outputs 还没机会命中新修复。当前唯一剩余方向：继续追 `/v1/responses` 非流 JSON 出口为何最终回了 chat surface（可能是 host JSON 出口/convert result 选错体，或更前层 result.body 被覆盖），不要再回头查 retention。
+
+## 2026-05-21 responses live shape leak
+- 现象：live `/v1/responses` 仍可能直出 `chat.completion`，导致第二轮 `submit_tool_outputs` 找不到 `response.id`。
+- 已排除：`responsesPayloadRequiresSubmitToolOutputs`、followup clientProtocol 降级、retention。
+- 重点怀疑：`convertProviderResponseIfNeeded -> bridgeConvertProviderResponse` 后，某些 `/v1/responses` 路径仍返回 chat surface，且 `sendPipelineResponse` 直接透传，未做 final responses-ssot 兜底。
+- 下一步：查 `convertProviderResponse` 的 clientProtocol 分支和 `/v1/responses` 最终出口是否必须强制 `object=response`。
+
+
+## 2026-05-21 /v1/responses 最终重建继续排查
+- 已确认 `responses-openai-bridge.spec.ts` 里已有 `chat.completion -> response` 红绿样本，bridge 本身不是当前唯一嫌疑。
+- 当前更像是 live 路径在 handler / provider response / SSE 收口层仍保留旧出口，尤其要查 `handler-response-utils.ts` 的 `chat.completion` 识别与 `/v1/responses` 入口的最终写回。
+- 重点继续看：`responses-handler.ts`、`request-executor-provider-response.ts`、`handler-response-utils.ts`、`provider-response.ts` 的最终 body shape 是否被二次改回 chat。
+
+## 2026-05-21 5520 codex samples 审计：provider-request_N 不是“每轮 delta”，而是同一 clientRequestId 的 retry 样本
+
+- 已确认真实样本目录在 `~/.rcc/codex-samples/openai-responses/`，不是 `~/.routecodex/`。
+- 证据：`windsurf.ws-pro-1.gpt-5.4-high/req_1779271454207_c334d80f/provider-request_{1,2,3}.json` 的 `meta.clientRequestId` 全相同，且 `buildTime` 递增；说明这些文件代表**同一请求的 provider retry attempt**，不是 continuation 的逐轮增量样本。
+- 因此：不能把 `provider-request_1/2/3` 的重复直接判成“历史没有进入下一轮”；它们本来就应该在 retry 时重复同一个 outbound payload。
+- 但样本也暴露出两个关键事实：
+  1. `windsurf.ws-pro-2.gpt-5.5-medium/req_1779271312514_d2467930` 这类简单请求，outbound 仍是 `https://api.openai.com/v1/chat/completions`，body 只有单条 user message（如 `hi`），说明该请求本身不是 continuation，多份 `provider-request_N` 只是重试。
+  2. `windsurf.ws-pro-1.gpt-5.4-high/req_1779271454207_c334d80f` 这类工具链样本里，单个 outbound payload 内部已经带了完整历史：system/user/assistant tool_calls/tool results/.../最后 user=继续；所以**该请求的历史本体并没有丢**。
+- 当前真正可疑点不是“retry 样本重复”，而是：
+  - continuation / submit_tool_outputs 的 resume 链是否在新的 `clientRequestId` 间正确衔接；
+  - 以及 payload 中出现 `tools=[]` 但 `tool_choice=auto` 的异常形态（该样本已见到），这可能导致后续轮次判定/恢复异常。
+- 下一步唯一值得查的真源：
+  - `responses-handler.ts` 的 `/responses/:id/submit_tool_outputs`
+  - `responses-conversation-store.ts`
+  - `resumeResponsesConversation(...)`
+  - 看 response_id -> 历史恢复 -> tool result 注入 是否跨 requestId 正确续上。
+
+## 2026-05-21 windsurf 现象真源补充：不是历史没带上，而是 tool_result 后重复同一 tool_call 未被 fail-fast
+
+- 继续核 5520/样本后，现象已更精确：Windsurf provider outbound payload 里历史是带上的，典型样本可见 `tool_calls=5`、`tool_results=5`、最后一条 `user=继续`。
+- 因此本轮真问题不是“上一轮历史没进入下一轮”，而是 **Windsurf 把工具语义文本化后，没有像 mimoweb 那样在 tool_result 之后检测并阻断“重复发相同 tool_call”**。
+- 唯一正确修复点：`src/providers/core/runtime/windsurf-chat-provider.ts`
+  - 新增 `extractImmediateMatchedWindsurfToolRound(...)`
+  - 新增 `assertNoImmediateRepeatedToolRound(...)`
+  - 在 `pollCascadeToCompletion(...)` 中，`normalizeAssistantTextToToolCallsJson(...)` 之后立刻执行检测；若新 harvest 的 tool_calls 与上一轮已匹配 tool_result 的 tool_calls 签名相同，则直接抛错：`[windsurf] upstream repeated prior tool call after tool_result`
+- 这与 mimoweb 的真源保持一致：问题不是让 provider 硬猜语义成功，而是当上游重复相同工具调用时 **fail-fast 暴露**，阻断错误循环。
+- 已补定向红测并转绿：`tests/providers/core/runtime/windsurf-chat-provider.spec.ts`
+  - `fails fast when upstream repeats the same tool call after tool_result`
+- 定向验证已通过：
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts`
+
+## 2026-05-21 windsurf 测试真源纠偏：去掉“like winsurfapi”伪命名，明确这是 legacy 文本投影行为
+
+- 已确认 `tests/providers/core/runtime/windsurf-chat-provider.spec.ts` 中多条测试名称在撒谎：它们把当前 `normalizeMessages/buildCascadePrompt` 的文本化投影行为（`{"function_call":...}`、`<tool_result ...>`）称作 `like winsurfapi` 或 `gpt-native history shape`。
+- 这会误导后续调试，把“当前实现行为”伪装成“外部真源一致”。
+- 已物理修正测试名，不改当前断言语义，只把它们明确命名为：
+  - `currently rewrites ...`
+  - `currently serializes ... into inline function_call text`
+  - `currently ... via text projection`
+- 同时新增一条架构钉桩测试：
+  - `buildCascadePrompt currently projects tool history as plain text prompt instead of structured Windsurf tool parts`
+- 意义：
+  1. 不再口头把 legacy 行为说成对齐 winsurfapi；
+  2. 后续若要真正对齐 Windsurf 原生 tool parts，可以基于这些“当前行为”测试名明确做替换，而不是误以为当前已经正确。
+- 定向验证已通过：
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts`
+
+## 2026-05-21 windsurf reroute sticky-singleton pool root cause
+
+- 已补红测并转绿：`tests/server/runtime/http-server/request-executor.excluded-provider-reselection.spec.ts`
+- 真因不是 Windsurf provider 本身，而是 request-executor 在重试阶段把 `routingDecision.pool` 的“暂时收窄单 key”当成真实候选池，覆盖了 `initialRoutePool`。
+- 结果：明明初始池里还有 `ws-pro-2/ws-pro-3`，但执行层在 excluded provider 被 router 再次选回时，误判“没有备选”，把已排除 key 放回去，造成持续命中 `ws-pro-1`。
+- 唯一正确修改点：`src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts`
+  - 当已存在更完整的 `initialRoutePool`，且当前 `routingDecision.pool` 被收窄到 1 个 key 时，重试/重选判断必须继续以 `initialRoutePool` 作为候选池真源。
+- 这比改 provider/failure-policy/router quota 更正确，因为错误发生在 HTTP executor 的 attempt-level reselect 逻辑；上游 quota blacklisting 与 provider exclusion 测试本来就已存在。
+
+## 2026-05-21 windsurf tool history projection aligned to existing RawGetChatMessage codec
+
+- 已确认仓库内 `src/providers/core/runtime/grpc/windsurf-grpc-bridge.ts` 本来就有更接近 WindsurfAPI 的历史编码真源：
+  - assistant tool call -> `[called tool <name> with <args>]`
+  - tool result -> `[tool result for <call_id>]: <content>`
+- 之前 `windsurf-chat-provider.ts::normalizeMessages()` 自己发明了另一套文本投影：
+  - `{"function_call":...}`
+  - `<tool_result ...>...</tool_result>`
+- 这造成同项目内出现两套 Windsurf 历史语义，属于重复设计，且更偏离 Windsurf 原生 `LanguageModelToolCallPart / LanguageModelToolResultPart` 关系。
+- 本轮已把 `normalizeMessages()` 收敛到复用 `serializeWindsurfRawHistoryMessage()`，统一为 RawGetChatMessage 的既有历史格式。
+- 定向回归已绿：
+  - `tests/providers/core/runtime/windsurf-chat-provider.spec.ts`
+  - `tests/server/runtime/executor-provider.retryable.spec.ts`
+- 当前仍未完成的更深层问题：`windsurf-chat-provider.ts` 主链依旧是 `StartCascade/SendUserCascadeMessage/GetCascadeTrajectory*` + `buildCascadePrompt()`，尚未切到 RawGetChatMessage 主链；本轮只先消除了同仓内两套历史/tool_result 文本语义不一致的问题。
+
+## 2026-05-21 remove second windsurf history projection implementation
+
+- 在 `windsurf-chat-provider.ts::normalizeMessages()` 内，已把 assistant/tool 的两段重复投影逻辑物理收敛为单一 helper：
+  - `extractPlainTextContent`
+  - `extractAssistantToolCallsFromRows`
+  - `extractToolResultProjection`
+- 这样做的目的不是功能新增，而是删除“同一文件内存在两套相似解析路径”的第二套实现残留，避免以后再次偏离 `serializeWindsurfRawHistoryMessage()`。
+- 当前 remaining 旧语义不在 `normalizeMessages()`，而在更上层主链：
+  - `buildCascadePrompt()`
+  - `SendUserCascadeMessage` + `GetCascadeTrajectory*`
+  - 这仍是 cascade prompt 主链，不是 RawGetChatMessage 主链。
+- 所以下一步若继续“彻底移除第二套实现”，唯一正确目标将是：把整个 windsurf provider 主链从 cascade prompt 迁移/对齐到现成 RawGetChatMessage 主链，而不是继续在 `normalizeMessages()` 上打补丁。
+## 2026-05-21 5555 silent-failure investigate
+- requestId=openai-responses-mini27.key1-MiniMax-M2.7-20260521T131640199-219780-44
+- hypothesis: success path completed with missing finish_reason/usage extraction, need compare provider snapshot -> converted body -> final log usage.
+- fix plan: tighten bypass for chat.completion business-error bodies (base_resp/status + choices null), add targeted regression test.
+
+
+## 2026-05-21 windsurf grpc second-mainline physical removal
+
+- 已验证 `sendRequestInternal` 是 Windsurf 第二套 cascade 主链仍然可达的唯一入口：`transportBackend === cascade-cloud` 时仍会走 `buildCascadePrompt -> StartCascade -> SendUserCascadeMessage -> pollCascadeToCompletion`。
+- 已先补红测：即使配置 `transportBackend: cascade-cloud`，`sendRequestInternal` 也必须走 `RawGetChatMessage`，不得再触发 `/StartCascade` 或 `/SendUserCascadeMessage`。红测先红后绿。
+- 已物理删除 `WindsurfChatProvider` 中旧第二套实现：`buildCascadePrompt`、`startCascade`、`sendCascadeMessage`、`pollCascadeToCompletion`，并删除对应 grpc bridge 中不再使用的 cascade request builder / trajectory parser。
+- 唯一正确修改点论证：问题不是通用 responses/pipeline，也不是 grpc manager；旧第二套主链只在 Windsurf provider 自己的 `sendRequestInternal` 里还有可达分流，且其 proto builder/parser 只服务该分流。故必须在 provider + its private bridge 物理删除，而不能在上层屏蔽或保留死代码。
+
+## 2026-05-21 stopless behavior investigate
+- expected1: non-goal mode defaults to 3 followup rounds
+- expected2: goal mode should stop normal followup; consecutive errors >=5 should stop followup
+- implement stopless contract: non-goal default auto-continue=3; goal active skip normal stop_message_auto; keep goal 5-error thresholds.
+- harden tests for stopless: config precedence, non-goal 3 repeats, sticky active skip, goal error-stop thresholds(5).
+
+## 2026-05-21 windsurf empty assistant payload true source
+
+- 红测已确认：`tests/providers/core/runtime/windsurf-chat-provider.spec.ts::sendRequestInternal must not resolve stop with empty assistant payload when raw stream yields no text`
+  - 当前实现会 resolve：
+    - `message.content=""`
+    - `finish_reason="stop"`
+- 这不是 host.response_contract 的问题；host 只是正确拒绝了非法 chat completion。
+- 唯一正确修复点在 `src/providers/core/runtime/windsurf-chat-provider.ts::sendGrpcRawChatRequest().finish()`：
+  - 只有这里把 RawGetChatMessage 聚合后的 `totalText + harvestedToolCalls` 收口成最终 chat completion；
+  - 若这里允许 `empty text + empty tool_calls + stop`，上层任何层再补都会变成第二语义面或 fallback。
+- 最小止血规则：
+  - `harvestedToolCalls.length === 0`
+  - 且 `totalText.trim() === ''`
+  - 且 `normalizedText.trim() === ''`
+  - 则直接抛 `windsurf raw chat returned empty completion`
+- 下一步仍需继续对齐 `windsurf-grpc-bridge.ts::parseRawResponse()/startGrpcStream()` 的 done/tool-call 真实协议；但那是下一层协议对齐，不影响当前“禁止产出非法空 assistant stop”这条唯一收口规则。
+
+## 2026-05-21 windsurf grpc bridge synthetic done root cause
+
+- 新红测已确认：`tests/providers/core/runtime/windsurf-grpc-bridge.spec.ts::startGrpcStream surfaces explicit empty-stream error instead of synthetic done when no text ever arrives`
+- 旧实现真因：
+  - `startGrpcStream()` 的 `onEnd` 无条件执行 `onChunk('', true)`
+  - 即使整条 RawGetChatMessage 流从未产出任何 text，也会伪造一个“done”
+  - provider 层因此被迫进入 finish 收口，最终生成空 assistant stop
+- 唯一正确修改点：`src/providers/core/runtime/grpc/windsurf-grpc-bridge.ts::startGrpcStream`
+  - 因为“把空流伪造成 done chunk”的行为只发生在这里
+  - provider 层只能看到被 bridge 包装后的 `onChunk/onError` 契约，无法区分“真实完成”与“bridge 伪造 done”
+- 当前最小修复规则：
+  - 记录 `sawText`
+  - `onEnd` 时若 `sawText === false`，直接 `onError('windsurf raw stream ended with no content')`
+  - 只有至少收到过一段 text，才允许发 `onChunk('', true)`
+
+## 2026-05-21 windsurf invalid local grpc/ls mainline physically removed
+
+- 用户再次明确纠偏：不要保留双实现；先物理删除错误的本地 gRPC / LS 主链，再谈解析对齐。
+- 已执行物理删除目标：
+  - `src/providers/core/runtime/windsurf-langserver-manager.ts`
+  - `src/providers/core/runtime/grpc/*`
+  - 对应 grpc/langserver 测试文件
+  - contract 中 `transportBackend/lsPort/csrfToken/WINDSURF_DEFAULT_LS_PORT` 语义
+- `windsurf-chat-provider.ts::sendRequestInternal()` 已改成单一路径 fail-fast：
+  - 抛 `WINDSURF_SEND_PATH_NOT_IMPLEMENTED`
+  - 目的：在真实上游解析主线对齐前，禁止仓库里继续挂着错误的本地 gRPC/LS 可达实现
+- 保留的唯一本地能力只剩：
+  - 认证登录链
+  - probe/status/model-config 云端能力
+  - 单一历史文本投影 helper（assistant tool call / tool result）
+- 下一步必须做的是“解析对齐”，不是恢复/重写本地 gRPC 结构。
+
+## 2026-05-21 stopless followup error test hardening
+- Continue from prior investigation: target failing spec tests/server/runtime/http-server/executor/provider-response-converter.goal-followup-http400.spec.ts
+- Goal: make test load correctly, then verify 5 consecutive error stop / reset behavior.
+
+- Expand regression scope: discover related followup/stop_message/provider converter tests before broader run.
+
+## 2026-05-21 5520 repeat-after-error + silent-failure
+- New evidence from user: req 53 WINDSURF_SERVICE_UNREACHABLE, then req 54/55 router followup still started and one failed with Provider execution failed without response.
+- Investigate log chain + code guards for followup after provider error and silent no-response finalization.
+
+## 2026-05-21 red regression first
+- User requested: write red regression first, then fix.
+- Target A: request-executor early failure must preserve concrete error instead of generic no-response.
+- Target B: failure path must not be treated as continue-eligible.
+
+
+## 2026-05-21 windsurf cascade semantic parser fail-fast tests
+
+- 继续按 goal 先补红测，再改实现，再转绿。
+- 新增并已转绿的 cascade 解析语义测试（`tests/providers/core/runtime/windsurf-chat-provider.spec.ts`）：
+  - assistant tool_call -> structured tool_calls
+  - tool_result -> function_call_output continuity object
+  - assistant tool_call + tool_result semantic roundtrip
+  - invalid assistant tool_call(empty tool name) fail-fast
+  - invalid tool_result(missing call_id) fail-fast
+  - orphan tool_result(before matching assistant tool call) fail-fast
+- 唯一正确修改点仍在 `src/providers/core/runtime/windsurf-chat-provider.ts`：
+  - `parseCascadeAssistantTurn`
+  - `parseCascadeToolResultTurn`
+  - `parseCascadeSemanticRoundtrip`
+- 原因：本轮目标是“解析语义真源”，不是 transport；这些规则只属于 Windsurf provider 自己的 cascade 语义解析层。改其他层（host/router/send path）都会变成第二语义面或提前耦合错误主链。
+
+
+## 2026-05-21 windsurf normalizeMessages starts delegating continuity semantics to cascade parser truth
+
+- 新增并转绿两条测试：
+  - `RED: normalizeMessages routes assistant function_call + tool_result continuity through cascade semantic parser truth`
+  - `RED: normalizeMessages uses cascade semantic parser fail-fast for orphan tool result continuity`
+- 这证明 `normalizeMessages` 已开始把 assistant function_call + tool_result continuity 交给 `parseCascadeSemanticRoundtripSync` 真源，而不是继续在分支里自己散写 continuity 语义。
+- 本轮唯一正确修改点仍在 `src/providers/core/runtime/windsurf-chat-provider.ts`：
+  - `normalizeMessages`
+  - `parseCascadeAssistantTurnSync`
+  - `parseCascadeToolResultTurnSync`
+  - `parseCascadeSemanticRoundtripSync`
+- 原因：remaining temporary text carrier 的问题不在 host/router/send path，而在 Windsurf provider 内部历史归一仍自带第二语义面。把 continuity 先委托给同文件内的 cascade semantic parser，是删除第二语义面的唯一正确收敛路径。
+
+
+## 2026-05-21 windsurf send/response parse mainline first reconnect
+
+- 新增红测并转绿：
+  - `RED: sendRequestInternal routes real upstream semantic payload through cascade parser truth instead of 501 fail-fast`
+- 本轮目标不是恢复旧 transport，而是恢复**单一路径 send/response parse 主链**：
+  - `httpClient.post(...)`
+  - `buildChatCompletionFromCascadeResponse(...)`
+  - `parseCascadeSemanticRoundtripSync(...)`
+  - chat completion 收口
+- 当前仍是最小可测主线：endpoint 仍为测试占位（`fake-cascade-endpoint`），但方向已从“501 fail-fast”推进到“真实上游 payload -> 语义解析真源 -> 收口”。
+- 唯一正确修改点仍在 `src/providers/core/runtime/windsurf-chat-provider.ts`，因为 send path 的恢复必须直接建立在 Windsurf provider 自己的 cascade semantic parser truth 上；改 host/router/其他 transport 层都会重新制造第二套语义面。
+
+
+## 2026-05-21 windsurf real upstream endpoint and response-shape alignment
+
+- 新增并转绿三条真实 shape 红测：
+  - `RED: sendRequestInternal routes real upstream semantic payload through cascade parser truth instead of 501 fail-fast`
+  - `RED: sendRequestInternal uses real upstream request endpoint instead of fake-cascade-endpoint placeholder`
+  - `RED: buildChatCompletionFromCascadeResponse parses real upstream candidates shape instead of test-only items shape`
+- 已物理替换两个测试占位真因：
+  - endpoint: `fake-cascade-endpoint` -> `/v1internal:loadCodeAssist`
+  - response shape: `items` -> `candidates`
+- 唯一正确修改点仍在 `src/providers/core/runtime/windsurf-chat-provider.ts`：
+  - `buildCascadeSendEndpoint`
+  - `buildChatCompletionFromCascadeResponse`
+- 原因：这轮问题是 Windsurf provider 自己仍在用错误的测试占位 request/response shape；改 host/router/通用 transport 都不能纠正 provider 私有上游契约，只会制造第二真源。
+
+
+## 2026-05-21 windsurf real loadCodeAssist request body shape first alignment
+
+- 新增并转绿两条 request body 红测：
+  - `RED: sendRequestInternal no longer sends test-only modelInfo/messages body shape to loadCodeAssist`
+  - `RED: sendRequestInternal emits real loadCodeAssist request field for normalized transcript instead of raw messages array`
+- 已移除当前最明显的 request 占位真因：
+  - 删除 body 中的 `modelInfo`
+  - 删除 body 中的裸 `messages`
+  - 改为真实 transcript 字段 `conversation`
+- 唯一正确修改点仍在 `src/providers/core/runtime/windsurf-chat-provider.ts::sendRequestInternal`，因为 request body 真源属于 Windsurf provider 自己的 upstream 契约；改 host/router/通用 transport 不能纠正 provider 私有 outbound shape，只会制造第二真源。
+
+## 2026-05-21 14:38:13 windsurf single-path continuation
+- continuing from handoff: inspect current spec + provider before adding red tests
+
+- 14:39:06 targeted jest green at 27/27; next add red tests for empty/malformed/repeated-candidate fail-fast in send/response parse
+
+## 2026-05-21 responses malformed continuation contract closes same-session restore path
+
+- 新增回归：`tests/server/runtime/http-server/request-executor.responses-store-cleanup.spec.ts`
+  - `does not allow same-session continuation restore after malformed responses continuation shape was converted into error contract`
+- 目标不是只看最终 400 文案，而是验证 **错误 request shape -> error contract -> continuation lifecycle fully closed**。
+- 证据：在 `previous_response_id is only supported on Responses WebSocket v2` 这类 malformed continuation contract 返回后，`resumeLatestResponsesContinuationByScope(...)` 必须返回 `null`，且 store debug stats 归零。
+- 这说明当前唯一收口点 `src/server/runtime/http-server/request-executor.ts` 的 `/v1/responses` error-contract cleanup 规则已经覆盖“同 session 后续错误恢复/重发”的残留风险，而不是只把最终结果改成 400。
+
+- 14:40:36 added 3 red tests (empty assistant completion / repeated tool call after tool_result / send-path empty completion) and turned them green in windsurf-chat-provider.ts
+
+- 14:41:13 verification passed: targeted jest 30/30, tsc ok, build:min ok; next install:global + routecodex restart --port 5520
+
+- 14:44:38 added red test for omitted apiBaseUrl -> built-in cloud endpoint truth; fixed runtime option SSOT defaults in contract
+
+- 14:45:20 post-fix verification rerun: tsc ok, build:min ok; next install:global + restart + smoke
+
+- 14:46:55 investigating live auth failure on restored single-path send chain; next lock metadata/auth shape by red test
+
+## 2026-05-21 stopless injection single-path contract hardened
+
+- 用户新增硬约束：stopless 注入方式必须唯一，不能 tmux 和 servertool 同时使用。
+- 新增回归：`tests/servertool/stop-message-auto.spec.ts`
+  - `stop_message_flow uses clientInjectDispatch only and never reenterPipeline when both are available`
+- 证据：在同时提供 `clientInjectDispatch` 与 `reenterPipeline` 的情况下，`stop_message_flow` 只调用前者 1 次，后者必须为 0 次。
+- 这与当前真源一致：
+  - `sharedmodule/llmswitch-core/src/servertool/followup-runtime-block.ts::resolveFollowupExecutionMode`
+  - 对 `stop_message_flow` 强制返回 `client_inject_only`
+- 结论：stopless 普通续轮的执行方式已经被测试锁成 tmux/client inject 单路径；不能再把它解释成 servertool reenter followup。
+
+- 14:49:51 red test locked live auth gap: loadCodeAssist must send Authorization Bearer; send path updated and spec now 32/32 green
+
+- 14:50:38 post-auth-header fix verification: tsc ok, build:min ok; next install + restart + live smoke
+
+- 14:52:18 evidence update: cloud chat wants OAuth2 access token; sessionToken-as-Bearer is structurally wrong, now tracing true token source before any further send-path mutation
+
+
+## 2026-05-21 windsurf auth supports both account login and final devin token
+
+- 已用回归锁死两种 Windsurf provider 认证入口：
+  1. `rawType=windsurf-account` + `account/password`：走 `Auth1 -> WindsurfPostAuth` 登录链，拿到 `devin-session-token$...` 后缓存并作为最终 apiKey 使用。
+  2. `rawType=windsurf-account` + `apiKey=devin-session-token$...`：必须直接视为最终 credential，**不得再触发密码登录**。
+- 定向测试已补并通过：
+  - `tests/providers/core/runtime/windsurf-chat-provider.spec.ts`
+    - `windsurf-account resolves session token via login chain and caches it`
+    - `RED: direct devin session token auth must bypass password login and be used as final apiKey`
+  - `tests/provider/provider-factory.test.ts`
+    - `windsurf account runtime preserves account/password credentials into provider config`
+    - `RED: windsurf direct final devin token runtime preserves token and must not require account/password fields`
+- 结论：RouteCodex provider 层现在同时支持“账号登录型”和“最终 devin token 型”两种输入面，且最终统一收敛为 `devin-session-token$...` 作为发送链 credential。
+
+
+## 2026-05-21 windsurf provider auth direct-config + persistence
+
+- 已验证 provider 配置层现在支持两种直接配置：
+  1. `windsurf-account`：`account/mobile/username + password` 直接写在 provider 配置里，登录后统一收敛到 `devin-session-token$...`。
+  2. `windsurf-devin-token`：最终 `devin-session-token$...` 直接写在 provider 配置里，无需登录。
+- 已验证 runtime/profile/factory/setup 四层链路全部打通：
+  - profile 识别 `windsurf-devin-token`
+  - runtime setup 透传 `apiKey/tokenFile`
+  - provider factory 直通 `rawType/tokenFile/apiKey`
+  - provider runtime 读取/写入 `tokenFile` 持久化 session，不再只依赖内存态
+- 已补红测并转绿：
+  - persisted tokenFile session load
+  - postAuth session persist to tokenFile
+  - provider-factory direct devin token rawType preserve
+  - provider-v2 setup inject direct devin token auth
+- 当前修改仍保持单一路径：账号密码和 direct token 最终都归一为 `devin-session-token$...`，由 provider 注入后续 cascade 调用。
+
+## 2026-05-21 Windsurf single-path rebuild
+- 目标: 去掉 gRPC/LS 主线，保留 provider 内单一路径；认证支持 account + devin token + tokenFile；重点恢复 tool/history。
+- 当前线索: 现有语义解析测试 21/21 绿，但 send path 仍可能残留旧链或错误收口。
+- 本轮先做: 读 windsurf provider / spec / 运行错误，再补红测。
+
+## 2026-05-21 Windsurf single-path rebuild execution
+- 红测先红: sendRequestInternal 仍触发 ensureCascadeWorkspace/lsEntry 访问，证明 gRPC/LS 主线仍然可达。
+- 修复: 在 src/providers/core/runtime/windsurf-chat-provider.ts 物理删除 gRPC/LS send 主链，改为 cloud loadCodeAssist -> candidates -> parseCascadeAssistantTurnSync/buildChatCompletionFromCascadeResponse 单一路径。
+- 修复: contract 删除 WINDSURF_DEFAULT_LS_PORT / lsPort / csrfToken / grpc backend，只保留 cascade-cloud。
+- 物理删除: src/providers/core/runtime/windsurf-langserver-manager.ts 与 src/providers/core/runtime/grpc/*。
+- 验证: targeted jest 17/17 green; npx tsc -p tsconfig.json --noEmit green.
+
+## 2026-05-21 servertool flow / skeleton 梳理结论
+
+- 当前 servertool 已经不是“没有 skeleton”，而是 **skeleton/profile 已有一半真相，但 TS orchestration 仍保留第二语义面**。
+- 已确认 followup policy 单点入口：
+  - TS 壳：`sharedmodule/llmswitch-core/src/servertool/followup-flow-policy.ts`
+  - Rust 真源：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`
+- 当前最核心结构错误不是某个 stopless 细节，而是 **outcome 双真源**：
+  - Rust profile 已能表达 `clientInjectOnly/stickyProvider/autoLimit/...`
+  - 但 `followup-runtime-block.ts` 仍内建：`flowId === 'stop_message_flow' -> client_inject_only`
+- 这说明问题的唯一第一刀不是继续修 handler，而是：
+  - 先把 flow outcome 真相彻底迁到 skeleton/profile
+  - orchestration 只消费 `FollowupFlowDecision`
+- 当前违反“编排不做逻辑”的主要文件：
+  - `sharedmodule/llmswitch-core/src/servertool/followup-runtime-block.ts`
+  - `sharedmodule/llmswitch-core/src/servertool/followup-mainline-block.ts`
+  - `sharedmodule/llmswitch-core/src/servertool/engine.ts`
+  - `sharedmodule/llmswitch-core/src/servertool/execution-shell.ts`
+- 目标结构应固定为：
+  - functions：解析/归一/plan/state transform
+  - blocks：request_context / response_context / flow_profile / execution_plan / outcome / diagnostics
+  - orchestration：只串 block，不写 flow-specific if/else
+- 已新增设计文档：`docs/design/servertool-flow-skeleton-refactor.md`
+
+## 2026-05-21 Windsurf send-path fail-fast hardening
+- 新增红测并转绿: upstream candidates=[] 时 sendRequestInternal 必须 fail-fast 为 empty cascade candidate payload。
+- 新增红测并转绿: upstream assistant candidate 若既无 text 也无 tool_call，必须 fail-fast 为 empty assistant completion。
+- 当前 windsurf-chat-provider.spec.ts 已提升到 19/19 green。
+- 这两处仍然只能在 windsurf-chat-provider.ts 收口修复，因为它们属于 provider 私有 upstream response contract；改 host/router 会制造第二语义真源。
+
+## 2026-05-21 Windsurf dead-code shrink
+- 已物理收缩 windsurf-chat-provider.ts 中 send-path 不再使用的 dead code: buildCloudMetadata / resolveModelInfo / normalizeMessages，以及 buildCascadeSendBody 的无效 modelInfo 参数。
+- 收缩后再次验证: windsurf-chat-provider.spec.ts 19/19 green。
+- 该收缩是必要的，因为这些 helper 属于已删除 gRPC/旧 carrier 主线残面，继续保留会制造单文件内第二语义暗面。
+
+
+## 2026-05-21 windsurf single-path auth gate correction
+
+- 新红测先红：`tests/providers/core/runtime/windsurf-chat-provider.spec.ts::direct devin session token must remain sendable on single-path send chain`。
+- 红因已钉死：`src/providers/core/runtime/windsurf-chat-provider.ts::buildCascadeSendHeaders()` 错把 `devin-session-token$...` 当成非法 bearer，在 provider 本地直接抛 `WINDSURF_CLOUD_OAUTH_REQUIRED`，请求还没出网就被拦死。
+- 这与当前仓内已锁定的 Windsurf 认证真相冲突：
+  - `windsurf-account` 登录链最终收敛到 `devin-session-token$...`
+  - `windsurf-devin-token` 也要求直接支持 `devin-session-token$...`
+  - 两者都应作为 send path 最终 credential 真值
+- 已修正：`buildCascadeSendHeaders()` 只校验 token 非空，不再根据 token 形态本地拒绝；最终统一发送 `Authorization: Bearer <token>`。
+- 同时把原先错误期待测试替换为正向回归：oauth-like bearer 与 devin-session-token 两种形态都必须可发送。
+- 定向验证：
+  - `tests/providers/core/runtime/windsurf-chat-provider.spec.ts` 21/21 绿
+  - Windsurf 周边 factory/profile/runtime setup/live probe 回归待继续跑
+- 唯一正确修改点仍是 `windsurf-chat-provider.ts::buildCascadeSendHeaders()`，因为错误发生在 provider 自己的 outbound auth gate；改 host/router/failure policy 只能改表象，不能纠正错误的本地拒发。
+
+
+## 2026-05-21 windsurf real 5520 smoke proves current send path auth contract is still wrong
+
+- 实机 same-shape smoke 证据：对 `http://127.0.0.1:5520/v1/responses` 发 `model=gpt-5.4-medium, stream=false, input=Say only OK`，当前返回：
+  - HTTP 401
+  - `code=WINDSURF_AUTH_FAILED`
+- 日志真因：
+  - `Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential.`
+- 这说明：
+  1. 当前 send path 确实已出网，不再是本地 gRPC/LS 残留拦截。
+  2. 但当前 `loadCodeAssist` 主链的上游认证契约与仓内“managed windsurf credential -> devin-session-token 真值”仍未对齐。
+- 同时补了一条红测先红：
+  - `real send chain shape is still unverified because loadCodeAssist rejects managed windsurf credentials with upstream 401`
+- 红因还暴露第二个真缺口：provider 之前把这种上游 401 错归成 `WINDSURF_SERVICE_UNREACHABLE/502`。
+- 已修正唯一真源：`src/providers/core/runtime/windsurf-chat-provider.ts::classifyWindsurfCascadeError()`
+  - 现在会识别：
+    - `status=401`
+    - nested `error.status=UNAUTHENTICATED`
+    - `invalid authentication credentials`
+  - 并统一归一为：
+    - `code=WINDSURF_AUTH_FAILED`
+    - `status=401`
+- 结论：当前 5520 实机失败点已从“本地拒发/错误归类”进一步收缩为 **send path 上游认证契约本身未对齐**；下一步必须继续验证 `loadCodeAssist` 是否就是错误主线，而不是再改 host/router。
+
+
+## 2026-05-21 windsurf reference truth proves current loadCodeAssist mainline is not verified for managed credentials
+
+- 参考真源仓实证：`/Volumes/extension/code/WindsurfAPI` 明确写着聊天主链是：
+  - Legacy: `RawGetChatMessage`
+  - Cascade: `StartCascade -> SendUserCascadeMessage -> poll GetCascadeTrajectorySteps`
+- 关键证据文件：
+  - `src/windsurf.js`
+  - `src/models.js`
+  - `src/client.js`
+  - `docs/releases/RELEASE_NOTES_2.0.90.md`
+- 同时 `RELEASE_NOTES_2.0.90.md` 明确确认：
+  - `devin-session-token$...` 可以直接作为 IDE/Cascade `metadata.apiKey` 真值
+  - 这是对 Cascade 主链成立的，不是对 `cloudcode-pa.googleapis.com/v1internal:loadCodeAssist` 成立的证据
+- 因此当前 RouteCodex 的 `loadCodeAssist + managed Windsurf credential` 主线没有被参考真源证明成立；继续让它真实出网只会制造“未验证 send 主线伪装成已恢复”的假象。
+- 本轮新增红测先红：
+  - `managed devin session token must fail fast until verified cloud chat mainline exists`
+- 然后只在 `src/providers/core/runtime/windsurf-chat-provider.ts` 加单点门禁并转绿：
+  - 若命中 managed Windsurf auth（`windsurf-account` / `windsurf-devin-token`）且最终 credential 形态是 `devin-session-token$...`，当前直接 fail-fast：
+    - `code=WINDSURF_CHAT_MAINLINE_UNVERIFIED`
+    - `status=501`
+- 同时保留 unit-testable 的 generic bearer send path，用于继续验证当前 parser/body/response-contract，而不再误导为“managed Windsurf credentials 已打通 cloud chat 主链”。
+- 唯一正确修改点仍是 `windsurf-chat-provider.ts::sendRequestInternal` 的 send gate：因为错误不在 host/router，也不在 parser；问题是 provider 当前把“未被参考真源证明的 send 主线”当成可用主线真实出网。
+
+## 2026-05-21 provider 501 passthrough fix
+- 红测先红: request-executor-provider-response.stopless-contract-removal.spec.ts 新增 provider 501/code 保留用例，证明 provider.http 分支把 code/upstreamCode/message 洗掉了。
+- 唯一修复点: src/server/runtime/http-server/executor/request-executor-provider-response.ts::throwProviderHttpError()。现在保留 error.message + error.code，并同步回填 upstreamCode/status。
+- 原因: 这里是 provider 成功返回 HTTP body 但语义上为 error 的唯一抛错出口；改这里才能让后续 handler/http mapper 看到真实 501/code，改别处都只是补表象。
+
+- 继续红测先红: tests/error-handling/route-error-hub.http-status-preserve.spec.ts 锁定 RouteErrorHub includeHttpResult 把 501 洗成 502。
+- 唯一修复点补充: src/error-handling/route-error-hub.ts::buildHttpPayload() 现在显式透传 originalError/details 上的 status/statusCode。
+- 原因: provider.http 已经把 code/message/body 保住了；剩余唯一丢失点就是 error hub 在二次 map 前未携带 status。
+- 最后红因: src/server/utils/http-error-mapper.ts 只特判 401/403/429/4xx，501 会掉到默认 502。
+- 唯一修复点补充: http-error-mapper 新增 501 passthrough 分支，保持 message/code/status 原样对外。
+2026-05-21 5555 responses regression:
+- red test first: responses-context-capture-fallback.regression.spec.ts
+- root cause: req_inbound capture fallback path did not persist /v1/responses conversation request context
+- failure surface: recordResponsesResponse -> MALFORMED_RESPONSE missing_request_context -> upper layer 502/HTTP_502
+- fix: persist captureContext() fallback result into responses conversation store; keep recordResponsesResponse fail-fast
+- 继续补 Windsurf cascade 语义红测：新增 `parseCascadeSemanticRoundtripSync accepts assistant content[].type=function_call history and preserves tool continuity`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeSemanticRoundtripSync()` 之前只识别 chat 形态 `assistant.tool_calls`，不识别 responses/history 形态 `assistant.content[].type=function_call`，会把真实多轮历史误判成 `empty assistant completion`。
+- 唯一修复点：仍在 `parseCascadeSemanticRoundtripSync()`；当 `tool_calls` 为空但 `content[]` 存在时，补收 `type=function_call/custom_tool_call` 为统一 tool_calls 语义，再接现有 tool_result continuity 链。
+- 这是唯一正确真源，因为问题发生在 Windsurf provider 自己把 inbound history 归一为 cascade conversation 的入口；改 send path / host / router 都无法恢复丢失的 assistant tool-call 历史语义。
+- 继续补 Windsurf cascade 解析红测：新增 `parseCascadeSemanticRoundtripSync preserves assistant content[].type=output_text alongside function_call history`。
+- 红因已锁定：`parseCascadeSemanticRoundtripSync()` 在 assistant history 为 responses 形态 `content=[output_text,function_call]` 时，只收 function_call，不收 output_text，导致 assistant 文本历史被吞掉。
+- 唯一修复点仍是 `src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeSemanticRoundtripSync()`：在 `content[]` 分支补收 `type=output_text/text` 到 textParts，再与 `function_call/custom_tool_call` 同轮归一。
+- 这是唯一正确真源，因为 Windsurf provider 构建 outbound cascade conversation 时，assistant 历史文本和 tool_call 必须在同一个归一化入口里一起恢复；改 host/router/send contract 都无法补回已经丢掉的 assistant 文本语义。
+- 追加定向回归：`parseCascadeSemanticRoundtripSync accepts assistant content[].type=custom_tool_call history and preserves tool continuity`。
+- 结果：该测试首跑即绿，说明当前 `parseCascadeSemanticRoundtripSync()` 里已存在的 `type=custom_tool_call -> {input}` 归一逻辑是有效真源，不需要新增第二实现。
+- 结论：当前已验证 assistant history 至少覆盖三类真实 responses 形态：`function_call`、`output_text+function_call`、`custom_tool_call`；下一步应继续盯 `tool result` 侧变体与更真实的异常/重复 tool call 场景，而不是重复改已覆盖路径。
+- 新红测先红：`parseCascadeToolResultTurnSync falls back to stringifying object tool content from real history variants`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeToolResultTurnSync()` 之前只接受 string content；真实 history 若 tool result 是 object（如 `{stdout, exit_code}`）会被吞成空串，破坏 function_call_output continuity。
+- 唯一修复点：仍是 `parseCascadeToolResultTurnSync()`；对非 string / 非 null 的 `msg.content` 统一 `JSON.stringify` 后写入 `output`。
+- 这是唯一正确真源，因为 function_call_output 的内容语义就是在 Windsurf provider 的 tool_result -> semantic turn 入口里确定；改 send body/host/router 都无法恢复已丢失的 tool output payload。
+- 追加回归：`parseCascadeSemanticRoundtripSync accepts type=custom_tool_call_output history as function_call_output continuity`。
+- 结果：首跑即绿，说明前一轮在 `parseCascadeToolResultTurnSync()` 补的 object-content stringify 已经覆盖到 `custom_tool_call_output` 这类真实 tool output 变体；无需新增第二解析分支。
+- 当前已验证 tool_result 侧至少两类真实形态：plain string、object/custom_tool_call_output object。下一步更值得补的是 fail-fast：错误 role/缺失 tool_call_id/重复 tool_result/assistant 重复相同 tool_call 的更真实变体。
+- 新红测先红：`parseCascadeSemanticRoundtripSync fails fast on duplicate tool_result for the same call after completion`。
+- 红因已锁定：`parseCascadeSemanticRoundtripSync()` 之前允许同一 `tool_call_id` 在已完成后再次出现 `role=tool`，会把重复 tool_result 混入 continuity，污染下一轮历史。
+- 唯一修复点：仍是 `src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeSemanticRoundtripSync()`；新增 `completedToolCallIds`，在 tool_result 分支对已完成 call_id 直接 fail-fast：`[windsurf] duplicate tool_result for completed tool call`。
+- 这是唯一正确真源，因为“同一 tool_call 是否已完成”只存在于 Windsurf provider 组装 semantic roundtrip 的局部状态里；改 host/router/send path 都既拿不到该状态，也会制造第二套去重语义。
+- 新红测先红：`parseCascadeSemanticRoundtripSync fails fast on malformed assistant function_call arguments json`。
+- 红因已锁定：`parseCascadeSemanticRoundtripSync()` 之前在 assistant tool call 的 `arguments` JSON 解析失败时，会静默回退成 `{}`；这会把损坏历史伪装成合法 tool_call，制造假 continuity。
+- 唯一修复点：仍是 `src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeSemanticRoundtripSync()`；无论是 chat `tool_calls` 形态还是 responses `content[].function_call/custom_tool_call` 形态，只要 `arguments` 不是合法 JSON object，就统一 fail-fast：`[windsurf] assistant tool call arguments must be valid json object`。
+- 这是唯一正确真源，因为 arguments 语义真相只在 Windsurf provider 做 assistant tool call 历史归一时存在；改 host/router/send path 都只能吞掉坏输入，不能阻止伪造 continuity 进入下一轮。
+- 追加回归：`parseCascadeSemanticRoundtripSync fails fast when assistant function_call arguments json is not an object`。
+- 结果：首跑即绿，说明上一轮在 `parseCascadeSemanticRoundtripSync()` 引入的统一 `arguments must be valid json object` gate 已经同时覆盖两类坏输入：1) 非法 JSON；2) 合法但非 object 的 JSON（如 array/string）。
+- 结论：assistant tool call arguments 的 contract gate 现已形成单一真源；下一步应继续补多 tool-call 同轮与更真实 mixed block 顺序场景，而不是再分叉新的参数校验实现。
+- 追加回归：`parseCascadeSemanticRoundtripSync preserves multiple assistant tool calls in one turn and matching tool results`。
+- 结果：首跑即绿，说明当前 semantic roundtrip 真源已经能稳定承接“同一 assistant 回合多个 function_call + 后续逐个 tool_result”这类真实多工具链场景。
+- 结论：当前 continuity 主要剩余风险已从“多 call 基本配对”进一步收缩到更细的 fail-fast/mixed-order 场景，例如：tool_result 顺序打乱、assistant mixed block 中 text/tool/thinking 顺序、以及 send/response 主链未对齐导致的真实上游空完成。
+- 新红测先红：`parseCascadeSemanticRoundtripSync fails fast when upstream repeats the same multi-tool signature set after tool results`。
+- 红因已锁定：`parseCascadeSemanticRoundtripSync()` 之前的 `lastMatchedRoundSignatures` 在 tool_result 分支只记住最后一个 signature；当上一轮 assistant 同时发多个 tool_call 时，若上游随后重复整组相同 tool_call 集合，会因为只保留了最后一个 signature 而漏检。
+- 唯一修复点：仍是 `src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeSemanticRoundtripSync()`；tool_result 分支改为把本轮已完成的 signatures 追加到 `lastMatchedRoundSignatures` 集合，而不是覆盖成单元素数组。
+- 这是唯一正确真源，因为“上一轮已完成哪些 tool signatures”只存在 semantic roundtrip 的局部状态里；改 host/router/send path 都看不到这组局部签名，也无法正确阻断多工具集合的重复回放。
+- 新红测先红：`parseCascadeAssistantTurnSync fails fast when upstream tool_call arguments is not an object`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeAssistantTurnSync()` 之前对上游 candidate 的 `tool_call.arguments` 若不是 object，会静默回退成 `{}`；这会把坏上游响应伪装成合法 tool_call 并继续流入 buildChatCompletion/send followup。
+- 唯一修复点：仍是 `parseCascadeAssistantTurnSync()`；对 upstream `tool_call.arguments` 明确要求必须是非数组 object，否则直接 fail-fast：`[windsurf] assistant tool call arguments must be object`。
+- 这是唯一正确真源，因为这是 Windsurf provider 从真实上游 candidate 解析出 assistant tool call 的唯一入口；改 host/router/chat completion builder 都只能掩盖坏上游响应，不能阻止错误语义进入统一真源。
+- 新红测先红：`parseCascadeAssistantTurnSync accepts upstream output_text blocks as assistant text`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeAssistantTurnSync()` 之前只识别 `content[].type=text`，不识别更接近 responses/上游 shape 的 `type=output_text`，因此会把真实文本 candidate 误判成 `empty assistant completion`。
+- 唯一修复点：仍是 `parseCascadeAssistantTurnSync()`；把 `output_text` 与 `text` 同等视为 assistant 文本块进入 `textParts`。
+- 这是唯一正确真源，因为这正是 Windsurf provider 从上游 assistant candidate 解析最终 assistant text 的唯一入口；改 builder/host/router 都只能补表象，不能纠正真实 upstream shape 的识别缺口。
+- 追加回归：`parseCascadeAssistantTurnSync preserves mixed output_text + tool_call candidate blocks`。
+- 结果：首跑即绿，说明当前 assistant candidate 真源已经能同时保留同轮 `output_text` 与 `tool_call`，不会二选一丢失。
+- 结论：response parse 当前剩余风险已进一步收缩到 builder/send 主链层面，而不是 `parseCascadeAssistantTurnSync()` 的 block 组合能力本身。
+- 追加 builder 回归：`buildChatCompletionFromCascadeResponse preserves assistant text when candidate contains output_text + tool_call`。
+- 结果：首跑即绿，说明当前真源不仅能在 parse 阶段识别 mixed candidate，还能在最终 chat completion 收口时同时保留 assistant text + tool_calls，并维持 `finish_reason=tool_calls`。
+- 结论：当前 assistant candidate -> chat completion 的 mixed-block path 已稳定；send/response 主链剩余缺口更可能在真实网络 response shape 或 managed credential send gate，而不是本地 mixed block 收口。
+- 2026-05-21 新补红测先红：`parseCascadeSemanticRoundtripSync preserves responses-style user content[] text blocks into cascade history` 与 `sendRequestInternal preserves responses-style user content[] when building cascade conversation`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeSemanticRoundtripSync()` 之前对 `role=user` 只接受 string content，不接受 WindsurfAPI/Responses 真形态 `content[]`（`input_text` / `text` / `output_text`），导致多轮 user 历史在 provider 归一时被吞成空串，后续 send path conversation 也一起丢失文本。
+- 唯一修复点：仍是 `parseCascadeSemanticRoundtripSync()`；新增局部 `normalizeTextContent()`，对 `role=user` 统一按与 WindsurfAPI `responsesToChat.normalizeMessageContent()` 对齐的文本块规则归并 `input_text|text|output_text`。
+- 这是唯一正确真源，因为 user 历史进入 cascade conversation 的唯一入口就在 Windsurf provider 的 semantic roundtrip 归一层；改 builder/host/router 都只能补表象，无法恢复已经在 provider 入口丢失的历史文本语义。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 38/38 绿。
+- 2026-05-21 新补红测先红：`parseCascadeAssistantTurnSync accepts plain string assistant content` 与 `sendRequestInternal accepts upstream candidate with plain string assistant content`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeAssistantTurnSync()` 之前只识别 `content[]` block，不识别真实上游可能直接返回的 string content，导致明明是合法 assistant 文本却被误判为 `empty assistant completion`。
+- 唯一修复点：仍是 `parseCascadeAssistantTurnSync()`；在 block 解析前先吸收 `record.content` 的 string 形态进入 `textParts`。
+- 这是唯一正确真源，因为上游 candidate -> assistant completion 的第一次语义落点只有这一处；改 sendRequestInternal/buildChatCompletion/host 都只会掩盖坏解析，不能纠正 provider 对真实上游 shape 的识别缺口。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 40/40 绿。
+- 2026-05-21 新补红测先红：`parseCascadeAssistantTurnSync accepts function_call candidate blocks into openai tool_calls`、`parseCascadeAssistantTurnSync accepts custom_tool_call candidate blocks into openai tool_calls`、`sendRequestInternal accepts upstream function_call candidate blocks`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeAssistantTurnSync()` 之前只识别 candidate `content[].type=tool_call`，不识别更贴近 WindsurfAPI/Responses 输出语义的 `function_call` / `custom_tool_call`，会把合法工具调用 candidate 误判为 `empty assistant completion`。
+- 唯一修复点：仍是 `parseCascadeAssistantTurnSync()`；在 assistant candidate 真源入口统一承接三类 tool block：`tool_call`、`function_call`、`custom_tool_call`，并分别按 object/json-string/input 归一成 OpenAI `tool_calls`。
+- 这是唯一正确真源，因为真实上游 candidate 的 tool 调用第一次落到 RouteCodex 语义层只有这一处；改 sendRequestInternal/buildChatCompletion/host/router 都只能掩盖 provider 对上游 block shape 的识别缺口，不能恢复真实 tool call 语义。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 43/43 绿。
+## 2026-05-21 继续排查 5555 502 + longcontext route
+- 目标：先补红测抓 longcontext 优先级与 5555 request-shape / stage 真因，再修唯一真源。
+- 约束：禁止 fallback；先看请求/路由/配置，不先糊响应处理。
+- 2026-05-21 新补红测先红：`sendRequestInternal accepts responses-style output[message] payload and snake_case usage`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::extractCascadeCandidate()` 之前只识别 `candidates[0] / candidate`，不识别更贴近 Responses 输出的 `output[]` message 形态；同时 `extractCascadeUsage()` 只识别 camelCase usage，不识别 snake_case `input_tokens/output_tokens/cached_tokens`。
+- 唯一修复点：仍是 `windsurf-chat-provider.ts` 的 response parse 真源：1) `extractCascadeCandidate()` 补承接 `output[].type=message`；2) `extractCascadeUsage()` 补 snake_case usage 字段读取。
+- 这是唯一正确真源，因为上游原始 payload 第一次进入 RouteCodex 并被收口成 candidate/usage 的唯一位置就是这两个 extractor；改 sendRequestInternal/buildChatCompletion/host/router 都只是消费错误提取结果，无法纠正真实 payload shape 识别缺口。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 44/44 绿。
+- 2026-05-21 新补红测先红：`sendRequestInternal accepts responses-style output function_call item without wrapping message` 与 `sendRequestInternal accepts responses-style output custom_tool_call item without wrapping message`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::extractCascadeCandidate()` 在上一轮只补了 `output[].type=message`，但真实 Responses 风格 output 还可能直接把 `function_call/custom_tool_call` 顶层放进 `output[]`，不包 message；当前因此误判成 `empty cascade candidate payload`。
+- 唯一修复点：仍是 `extractCascadeCandidate()`；对 `output[]` 中顶层 `function_call/custom_tool_call` 统一包装成 `{ role:'assistant', content:[row] }` 后复用现有 assistant candidate 解析真源。
+- 这是唯一正确真源，因为上游 output 数组第一次被收口成 assistant candidate 的唯一位置就是这里；改 parse/build/host/router 都只能消费错误缺失后的结果，无法纠正 output 顶层工具项的识别缺口。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 46/46 绿。
+- 2026-05-21 新补红测先红：`sendRequestInternal preserves responses-style output[] mixed message + function_call items in order` 与 `sendRequestInternal preserves responses-style output[] mixed message + custom_tool_call items in order`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::extractCascadeCandidate()` 之前在 output 路径上只拿“第一个 assistant-like item”，导致 `output[]` 混排 `message + function_call/custom_tool_call` 时，后续工具项被丢，最终 finish_reason 退化成 `stop`。
+- 唯一修复点：仍是 `extractCascadeCandidate()`；把 `output[]` 中所有 assistant-like 项统一线性归并到单个 `{ role:'assistant', content:[...] }` candidate，保持原顺序，让后续 `parseCascadeAssistantTurnSync()` 作为唯一语义真源继续解析。
+- 这是唯一正确真源，因为 output 数组的“多 item 合并成单一 assistant candidate”只应该在 extractor 收口处发生；改 parse/build/host/router 都只能在丢失顺序/丢失工具项之后补表象，不能恢复真实 output 序列。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 48/48 绿。
+
+- Jason 明确要求确认：fresh user input 不能无条件进 thinking；仅在显式 thinking 信号成立时才允许 thinking route。
+- 2026-05-21 新补红测先红：`sendRequestInternal reads nested responses usage.input_tokens_details.cached_tokens`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::extractCascadeUsage()` 之前已支持 camelCase 与平铺 snake_case，但仍漏掉 Responses 常见嵌套路径 `usage.input_tokens_details.cached_tokens`，导致缓存命中统计被错误归零。
+- 唯一修复点：仍是 `extractCascadeUsage()`；在 usage extractor 真源补读 `input_tokens_details.cached_tokens`，不把 usage 兼容散落到 builder 或 host 层。
+- 这是唯一正确真源，因为上游 usage payload 第一次被归一成 RouteCodex 内部 usage 结构只发生在 extractor；改 buildChatCompletion/host/router 都只能消费已丢失的 cached_tokens，无法纠正 usage 提取缺口。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 49/49 绿。
+
+- Jason 最新纠正：fresh user input 需要无条件进入 thinking；撤回之前相反假设。
+- 当前仅关注 longcontext 路径：只检查 longcontext 与 search/coding/continuation 的优先级与命中条件。
+- 2026-05-21 追加 probe：`sendRequestInternal preserves responses-style output[] multiple message items as one assistant text stream`。
+- 结果：首跑即绿，说明前一轮在 `extractCascadeCandidate()` 引入的 `output[] -> 单个 assistant candidate.content[]` 线性归并，已经自然覆盖多 message 文本串联场景；无需新增第二实现或额外补丁。
+- 结论：当前 `output[]` 收口风险已进一步收缩到更细的异常/边界语义，而不是普通多 message 文本拼接本身。
+
+- Jason 最新规则：fresh user input 先进入 thinking；若超过 thinking 路由目标 context，则 thinking 候选需被过滤，最终应落到 longcontext。
+- 2026-05-21 新补红测先红：`sendRequestInternal reads nested camelCase usageMetadata.inputTokensDetails.cachedTokens`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::extractCascadeUsage()` 之前已补 snake_case 嵌套 `input_tokens_details.cached_tokens`，但还漏 camelCase 嵌套 `inputTokensDetails.cachedTokens`，导致部分 usageMetadata 返回下 cached_tokens 仍被归零。
+- 唯一修复点：仍是 `extractCascadeUsage()`；在同一个 usage extractor 真源补读 `inputTokensDetails.cachedTokens`，不把 usage 兼容扩散到 builder 或 host 层。
+- 这是唯一正确真源，因为 usage 兼容归一只能发生在 extractor；改 buildChatCompletion/host/router 都只能消费已经丢失的 cached token 信息，不能修正上游 payload 提取缺口。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 51/51 绿。
+- 2026-05-21 新补红测先红：`sendRequestInternal fails fast when responses-style output contains function_call_output item` 与 `sendRequestInternal fails fast when responses-style output contains custom_tool_call_output item`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::extractCascadeCandidate()` 之前面对 `output[]` 中只有 tool-result 项（`function_call_output/custom_tool_call_output`）时，会退化成通用 `empty cascade candidate payload`，没有显式暴露“上游返回了 tool result 但没有 assistant tool call”这一更精确的语义错误。
+- 唯一修复点：仍是 `extractCascadeCandidate()`；当 `output[]` 只含 tool-result 项且不存在 candidate/assistant-like output 时，直接 fail-fast：`[windsurf] response output contains tool result without assistant tool call`。
+- 这是唯一正确真源，因为 output 数组是否能构成 assistant candidate 的判定只存在 extractor 收口处；改 parse/build/host/router 都只能看到收口失败后的空结果，无法给出正确的上游语义错误分类。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 53/53 绿。
+- 2026-05-21 新补红测先红：`sendRequestInternal fails fast when responses-style output mixes message with function_call_output item` 与 `sendRequestInternal fails fast when responses-style output mixes custom_tool_call with custom_tool_call_output item`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::extractCascadeCandidate()` 之前在 `output[]` 里只要能提取出 assistant-like content，就会把同数组中的 tool-result 项静默丢掉，导致 mixed output 被错误收口成正常 assistant completion。
+- 唯一修复点：仍是 `extractCascadeCandidate()`；当同一个 `output[]` 同时含 assistant-like 项与 `function_call_output/custom_tool_call_output` 时，直接 fail-fast：`[windsurf] response output mixed assistant content with tool result item`。
+- 这是唯一正确真源，因为是否允许 `output[]` 混合构成单个 assistant candidate 的判定只存在 extractor 收口处；改 parse/build/host/router 都是在 tool-result 已被静默丢弃之后，无法恢复或正确分类原始响应语义。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 55/55 绿。
+- 2026-05-21 追加 probe：`sendRequestInternal preserves multiple top-level responses-style output function_call items`。
+- 结果：首跑即绿，说明当前 `extractCascadeCandidate()` 的 `output[] -> 单个 assistant candidate.content[]` 线性归并已经自然覆盖“多个顶层 function_call 连续出现”的场景；无需新增解析分支。
+- 结论：当前 response output 收口剩余风险进一步收缩到异常混排/重复语义，而不是普通多 function_call 聚合本身。
+- 2026-05-21 新补红测先红：`sendRequestInternal fails fast when responses-style output message role is not assistant`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::extractCascadeCandidate()` 之前对 `output[].type=message` 只抽 content，不校验 role，等于把上游返回的 `role=user`/其他非法 role 静默重写成 assistant completion。
+- 唯一修复点：仍是 `extractCascadeCandidate()`；当 `output[].type=message` 的 role 存在且不是 `assistant` 时，直接 fail-fast：`[windsurf] response output message role must be assistant`。
+- 这是唯一正确真源，因为 `output[]` message 是否属于 assistant candidate 的合法性判断只应该发生在 extractor 收口处；改 parse/build/host/router 都是在角色信息被错误吞掉之后，无法恢复原始 role 语义。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 57/57 绿。
+- 2026-05-21 新补红测先红：`sendRequestInternal fails fast when responses-style output repeats function_call call_id`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeAssistantTurnSync()` 之前允许同一个 assistant candidate 内出现重复 `call_id` 的多条 tool call，最终会把非法重复 id 直接透传成 OpenAI `tool_calls` 数组。
+- 唯一修复点：仍是 `parseCascadeAssistantTurnSync()`；在 assistant candidate tool-call 归一入口对 `call_id` 做局部去重 gate，重复即 fail-fast：`[windsurf] duplicate assistant tool call id in response output`。
+- 这是唯一正确真源，因为重复 `call_id` 的合法性只在“assistant candidate -> normalized tool_calls”这个入口具备完整上下文；改 extractor/build/host/router 都只能在错误 tool_calls 已经生成后补表象，不能阻止坏语义进入统一真源。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 58/58 绿。
+- 2026-05-21 新补红测先红：`sendRequestInternal fails fast when responses-style output repeats same function_call signature with different call_id`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeAssistantTurnSync()` 之前虽然已拦重复 `call_id`，但仍允许同一 assistant candidate 内用不同 `call_id` 重复发送同一个 tool-call signature（同 name + 同 args），会把重复工具意图直接透传下去。
+- 唯一修复点：仍是 `parseCascadeAssistantTurnSync()`；在 tool-call 归一入口新增 signature-set gate，重复 signature 直接 fail-fast：`[windsurf] duplicate assistant tool call signature in response output`。
+- 这是唯一正确真源，因为“同一 assistant candidate 内哪些 tool calls 语义上是重复的”只在 candidate 解析入口拥有完整、未降损的 name+args 视图；改 extractor/build/host/router 都是在重复语义已经 materialize 为 tool_calls 后补表象，不能阻止坏语义进入统一真源。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 59/59 绿。
+- 2026-05-21 追加 probe：`sendRequestInternal fails fast when responses-style output repeats same custom_tool_call signature with different call_id`。
+- 结果：首跑即绿，说明上一轮在 `parseCascadeAssistantTurnSync()` 引入的 signature-set gate 已经自然覆盖 `custom_tool_call` 这条同签名不同 call_id 的重复工具意图；无需新增第二套 custom 分支。
+- 结论：assistant candidate 内重复工具意图的 gate 当前已形成单一真源，后续更值得盯的是 response output 与 history continuity 交叉场景，而不是再拆 function/custom 两套重复检查。
+- 2026-05-21 新补红测先红：`parseCascadeAssistantTurnSync accepts function_call candidate fallback id when call_id is absent` 与 `parseCascadeAssistantTurnSync accepts custom_tool_call candidate fallback id when call_id is absent`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeAssistantTurnSync()` 之前对 assistant candidate 只认 `call_id`，未承接 Responses item 常见的 `id` fallback 形态，导致合法 item 被误判为 `assistant tool call missing call_id`。
+- 唯一修复点：仍是 `parseCascadeAssistantTurnSync()`；在 candidate tool-call id 提取处统一采用 `call_id ?? id`。
+- 这是唯一正确真源，因为 assistant candidate 内工具项的标识归一只在 parse 入口发生；改 extractor/build/host/router 都无法在缺失 call_id 被早期拒绝后恢复 `id` 语义。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 62/62 绿。
+- 2026-05-21 追加 probe：`parseCascadeSemanticRoundtripSync accepts assistant function_call history fallback id when call_id is absent` 与 `parseCascadeSemanticRoundtripSync accepts assistant custom_tool_call history fallback id when call_id is absent`。
+- 结果：首跑即绿，说明上一轮在 `parseCascadeAssistantTurnSync()`/同源 id 提取逻辑里引入的 `call_id ?? id` 归一已经与 history 侧 assistant content 解析保持一致，能够自然覆盖 semantic roundtrip continuity；无需再拆 history 专用分支。
+- 结论：当前 assistant tool-call 标识归一已形成单一真源，response parse 与 history continuity 两侧保持一致。
+
+- 2026-05-21 longcontext 路由新证据：当日志同时出现 `thinking:user-input|longcontext:token-threshold` 却最终仍落到 thinking/default 时，先检查两件事：1) classifier candidates 是否含 `longcontext`；2) 黑盒回归是否把 `metadata.estimatedInputTokens` 显式锁定到与断言一致的值，避免 TS/Rust token estimator 偏差制造假红。
+- 2026-05-21 longcontext 唯一修复主线：Rust virtual-router classifier 负责在 longcontext 触发时把 `longcontext` 纳入 candidates；Rust selection 负责按 `estimated_tokens/max_context_tokens/contextRouting` 过滤当前 route pool。不能去改响应处理，也不能靠 fallback 补。
+- 2026-05-21 新补红测先红：`parseCascadeToolResultTurnSync accepts id fallback when tool_call_id is absent` 与 `parseCascadeSemanticRoundtripSync accepts tool result history fallback id when tool_call_id is absent`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeToolResultTurnSync()` 之前对 tool result 只认 `tool_call_id`，未承接 Responses/历史项常见的 `id` fallback，导致合法 tool result 被误判为 orphan。
+- 唯一修复点：仍是 `parseCascadeToolResultTurnSync()`；在 tool-result id 提取处统一采用 `tool_call_id ?? id`。
+- 这是唯一正确真源，因为 tool result 到 `function_call_output` 的标识归一只在 parse 工具结果入口发生；改 semantic roundtrip 上层或 host/router 都无法在 orphan 判定触发后恢复 `id` 语义。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 66/66 绿。
+- 2026-05-21 新补红测先红：`sendRequestInternal fails fast when responses-style output repeats function_call_output id` 与 `sendRequestInternal fails fast when responses-style output repeats custom_tool_call_output call_id`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::extractCascadeCandidate()` 虽然开始补 duplicate tool-result id 检查，但首版误用了 `Array.some()`；遇到第一条 tool-result 就短路返回，第二条重复 id 根本没被扫描到，最终仍退化成通用 `response output contains tool result without assistant tool call`。
+- 唯一修复点：仍是 `extractCascadeCandidate()`；把 `output[]` 中 tool-result 扫描改成完整线性遍历，先收集/判重 `call_id ?? id`，重复即 fail-fast：`[windsurf] duplicate tool result id in response output`。
+- 这是唯一正确真源，因为 responses-style `output[]` 的 tool-result 合法性只在 extractor 收口阶段拥有完整原始序列；改 parse/build/host/router 都只能消费 extractor 之后的降损结果，无法阻断重复 tool-result id 进入统一语义层。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 68/68 绿。
+- 2026-05-21 新补红测先红：`parseCascadeSemanticRoundtripSync preserves assistant output_text when chat tool_calls and content[] coexist in same turn`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeSemanticRoundtripSync()` 之前只有在 `normalizedCalls.length === 0` 时才进入 `content[]` 分支，因此 assistant 历史一旦同时带 chat 形态 `tool_calls` 与 responses 形态 `content[].output_text`，文本块会被静默吞掉，造成多轮 continuity 的 assistant 文本历史失真。
+- 唯一修复点：仍是 `parseCascadeSemanticRoundtripSync()`；始终扫描 `content[]` 中的 `output_text/text` 进入 `textParts`，但仅当当前回合没有 chat `tool_calls` 时，才从 `content[]` 继续补收 `function_call/custom_tool_call`，避免重复收工具调用同时保住文本历史。
+- 这是唯一正确真源，因为“assistant 历史同轮文本块与 tool call 如何合并”只在 semantic roundtrip 归一层同时掌握 chat `tool_calls` 与 responses `content[]` 两种原始输入；改 send body/builder/host/router 都只能消费归一后的降损结果，无法恢复已经丢失的 assistant 文本 continuity。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 69/69 绿。
+- 2026-05-21 新补红测先红：`parseCascadeToolResultTurnSync normalizes tool text-block array content into plain output text` 与 `sendRequestInternal preserves tool text-block array history when building cascade conversation`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeToolResultTurnSync()` 之前对 `role=tool` 的 `content` 只区分 string/null/other；当真实历史里 tool result 是 text block 数组（例如 Hub/Responses 常见的 `[{type:'text'},{type:'output_text'}]`）时，会整段 `JSON.stringify`，把本应进入 `function_call_output.output` 的真实文本语义降损成 JSON 字符串。
+- 唯一修复点：仍是 `parseCascadeToolResultTurnSync()`；新增本地 `normalizeToolResultContent()`，对数组内容优先抽取 `text/output_text` block 并拼接为纯文本；只有不存在文本块时才退回 `JSON.stringify`，从而保持 object/custom shape 兼容。
+- 这是唯一正确真源，因为 tool result 历史如何归一成 `function_call_output.output` 只在 Windsurf provider 的 tool_result 解析入口发生；改 semantic roundtrip 上层、send body、builder、host/router 都只能消费已经降损后的 output，无法恢复真实的文本 tool result 语义。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 71/71 绿。
+- 2026-05-21 新补红测先红：`parseCascadeToolResultTurnSync unwraps nested function_call_output block content`、`parseCascadeToolResultTurnSync unwraps nested tool_result block content`、`sendRequestInternal preserves nested function_call_output block tool history when building cascade conversation`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeToolResultTurnSync()` 虽已支持 text-block 数组，但对 `role=tool` 的 `content[]` 若嵌套的是 `function_call_output/tool_result/custom_tool_call_output/tool_message` block，仍会整段 `JSON.stringify(content)`，没有抽取 block 自身的 `output/content` 真实语义，导致 send path/history 里的 `function_call_output.output` 继续失真。
+- 唯一修复点：仍是 `parseCascadeToolResultTurnSync()`；扩展 `normalizeToolResultContent()`，在数组场景下不仅抽 `text/output_text`，也承接 `function_call_output/tool_result/custom_tool_call_output/tool_message` 这些真实 tool-result block，并优先提取其 `output`（无则退回 string `content`），最后拼接成统一纯文本 output。
+- 这是唯一正确真源，因为嵌套 tool-result block 到 `function_call_output.output` 的语义归一仍只发生在 Windsurf provider 的 tool_result 解析入口；改 semantic roundtrip 上层、send body、builder、host/router 都只能消费已经被错误 JSON 化后的 output，无法恢复真实 block 级 tool result 语义。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 74/74 绿。
+- 2026-05-21 新补红测先红：`parseCascadeToolResultTurnSync unwraps nested tool_result block object content` 与 `sendRequestInternal preserves nested tool_result object-content history when building cascade conversation`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeToolResultTurnSync()` 在数组嵌套 `tool_result` block 时，虽然已承接 `output` 字段，但若真实 block 只有 object `content`（sharedmodule 覆盖样本里就有 `{ type:'tool_result', content:{ ok:1 } }`），当前会因为 `content` 不是 string 而退化成空串，继续丢失真实 tool result 语义。
+- 唯一修复点：仍是 `parseCascadeToolResultTurnSync()` 的 `normalizeToolResultContent()`；对嵌套 `function_call_output/tool_result/custom_tool_call_output/tool_message` block 在 `output` 缺失时，string `content` 直接用，object/array `content` 则 `JSON.stringify(block.content)`，确保真实 payload 不被吞空。
+- 这是唯一正确真源，因为嵌套 tool-result block 的 `content`/`output` 二选一归一仍只存在 Windsurf provider 的 tool_result 解析入口；改 semantic roundtrip 上层、send body、builder、host/router 都只能消费已经被吞空的 output，无法恢复 object-content 语义。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 76/76 绿。
+- 2026-05-21 新补红测先红：`parseCascadeSemanticRoundtripSync fails fast when assistant chat tool_calls history repeats call_id in same turn`、`parseCascadeSemanticRoundtripSync fails fast when assistant chat tool_calls history repeats same signature with different call_id`、`parseCascadeSemanticRoundtripSync fails fast when assistant responses content history repeats call_id in same turn`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeSemanticRoundtripSync()` 之前在 assistant 历史 continuity 侧只做了 arguments/json 校验与 prior-round 重放检测，但没有像 `parseCascadeAssistantTurnSync()` 那样对“同一 assistant 历史回合内部”的 duplicate `call_id` / duplicate signature 做局部去重 gate。这会让坏历史直接进入 `matchedCalls`，为后续 tool_result continuity 与重复循环埋雷。
+- 唯一修复点：仍是 `parseCascadeSemanticRoundtripSync()`；在 assistant 历史回合内引入 `seenHistoryToolCallIds` 与 `seenHistoryToolCallSignatures`，统一覆盖 chat `tool_calls` 与 responses `content[].function_call/custom_tool_call` 两条入口，重复即 fail-fast：`[windsurf] duplicate assistant tool call id in history` / `[windsurf] duplicate assistant tool call signature in history`。
+- 这是唯一正确真源，因为“assistant 历史同一回合内部哪些 tool_call 语义重复”只在 semantic roundtrip 归一层同时拥有 chat `tool_calls` 与 responses `content[]` 的完整未降损视图；改 send body、builder、host/router 都是在重复 tool_call 已写入 continuity 之后，无法阻断坏历史进入 tool_result 配对链。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 79/79 绿。
+- 2026-05-21 新补红测先红：`parseCascadeSemanticRoundtripSync fails fast when assistant history mixes chat tool_calls with duplicate content function_call call_id` 与 `parseCascadeSemanticRoundtripSync fails fast when assistant history mixes chat tool_calls with extra content function_call signature`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeSemanticRoundtripSync()` 之前在 assistant 历史回合里，一旦 `tool_calls` 已存在，就会对 `content[]` 中的 `function_call/custom_tool_call` 直接 `continue`，等于静默忽略 mixed representation。结果是：1) 若 content tool call 与 chat tool_calls 重复，坏历史被吞掉而非显式报错；2) 若 content tool call 是额外调用，也会被悄悄丢失，直到后续 tool_result 才以 orphan 形式暴露，定位滞后且语义不准。
+- 唯一修复点：仍是 `parseCascadeSemanticRoundtripSync()`；assistant 历史 content-block 分支在检测到 `hasChatToolCalls` 时，不再静默跳过，而是先完整解析该 content tool call，再根据已有 `seenHistoryToolCallIds/signatures` 判定：若重复则抛已有 duplicate history 错；若不重复则显式 fail-fast：`[windsurf] assistant history mixed chat tool_calls with content tool call`。
+- 这是唯一正确真源，因为“assistant 历史同一回合是否混用了两套 tool-call 表示，且这种混用是重复还是额外调用”只在 semantic roundtrip 归一层同时掌握 chat `tool_calls` 与 responses `content[]` 的完整视图；改 send body、builder、host/router 都是在 mixed 坏历史已被吞掉或延后暴露后，无法给出正确的一次性根因分类。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 81/81 绿。
+- 2026-05-21 新补红测先红：`parseCascadeSemanticRoundtripSync accepts assistant content[].type=tool_call history and preserves tool continuity`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeSemanticRoundtripSync()` 之前在 assistant history `content[]` 分支只承接 `function_call/custom_tool_call`，漏掉了与 response candidate 真源已对齐的 `type=tool_call`。这导致上游历史若使用 `tool_call` block，会被误判成 `empty assistant completion`；即便勉强纳入后，还会把 object `arguments` 错误退化成 `{}`，形成明显 parse 不对称。
+- 唯一修复点：仍是 `parseCascadeSemanticRoundtripSync()`；1) assistant history content-block gate 扩展承接 `type=tool_call`；2) arguments 归一与 response candidate 保持一致：string 走 JSON object 校验，object 直接接纳，custom 仍走 `input -> {input}`，禁止静默退化成 `{}`。
+- 这是唯一正确真源，因为 assistant history `content[]` 中 `tool_call` 的承接与 arguments 归一只在 semantic roundtrip 归一层完成；改 send body、builder、host/router 都是在历史工具调用已被丢弃或降损为错误 args 之后，无法恢复 continuity 所需的真实 tool-call 语义。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 82/82 绿。
+- 2026-05-21 新补红测先红：`parseCascadeToolResultTurnSync falls back to nested function_call_output call_id when outer tool message id is absent`、`parseCascadeToolResultTurnSync falls back to nested tool_result tool_use_id when outer tool message id is absent`、`sendRequestInternal preserves nested tool_result id fallback history when outer tool message id is absent`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeToolResultTurnSync()` 之前只认外层 `tool_call_id ?? id`，漏掉真实 tool history 常见的 nested block id（`call_id/tool_call_id/tool_use_id/id`），导致合法 tool result 被误判为 orphan，history continuity 断裂。
+- 唯一修复点：仍是 `parseCascadeToolResultTurnSync()`；新增 nested tool-result call-id extractor，在外层无 id 时线性扫描 `content[]` block，并按 `tool_call_id -> call_id -> tool_use_id -> id` 回退提取，再回接现有 matchedCalls 真源。
+- 这是唯一正确真源，因为 tool result 到 `function_call_output.call_id` 的标识归一只在 Windsurf provider 的 tool-result 解析入口发生；改 semantic roundtrip 上层、send path、builder、host/router 都只能消费 orphan 判定之后的降损结果，无法恢复真实 nested block id 语义。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 85/85 绿。
+- 2026-05-21 新补红测先红：`sendRequestInternal accepts responses-style output tool_call item without wrapping message` 与 `sendRequestInternal preserves multiple top-level responses-style output tool_call items`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::extractCascadeCandidate()` 之前在 `output[]` 路径只承接顶层 `message/function_call/custom_tool_call`，漏掉与 assistant/history 真源已对齐的同源 item `type=tool_call`，导致合法上游 output 被误判成 `empty cascade candidate payload`。
+- 唯一修复点：仍是 `extractCascadeCandidate()`；把 `output[]` 顶层 `tool_call` 与 `function_call/custom_tool_call` 一样统一收口进单个 assistant candidate.content[]，继续交给 `parseCascadeAssistantTurnSync()` 作为唯一语义真源解析。
+- 这是唯一正确真源，因为 responses-style `output[]` 到 assistant candidate 的收口只发生在 extractor；改 parse/build/host/router 都是在 output 顶层 `tool_call` 已被丢弃之后补表象，无法恢复真实上游语义。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 87/87 绿。
+- 2026-05-21 新补红测先红：`sendRequestInternal accepts responses-style output[message] string content payload` 与 `sendRequestInternal preserves responses-style output[] mixed string-message + function_call items in order`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::extractCascadeCandidate()` 在 `output[].type=message` 路径下只承接 array `content`，漏掉真实上游常见的 string `content`。结果是：纯 string-message 被后续 `parseCascadeAssistantTurnSync()` 误判成 empty assistant completion；string-message + function_call 混排时文本被吞空，只剩 tool_call。
+- 唯一修复点：仍是 `extractCascadeCandidate()`；对顶层 `output[].message.content` 为 string 的场景，统一包装成 `{ type:'output_text', text:<string> }` 注入 assistant candidate.content[]，继续复用现有 `parseCascadeAssistantTurnSync()` 单一语义真源。
+- 这是唯一正确真源，因为 responses-style `output[].message` 的 content shape 归一只存在 extractor 收口处；改 parse/build/host/router 都是在 string 内容已被丢弃或降损后补表象，无法恢复真实上游 message 文本语义。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 89/89 绿。
+- 2026-05-21 longcontext classifier 护栏：当 `thinking:user-input` 与 `longcontext:token-threshold` 同时命中时，`route_name` 仍保持 `thinking`，但 `candidates` 必须显式包含 `longcontext` 与 `default`；否则 selection 层即使能过滤 thinking overflow，也没有可切换的 longcontext 候选。
+- 2026-05-21 新补红测先红：`sendRequestInternal prefers valid responses-style output message when candidates[0] is empty object`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::extractCascadeCandidate()` 之前只要 `candidates[0]` 存在，即便它只是空 object，也会优先压过合法的 `output[]` assistant payload，最终把后续解析带进 `empty assistant completion`。这会让真实上游在同时回传占位 candidate 与有效 output 时错误选错真源。
+- 唯一修复点：仍是 `extractCascadeCandidate()`；在 `candidates[0] / candidate / normalizedOutputCandidate` 之间不再只按存在性选，而是按“是否具备结构化 assistant payload”判定：只有具备非空 `content` 或 `tool_calls` 的 candidate 才能优先，否则回退到有效 `output[]` 收口结果。
+- 这是唯一正确真源，因为 `candidates` 与 `output[]` 的收口优先级只在 extractor 层同时可见；改 parse/build/host/router 都是在错误 candidate 已被选中、真实 output 被丢弃之后，无法恢复上游 assistant 真源。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 90/90 绿。
+- 2026-05-21 新补红测先红：`parseCascadeSemanticRoundtripSync allows repeating same tool signature after a new user turn`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::parseCascadeSemanticRoundtripSync()` 之前用 `lastMatchedRoundSignatures` 检测“tool_result 后 assistant 重复发同签名工具调用”，但这个状态没有在新 user turn 到来时清空。结果是：用户明确发起第二次请求时，合法的同签名 tool call 仍被误判成 `[windsurf] upstream repeated prior tool call after tool_result`，直接破坏多轮 continuity。
+- 唯一修复点：仍是 `parseCascadeSemanticRoundtripSync()`；在进入新的 `role=user` turn 时清空 `lastMatchedRoundSignatures`，把“重复工具调用”检测严格限定在同一轮 tool-result-followup continuity 内，而不是跨 user round 泄漏。
+- 这是唯一正确真源，因为“上一轮 tool-result 之后的重复工具意图边界”只在 semantic roundtrip 归一层同时掌握 user/assistant/tool 的真实轮次顺序；改 send body、builder、host/router 都是在轮次边界已被错误污染之后，无法恢复正确的多轮 continuity 判定。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 91/91 绿。
+- 2026-05-21 新补红测先红：`sendRequestInternal scans later candidates when candidates[0] is invalid but candidates[1] is valid`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::extractCascadeCandidate()` 虽然上一轮已不再盲信空的 `candidates[0]`，但仍只检查第一个 candidate，没有扫描 `candidates[]` 后续项。结果是：当 `candidates[0]` 无效、`candidates[1+]` 才是真正的 assistant payload 时，仍会错误退化为 `empty cascade candidate payload`。
+- 唯一修复点：仍是 `extractCascadeCandidate()`；把 `candidates[0]` 提升为“扫描 `candidates[]` 中第一个具备结构化 assistant payload 的 candidate”，再与 `record.candidate` / `normalizedOutputCandidate` 按同一真源规则择优。
+- 这是唯一正确真源，因为 `candidates[]` 多项的收口与优先级只在 extractor 层可见；改 parse/build/host/router 都是在合法后续 candidate 已被丢弃之后，无法恢复真实 assistant 真源。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 92/92 绿。
+- 2026-05-21 longcontext 反向边界护栏已补：当 `thinking:user-input` 与 `longcontext:token-threshold` 同时命中，但 thinking provider `maxContextTokens` 足够时，必须继续命中 `thinking`；黑盒回归固定显式传 `metadata.estimatedInputTokens`，避免把 estimator 偏差误判成 route bug。
+- 2026-05-21 新补红测先红：`sendRequestInternal prefers responses-style output over stale candidate when both are present`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::extractCascadeCandidate()` 之前在 `normalizedOutputCandidate` 与结构化 `candidate(s)` 同时存在时，仍优先选择 candidate。这样会把真实上游已经更新的 responses-style `output[]`（含 text + tool_call）错误让位给 stale candidate，直接造成 finish_reason/assistant text/tool_call 丢真。
+- 唯一修复点：仍是 `extractCascadeCandidate()`；当 `output[]` 已成功归一出 `normalizedOutputCandidate` 时，应把它视为当前响应的真源并优先返回，再把 `candidate(s)` 作为仅在 `output[]` 不可用时的补位来源。
+- 这是唯一正确真源，因为 `output[]` 与 `candidate(s)` 的冲突仲裁只在 extractor 层同时可见；改 parse/build/host/router 都是在 stale candidate 已被选中、真实 output 被丢弃之后，无法恢复当前响应的真实 assistant 语义。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 93/93 绿。
+- 2026-05-21 追加 send-path continuity probe：`sendRequestInternal preserves multi-round same-tool replay after assistant text and new user turn`。
+- 结果：首跑即绿，说明上一轮在 `parseCascadeSemanticRoundtripSync()` 对 `role=user` 时清空 `lastMatchedRoundSignatures` 的修复已经真实贯穿 send path；在 conversation body 构建阶段，多轮 `assistant(tool_call) -> tool_result -> assistant(text) -> user -> same tool again` 不再被误判为循环。
+- 结论：当前“同签名工具调用在新 user round 合法重放”的 continuity 真源已从纯 parse 层扩展验证到 sendRequestInternal 主链，无需另加第二套 send-path 特判。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 94/94 绿。
+- 2026-05-21 新补红测先红：`sendRequestInternal skips semantically-empty candidate blocks and uses later valid candidate`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::extractCascadeCandidate()` 之前把“非空 `content[]`”直接当作 structured candidate，有效性判定过粗。这样像 `[{type:'unknown_block'}]` 这种语义空 candidate 会被错误选中，后续落到 `empty assistant completion`，并遮蔽真正位于后续 candidate 的有效 assistant payload。
+- 唯一修复点：仍是 `extractCascadeCandidate()`；把 `hasStructuredAssistantPayload()` 从“结构非空”升级为“语义非空”判定：只有 string content、非空 tool_calls、非空 text/output_text、或真实 tool-call block（tool_call/function_call/custom_tool_call）才算有效 candidate。与此同时保留一个 `firstObjectCandidate` 兜住单个 object candidate 的原始错误归类，让“唯一 candidate 语义空”仍由 parse 层报 `empty assistant completion`，避免错误退化成 `empty cascade candidate payload`。
+- 这是唯一正确真源，因为 `candidates[]` 多项筛选与单项语义空错误分类都只在 extractor 层同时可见；改 parse/build/host/router 都是在错误 candidate 已被选中或错误归类之后，无法同时满足“跳过坏候选”和“保留原始错误类型”这两个约束。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 95/95 绿。
+- 2026-05-21 追加 continuity guard probe：`parseCascadeSemanticRoundtripSync still fails fast when same tool signature repeats after assistant text but before any new user turn`。
+- 结果：首跑即绿，说明上一轮把 `lastMatchedRoundSignatures` 仅在 `role=user` 时清空的边界是正确的；assistant 纯文本 followup 不会错误重置 repeat-detection，因此“无新 user turn 的同签名重放”仍然会被视为上游循环并 fail-fast。
+- 结论：当前 multi-round continuity 边界已经具备区分：1) 新 user round 后合法重放；2) 同一轮 assistant text 插话后的非法重放。无需再为 assistant-text turn 增加额外状态分支。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 96/96 绿。
+- 2026-05-21 新补红测先红：`sendRequestInternal fails fast when same tool signature repeats after assistant text without any new user turn`。
+- 红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::sendRequestInternal()` 之前把 `parseCascadeSemanticRoundtripSync(body.messages)` 放在 try/catch 外面。结果是：虽然 semantic 真源已经正确抛出 `[windsurf] upstream repeated prior tool call after tool_result`，但这个错误不会走 `classifyWindsurfCascadeError()`，从 send path 出来时缺少标准 `code/status` 归一，破坏了 provider 主发送-收口链的一致错误契约。
+- 唯一修复点：仍是 `sendRequestInternal()`；把 request body 读取、semantic roundtrip 解析、model/apiKey 决策一起纳入同一个 try/catch 收口，让 parse 真源抛出的错误也统一经过 `classifyWindsurfCascadeError()` 归一为 provider 标准错误。
+- 这是唯一正确真源，因为 send path 的“所有语义错误是否统一进入 provider 错误契约”只在 `sendRequestInternal()` 这个主发送-收口入口可保证；改 parse 层会污染纯语义真源，改 host/router 则是在 provider 已经漏收口之后补表象，无法恢复统一错误分类链。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 97/97 绿。
+- 2026-05-21 追加 send-path mixed-source probe：`sendRequestInternal prefers output tool continuation over stale candidate text in multi-round flow`。
+- 结果：首跑即绿，说明前一轮在 `extractCascadeCandidate()` 把 `normalizedOutputCandidate` 提升为冲突真源后，已经真实覆盖多轮 send path：即使同时存在 stale text candidate 与 valid output(text + function_call)，最终 assistant continuation 仍会跟当前 `output[]` 走，不会被旧 candidate 截断。
+- 结论：当前 `output[]` 优先级修复不仅修正单轮 finish_reason/text/tool_call，也已经通过 sendRequestInternal 验证能承接多轮 tool continuation，无需额外 send-path 特判。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 98/98 绿。
+- 2026-05-21 线上 501 根因修复：用户实机日志暴露 `WINDSURF_CHAT_MAINLINE_UNVERIFIED`，说明之前保留的 managed devin token fail-fast 仍在主链阻断真实请求。
+- 新补红测先红：`managed devin session token directly uses cloud chat mainline`。红因已锁定：`src/providers/core/runtime/windsurf-chat-provider.ts::sendRequestInternal()` 里仍调用 `shouldFailFastUnverifiedManagedCloudChat(apiKey)`，对 `devin-session-token$...` 直接抛 501，连 `httpClient.post()` 都不会发生。
+- 唯一修复点：仍是 `sendRequestInternal()` 主发送链；物理删除 `shouldFailFastUnverifiedManagedCloudChat()` 阻断与对应 501 分支，让 managed devin token 和账号登录得到的 session token 一样直接走统一 cloud chat send path。因为用户已经用实机证据证明“基础链路都没通”，此处再保留 fail-fast 只会继续阻断真实主目标。
+- 同时补 send-path 错误收口：把 semantic roundtrip / body/model/apiKey 决策纳入 try/catch 已在前一轮完成，确保这条主链所有错误都能继续走 provider 标准归一。
+- 这是唯一正确真源，因为 501 阻断发生在 provider 主发送入口；改 parse 层无意义，改 host/router 只是在 provider 未发请求前补表象，无法让 managed devin token 真正进入统一 send path。
+- 定向验证：`npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/windsurf-chat-provider.spec.ts` -> 99/99 绿。

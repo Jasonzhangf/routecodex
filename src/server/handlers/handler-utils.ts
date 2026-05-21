@@ -254,9 +254,14 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
   const formatted = formatErrorForConsole(error);
   const rawMeta = extractRawErrorMeta(error);
   const rawSnippet = rawMeta?.rawErrorSnippet;
-  const summary = shouldUseRawSnippetAsSummary(rawSnippet, formatted.text)
+  const responseDataShell = extractCodeOnlyResponseDataShell(error);
+  const summaryFromRaw = shouldUseRawSnippetAsSummary(rawSnippet, formatted.text)
     ? String(rawSnippet)
     : formatted.text;
+  const summary =
+    responseDataShell && isCodeOnlyShellError(responseDataShell) && formatted.text.trim()
+      ? formatted.text
+      : summaryFromRaw;
   const fields = extractErrorLogFields(error, summary);
   const fieldSuffix = [
     typeof fields.statusCode === 'number' ? `status=${fields.statusCode}` : undefined,
@@ -294,6 +299,29 @@ function shouldUseRawSnippetAsSummary(rawSnippet: string | undefined, fallbackTe
   }
   // code-only shell error loses diagnostics; prefer richer normalized text.
   return !fallbackText || !fallbackText.trim();
+}
+
+function extractCodeOnlyResponseDataShell(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+  const bag = error as Record<string, unknown>;
+  const response =
+    bag.response && typeof bag.response === 'object' && !Array.isArray(bag.response)
+      ? (bag.response as Record<string, unknown>)
+      : undefined;
+  const responseData =
+    response?.data && typeof response.data === 'object' && !Array.isArray(response.data)
+      ? response.data
+      : undefined;
+  if (!responseData) {
+    return undefined;
+  }
+  try {
+    return JSON.stringify(responseData);
+  } catch {
+    return undefined;
+  }
 }
 
 function isCodeOnlyShellError(value: string): boolean {

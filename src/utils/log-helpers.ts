@@ -46,6 +46,25 @@ function stripInternalErrorCarriers(value: unknown): unknown {
   return out;
 }
 
+function isCodeOnlyShellErrorText(value: string): boolean {
+  const trimmed = value.trim();
+  if (!(trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    const errorNode = parsed?.error;
+    if (!errorNode || typeof errorNode !== 'object' || Array.isArray(errorNode)) {
+      return false;
+    }
+    const errorRecord = errorNode as Record<string, unknown>;
+    const keys = Object.keys(errorRecord);
+    return keys.length === 1 && keys[0] === 'code' && typeof errorRecord.code === 'string' && errorRecord.code.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function extractRawErrorPayload(error: unknown): string | undefined {
   if (!error || typeof error !== 'object') {
     return undefined;
@@ -127,6 +146,11 @@ export function formatErrorForConsole(
 
   const raw = extractRawErrorPayload(error);
   if (raw) {
+    const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+    if (isCodeOnlyShellErrorText(raw) && message.trim()) {
+      annotateErrorWithRaw(error, raw);
+      return { text: truncateForConsole(message, limit) };
+    }
     annotateErrorWithRaw(error, raw);
     return { text: truncateForConsole(raw, limit) };
   }

@@ -98,7 +98,7 @@ export function shouldApplyProviderTransportBackoff(args: {
 export function resolveRequestExecutorProviderErrorReportPlan(args: {
   error: unknown;
   retryError: RetryErrorSnapshot;
-  fallbackStage: RequestExecutorProviderErrorStage;
+  stage: RequestExecutorProviderErrorStage;
 }): RequestExecutorProviderErrorReportPlan {
   const errorCode =
     normalizeCodeKey((args.error as { code?: unknown } | undefined)?.code)
@@ -111,20 +111,18 @@ export function resolveRequestExecutorProviderErrorReportPlan(args: {
       ? args.retryError.statusCode
       : extractStatusCodeFromError(args.error);
   const explicitStage = extractRequestExecutorProviderErrorStage(args.error);
-  const stageHint: RequestExecutorProviderErrorStage =
-    explicitStage
-      ? explicitStage
-      : (args.fallbackStage === 'provider.runtime_resolve'
-        ? 'provider.runtime_resolve'
-        : (args.fallbackStage === 'provider.http'
-          ? 'provider.http'
-          : (args.fallbackStage === 'host.response_contract'
-            ? 'host.response_contract'
-            : (isSseDecodeRateLimitError(args.error, statusCode) || isSseDecodeRetryableNetworkError(args.error, statusCode)
-              ? 'provider.sse_decode'
-              : (isServerToolFollowupErrorCode(errorCode) || isServerToolFollowupErrorCode(upstreamCode)
-                ? 'provider.followup'
-                : args.fallbackStage)))));
+  const stageHint: RequestExecutorProviderErrorStage = explicitStage
+    ?? (args.stage === 'provider.runtime_resolve'
+      ? 'provider.runtime_resolve'
+      : args.stage === 'provider.http'
+        ? 'provider.http'
+        : args.stage === 'host.response_contract'
+          ? 'host.response_contract'
+          : (isSseDecodeRateLimitError(args.error, statusCode) || isSseDecodeRetryableNetworkError(args.error, statusCode))
+            ? 'provider.sse_decode'
+            : (isServerToolFollowupErrorCode(errorCode) || isServerToolFollowupErrorCode(upstreamCode))
+              ? 'provider.followup'
+              : 'provider.send');
   return {
     ...(errorCode ? { errorCode } : {}),
     ...(upstreamCode ? { upstreamCode } : {}),
@@ -182,7 +180,7 @@ export async function reportRequestExecutorProviderError(
   const reportPlan = resolveRequestExecutorProviderErrorReportPlan({
     error: args.error,
     retryError: args.retryError,
-    fallbackStage: args.stageHint ?? 'provider.send'
+    stage: args.stageHint ?? 'provider.send'
   });
   const errorCode = reportPlan.errorCode;
   const upstreamCode = reportPlan.upstreamCode;

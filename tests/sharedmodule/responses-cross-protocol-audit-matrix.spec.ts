@@ -8,6 +8,10 @@ import { GeminiSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conv
 import { ChatSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/chat-mapper.js';
 import { readProtocolMappingAudit } from '../../sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/protocol-mapping-audit.js';
 import { convertProviderResponse } from '../../sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.js';
+import {
+  captureResponsesRequestContext,
+  clearResponsesConversationByRequestId
+} from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js';
 
 function createResponsesContext(requestId: string): AdapterContext {
   return {
@@ -73,6 +77,32 @@ async function collectStream(stream: NodeJS.ReadableStream | undefined): Promise
 function readFixtureJson(caseDir: string, fileName: string): Record<string, any> {
   const filePath = path.join(process.cwd(), 'tests', 'fixtures', 'conversion-matrix', caseDir, fileName);
   return JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<string, any>;
+}
+
+function seedResponsesConversationRequest(args: {
+  requestId: string;
+  tools?: Array<Record<string, unknown>>;
+  inputText?: string;
+}): void {
+  captureResponsesRequestContext({
+    requestId: args.requestId,
+    payload: {
+      model: 'gpt-5.3-codex',
+      stream: true,
+      input: args.inputText ?? '继续执行',
+      ...(Array.isArray(args.tools) ? { tools: args.tools } : {})
+    } as any,
+    context: {
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: args.inputText ?? '继续执行' }]
+        }
+      ],
+      ...(Array.isArray(args.tools) ? { tools: args.tools } : {})
+    } as any
+  });
 }
 
 describe('responses cross-protocol dropped/lossy audit matrix', () => {
@@ -468,6 +498,7 @@ describe('responses cross-protocol dropped/lossy audit matrix', () => {
   ] as const)(
     'resp matrix keeps tool-call surface for $providerProtocol -> $entryEndpoint',
     async ({ providerProtocol, entryEndpoint }) => {
+      const requestId = `resp-matrix-${entryEndpoint}`;
       const chatToolCallResponse = {
         id: 'chatcmpl_resp_matrix_toolcall',
         object: 'chat.completion',
@@ -495,11 +526,26 @@ describe('responses cross-protocol dropped/lossy audit matrix', () => {
         ]
       };
 
+      if (entryEndpoint === '/v1/responses') {
+        seedResponsesConversationRequest({
+          requestId,
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                parameters: { type: 'object' }
+              }
+            }
+          ]
+        });
+      }
+
       const converted = await convertProviderResponse({
         providerProtocol,
         providerResponse: chatToolCallResponse as any,
         context: {
-          requestId: `resp-matrix-${entryEndpoint}`,
+          requestId,
           entryEndpoint,
           providerProtocol
         } as AdapterContext,
@@ -519,10 +565,35 @@ describe('responses cross-protocol dropped/lossy audit matrix', () => {
         expect((converted.body as any)?.choices?.[0]?.finish_reason).toBe('tool_calls');
         expect((converted.body as any)?.choices?.[0]?.message?.tool_calls?.[0]?.function?.name).toBe('exec_command');
       }
+      clearResponsesConversationByRequestId(requestId);
     }
   );
 
   it('resp matrix keeps SSE completed semantics equivalent to JSON final for tool_calls', async () => {
+    seedResponsesConversationRequest({
+      requestId: 'resp-matrix-sse-equivalence',
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: { type: 'object' }
+          }
+        }
+      ]
+    });
+    seedResponsesConversationRequest({
+      requestId: 'resp-matrix-sse-equivalence-stream',
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: { type: 'object' }
+          }
+        }
+      ]
+    });
     const chatToolCallResponse = {
       id: 'chatcmpl_resp_matrix_sse_toolcall',
       object: 'chat.completion',
@@ -580,9 +651,23 @@ describe('responses cross-protocol dropped/lossy audit matrix', () => {
     const streamPayload = await collectStream((sseResult as any).__sse_responses);
     expect(streamPayload).toContain('response.completed');
     expect(streamPayload).toContain('requires_action');
+    clearResponsesConversationByRequestId('resp-matrix-sse-equivalence');
+    clearResponsesConversationByRequestId('resp-matrix-sse-equivalence-stream');
   });
 
   it('blackbox resp matrix: anthropic tool_use -> chat -> responses keeps submit_tool_outputs surface', async () => {
+    seedResponsesConversationRequest({
+      requestId: 'resp-blackbox-anthropic-to-responses',
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: { type: 'object' }
+          }
+        }
+      ]
+    });
     const anthropicResponse = {
       id: 'msg_blackbox_resp_1',
       type: 'message',
@@ -618,6 +703,7 @@ describe('responses cross-protocol dropped/lossy audit matrix', () => {
       name: 'exec_command'
     });
     expect((converted.body as any)?.output?.[0]?.type).toBe('function_call');
+    clearResponsesConversationByRequestId('resp-blackbox-anthropic-to-responses');
   });
 
   it('errorsample matrix: responses_empty_output fixture keeps tool contract and captures empty-output response shape', async () => {

@@ -107,21 +107,20 @@ async function captureInboundContextSnapshot<TContext = Record<string, unknown>>
   hooks: RequestStageHooks<TContext>;
   inboundRecorder?: StageRecorder;
 }): Promise<Record<string, unknown> | undefined> {
-  if (args.inboundStage2ResponsesContext) {
-    writeCacheEntryForRequest({ rawRequest: args.rawRequest, adapterContext: args.inboundAdapterContext as any });
+  const persistResponsesConversationContextIfNeeded = (context: Record<string, unknown> | undefined): void => {
     persistResponsesConversationContext({
       adapterContext: args.inboundAdapterContext,
       rawRequest: args.rawRequest,
-      context: args.inboundStage2ResponsesContext,
+      context,
     });
+  };
+  if (args.inboundStage2ResponsesContext) {
+    writeCacheEntryForRequest({ rawRequest: args.rawRequest, adapterContext: args.inboundAdapterContext as any });
+    persistResponsesConversationContextIfNeeded(args.inboundStage2ResponsesContext);
     return args.inboundStage2ResponsesContext;
   }
   const fallbackContext = await args.hooks.captureContext({ rawRequest: args.rawRequest, adapterContext: args.inboundAdapterContext as any, stageRecorder: args.inboundRecorder });
-  persistResponsesConversationContext({
-    adapterContext: args.inboundAdapterContext,
-    rawRequest: args.rawRequest,
-    context: fallbackContext as Record<string, unknown> | undefined,
-  });
+  persistResponsesConversationContextIfNeeded(fallbackContext as Record<string, unknown> | undefined);
   return fallbackContext as Record<string, unknown> | undefined;
 }
 

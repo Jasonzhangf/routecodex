@@ -120,6 +120,7 @@ export type ServertoolFollowupFlowProfilePayload = {
   flowOnlyLoopLimit?: boolean;
   stickyProvider?: boolean;
   clientInjectOnly?: boolean;
+  clearStateOnFollowupFailure?: boolean;
   seedLoopPayload?: boolean;
   retryEmptyFollowupOnce?: boolean;
   clientInjectSource?: string;
@@ -135,6 +136,7 @@ export type ServertoolFollowupRuntimePlanPayload = {
   flowOnlyLoopLimit: boolean;
   stickyProvider: boolean;
   clientInjectOnly: boolean;
+  clearStateOnFollowupFailure: boolean;
   seedLoopPayload: boolean;
   retryEmptyFollowupOnce: boolean;
   ignoreRequiresActionFollowup: boolean;
@@ -562,6 +564,7 @@ export function parseServertoolFollowupFlowProfilePayload(raw: string): Serverto
     ...(profile.flowOnlyLoopLimit === true ? { flowOnlyLoopLimit: true } : {}),
     ...(profile.stickyProvider === true ? { stickyProvider: true } : {}),
     ...(profile.clientInjectOnly === true ? { clientInjectOnly: true } : {}),
+    ...(profile.clearStateOnFollowupFailure === true ? { clearStateOnFollowupFailure: true } : {}),
     ...(profile.seedLoopPayload === true ? { seedLoopPayload: true } : {}),
     ...(profile.retryEmptyFollowupOnce === true ? { retryEmptyFollowupOnce: true } : {}),
     ...(typeof profile.clientInjectSource === 'string' && profile.clientInjectSource.trim()
@@ -597,6 +600,7 @@ export function parseServertoolFollowupRuntimePlanPayload(raw: string): Serverto
     flowOnlyLoopLimit: plan.flowOnlyLoopLimit === true,
     stickyProvider: plan.stickyProvider === true,
     clientInjectOnly: plan.clientInjectOnly === true,
+    clearStateOnFollowupFailure: plan.clearStateOnFollowupFailure === true,
     seedLoopPayload: plan.seedLoopPayload === true,
     retryEmptyFollowupOnce: plan.retryEmptyFollowupOnce === true,
     ignoreRequiresActionFollowup: plan.ignoreRequiresActionFollowup === true,

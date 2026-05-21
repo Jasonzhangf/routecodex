@@ -202,7 +202,7 @@ describe('ProviderFactory no fallback', () => {
     expect(provider?.config?.type).toBe('qwenchat-web-provider');
   });
 
-  test('windsurf cloud runtime does not require generic http baseUrl to initialize provider handle', () => {
+  test('windsurf runtime does not require generic http baseUrl to initialize provider handle', () => {
     ProviderFactory.clearInstanceCache();
     const runtime: any = {
       runtimeKey: 'windsurf.ws-pro-1',
@@ -217,9 +217,7 @@ describe('ProviderFactory no fallback', () => {
       },
       extensions: {
         windsurf: {
-          transportBackend: 'grpc',
-          lsPort: 42101,
-          csrfToken: 'csrf-token'
+          apiBaseUrl: 'https://server.self-serve.windsurf.com'
         }
       }
     };
@@ -229,11 +227,58 @@ describe('ProviderFactory no fallback', () => {
     expect(provider?.config?.type).toBe('windsurf-chat-provider');
     expect(provider?.config?.config?.baseUrl).toBe('');
     expect(provider?.config?.config?.auth?.apiKey).toBe('devin-session-token$windsurf-account-token');
-    expect(provider?.config?.config?.extensions?.windsurf?.transportBackend).toBe('grpc');
-    expect(provider?.config?.config?.extensions?.windsurf?.lsPort).toBe(42101);
-    expect(provider?.config?.config?.extensions?.windsurf?.csrfToken).toBe('csrf-token');
+    expect(provider?.config?.config?.extensions?.windsurf?.apiBaseUrl).toBe('https://server.self-serve.windsurf.com');
   });
 
+
+
+  test('RED: windsurf direct final devin token runtime preserves token and must not require account/password fields', () => {
+    ProviderFactory.clearInstanceCache();
+    const runtime: any = {
+      runtimeKey: 'windsurf.ws-pro-direct',
+      providerId: 'windsurf',
+      providerType: 'openai',
+      providerModule: 'openai',
+      compatibilityProfile: 'chat:windsurf',
+      auth: {
+        type: 'apikey',
+        rawType: 'windsurf-account',
+        value: 'devin-session-token$direct-provider-token'
+      }
+    };
+
+    const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
+    expect(provider?.config?.config?.auth?.rawType).toBe('windsurf-account');
+    expect(provider?.config?.config?.auth?.apiKey).toBe('devin-session-token$direct-provider-token');
+    expect(provider?.config?.config?.auth?.account).toBeUndefined();
+    expect(provider?.config?.config?.auth?.password).toBeUndefined();
+  });
+
+
+
+  test('RED: windsurf devin-token rawType should preserve tokenFile and not require account fields', () => {
+    ProviderFactory.clearInstanceCache();
+    const runtime: any = {
+      runtimeKey: 'windsurf.ws-devin-token',
+      providerId: 'windsurf',
+      providerType: 'openai',
+      providerModule: 'openai',
+      compatibilityProfile: 'chat:windsurf',
+      auth: {
+        type: 'apikey',
+        rawType: 'windsurf-devin-token',
+        value: 'devin-session-token$persisted-runtime-token',
+        tokenFile: '~/.rcc/auth/windsurf-devin-token-1.json',
+      },
+    };
+
+    const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
+    expect(provider?.config?.config?.auth?.rawType).toBe('windsurf-devin-token');
+    expect(provider?.config?.config?.auth?.apiKey).toBe('devin-session-token$persisted-runtime-token');
+    expect(provider?.config?.config?.auth?.tokenFile).toBe('~/.rcc/auth/windsurf-devin-token-1.json');
+    expect(provider?.config?.config?.auth?.account).toBeUndefined();
+    expect(provider?.config?.config?.auth?.password).toBeUndefined();
+  });
   test('windsurf account runtime preserves account/password credentials into provider config', () => {
     ProviderFactory.clearInstanceCache();
     const runtime: any = {
@@ -251,9 +296,7 @@ describe('ProviderFactory no fallback', () => {
       },
       extensions: {
         windsurf: {
-          transportBackend: 'grpc',
-          lsPort: 42101,
-          csrfToken: 'csrf-token'
+          apiBaseUrl: 'https://server.self-serve.windsurf.com'
         }
       }
     };

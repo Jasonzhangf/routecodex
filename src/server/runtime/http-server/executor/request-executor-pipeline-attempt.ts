@@ -61,9 +61,18 @@ export function resolveRequestExecutorPipelineAttempt(args: {
   if (!initialRoutePool && Array.isArray(args.pipelineResult.routingDecision?.pool)) {
     initialRoutePool = [...args.pipelineResult.routingDecision.pool];
   }
-  const routePoolForAttempt = Array.isArray(args.pipelineResult.routingDecision?.pool)
-    ? args.pipelineResult.routingDecision.pool
-    : (initialRoutePool ?? []);
+  const routePoolForAttempt = (() => {
+    const currentPool = Array.isArray(args.pipelineResult.routingDecision?.pool)
+      ? args.pipelineResult.routingDecision.pool
+      : [];
+    if (!initialRoutePool || initialRoutePool.length === 0) {
+      return currentPool;
+    }
+    if (currentPool.length <= 1 && initialRoutePool.length > currentPool.length) {
+      return initialRoutePool;
+    }
+    return currentPool.length > 0 ? currentPool : initialRoutePool;
+  })();
 
   const providerPayload = args.pipelineResult.providerPayload;
   const target = args.pipelineResult.target;

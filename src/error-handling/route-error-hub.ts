@@ -163,9 +163,22 @@ export class RouteErrorHub {
   }
 
   private buildHttpPayload(payload: RouteErrorPayload): Record<string, unknown> {
+    const originalError =
+      payload.originalError && typeof payload.originalError === 'object'
+        ? (payload.originalError as Record<string, unknown>)
+        : undefined;
+    const status =
+      typeof originalError?.status === 'number'
+        ? originalError.status
+        : typeof originalError?.statusCode === 'number'
+          ? originalError.statusCode
+          : typeof payload.details?.status === 'number'
+            ? payload.details.status
+            : undefined;
     return {
       message: payload.message,
       code: payload.code,
+      ...(typeof status === 'number' ? { status, statusCode: status } : {}),
       requestId: payload.requestId,
       providerKey: payload.providerKey,
       providerType: payload.providerType,

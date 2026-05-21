@@ -1342,6 +1342,43 @@ describe('responses-openai-bridge history seed normalization', () => {
     expect(submitCall.function?.arguments).toBe(JSON.stringify({ cmd: 'pwd' }));
   });
 
+  test('converts chat.completion tool-call payload into a response object for /v1/responses', () => {
+    const converted = buildResponsesPayloadFromChat(
+      {
+        id: 'chatcmpl_bridge_response_1',
+        object: 'chat.completion',
+        model: 'gpt-5.4-medium',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: '',
+              tool_calls: [
+                {
+                  id: 'call_bridge_response_1',
+                  type: 'function',
+                  function: {
+                    name: 'exec_command',
+                    arguments: '{"cmd":"pwd"}'
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      { requestId: 'req_bridge_response_1' } as any
+    ) as Record<string, any>;
+
+    expect(converted.object).toBe('response');
+    expect(converted.status).toBe('requires_action');
+    expect(converted.output?.[0]?.type).toBe('function_call');
+    expect(converted.required_action?.submit_tool_outputs?.tool_calls?.[0]?.id).toBe('call_bridge_response_1');
+  });
+
+
   test('preserves retained source fields and backfills missing output details via native payload builder', () => {
     const normalized = buildResponsesPayloadFromChat(
       {

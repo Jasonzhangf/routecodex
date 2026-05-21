@@ -372,7 +372,7 @@ describe('HubRequestExecutor failover', () => {
         upstreamCode: 'client_inject_failed',
         reason: 'followup failed before send'
       },
-      fallbackStage: 'provider.runtime_resolve'
+      stage: 'provider.runtime_resolve'
     });
     expect(runtimeResolveReportPlan).toEqual({
       errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
@@ -396,7 +396,7 @@ describe('HubRequestExecutor failover', () => {
         upstreamCode: 'anthropic_sse_to_json_failed',
         reason: 'Anthropic SSE error event [1305] 该模型当前访问量过大，请您稍后再试'
       },
-      fallbackStage: 'provider.send'
+      stage: 'provider.send'
     });
     expect(sseDecodeReportPlan).toEqual({
       errorCode: 'SSE_DECODE_ERROR',
@@ -417,7 +417,7 @@ describe('HubRequestExecutor failover', () => {
         upstreamCode: 'client_inject_failed',
         reason: 'followup client inject failed'
       },
-      fallbackStage: 'provider.send'
+      stage: 'provider.send'
     });
     expect(followupReportPlan).toEqual({
       errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
@@ -440,7 +440,7 @@ describe('HubRequestExecutor failover', () => {
         errorCode: 'INTERNAL_ERROR',
         reason: 'followup client inject failed'
       },
-      fallbackStage: 'provider.send'
+      stage: 'provider.send'
     });
     expect(detailMarkedFollowupPlan).toEqual({
       errorCode: 'INTERNAL_ERROR',
@@ -465,7 +465,7 @@ describe('HubRequestExecutor failover', () => {
         errorCode: 'HTTP_429',
         reason: 'rate limited'
       },
-      fallbackStage: 'provider.http'
+      stage: 'provider.http'
     });
     expect(providerHttpReportPlan).toEqual({
       errorCode: 'HTTP_429',
@@ -485,7 +485,7 @@ describe('HubRequestExecutor failover', () => {
         errorCode: 'EMPTY_ASSISTANT_RESPONSE',
         reason: 'empty assistant payload'
       },
-      fallbackStage: 'provider.send'
+      stage: 'provider.send'
     });
     expect(responseContractReportPlan).toEqual({
       errorCode: 'EMPTY_ASSISTANT_RESPONSE',
@@ -542,7 +542,7 @@ describe('HubRequestExecutor failover', () => {
         errorCode: 'MISSING_REQUIRED_TOOL_CALL',
         reason: 'missing required tool call'
       },
-      fallbackStage: 'provider.send'
+      stage: 'provider.send'
     });
     expect(missingToolCallReportPlan).toEqual({
       errorCode: 'MISSING_REQUIRED_TOOL_CALL',

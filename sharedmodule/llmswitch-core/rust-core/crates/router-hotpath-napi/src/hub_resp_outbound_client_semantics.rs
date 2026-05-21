@@ -400,15 +400,15 @@ fn resolve_client_protocol_for_response_entry(
     entry_endpoint: Option<&str>,
     is_followup: bool,
 ) -> String {
-    if is_followup {
-        return "openai-chat".to_string();
-    }
     let lowered = entry_endpoint.unwrap_or("").trim().to_ascii_lowercase();
     if lowered.contains("/v1/responses") {
         return "openai-responses".to_string();
     }
     if lowered.contains("/v1/messages") {
         return "anthropic-messages".to_string();
+    }
+    if is_followup {
+        return "openai-chat".to_string();
     }
     "openai-chat".to_string()
 }
@@ -4495,7 +4495,7 @@ mod tests {
         );
         assert_eq!(
             resolve_client_protocol_for_response_entry(Some("/v1/responses"), true),
-            "openai-chat"
+            "openai-responses"
         );
     }
 

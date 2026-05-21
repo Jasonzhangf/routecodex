@@ -45,6 +45,53 @@ function hasEmbeddedToolCallMarkersInChatMessage(message: Record<string, unknown
   ]);
 }
 
+function hasVisibleAssistantText(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => hasVisibleAssistantText(item));
+  }
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.text === 'string' && record.text.trim().length > 0) {
+    return true;
+  }
+  if (typeof record.content === 'string' && record.content.trim().length > 0) {
+    return true;
+  }
+  if (Array.isArray(record.content) && record.content.some((item) => hasVisibleAssistantText(item))) {
+    return true;
+  }
+  if (Array.isArray(record.parts) && record.parts.some((item) => hasVisibleAssistantText(item))) {
+    return true;
+  }
+  return false;
+}
+
+function isReasoningOnlyEmptyAssistantMessage(message: Record<string, unknown> | null): boolean {
+  if (!message) {
+    return false;
+  }
+  const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+  if (hasToolCalls) {
+    return false;
+  }
+  const hasVisibleContent = hasVisibleAssistantText(message.content);
+  if (hasVisibleContent) {
+    return false;
+  }
+  return hasVisibleAssistantText([
+    message.reasoning_content,
+    message.thinking,
+    message.reasoning,
+    message.reasoning_text
+  ]);
+}
+
+
 export function inspectStopGatewaySignal(base: unknown): StopGatewayContext {
   if (!base || typeof base !== 'object' || Array.isArray(base)) {
     return {
@@ -94,6 +141,16 @@ export function inspectStopGatewaySignal(base: unknown): StopGatewayContext {
       }
       const toolCalls = message && Array.isArray(message.tool_calls) ? message.tool_calls : [];
       const hasToolCalls = toolCalls.length > 0;
+      if (isReasoningOnlyEmptyAssistantMessage(message)) {
+        return {
+          observed: true,
+          eligible: false,
+          source: 'chat',
+          reason: `finish_reason_${finishReason}_reasoning_only_empty_assistant`,
+          choiceIndex: idx,
+          hasToolCalls
+        };
+      }
       return {
         observed: true,
         eligible: !hasToolCalls,

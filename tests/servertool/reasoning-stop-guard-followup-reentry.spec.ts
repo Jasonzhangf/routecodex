@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
-import { appendReasoningStopSummaryToChatResponse } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/reasoning-stop-guard.js';
+import { appendReasoningStopSummaryToChatResponse } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/reasoning-stop-guard-blocks.ts';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import {

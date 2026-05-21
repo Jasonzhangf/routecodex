@@ -146,6 +146,9 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
 
                             "stop_message_flow": {
                                 "stickyProvider": true,
+                                "clientInjectOnly": true,
+                                "clearStateOnFollowupFailure": true,
+                                "clientInjectSource": "servertool.stop_message",
                                 "seedLoopPayload": true,
                                 "retryEmptyFollowupOnce": true
                             },
@@ -227,6 +230,7 @@ pub fn plan_servertool_followup_runtime_json(flow_id: String) -> NapiResult<Stri
         "flowOnlyLoopLimit": profile_obj.and_then(|v| v.get("flowOnlyLoopLimit")).and_then(|v| v.as_bool()).unwrap_or(false),
         "stickyProvider": profile_obj.and_then(|v| v.get("stickyProvider")).and_then(|v| v.as_bool()).unwrap_or(false),
         "clientInjectOnly": profile_obj.and_then(|v| v.get("clientInjectOnly")).and_then(|v| v.as_bool()).unwrap_or(false),
+        "clearStateOnFollowupFailure": profile_obj.and_then(|v| v.get("clearStateOnFollowupFailure")).and_then(|v| v.as_bool()).unwrap_or(false),
         "seedLoopPayload": profile_obj.and_then(|v| v.get("seedLoopPayload")).and_then(|v| v.as_bool()).unwrap_or(false),
         "retryEmptyFollowupOnce": profile_obj.and_then(|v| v.get("retryEmptyFollowupOnce")).and_then(|v| v.as_bool()).unwrap_or(false),
         "ignoreRequiresActionFollowup": profile_obj.and_then(|v| v.get("ignoreRequiresActionFollowup")).and_then(|v| v.as_bool()).unwrap_or(false),

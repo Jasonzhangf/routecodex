@@ -7,7 +7,6 @@
 import type { UnknownObject } from '../../../types/common-types.js';
 
 export const WINDSURF_COMPATIBILITY_PROFILE = 'chat:windsurf';
-export const WINDSURF_DEFAULT_LS_PORT = 42100;
 
 export enum WindsurfErrorCode {
   AUTH_FAILED = 'WINDSURF_AUTH_FAILED',
@@ -32,7 +31,7 @@ export interface WindsurfAccountEntry {
   tokenFile?: string;
 }
 
-export type WindsurfTransportBackend = 'grpc' | 'cascade-cloud';
+export type WindsurfTransportBackend = 'cascade-cloud';
 
 export interface WindsurfProviderRuntimeOptions {
   enableThinking?: boolean;
@@ -42,12 +41,8 @@ export interface WindsurfProviderRuntimeOptions {
   toolEmulationStrict?: boolean;
   healthCheckEndpoint?: string;
   healthCheckTimeoutMs?: number;
-  /** Transport mode. Reference mainline uses local LS/gRPC cascade. */
+  /** Transport mode. Only cloud cascade mainline is allowed. */
   transportBackend?: WindsurfTransportBackend;
-  /** Local Language Server port for Cascade gRPC mainline. */
-  lsPort?: number;
-  /** Local Language Server CSRF token / header secret. */
-  csrfToken?: string;
   /** Primary cloud endpoint. */
   apiBaseUrl?: string;
   /** Secondary cloud endpoint. */
@@ -82,12 +77,7 @@ export function normalizeWindsurfProviderRuntimeOptions(
     toolEmulationStrict: typeof raw.toolEmulationStrict === 'boolean' ? raw.toolEmulationStrict : undefined,
     healthCheckEndpoint: readNonEmptyString(raw.healthCheckEndpoint),
     healthCheckTimeoutMs: typeof raw.healthCheckTimeoutMs === 'number' && raw.healthCheckTimeoutMs > 0 ? raw.healthCheckTimeoutMs : undefined,
-    transportBackend:
-      raw.transportBackend === 'grpc' || raw.transportBackend === 'cascade-cloud'
-        ? raw.transportBackend
-        : undefined,
-    lsPort: typeof raw.lsPort === 'number' && raw.lsPort > 0 ? Math.floor(raw.lsPort) : undefined,
-    csrfToken: readNonEmptyString(raw.csrfToken),
+    transportBackend: raw.transportBackend === 'cascade-cloud' ? raw.transportBackend : undefined,
     apiBaseUrl: readNonEmptyString(raw.apiBaseUrl),
     apiBaseUrlFallback: readNonEmptyString(raw.apiBaseUrlFallback),
     pollIntervalMs: typeof raw.pollIntervalMs === 'number' && raw.pollIntervalMs > 0 ? Math.floor(raw.pollIntervalMs) : undefined,

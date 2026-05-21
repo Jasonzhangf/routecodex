@@ -172,6 +172,7 @@ export async function runReenterFollowup(args: {
   maxAttempts: number;
   retryEmptyFollowupOnce: boolean;
   isStopMessageFlow: boolean;
+  clearStateOnFollowupFailure: boolean;
   shouldInjectStopLoopWarning: boolean;
   stopLoopWarnThreshold: number;
   loopState: {
@@ -502,7 +503,7 @@ export async function runReenterFollowup(args: {
       }
       lastError = error;
       if (attempt >= args.maxAttempts) {
-        if (args.isStopMessageFlow) {
+        if (args.clearStateOnFollowupFailure) {
           args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);
           args.onLogProgress(5, 5, 'failed (stopMessage followup failed; state cleared)', {
             flowId: args.flowId,
@@ -548,7 +549,7 @@ export async function runReenterFollowup(args: {
   const followupBody = resolveFollowupBodyCandidate(followup);
   const terminalLastError = lastError && isTerminalFollowupError(lastError) ? lastError : undefined;
   if (terminalLastError && !followupBody) {
-    if (args.isStopMessageFlow) {
+    if (args.clearStateOnFollowupFailure) {
       args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);
       args.onLogProgress(5, 5, 'failed (stopMessage followup terminal error; state cleared)', {
         flowId: args.flowId
@@ -558,7 +559,7 @@ export async function runReenterFollowup(args: {
   }
   if (args.retryEmptyFollowupOnce && (!followupBody || args.isEmptyClientResponsePayload(followupBody))) {
     if (terminalLastError) {
-      if (args.isStopMessageFlow) {
+      if (args.clearStateOnFollowupFailure) {
         args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);
         args.onLogProgress(5, 5, 'failed (stopMessage followup terminal error; state cleared)', {
           flowId: args.flowId
@@ -576,7 +577,7 @@ export async function runReenterFollowup(args: {
         payload: followupPayload
       });
     }
-    if (args.isStopMessageFlow) {
+    if (args.clearStateOnFollowupFailure) {
       args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);
       args.onLogProgress(5, 5, 'failed (stopMessage followup empty; state cleared)', { flowId: args.flowId });
       throw args.createEmptyFollowupError({

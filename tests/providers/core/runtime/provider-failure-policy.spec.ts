@@ -173,6 +173,46 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
+  it('classifies windsurf repeated tool call after tool_result as special_400', () => {
+    const error = Object.assign(new Error('[windsurf] upstream repeated prior tool call after tool_result'), {
+      code: 'WINDSURF_SERVICE_UNREACHABLE',
+      statusCode: 502
+    });
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 502,
+      errorCode: 'WINDSURF_SERVICE_UNREACHABLE',
+      reason: '[windsurf] upstream repeated prior tool call after tool_result'
+    });
+
+    expect(classification).toBe('special_400');
+    expect(isProviderFailureHealthNeutral({
+      stage: 'provider.send',
+      errorCode: 'WINDSURF_SERVICE_UNREACHABLE',
+      statusCode: 502,
+      classification
+    })).toBe(true);
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 502,
+      errorCode: 'WINDSURF_SERVICE_UNREACHABLE',
+      reason: '[windsurf] upstream repeated prior tool call after tool_result',
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'special_400',
+      affectsHealth: false,
+      shouldRetry: false,
+      action: 'direct_return',
+      decisionLabel: 'direct_return',
+      backoff: expect.objectContaining({
+        scope: 'none'
+      })
+    }));
+  });
+
   it('classifies sqlite busy 500 as recoverable and health-neutral', () => {
     const error = Object.assign(new Error('database is locked (5) (SQLITE_BUSY)'), {
       code: 'new_api_error',

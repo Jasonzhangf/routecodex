@@ -100,10 +100,6 @@ export function resolveFollowupExecutionMode(args: {
   if (injectSource === 'servertool.stopless_goal_continue') {
     return 'reenter';
   }
-  // plain stop_message auto-continue is tmux/client inject only.
-  if (args.flowId === 'stop_message_flow') {
-    return 'client_inject_only';
-  }
   if (
     args.readClientInjectOnly(args.metadata) ||
     decision.outcomeMode === 'client_inject_only' ||
@@ -163,7 +159,7 @@ export function applyClientInjectOnlyMetadata(args: {
   normalizeClientInjectText: (value: unknown) => string;
 }): { forced: boolean } {
   const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
-  if ((args.flowId !== 'stop_message_flow' && !decision.clientInjectOnly) || args.readClientInjectOnly(args.metadata)) {
+  if (!decision.clientInjectOnly || args.readClientInjectOnly(args.metadata)) {
     return { forced: false };
   }
   const record = args.metadata as Record<string, unknown>;

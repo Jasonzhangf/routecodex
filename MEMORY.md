@@ -2,6 +2,8 @@
 
 ## Skills 与调试工作流
 
+- 2026-05-21: Windsurf / responses 链路边界已校正：**provider -> inbound(very thin) -> chat_process -> outbound responses**。chat inbound 只做最薄的协议归一和字段透传，不承载 provider-specific 兼容逻辑；provider 也不应把 client surface 语义一路耦合进 pipeline。可复用规则：当 live `/v1/responses` 仍漏成 `chat.completion`，优先查 chat_process/outbound 的最终重建层，而不是把 provider inbound 当成兼容主战场。
+
 - 2026-04-17: virtual router 的 routing bootstrap 真源继续前移到 Rust：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/bootstrap.rs` 新接管 `normalizeRouting + expandRoutingTable`，并通过 native `bootstrapVirtualRouterRoutingJson` 回给 TS 薄壳；`bootstrap.ts` 不再直接执行 TS `routing-config` 语义。验证链：`npm run build:ci --prefix sharedmodule/llmswitch-core`、`node sharedmodule/llmswitch-core/scripts/tests/virtual-router-pool-mode.mjs`、`npm run jest:run -- --runTestsByPath tests/sharedmodule/virtual-router-loadbalancing-targets.spec.ts tests/sharedmodule/virtual-router-routing-model-validation.spec.ts`、真实 `/Volumes/extension/.rcc/config.json` dry-run 命中 `crs/duck/wuzu/glm-5/kimi-k2.5`。
 
 - 2026-04-16: 如果线上日志出现 `thinking/forced` / `tools/forced`，优先不要怀疑配置路径；先查 `~/.rcc/sessions/.../session-*.json` 是否被写入 `forcedTarget`。可复用规则：`servertool` 注入的 `__shadowCompareForcedProviderKey`、`disabledProviderKeyAliases`、`disableStickyRoutes` 都只能作用于**本次 selection**，不得持久化进 session routing state。

@@ -98,7 +98,8 @@ function persistSnapshotUsage(args: {
     return;
   }
   const now = Date.now();
-  const nextState = applyStopMessageSnapshotToState(null, {
+  const persistedState = loadRoutingInstructionStateSync(args.stickyKey) ?? null;
+  const nextState = applyStopMessageSnapshotToState(persistedState, {
     text: args.snapshot.text,
     maxRepeats: args.snapshot.maxRepeats,
     used: args.used,
@@ -125,7 +126,8 @@ function clearPersistedStopMessageSnapshot(args: {
     return;
   }
   const now = Date.now();
-  const nextState = applyStopMessageSnapshotToState(null, {
+  const persistedState = loadRoutingInstructionStateSync(args.stickyKey) ?? null;
+  const nextState = applyStopMessageSnapshotToState(persistedState, {
     text: args.snapshot.text,
     maxRepeats: args.snapshot.maxRepeats,
     used: 0,
@@ -161,7 +163,7 @@ function resolveStopMessageDefaultMaxRepeatsLive(): number {
   }
   const raw = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_MAX_REPEATS;
   const parsed = typeof raw === 'string' ? Number(raw.trim()) : Number.NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 2;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 3;
 }
 
 function debugLog(message: string, extra?: JsonObject): void {
@@ -414,12 +416,9 @@ const handler: ServerToolHandler = async (
       : { exhaustedDefault: false };
     const runtimeStopMessageState = resolveRuntimeStopMessageState(rt);
     const requestScopedGoal = readRequestScopedGoalState(ctx.adapterContext);
-    const effectiveGoalState = requestScopedGoal.state;
-    const hasManagedGoal = Boolean(
-      requestScopedGoal.explicit &&
-      effectiveGoalState &&
-      effectiveGoalState.status !== 'idle'
-    );
+    const persistedGoal = readStoplessGoalState(ctx.adapterContext).state;
+    const effectiveGoalState = requestScopedGoal.state ?? persistedGoal;
+    const hasManagedGoal = Boolean(effectiveGoalState && effectiveGoalState.status !== 'idle');
     let snapshot = persistedStopMessageState ?? runtimeStopMessageState;
     const stickyMode = normalizeStopMessageStageMode(undefined);
     const runtimeMode = readRuntimeStopMessageStageMode(rt);
@@ -436,11 +435,11 @@ const handler: ServerToolHandler = async (
       const implicit = STOPMESSAGE_IMPLICIT_GEMINI
         ? resolveImplicitGeminiStopMessageSnapshot(ctx, record)
         : null;
-      const shouldUseGoalDefault = hasManagedGoal && effectiveGoalState?.status !== 'active';
-      if (shouldUseGoalDefault && persistedStopMessageTombstone.exhaustedDefault) {
+      const shouldUseDefaultStopMessage = !hasManagedGoal || effectiveGoalState?.status !== 'active';
+      if (shouldUseDefaultStopMessage && persistedStopMessageTombstone.exhaustedDefault) {
         return markSkip('skip_goal_default_exhausted');
       }
-      const defaultSnapshot = shouldUseGoalDefault && resolveStopMessageDefaultEnabledLive()
+      const defaultSnapshot = shouldUseDefaultStopMessage && resolveStopMessageDefaultEnabledLive()
         ? resolveDefaultStopMessageSnapshot(ctx, {
             text: resolveStopMessageDefaultTextLive(),
             maxRepeats: resolveStopMessageDefaultMaxRepeatsLive()
@@ -578,6 +577,14 @@ const handler: ServerToolHandler = async (
         chatResponse: ctx.base,
         execution: {
           flowId: FLOW_ID,
+          ...(stickyKey
+            ? {
+                stopMessageReservation: {
+                  stickyKey,
+                  previousState: null
+                }
+              }
+            : {}),
           followup: {
             requestIdSuffix: ':stop_followup',
             injection: {

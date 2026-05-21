@@ -159,6 +159,29 @@ function isAlreadyClientFinalResponseBody(body: unknown): boolean {
   }
   const record = body as Record<string, unknown>;
   const object = typeof record.object === 'string' ? record.object.trim() : '';
+  const baseResp =
+    record.base_resp && typeof record.base_resp === 'object' && !Array.isArray(record.base_resp)
+      ? (record.base_resp as Record<string, unknown>)
+      : undefined;
+  const businessErrorStatusCode =
+    typeof baseResp?.status_code === 'number' && Number.isFinite(baseResp.status_code)
+      ? Number(baseResp.status_code)
+      : undefined;
+  const businessErrorStatusMessage =
+    typeof baseResp?.status_msg === 'string' && baseResp.status_msg.trim()
+      ? baseResp.status_msg.trim()
+      : undefined;
+  const choicesExplicitlyNull = Object.prototype.hasOwnProperty.call(record, 'choices') && record.choices == null;
+  if (
+    object === 'chat.completion'
+    && (
+      businessErrorStatusCode !== undefined
+      || businessErrorStatusMessage
+      || choicesExplicitlyNull
+    )
+  ) {
+    return false;
+  }
   if (object === 'chat.completion' || object === 'response' || object === 'message') {
     return true;
   }

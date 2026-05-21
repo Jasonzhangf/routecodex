@@ -504,11 +504,11 @@ export async function resolveRuntimeAuth(server: any, runtime: ProviderRuntimePr
         ...(tokenFile ? { tokenFile } : {})
       };
     }
-    if (rawType === 'windsurf-account') {
+    if (rawType === 'windsurf-account' || rawType === 'windsurf-devin-token') {
       return {
         ...auth,
         type: 'apikey',
-        rawType: auth.rawType ?? 'windsurf-account',
+        rawType: auth.rawType ?? rawType,
         value: typeof auth.value === 'string' ? auth.value : '',
         mobile: pickString(authRecord.mobile, authRecord.account, authRecord.username),
         password: pickString(authRecord.password),
@@ -589,7 +589,7 @@ export async function resolveApiKeyValue(
       : typeof (auth as { type?: unknown })?.type === 'string'
         ? String((auth as { type?: string }).type).trim().toLowerCase()
         : '';
-  if (rawType === 'qwenchat-guest' || rawType === 'windsurf-account') {
+  if (rawType === 'qwenchat-guest' || rawType === 'windsurf-account' || rawType === 'windsurf-devin-token') {
     return '';
   }
 

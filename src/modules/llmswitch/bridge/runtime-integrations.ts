@@ -143,28 +143,51 @@ export async function resumeLatestResponsesContinuationByScope(args: {
   return fn(args);
 }
 
-type ResponsesSseModule = {
+type ResponsesSseToJsonModule = {
   ResponsesSseToJsonConverter?: new () => {
     convertSseToJson(stream: unknown, options: AnyRecord): Promise<unknown>;
   };
 };
 
-let cachedResponsesSseConverterFactory:
+type ResponsesJsonToSseModule = {
+  ResponsesJsonToSseConverter?: new () => {
+    convertResponseToJsonToSse(payload: unknown, options: AnyRecord): Promise<unknown>;
+  };
+};
+
+let cachedResponsesSseToJsonConverterFactory:
   | (() => { convertSseToJson(stream: unknown, options: AnyRecord): Promise<unknown> })
+  | null = null;
+let cachedResponsesJsonToSseConverterFactory:
+  | (() => { convertResponseToJsonToSse(payload: unknown, options: AnyRecord): Promise<unknown> })
   | null = null;
 
 export async function createResponsesSseToJsonConverter(): Promise<{
   convertSseToJson(stream: unknown, options: AnyRecord): Promise<unknown>;
 }> {
-  if (!cachedResponsesSseConverterFactory) {
-    const mod = await importCoreDist<ResponsesSseModule>('sse/sse-to-json/index');
+  if (!cachedResponsesSseToJsonConverterFactory) {
+    const mod = await importCoreDist<ResponsesSseToJsonModule>('sse/sse-to-json/index');
     const Ctor = mod.ResponsesSseToJsonConverter;
     if (typeof Ctor !== 'function') {
       throw new Error('[llmswitch-bridge] ResponsesSseToJsonConverter not available');
     }
-    cachedResponsesSseConverterFactory = () => new Ctor();
+    cachedResponsesSseToJsonConverterFactory = () => new Ctor();
   }
-  return cachedResponsesSseConverterFactory();
+  return cachedResponsesSseToJsonConverterFactory();
+}
+
+export async function createResponsesJsonToSseConverter(): Promise<{
+  convertResponseToJsonToSse(payload: unknown, options: AnyRecord): Promise<unknown>;
+}> {
+  if (!cachedResponsesJsonToSseConverterFactory) {
+    const mod = await importCoreDist<ResponsesJsonToSseModule>('sse/json-to-sse/index');
+    const Ctor = mod.ResponsesJsonToSseConverter;
+    if (typeof Ctor !== 'function') {
+      throw new Error('[llmswitch-bridge] ResponsesJsonToSseConverter not available');
+    }
+    cachedResponsesJsonToSseConverterFactory = () => new Ctor();
+  }
+  return cachedResponsesJsonToSseConverterFactory();
 }
 
 type ProviderRuntimeIngressExports = {
@@ -214,11 +237,17 @@ export async function preloadCriticalBridgeRuntimeModules(): Promise<{ loaded: s
   }
   loaded.push('conversion/shared/responses-conversation-store');
 
-  const sseModule = await importCoreDist<ResponsesSseModule>('sse/sse-to-json/index');
-  if (typeof sseModule.ResponsesSseToJsonConverter !== 'function') {
+  const sseToJsonModule = await importCoreDist<ResponsesSseToJsonModule>('sse/sse-to-json/index');
+  if (typeof sseToJsonModule.ResponsesSseToJsonConverter !== 'function') {
     throw new Error('[llmswitch-bridge] preload failed: ResponsesSseToJsonConverter not available');
   }
   loaded.push('sse/sse-to-json/index');
+
+  const jsonToSseModule = await importCoreDist<ResponsesJsonToSseModule>('sse/json-to-sse/index');
+  if (typeof jsonToSseModule.ResponsesJsonToSseConverter !== 'function') {
+    throw new Error('[llmswitch-bridge] preload failed: ResponsesJsonToSseConverter not available');
+  }
+  loaded.push('sse/json-to-sse/index');
 
   const ingressModule = await getProviderRuntimeIngress();
   if (

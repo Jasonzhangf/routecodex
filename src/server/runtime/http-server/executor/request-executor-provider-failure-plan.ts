@@ -65,7 +65,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
   const reportPlan = resolveRequestExecutorProviderErrorReportPlan({
     error: args.error,
     retryError: args.retryError,
-    fallbackStage: args.stage
+    stage: args.stage
   });
   const classification = resolveRequestExecutorProviderErrorClassification({
     error: args.error,

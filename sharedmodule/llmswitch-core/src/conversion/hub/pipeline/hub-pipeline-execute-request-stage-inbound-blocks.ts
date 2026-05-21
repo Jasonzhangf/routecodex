@@ -63,38 +63,46 @@ export async function captureInboundContextSnapshot<TContext = Record<string, un
   hooks: RequestStageHooks<TContext>;
   inboundRecorder?: StageRecorder;
 }): Promise<Record<string, unknown> | undefined> {
+  const persistResponsesConversationContext = (context: Record<string, unknown> | undefined): void => {
+    if (!context) {
+      return;
+    }
+    const providerProtocol = resolveHubClientProtocolWithNative(args.inboundAdapterContext.entryEndpoint);
+    if (providerProtocol !== "openai-responses") {
+      return;
+    }
+    const reqId = typeof args.inboundAdapterContext.requestId === 'string'
+      ? args.inboundAdapterContext.requestId.trim() : undefined;
+    if (!reqId) {
+      return;
+    }
+    captureResponsesRequestContext({
+      requestId: reqId,
+      payload: args.rawRequest as unknown as Record<string, unknown>,
+      context: context as unknown as Record<string, unknown>,
+      sessionId: typeof (args.inboundAdapterContext as Record<string, unknown>).sessionId === 'string'
+        ? String((args.inboundAdapterContext as Record<string, unknown>).sessionId) : undefined,
+      conversationId: typeof (args.inboundAdapterContext as Record<string, unknown>).conversationId === 'string'
+        ? String((args.inboundAdapterContext as Record<string, unknown>).conversationId) : undefined,
+      routeHint: typeof (args.inboundAdapterContext as Record<string, unknown>).routeId === 'string'
+        ? String((args.inboundAdapterContext as Record<string, unknown>).routeId) : undefined,
+    });
+  };
   if (args.inboundStage2ResponsesContext) {
     writeCacheEntryForRequest({
       rawRequest: args.rawRequest,
       adapterContext: args.inboundAdapterContext,
     });
-    const providerProtocol = resolveHubClientProtocolWithNative(args.inboundAdapterContext.entryEndpoint);
-    if (providerProtocol === "openai-responses") {
-      // Persist conversation context only for responses protocol.
-      // Capturing non-responses requests here leaks requestMap entries with no response_id lifecycle.
-      const reqId = typeof args.inboundAdapterContext.requestId === 'string'
-        ? args.inboundAdapterContext.requestId.trim() : undefined;
-      if (reqId) {
-        captureResponsesRequestContext({
-          requestId: reqId,
-          payload: args.rawRequest as unknown as Record<string, unknown>,
-          context: args.inboundStage2ResponsesContext as unknown as Record<string, unknown>,
-          sessionId: typeof (args.inboundAdapterContext as Record<string, unknown>).sessionId === 'string'
-            ? String((args.inboundAdapterContext as Record<string, unknown>).sessionId) : undefined,
-          conversationId: typeof (args.inboundAdapterContext as Record<string, unknown>).conversationId === 'string'
-            ? String((args.inboundAdapterContext as Record<string, unknown>).conversationId) : undefined,
-          routeHint: typeof (args.inboundAdapterContext as Record<string, unknown>).routeId === 'string'
-            ? String((args.inboundAdapterContext as Record<string, unknown>).routeId) : undefined,
-        });
-      }
-    }
+    persistResponsesConversationContext(args.inboundStage2ResponsesContext);
     return args.inboundStage2ResponsesContext;
   }
-  return args.hooks.captureContext({
+  const fallbackContext = await args.hooks.captureContext({
     rawRequest: args.rawRequest,
     adapterContext: args.inboundAdapterContext,
     stageRecorder: args.inboundRecorder,
   });
+  persistResponsesConversationContext(fallbackContext as Record<string, unknown> | undefined);
+  return fallbackContext as Record<string, unknown> | undefined;
 }
 
 export function appendInboundNodeResult(args: {

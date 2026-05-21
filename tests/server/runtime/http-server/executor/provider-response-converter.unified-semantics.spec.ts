@@ -22,6 +22,47 @@ const mockReadStoplessGoalState = jest.fn((adapterContext: Record<string, unknow
 const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
+  requireCoreDist: jest.fn(() => ({
+    normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown, toolsRaw: unknown[]) => {
+      const toolName =
+        Array.isArray(toolsRaw) && toolsRaw[0] && typeof toolsRaw[0] === 'object'
+          ? String((((toolsRaw[0] as any).function || (toolsRaw[0] as any)).name) || '')
+          : '';
+      if (!payload || typeof payload !== 'object' || toolName !== 'exec_command') {
+        return payload as Record<string, unknown>;
+      }
+      const cloned = JSON.parse(JSON.stringify(payload));
+      const normalizeArgs = (holder: any) => {
+        if (!holder || typeof holder !== 'object') {
+          return;
+        }
+        try {
+          const parsed = typeof holder.arguments === 'string' ? JSON.parse(holder.arguments) : holder.arguments;
+          if (parsed && typeof parsed === 'object' && typeof parsed.command === 'string' && !parsed.cmd) {
+            holder.arguments = JSON.stringify({ cmd: parsed.command });
+          }
+        } catch {
+          // keep original shape on parse failure
+        }
+        if (holder.function && typeof holder.function === 'object') {
+          holder.function.arguments = holder.arguments;
+        }
+      };
+      const output = Array.isArray((cloned as any).output) ? (cloned as any).output : [];
+      for (const item of output) {
+        if (item && typeof item === 'object' && item.type === 'function_call') {
+          normalizeArgs(item);
+        }
+      }
+      const toolCalls = Array.isArray((cloned as any)?.required_action?.submit_tool_outputs?.tool_calls)
+        ? (cloned as any).required_action.submit_tool_outputs.tool_calls
+        : [];
+      for (const toolCall of toolCalls) {
+        normalizeArgs(toolCall);
+      }
+      return cloned;
+    },
+  })),
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
   syncStoplessGoalStateFromRequest: mockSyncStoplessGoalStateFromRequest,
   persistStoplessGoalStateSnapshot: mockPersistStoplessGoalStateSnapshot,
@@ -542,5 +583,71 @@ describe('provider-response-converter unified semantics handoff', () => {
     });
     expect(Array.isArray((converted as any).body?.output)).toBe(true);
     expect((converted as any).body?.output).toHaveLength(0);
+  });
+
+  it('preserves explicit providerProtocol on /v1/responses instead of remapping from providerType', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementationOnce(async ({ providerProtocol, entryEndpoint }) => ({
+      __sse_responses:
+        providerProtocol === 'openai-responses' && entryEndpoint === '/v1/responses'
+          ? ({ pipe: () => undefined } as any)
+          : undefined,
+      body: {
+        id: 'resp_protocol_preserved_1',
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: `protocol=${String(providerProtocol)}` }],
+          },
+        ],
+      },
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const result = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        providerType: 'openai',
+        requestId: 'req_converter_protocol_preserve_1',
+        wantsStream: true,
+        response: {
+          body: {
+            id: 'chatcmpl_protocol_preserve_1',
+            object: 'chat.completion',
+            model: 'gpt-5.4-medium',
+            choices: [
+              {
+                index: 0,
+                message: { role: 'assistant', content: 'hello' },
+                finish_reason: 'stop',
+              },
+            ],
+          },
+        } as any,
+        pipelineMetadata: {},
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined,
+        },
+        executeNested: async () => ({ body: { ok: true } } as any),
+      },
+    );
+
+    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
+    const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(bridgeArgs?.providerProtocol).toBe('openai-responses');
+    expect((result as any).body?.__sse_responses).toBeDefined();
   });
 });

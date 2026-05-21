@@ -163,13 +163,17 @@ class ResponsesConversationStore {
     }
     const entry = this.requestMap.get(requestId);
     if (!entry) {
-      // Silent return + log: preserve existing caller contract (no unhandled exceptions)
-      console.error('[ResponsesConversationStore] recordResponse: request entry not found, skipping', {
-        context: 'responses-conversation-store.recordResponse',
-        requestId,
-        responseId
+      throw new ProviderProtocolError('Responses conversation request context missing for response capture', {
+        code: 'MALFORMED_RESPONSE',
+        protocol: 'openai-responses',
+        providerType: 'responses',
+        details: {
+          context: 'responses-conversation-store.recordResponse',
+          reason: 'missing_request_context',
+          requestId,
+          responseId
+        }
       });
-      return;
     }
     if (!responseId) return;
     const responseRouteHint = readScopeToken(args.routeHint);
@@ -409,20 +413,10 @@ export function captureResponsesRequestContext(args: CaptureContextArgs): void {
 }
 
 export function recordResponsesResponse(args: RecordResponseArgs): void {
-  try {
-    if (RESPONSES_DEBUG) {
-      console.log('[responses-store] record', args.requestId, (args.response as AnyRecord)?.id);
-    }
-    store.recordResponse(args);
-  } catch (error) {
-    if (error instanceof ProviderProtocolError) {
-      throw error;
-    }
-    logResponsesStoreNonBlockingError('record', error, {
-      requestId: args.requestId,
-      responseId: (args.response as AnyRecord)?.id
-    });
+  if (RESPONSES_DEBUG) {
+    console.log('[responses-store] record', args.requestId, (args.response as AnyRecord)?.id);
   }
+  store.recordResponse(args);
 }
 
 export function resumeResponsesConversation(

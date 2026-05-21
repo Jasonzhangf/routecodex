@@ -127,4 +127,106 @@ describe('http server runtime setup provider merge', () => {
     expect(capturedInputs[0]?.providers?.windsurf).toBeDefined();
     expect(capturedInputs[0]?.providers?.windsurf?.auth?.type).toBe('windsurf-account');
   });
+
+
+  it('injects direct windsurf devin-token auth from provider-v2 configs during setup', async () => {
+    const capturedInputs: any[] = [];
+
+    jest.unstable_mockModule(PROVIDER_V2_LOADER_PATH, () => ({
+      loadProviderConfigsV2: async () => ({
+        windsurf: {
+          provider: {
+            id: 'windsurf',
+            auth: {
+              type: 'windsurf-devin-token',
+              apiKey: 'devin-session-token$cfg-direct',
+              tokenFile: '~/.rcc/auth/windsurf-devin-token-1.json'
+            },
+            models: { 'gpt-5.5-medium': {} },
+          },
+        },
+      }),
+    }));
+
+    jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      bootstrapVirtualRouterConfig: (input: any) => input,
+      getHubPipelineCtor: async () => class HubPipelineMock { constructor(_config: any) {} updateVirtualRouterConfig(): void {} },
+      preloadCriticalBridgeRuntimeModules: async () => ({ loaded: [] }),
+      loadRoutingInstructionStateSync: () => null,
+      saveRoutingInstructionStateAsync: async () => {},
+      saveRoutingInstructionStateSync: () => {},
+      syncStoplessGoalStateFromRequest: () => null,
+      persistStoplessGoalStateSnapshot: () => {},
+      readStoplessGoalState: () => null,
+      extractSessionIdentifiersFromMetadata: () => ({}),
+      getStatsCenterSafe: () => null,
+      getLlmsStatsSnapshot: () => ({}),
+      resolveClockConfigSnapshot: () => null,
+      startClockDaemonIfNeededSnapshot: () => {},
+      setClockRuntimeHooksSnapshot: () => {},
+      buildHeartbeatInjectTextSnapshot: () => null,
+      resolveHeartbeatConfigSnapshot: () => null,
+      startHeartbeatDaemonIfNeededSnapshot: () => {},
+      setHeartbeatRuntimeHooksSnapshot: () => {},
+      loadHeartbeatStateSnapshot: () => null,
+      listHeartbeatStatesSnapshot: () => [],
+      listHeartbeatHistorySnapshot: () => [],
+      appendHeartbeatHistoryEventSnapshot: () => {},
+      setHeartbeatEnabledSnapshot: () => {},
+      runHeartbeatDaemonTickSnapshot: () => {},
+      reserveClockDueTasks: () => [],
+      commitClockDueReservation: () => {},
+      listClockSessionIdsSnapshot: () => [],
+      listClockTasksSnapshot: () => [],
+      scheduleClockTasksSnapshot: () => [],
+      updateClockTaskSnapshot: () => null,
+      cancelClockTaskSnapshot: () => false,
+      clearClockTasksSnapshot: () => {},
+    }));
+
+    const { setupRuntime } = await import('../../../../src/server/runtime/http-server/http-server-runtime-setup.ts');
+    const { resolveVirtualRouterInput } = await import(BOOTSTRAP_MODULE_PATH);
+
+    const server: any = {
+      userConfig: {
+        virtualrouter: {
+          routingPolicyGroups: {
+            gateway_priority_5520: {
+              routing: {
+                thinking: [
+                  { id: 'gateway-priority-5520-thinking', targets: ['windsurf.gpt-5.5-medium'] },
+                ],
+              },
+            },
+          },
+        },
+      },
+      config: { configPath: 'test-config.json' },
+      managerDaemon: { getModule: () => undefined },
+      hubPipeline: null,
+      hubPipelineCtor: null,
+      currentRouterArtifacts: null,
+      routingProviderScope: null,
+      hubPolicyMode: 'off',
+      ensureProviderProfilesFromUserConfig: () => {},
+      resolveVirtualRouterInput: async function (userConfig: any) { return await resolveVirtualRouterInput(this, userConfig); },
+      bootstrapVirtualRouter: async (input: any) => { capturedInputs.push(JSON.parse(JSON.stringify(input))); return { config: input, runtime: {}, targetRuntime: {} }; },
+      ensureHubPipelineCtor: async () => class HubPipelineMock { constructor(_config: any) {} updateVirtualRouterConfig(): void {} },
+      isQuotaRoutingEnabled: () => false,
+      initializeProviderRuntimes: async () => {},
+      initializeRouteErrorHub: async () => {},
+      startSessionDaemonInjectLoop: () => {},
+      pipelineLogger: { logDebug: () => {}, logError: () => {}, logModule: () => {}, getRecentLogs: () => [] },
+      getErrorHandlingShim: () => ({ handleError: async () => {}, createContext: () => ({}), getStatistics: () => ({}) }),
+      createDebugCenterShim: () => ({ logDebug: () => {}, logError: () => {}, logModule: () => {}, processDebugEvent: () => {}, getLogs: () => [] }),
+    };
+
+    await setupRuntime(server, server.userConfig as any);
+
+    expect(capturedInputs).toHaveLength(1);
+    expect(capturedInputs[0]?.providers?.windsurf?.auth?.type).toBe('windsurf-devin-token');
+    expect(capturedInputs[0]?.providers?.windsurf?.auth?.apiKey).toBe('devin-session-token$cfg-direct');
+    expect(capturedInputs[0]?.providers?.windsurf?.auth?.tokenFile).toBe('~/.rcc/auth/windsurf-devin-token-1.json');
+  });
+
 });

@@ -26,6 +26,7 @@ export {
   resumeLatestResponsesContinuationByScope,
   rebindResponsesConversationRequestId,
   createResponsesSseToJsonConverter,
+  createResponsesJsonToSseConverter,
   reportProviderErrorToRouterPolicy,
   reportProviderSuccessToRouterPolicy,
   setProviderRuntimeQuotaHooks,

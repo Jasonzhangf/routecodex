@@ -114,20 +114,20 @@ export function mapRuntimeAuthToConfig(
         ? openCodeZenResolved.apiKey
         : (isNonEmptyString(auth.value) ? auth.value.trim() : '');
 
-    if (rawType !== 'deepseek-account' && rawType !== 'qwenchat-guest' && rawType !== 'windsurf-account' && !resolvedApiKey) {
+    if (rawType !== 'deepseek-account' && rawType !== 'qwenchat-guest' && rawType !== 'windsurf-account' && rawType !== 'windsurf-devin-token' && !resolvedApiKey) {
       const baseUrl =
         runtime && typeof (runtime as any).baseUrl === 'string'
           ? String((runtime as any).baseUrl).trim()
           : runtime && typeof (runtime as any).endpoint === 'string'
             ? String((runtime as any).endpoint).trim()
             : '';
-      const allowEmpty = isLocalBaseUrl(baseUrl) || rawType === 'deepseek-account' || rawType === 'qwenchat-guest' || rawType === 'windsurf-account';
+      const allowEmpty = isLocalBaseUrl(baseUrl) || rawType === 'deepseek-account' || rawType === 'qwenchat-guest' || rawType === 'windsurf-account' || rawType === 'windsurf-devin-token';
       if (!allowEmpty) {
         throw new Error(`[ProviderFactory] runtime ${runtimeKey} missing inline apiKey value`);
       }
     }
     const preserveInlineValueForRawType =
-      rawType === 'windsurf-account';
+      rawType === 'windsurf-account' || rawType === 'windsurf-devin-token';
     const apiKeyAuth: ApiKeyAuthExtended = {
       type: 'apikey',
       apiKey:

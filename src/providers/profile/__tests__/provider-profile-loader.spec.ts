@@ -110,6 +110,34 @@ describe('provider-profile-loader', () => {
   });
 
 
+
+
+  it('RED: parses windsurf devin-token auth with tokenFile persistence fields', () => {
+    const config: Record<string, unknown> = {
+      providers: {
+        windsurf: {
+          type: 'openai',
+          providerModule: 'windsurf-chat-provider',
+          auth: {
+            type: 'windsurf-devin-token',
+            apiKey: 'devin-session-token$profile-token',
+            tokenFile: '~/.rcc/auth/windsurf-devin-token-1.json'
+          }
+        }
+      }
+    };
+
+    const result = buildProviderProfiles(config);
+    const profile = result.byId.windsurf;
+    expect(profile.auth.kind).toBe('apikey');
+    if (profile.auth.kind === 'apikey') {
+      expect(profile.auth.rawType).toBe('windsurf-devin-token');
+      expect(profile.auth.apiKey).toBe('devin-session-token$profile-token');
+      expect(profile.auth.tokenFile).toBe('~/.rcc/auth/windsurf-devin-token-1.json');
+      expect(profile.auth.mobile).toBeUndefined();
+      expect(profile.auth.password).toBeUndefined();
+    }
+  });
   it('parses windsurf account auth with account/password fields', () => {
     const config: Record<string, unknown> = {
       providers: {

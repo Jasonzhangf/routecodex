@@ -62,6 +62,14 @@ describe('shouldRetryProviderError', () => {
     expect(shouldRetryProviderError(err)).toBe(false);
   });
 
+  it('does not retry windsurf repeated tool call after tool_result', () => {
+    const err: any = new Error('[windsurf] upstream repeated prior tool call after tool_result');
+    err.statusCode = 502;
+    err.code = 'WINDSURF_SERVICE_UNREACHABLE';
+    err.upstreamCode = 'WINDSURF_SERVICE_UNREACHABLE';
+    expect(shouldRetryProviderError(err)).toBe(false);
+  });
+
   it('does not retry client disconnect abort errors', () => {
     const err: any = Object.assign(new Error('CLIENT_REQUEST_ABORTED'), {
       name: 'AbortError',

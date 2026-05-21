@@ -14,6 +14,7 @@ export type FollowupFlowDecision = {
   flowOnlyLoopLimit: boolean;
   stickyProvider: boolean;
   clientInjectOnly: boolean;
+  clearStateOnFollowupFailure: boolean;
   seedLoopPayload: boolean;
   retryEmptyFollowupOnce: boolean;
   clientInjectSource?: string;
@@ -41,6 +42,7 @@ export function resolveFollowupFlowDecision(flowId: unknown): FollowupFlowDecisi
     flowOnlyLoopLimit: plan?.flowOnlyLoopLimit === true,
     stickyProvider: plan?.stickyProvider === true,
     clientInjectOnly: plan?.clientInjectOnly === true,
+    clearStateOnFollowupFailure: plan?.clearStateOnFollowupFailure === true,
     seedLoopPayload: plan?.seedLoopPayload === true,
     retryEmptyFollowupOnce: plan?.retryEmptyFollowupOnce === true,
     ...(plan?.clientInjectSource ? { clientInjectSource: plan.clientInjectSource } : {}),

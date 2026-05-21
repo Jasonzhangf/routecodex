@@ -34,4 +34,60 @@ describe('request-executor excluded provider reselection plan', () => {
       keepExcludedForNextAttempt: false
     });
   });
+
+  it('keeps excluded provider excluded when current routingDecision pool was narrowed but initial route pool still has alternatives', () => {
+    const resolved = __requestExecutorTestables.resolveRequestExecutorPipelineAttempt({
+      inputRequestId: 'req-ws-weekly-reroute',
+      providerRequestId: 'req-ws-weekly-reroute',
+      attempt: 2,
+      metadataForAttempt: {},
+      pipelineResult: {
+        routingDecision: {
+          routeName: 'thinking',
+          pool: ['windsurf.ws-pro-1.gpt-5.4-medium'],
+        },
+        providerPayload: { body: { model: 'gpt-5.4-medium' } },
+        target: {
+          providerKey: 'windsurf.ws-pro-1.gpt-5.4-medium',
+          runtimeKey: 'windsurf.ws-pro-1',
+          compatibilityProfile: 'chat:windsurf',
+        },
+        metadata: {},
+      } as any,
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'req-ws-weekly-reroute',
+      clientAbortSignal: undefined,
+      initialRoutePool: [
+        'windsurf.ws-pro-1.gpt-5.4-medium',
+        'windsurf.ws-pro-2.gpt-5.4-medium',
+        'windsurf.ws-pro-3.gpt-5.4-medium',
+      ],
+      excludedProviderKeys: new Set(['windsurf.ws-pro-1.gpt-5.4-medium']),
+      lastError: Object.assign(
+        new Error('Your weekly usage quota has been exhausted.'),
+        {
+          status: 429,
+          code: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+          upstreamCode: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+          retryable: false,
+          quotaScope: 'weekly',
+        }
+      ),
+      blockingRecoverableRouteHoldState: null,
+      throwIfClientAbortSignalAborted: () => undefined,
+      logStage: () => undefined,
+      extractRetryErrorSnapshot: __requestExecutorTestables.extractRetryErrorSnapshot,
+      hubStartedAtMs: Date.now() - 10,
+      pipelineLabel: 'hub'
+    });
+
+    expect(resolved).toEqual({
+      kind: 'retry_next_attempt',
+      initialRoutePool: [
+        'windsurf.ws-pro-1.gpt-5.4-medium',
+        'windsurf.ws-pro-2.gpt-5.4-medium',
+        'windsurf.ws-pro-3.gpt-5.4-medium',
+      ]
+    });
+  });
 });
