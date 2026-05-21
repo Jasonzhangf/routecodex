@@ -3,9 +3,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ProviderQuotaDaemonModule } from '../../../src/manager/modules/quota/index.js';
-import { createInitialQuotaState } from '../../../src/manager/quota/provider-quota-center.js';
-import { reportProviderErrorToRouterPolicy } from '../../../src/modules/llmswitch/bridge.js';
+let ProviderQuotaDaemonModule: typeof import('../../../src/manager/modules/quota/index.js').ProviderQuotaDaemonModule;
+let createInitialQuotaState: typeof import('../../../src/manager/quota/provider-quota-center.js').createInitialQuotaState;
 
 function setEnv(name: string, value: string | undefined): () => void {
   const original = process.env[name];
@@ -23,11 +22,20 @@ function setEnv(name: string, value: string | undefined): () => void {
   };
 }
 
+
+async function emitProviderError(mod: InstanceType<typeof ProviderQuotaDaemonModule>, event: any): Promise<void> {
+  await (mod as any).handleProviderErrorEvent(event);
+}
 describe('ProviderQuotaDaemonModule', () => {
   let tempQuotaDir: string | null = null;
   let restoreQuotaDir: (() => void) | null = null;
   let restorePersistDebounce: (() => void) | null = null;
   let restoreInterval: (() => void) | null = null;
+
+  beforeAll(async () => {
+    ({ ProviderQuotaDaemonModule } = await import('../../../src/manager/modules/quota/index.js'));
+    ({ createInitialQuotaState } = await import('../../../src/manager/quota/provider-quota-center.js'));
+  });
 
   beforeEach(async () => {
     tempQuotaDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-quota-daemon-test-'));
@@ -63,7 +71,7 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.init({ serverId: 'test' });
     await mod.start();
 
-    await reportProviderErrorToRouterPolicy({
+    await emitProviderError(mod, {
       code: 'HTTP_429',
       message: 'HTTP 429: {"error":{"message":"You have exhausted your capacity on this model. Your quota will reset after 1s."}}',
       stage: 'provider.provider.http',
@@ -105,7 +113,7 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.init({ serverId: 'test' });
     await mod.start();
 
-    await reportProviderErrorToRouterPolicy({
+    await emitProviderError(mod, {
       code: 'HTTP_500',
       message: 'Internal Server Error',
       stage: 'provider.send',
@@ -154,7 +162,7 @@ describe('ProviderQuotaDaemonModule', () => {
 
     for (let i = 0; i < 4; i += 1) {
       const ts = baseNow + i * 2_000;
-      await reportProviderErrorToRouterPolicy({
+      await emitProviderError(mod, {
         code: 'HTTP_502',
         message: 'Upstream SSE error event: Internal Network Failure',
         stage: 'provider.send',
@@ -205,7 +213,7 @@ describe('ProviderQuotaDaemonModule', () => {
 
     for (let i = 0; i < 3; i += 1) {
       const ts = baseNow + i * 1_000;
-      await reportProviderErrorToRouterPolicy({
+      await emitProviderError(mod, {
         code: 'HTTP_401',
         message: 'Invalid API key',
         stage: 'provider.send',
@@ -251,7 +259,7 @@ describe('ProviderQuotaDaemonModule', () => {
 
     for (let i = 0; i < 3; i += 1) {
       const ts = baseNow + i * 1_000;
-      await reportProviderErrorToRouterPolicy({
+      await emitProviderError(mod, {
         code: 'HTTP_401',
         message: 'Invalid API key',
         stage: 'provider.send',
@@ -348,7 +356,7 @@ describe('ProviderQuotaDaemonModule', () => {
     mod.registerProviderStaticConfig('antigravity.alias1.claude-sonnet-4-5-thinking', { authType: 'oauth' });
     await mod.start();
 
-    await reportProviderErrorToRouterPolicy({
+    await emitProviderError(mod, {
       code: 'HTTP_403',
       message: 'HTTP 403: Please authenticate with Google OAuth first',
       stage: 'provider.provider.http',
@@ -387,7 +395,7 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.init({ serverId: 'test' });
     await mod.start();
 
-    await reportProviderErrorToRouterPolicy({
+    await emitProviderError(mod, {
       code: 'HTTP_429',
       message: 'HTTP 429: {"error":{"message":"No capacity available for model claude-sonnet-4-5-thinking on the server"}}',
       stage: 'provider.provider.http',
@@ -419,7 +427,7 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking'].reason).toBe('cooldown');
     expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking'].cooldownUntil).toBe(now + 15_000);
 
-    await reportProviderErrorToRouterPolicy({
+    await emitProviderError(mod, {
       code: 'QUOTA_RECOVERY',
       message: 'Quota manager: provider quota refreshed',
       stage: 'quota',
@@ -468,7 +476,7 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(view1).not.toBeNull();
     expect(view1!('antigravity.alias1.claude-sonnet-4-5-thinking')?.inPool).toBe(true);
 
-    await reportProviderErrorToRouterPolicy({
+    await emitProviderError(mod, {
       code: 'QUOTA_RECOVERY',
       message: 'Quota manager: provider quota refreshed',
       stage: 'quota',
@@ -509,7 +517,7 @@ describe('ProviderQuotaDaemonModule', () => {
 
     const baseNow = Date.now();
     for (let i = 0; i < 3; i++) {
-      await reportProviderErrorToRouterPolicy({
+      await emitProviderError(mod, {
         code: 'HTTP_429',
         message: 'HTTP 429: rate limited',
         stage: 'provider.provider.http',
@@ -556,7 +564,7 @@ describe('ProviderQuotaDaemonModule', () => {
 
         const baseNow = Date.now();
       for (let i = 0; i < 4; i += 1) {
-        await reportProviderErrorToRouterPolicy({
+        await emitProviderError(mod, {
           code: 'HTTP_429',
           message: 'HTTP 429: MODEL_CAPACITY_EXHAUSTED',
           stage: 'provider.provider.http',
@@ -601,7 +609,7 @@ describe('ProviderQuotaDaemonModule', () => {
     const baseNow = Date.now();
     const eventCount = 7; // reaches the last step in the schedule
     for (let i = 0; i < eventCount; i++) {
-      await reportProviderErrorToRouterPolicy({
+      await emitProviderError(mod, {
         code: 'HTTP_429',
         message: 'HTTP 429: rate limited',
         stage: 'provider.provider.http',
@@ -634,7 +642,7 @@ describe('ProviderQuotaDaemonModule', () => {
 
     // Next 429 within the chain window stays at capped step.
     const afterCooldownNow = Date.now();
-    await reportProviderErrorToRouterPolicy({
+    await emitProviderError(mod, {
       code: 'HTTP_429',
       message: 'HTTP 429: rate limited',
       stage: 'provider.provider.http',
@@ -699,7 +707,7 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.init({ serverId: 'test' });
     await mod.start();
 
-    await reportProviderErrorToRouterPolicy({
+    await emitProviderError(mod, {
       code: 'HTTP_429',
       message: 'HTTP 429: {"error":{"message":"No capacity available for model gpt-5.1"}}',
       stage: 'provider.provider.http',
@@ -744,7 +752,7 @@ describe('ProviderQuotaDaemonModule', () => {
     mod.registerProviderStaticConfig('crs.key1.gpt-5.2', { authType: 'apikey' });
     await mod.start();
 
-    await reportProviderErrorToRouterPolicy({
+    await emitProviderError(mod, {
       code: 'HTTP_402',
       message:
         'HTTP 402: {"error":{"type":"insufficient_quota","message":"daily limit","code":"daily_cost_limit_exceeded"},"resetAt":"2026-02-02T16:00:00.000Z"}',
@@ -781,7 +789,7 @@ describe('ProviderQuotaDaemonModule', () => {
     mod.registerProviderStaticConfig('crs.key1.gpt-5.2', { authType: 'apikey', apikeyDailyResetTime: '12:00Z' });
     await mod.start();
 
-    await reportProviderErrorToRouterPolicy({
+    await emitProviderError(mod, {
       code: 'HTTP_402',
       message: 'HTTP 402: {"error":{"type":"insufficient_quota","message":"daily limit","code":"daily_cost_limit_exceeded"}}',
       stage: 'provider.provider.http',
@@ -805,5 +813,65 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(snapshot['crs.key1.gpt-5.2'].blacklistUntil).toBe(Date.parse('2026-02-02T12:00:00.000Z'));
 
     await mod.stop();
+  });
+
+  it('persists windsurf weekly blacklist across daemon restart', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-21T00:00:00.000Z'));
+    const now = Date.now();
+    const providerKey = 'windsurf.ws-pro-1.gpt-5.4-medium';
+
+    const mod1 = new ProviderQuotaDaemonModule();
+    await mod1.init({ serverId: 'test' });
+    mod1.registerProviderStaticConfig(providerKey, { authType: 'apikey' });
+    await mod1.start();
+
+    await emitProviderError(mod1, {
+      code: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+      message: 'Your weekly usage quota has been exhausted.',
+      stage: 'provider.send',
+      status: 429,
+      recoverable: false,
+      affectsHealth: true,
+      timestamp: now,
+      runtime: {
+        requestId: 'req_ws_weekly_restart',
+        providerKey,
+        providerId: 'windsurf'
+      },
+      details: {
+        errorClassification: 'unrecoverable',
+        routePoolSize: 3,
+        rateLimitKind: 'daily_limit',
+        cooldownOverrideMs: 24 * 60 * 60_000,
+        quotaScope: 'weekly',
+        quotaReason: 'windsurf_weekly_exhausted'
+      }
+    } as any);
+
+    await jest.advanceTimersByTimeAsync(10);
+
+    const snapshotBeforeStop = mod1.getAdminSnapshot();
+    expect(snapshotBeforeStop[providerKey]).toBeDefined();
+    expect(snapshotBeforeStop[providerKey].inPool).toBe(false);
+    expect(snapshotBeforeStop[providerKey].reason).toBe('blacklist');
+    expect(snapshotBeforeStop[providerKey].blacklistUntil).toBe(now + 24 * 60 * 60_000);
+
+    await mod1.stop();
+
+    const mod2 = new ProviderQuotaDaemonModule();
+    await mod2.init({ serverId: 'test' });
+    mod2.registerProviderStaticConfig(providerKey, { authType: 'apikey' });
+
+    const snapshotAfterRestart = mod2.getAdminSnapshot();
+    expect(snapshotAfterRestart[providerKey]).toBeDefined();
+    expect(snapshotAfterRestart[providerKey].inPool).toBe(false);
+    expect(snapshotAfterRestart[providerKey].reason).toBe('blacklist');
+    expect(snapshotAfterRestart[providerKey].blacklistUntil).toBe(now + 24 * 60 * 60_000);
+
+    const quotaView = mod2.getQuotaView();
+    expect(quotaView).not.toBeNull();
+    expect(quotaView!(providerKey)?.inPool).toBe(false);
+    expect(quotaView!(providerKey)?.reason).toBe('blacklist');
   });
 });
