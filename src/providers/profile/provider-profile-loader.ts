@@ -11,6 +11,7 @@ import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 
 type UnknownRecord = Record<string, unknown>;
 type DeepSeekMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['deepseek']>;
+type WindsurfMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['windsurf']>;
 type ConcurrencyMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['concurrency']>;
 type RpmMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['rpm']>;
 
@@ -21,8 +22,9 @@ export function buildProviderProfiles(config: UnknownRecord): ProviderProfileCol
     if (!isRecord(raw)) {
       continue;
     }
-    const moduleType = pickString(raw.type) ?? pickString(raw.module);
-    const protocol = resolveProtocol(id, raw, moduleType);
+    const protocolTypeHint = pickString(raw.type) ?? pickString(raw.providerType) ?? pickString(raw.protocol) ?? pickString(raw.module);
+    const moduleType = pickString(raw.providerModule ?? raw.provider_module) ?? pickString(raw.module) ?? pickString(raw.type);
+    const protocol = resolveProtocol(id, raw, protocolTypeHint);
     const transport = extractTransport(raw);
     const auth = extractAuth(raw);
     const compatibilityProfile = extractCompatProfile(id, raw);
@@ -287,10 +289,13 @@ function extractMetadata(raw: UnknownRecord, compatibilityProfile?: string): Pro
     raw.deepseek ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).deepseek : undefined),
     compatibilityProfile
   );
+  const windsurf = extractWindsurfMetadata(
+    raw.windsurf ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).windsurf : undefined)
+  );
   const concurrency = extractConcurrencyMetadata(raw.concurrency ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).concurrency : undefined));
   const rpm = extractRpmMetadata(raw.rpm ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).rpm : undefined));
 
-  if (!defaultModel && (!supportedModels || supportedModels.length === 0) && !deepseek && !concurrency && !rpm) {
+  if (!defaultModel && (!supportedModels || supportedModels.length === 0) && !deepseek && !windsurf && !concurrency && !rpm) {
     return undefined;
   }
 
@@ -304,6 +309,9 @@ function extractMetadata(raw: UnknownRecord, compatibilityProfile?: string): Pro
   if (deepseek) {
     metadata.deepseek = deepseek;
   }
+  if (windsurf) {
+    metadata.windsurf = windsurf;
+  }
   if (concurrency) {
     metadata.concurrency = concurrency;
   }
@@ -311,6 +319,46 @@ function extractMetadata(raw: UnknownRecord, compatibilityProfile?: string): Pro
     metadata.rpm = rpm;
   }
   return Object.keys(metadata).length ? metadata : undefined;
+}
+
+function extractWindsurfMetadata(raw: unknown): WindsurfMetadata | undefined {
+  if (!isRecord(raw)) {
+    return undefined;
+  }
+  const node = raw as UnknownRecord;
+  const toBool = (value: unknown): boolean | undefined => {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+      if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+    }
+    return undefined;
+  };
+  const toReasoning = (value: unknown): WindsurfMetadata['defaultReasoningEffort'] | undefined => {
+    if (typeof value !== 'string') return undefined;
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'xhigh' || normalized === 'high' || normalized === 'medium' || normalized === 'low') {
+      return normalized as WindsurfMetadata['defaultReasoningEffort'];
+    }
+    return undefined;
+  };
+  const normalized = {
+    enableThinking: toBool(node.enableThinking ?? node.enable_thinking),
+    defaultReasoningEffort: toReasoning(node.defaultReasoningEffort ?? node.default_reasoning_effort),
+    sanitizePaths: toBool(node.sanitizePaths ?? node.sanitize_paths),
+    preserveUpstreamIdentity: toBool(node.preserveUpstreamIdentity ?? node.preserve_upstream_identity),
+    toolEmulationStrict: toBool(node.toolEmulationStrict ?? node.tool_emulation_strict),
+    pollIntervalMs: pickPositiveInt(node.pollIntervalMs ?? node.poll_interval_ms),
+    pollMaxWaitMs: pickPositiveInt(node.pollMaxWaitMs ?? node.poll_max_wait_ms),
+    lsPort: pickPositiveInt(node.lsPort ?? node.ls_port ?? node.languageServerPort ?? node.language_server_port),
+    csrfToken: pickString(node.csrfToken ?? node.csrf_token),
+    sessionId: pickString(node.sessionId ?? node.session_id),
+    workspacePath: pickString(node.workspacePath ?? node.workspace_path),
+    workspaceUri: pickString(node.workspaceUri ?? node.workspace_uri),
+  } as Record<string, unknown>;
+  const pruned = Object.fromEntries(Object.entries(normalized).filter(([, value]) => value !== undefined));
+  return Object.keys(pruned).length ? (pruned as WindsurfMetadata) : undefined;
 }
 
 function extractDeepSeekMetadata(raw: unknown, compatibilityProfile?: string): DeepSeekMetadata | undefined {

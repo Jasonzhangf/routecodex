@@ -7,7 +7,6 @@ import {
 } from './tool-governor-guards.js';
 import {
   applyRespProcessToolGovernanceWithNative,
-  normalizeApplyPatchArgumentsWithNative,
   prepareRespProcessToolGovernancePayloadWithNative
 } from '../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
 import {
@@ -16,40 +15,6 @@ import {
 } from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
 import { isObject } from '../../shared/common-utils.js';
 import { logToolGovernorNonBlocking, type Unknown } from './tool-governor-shared.js';
-
-export function normalizeApplyPatchToolCallsOnResponse(chat: Unknown): Unknown {
-  try {
-    const out = JSON.parse(JSON.stringify(chat)) as Unknown;
-    const validationOptions = resolveExecCommandGuardValidationOptions(out);
-    const choices = Array.isArray((out as any)?.choices) ? ((out as any).choices as any[]) : [];
-    for (const choice of choices) {
-      const message = choice && choice.message ? choice.message : undefined;
-      const toolCalls = Array.isArray(message?.tool_calls) ? (message.tool_calls as any[]) : [];
-      if (!toolCalls.length) continue;
-      for (const toolCall of toolCalls) {
-        try {
-          const fn = toolCall && toolCall.function ? toolCall.function : undefined;
-          repairCommandNameAsExecToolCall(fn as Record<string, unknown> | undefined, validationOptions);
-          const name = typeof fn?.name === 'string' ? String(fn.name).trim().toLowerCase() : '';
-          if (name !== 'apply_patch') continue;
-          const rawArgs = (fn as any)?.arguments;
-          const normalized = normalizeApplyPatchArgumentsWithNative(rawArgs);
-          (fn as any).arguments = normalized.normalizedArguments;
-        } catch (error) {
-          logToolGovernorNonBlocking('response_tool_call_normalize_item', error);
-        }
-      }
-    }
-    return out;
-  } catch (error) {
-    logToolGovernorNonBlocking('normalize_apply_patch_tool_calls_on_response', error);
-    return chat;
-  }
-}
-
-export function normalizeResponseToolCalls(chat: Unknown): Unknown {
-  return normalizeApplyPatchToolCallsOnResponse(chat);
-}
 
 export function processChatResponseTools(resp: Unknown): Unknown {
   if (!isObject(resp)) return resp;

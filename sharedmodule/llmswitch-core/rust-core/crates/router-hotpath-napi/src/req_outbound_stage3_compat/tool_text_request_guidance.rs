@@ -204,8 +204,6 @@ fn build_default_instruction(
     let marker = read_trimmed_string(config.and_then(|row| row.get("marker")))
         .unwrap_or_else(|| DEFAULT_MARKER.to_string());
     let has_exec_command = tool_names.iter().any(|name| name == "exec_command");
-    let has_apply_patch = tool_names.iter().any(|name| name == "apply_patch");
-
     let mut lines = vec![format!("{}:", marker)];
     let mut step = 1usize;
     let mut push_line = |text: String| {
@@ -217,25 +215,9 @@ fn build_default_instruction(
         "This is a text-tool runtime. When a tool is needed, emit the tool-call container directly instead of explaining a plan first."
             .to_string(),
     );
-    if has_exec_command && has_apply_patch {
-        push_line(
-            "FORBIDDEN FIRST: never send `apply_patch` through `exec_command`, shell, `bash -lc`, command substitution, or heredoc wrappers like `apply_patch <<PATCH`; any file edit must be a direct `apply_patch` tool call."
-                .to_string(),
-        );
-    }
-    if has_exec_command && has_apply_patch {
-        push_line(
-            "If calling tools, output exactly one heredoc container: <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}\\nRCC_TOOL_CALLS_JSON or <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"apply_patch\",\"input\":{\"patch\":\"*** Begin Patch\\n*** Add File: path/to/file\\n+content\\n*** End Patch\"}}]}\\nRCC_TOOL_CALLS_JSON"
-                .to_string(),
-        );
-    } else if has_exec_command {
+    if has_exec_command {
         push_line(
             "If calling tools, output exactly one heredoc container: <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}\\nRCC_TOOL_CALLS_JSON"
-                .to_string(),
-        );
-    } else if has_apply_patch {
-        push_line(
-            "If calling tools, output exactly one heredoc container: <<RCC_TOOL_CALLS_JSON\\n{\"tool_calls\":[{\"name\":\"apply_patch\",\"input\":{\"patch\":\"*** Begin Patch\\n*** Add File: path/to/file\\n+content\\n*** End Patch\"}}]}\\nRCC_TOOL_CALLS_JSON"
                 .to_string(),
         );
     } else {
@@ -274,27 +256,6 @@ fn build_default_instruction(
             "If `cmd` starts with `bash -lc '`, the closing single quote at the very end is mandatory; `bash-lc` or a missing final `'` is invalid."
                 .to_string(),
         );
-    }
-
-    if has_apply_patch {
-        push_line(
-            "For `apply_patch`, file edits must be a DIRECT tool call. Author exactly one canonical patch body in `patch`."
-                .to_string(),
-        );
-        push_line(
-            "For `apply_patch`, use the canonical internal patch grammar only."
-                .to_string(),
-        );
-        push_line(
-            "If an `apply_patch` attempt failed, read the file first, then rebuild the patch from the latest content before retrying."
-                .to_string(),
-        );
-        if has_recent_apply_patch_failure_without_read(root) {
-            push_line(
-                "MANDATORY NEXT ACTION: a recent `apply_patch` failed and no file-read step was observed afterwards. Before any new `apply_patch`, first use `exec_command` to read the exact latest file content for the target path (for example `nl -ba <file>`)."
-                    .to_string(),
-            );
-        }
     }
 
     if include_tool_names && !tool_names.is_empty() {
@@ -558,8 +519,7 @@ mod tests {
     fn guidance_warns_against_tool_registry_refusal_and_uses_exec_command_canonical_shape() {
         let mut payload = json!({
             "tools": [
-                { "type": "function", "function": { "name": "exec_command" } },
-                { "type": "function", "function": { "name": "apply_patch" } }
+                { "type": "function", "function": { "name": "exec_command" } }
             ],
             "messages": [{ "role": "user", "content": "check files" }]
         });
@@ -569,56 +529,9 @@ mod tests {
         let content = payload["messages"][0]["content"].as_str().unwrap_or("");
         assert!(content.contains("Any tool name not explicitly declared for this turn is invalid."));
         assert!(content.contains("read_file"));
-        assert!(content.contains("Allowed tool names this turn: exec_command, apply_patch"));
+        assert!(content.contains("Allowed tool names this turn: exec_command"));
         assert!(content.contains("use tool name `exec_command`"));
         assert!(content.contains("Do NOT emit `command`, `cwd`, or `workdir`"));
-        assert!(content.contains("Author exactly one canonical patch body in `patch`"));
-        assert!(content.contains("*** Begin Patch"));
-        assert!(content.contains("*** End Patch"));
-    }
-
-    #[test]
-    fn guidance_adds_apply_patch_example() {
-        let mut payload = json!({
-            "tools": [
-                { "type": "function", "function": { "name": "apply_patch" } }
-            ],
-            "messages": [{ "role": "user", "content": "edit file" }]
-        });
-
-        apply_tool_text_request_guidance(&mut payload, None);
-
-        let content = payload["messages"][0]["content"].as_str().unwrap_or("");
-        assert!(content.contains("Author exactly one canonical patch body in `patch`"));
-        assert!(content.contains("*** Begin Patch"));
-        assert!(content.contains("*** End Patch"));
-        assert!(content.contains("*** Add File:"));
-        assert!(content.contains("apply_patch"));
-        assert!(!content.contains("exec_command"), "should not mention exec_command when not declared");
-    }
-
-    #[test]
-    fn guidance_requires_file_read_before_retry_after_recent_apply_patch_failure() {
-        let mut payload = json!({
-            "tools": [
-                { "type": "function", "function": { "name": "exec_command" } },
-                { "type": "function", "function": { "name": "apply_patch" } }
-            ],
-            "messages": [
-                {
-                    "role": "tool",
-                    "name": "apply_patch",
-                    "content": "apply_patch verification failed: Failed to find context '-15,2 +15,2 @@' in AGENTS.md"
-                }
-            ]
-        });
-
-        apply_tool_text_request_guidance(&mut payload, None);
-
-        let content = payload["messages"][0]["content"].as_str().unwrap_or("");
-        assert!(content.contains("MANDATORY NEXT ACTION"));
-        assert!(content.contains("first use `exec_command` to read the exact latest file content"));
-        assert!(content.contains("nl -ba <file>"));
     }
 
     #[test]

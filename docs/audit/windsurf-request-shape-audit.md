@@ -9,9 +9,9 @@
 
 ## 1. 请求链路架构对比
 
-### RouteCodex 当前链路
+### RouteCodex 当前链路（已证实为错误链路）
 ```
-preprocessRequest → buildGetChatCompletionsRequest → HTTP POST GetChatCompletions
+preprocessRequest → semanticConversation / tools_preamble 观察面（旧 GetChatCompletions 主链已删除，不再作为发送契约）
                    → parseGetChatMessageResponse → buildCascadeCompletionFromOutput
 ```
 
@@ -26,11 +26,25 @@ preprocessRequest → buildGetChatCompletionsRequest → HTTP POST GetChatComple
       → SendUserCascadeMessageRequest (protobuf over HTTP/2)
 ```
 
-**关键差异**: WindsurfAPI 使用 `SendUserCascadeMessageRequest` (protobuf/HTTP2)，RouteCodex 使用 `GetChatCompletions` (JSON)。两者语义等价但协议层不同，audit 聚焦语义 shape。
+**关键差异（已黑盒证实为根因级差异）**:
+- WindsurfAPI 真链：`StartCascade -> SendUserCascadeMessageRequest`（protobuf / HTTP2 / poll）
+- RouteCodex 旧链：`GetChatCompletions`（JSON）
+
+这不是“协议层不同但语义等价”的小差异，而是**请求路径族不同**。
+2026-05-22 已用同一份带 tools/history 的输入做最黑盒对比，结果显示：
+- RouteCodex 最终出站为 `metadata/chatMessagePrompts/systemPrompt/completionsRequest`
+- WindsurfAPI 最终出站为 `normalizeMessagesForCascade -> text history replay + toolPreamble -> SendUserCascadeMessageRequest`
+
+因此当前 live 问题优先判定为：**路径问题 > 形状问题**。
+后续实现必须物理移除 `GetChatCompletions` 错误主链，只保留 `StartCascade -> SendUserCascadeMessage -> poll` 真链。
 
 ---
 
-## 2. 请求体 shape 审计
+## 2. 请求体 shape 审计（仅保留为旧错误链路取证）
+
+> 本节以下内容只用于说明旧 `GetChatCompletions` 链路内部曾有哪些字段差异，
+> **不再表示该链路可继续修补使用**。
+> 2026-05-22 最黑盒结论已经确认：即使 model/modelUid 来源对齐 `WindsurfAPI/src/models.js`，只要仍发 `GetChatCompletions`，问题仍首先属于**路径族错误**。
 
 ### 2.1 metadata 字段（已对齐）
 
@@ -48,7 +62,7 @@ preprocessRequest → buildGetChatCompletionsRequest → HTTP POST GetChatComple
 | `maxTokens` | ✅ `4096` | ❌ 应为 `32768` | **gap** | 见 2.2.1 |
 | `temperature` | ✅ `0` | ✅ `0` | 已对齐 | |
 
-#### 2.2.1 maxTokens 缺口（高优先级）
+#### 2.2.1 maxTokens 缺口（旧错误链路内部差异）
 
 **真源** (`windsurf.js:567`):
 ```javascript
@@ -66,11 +80,11 @@ configuration: {
 },
 ```
 
-**影响**: 上游 Cascade 在 maxTokens=4096 时会过早截断输出，导致长响应不完整。
+**影响**: 若仍错误地沿用旧 JSON 链，会导致长响应更易截断；但这已不是当前最高优先级，优先级低于“移除整条错误路径”。
 
 ---
 
-### 2.3 systemPrompt vs toolPreamble 字段名
+### 2.3 systemPrompt vs toolPreamble 字段名（旧错误链路观察）
 
 | 场景 | RouteCodex | WindsurfAPI | 状态 |
 |------|-----------|------------|------|
@@ -193,6 +207,17 @@ return {
 ---
 
 ## 7. 审计结论汇总
+
+### 7.0 根因级结论（2026-05-22 更新）
+1. **WindsurfAPI 真源主发送链不是 `GetChatCompletions`。**
+2. **RouteCodex 当前 `GetChatCompletions` 主链属于错误链路，必须物理删除。**
+3. **后续唯一正确实现方向**：
+   - `preprocess/chat-normalize`
+   - `StartCascade`
+   - `SendUserCascadeMessage`
+   - `GetCascadeTrajectorySteps / poll`
+4. 因而本报告中剩余的 `maxTokens / preamble tier / error code` 等 gap，全部降级为：
+   - **仅当正确 cascade 主链接回后** 才有继续对齐意义。
 
 ### 7.1 已对齐项（✅）
 1. metadata 字段完整性

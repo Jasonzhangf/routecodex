@@ -37,9 +37,12 @@ describe('provider snapshot 429 suppression', () => {
   it('purges existing provider snapshot artifacts when a 429 provider stage arrives', async () => {
     const previousSnapshotFlag = runtimeFlags.snapshotsEnabled;
     const previousSnapshotDir = process.env.ROUTECODEX_SNAPSHOT_DIR;
+    const previousErrorsamplesDir = process.env.ROUTECODEX_ERRORSAMPLES_DIR;
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-snapshot-429-purge-'));
+    const errorsampleDir = path.join(tempDir, 'errorsamples');
 
     process.env.ROUTECODEX_SNAPSHOT_DIR = tempDir;
+    process.env.ROUTECODEX_ERRORSAMPLES_DIR = errorsampleDir;
     setRuntimeFlag('snapshotsEnabled', true);
     __resetProviderSnapshotErrorBufferForTests();
 
@@ -71,8 +74,8 @@ describe('provider snapshot 429 suppression', () => {
         }
       });
 
-      const after = await listFilesRecursively(tempDir);
-      expect(after).toHaveLength(0);
+      const providerFiles = await listFilesRecursively(tempDir);
+      expect(providerFiles.filter((file) => !file.includes('/errorsamples/'))).toHaveLength(0);
     } finally {
       __resetProviderSnapshotErrorBufferForTests();
       setRuntimeFlag('snapshotsEnabled', previousSnapshotFlag);
@@ -80,6 +83,11 @@ describe('provider snapshot 429 suppression', () => {
         delete process.env.ROUTECODEX_SNAPSHOT_DIR;
       } else {
         process.env.ROUTECODEX_SNAPSHOT_DIR = previousSnapshotDir;
+      }
+      if (previousErrorsamplesDir === undefined) {
+        delete process.env.ROUTECODEX_ERRORSAMPLES_DIR;
+      } else {
+        process.env.ROUTECODEX_ERRORSAMPLES_DIR = previousErrorsamplesDir;
       }
       await fs.rm(tempDir, { recursive: true, force: true });
     }

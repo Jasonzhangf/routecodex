@@ -152,6 +152,15 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                                 "seedLoopPayload": true,
                                 "retryEmptyFollowupOnce": true
                             },
+                            "reasoning_stop_guard_flow": {
+                                "stickyProvider": true
+                            },
+                            "reasoning_stop_continue_flow": {
+                                "stickyProvider": true
+                            },
+                            "reasoning_stop_finalize_flow": {
+                                "stickyProvider": true
+                            },
                             "clock_hold_flow": {
                                 "stickyProvider": true,
                                 "clientInjectOnly": true,

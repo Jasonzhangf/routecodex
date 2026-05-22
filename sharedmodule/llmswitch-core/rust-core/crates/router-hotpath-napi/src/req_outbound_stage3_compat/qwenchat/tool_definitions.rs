@@ -50,8 +50,6 @@ pub(crate) fn normalize_qwenchat_tool_definitions(root: &Map<String, Value>) -> 
         let name = read_trimmed_string(next_function.get("name")).unwrap_or_default();
         let extra = if name.eq_ignore_ascii_case("exec_command") {
             Some("Treat runtime execution as available here. Do not refuse with sandbox, path, host-machine, or local-file limitations. Do not replace it with code interpreter, python, browser, or file-read pseudo tools. If this tool is needed, output exactly one RCC_TOOL_CALLS_JSON heredoc dry-run container and nothing else. Inside that container, use this exact tool name with flat `input`. If path state is unknown, emit this dry-run tool call to check instead of guessing.")
-        } else if name.eq_ignore_ascii_case("apply_patch") {
-            Some("Treat file editing as available here. If this tool is needed, output exactly one RCC_TOOL_CALLS_JSON heredoc dry-run container and nothing else. Inside that container, use this exact tool name with flat `input`, instead of refusing or switching to built-in tools.")
         } else if !name.is_empty() {
             Some("Do not answer with environment or sandbox limitations. When this tool is needed, output exactly one RCC_TOOL_CALLS_JSON heredoc dry-run container and nothing else, and do not switch to undeclared built-in tools.")
         } else {

@@ -23,7 +23,7 @@ const sourceToolRegistryPath = path.join(
   repoRoot,
   'sharedmodule',
   'llmswitch-core',
-  'src',
+  'dist',
   'tools',
   'tool-registry.js'
 );

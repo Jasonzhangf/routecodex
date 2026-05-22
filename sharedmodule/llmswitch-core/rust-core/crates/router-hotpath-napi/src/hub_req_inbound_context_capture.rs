@@ -1,7 +1,5 @@
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
-use crate::shared_tool_mapping::{
-    enforce_builtin_tool_schema, rewrite_builtin_tool_description,
-};
+use crate::shared_tool_mapping::enforce_builtin_tool_schema;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
@@ -135,6 +133,10 @@ fn read_bool(value: Option<&Value>) -> Option<bool> {
 }
 
 fn normalize_tool_parameters(name: &str, value: Option<&Value>) -> Option<Value> {
+    let normalized = name.trim().to_ascii_lowercase();
+    if normalized == "apply_patch" {
+        return value.cloned();
+    }
     enforce_builtin_tool_schema(name, value)
 }
 
@@ -383,8 +385,7 @@ pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
                                 "name".to_string(),
                                 Value::String(child_name.clone()),
                             );
-                            if let Some(description) = rewrite_builtin_tool_description(
-                                child_name.as_str(),
+                            if let Some(description) = read_trimmed_string(
                                 child_function
                                     .and_then(|v| v.get("description"))
                                     .or_else(|| child_row.get("description")),
@@ -458,8 +459,7 @@ pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
 
         let mut function_out = Map::new();
         function_out.insert("name".to_string(), Value::String(name_value.clone()));
-        if let Some(description) = rewrite_builtin_tool_description(
-            name_value.as_str(),
+        if let Some(description) = read_trimmed_string(
             function_row
                 .and_then(|v| v.get("description"))
                 .or_else(|| tool_row.get("description")),
@@ -1341,7 +1341,7 @@ mod tests {
     }
 
     #[test]
-    fn map_bridge_tools_to_chat_enforces_apply_patch_schema_contract() {
+    fn map_bridge_tools_to_chat_does_not_own_apply_patch_schema_contract() {
         let raw_tools = vec![json!({
           "description": "Use the `apply_patch` tool to edit files.",
           "name": "apply_patch",
@@ -1355,12 +1355,12 @@ mod tests {
             .get("description")
             .and_then(Value::as_str)
             .unwrap_or("");
-        assert!(description.contains("schema arguments"));
-        assert!(description.contains("*** Begin Patch"));
-        assert!(!description.to_ascii_lowercase().contains("freeform"));
+        assert_eq!(description, "Use the `apply_patch` tool to edit files.");
         let parameters = function.get("parameters").and_then(Value::as_object).unwrap();
         let properties = parameters.get("properties").and_then(Value::as_object).unwrap();
-        assert!(properties.contains_key("patch"));
-        assert!(properties.contains_key("input"));
+        assert!(!properties.contains_key("patch"));
+        assert!(!properties.contains_key("input"));
+        assert!(!properties.contains_key("filePath"));
+        assert!(!properties.contains_key("file_path"));
     }
 }

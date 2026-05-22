@@ -46,6 +46,10 @@ fn parse_header(line: &str, src_line: u32) -> Result<HashlineOp, HashlineError> 
             })?;
             Some(parse_u32(raw, src_line, "anchor_bigram")?)
         }
+        OpKind::Insert => {
+            let _legacy_ignored_anchor = parts.next();
+            None
+        }
         _ => None,
     };
 
@@ -156,4 +160,20 @@ pub fn parse_hashline_ops(patch_body: &str) -> Result<Vec<HashlineOp>, HashlineE
     }
 
     Ok(ops)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_hashline_ops;
+    use crate::hashline::OpKind;
+
+    #[test]
+    fn insert_op_accepts_legacy_anchor_token_without_changing_semantics() {
+        let ops = parse_hashline_ops("+ 2 deadbeef\nhello").expect("parse ok");
+        assert_eq!(ops.len(), 1);
+        assert!(matches!(ops[0].op, OpKind::Insert));
+        assert_eq!(ops[0].line_num, Some(2));
+        assert_eq!(ops[0].anchor_bigram, None);
+        assert_eq!(ops[0].payload, vec!["hello".to_string()]);
+    }
 }

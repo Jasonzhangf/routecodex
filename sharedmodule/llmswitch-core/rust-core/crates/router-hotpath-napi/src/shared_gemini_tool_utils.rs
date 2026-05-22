@@ -477,50 +477,12 @@ fn apply_fixups(name: &str, parameters: &Value, mode: &str) -> Value {
         return Value::Object(params);
     }
 
-    if lowered == "apply_patch" {
-        if !props.contains_key("patch") {
-            props.insert(
-                "patch".to_string(),
-                serde_json::json!({
-                    "type": "string",
-                    "description": "Raw patch text only. Author exactly one canonical patch body in `patch`."
-                }),
-            );
-        }
-        if !props.contains_key("input") {
-            props.insert(
-                "input".to_string(),
-                serde_json::json!({ "type": "string", "description": "Compatibility alias of patch. Prefer patch." }),
-            );
-        }
-        if !props.contains_key("instructions") {
-            props.insert(
-                "instructions".to_string(),
-                serde_json::json!({ "type": "string", "description": "Compatibility alias of patch. Prefer patch." }),
-            );
-        }
-        if !props.contains_key("text") {
-            props.insert(
-                "text".to_string(),
-                serde_json::json!({ "type": "string", "description": "Compatibility alias of patch. Prefer patch." }),
-            );
-        }
-        params.insert("properties".to_string(), Value::Object(props));
-        params.remove("required");
-        return Value::Object(params);
-    }
-
     Value::Object(params)
 }
 
 fn rewrite_description(name: &str, description: Option<&str>, mode: &str) -> Option<String> {
     let _ = mode;
     let lowered = name.trim().to_ascii_lowercase();
-    if lowered == "apply_patch" {
-        return Some(
-            "Edit files by providing exactly one canonical patch body in `patch` (string). `input`/`instructions`/`text` are compatibility aliases only.".to_string(),
-        );
-    }
     if lowered == "exec_command" {
         return Some(
             "Run a shell command. Provide `cmd` (string) (alias: `command`) and optional `workdir` (string)."

@@ -1,7 +1,7 @@
 /**
  * WindsurfProvider Contract
  *
- * WindsurfAPI Provider V2 专有配置与常量定义。
+ * 仅保留当前 provider 的最小运行时配置；唯一真相是 chat -> provider -> cascade。
  */
 
 import type { UnknownObject } from '../../../types/common-types.js';
@@ -13,7 +13,6 @@ export enum WindsurfErrorCode {
   ACCOUNT_QUOTA_EXHAUSTED = 'WINDSURF_ACCOUNT_QUOTA_EXHAUSTED',
   ALL_ACCOUNTS_UNAVAILABLE = 'WINDSURF_ALL_ACCOUNTS_UNAVAILABLE',
   CASCADE_SESSION_NOT_FOUND = 'WINDSURF_CASCADE_SESSION_NOT_FOUND',
-  LANGUAGE_SERVER_UNAVAILABLE = 'WINDSURF_LANGUAGE_SERVER_UNAVAILABLE',
   MODEL_UNSUPPORTED = 'WINDSURF_MODEL_UNSUPPORTED',
   TOOL_REQUIRED_BUT_MISSING = 'WINDSURF_TOOL_REQUIRED_BUT_MISSING',
   SERVICE_UNREACHABLE = 'WINDSURF_SERVICE_UNREACHABLE',
@@ -31,32 +30,23 @@ export interface WindsurfAccountEntry {
   tokenFile?: string;
 }
 
-export type WindsurfTransportBackend = 'cascade-cloud';
-
 export interface WindsurfProviderRuntimeOptions {
   enableThinking?: boolean;
   defaultReasoningEffort?: 'xhigh' | 'high' | 'medium' | 'low';
   sanitizePaths?: boolean;
   preserveUpstreamIdentity?: boolean;
   toolEmulationStrict?: boolean;
-  healthCheckEndpoint?: string;
-  healthCheckTimeoutMs?: number;
-  /** Transport mode. Only cloud cascade mainline is allowed. */
-  transportBackend?: WindsurfTransportBackend;
-  /** Primary cloud endpoint. */
-  apiBaseUrl?: string;
-  /** Secondary cloud endpoint. */
-  apiBaseUrlFallback?: string;
-  /** Poll interval for cloud progress fetch (ms) */
   pollIntervalMs?: number;
-  /** Poll max wait (ms) */
   pollMaxWaitMs?: number;
+  lsPort?: number;
+  csrfToken?: string;
+  sessionId?: string;
+  workspacePath?: string;
+  workspaceUri?: string;
 }
 
 function readNonEmptyString(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
+  if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
 }
@@ -69,23 +59,22 @@ export function normalizeWindsurfProviderRuntimeOptions(
   return {
     enableThinking: typeof raw.enableThinking === 'boolean' ? raw.enableThinking : undefined,
     defaultReasoningEffort:
-      typeof raw.defaultReasoningEffort === 'string' && ['xhigh','high','medium','low'].includes(raw.defaultReasoningEffort)
+      typeof raw.defaultReasoningEffort === 'string' && ['xhigh', 'high', 'medium', 'low'].includes(raw.defaultReasoningEffort)
         ? raw.defaultReasoningEffort as WindsurfProviderRuntimeOptions['defaultReasoningEffort']
         : undefined,
     sanitizePaths: typeof raw.sanitizePaths === 'boolean' ? raw.sanitizePaths : undefined,
     preserveUpstreamIdentity: typeof raw.preserveUpstreamIdentity === 'boolean' ? raw.preserveUpstreamIdentity : undefined,
     toolEmulationStrict: typeof raw.toolEmulationStrict === 'boolean' ? raw.toolEmulationStrict : undefined,
-    healthCheckEndpoint: readNonEmptyString(raw.healthCheckEndpoint),
-    healthCheckTimeoutMs: typeof raw.healthCheckTimeoutMs === 'number' && raw.healthCheckTimeoutMs > 0 ? raw.healthCheckTimeoutMs : undefined,
-    transportBackend: raw.transportBackend === 'cascade-cloud' ? raw.transportBackend : undefined,
-    apiBaseUrl: readNonEmptyString(raw.apiBaseUrl),
-    apiBaseUrlFallback: readNonEmptyString(raw.apiBaseUrlFallback),
     pollIntervalMs: typeof raw.pollIntervalMs === 'number' && raw.pollIntervalMs > 0 ? Math.floor(raw.pollIntervalMs) : undefined,
     pollMaxWaitMs: typeof raw.pollMaxWaitMs === 'number' && raw.pollMaxWaitMs > 0 ? Math.floor(raw.pollMaxWaitMs) : undefined,
+    lsPort: typeof raw.lsPort === 'number' && raw.lsPort > 0 ? Math.floor(raw.lsPort) : undefined,
+    csrfToken: readNonEmptyString(raw.csrfToken),
+    sessionId: readNonEmptyString(raw.sessionId),
+    workspacePath: readNonEmptyString(raw.workspacePath),
+    workspaceUri: readNonEmptyString(raw.workspaceUri),
   };
 }
 
-/** 运行时身份判定：给定字段组合是否命中 Windsurf 家族 */
 export function isWindsurfRuntimeIdentity(opts: {
   providerFamily?: string;
   providerId?: string;

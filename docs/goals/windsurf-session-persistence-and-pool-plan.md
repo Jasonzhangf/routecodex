@@ -9,7 +9,7 @@
 1. 进程重启后，若 `sessionToken` 仍有效，provider 不再重新走账号密码登录链，而是直接复用持久化 session。
 2. 当某账号出现 `weekly quota exhausted` / `daily quota exhausted` 时，系统将该账号标记为 cooldown，并在 cooldown 期内不再选中；cooldown 至少按 24h 粒度检查恢复。
 3. 当某账号出现 auth 失效（401、invalid email/password、invalid session token 等）时，系统将其标记为 auth-invalid，并触发单账号 refresh/login；refresh 失败时短时退避。
-4. 当某账号只出现 runtime 故障（如 empty completion、ECONNRESET、pending stream canceled、language server unavailable）时，只重置 runtime/live workspace，不清空持久化 auth。
+4. 当某账号只出现 runtime 故障（如 empty completion、ECONNRESET、pending stream canceled、上游连接取消）时，只重置 runtime/live state，不清空持久化 auth。
 5. 同一 runtimeKey 下多个 Windsurf 账号能够形成候选池，支持轮转、sticky、cooldown、失效跳过。
 6. 错误归一后，quota 类错误必须进入统一错误处理，不得直接把“原始 provider 失败”立刻回给客户端导致池切换失效。
 7. 必须有红测锁定：
@@ -51,14 +51,16 @@
 1. 参考实现：`windsurfapi`
    - 登录链：`CheckUserLoginMethod -> password/login -> WindsurfPostAuth -> sessionToken`
    - `sessionToken` 可作为长期认证凭据持久化复用
-   - `sessionId/workspace/cascade/http2` 不是长期持久化真源
+  - `sessionToken` 才是长期持久化真源；临时会话态不得当成 provider 真源
 2. RouteCodex 当前现状：
    - `src/providers/core/runtime/windsurf-chat-provider.ts`
    - 只有进程内：`windsurfSessionCredential` / `windsurfSessionCredentialPromise`
    - 重启后必然重新登录
 3. 已验证现象：
-   - Windsurf 工具调用主链已 live 打通，不应再回头改该主链
-   - 当前主目标已切到 session persistence + pool design
+   - 鉴权真相已收敛到：`token 优先 -> token 失败再账号密码登录 -> 成功后持久化 devin-session-token$...`
+  - tool / history / continuity 的参考锚点来自 `WindsurfAPI` 的 cascade 语义转换层
+   - 该计划只允许建立在 `chat -> provider -> cascade` 单一路径上
+   - 禁止把账号池/持久化设计接成第二套实现
 
 ## 5. 总体方案
 
@@ -137,10 +139,9 @@ provider 仅接入上述三层，不再自己成为状态真源。
 {
   runtimeKey: string,
   accountKey: string,
-  sessionId?: string,
-  workspacePort?: number,
-  workspaceGeneration: number,
-  workspaceReady: boolean,
+  cascadeSessionKey?: string,
+  runtimeGeneration: number,
+  runtimeReady: boolean,
   refreshPromise?: Promise<...>,
   runtimeResetPromise?: Promise<void>
 }
@@ -188,11 +189,11 @@ provider 仅接入上述三层，不再自己成为状态真源。
 - empty completion
 - ECONNRESET
 - pending stream canceled
-- language server unavailable
-- grpc/http2 transport canceled
+- cascade transport unavailable
+- upstream transport canceled
 
 动作：
-- 仅重置 live runtime：workspace/session/cascade/live connection
+- 仅重置 live runtime：当前请求相关的 cascade/runtime 临时态
 - 不删持久化 `sessionToken`
 - 短 backoff（30s~2min）后允许再试
 
@@ -264,7 +265,7 @@ provider 仅接入上述三层，不再自己成为状态真源。
 ### 7.3 runtime 类
 - `windsurf cascade returned empty completion`
 - `The pending stream has been canceled`
-- `LANGUAGE_SERVER_UNAVAILABLE`
+- `WINDSURF_SERVICE_UNREACHABLE`
 - `ECONNRESET`
 - transport canceled
 

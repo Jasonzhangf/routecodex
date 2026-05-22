@@ -3,6 +3,7 @@ use crate::hub_bridge_actions::utils::create_harvested_tool_call_id;
 use crate::hub_text_markup_normalizer::{
     extract_explicit_top_level_tool_calls_as_values, TextMarkupNormalizeOptions,
 };
+use crate::resp_process_stage1_tool_governance::normalize_apply_patch_schema_args;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use regex::Regex;
@@ -1612,13 +1613,31 @@ fn normalize_reasoning_harvested_arguments(
     }
 
     if lowered == "apply_patch" {
-        let patch = extract_apply_patch_text_value(Some(args_source)).or_else(|| {
-            extract_apply_patch_text_value(Some(&parse_lenient_string(args_text.as_str())))
-        })?;
-        let mut args_obj = Map::new();
-        args_obj.insert("input".to_string(), Value::String(patch.clone()));
-        args_obj.insert("patch".to_string(), Value::String(patch));
-        return serde_json::to_string(&Value::Object(args_obj)).ok();
+        let normalized = normalize_apply_patch_schema_args(Some(args_source));
+        let normalized_value: Value = serde_json::from_str(normalized.0.as_str()).ok()?;
+        if normalized_value
+            .as_object()
+            .and_then(|row| row.get("patch"))
+            .and_then(Value::as_str)
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+        {
+            return Some(normalized.0);
+        }
+        let parsed_args = parse_lenient_string(args_text.as_str());
+        let normalized_from_text = normalize_apply_patch_schema_args(Some(&parsed_args));
+        let normalized_from_text_value: Value =
+            serde_json::from_str(normalized_from_text.0.as_str()).ok()?;
+        if normalized_from_text_value
+            .as_object()
+            .and_then(|row| row.get("patch"))
+            .and_then(Value::as_str)
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+        {
+            return Some(normalized_from_text.0);
+        }
+        return None;
     }
 
     Some(args_text)
@@ -4648,7 +4667,11 @@ exec_command
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        assert!(tool_calls.is_empty());
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(
+            tool_calls[0]["function"]["name"].as_str(),
+            Some("apply_patch")
+        );
     }
 
 

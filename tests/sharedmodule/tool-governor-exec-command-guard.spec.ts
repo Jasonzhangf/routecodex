@@ -1,10 +1,67 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {
+import { jest } from '@jest/globals';
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-shared-conversion-semantics.js',
+  () => ({
+    parseLenientJsonishWithNative: jest.fn((value: string) => {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return {};
+      }
+    }),
+    repairArgumentsToStringWithNative: jest.fn((value: unknown) =>
+      typeof value === 'string' ? value : JSON.stringify(value ?? {})
+    ),
+    readRuntimeMetadataWithNative: jest.fn((carrier: Record<string, unknown> | undefined) => carrier?.__rt),
+    ensureRuntimeMetadataCarrierWithNative: jest.fn((value: unknown) => value),
+    cloneRuntimeMetadataWithNative: jest.fn((carrier: Record<string, unknown> | undefined) => carrier?.__rt),
+    chunkStringWithNative: jest.fn(() => []),
+    flattenByCommaWithNative: jest.fn((value: unknown) => value),
+    packShellArgsWithNative: jest.fn((value: unknown) => value),
+    repairFindMetaWithNative: jest.fn((value: unknown) => String(value ?? '')),
+    splitCommandStringWithNative: jest.fn(() => [])
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/conversion/runtime-metadata.js',
+  () => ({
+    readRuntimeMetadata: jest.fn((carrier: Record<string, unknown> | undefined) => carrier?.__rt),
+    ensureRuntimeMetadata: jest.fn((carrier: Record<string, unknown>) => {
+      carrier.__rt = carrier.__rt ?? {};
+      return carrier.__rt;
+    }),
+    cloneRuntimeMetadata: jest.fn((carrier: Record<string, unknown> | undefined) => carrier?.__rt)
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-governance-semantics.js',
+  () => ({
+    normalizeApplyPatchArgumentsWithNative: jest.fn((rawArgs: unknown) => ({
+      normalizedArguments:
+        typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs ?? {}),
+      repaired: false
+    })),
+    prepareRespProcessToolGovernancePayloadWithNative: jest.fn((payload: Record<string, unknown>) => ({
+      preparedPayload: payload,
+      summary: { converted: false, shapeSanitized: false, harvestedToolCalls: 0 }
+    })),
+    applyRespProcessToolGovernanceWithNative: jest.fn((input: { payload: any }) => ({
+      governedPayload: input.payload,
+      summary: { applied: true, toolCallsNormalized: 0, applyPatchRepaired: 0 }
+    })),
+    validateApplyPatchArgumentsWithNative: jest.fn()
+  })
+);
+
+const {
   normalizeApplyPatchToolCallsOnRequest,
-  normalizeApplyPatchToolCallsOnResponse,
   processChatResponseTools
-} from '../../sharedmodule/llmswitch-core/src/conversion/shared/tool-governor.js';
+} = await import('../../sharedmodule/llmswitch-core/src/conversion/shared/tool-governor.js');
 
 describe('tool governor exec_command guard', () => {
   const originalEnhance = process.env.RCC_TOOL_ENHANCE;
@@ -373,7 +430,7 @@ describe('tool governor exec_command guard', () => {
       ]
     };
 
-    const out: any = normalizeApplyPatchToolCallsOnResponse(response);
+    const out: any = processChatResponseTools(response);
     const fn = out.choices?.[0]?.message?.tool_calls?.[0]?.function;
     expect(fn?.name).toBe('exec_command');
     const args = JSON.parse(String(fn?.arguments || '{}'));

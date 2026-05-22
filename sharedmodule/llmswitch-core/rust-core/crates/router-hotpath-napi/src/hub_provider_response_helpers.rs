@@ -96,6 +96,18 @@ fn has_new_governed_server_tool_calls(before: &Value, after: &Value) -> bool {
 
 /// Returns true if the payload requires submit_tool_outputs (has pending function_calling).
 fn responses_payload_requires_submit_tool_outputs(payload: &Value) -> bool {
+    let has_required_tool_calls = payload
+        .get("required_action")
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("submit_tool_outputs"))
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("tool_calls"))
+        .and_then(Value::as_array)
+        .map(|calls| !calls.is_empty())
+        .unwrap_or(false);
+    if has_required_tool_calls {
+        return true;
+    }
     if let Some(output) = payload.get("output").and_then(|v| v.as_array()) {
         for entry in output {
             if let Some(kind) = entry

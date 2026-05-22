@@ -28,7 +28,7 @@
 
 `tests/v2/src/tool-processing-test.ts` 做的事情是：
 
-1. 从 `~/.routecodex/codex-samples` 读取真实快照：
+1. 从 `~/.rcc/codex-samples` 读取真实快照：
    - 当前仅使用 `openai-chat/*_provider-response.json`。
 2. 对每个样本：
    - 取出 `response.body.data`（Chat completion 形状）。
@@ -79,7 +79,7 @@
    - 在 `tests/sharedmodule/*` 下新增/扩展 spec，直接调核心函数（例如
      `normalizeAssistantTextToToolCalls`、`validateToolCall`）。
 4. **将样本纳入矩阵测试**
-   - 把捕获的快照放进 `~/.routecodex/codex-samples/openai-chat`；
+   - 把捕获的快照放进 `~/.rcc/codex-samples/openai-chat`；
    - 根据需要在 `tool-processing-test` 里增加对特定工具的断言：
      - 检查 `tool_calls` 是否存在；
      - 检查 `finish_reason === 'tool_calls'`；
@@ -90,4 +90,3 @@
 - 生产链路和回归测试共享同一实现；
 - 每次针对工具 / 文本治理的修复，都能通过「增加样本 + 扩单元测试 +
   走一遍矩阵测试」实现完整回环。 
-

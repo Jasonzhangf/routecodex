@@ -119,14 +119,14 @@ impl RoutingClassifier {
             "multimodal:visual-content".to_string(),
         ));
         evaluation.push((
-            "thinking".to_string(),
-            thinking_from_user,
-            "thinking:user-input".to_string(),
-        ));
-        evaluation.push((
             "longcontext".to_string(),
             reached_long_context,
             "longcontext:token-threshold".to_string(),
+        ));
+        evaluation.push((
+            "thinking".to_string(),
+            thinking_from_user && !reached_long_context,
+            "thinking:user-input".to_string(),
         ));
         evaluation.push((
             "coding".to_string(),
@@ -428,7 +428,7 @@ mod tests {
     }
 
     #[test]
-    fn longcontext_does_not_override_current_user_thinking_route() {
+    fn longcontext_overrides_current_user_thinking_route_when_context_is_too_large() {
         let features = RoutingFeatures {
             latest_message_from_user: true,
             has_tools: true,
@@ -438,13 +438,11 @@ mod tests {
 
         let result = classifier().classify(&features);
 
-        assert_eq!(result.route_name, "thinking");
-        assert!(result.reasoning.contains("thinking:user-input"));
         assert!(result.reasoning.contains("longcontext:token-threshold"));
+        assert_eq!(result.route_name, "longcontext");
         assert_eq!(
             result.candidates,
             vec![
-                "thinking".to_string(),
                 "longcontext".to_string(),
                 DEFAULT_ROUTE.to_string()
             ]

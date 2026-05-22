@@ -801,6 +801,22 @@ fn is_historical_goal_control_user_text(text: &str) -> bool {
         || normalized.contains("<untrusted_objective>")
 }
 
+fn is_apply_patch_teaching_assistant_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let normalized = trimmed.to_ascii_lowercase();
+    if !normalized.contains("apply_patch") {
+        return false;
+    }
+    normalized.contains("*** begin patch")
+        || normalized.contains("patch 语法验证")
+        || normalized.contains("apply_patch 测试完成")
+        || normalized.contains("全面的 `apply_patch` 测试")
+        || normalized.contains("覆盖各种编辑场景")
+}
+
 fn latest_user_index(messages: &[Value]) -> Option<usize> {
     messages
         .iter()
@@ -995,6 +1011,10 @@ pub(crate) fn sanitize_chat_process_messages_value(input: &Value) -> SanitizeMes
         if nt.is_empty() && nr.is_empty() { re += 1; continue; }
         if is_template_assistant_text(&nt) { rt += 1; continue; }
         if mirror_set[i] { rm += 1; continue; }
+        if is_apply_patch_teaching_assistant_text(&nt) {
+            rm += 1;
+            continue;
+        }
         out.push(msg.clone());
     }
     SanitizeMessagesOutput {

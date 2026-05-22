@@ -87,25 +87,6 @@ function augmentShell(fn: Unknown): void {
   (fn as any).description = appendOnce(((fn as any).description as string | undefined), guidance, marker);
 }
 
-function augmentApplyPatch(fn: Unknown): void {
-  const params = ensureObjectSchema((fn as any).parameters);
-  const props = (params as any).properties as Unknown;
-  (props as any).patch = {
-    type: 'string',
-    description: 'Raw patch text only. Author exactly one canonical patch body in `patch`.'
-  } as Unknown;
-  (props as any).input = {
-    type: 'string',
-    description: 'Compatibility alias of patch. Prefer patch.'
-  } as Unknown;
-  (params as any).required = Array.isArray((params as any).required) ? (params as any).required : [];
-  if (!(params as any).required.includes('patch')) {
-    (params as any).required.push('patch');
-  }
-  (params as any).additionalProperties = false;
-  (fn as any).parameters = params;
-}
-
 function augmentUpdatePlan(fn: Unknown): void {
   const marker = '[Codex Plan Guidance]';
   const guidance = [
@@ -160,7 +141,7 @@ export function augmentOpenAITools(tools: unknown[]): unknown[] {
         if (n === 'shell') augmentShell(fn);
         else if (n === 'exec_command') augmentExecCommand(fn);
         else if (n === 'apply_patch') {
-          augmentApplyPatch(fn);
+          // apply_patch schema/guidance owner moved to chat process SSOT
         }
         else if (n === 'update_plan') augmentUpdatePlan(fn);
         else if (n === 'view_image') augmentViewImage(fn);
@@ -189,20 +170,6 @@ export function augmentAnthropicTools(tools: unknown[]): unknown[] {
       try {
         if (n === 'exec_command') {
           augmentExecCommand(copy as Unknown);
-        }
-        if (n === 'apply_patch') {
-          ((schema as any).properties as any).patch = {
-            type: 'string',
-            description: 'Raw patch text only. Author exactly one canonical patch body in `patch`.'
-          } as Unknown;
-          ((schema as any).properties as any).input = {
-            type: 'string',
-            description: 'Compatibility alias of patch. Prefer patch.'
-          } as Unknown;
-          if (!Array.isArray((schema as any).required)) (schema as any).required = [];
-          if (!((schema as any).required as string[]).includes('patch')) ((schema as any).required as string[]).push('patch');
-          (schema as any).additionalProperties = false;
-          (copy as any).input_schema = schema;
         }
         if (n === 'shell') {
           const marker = '[Codex Shell Guidance]';

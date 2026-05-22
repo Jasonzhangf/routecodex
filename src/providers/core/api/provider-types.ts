@@ -195,6 +195,7 @@ export interface ProviderRuntimeProfile {
   deepseek?: Partial<DeepSeekProviderRuntimeOptions>;
   concurrency?: ProviderConcurrencyConfig;
   rpm?: ProviderRpmConfig;
+  extensions?: Record<string, unknown>;
 }
 
 /**

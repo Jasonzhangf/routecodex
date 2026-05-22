@@ -259,6 +259,15 @@ function isWebProviderRuntime(runtime: ProviderRuntimeProfile): boolean {
   ));
 }
 
+function isSingleConcurrencyProviderRuntime(runtime: ProviderRuntimeProfile): boolean {
+  const providerId = readLowerToken(runtime.providerId);
+  const providerKey = readLowerToken(runtime.providerKey);
+  const providerFamily = readLowerToken(runtime.providerFamily);
+  const runtimeKey = readLowerToken(runtime.runtimeKey);
+  const tokens = [providerId, providerKey, providerFamily, runtimeKey].filter(Boolean);
+  return isWebProviderRuntime(runtime) || tokens.some((value) => value === 'windsurf' || value.startsWith('windsurf.'));
+}
+
 
 function readAdaptiveEnvInt(keys: string[], fallback: number): number {
   for (const key of keys) {
@@ -366,13 +375,13 @@ export function resolveProviderTrafficPolicy(
   runtime: ProviderRuntimeProfile,
   _providerKey?: string
 ): ResolvedProviderTrafficPolicy {
-  const webProvider = isWebProviderRuntime(runtime);
-  const defaultMaxInFlight = webProvider ? 1 : 2;
+  const singleConcurrencyProvider = isSingleConcurrencyProviderRuntime(runtime);
+  const defaultMaxInFlight = singleConcurrencyProvider ? 1 : 2;
   const defaultRpm = defaultMaxInFlight * 60;
   const configuredConcurrency = runtime.concurrency;
   const configuredRpm = runtime.rpm;
   const rawMaxInFlight = clampPositiveInt(configuredConcurrency?.maxInFlight) ?? defaultMaxInFlight;
-  const maxInFlight = webProvider ? 1 : rawMaxInFlight;
+  const maxInFlight = singleConcurrencyProvider ? 1 : rawMaxInFlight;
   const concurrencyTimeoutMs =
     clampPositiveInt(configuredConcurrency?.acquireTimeoutMs) ?? DEFAULT_CONCURRENCY_TIMEOUT_MS;
   const staleLeaseMs =
@@ -1127,7 +1136,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     }
     await this.ensureAdaptiveLoaded();
     const policyBase = resolveProviderTrafficPolicy(options.runtime, options.providerKey);
-    const adaptiveState = this.adaptiveEnabled && !isWebProviderRuntime(options.runtime)
+    const adaptiveState = this.adaptiveEnabled && !isSingleConcurrencyProviderRuntime(options.runtime)
       ? this.getOrCreateAdaptiveState(runtimeKey, policyBase.concurrency.maxInFlight)
       : null;
     const policy: ResolvedProviderTrafficPolicy = adaptiveState
@@ -1379,7 +1388,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     }
     const providerKey = typeof event.providerKey === 'string' ? event.providerKey.trim() : '';
     const providerRoot = providerKey ? providerKey.split('.')[0]?.trim().toLowerCase() ?? '' : '';
-    if (isWebProviderRuntime({
+    if (isSingleConcurrencyProviderRuntime({
       runtimeKey,
       providerId: providerRoot || runtimeKey,
       providerKey,

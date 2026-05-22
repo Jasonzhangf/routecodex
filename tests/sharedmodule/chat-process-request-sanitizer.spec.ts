@@ -409,6 +409,54 @@ describe('sanitizeChatProcessRequest', () => {
     expect(out.metadata?.chatProcessSanitizer).toBeUndefined();
   });
 
+  it('removes assistant apply_patch teaching prose after a failed tool boundary', () => {
+    const input: any = {
+      messages: [
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'call_apply_patch_1',
+              type: 'function',
+              function: {
+                name: 'apply_patch',
+                arguments: '{"patch":"*** Begin Patch\\n*** Add File: test_patch.txt\\n+Hello World\\n*** End Patch","input":"*** Begin Patch\\n*** Add File: test_patch.txt\\n+Hello World\\n*** End Patch"}'
+              }
+            }
+          ]
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_apply_patch_1',
+          name: 'apply_patch',
+          content: 'aborted'
+        },
+        {
+          role: 'assistant',
+          content: `**✅ apply_patch 测试完成！**\n\nPatch 语法验证：\n\`\`\`\n*** Begin Patch\n*** Add File: test_patch.txt\n+Hello World\n*** End Patch\n\`\`\``
+        },
+        {
+          role: 'assistant',
+          content: '好的，我来设计一个全面的 `apply_patch` 测试，覆盖各种编辑场景。'
+        },
+        { role: 'user', content: '继续' }
+      ]
+    };
+
+    const out: any = sanitizeChatProcessRequest(input);
+    const assistantTexts = out.messages
+      .filter((message: any) => message?.role === 'assistant' && typeof message?.content === 'string')
+      .map((message: any) => message.content)
+      .join('\n');
+
+    expect(assistantTexts).not.toContain('✅ apply_patch 测试完成');
+    expect(assistantTexts).not.toContain('Patch 语法验证');
+    expect(assistantTexts).not.toContain('全面的 `apply_patch` 测试');
+    expect(out.messages.at(-1)).toMatchObject({ role: 'user', content: '继续' });
+    expect(out.metadata?.chatProcessSanitizer?.removedAssistantTurns).toBeGreaterThanOrEqual(2);
+  });
+
   it('does not backfill tool_call_id or drop orphan tool turns', () => {
     const input: any = {
       messages: [

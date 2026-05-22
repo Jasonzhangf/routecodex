@@ -229,4 +229,103 @@ describe('http server runtime setup provider merge', () => {
     expect(capturedInputs[0]?.providers?.windsurf?.auth?.tokenFile).toBe('~/.rcc/auth/windsurf-devin-token-1.json');
   });
 
+  it('applies windsurf profile metadata into runtime extensions for cascade local-runtime prerequisites', async () => {
+    const { applyProviderProfileOverrides } = await import('../../../../src/server/runtime/http-server/http-server-bootstrap.ts');
+
+    const server: any = {
+      providerProfileIndex: new Map([
+        ['windsurf', {
+          id: 'windsurf',
+          protocol: 'openai',
+          transport: {},
+          auth: { kind: 'apikey' },
+          compatibilityProfile: 'chat:windsurf',
+          metadata: {
+            windsurf: {
+              lsPort: 42101,
+              csrfToken: 'windsurf-api-csrf-fixed-token',
+              sessionId: 'session-from-profile',
+              workspacePath: '/tmp/windsurf-workspace',
+              workspaceUri: 'file:///tmp/windsurf-workspace',
+              pollIntervalMs: 500,
+              pollMaxWaitMs: 120000
+            }
+          }
+        }]
+      ])
+    };
+
+    const runtime: any = {
+      runtimeKey: 'windsurf.ws-pro-1',
+      providerId: 'windsurf',
+      providerType: 'openai',
+      endpoint: '',
+      compatibilityProfile: 'chat:windsurf',
+      auth: {
+        type: 'apikey',
+        rawType: 'windsurf-devin-token',
+        value: 'devin-session-token$cfg-direct'
+      }
+    };
+
+    const patched = applyProviderProfileOverrides(server, runtime);
+    expect(patched.extensions?.windsurf).toEqual({
+      lsPort: 42101,
+      csrfToken: 'windsurf-api-csrf-fixed-token',
+      sessionId: 'session-from-profile',
+      workspacePath: '/tmp/windsurf-workspace',
+      workspaceUri: 'file:///tmp/windsurf-workspace',
+      pollIntervalMs: 500,
+      pollMaxWaitMs: 120000
+    });
+  });
+
+  it('preserves already materialized virtualrouter.providers when routingPolicyGroups exist', async () => {
+    const { resolveVirtualRouterInput } = await import(BOOTSTRAP_MODULE_PATH);
+
+    const materializedConfig = {
+      virtualrouter: {
+        providers: {
+          mock: {
+            id: 'mock',
+            auth: {
+              type: 'apikey',
+              entries: [{ alias: 'default', value: 'mock-key' }]
+            },
+            models: {
+              'gpt-5.1': { supportsStreaming: true }
+            }
+          }
+        },
+        routingPolicyGroups: {
+          default: {
+            routing: {
+              default: [
+                { id: 'mock-default', targets: ['mock.default.gpt-5.1'] }
+              ]
+            }
+          }
+        }
+      }
+    };
+
+    const server: any = {};
+    const input = await resolveVirtualRouterInput(server, materializedConfig as any);
+
+    expect(input).toMatchObject({
+      providers: {
+        mock: {
+          id: 'mock'
+        }
+      },
+      routing: {
+        default: [
+          expect.objectContaining({
+            targets: ['mock.default.gpt-5.1']
+          })
+        ]
+      }
+    });
+  });
+
 });

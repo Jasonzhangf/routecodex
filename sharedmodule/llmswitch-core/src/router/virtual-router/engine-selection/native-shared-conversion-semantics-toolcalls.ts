@@ -304,9 +304,9 @@ export function repairToolCallsWithNative(
     if (!parsed) {
       return fail('invalid payload');
     }
-    return parsed.filter((entry): entry is { name?: string; arguments: string } =>
-      entry && typeof entry === 'object' && !Array.isArray(entry) && typeof (entry as any).arguments === 'string'
-    );
+    return parsed.filter((entry): entry is { name?: string; arguments: string } => {
+      return !!(entry && typeof entry === 'object' && !Array.isArray(entry) && typeof (entry as any).arguments === 'string');
+    });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

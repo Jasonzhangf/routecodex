@@ -72,10 +72,6 @@ pub(crate) fn normalize_qwen_family_tool_definitions(root: &Map<String, Value>) 
             Some(
                 "Use only `cmd` as one shell-command string. Preferred shape: `bash -lc '...'`. Call the tool directly instead of narrating a plan.",
             )
-        } else if name.eq_ignore_ascii_case("apply_patch") {
-            Some(
-                "Author exactly one canonical patch body in `patch`. Use the canonical internal patch grammar only. Call the tool directly.",
-            )
         } else if name.eq_ignore_ascii_case("update_plan") {
             Some(
                 "Use `plan` plus optional `explanation`. Do not use `steps`. Each plan item must contain `step` and `status`.",
@@ -113,26 +109,6 @@ pub(crate) fn normalize_qwen_family_tool_definitions(root: &Map<String, Value>) 
                     let before = cmd_prop.get("description").cloned().unwrap_or(Value::Null);
                     append_property_description(cmd_prop, "Single command string only.");
                     if cmd_prop.get("description").cloned().unwrap_or(Value::Null) != before {
-                        changed = true;
-                    }
-                }
-                if let Some(patch_prop) =
-                    properties.get_mut("patch").and_then(|v| v.as_object_mut())
-                {
-                    let before = patch_prop
-                        .get("description")
-                        .cloned()
-                        .unwrap_or(Value::Null);
-                    append_property_description(
-                        patch_prop,
-                        "Single canonical patch string only.",
-                    );
-                    if patch_prop
-                        .get("description")
-                        .cloned()
-                        .unwrap_or(Value::Null)
-                        != before
-                    {
                         changed = true;
                     }
                 }

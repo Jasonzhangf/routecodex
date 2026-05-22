@@ -6,6 +6,13 @@ import {
 } from '../../../../src/providers/core/runtime/provider-failure-policy.js';
 
 describe('provider failure backoff windsurf stream cancel', () => {
+  /**
+   * Reference boundary:
+   * - `/Volumes/extension/code/WindsurfAPI` is the only truth source for Windsurf alignment.
+   * - RouteCodex must only preserve pure cascade cancel semantics here:
+   *   `pending stream has been canceled` / `ERR_HTTP2_STREAM_CANCEL`.
+   * - Only pure cascade transport wording may remain in active tests.
+   */
   afterEach(() => {
     delete process.env.ROUTECODEX_WINDSURF_STREAM_CANCEL_BACKOFF_BASE_MS;
     delete process.env.RCC_WINDSURF_STREAM_CANCEL_BACKOFF_BASE_MS;
@@ -28,9 +35,9 @@ describe('provider failure backoff windsurf stream cancel', () => {
     expect(delayMs).toBe(2000);
   });
 
-  it('treats stage-prefixed windsurf cancel as reroute-worthy transport failure', () => {
+  it('treats pure cascade cancel wording as reroute-worthy transport failure', () => {
     const error = Object.assign(
-      new Error('InitializeCascadePanelState: The pending stream has been canceled (caused by: )'),
+      new Error('cascade transport: The pending stream has been canceled (caused by: )'),
       {
         statusCode: 502,
       }
@@ -40,7 +47,7 @@ describe('provider failure backoff windsurf stream cancel', () => {
       error,
       stage: 'provider.send',
       statusCode: 502,
-      reason: 'InitializeCascadePanelState: The pending stream has been canceled (caused by: )',
+      reason: 'cascade transport: The pending stream has been canceled (caused by: )',
     });
 
     expect(classification).toBe('recoverable');
@@ -56,7 +63,7 @@ describe('provider failure backoff windsurf stream cancel', () => {
       isReauth: false,
       isProviderTrafficSaturated: false,
       isNetworkTransport: false,
-      reason: 'InitializeCascadePanelState: The pending stream has been canceled (caused by: )',
+      reason: 'cascade transport: The pending stream has been canceled (caused by: )',
     } as any)).toEqual({
       excludeCurrentProvider: true,
       retryAction: 'reroute_explicit_alternative'

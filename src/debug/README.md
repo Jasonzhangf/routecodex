@@ -12,7 +12,8 @@ src/debug/
 ├── session-manager.ts       # debug session lifecycle
 ├── harness-registry.ts      # harness registration
 ├── harnesses/
-│   └── provider-harness.ts  # provider-layer dry-run
+│   ├── provider-harness.ts  # provider-layer dry-run
+│   └── windsurf-static-request-harness.ts # static windsurf outbound lens
 ├── dry-runner.ts            # dry-run controller
 └── replay-runner.ts         # snapshot replay
 ```
@@ -26,14 +27,14 @@ src/debug/
 ```bash
 npm run snapshot:inspect -- --rid <RID>
 ```
-Fast snapshots are stored in `~/.routecodex/codex-samples/`.
+Fast snapshots are stored in `~/.rcc/codex-samples/`.
 
 ## Policy Violations Folder
 
 When Unified Hub Framework policy snapshots (`hub_policy.*`) detect violations, they are additionally copied to:
 
-- `~/.routecodex/codex-samples/__policy_violations__/`
-- `~/.routecodex/errorsamples/policy/`
+- `~/.rcc/codex-samples/__policy_violations__/`
+- `~/.rcc/errorsamples/policy/`
 
 This keeps normal snapshot traffic intact while making these cases easy to monitor:
 

@@ -75,13 +75,17 @@ async function main() {
       assert.ok(parsed.patch.includes(' alpha\n-beta\n+beta2\n gamma'), 'live context must be injected');
     }
 
-    // 3) mixed internal + GNU
+    // 3) mixed internal + GNU should be normalized into canonical apply_patch
     {
       const result = validateApplyPatchArgumentsWithNative({
         patch: '*** Begin Patch\n--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old\n+new\n*** End Patch'
       });
-      assert.equal(result.ok, false, 'mixed internal + GNU must fail');
-      assert.equal(result.reason, 'mixed_gnu_diff');
+      assert.equal(result.ok, true, 'mixed internal + GNU should normalize through the native verdict');
+      const parsed = parseNormalizedArgs(result);
+      assert.ok(parsed.patch.includes('*** Begin Patch'));
+      assert.ok(parsed.patch.includes('*** Update File: demo.txt'));
+      assert.ok(parsed.patch.includes('@@ -1 +1 @@'));
+      assert.equal(parsed.input, parsed.patch);
     }
 
     // 4) raw / wrapped / json envelope
@@ -101,13 +105,45 @@ async function main() {
       }
     }
 
-    // 5) add-file without leading +
+    // 4.1) shell-wrapped apply_patch heredoc must be harvested by explicit apply_patch tool shape
+    {
+      const shellWrapped = `bash -lc "echo hi && apply_patch <<'PATCH'
+*** Begin Patch
+*** Add File: src/nope.ts
++console.log('nope');
+*** End Patch
+PATCH"`;
+      const result = normalizeApplyPatchArgumentsWithNative(shellWrapped);
+      const parsed = parseNormalizedArgs(result);
+      assert.ok(parsed.patch.includes('*** Begin Patch'), 'shell-wrapped apply_patch must preserve canonical patch');
+      assert.ok(parsed.patch.includes('*** Add File: src/nope.ts'), 'shell-wrapped apply_patch must preserve target file');
+      assert.ok(parsed.patch.includes("+console.log('nope');"), 'shell-wrapped apply_patch must preserve add-file content');
+      assert.equal(parsed.input, parsed.patch, 'shell-wrapped apply_patch input alias must mirror patch');
+    }
+
+    // 4.2) hashline shape missing fileContent must fail-fast instead of silently normalizing to empty patch
+    {
+      const result = validateApplyPatchArgumentsWithNative({
+        patch: '+ 2 deadbeef\nhello',
+        filePath: 'note.txt'
+      });
+      assert.equal(result.ok, false, 'hashline missing fileContent must stay invalid');
+      assert.equal(result.reason, 'hashline_missing_file_content');
+    }
+
+    // 5) add-file without leading + should be repaired by native verdict
     {
       const result = validateApplyPatchArgumentsWithNative({
         patch: '*** Begin Patch\n*** Add File: demo.txt\nhello\n*** End Patch'
       });
-      assert.equal(result.ok, false, 'add-file without + must fail');
-      assert.equal(result.reason, 'empty_add_file_block');
+      assert.equal(result.ok, true, 'add-file without + should be repaired');
+      const parsed = parseNormalizedArgs(result);
+      assert.equal(
+        parsed.patch,
+        '*** Begin Patch\n*** Add File: demo.txt\n+hello\n*** End Patch',
+        'native verdict must plus-prefix add-file content'
+      );
+      assert.equal(parsed.input, parsed.patch);
     }
 
     // 6) file changed -> context mismatch

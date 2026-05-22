@@ -169,6 +169,13 @@ function isRouteCodexHealthy(body: RouteCodexHealthBody): boolean {
 }
 
 export function describeHealthProbeFailure(result: ProbeFailure): string {
+  if (
+    result.kind === 'bad_status'
+    && typeof result.bodySnippet === 'string'
+    && /"status"\s*:\s*"starting"/i.test(result.bodySnippet)
+  ) {
+    return `starting status=${result.status ?? 'n/a'} body=${result.bodySnippet}`;
+  }
   const parts: string[] = [result.kind];
   if (typeof result.status === 'number' && result.status > 0) {
     parts.push(`status=${result.status}`);

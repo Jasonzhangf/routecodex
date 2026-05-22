@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { describe, expect, test } from '@jest/globals';
+import { describe, expect, jest, test } from '@jest/globals';
 
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
@@ -83,18 +83,19 @@ describe('resp_process stage3 servertool followup reentry', () => {
     fs.mkdirSync(SESSION_DIR, { recursive: true });
   });
 
-  test('reasoning_stop_guard followup re-enters orchestration instead of followup_bypass', async () => {
+  test('stop_message followup hop uses client inject and does not reenter orchestration', async () => {
     const sessionId = 'stage3-reentry-guard';
     setStoplessMode(sessionId, 'on');
+    const clientInjectDispatch = jest.fn(async () => ({ ok: true } as const));
     let reenterCalls = 0;
 
     const result = await runRespProcessStage3ServerToolOrchestration({
       payload: buildStopResponse('再次停止') as any,
       adapterContext: {
         sessionId,
-        clientInjectSource: 'servertool.reasoning_stop_guard',
+        clientInjectSource: 'servertool.stop_message',
         capturedChatRequest: {
-          model: 'deepseek-reasoner',
+          model: 'gpt-test',
           messages: [{ role: 'user', content: '继续执行' }]
         },
         __rt: { serverToolFollowup: true }
@@ -102,6 +103,8 @@ describe('resp_process stage3 servertool followup reentry', () => {
       requestId: 'req_stage3_reentry_guard',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
+      allowFollowup: true,
+      clientInjectDispatch,
       reenterPipeline: async () => {
         reenterCalls += 1;
         return { body: buildStopResponse('继续执行') };
@@ -109,8 +112,9 @@ describe('resp_process stage3 servertool followup reentry', () => {
     });
 
     expect(result.executed).toBe(true);
-    expect(result.flowId).toBe('reasoning_stop_guard_flow');
-    expect(reenterCalls).toBeGreaterThan(0);
+    expect(clientInjectDispatch).toHaveBeenCalledTimes(1);
+    expect(reenterCalls).toBe(0);
+    expect(loadRoutingInstructionStateSync(`session:${sessionId}`)?.stopMessageUsed).toBe(1);
   });
 
   test('non-reasoning followup still bypasses orchestration', async () => {

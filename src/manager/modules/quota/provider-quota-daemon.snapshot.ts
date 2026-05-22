@@ -12,6 +12,112 @@ import {
 } from '../../quota/provider-quota-store.js';
 import { canonicalizeProviderKey, mergeQuotaStates } from './provider-key-normalization.js';
 
+function resolveWindsurfAliasPrefix(providerKey: string): string | null {
+  const raw = typeof providerKey === 'string' ? providerKey.trim().toLowerCase() : '';
+  if (!raw.startsWith('windsurf.')) {
+    return null;
+  }
+  const parts = raw.split('.');
+  if (parts.length < 2) {
+    return null;
+  }
+  return `${parts[0]}.${parts[1]}`;
+}
+
+function isWindsurfWeeklyBlacklistState(state: QuotaState): boolean {
+  const lastErrorCode =
+    typeof (state as unknown as { lastErrorCode?: unknown }).lastErrorCode === 'string'
+      ? String((state as unknown as { lastErrorCode?: string }).lastErrorCode).trim()
+      : '';
+  return state.reason === 'blacklist' && lastErrorCode === 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED';
+}
+
+function expandWindsurfWeeklyBlacklists(args: {
+  grouped: Map<string, QuotaState[]>;
+  staticConfigs: Map<string, StaticQuotaConfig>;
+}): boolean {
+  const aliasWindows = new Map<string, QuotaState>();
+  for (const [providerKey, states] of args.grouped.entries()) {
+    const aliasPrefix = resolveWindsurfAliasPrefix(providerKey);
+    if (!aliasPrefix) {
+      continue;
+    }
+    for (const state of states) {
+      if (!isWindsurfWeeklyBlacklistState(state)) {
+        continue;
+      }
+      const previous = aliasWindows.get(aliasPrefix);
+      if (!previous) {
+        aliasWindows.set(aliasPrefix, state);
+        continue;
+      }
+      const prevUntil = typeof previous.blacklistUntil === 'number' ? previous.blacklistUntil : 0;
+      const nextUntil = typeof state.blacklistUntil === 'number' ? state.blacklistUntil : 0;
+      if (nextUntil >= prevUntil) {
+        aliasWindows.set(aliasPrefix, state);
+      }
+    }
+  }
+  if (aliasWindows.size === 0) {
+    return false;
+  }
+
+  let migrated = false;
+  const ensureWeeklyBlacklist = (providerKey: string, template: QuotaState) => {
+    const canonicalKey = canonicalizeProviderKey(providerKey);
+    const existing = args.grouped.get(canonicalKey) ?? [];
+    const alreadyCovered = existing.some((state) => {
+      if (!isWindsurfWeeklyBlacklistState(state)) {
+        return false;
+      }
+      return state.blacklistUntil === template.blacklistUntil;
+    });
+    if (alreadyCovered) {
+      return;
+    }
+    const base =
+      existing[0]
+      ?? createInitialQuotaState(canonicalKey, args.staticConfigs.get(canonicalKey), template.lastErrorAtMs ?? Date.now());
+    const injected: QuotaState = sanitizeQuotaStateForSnapshot({
+      ...base,
+      providerKey: canonicalKey,
+      authType: 'apikey',
+      inPool: false,
+      reason: 'blacklist',
+      cooldownUntil: null,
+      cooldownKeepsPool: undefined,
+      blacklistUntil: template.blacklistUntil,
+      lastErrorSeries: 'E429',
+      lastErrorCode: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+      lastErrorAtMs: template.lastErrorAtMs ?? base.lastErrorAtMs ?? Date.now(),
+      consecutiveErrorCount:
+        typeof base.consecutiveErrorCount === 'number' && base.consecutiveErrorCount > 0
+          ? base.consecutiveErrorCount
+          : 1
+    });
+    args.grouped.set(canonicalKey, [...existing, injected]);
+    migrated = true;
+  };
+
+  for (const [aliasPrefix, template] of aliasWindows.entries()) {
+    ensureWeeklyBlacklist(aliasPrefix, template);
+    const normalizedPrefix = `${aliasPrefix}.`;
+    for (const providerKey of args.staticConfigs.keys()) {
+      const normalizedKey = canonicalizeProviderKey(providerKey);
+      if (normalizedKey === aliasPrefix || normalizedKey.startsWith(normalizedPrefix)) {
+        ensureWeeklyBlacklist(normalizedKey, template);
+      }
+    }
+    for (const providerKey of Array.from(args.grouped.keys())) {
+      if (providerKey === aliasPrefix || providerKey.startsWith(normalizedPrefix)) {
+        ensureWeeklyBlacklist(providerKey, template);
+      }
+    }
+  }
+
+  return migrated;
+}
+
 function normalizeLoadedQuotaState(providerKey: string, state: QuotaState): QuotaState {
   const key = typeof providerKey === 'string' && providerKey.trim() ? providerKey.trim() : state.providerKey;
   const rawAuth = typeof (state as unknown as { authType?: unknown }).authType === 'string'
@@ -65,6 +171,9 @@ export async function loadProviderQuotaStates(options: {
       } else {
         grouped.set(canonicalKey, [adjusted]);
       }
+    }
+    if (expandWindsurfWeeklyBlacklists({ grouped, staticConfigs: options.staticConfigs })) {
+      migrated = true;
     }
     for (const [canonicalKey, states] of grouped.entries()) {
       if (states.length === 1) {

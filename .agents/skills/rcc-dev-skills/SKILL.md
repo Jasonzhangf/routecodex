@@ -28,6 +28,112 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 4. 若本次任务暴露出 agent 先查错配置源，必须先纠正到 `~/.rcc`，再继续分析 provider/token/router 问题。
 
 
+## Windsurf 对齐固定参考（2026-05-21，强制）
+
+1. **不要再全盘搜索参考仓。** Windsurf 相关任务固定先看以下路径：
+   - 主参考仓入口：`/Volumes/extension/code/WindsurfAPI`
+   - 鉴权 / PostAuth 真源：`/Volumes/extension/code/WindsurfAPI/src/dashboard/windsurf-login.js`
+   - RouteCodex 当前实现：`src/providers/core/runtime/windsurf-chat-provider.ts`
+
+2. **鉴权已确认真源（且只允许 cascade 主线）**
+   - 所有 Windsurf 认证最终都收敛为：`devin-session-token$...`
+   - provider 最终使用的凭证就是这个 session token
+   - 若 provider 配置里直接给了 devin session token：**优先直接用 token，不走账密登录**
+   - 若只有账号密码：直接走 `/_devin-auth/password/login` 拿 `auth1_token`，再调用 `WindsurfPostAuth` 换 `session_token`
+   - 登录成功后，**必须持久化 session token**；下次优先读持久化 token，失败再按规则刷新
+   - Windsurf 本地实现只允许：`chat -> windsurf-chat-provider -> cascade`；禁止再引回任何第二实现文件、脚本、文档或测试锚点
+   - **发送主链已黑盒证伪旧 JSON 路径**：`GetChatCompletions` 不是当前 WindsurfAPI / app 真发送主线；后续调试/实现/测试必须只围绕 `StartCascade -> SendUserCascadeMessage -> GetCascadeTrajectorySteps/poll`。若文档、测试或代码仍把 `GetChatCompletions` 当主线，必须先纠正并物理删除该错误叙事/实现。
+   - 调试与实现中，默认先检查 `~/.rcc/codex-samples/**` 的 same-shape 样本，再看代码；不要跳过样本直接脑补
+   - 当前仓内只允许单一路径实现；后续禁止把任何已删除旧链路写回 Windsurf 文档、测试和实现
+
+3. **WindsurfPostAuth 对齐规则**
+   - **不能**把 `WindsurfPostAuth` 当普通 JSON 接口调用
+   - 参考真源要求：
+     - body：`application/proto`
+     - body 为空（`Buffer.alloc(0)`）
+     - header 必须带：`X-Devin-Auth1-Token: <auth1_token>`
+   - 响应按 `WindsurfAPI/src/dashboard/windsurf-login.js::parsePostAuthResponseData()` 的观察真源解析：
+     - `sessionToken`
+     - `accountId`
+     - `primaryOrgId`
+
+4. **排查优先级**
+   - 先判定问题是否仍在“鉴权链”：
+     - `password/login` 是否拿到 `auth1_token`
+     - `WindsurfPostAuth` 是否按 proto + header 正确发送
+     - 是否成功落到 `devin-session-token$...`
+   - 若以上已通，再看工具调用 / 历史 / continuity；不要把工具问题误判成认证问题
+   - **调试顺序强制追加**：
+     1. 先看 `~/.rcc/codex-samples/**` 里与当前 requestId / 时间段 / 端口命中的 sample / snapshot / same-shape 输入；
+     2. 先比对 sample 中的 `messages / tools / tool results / stream / model / request body delta` 是否合理；
+     3. 再去看实现代码；**禁止跳过 codex samples 直接凭日志表象改代码**。
+
+5. **调试优先看固定参考目标（新增，强制）**
+   - Windsurf 任务不要先全仓乱搜；固定先看：
+     - `/Volumes/extension/code/WindsurfAPI`
+     - `src/dashboard/windsurf-login.js`
+     - `src/conversation-pool.js`
+     - `src/cascade-native-bridge.js`
+     - `src/windsurf.js`
+     - `src/handlers/responses.js`
+   - 先从这些目标提取锚点函数/shape，再回到 RouteCodex 对应实现。
+   - **禁止先脱离参考仓自造边界解释。**
+
+6. **Windsurf 调试先看固定参考与 codex samples（强制）**
+   - 先看 `~/.rcc/codex-samples/**` 的同 requestId / 同时间段样本，先核对 request body、messages、tools、tool results、stream、model delta。
+   - 再看固定参考：`/Volumes/extension/code/WindsurfAPI`，禁止先全仓乱搜或凭日志表象脑补。
+   - 对 Windsurf，只允许围绕 `chat -> provider -> cascade` 真源排查；不得回到任何旧 transport 叙事。
+- 调试 Windsurf 前，固定先看两个目标：`~/.rcc/codex-samples/**` 与 `/Volumes/extension/code/WindsurfAPI`；先对样本和参考锚点，再动代码。
+
+6. **Cascade 语义测试真源（新增，强制）**
+   - Windsurf 的 assistant/tool_result/history/continuity 测试，**必须先对齐参考仓锚点，再写测试**；禁止先凭主观推边界再补 case。
+   - 固定语义锚点文件：
+     - `/Volumes/extension/code/WindsurfAPI/src/handlers/responses.js`
+       - `responsesToChat()`
+       - `chatToResponse()`
+       - 这是 Responses ↔ Chat 结构语义锚点
+     - `/Volumes/extension/code/WindsurfAPI/src/windsurf.js`
+       - `parseTrajectorySteps()`
+       - 这是 Cascade trajectory step → assistant/tool/tool-result 观察面的锚点
+     - `/Volumes/extension/code/WindsurfAPI/src/cascade-native-bridge.js`
+       - `buildAdditionalStepsFromHistory()`
+       - 这是 assistant tool_calls + tool results 历史如何注入 cascade additional_steps 的锚点
+     - `/Volumes/extension/code/WindsurfAPI/src/conversation-pool.js`
+       - `projectAssistantToolCalls()`
+       - `projectMessage()`
+       - 这是 continuity / digest / assistant text + tool_calls 投影锚点
+
+7. **Windsurf 测试编写规则（新增，强制）**
+   - 每补一条 `tests/providers/core/runtime/windsurf-chat-provider.spec.ts`：
+     1. 先指出参考锚点文件 + 函数名；
+     2. 说明该测试是在锁哪个 reference 语义；
+     3. 如果 reference 里没有直接证据，只能先记入 `note.md` 为“待证伪/待证实假设”，**不能直接当真源测试**。
+   - 允许写“RouteCodex 本地 fail-fast 真源”测试，但前提是：
+     - 该 case 必须能从参考仓已有 shape/投影/trajectory family 合理推出；
+     - 且在 `note.md` 明确标注“derived from reference anchor”，不能伪装成 reference 直接明文行为。
+
+8. **Windsurf provider / cascade 实现禁止假设（新增，强制）**
+   - Windsurf provider 的 cascade 实现，**不得脑补 endpoint / body / response / 轮询协议 / tool shape / history shape**。
+   - 固定参考真源只有：`/Volumes/extension/code/WindsurfAPI`。
+   - **实现、测试、调试都必须先对齐参考仓，再动本仓代码；不允许伪造，不允许假设，不允许自己编协议。**
+   - 对齐目标是 **WindsurfAPI 的 cascade 观察真相**：鉴权链、tool call、tool result、history continuity、trajectory steps、additional_steps 注入方式。
+   - 任何“我觉得应该是这样”的判断都不算证据；必须能指回 `WindsurfAPI` 的具体文件、函数、shape 或实机请求样本。
+   - 如果参考仓没有直接证据：
+     1. 先记入 `note.md` 为待证实假设；
+     2. 不能写成正式测试真源；
+     3. 不能写进 provider 主线实现。
+   - 排查与实现顺序强制为：
+     1. 先看 `WindsurfAPI` 对应锚点文件与函数；
+     2. 再看 `~/.rcc/codex-samples/**` 的 same-shape 样本；
+     3. 再写/改 RouteCodex 测试；
+     4. 最后才改实现。
+   - **禁止伪造 happy-path 测试**：如果 reference 没证明某条 send-path / poll-path / tool-path / history-path 存在，就不能写成“已验证主线”测试。
+   - **禁止把未验证 cloud endpoint 当真源**：没有 reference 或实机证据的路径，不得作为实现前提，不得作为测试锚点。
+   - 若 reference 未覆盖，而本地又必须处理，只能：
+     - 明确标成 `derived from reference anchor` 或 `local fail-fast invariant`
+     - 写入 `note.md`
+     - 不能冒充成 WindsurfAPI 已证实行为。
+   - **UA / app version 也不得脑补**：先对齐本机 `Windsurf.app` 真值；当前已验证版本为 `2.3.9`，所以 provider 内所有 auth/login/probe/send header builder 必须统一为 `User-Agent: windsurf/2.3.9`，禁止混入 `Mozilla/...` 浏览器指纹。
 > 适用于 Hub Pipeline / Virtual Router / servertool / provider runtime / Rust 化收口。  
 > 必须按顺序推进；没有上一步证据，不允许跳下一步。
 
@@ -37,12 +143,28 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 3. 若改动跨多个阶段，必须显式说明每一段为什么必要；否则视为散改。
 
 ### R1. 先复现 / 先补测试（不改实现）
+0.001 **用户已明确：遇到问题直接补红测，这件事不需要询问。** 若本技能缺该规则，必须立即写入本技能后再继续。
 0. **遇到问题默认直接补红测，不询问是否要先写测试。** 只有用户明确禁止时才例外。
+0.005 **先看 codex samples，再看代码。** 对线上/实机问题，优先读取：
+   - `~/.rcc/codex-samples/**`
+   - requestId 对应 snapshot
+   - 同时间段 same-shape 请求
+   若没有 sample，再明确记录“未捕获到 sample”，之后才进入代码分析。
+0.01 **若运行/安装报错，先审请求/配置 shape 是否在入口被重建、丢字段或错路由。** 先确认输入真形，再看响应/错误分类；禁止先修 handler 或错误映射。
 0.1 **若现有测试 helper 自带 fallback / 兼容桥 / 双路径补偿，先把 helper 清成 fail-fast 真相，再补红测；禁止让测试夹带 fallback 掩盖设计错误。**
 0.2 **贴出响应报错时，先审请求 shape，再审响应处理。** 强制顺序：
    - 先抓 `provider-request` / outbound payload / same-shape fixture，确认请求字段、协议主形、历史消息、tools/tool_choice/stream 等是否已坏；
    - 只有在请求 shape 被证明确实正确后，才允许继续查看响应分类、contract、错误映射与处理分支；
    - 禁止看到 `502`、`EMPTY_ASSISTANT_RESPONSE`、`HTTP_502`、`completed+output=[]` 之类响应表象后，直接去修 response handler / error mapper / fallback。
+0.22 **若问题属于 apply_patch/hashline，请先确认 chat process 真入口是否真的接线。**
+   - 先确认真实请求主链命中的是哪一个入口函数，而不是只看 helper 是否存在；
+   - 当前 RouteCodex 若是 chat process 问题，优先核对 `processChatRequestTools()` / 对应 request governance 主入口有没有真正串上 request-side normalization；
+   - 禁止只测孤立 helper（如单独的 normalize 函数）就宣称主链已修复。
+0.21 **apply_patch/hashline 专项：先锁“请求 shape 命中了哪条归一链”，再看结果。**
+   - 若 schema 声明了 `filePath/file_path`，默认先判定为 hashline authoring mode；
+   - 先补红测锁“命中 hashline 后不得静默掉回旧 schema normalizer”；
+   - hashline native 若返回坏 payload / 抛错，必须 fail-fast 暴露 `runHashlineNativeEditJson` 真错误，禁止再走 legacy schema normalizer 糊过去。
+0.3 **mem-observer 先看 retention 指标，不先猜 GC。** 若 `requestMap` / `pendingNoResponseId` / `retainedInputItems` 同步增长，优先排查“capture 后是否漏了唯一收口（record/finalize/clear）”；对定向测试也先确认 `requestId` 等请求 shape 已带齐，否则会伪装成清理失败。
 1. 先拿原 requestId / codex-sample / errorsample / 最小 fixture 复现。
 2. 先补会红的测试：
    - shape / sanitize / compat：单测或 same-shape replay
@@ -75,7 +197,11 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
    - 1 条 failing-shape replay
    - 1 条 control replay
    - 1 次真实入口 smoke（如 `/v1/responses`）
-3. 验证内容包括：
+3. **开发中修改后，必须先由 agent 自己完成真实入口 smoke，再允许让用户测试。**
+   - 禁止在“仅单测/回归通过、未做本机真实入口验证”的状态下让用户先测。
+   - 若本机真实入口 smoke 失败，必须继续由 agent 自己排查，不能把首轮验证责任转嫁给用户。
+   - 只有 agent 已完成至少一次真实入口 smoke，并给出结果证据后，才可以请求用户做进一步复测或更复杂场景验证。
+4. 验证内容包括：
    - 返回码 / finish_reason
    - provider-request / provider-response 形状
    - 日志阶段是否变成目标形态
@@ -346,7 +472,7 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 ## 工具治理唯一真源
 
 - Hub Pipeline Rust-only 铁律（2026-05-16）：`llmswitch-core Hub Pipeline / chat process / req_process / resp_process / servertool followup orchestration` 已经是 **Rust-only** 责任域；凡发现 TS 里还残留语义判定、followup tools sanitize、兼容修复、注入裁剪等第二实现，必须立即迁回 `rust-core/crates/router-hotpath-napi/`，TS 只保留薄壳调用。
-- apply_patch authoring/compat/followup 分层（2026-05-16）：**对模型只暴露一种 canonical internal patch grammar**；GNU diff、wrapped/raw/json envelope、absolute path、line-number-only hunk 等兼容只允许在 Rust ingress 归一，禁止写进模型引导。重复 apply_patch 失败后的 `read-before-repatch` 必须走真实工具列表上的硬门禁（保留工具，不伪造/清洗工具面），不要再在 TS 里伪造 blocked patch 或第二语义面。
+- apply_patch/hashline 单一路径（2026-05-21）：**对 client 只暴露 `apply_patch`，对 upstream authoring 在声明 `filePath/file_path` 时切到 hashline 主路径**；Rust 负责 hashline ↔ canonical apply_patch 的透明桥接。GNU diff、wrapped/raw/json envelope、absolute path、line-number-only hunk 等兼容只允许在 Rust ingress 归一；TS 不得自定 mode，也不得保留第二语义面。重复 apply_patch 失败后的 `read-before-repatch` 必须走真实工具列表上的硬门禁（保留工具，不伪造/清洗工具面）。
 - req inbound tool normalize 唯一入口（2026-05-17）：`messages[].assistant.tool_calls` 与 `/v1/responses input.function_call` 的 ingress shape 修复必须共用 Rust `hub_req_inbound_tool_call_normalization`；至少统一三类工具：`exec_command -> {cmd,workdir}`、`apply_patch -> {patch,input}`、`write_stdin -> {session_id,chars}`。`req_inbound stage2 record`、`standardizedRequest`、followup/history 必须吃同一份归一结果，禁止 TS 再补第二语义面。
 - Virtual Router shell 读写判定护栏（2026-05-17）：`virtual_router_engine/features/tools.rs::classify_shell_command()` 里，**read-only python/node 文件读取脚本必须归 thinking，不得掉进 tools/other，更不能因路径/正文含 write/patch 词误进 coding**；最小证据形状是 `python -c "print(Path(...).read_text())"` 与 `node -e "console.log(fs.readFileSync(...))"`。
 - Responses tool-args scope 边界（2026-05-16）：`/v1/responses required_action/output function_call` 的 client args 归一（如 `exec_command command -> cmd`）必须先走 Rust `hub_resp_outbound_client_semantics` 的 schema-based SSOT；Host/TS 若在此之前直接校验并报 `CLIENT_TOOL_ARGS_INVALID`，属于 scope 越权。唯一修复点是在 Host validator 前复用该 Rust normalize，而不是放宽 TS validator。
@@ -1010,3 +1136,12 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - provider ban 黑盒排查铁律（2026-05-18）：若 5555/5520 出现“同一个 provider 明明应该被 ban，却提前/重复/根本不 ban”，先跑 `scripts/tests/provider-failure-ban-blackbox.mjs`，并同时挂 `provider-runtime-ingress` observer 看**每次失败到底上报了几条 error event、stage 是什么**；不要只看 selection 日志猜。
 - provider 错误重复上报真源（2026-05-18）：主链 provider 失败可能同时来自 `base-provider.ts -> emitProviderError(stage=provider.http)` 与 `request-executor-provider-failure.ts -> emitProviderErrorAndWait(stage=provider.send)`；若黑盒显示 502 两次就提前 cooldown，先审 `src/providers/core/utils/provider-error-reporter.ts` 的单次错误去重 marker，禁止去 router selection/quota view 补第三语义面。
 - 高频周期日志禁令（2026-05-20）：**未经 Jason 明确要求，禁止任何 500ms/逐轮/按 poll tick 输出的运行态日志进入主链**，尤其是 provider poll / heartbeat / idle counter / step scan 这类周期调试信息。此类日志不允许“节流后保留”，默认必须物理删除；只有状态跃迁、最终退出、明确错误三类日志可保留。若需要排查，优先 requestId 定点样本或临时本地调试，不得把高频日志带入常规运行态。
+
+## Windsurf cascade provider lessons
+
+- Windsurf cascade blackbox must be verified through the local LS gRPC cascade chain, not cloud `GetChatCompletions` or Connect/JSON detours: warmup -> `StartCascade` -> `SendUserCascadeMessage` -> trajectory poll.
+- Protobuf empty embedded messages must be omitted to match WindsurfAPI `writeMessageField`; encoding `tag + len=0` can make LS reject requests as invalid wire-format data.
+- When multiple `routecodex-windsurf-*` LS instances exist, pin the selected runtime per request scope. Do not store pinned LS runtime in provider instance fields because concurrent `/v1/responses` calls can overwrite it and cause `trajectory not found`.
+- After modifying Windsurf provider, agent must run its own source smoke and installed `/v1/responses` smoke before asking Jason to test.
+
+- Windsurf pending stream canceled 排查（2026-05-22）：若 `/v1/responses` 报 `The pending stream has been canceled`，先用 WindsurfAPI `grpc.js + buildInitializePanelStateRequest` 直打当前 `lsPort` 验证；若同样失败或端口无监听，根因是 LS 连接/启动形态，不是 Hub/retry/并发。RouteCodex Windsurf provider 必须按 WindsurfAPI `ensureLs()` 启动受管 LS（`--server_port --csrf_token --codeium_dir --database_dir --detect_proxy=false`），不要连 Windsurf app 的 `--random_port` 子进程或 stale `~/.rcc` 端口。

@@ -80,4 +80,32 @@ describe('snapshot-utils memory guard', () => {
     expect(stages).toContain('stage_39');
     expect(stages).not.toContain('stage_0');
   });
+
+  it('RED: forwards providerKey and groupRequestId into native snapshot hooks so --snap responses can finalize out of __pending__', async () => {
+    process.env.ROUTECODEX_SNAPSHOT_STAGES = 'provider-response';
+    const { createSnapshotWriter } = await import('../../sharedmodule/llmswitch-core/src/conversion/snapshot-utils.js');
+    const writer = createSnapshotWriter({
+      requestId: 'req_snapshot_finalize_chain_1',
+      endpoint: '/v1/responses',
+      providerKey: 'windsurf.ws-pro-4.gpt-5.3-codex',
+      groupRequestId: 'openai-responses-windsurf.ws-pro-4-gpt-5.3-codex-20260522T160620130-221799-483'
+    });
+    expect(writer).toBeTruthy();
+
+    writer?.('provider-response', { ok: true, status: 502 });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(writeSnapshotViaHooksWithNativeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endpoint: '/v1/responses',
+        stage: 'provider-response',
+        requestId: 'req_snapshot_finalize_chain_1',
+        providerKey: 'windsurf.ws-pro-4.gpt-5.3-codex',
+        groupRequestId: 'openai-responses-windsurf.ws-pro-4-gpt-5.3-codex-20260522T160620130-221799-483',
+        verbosity: 'verbose',
+        data: { ok: true, status: 502 }
+      })
+    );
+  });
+
 });

@@ -1428,6 +1428,16 @@ fn resolve_apply_patch_tool_mode_from_tools(tools_raw: &Value) -> Option<String>
         if name != "apply_patch" {
             continue;
         }
+        let has_hashline_filepath = fn_obj
+            .and_then(|obj| obj.get("parameters"))
+            .and_then(|v| v.as_object())
+            .and_then(|row| row.get("properties"))
+            .and_then(|v| v.as_object())
+            .map(|properties| properties.contains_key("filePath") || properties.contains_key("file_path"))
+            .unwrap_or(false);
+        if has_hashline_filepath {
+            return Some("hashline".to_string());
+        }
         return Some("schema".to_string());
     }
     None
@@ -3354,6 +3364,47 @@ mod tests {
     }
 
     #[test]
+    fn test_run_hub_pipeline_extracts_hashline_mode_when_filepath_declared() {
+        let input = HubPipelineInput {
+            request_id: "req_apply_patch_hashline".to_string(),
+            endpoint: "/v1/chat/completions".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "model": "gpt-4",
+                "messages": [{"role": "user", "content": "hi"}],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "apply_patch",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "patch": {"type": "string"},
+                                "filePath": {"type": "string"}
+                            }
+                        }
+                    }
+                }]
+            }),
+            metadata: json!({}),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "request".to_string(),
+            stage: "inbound".to_string(),
+        };
+        let result = run_hub_pipeline(input).expect("hub pipeline");
+        let metadata = result.metadata.expect("metadata value");
+        assert_eq!(
+            metadata
+                .get("runtime")
+                .and_then(|v| v.get("applyPatchToolMode"))
+                .and_then(|v| v.as_str()),
+            Some("hashline")
+        );
+    }
+
+    #[test]
     fn test_run_hub_pipeline_merges_stop_message_tmux_aliases() {
         let input = HubPipelineInput {
             request_id: "req_stop_msg".to_string(),
@@ -4997,6 +5048,28 @@ mod tests {
         ]);
         let mode = resolve_apply_patch_tool_mode_from_tools(&tools);
         assert_eq!(mode.as_deref(), Some("schema"));
+    }
+
+    #[test]
+    fn test_resolve_apply_patch_tool_mode_from_tools_declared_filepath_prefers_hashline() {
+        let tools = json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "apply_patch",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "patch": { "type": "string" },
+                            "filePath": { "type": "string" }
+                        },
+                        "required": ["patch"]
+                    }
+                }
+            }
+        ]);
+        let mode = resolve_apply_patch_tool_mode_from_tools(&tools);
+        assert_eq!(mode.as_deref(), Some("hashline"));
     }
 
     #[test]

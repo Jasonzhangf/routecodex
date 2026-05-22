@@ -16,7 +16,7 @@ const APPLY_PATCH_SANDBOX_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_SANDBO
 const APPLY_PATCH_PATH_MISSING_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_PATH_NOT_FOUND] apply_patch 读取目标文件失败：路径不存在或不在当前 workspace。下一步：确认路径真实存在且使用 workspace 相对路径（如 src/...），不要以 / 或盘符开头。";
 const APPLY_PATCH_CONFLICT_MARKER_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_CONFLICT_MARKERS] apply_patch 检测到 merge/conflict 标记被直接塞进了 Update File hunk。下一步：先读取目标文件最新内容，再只保留真正的 `@@` patch hunk；不要发送 `<<<<<<<` / `=======` / `>>>>>>>`。";
 const APPLY_PATCH_CONTEXT_MISMATCH_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_CONTEXT_MISMATCH] apply_patch 的 hunk 上下文与当前文件不匹配。下一步：必须先重新读取目标文件最新内容，再用更小且唯一的上下文重建 patch；不要继续猜 `@@ -x,y +x,y @@` 行号范围。";
-const APPLY_PATCH_MIXED_SYNTAX_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_MIXED_SYNTAX] apply_patch 混入了 GNU/git diff 头。模型输出时只能发送 canonical internal patch grammar：如果已经使用 `*** Begin Patch`，块内不要再写 `--- a/...` / `+++ b/...`。";
+const APPLY_PATCH_MIXED_SYNTAX_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_MIXED_SYNTAX] apply_patch 只能使用单一 canonical patch grammar；不要混入 hashline 前缀、GNU/git diff 头，或把多种格式揉在同一 patch 里。";
 const APPLY_PATCH_EXPECTED_LINES_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_EXPECTED_LINES_MISMATCH] apply_patch 没找到待替换原文，通常说明文件已经变化或上下文过大。下一步：先重读目标文件最新内容，再用更小、唯一的上下文重试；必要时把大 patch 拆成多次小 patch。";
 const APPLY_PATCH_HUNK_SHAPE_HINT: &str = "\n\n[RouteCodex hint][APPLY_PATCH_HUNK_SHAPE_INVALID] apply_patch 的 Update File hunk 形状不对：`@@` 之后的每一行都必须以前缀开头——空格=上下文，`-`=删除，`+`=新增；不要把原文件正文直接贴进 hunk。下一步：先用 `nl -ba <file>` 读取最新文件（保留空行编号），再基于真实内容重建一个更小、更唯一的 hunk。";
 

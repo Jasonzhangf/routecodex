@@ -41,6 +41,36 @@ const readNumber = (value: unknown): number | undefined => {
   return value;
 };
 
+const shouldPassApplyPatchRecordToNative = (value: unknown): value is UnknownRecord => {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const keys = Object.keys(value);
+  if (keys.length === 0) {
+    return true;
+  }
+  const nestedInput = value.input;
+  return typeof value.patch === 'string'
+    || typeof value.input === 'string'
+    || typeof value.filePath === 'string'
+    || typeof value.file_path === 'string'
+    || (isRecord(nestedInput)
+      && (typeof nestedInput.patch === 'string'
+        || typeof nestedInput.input === 'string'
+        || typeof nestedInput.filePath === 'string'
+        || typeof nestedInput.file_path === 'string'))
+    || Array.isArray(value.changes)
+    || typeof value.instructions === 'string'
+    || typeof value.file === 'string'
+    || typeof value.path === 'string'
+    || typeof value.filepath === 'string'
+    || typeof value.filename === 'string'
+    || typeof value.style === 'string'
+    || typeof value.onClick === 'string'
+    || typeof value.cmd === 'string'
+    || typeof value.command === 'string';
+};
+
 // JSON parsing/repair helpers are shared via tools/args-json.ts
 
 const toJson = (value: unknown): string => {
@@ -133,7 +163,20 @@ export function validateToolCall(
 
   switch (normalizedName) {
     case 'apply_patch': {
-      const validation = validateApplyPatchArgumentsWithNative(rawArgsAny);
+      const rawArgsWasObject = (() => {
+        if (typeof argsString !== 'string') {
+          return isRecord(rawArgsAny);
+        }
+        const trimmed = argsString.trim();
+        return trimmed.startsWith('{') && trimmed.endsWith('}') && isRecord(rawArgsAny);
+      })();
+      const applyPatchArgsSource =
+        rawArgsWasObject && shouldPassApplyPatchRecordToNative(rawArgsAny)
+          ? rawArgsAny
+          : typeof argsString === 'string'
+            ? argsString
+            : rawArgsAny;
+      const validation = validateApplyPatchArgumentsWithNative(applyPatchArgsSource);
       if (!validation.ok) {
         return {
           ok: false,

@@ -126,6 +126,85 @@ describe('provider-traffic-governor', () => {
     expect(policy.rpm.acquireTimeoutMs).toBe(23000);
   });
 
+  it('forces Windsurf account runtimes to single concurrency even when config asks for more', () => {
+    const policy = resolveProviderTrafficPolicy(
+      createRuntime({
+        providerId: 'windsurf',
+        providerFamily: 'windsurf',
+        runtimeKey: 'windsurf.ws-pro-4',
+        concurrency: {
+          maxInFlight: 3,
+          acquireTimeoutMs: 12000,
+          staleLeaseMs: 150000
+        }
+      }),
+      'windsurf.ws-pro-4.gpt-5.4-medium'
+    );
+    expect(policy.concurrency.maxInFlight).toBe(1);
+    expect(policy.concurrency.acquireTimeoutMs).toBe(12000);
+  });
+
+
+
+  it('RED: Windsurf runtime must stay single-concurrency even when persisted adaptive state says currentCap > 1', async () => {
+    const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-windsurf-adaptive-${process.pid}-${randomUUID()}`);
+    const adaptivePath = path.join(rootDir, 'dynamic-concurrency-overrides.json');
+    const prevAdaptivePath = process.env.ROUTECODEX_DYNAMIC_CONCURRENCY_CONFIG_PATH;
+    process.env.ROUTECODEX_DYNAMIC_CONCURRENCY_CONFIG_PATH = adaptivePath;
+    await fs.mkdir(rootDir, { recursive: true });
+    await fs.writeFile(adaptivePath, JSON.stringify({
+      version: 1,
+      updatedAt: Date.now(),
+      runtimes: {
+        'windsurf.ws-pro-4': {
+          baseCap: 3,
+          minCap: 1,
+          hardMaxCap: 6,
+          currentCap: 2,
+          tentativeCap: 3,
+          safeCap: 2,
+          cooldownUntilMs: 0,
+          saturatedNo429Streak: 5,
+          saturated429Streak: 0,
+          blockedBackoffLevel: 0,
+          blockedBackoffUntilMs: 0,
+          triedIncreaseCaps: [2],
+          updatedAtMs: Date.now()
+        }
+      }
+    }));
+    const governor = new ProviderTrafficGovernor(rootDir);
+    const runtime = createRuntime({
+      runtimeKey: 'windsurf.ws-pro-4',
+      providerId: 'windsurf',
+      providerFamily: 'windsurf',
+      concurrency: { maxInFlight: 3, acquireTimeoutMs: 150, staleLeaseMs: 60000 }
+    });
+    try {
+      const first = await governor.acquire({
+        runtimeKey: runtime.runtimeKey,
+        providerKey: 'windsurf.ws-pro-4.gpt-5.4-medium',
+        requestId: 'windsurf-first',
+        runtime
+      });
+      expect(first.policy.concurrency.maxInFlight).toBe(1);
+      await expect(governor.acquire({
+        runtimeKey: runtime.runtimeKey,
+        providerKey: 'windsurf.ws-pro-4.gpt-5.3-codex',
+        requestId: 'windsurf-second',
+        runtime
+      })).rejects.toBeInstanceOf(ProviderTrafficSaturatedError);
+      await governor.release(first.permit);
+    } finally {
+      if (typeof prevAdaptivePath === 'string') {
+        process.env.ROUTECODEX_DYNAMIC_CONCURRENCY_CONFIG_PATH = prevAdaptivePath;
+      } else {
+        delete process.env.ROUTECODEX_DYNAMIC_CONCURRENCY_CONFIG_PATH;
+      }
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
   it('defaults to shared provider-traffic root outside test workers', async () => {
     const prevShared = process.env.ROUTECODEX_PROVIDER_TRAFFIC_SHARED;
     const prevServerId = process.env.ROUTECODEX_SERVER_ID;

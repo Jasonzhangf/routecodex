@@ -5,7 +5,6 @@ use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use crate::hashline::{self, HashlineNativeEditInput};
 use crate::resp_process_stage1_tool_governance::normalize_apply_patch_schema_args;
 
 fn normalize_shell_like_output_text(raw: &str) -> String {
@@ -255,125 +254,6 @@ fn is_write_stdin_tool_name(raw_name: &str) -> bool {
     )
 }
 
-fn is_apply_patch_tool_name(raw_name: &str) -> bool {
-    raw_name.trim().eq_ignore_ascii_case("apply_patch")
-}
-
-fn looks_like_hashline_patch(raw: &str) -> bool {
-    let first = raw.lines().find(|line| !line.trim().is_empty()).unwrap_or("").trim_start();
-    matches!(first.chars().next(), Some('<') | Some('+') | Some('-') | Some('='))
-        && first.chars().nth(1).map(|ch| ch.is_whitespace()).unwrap_or(true)
-}
-
-fn read_apply_patch_source(args: &Map<String, Value>, raw_args: Option<&Value>) -> Option<String> {
-    args.get("patch")
-        .or_else(|| args.get("input"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_string())
-        .or_else(|| raw_args.and_then(extract_apply_patch_text_local))
-}
-
-fn extract_apply_patch_text_local(raw_args: &Value) -> Option<String> {
-    match raw_args {
-        Value::String(raw) => {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        }
-        Value::Object(row) => row
-            .get("patch")
-            .or_else(|| row.get("input"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| value.to_string()),
-        _ => None,
-    }
-}
-
-fn read_hashline_file_path(args: &Map<String, Value>) -> Option<String> {
-    read_trimmed_string(args.get("filePath"))
-        .or_else(|| read_trimmed_string(args.get("file_path")))
-        .or_else(|| {
-            args.get("input")
-                .and_then(Value::as_object)
-                .and_then(|row| read_trimmed_string(row.get("filePath")))
-        })
-        .or_else(|| {
-            args.get("input")
-                .and_then(Value::as_object)
-                .and_then(|row| read_trimmed_string(row.get("file_path")))
-        })
-}
-
-fn resolve_hashline_target_path(file_path: &str, workdir: Option<&str>) -> PathBuf {
-    let candidate = PathBuf::from(file_path);
-    if candidate.is_absolute() {
-        return candidate;
-    }
-    if let Some(base) = workdir {
-        return Path::new(base).join(candidate);
-    }
-    candidate
-}
-
-fn normalize_hashline_apply_patch_arguments(
-    raw_arguments: Option<&Value>,
-) -> Result<Option<String>, napi::Error> {
-    let args = parse_json_record(raw_arguments).unwrap_or_default();
-    let Some(patch_source) = read_apply_patch_source(&args, raw_arguments) else {
-        return Ok(None);
-    };
-    if !looks_like_hashline_patch(&patch_source) {
-        return Ok(None);
-    }
-
-    let file_path = read_hashline_file_path(&args).ok_or_else(|| {
-        napi::Error::from_reason(
-            "hashline apply_patch requires explicit filePath/file_path in arguments".to_string(),
-        )
-    })?;
-    let workdir = read_workdir_from_args(&args);
-    let resolved_path = resolve_hashline_target_path(file_path.as_str(), workdir.as_deref());
-    let file_content = fs::read_to_string(&resolved_path).map_err(|err| {
-        napi::Error::from_reason(format!(
-            "hashline apply_patch failed to read target file `{}`: {}",
-            resolved_path.display(),
-            err
-        ))
-    })?;
-
-    let result = hashline::run_hashline_native_edit(HashlineNativeEditInput {
-        patch: patch_source,
-        file_path,
-        file_content,
-    });
-    if !result.ok {
-        let message = result
-            .error
-            .as_ref()
-            .map(|err| format!("{}: {}", format!("{:?}", err.code), err.message))
-            .unwrap_or_else(|| "hashline native edit failed".to_string());
-        return Err(napi::Error::from_reason(message));
-    }
-    let normalized_patch = result.normalized_patch.ok_or_else(|| {
-        napi::Error::from_reason(
-            "hashline native edit returned ok without normalized patch".to_string(),
-        )
-    })?;
-    let mut out = Map::new();
-    out.insert("patch".to_string(), Value::String(normalized_patch.clone()));
-    out.insert("input".to_string(), Value::String(normalized_patch));
-    serde_json::to_string(&Value::Object(out))
-        .map(Some)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
 fn is_shell_like_tool_name_token(name: Option<String>) -> bool {
     let normalized = name.unwrap_or_default().trim().to_string();
     if normalized.is_empty() {
@@ -495,22 +375,6 @@ fn normalize_shell_like_function_call_arguments(
     Some((resolved_name, arguments))
 }
 
-fn normalize_apply_patch_function_call_arguments(
-    raw_name: &str,
-    raw_arguments: Option<&Value>,
-) -> Result<Option<(String, String)>, napi::Error> {
-    if !is_apply_patch_tool_name(raw_name) {
-        return Ok(None);
-    }
-    if let Some(arguments) = normalize_hashline_apply_patch_arguments(raw_arguments)? {
-        return Ok(Some(("apply_patch".to_string(), arguments)));
-    }
-    Ok(Some((
-        "apply_patch".to_string(),
-        normalize_apply_patch_schema_args(raw_arguments).0,
-    )))
-}
-
 fn normalize_message_tool_calls(
     payload: &mut Value,
     requested_tool_names: &HashSet<String>,
@@ -592,16 +456,6 @@ fn normalize_message_tool_calls(
                 }
                 continue;
             }
-            if let Some((resolved_name, arguments)) = normalize_apply_patch_function_call_arguments(
-                raw_name.as_str(),
-                fn_row.get("arguments"),
-            )? {
-                if resolved_name != raw_name {
-                    fn_row.insert("name".to_string(), Value::String(resolved_name));
-                }
-                fn_row.insert("arguments".to_string(), Value::String(arguments));
-                continue;
-            }
             if let Some((resolved_name, arguments)) =
                 normalize_write_stdin_function_call_arguments(
                     raw_name.as_str(),
@@ -659,16 +513,6 @@ fn normalize_responses_input_function_calls(
                         if let Some(call_id) = call_id {
                             shell_like_call_ids.insert(call_id);
                         }
-                    } else if let Some((resolved_name, arguments)) =
-                        normalize_apply_patch_function_call_arguments(
-                            raw_name.as_str(),
-                            item_row.get("arguments"),
-                        )?
-                    {
-                        if resolved_name != raw_name {
-                            item_row.insert("name".to_string(), Value::String(resolved_name));
-                        }
-                        item_row.insert("arguments".to_string(), Value::String(arguments));
                     } else if let Some((resolved_name, arguments)) =
                         normalize_write_stdin_function_call_arguments(
                             raw_name.as_str(),
@@ -979,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_apply_patch_inside_message_tool_calls_to_canonical_patch_shape() {
+    fn does_not_normalize_apply_patch_inside_message_tool_calls_anymore() {
         let mut payload = json!({
           "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
           "messages": [
@@ -1003,16 +847,11 @@ mod tests {
         let args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
             .as_str()
             .expect("arguments text");
-        let args: Value = serde_json::from_str(args_text).expect("args object");
-        let patch = args["patch"].as_str().expect("patch");
-        let input = args["input"].as_str().expect("input");
-        assert_eq!(patch, input);
-        assert!(patch.starts_with("*** Begin Patch"));
-        assert!(patch.contains("*** Update File: note.txt"));
+        assert_eq!(args_text, "{\"input\":\"*** note.txt\\n--- note.txt\\n@@ -0,0 +1 @@\\n+hello\"}");
     }
 
     #[test]
-    fn shell_wrapped_apply_patch_is_normalized_to_empty_patch_shape() {
+    fn does_not_normalize_shell_wrapped_apply_patch_anymore() {
         let mut payload = json!({
           "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
           "messages": [
@@ -1036,9 +875,10 @@ mod tests {
         let args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
             .as_str()
             .expect("arguments text");
-        let args: Value = serde_json::from_str(args_text).expect("args object");
-        assert_eq!(args["patch"], "");
-        assert_eq!(args["input"], "");
+        assert_eq!(
+            args_text,
+            "bash -lc \"echo hi && apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/nope.ts\n+console.log('nope');\n*** End Patch\nPATCH\""
+        );
     }
 
     #[test]
@@ -1427,7 +1267,7 @@ mod tests {
     }
 
     #[test]
-    fn hashline_apply_patch_requires_explicit_filepath() {
+    fn does_not_validate_hashline_apply_patch_requires_explicit_filepath_anymore() {
         let mut payload = json!({
           "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
           "messages": [
@@ -1447,27 +1287,38 @@ mod tests {
           ]
         });
 
-        let err = normalize_shell_like_tool_calls_before_governance(&mut payload)
-            .expect_err("should fail without filePath");
-        assert!(
-            err.reason.contains("filePath/file_path"),
-            "unexpected error: {}",
-            err.reason
-        );
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
     }
 
     #[test]
-    fn hashline_apply_patch_normalizes_with_filepath_and_cwd() {
-        let millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_millis();
-        let temp_dir = std::env::temp_dir().join(format!("routecodex-hashline-test-{}", millis));
-        fs::create_dir_all(&temp_dir).expect("create temp dir");
-        let target_path = temp_dir.join("note.txt");
-        fs::write(&target_path, "hello").expect("write seed file");
+    fn does_not_validate_hashline_target_context_anymore() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
+          "messages": [
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_hashline_missing_target_context",
+                  "type": "function",
+                  "function": {
+                    "name": "apply_patch",
+                    "arguments": {
+                      "patch": "+ 2 deadbeef\nhello",
+                      "filePath": "note.txt"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        });
 
-        let anchor = compute_line_hash("hello");
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+    }
+
+    #[test]
+    fn does_not_normalize_hashline_apply_patch_with_filepath_and_cwd_anymore() {
         let mut payload = json!({
           "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
           "messages": [
@@ -1480,9 +1331,9 @@ mod tests {
                   "function": {
                     "name": "apply_patch",
                     "arguments": {
-                      "patch": format!("= 1 {}\nworld", anchor),
+                      "patch": "= 1 123\nworld",
                       "filePath": "note.txt",
-                      "cwd": temp_dir.to_string_lossy().to_string()
+                      "cwd": "/tmp/hashline-owner-should-not-run"
                     }
                   }
                 }
@@ -1496,12 +1347,43 @@ mod tests {
             .as_str()
             .expect("arguments text");
         let args: Value = serde_json::from_str(args_text).expect("args object");
-        let patch = args["patch"].as_str().expect("patch");
-        assert!(patch.starts_with("*** Begin Patch"));
-        assert!(patch.contains("*** Update File: note.txt"));
-        assert!(patch.contains("+world"));
+        assert_eq!(args["patch"], "= 1 123\nworld");
+        assert_eq!(args["filePath"], "note.txt");
+    }
 
-        let _ = fs::remove_file(&target_path);
-        let _ = fs::remove_dir(&temp_dir);
+    #[test]
+    fn does_not_normalize_nested_hashline_apply_patch_anymore() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
+          "messages": [
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_hashline_nested",
+                  "type": "function",
+                  "function": {
+                    "name": "apply_patch",
+                    "arguments": {
+                      "input": {
+                        "patch": "+ 2 deadbeef\nhello",
+                        "filePath": "note.txt"
+                      },
+                      "cwd": "/tmp/hashline-owner-should-not-run"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let args_text = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments text");
+        let args: Value = serde_json::from_str(args_text).expect("args object");
+        assert_eq!(args["input"]["patch"], "+ 2 deadbeef\nhello");
+        assert_eq!(args["input"]["filePath"], "note.txt");
     }
 }

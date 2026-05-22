@@ -1479,9 +1479,14 @@ mod tests {
                 "baseURL": "https://server.self-serve.windsurf.com",
                 "extensions": {
                     "windsurf": {
-                        "transportBackend": "grpc",
+                        "pollIntervalMs": 800,
+                        "pollMaxWaitMs": 120000,
+                        "enableThinking": true,
                         "lsPort": 42101,
-                        "csrfToken": "csrf-token"
+                        "csrfToken": "windsurf-api-csrf-fixed-token",
+                        "sessionId": "routecodex-windsurf-session-1",
+                        "workspacePath": "/Users/fanzhang/Documents/github/routecodex",
+                        "workspaceUri": "file:///Users/fanzhang/Documents/github/routecodex"
                     }
                 },
                 "auth": {
@@ -1506,9 +1511,25 @@ mod tests {
         assert_eq!(auth["mobile"], "2094423@qq.com");
         assert_eq!(auth["password"], "welcome4zcam#");
         let extensions = &parsed["runtimeEntries"]["windsurf.ws-pro-1"]["extensions"]["windsurf"];
-        assert_eq!(extensions["transportBackend"], "grpc");
+        assert_eq!(extensions["pollIntervalMs"], 800);
+        assert_eq!(extensions["pollMaxWaitMs"], 120000);
+        assert_eq!(extensions["enableThinking"], true);
         assert_eq!(extensions["lsPort"], 42101);
-        assert_eq!(extensions["csrfToken"], "csrf-token");
+        assert_eq!(extensions["csrfToken"], "windsurf-api-csrf-fixed-token");
+        assert_eq!(extensions["sessionId"], "routecodex-windsurf-session-1");
+        assert_eq!(extensions["workspacePath"], "/Users/fanzhang/Documents/github/routecodex");
+        assert_eq!(extensions["workspaceUri"], "file:///Users/fanzhang/Documents/github/routecodex");
+        let keys = extensions.as_object().expect("windsurf extensions should be object").keys().cloned().collect::<Vec<_>>();
+        assert_eq!(keys, vec![
+            "csrfToken",
+            "enableThinking",
+            "lsPort",
+            "pollIntervalMs",
+            "pollMaxWaitMs",
+            "sessionId",
+            "workspacePath",
+            "workspaceUri"
+        ]);
     }
 
 
@@ -1812,13 +1833,37 @@ fn normalize_windsurf_options(provider: &Map<String, Value>) -> Option<Value> {
         return None;
     };
     let mut out = Map::new();
-    if let Some(backend) = source
-        .get("transportBackend")
+    if let Some(enable_thinking) = source.get("enableThinking").and_then(Value::as_bool) {
+        out.insert("enableThinking".to_string(), Value::Bool(enable_thinking));
+    }
+    if let Some(default_reasoning_effort) = source
+        .get("defaultReasoningEffort")
         .and_then(Value::as_str)
-        .map(|value| value.trim().to_lowercase())
-        .filter(|value| value == "grpc" || value == "cascade-cloud")
+        .map(|value| value.trim())
+        .filter(|value| matches!(*value, "xhigh" | "high" | "medium" | "low"))
     {
-        out.insert("transportBackend".to_string(), Value::String(backend));
+        out.insert(
+            "defaultReasoningEffort".to_string(),
+            Value::String(default_reasoning_effort.to_string()),
+        );
+    }
+    if let Some(sanitize_paths) = source.get("sanitizePaths").and_then(Value::as_bool) {
+        out.insert("sanitizePaths".to_string(), Value::Bool(sanitize_paths));
+    }
+    if let Some(preserve_upstream_identity) = source.get("preserveUpstreamIdentity").and_then(Value::as_bool) {
+        out.insert(
+            "preserveUpstreamIdentity".to_string(),
+            Value::Bool(preserve_upstream_identity),
+        );
+    }
+    if let Some(tool_emulation_strict) = source.get("toolEmulationStrict").and_then(Value::as_bool) {
+        out.insert("toolEmulationStrict".to_string(), Value::Bool(tool_emulation_strict));
+    }
+    if let Some(poll_interval_ms) = source.get("pollIntervalMs").and_then(Value::as_i64).filter(|value| *value > 0) {
+        out.insert("pollIntervalMs".to_string(), Value::Number(poll_interval_ms.into()));
+    }
+    if let Some(poll_max_wait_ms) = source.get("pollMaxWaitMs").and_then(Value::as_i64).filter(|value| *value > 0) {
+        out.insert("pollMaxWaitMs".to_string(), Value::Number(poll_max_wait_ms.into()));
     }
     if let Some(ls_port) = source.get("lsPort").and_then(Value::as_i64).filter(|value| *value > 0) {
         out.insert("lsPort".to_string(), Value::Number(ls_port.into()));
@@ -1831,11 +1876,29 @@ fn normalize_windsurf_options(provider: &Map<String, Value>) -> Option<Value> {
     {
         out.insert("csrfToken".to_string(), Value::String(csrf_token.to_string()));
     }
-    if let Some(poll_interval_ms) = source.get("pollIntervalMs").and_then(Value::as_i64).filter(|value| *value > 0) {
-        out.insert("pollIntervalMs".to_string(), Value::Number(poll_interval_ms.into()));
+    if let Some(session_id) = source
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        out.insert("sessionId".to_string(), Value::String(session_id.to_string()));
     }
-    if let Some(poll_max_wait_ms) = source.get("pollMaxWaitMs").and_then(Value::as_i64).filter(|value| *value > 0) {
-        out.insert("pollMaxWaitMs".to_string(), Value::Number(poll_max_wait_ms.into()));
+    if let Some(workspace_path) = source
+        .get("workspacePath")
+        .and_then(Value::as_str)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        out.insert("workspacePath".to_string(), Value::String(workspace_path.to_string()));
+    }
+    if let Some(workspace_uri) = source
+        .get("workspaceUri")
+        .and_then(Value::as_str)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        out.insert("workspaceUri".to_string(), Value::String(workspace_uri.to_string()));
     }
     if let Some(api_base_url) = source
         .get("apiBaseUrl")

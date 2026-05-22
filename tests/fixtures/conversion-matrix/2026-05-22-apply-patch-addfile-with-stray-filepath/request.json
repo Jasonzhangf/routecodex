@@ -1,0 +1,12 @@
+{
+  "tool_calls": [
+    {
+      "id": "call_apply_patch_addfile_with_stray_filepath",
+      "type": "function",
+      "function": {
+        "name": "apply_patch",
+        "arguments": "{\"filePath\":\"test_apply_patch/new_file.txt\",\"patch\":\"*** Begin Patch\\n*** Add File: test_apply_patch/new_file.txt\\n+Line 1: This is a new file\\n+Line 2: Testing add file functionality\\n+Line 3: All systems go\\n*** End Patch\"}"
+      }
+    }
+  ]
+}

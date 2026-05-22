@@ -19,7 +19,7 @@ export async function buildResponsesFormatEnvelopeFromChat(
   ctx: AdapterContext,
 ): Promise<FormatEnvelope<ResponsesPayload>> {
   const requestId = typeof ctx.requestId === 'string' && ctx.requestId.trim().length ? ctx.requestId : 'unknown';
-  const envelopeMetadata = chat.metadata && isJsonObject(chat.metadata) ? (chat.metadata as JsonObject) : undefined;
+  const envelopeMetadata = chat.metadata && isJsonObject(chat.metadata as unknown as JsonValue) ? (chat.metadata as JsonObject) : undefined;
   const responsesContext = selectResponsesContextSnapshot(chat, envelopeMetadata);
   const semanticsParameters = readResponsesRequestParametersFromSemantics(chat);
   const mergedParameters =
@@ -36,7 +36,7 @@ export async function buildResponsesFormatEnvelopeFromChat(
       direction: 'response',
       payload: submitPayload,
       meta: {
-        context: ctx,
+        context: ctx as unknown as JsonValue as unknown as JsonValue,
         submitToolOutputs: true
       }
     };
@@ -48,8 +48,8 @@ export async function buildResponsesFormatEnvelopeFromChat(
   const requestShape: JsonObject = {
     ...(mergedParameters || {}),
     model: modelValue,
-    messages: chat.messages,
-    tools: chat.tools,
+    messages: chat.messages as unknown as JsonValue,
+    tools: chat.tools as unknown as JsonValue,
     semantics:
       chat.semantics && typeof chat.semantics === 'object'
         ? (chat.semantics as JsonObject)
@@ -86,7 +86,7 @@ export async function buildResponsesFormatEnvelopeFromChat(
     direction: 'response',
     payload: responses as ResponsesPayload,
     meta: {
-      context: ctx
+      context: ctx as unknown as JsonValue as unknown as JsonObject
     }
   };
 

@@ -80,63 +80,6 @@ fn normalize_tool_name(raw: Option<&str>, mode: &str) -> Option<String> {
     }
 }
 
-fn ensure_apply_patch_schema(candidate: Option<&Value>) -> Value {
-    let mut schema = match candidate {
-        Some(Value::Object(map)) => map.clone(),
-        _ => Map::new(),
-    };
-
-    if !schema.contains_key("type") {
-        schema.insert("type".to_string(), Value::String("object".to_string()));
-    }
-
-    let mut properties = match schema.get("properties") {
-        Some(Value::Object(map)) => map.clone(),
-        _ => Map::new(),
-    };
-
-    let mut patch = Map::new();
-    patch.insert("type".to_string(), Value::String("string".to_string()));
-    patch.insert(
-        "description".to_string(),
-        Value::String(
-            "Raw patch text only. Author exactly one canonical patch body in `patch`. `input` is a compatibility alias only.".to_string(),
-        ),
-    );
-    properties.insert("patch".to_string(), Value::Object(patch));
-
-    let mut input = Map::new();
-    input.insert("type".to_string(), Value::String("string".to_string()));
-    input.insert(
-        "description".to_string(),
-        Value::String("Compatibility alias of patch. Prefer patch.".to_string()),
-    );
-    properties.insert("input".to_string(), Value::Object(input));
-
-    schema.insert("properties".to_string(), Value::Object(properties));
-
-    let mut required: Vec<Value> = match schema.get("required") {
-        Some(Value::Array(values)) => values
-            .iter()
-            .filter_map(|v| v.as_str().map(|s| Value::String(s.to_string())))
-            .collect(),
-        _ => Vec::new(),
-    };
-    let has_patch = required
-        .iter()
-        .any(|v| v.as_str().map(|s| s == "patch").unwrap_or(false));
-    if !has_patch {
-        required.push(Value::String("patch".to_string()));
-    }
-    schema.insert("required".to_string(), Value::Array(required));
-
-    if !matches!(schema.get("additionalProperties"), Some(Value::Bool(_))) {
-        schema.insert("additionalProperties".to_string(), Value::Bool(false));
-    }
-
-    Value::Object(schema)
-}
-
 fn ensure_web_search_schema(candidate: Option<&Value>) -> Value {
     let mut schema = match candidate {
         Some(Value::Object(map)) => map.clone(),
@@ -206,9 +149,6 @@ fn normalize_generic_tool_schema(candidate: Option<&Value>) -> Option<Value> {
 
 pub(crate) fn enforce_builtin_tool_schema(name: &str, candidate: Option<&Value>) -> Option<Value> {
     let normalized = name.trim().to_ascii_lowercase();
-    if normalized == "apply_patch" {
-        return Some(ensure_apply_patch_schema(candidate));
-    }
     if normalized == "web_search" || normalized.starts_with("web_search") {
         return Some(ensure_web_search_schema(candidate));
     }
@@ -216,14 +156,8 @@ pub(crate) fn enforce_builtin_tool_schema(name: &str, candidate: Option<&Value>)
 }
 
 pub(crate) fn rewrite_builtin_tool_description(name: &str, existing: Option<&Value>) -> Option<String> {
-    let normalized = name.trim().to_ascii_lowercase();
-    let base = read_trimmed_string(existing);
-    if normalized != "apply_patch" {
-        return base;
-    }
-    Some(
-        r#"Use `apply_patch` to edit files. Author exactly one canonical patch body in `patch`. `input` is a compatibility alias only."#.to_string(),
-    )
+    let _ = name;
+    read_trimmed_string(existing)
 }
 
 fn resolve_tool_name(candidates: &[Option<&Value>], sanitize_mode: &str) -> Option<String> {
@@ -317,7 +251,7 @@ fn build_namespace_child_function(
 
     let mut out = Map::new();
     out.insert("type".to_string(), Value::String("function".to_string()));
-    out.insert("name".to_string(), Value::String(name));
+    out.insert("name".to_string(), Value::String(name.clone()));
     if let Some(text) = description {
         out.insert("description".to_string(), Value::String(text));
     }
@@ -441,7 +375,7 @@ fn bridge_tool_to_chat_definition_impl(tool: &Value, sanitize_mode: &str) -> Opt
     };
 
     let mut fn_out = Map::new();
-    fn_out.insert("name".to_string(), Value::String(name));
+    fn_out.insert("name".to_string(), Value::String(name.clone()));
     if let Some(text) = description {
         fn_out.insert("description".to_string(), Value::String(text));
     }
@@ -495,7 +429,7 @@ fn chat_tool_to_bridge_definition_impl(tool: &Value, sanitize_mode: &str) -> Opt
     }
 
     let mut fn_out = Map::new();
-    fn_out.insert("name".to_string(), Value::String(name));
+    fn_out.insert("name".to_string(), Value::String(name.clone()));
     if let Some(text) = description {
         fn_out.insert("description".to_string(), Value::String(text));
     }

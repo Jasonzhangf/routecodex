@@ -365,7 +365,7 @@ export function buildAnthropicFormatEnvelopeFromChat(
     direction: 'response',
     payload,
     meta: {
-      context: ctx
+      context: ctx as unknown as JsonValue
     }
   };
 }

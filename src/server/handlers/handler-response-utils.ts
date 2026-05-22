@@ -18,7 +18,7 @@ import {
 } from '../utils/request-log-color.js';
 import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
 import { extractClientModelId } from '../runtime/http-server/executor/provider-response-utils.js';
-import { createResponsesJsonToSseConverter, importCoreDist, requireCoreDist } from '../../modules/llmswitch/bridge.js';
+import { createResponsesJsonToSseConverter, importCoreDist, recordResponsesResponseForRequest, requireCoreDist } from '../../modules/llmswitch/bridge.js';
 
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);
 
@@ -1053,6 +1053,29 @@ export function sendPipelineResponse(
         completedLogged = true;
         logStreamRequestComplete(entryEndpoint, requestLabel, status, resolvedStreamFinishReason, requestLogContext);
       }
+      const closedBeforeTerminalEvent = !finishTracker.seenTerminalEvent;
+      if (closedBeforeTerminalEvent) {
+        logPipelineStage('response.sse.stream.error', requestLabel, {
+          message: 'stream closed before response.completed',
+          code: 'upstream_stream_incomplete'
+        });
+        if (!res.writableEnded && !res.destroyed) {
+          try {
+            const payload = {
+              type: 'error',
+              status: 502,
+              error: {
+                message: 'stream closed before response.completed',
+                code: 'upstream_stream_incomplete',
+                request_id: requestLabel
+              }
+            };
+            res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
+          } catch (writeError) {
+            logResponseNonBlockingError(`response.sse.stream.end.write_error_event:${requestLabel}`, writeError);
+          }
+        }
+      }
       if (!res.writableEnded && !res.destroyed) {
         try {
           res.end();
@@ -1110,6 +1133,21 @@ export function sendPipelineResponse(
   const clientBody = usageNormalized.payload;
   const sanitized = stripInternalKeysDeep(clientBody);
   const jsonFinishReason = deriveFinishReason(clientBody);
+  if (
+    entryEndpoint === '/v1/responses'
+    && sanitized
+    && typeof sanitized === 'object'
+    && !Array.isArray(sanitized)
+    && jsonFinishReason === 'tool_calls'
+  ) {
+    void recordResponsesResponseForRequest({
+      requestId: requestLabel,
+      response: sanitized as Record<string, unknown>,
+      routeHint: result.usageLogInfo?.routeName,
+    }).catch((error) => {
+      logResponseNonBlockingError(`responses-conversation-record:${requestLabel}`, error);
+    });
+  }
   getSessionExecutionStateTracker().recordJsonResponseComplete(requestLabel, jsonFinishReason);
   if (captureClientResponse) {
     void writeServerSnapshot({

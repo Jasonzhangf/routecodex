@@ -5,7 +5,7 @@ import type { JsonObject, JsonValue } from './json.js';
 export interface ChatMessageContentPart {
   type: string;
   text?: string;
-  [key: string]: JsonValue;
+  [key: string]: unknown;
 }
 
 export interface ChatToolCall {
@@ -15,7 +15,7 @@ export interface ChatToolCall {
     name: string;
     arguments: string;
   };
-  [key: string]: JsonValue;
+  [key: string]: unknown;
 }
 
 export interface ChatMessage {
@@ -23,7 +23,7 @@ export interface ChatMessage {
   content?: string | ChatMessageContentPart[] | null;
   tool_calls?: ChatToolCall[];
   name?: string;
-  [key: string]: JsonValue;
+  [key: string]: unknown;
 }
 
 export interface ChatToolDefinition {
@@ -45,14 +45,14 @@ export interface ChatToolDefinition {
     parameters?: JsonValue;
     strict?: boolean;
   };
-  [key: string]: JsonValue;
+  [key: string]: unknown;
 }
 
 export interface ChatToolOutput {
   tool_call_id: string;
   content: string;
   name?: string;
-  [key: string]: JsonValue;
+  [key: string]: unknown;
 }
 
 export interface MissingField extends JsonObject {
@@ -75,7 +75,7 @@ export interface AdapterContext {
   clientModelId?: string;
   toolCallIdStyle?: 'fc' | 'preserve';
   responsesResume?: JsonObject;
-  [key: string]: JsonValue;
+  [key: string]: unknown;
 }
 
 export type ChatContinuationStickyScope =
@@ -209,6 +209,6 @@ export interface ChatEnvelope {
   metadata: {
     context: AdapterContext;
     missingFields?: MissingField[];
-    [key: string]: JsonValue;
+    [key: string]: unknown;
   };
 }

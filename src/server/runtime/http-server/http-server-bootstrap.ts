@@ -7,6 +7,7 @@ import { buildProviderProfiles } from '../../../providers/profile/provider-profi
 import { logPipelineStage, shouldEmitStageEvent } from '../../utils/stage-logger.js';
 import { buildInfo } from '../../../build-info.js';
 import { buildVirtualRouterInputV2 } from '../../../config/virtual-router-builder.js';
+import { buildVirtualRouterInputFromUserConfig } from '../../../config/virtual-router-types.js';
 import {
   bootstrapVirtualRouterConfig,
   getHubPipelineCtor
@@ -32,6 +33,9 @@ export async function resolveVirtualRouterInput(server: any, userConfig: Unknown
   const vrNode = isRecord(root.virtualrouter) ? (root.virtualrouter as Record<string, unknown>) : null;
   const hasRoutingPolicyGroups = Boolean(vrNode && isRecord(vrNode.routingPolicyGroups));
   if (hasRoutingPolicyGroups) {
+    if (vrNode && isRecord(vrNode.providers) && Object.keys(vrNode.providers as Record<string, unknown>).length > 0) {
+      return buildVirtualRouterInputFromUserConfig(root) as UnknownObject;
+    }
     return (await buildVirtualRouterInputV2(root)) as UnknownObject;
   }
   if (vrNode) {
@@ -311,6 +315,16 @@ export function applyProviderProfileOverrides(server: any, runtime: ProviderRunt
   }
   if (!patched.rpm && profile.metadata?.rpm) {
     patched.rpm = profile.metadata.rpm;
+  }
+  if (profile.metadata?.windsurf) {
+    const nextExtensions: Record<string, unknown> =
+      patched.extensions && typeof patched.extensions === 'object' && !Array.isArray(patched.extensions)
+        ? { ...patched.extensions }
+        : {};
+    if (!nextExtensions.windsurf || typeof nextExtensions.windsurf !== 'object' || Array.isArray(nextExtensions.windsurf)) {
+      nextExtensions.windsurf = profile.metadata.windsurf;
+    }
+    patched.extensions = nextExtensions;
   }
 
   return canonicalizeRuntimeProvider(patched);

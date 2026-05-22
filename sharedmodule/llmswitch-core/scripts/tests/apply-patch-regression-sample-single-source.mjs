@@ -11,9 +11,13 @@ const projectRoot = path.resolve(
   '..',
 );
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function main() {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'llms-apply-patch-reg-'));
-  process.env.ROUTECODEX_APPLY_PATCH_REGRESSION_DIR = path.join(tmpRoot, 'apply_patch');
+  process.env.ROUTECODEX_ERRORSAMPLES_DIR = path.join(tmpRoot, 'apply_patch');
 
   const { validateToolCall } = await import(
     path.join(projectRoot, 'dist', 'tools', 'tool-registry.js')
@@ -25,6 +29,14 @@ async function main() {
   const invalidArgs = JSON.stringify({ patch: 'not a patch' });
   const validation = validateToolCall('apply_patch', invalidArgs);
   assert.equal(validation.ok, false, 'tool-registry path must stay invalid for non-patch payload');
+  captureApplyPatchRegression({
+    errorType: validation.reason || 'invalid_apply_patch_args',
+    originalArgs: invalidArgs,
+    normalizedArgs: invalidArgs,
+    validationError: validation.reason || 'invalid_apply_patch_args',
+    source: 'tool-registry.validateToolCall'
+  });
+  await sleep(50);
 
   const root = path.join(tmpRoot, 'apply_patch');
   const sampleFiles = [];
@@ -39,7 +51,7 @@ async function main() {
     }
   }
 
-  assert.ok(sampleFiles.length >= 1, 'expected at least one apply_patch regression sample');
+  assert.ok(sampleFiles.length >= 1, 'expected at least one explicit apply_patch regression sample');
 
   const samples = sampleFiles.map((file) => JSON.parse(fs.readFileSync(file, 'utf8')));
   const registrySample = samples.find((sample) => sample.source === 'tool-registry.validateToolCall');
@@ -79,13 +91,14 @@ async function main() {
     validationError: 'invalid_patch',
     source: 'cross-source.b'
   });
+  await sleep(50);
 
-  const invalidPatchDir = path.join(root, 'invalid_patch');
-  const invalidPatchSamples = fs
-    .readdirSync(invalidPatchDir)
+  const regressionDir = path.join(root, 'apply-patch-regression');
+  const regressionSamples = fs
+    .readdirSync(regressionDir)
     .filter((entry) => entry.endsWith('.json'))
-    .map((entry) => JSON.parse(fs.readFileSync(path.join(invalidPatchDir, entry), 'utf8')));
-  const crossSourceSamples = invalidPatchSamples.filter((sample) => String(sample.source).startsWith('cross-source.'));
+    .map((entry) => JSON.parse(fs.readFileSync(path.join(regressionDir, entry), 'utf8')));
+  const crossSourceSamples = regressionSamples.filter((sample) => String(sample.source).startsWith('cross-source.'));
   assert.equal(
     crossSourceSamples.length,
     2,

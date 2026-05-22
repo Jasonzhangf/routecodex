@@ -86,11 +86,11 @@ samples/mock-provider/
 ```
 
 ## 如何使用
-1. 将真实 provider 请求/响应落盘到 `~/.routecodex/codex-samples` 后，运行脚本提取并复制到本目录。
+1. 将真实 provider 请求/响应落盘到 `~/.rcc/codex-samples` 后，运行脚本提取并复制到本目录。
 2. 脚本自动重命名并生成 `_registry/index.json`。
 3. Mock Provider 在 CI 或本地测试时，根据 reqId 前缀匹配入口，再按 providerId+model 查找最接近时间戳的样本进行回放。
 
 ## 脚本接口（待实现）
-- `npm run mock:extract`   # 从 ~/.routecodex/codex-samples 提取并落盘到本目录
+- `npm run mock:extract`   # 从 ~/.rcc/codex-samples 提取并落盘到本目录
 - `npm run mock:validate`  # 校验命名与格式
 - `npm run mock:clean`     # 清理过旧样本

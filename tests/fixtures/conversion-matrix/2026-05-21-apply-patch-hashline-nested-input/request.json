@@ -1,0 +1,12 @@
+{
+  "tool_calls": [
+    {
+      "id": "call_hashline_nested",
+      "type": "function",
+      "function": {
+        "name": "apply_patch",
+        "arguments": "{\"input\":{\"patch\":\"+ 2 deadbeef\\nhello\",\"filePath\":\"note.txt\"},\"fileContent\":\"hello\"}"
+      }
+    }
+  ]
+}

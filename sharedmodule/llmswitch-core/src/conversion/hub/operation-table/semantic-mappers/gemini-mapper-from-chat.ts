@@ -271,10 +271,10 @@ export function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnv
     request.toolConfig = jsonClone(semanticsNode.toolConfig as JsonObject) as JsonObject;
   }
   if (!isAnthropicEntry) {
-    if (semanticsNode?.providerMetadata && isJsonObject(semanticsNode.providerMetadata)) {
-      request.metadata = jsonClone(semanticsNode.providerMetadata as JsonObject);
-    } else if (metadata?.providerMetadata && isJsonObject(metadata.providerMetadata)) {
-      request.metadata = jsonClone(metadata.providerMetadata);
+    if (semanticsNode?.providerMetadata && isJsonObject(semanticsNode.providerMetadata as JsonValue)) {
+      request.metadata = jsonClone(semanticsNode.providerMetadata as unknown as JsonValue) as JsonObject;
+    } else if (metadata?.providerMetadata && isJsonObject(metadata.providerMetadata as JsonValue)) {
+      request.metadata = jsonClone(metadata.providerMetadata as JsonValue) as JsonObject;
     }
   }
   if (chat.parameters && chat.parameters.stream !== undefined) {

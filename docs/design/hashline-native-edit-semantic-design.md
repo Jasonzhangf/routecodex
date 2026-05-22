@@ -2,14 +2,31 @@
 
 ## 目标
 
-本文定义 hashline edit 语义在 `router-hotpath-napi` 的 Rust-only 设计：
+本文定义 hashline edit 语义在 `router-hotpath-napi` 的 Rust-only 设计。
+
+**2026-05-21 纠偏后的唯一主线：**
+
+1. **客户端外部契约始终是 `apply_patch`**
+2. **上游模型 authoring 主路径默认切到 hashline**
+3. **Rust 在 ingress/egress 透明桥接：hashline ↔ canonical apply_patch**
+4. **TS 只保留 transport / native 调用薄壳**
+
+也就是说：
+
+- client 请求进来时，看到的仍然是 `apply_patch` tool
+- 发给上游模型时，不应把 canonical apply_patch grammar 当主 authoring 语义反复教模型
+- 应改为：当 schema 明确声明 `filePath/file_path` 时，**上游 authoring 主路径是 hashline**，不要再把 `*** Begin Patch` 当这一路的主提示
+- 上游回来的 hashline 结果，在 Rust 真源里转换成 canonical `*** Begin Patch ... *** End Patch`
+- 返回给 client 的仍然是透明的 `apply_patch` canonical 语义
+
+因此，hashline 不是“另一个工具”，也不是 fallback；它是 **apply_patch 的上游 authoring 协议**。
 
 1. **hashline 解析真源统一到 Rust**
 2. **锚点 hash 校验与 apply 语义统一到 Rust**
 3. **输出统一标准化 changeset + apply_patch 文本契约**
 4. **Hub inbound 归一化集成点只保留单一路径，不允许 TS 语义分叉**
 
-目标不是“新增一个 parser 文件”，而是把 `< / + / - / =` 编辑语义完整收敛为单一原生子系统，TS 仅保留 transport shell。
+目标不是“新增一个 parser 文件”，而是把 `< / + / - / =` 编辑语义完整收敛为单一原生子系统，并让 `apply_patch` 的上游 authoring/下游客户端契约都经由这个子系统透明桥接；TS 仅保留 transport shell。
 
 ## 背景与问题陈述
 
@@ -29,6 +46,7 @@
 3. **Fail-fast + no fallback**：解析错误、锚点冲突、越界必须显式结构化错误。
 4. **Phase 1 仅支持单文件 update-only**：超出范围（多文件/创建/删除）显式报错。
 5. **变更最小化**：集成点只新增必要调用与契约映射，不扩散到不相关路径。
+6. **禁止双 authoring 语义并存**：同一条上游请求里，不能同时让模型在 canonical apply_patch grammar 与 hashline grammar 之间自由选择。
 
 ## 设计目标与非目标
 
@@ -39,6 +57,9 @@
 3. 支持按行号 bucket + bottom-up apply，避免行偏移污染。
 4. 产出统一 `HashlineChangeset`，并可稳定 emit 为 `*** Begin Patch` 格式。
 5. 在 `hub_req_inbound_tool_call_normalization.rs` 单点集成，确保上游/下游契约稳定。
+6. 在 request tool mode / request guidance 真源中，明确：
+   - client-facing tool 仍叫 `apply_patch`
+   - upstream authoring mode 在声明 `filePath/file_path` 时切到 `hashline`
 
 ### 非目标
 
@@ -63,7 +84,15 @@ inbound normalization orchestrator
 ### 数据流 ASCII 图
 
 ```text
-Raw tool_call(args.patch)
+client apply_patch tool
+  |
+  v
+request mode resolver
+  -> choose: schema | hashline
+  -> if hashline: expose hashline authoring contract upstream
+  |
+  v
+upstream model output
   |
   v
 hub_req_inbound_tool_call_normalization.rs
@@ -97,7 +126,7 @@ hub_req_inbound_tool_call_normalization.rs
 +-----------+-------------------+
             |
             v
-normalized apply_patch tool_call
+normalized canonical apply_patch tool_call
             |
             v
 Hub downstream pipeline
@@ -251,13 +280,41 @@ fail-fast：
 
 集成目标：在 inbound tool_call 归一化中，对目标 apply_patch payload 调用 native hashline pipeline。
 
-建议新增流程：
+建议流程：
 
-1. 识别 `tool_name == "apply_patch"` 且 `args.patch` 为 hashline 模式。
-2. 调用 `run_hashline_native_edit_json`（或同名导出）得到：
+1. client-facing tools 中识别 `tool_name == "apply_patch"`。
+2. request tool-mode resolver 判断：
+   - 若 schema 未声明 `filePath/file_path` → mode=`schema`
+   - 若 schema 已声明 `filePath/file_path` → mode=`hashline`
+3. mode=`hashline` 时，上游 guidance / tool description / req profile 统一引导模型输出 hashline patch。
+4. ingress 收到 `apply_patch` tool call 后：
+   - 若 `args.patch` 是 hashline 模式 → 调用 `run_hashline_native_edit_json`
+   - 若 `args.patch` 已是 canonical apply_patch → 走 canonical shape normalize
+5. hashline native edit 输出：
    - `changeset`
    - `normalized_patch`
    - `errors/conflicts`
+6. 对外统一回写 canonical apply_patch `{patch,input}`；client 不感知 hashline 中间层。
+
+## 单一路径约束（2026-05-21 新增）
+
+1. **client/tool surface**
+   - 对 client 永远只暴露 `apply_patch`
+   - 不新增 `hashline_patch`、`native_edit` 之类第二工具名
+
+2. **upstream authoring**
+   - 若 `apply_patch` schema 声明了 `filePath/file_path`，默认 authoring 主路径就是 hashline
+   - 不再把 canonical apply_patch grammar 当成这一路的主 authoring 提示
+
+3. **Rust transparent bridge**
+   - upstream hashline → Rust native parse/apply/emit → canonical apply_patch
+   - 返回 client 的始终是 canonical apply_patch 语义
+
+4. **fail-fast**
+   - hashline 缺 `filePath/file_path`
+   - hashline anchor 校验失败
+   - hashline parse 失败
+   都必须显式失败，禁止偷偷退回 canonical 猜测或第二套 authoring
 3. 按 feature flag 决定：
    - 严格模式：有错即 fail-fast 返回结构化错误。
    - 兼容观测模式：保留原请求并附 diagnostic（仅灰度）。

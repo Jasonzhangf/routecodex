@@ -34,7 +34,7 @@ describe('tool guidance for nested apply_patch prevention', () => {
     expect(guidance).not.toContain('GNU line-number ranges');
   });
 
-  it('keeps apply_patch tool schema minimal and avoids second authoring prompt', () => {
+  it('does not let generic guidance own apply_patch schema or authoring contract anymore', () => {
     const tools: any[] = [
       {
         type: 'function',
@@ -52,7 +52,53 @@ describe('tool guidance for nested apply_patch prevention', () => {
     const out = augmentOpenAITools(tools) as any[];
     const desc = String(out?.[0]?.function?.description || '');
     expect(desc).toBe('Edit files by patch');
-    expect(String(out?.[0]?.function?.parameters?.properties?.patch?.description || '')).toBe('Raw patch text only. Author exactly one canonical patch body in `patch`.');
-    expect(String(out?.[0]?.function?.parameters?.properties?.input?.description || '')).toBe('Compatibility alias of patch. Prefer patch.');
+    expect(out?.[0]?.function?.parameters?.properties?.patch).toBeUndefined();
+    expect(out?.[0]?.function?.parameters?.properties?.input).toBeUndefined();
+  });
+
+  it('does not rewrite apply_patch into canonical grammar at generic guidance layer', () => {
+    const tools: any[] = [
+      {
+        type: 'function',
+        function: {
+          name: 'apply_patch',
+          description: 'Edit files by patch',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      }
+    ];
+
+    const out = augmentOpenAITools(tools) as any[];
+    const patchDesc = String(out?.[0]?.function?.parameters?.properties?.patch?.description || '');
+    expect(patchDesc).toBe('');
+  });
+
+  it('does not rewrite apply_patch into hashline mode at generic guidance layer', () => {
+    const tools: any[] = [
+      {
+        type: 'function',
+        function: {
+          name: 'apply_patch',
+          description: 'Edit files by patch',
+          parameters: {
+            type: 'object',
+            properties: {
+              filePath: {
+                type: 'string',
+                description: 'target file path'
+              }
+            }
+          }
+        }
+      }
+    ];
+
+    const out = augmentOpenAITools(tools) as any[];
+    expect(out?.[0]?.function?.parameters?.properties?.filePath?.type).toBe('string');
+    const patchDesc = String(out?.[0]?.function?.parameters?.properties?.patch?.description || '');
+    expect(patchDesc).toBe('');
   });
 });

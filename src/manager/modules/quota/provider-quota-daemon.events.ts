@@ -49,6 +49,82 @@ export type ProviderQuotaDaemonEventContext = {
   toSnapshotObject(): Record<string, QuotaState>;
 };
 
+type WindsurfRateLimitBurstEvent = {
+  time: number;
+  modelKey: string;
+  providerKey: string;
+};
+
+function resolveWindsurfModelScopeKey(providerKey: string): string | null {
+  const raw = typeof providerKey === 'string' ? providerKey.trim().toLowerCase() : '';
+  if (!raw.startsWith('windsurf.')) {
+    return null;
+  }
+  const parts = raw.split('.');
+  if (parts.length < 3) {
+    return null;
+  }
+  return parts.slice(2).join('.');
+}
+
+function collectWindsurfModelSiblingKeys(
+  ctx: Pick<ProviderQuotaDaemonEventContext, 'quotaStates' | 'staticConfigs'>,
+  modelKey: string,
+): string[] {
+  const normalizedModelKey = String(modelKey || '').trim().toLowerCase();
+  const out = new Set<string>();
+  const matchKey = (value: string) => {
+    const scoped = resolveWindsurfModelScopeKey(value);
+    if (scoped === normalizedModelKey) {
+      out.add(String(value || '').trim().toLowerCase());
+    }
+  };
+  for (const key of ctx.quotaStates.keys()) {
+    matchKey(key);
+  }
+  for (const key of ctx.staticConfigs.keys()) {
+    matchKey(key);
+  }
+  return Array.from(out);
+}
+
+function recordWindsurfRateLimitBurstAndReadCooldown(args: {
+  ctx: ProviderQuotaDaemonEventContext;
+  providerKey: string;
+  nowMs: number;
+}): { hit: boolean; cooldownMs: number; siblingKeys: string[] } {
+  const modelKey = resolveWindsurfModelScopeKey(args.providerKey);
+  if (!modelKey) {
+    return { hit: false, cooldownMs: 30_000, siblingKeys: [] };
+  }
+  const ctxRecord = args.ctx as ProviderQuotaDaemonEventContext & {
+    __windsurfRateLimitEvents?: WindsurfRateLimitBurstEvent[];
+  };
+  const windowMs = 8_000;
+  const threshold = 3;
+  const cooldownMs = 30_000;
+  const nextEvents = Array.isArray(ctxRecord.__windsurfRateLimitEvents)
+    ? ctxRecord.__windsurfRateLimitEvents
+    : [];
+  nextEvents.push({
+    time: args.nowMs,
+    modelKey,
+    providerKey: args.providerKey,
+  });
+  const cutoff = args.nowMs - windowMs;
+  ctxRecord.__windsurfRateLimitEvents = nextEvents.filter((entry) => entry.time >= cutoff);
+  const sameModelCount = new Set(
+    ctxRecord.__windsurfRateLimitEvents
+      .filter((entry) => entry.modelKey === modelKey)
+      .map((entry) => entry.providerKey),
+  ).size;
+  return {
+    hit: sameModelCount >= threshold,
+    cooldownMs,
+    siblingKeys: collectWindsurfModelSiblingKeys(args.ctx, modelKey),
+  };
+}
+
 export async function handleProviderQuotaErrorEvent(
   ctx: ProviderQuotaDaemonEventContext,
   event: ProviderErrorEvent
@@ -107,7 +183,34 @@ export async function handleProviderQuotaErrorEvent(
           ? previous.consecutiveErrorCount + 1
           : 1
     };
-    ctx.quotaStates.set(providerKey, nextState);
+    const aliasPrefix = resolveWindsurfAliasPrefix(providerKey);
+    const familyKeys = aliasPrefix ? collectWindsurfAliasFamilyKeys(ctx, aliasPrefix) : [];
+    if (familyKeys.length > 0) {
+      for (const familyKey of familyKeys) {
+        const canonicalFamilyKey = canonicalizeProviderKey(familyKey);
+        const prevFamily =
+          ctx.quotaStates.get(canonicalFamilyKey) ??
+          createInitialQuotaState(canonicalFamilyKey, ctx.staticConfigs.get(canonicalFamilyKey), nowMs);
+        const nextFamily: QuotaState = {
+          ...prevFamily,
+          inPool: false,
+          reason: 'blacklist',
+          cooldownUntil: null,
+          cooldownKeepsPool: undefined,
+          blacklistUntil: nowMs + cooldownMs,
+          lastErrorSeries: 'E429',
+          lastErrorCode: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+          lastErrorAtMs: nowMs,
+          consecutiveErrorCount:
+            typeof prevFamily.consecutiveErrorCount === 'number' && prevFamily.consecutiveErrorCount > 0
+              ? prevFamily.consecutiveErrorCount + 1
+              : 1
+        };
+        ctx.quotaStates.set(canonicalFamilyKey, nextFamily);
+      }
+    } else {
+      ctx.quotaStates.set(providerKey, nextState);
+    }
     ctx.schedulePersist(nowMs);
     return;
   }
@@ -312,6 +415,35 @@ export async function handleProviderQuotaErrorEvent(
     }
     const runtime = event.runtime as { providerId?: unknown; providerProtocol?: unknown } | undefined;
     const providerIdRaw = runtime && typeof runtime.providerId === 'string' ? runtime.providerId.trim().toLowerCase() : '';
+    if (providerIdRaw === 'windsurf') {
+      const burst = recordWindsurfRateLimitBurstAndReadCooldown({
+        ctx,
+        providerKey,
+        nowMs,
+      });
+      if (burst.hit) {
+        const until = nowMs + burst.cooldownMs;
+        for (const siblingKey of burst.siblingKeys) {
+          const prevSibling =
+            ctx.quotaStates.get(siblingKey) ??
+            createInitialQuotaState(siblingKey, ctx.staticConfigs.get(siblingKey), nowMs);
+          const existingCooldownUntil = prevSibling.cooldownUntil;
+          const cooldownUntil =
+            typeof existingCooldownUntil === 'number' && existingCooldownUntil > until
+              ? existingCooldownUntil
+              : until;
+          ctx.quotaStates.set(siblingKey, {
+            ...prevSibling,
+            inPool: false,
+            reason: 'cooldown',
+            cooldownUntil,
+            cooldownKeepsPool: undefined,
+          });
+        }
+        ctx.schedulePersist(nowMs);
+        return;
+      }
+    }
     const isQuotaProvider = providerIdRaw === 'gemini';
     if (isQuotaProvider) {
       const ttl = parseQuotaResetDelayMs(event);
@@ -401,6 +533,40 @@ export async function handleProviderQuotaErrorEvent(
       providerKey
     });
   }
+}
+
+function resolveWindsurfAliasPrefix(providerKey: string): string | null {
+  const raw = typeof providerKey === 'string' ? providerKey.trim().toLowerCase() : '';
+  if (!raw.startsWith('windsurf.')) {
+    return null;
+  }
+  const parts = raw.split('.');
+  if (parts.length < 2) {
+    return null;
+  }
+  return `${parts[0]}.${parts[1]}`;
+}
+
+function collectWindsurfAliasFamilyKeys(
+  ctx: Pick<ProviderQuotaDaemonEventContext, 'quotaStates' | 'staticConfigs'>,
+  aliasPrefix: string
+): string[] {
+  const normalizedPrefix = `${aliasPrefix}.`;
+  const keys = new Set<string>();
+  keys.add(aliasPrefix);
+  for (const key of ctx.quotaStates.keys()) {
+    const normalized = String(key || '').trim().toLowerCase();
+    if (normalized === aliasPrefix || normalized.startsWith(normalizedPrefix)) {
+      keys.add(normalized);
+    }
+  }
+  for (const key of ctx.staticConfigs.keys()) {
+    const normalized = String(key || '').trim().toLowerCase();
+    if (normalized === aliasPrefix || normalized.startsWith(normalizedPrefix)) {
+      keys.add(normalized);
+    }
+  }
+  return Array.from(keys);
 }
 
 function readPositiveNumberFromEnv(name: string, fallback: number): number {

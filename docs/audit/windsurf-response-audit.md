@@ -9,7 +9,7 @@
 
 ## 1. 响应链路架构对比
 
-### RouteCodex 当前链路（non-stream）
+### RouteCodex 当前链路（旧错误链路观察）
 ```
 fetchWithTimeout (HTTP POST GetChatCompletions)
   → readFetchResponseBuffer → parseGetChatMessageResponse
@@ -26,14 +26,22 @@ client.rawGetChatMessage / client.cascadeChat
         → SSE stream → chat.js → openAIToAnthropic / ChatCompletion chunk
 ```
 
-**关键差异**:
-- WindsurfAPI 使用 **gRPC streaming**，RouteCodex 使用 **HTTP JSON polling**（Connect 协议变体）
-- WindsurfAPI 支持 **SSE streaming**，RouteCodex 当前仅实现 **non-stream** 聚合
-- 协议层不同，但语义等价
+**关键差异（2026-05-22 已升级为根因级判定）**:
+- WindsurfAPI 真源主链使用 **StartCascade / SendUserCascadeMessage / GetCascadeTrajectorySteps**
+- RouteCodex 此处审计的仍是旧 **GetChatCompletions** 分支
+- 因此本报告以下内容只用于说明“旧错误链路的响应解析行为”，**不再表示该链路可继续保留或修补**
+
+最黑盒结果已经证明：
+- 当前优先问题是**路径错误**
+- 不是继续在 `GetChatCompletions` 响应解析上做局部对齐
+
+后续唯一正确方向是：
+- request: `StartCascade -> SendUserCascadeMessage`
+- response: `GetCascadeTrajectorySteps / poll` 真链收口
 
 ---
 
-## 2. 响应 frame 解析审计
+## 2. 响应 frame 解析审计（仅保留为旧错误链路取证）
 
 ### 2.1 HTTP response frame 格式
 
@@ -169,7 +177,7 @@ protected override wantsUpstreamSse(request: UnknownObject, context: ProviderCon
 
 **当前行为**: 当请求带 `stream: true` 时返回 true，但 `sendRequestInternal` 没有 SSE 处理分支，仍然走 non-stream 聚合路径。
 
-### 5.2 Gap 分析
+### 5.2 Gap 分析（旧错误链路内部观察）
 
 | 场景 | wantsUpstreamSse | 实际处理 | 状态 |
 |------|-----------------|---------|------|
@@ -178,7 +186,9 @@ protected override wantsUpstreamSse(request: UnknownObject, context: ProviderCon
 
 **影响**: 客户端请求 SSE streaming 时，当前实现仍做聚合后返回单一完成体，而非 SSE 流。可能影响首 token 延迟，但功能上返回完整结果。
 
-**是否需要修复**: 取决于 RouteCodex 架构层是否在 provider 之上做 SSE streaming。若 Hub 层处理 SSE 转换，则当前 provider non-stream 实现正确。
+**是否需要修复**:
+- 对旧 `GetChatCompletions` 链路本身，已不再是优先修复项；
+- 只有在正确 `StartCascade / SendUserCascadeMessage / poll` 主链接回后，才有资格重新讨论 streaming 收口细节。
 
 ---
 
@@ -212,14 +222,16 @@ protected override wantsUpstreamSse(request: UnknownObject, context: ProviderCon
 10. `WINDSURF_POLICY_BLOCKED` error code with 451 status（已补齐）
 11. 响应阶段错误分类完整性
 
-### 7.2 发现 gap
+### 7.2 发现 gap（降级为旧链路观察项）
 
 | # | Gap | 优先级 | 影响 | 说明 |
 |---|-----|--------|------|------|
-| 1 | SSE streaming 路径未实现 | 中 | stream: true 请求仍走聚合路径 | 需确认 Hub 层是否处理 SSE 转换；若 Hub 层不处理则需在 provider 层实现 SSE 处理 |
+| 1 | SSE streaming 路径未实现 | 低 | stream: true 请求仍走聚合路径 | 旧 `GetChatCompletions` 链路已证伪，优先级低于移除整条错误路径 |
 
-### 7.3 需进一步确认
-- **SSE streaming**: `wantsUpstreamSse` 返回 true 但无 SSE 处理路径。需确认 RouteCodex Hub 层是否在 provider 之上做 SSE 转换。如果 Hub 层直接透传 provider 的 non-stream 响应，则当前实现正确；如果需要 provider 实时 SSE 流，则需补 SSE 处理路径。
+### 7.3 根因级更新
+1. 本报告审计对象仍是 **旧 `GetChatCompletions` 响应链**。
+2. 2026-05-22 最黑盒结论已确认：**旧链路必须物理移除**。
+3. 因而这里记录的解析对齐项，只能作为删除旧链路前的取证材料；**不能再作为保留旧主链的依据**。
 
 ---
 

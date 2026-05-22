@@ -119,7 +119,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "buildReviewOperationsJson",
   "buildWebSearchToolAppendOperationsJson",
   "clampResponsesInputItemIdJson",
-  "castGovernedToolsJson",
   "collectToolOutputsJson",
   "buildReqInboundToolOutputSnapshotJson",
   "mapBridgeToolsToChatJson",

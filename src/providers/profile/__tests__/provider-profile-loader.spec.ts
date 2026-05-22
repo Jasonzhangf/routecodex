@@ -163,6 +163,74 @@ describe('provider-profile-loader', () => {
     }
   });
 
+  it('RED: preserves providerModule instead of collapsing it to protocol type for windsurf', () => {
+    const config: Record<string, unknown> = {
+      providers: {
+        windsurf: {
+          type: 'openai',
+          providerModule: 'windsurf-chat-provider',
+          compatibilityProfile: 'chat:windsurf',
+          auth: {
+            type: 'windsurf-account',
+            account: '2094423@qq.com',
+            password: 'welcome4zcam#'
+          }
+        }
+      }
+    };
+
+    const result = buildProviderProfiles(config);
+    expect(result.byId.windsurf.moduleType).toBe('windsurf-chat-provider');
+    expect(result.byId.windsurf.protocol).toBe('openai');
+  });
+
+  it('parses windsurf runtime metadata needed by cascade local-runtime chain', () => {
+    const config: Record<string, unknown> = {
+      providers: {
+        windsurf: {
+          type: 'openai',
+          providerModule: 'windsurf-chat-provider',
+          compatibilityProfile: 'chat:windsurf',
+          auth: {
+            type: 'windsurf-devin-token',
+            apiKey: 'devin-session-token$profile-token',
+            tokenFile: '~/.rcc/auth/windsurf-devin-token-1.json'
+          },
+          windsurf: {
+            enableThinking: true,
+            defaultReasoningEffort: 'high',
+            sanitizePaths: true,
+            preserveUpstreamIdentity: true,
+            toolEmulationStrict: true,
+            pollIntervalMs: 500,
+            pollMaxWaitMs: 120000,
+            lsPort: 42101,
+            csrfToken: 'windsurf-api-csrf-fixed-token',
+            sessionId: 'session-from-profile',
+            workspacePath: '/tmp/windsurf-workspace',
+            workspaceUri: 'file:///tmp/windsurf-workspace'
+          }
+        }
+      }
+    };
+
+    const result = buildProviderProfiles(config);
+    expect(result.byId.windsurf.metadata?.windsurf).toEqual({
+      enableThinking: true,
+      defaultReasoningEffort: 'high',
+      sanitizePaths: true,
+      preserveUpstreamIdentity: true,
+      toolEmulationStrict: true,
+      pollIntervalMs: 500,
+      pollMaxWaitMs: 120000,
+      lsPort: 42101,
+      csrfToken: 'windsurf-api-csrf-fixed-token',
+      sessionId: 'session-from-profile',
+      workspacePath: '/tmp/windsurf-workspace',
+      workspaceUri: 'file:///tmp/windsurf-workspace'
+    });
+  });
+
   it('defaults deepseek-web profile to contextFileEnabled when omitted', () => {
     const config: Record<string, unknown> = {
       providers: {

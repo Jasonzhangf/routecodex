@@ -19,7 +19,7 @@ async function withServer<T>(app: express.Express, run: (baseUrl: string) => Pro
 }
 
 describe('responses-handler stream closed before completed regression', () => {
-  it('surfaces started-stream failure when upstream SSE closes before response.completed', async () => {
+  it('surfaces started-stream failure as explicit SSE error when upstream closes before response.completed', async () => {
     const app = express();
     app.use(express.json());
     app.post('/v1/responses', async (req, res) => {
@@ -74,6 +74,9 @@ describe('responses-handler stream closed before completed regression', () => {
       expect(text).toContain('response.created');
       expect(text).toContain('partial');
       expect(text).not.toContain('event: response.completed');
+      expect(text).toContain('event: error');
+      expect(text).toContain('"code":"upstream_stream_incomplete"');
+      expect(text).toContain('stream closed before response.completed');
     });
   });
 });

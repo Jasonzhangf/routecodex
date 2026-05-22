@@ -15,11 +15,11 @@ export function ensureProtocolState(metadata: ChatEnvelope['metadata'], protocol
     }
   }
   Object.assign(metadata as Record<string, unknown>, native.metadata);
-  if (!metadata[PROTOCOL_STATE_KEY] || !isJsonObject(metadata[PROTOCOL_STATE_KEY])) {
+  if (!metadata[PROTOCOL_STATE_KEY] || !isJsonObject(metadata[PROTOCOL_STATE_KEY] as unknown as JsonValue)) {
     metadata[PROTOCOL_STATE_KEY] = {};
   }
   const container = metadata[PROTOCOL_STATE_KEY] as JsonObject;
-  if (!isJsonObject(container[protocol])) {
+  if (!isJsonObject(container[protocol] as unknown as JsonValue)) {
     container[protocol] = native.node as JsonObject;
   }
   return container[protocol] as JsonObject;

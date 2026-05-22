@@ -159,8 +159,10 @@ PATCH"`
 
     const assistantMessage = (stage2.chatEnvelope.messages as any[])[1];
     const patchArgs = JSON.parse(assistantMessage.tool_calls[0].function.arguments);
-    expect(String(patchArgs.input || '')).toBe('');
-    expect(String(patchArgs.patch || '')).toBe('');
+    expect(String(patchArgs.patch || '')).toContain('*** Begin Patch');
+    expect(String(patchArgs.patch || '')).toContain('*** Add File: src/nope.ts');
+    expect(String(patchArgs.patch || '')).toContain("+console.log('nope');");
+    expect(patchArgs.input).toBe(patchArgs.patch);
   });
 
   it('preserves assistant reasoning-only history into standardizedRequest', async () => {

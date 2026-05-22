@@ -369,6 +369,9 @@ function readNumericLike(value: unknown): number | null {
 }
 
 function shouldSkipErrorsamplePayload(payload: unknown): boolean {
+  if (shouldWriteFullErrorsamplePayload()) {
+    return false;
+  }
   const queue: unknown[] = [payload];
   const seen = new WeakSet<object>();
   let steps = 0;

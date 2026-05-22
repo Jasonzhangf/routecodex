@@ -51,6 +51,7 @@ type ResponsesConversationStoreLike = {
 };
 
 type ResponsesConversationModule = {
+  recordResponsesResponse?: (args: { requestId: string; response: AnyRecord; routeHint?: string }) => void;
   resumeResponsesConversation?: (
     responseId: string,
     submitPayload: AnyRecord,
@@ -82,6 +83,20 @@ async function getResponsesConversationModule(): Promise<ResponsesConversationMo
     );
   }
   return cachedResponsesConversationModule;
+}
+
+
+export async function recordResponsesResponseForRequest(args: {
+  requestId: string;
+  response: AnyRecord;
+  routeHint?: string;
+}): Promise<void> {
+  const mod = await getResponsesConversationModule();
+  const fn = mod.recordResponsesResponse;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] recordResponsesResponse not available');
+  }
+  fn(args);
 }
 
 export async function resumeResponsesConversation(

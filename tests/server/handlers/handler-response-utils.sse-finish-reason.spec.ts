@@ -75,7 +75,8 @@ describe('sendPipelineResponse SSE completion logging', () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
-      importCoreDist: async () => ({})
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
@@ -130,7 +131,8 @@ describe('sendPipelineResponse SSE completion logging', () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
-      importCoreDist: async () => ({})
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
@@ -176,7 +178,8 @@ describe('sendPipelineResponse SSE completion logging', () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
-      importCoreDist: async () => ({})
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
@@ -227,7 +230,8 @@ describe('sendPipelineResponse SSE completion logging', () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
-      importCoreDist: async () => ({})
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
@@ -276,7 +280,8 @@ describe('sendPipelineResponse SSE completion logging', () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
-      importCoreDist: async () => ({})
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
@@ -322,7 +327,8 @@ describe('sendPipelineResponse SSE completion logging', () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       writeSnapshotViaHooks: async () => undefined,
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
-      importCoreDist: async () => ({})
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,

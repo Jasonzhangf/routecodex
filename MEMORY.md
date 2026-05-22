@@ -1,5 +1,21 @@
 # RouteCodex Memory
 
+
+- 2026-05-21: Windsurf provider 真源边界已收口。固定参考只允许：`/Volumes/extension/code/WindsurfAPI`。已验证稳定真相：
+  1. `tests/providers/core/runtime/windsurf-chat-provider.spec.ts` 已扩展到 108/108 全绿；
+  2. auth/token persistence、PostAuth header-only empty proto body、auth-context headers、assistant/tool_result/history/responses parse 全部已由测试锚定；
+  3. 已验证成功链：
+     - 直接 `devin-session-token$...` 可作为最终认证真源；
+     - 账号密码 -> `auth1` -> `WindsurfPostAuth` -> `devin-session-token$...`；
+     - persisted stale token 命中 401 后，会清理旧 token、重新登录、持久化 refreshed token，并完成下一次推理；
+     - 认证成功后可返回 assistant text、assistant tool_calls；
+     - 多轮 history 会正确序列化为上游 `conversation`；
+     - 已有 `tool_call + tool_result` 历史后，下一轮既可继续返回新的 tool call，也可直接返回最终 assistant text；
+  4. 认证最终真源统一收敛为 `devin-session-token$...`；测试样本、probe 样本都应优先使用该形状，不再把 generic `session-token-*` 当 Windsurf 最终凭证真相；
+  5. 后续若再看到任何“旧 send 主线已恢复/真主链已接回”叙事，均视为错误旧叙事，应直接删除，不得据此恢复 send path。
+
+Tags: windsurf, cascade, auth, postauth, token-persistence, responses-parse, continuity, fail-fast, no-send-mainline, reference-boundary, 2026-05-21
+
 ## Skills 与调试工作流
 
 - 2026-05-21: Windsurf / responses 链路边界已校正：**provider -> inbound(very thin) -> chat_process -> outbound responses**。chat inbound 只做最薄的协议归一和字段透传，不承载 provider-specific 兼容逻辑；provider 也不应把 client surface 语义一路耦合进 pipeline。可复用规则：当 live `/v1/responses` 仍漏成 `chat.completion`，优先查 chat_process/outbound 的最终重建层，而不是把 provider inbound 当成兼容主战场。
@@ -374,7 +390,7 @@ Tags: rust-migration, routecodex-3.11.7, hub-pipeline, thin-shell, native-primar
 
 
 
-- 2026-03-10: `~/.codex/skills/pipedebug/` 已按当前 RouteCodex V2 结构更新。默认调试主线改为：先看 `~/.routecodex/codex-samples/`，先判断问题属于 request path 还是 response path，再沿 `host bridge -> llmswitch-core Hub Pipeline -> Provider V2` 的真实边界定位。旧的“4 层流水线 / workflow-compatibility-provider README / routecodex-worktree/fix / ~/.claude/skills”表述已从 `SKILL.md` 与 references 中移除。
+- 2026-03-10: `~/.codex/skills/pipedebug/` 已按当前 RouteCodex V2 结构更新。默认调试主线改为：先看 `~/.rcc/codex-samples/`，先判断问题属于 request path 还是 response path，再沿 `host bridge -> llmswitch-core Hub Pipeline -> Provider V2` 的真实边界定位。旧的“4 层流水线 / workflow-compatibility-provider README / routecodex-worktree/fix / ~/.claude/skills”表述已从 `SKILL.md` 与 references 中移除。
 - 2026-03-16: Heartbeat 现定义为 tmux-client re-activation feature，唯一协议是 `<**hb:on**>` / `<**hb:off**>`，并且只绑定 `tmuxSessionId`。`hb:on` 立即生效，不支持输入 startAt；结束时间唯一来自目标工作目录 `HEARTBEAT.md` 头部 `Heartbeat-Until:` 标签。heartbeat 只在“无 in-flight request + 客户端已断开/心跳过期”时才允许注入；失败只能记日志/状态，不能影响主链路正确性，也不能 fallback 到 server cwd。注入文案必须要求读取 `HEARTBEAT.md`、检查上次交付、更新 `DELIVERY.md`、再调用 `review`，且 review 只能由模型通过现有 `review_flow` 主动调用，服务端不得自动串联。
 - 2026-03-17: 修复 review/continue 回注入断裂的 request-path 根因：当请求只携带 `session scope`（如 API key `::rcc-session:*`）且没有显式 tmux header 时，`session-scope-resolution` 之前不会把该 scope 纳入 binding 候选，导致 `clientInjectReady=false` 并触发 `tmux_session_missing`。现已补齐 `api-key -> session scope -> registry_by_binding` 回查路径，并保持 tmux 存活校验；新增 `session-scope-resolution` 与 `executor-metadata` 回归用例覆盖该场景。
 
@@ -1521,3 +1537,29 @@ Tags: validator, shape-only, no-audit, no-compat-guess, goal-state-owner, 2026-0
 ## 2026-05-14 validator边界纠偏
 - 用户再次明确：不要把 runtime/router/provider failure 收敛塞进 validator 或 converter 前置门。
 - 本次修正：provider-response-converter 只做合法 tool shape 投影，不再在 converter 内累计 validation failure / no_progress / irrecoverable followup 并强制 stopped。
+
+## 2026-05-21 longcontext 路由真源
+- 现行虚拟路由分类器里，`longcontext` 必须在 `thinking` 之前判定；否则 fresh user input 即使超长，也会先命中 `thinking`，导致 longcontext 无法接管。
+- 唯一正确修复点是 Rust `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/classifier.rs` 的 evaluation 顺序与 thinking gate：`thinking_from_user && !reached_long_context`。
+- 回归锚点：`tests/servertool/virtual-router-thinking-longcontext-context-switch.spec.ts` 与 Rust classifier 长文回归。
+
+## 2026-05-21 apply_patch / hashline 引导边界
+- `apply_patch` 的唯一正确引导是 **patch-first canonical body**；不要在通用引导里暗示 `filePath`/`file_path`，也不要把 hashline 当成 canonical patch 的别名。
+- `hashline` 只允许在显式 `filePath/file_path` 的收割入口接管，并且必须 fail-fast；引导层不要让模型“试格式、猜格式”。
+- 回归锚点：`req_outbound_stage3_compat/*tool_definitions.rs`、`tool_text_request_guidance.rs`、`req_profiles.rs`、`hub_req_inbound_tool_call_normalization.rs` 的 hashline 入口测试。
+
+- 2026-05-21: `buildCascadeCompletionFromOutput` 需要保留 assistant 的 `reasoning_content`，对齐 Windsurf reference 的 `chatToResponse()` 输出语义：reasoning 不应在 parser 里被吞掉，哪怕最终仍是 `chat.completion`。已补测试锚点并转绿。验证：`tests/providers/core/runtime/windsurf-chat-provider.spec.ts` 定向通过。
+
+Tags: windsurf, responses-parse, reasoning_content, chatToResponse, parser-ssot, 2026-05-21
+- 2026-05-22: Windsurf 真实无 mock 鉴权链已验证通过。唯一正确的 PostAuth 真源是 `https://web-backend.windsurf.com/exa.seat_management_pb.SeatManagementService/WindsurfPostAuth`，请求必须发送 `application/proto` 空 body，并同时发送 `X-Devin-Auth1-Token`、`Origin: https://windsurf.com`、`Referer: https://windsurf.com/account/login`、`connect-protocol-version: 1`。3 个真实账号（ws-pro-1/ws-pro-2/ws-pro-3）已通过 `checkHealth()` + `ensureWindsurfSessionCredential()` 无 mock 实测，证明 auth 真链已经打通；之前超时的唯一根因是 PostAuth request shape 错，而不是账号失效或网络不可达。
+Tags: windsurf, auth, postauth, web-backend, protobuf, no-mock, live-verified, 2026-05-22
+
+
+- 2026-05-22: Windsurf `chat -> provider -> cascade` 的真实无 mock 鉴权链已再次以 live probe 固化进仓库测试。`tests/providers/core/runtime/windsurf-chat-provider.live-probe-api.spec.ts` 现包含真实账号密码登录 -> `WindsurfPostAuth` -> `devin-session-token$...` 持久化 -> `checkHealth()` 直打 `GetCascadeModelConfigsForSite` 的无 mock 测试，并已在本机通过。`scripts/windsurf-auth-probe.ts` 也已改成同一真链：`ensureWindsurfSessionCredential()` + `checkHealth()`；禁止再调用旧的 cloud/status 假接口。
+Tags: windsurf, cascade, auth, no-mock, live-probe, checkHealth, postauth, 2026-05-22
+
+- 2026-05-22: Windsurf 请求主链真相已用“最黑盒”方式再次钉死：对同一份带 tools/history 的输入，同时实跑 RouteCodex 当前链与 WindsurfAPI 参考链，结果显示 RouteCodex 当前最终出站仍是 `GetChatCompletions` JSON 族（`metadata/chatMessagePrompts/systemPrompt/completionsRequest`），而 WindsurfAPI 真源最终出站是 `StartCascade -> SendUserCascadeMessage` protobuf/gRPC 族（`normalizeMessagesForCascade -> history replay text + toolPreamble -> poll`）。因此当前 Windsurf live 问题优先判定为**路径问题，不是字段小形状问题**；`GetChatCompletions` 旧主链已被证伪，后续必须从文档、记忆、测试与实现中物理移除，只保留 `chat -> provider -> StartCascade -> SendUserCascadeMessage -> GetCascadeTrajectorySteps/poll` 单一路径。
+Tags: windsurf, cascade, request-path, blackbox-verified, getchatcompletions-invalid, single-path, remove-wrong-mainline, 2026-05-22
+
+- 2026-05-22: Windsurf 运行时唯一真相是 `chat -> provider -> cascade`；仓内不允许 gRPC/LS 或任何第二套本地实现回流。
+- 2026-05-22: 做 Windsurf / request-shape / live sample 排查时，样本与 snapshot 的当前真源目录应先看 `~/.rcc/codex-samples/`；把它写成 `~/.routecodex/codex-samples/` 属于错误旧路径。注意：这条只约束当前运行时样本/快照真源；仓内仍有一部分 legacy 迁移文档需要保留 `~/.routecodex` 作为旧目录叙事，不能机械全量替换所有 `.routecodex` 字符串。

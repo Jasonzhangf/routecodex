@@ -6,6 +6,5 @@ This folder stores **non-context** tool-shape regressions captured from real Cod
 - These are intended for CI regression (deterministic inputs, no secrets).
 
 Capture sources:
-- User-local: `~/.routecodex/golden_samples/ci-regression/**`
+- User-local: `~/.rcc/golden_samples/ci-regression/**`
 - Repo: this folder (promoted via sync script)
-

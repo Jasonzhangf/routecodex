@@ -60,11 +60,9 @@ const BLOCKING_RECOVERABLE_CODE_SET = new Set([
   'SSE_TO_JSON_ERROR',
   'SSE_DECODE_ERROR',
   'UPSTREAM_EMPTY_OUTPUT',
-  'WINDSURF_GRPC_UNAVAILABLE',
   'WINDSURF_RATE_LIMITED'
 ]);
 
-UNRECOVERABLE_CODE_SET.add('WINDSURF_GRPC_CONFIG_MISSING');
 UNRECOVERABLE_CODE_SET.add('WINDSURF_SESSION_TOKEN_NOT_INITIALIZED');
 UNRECOVERABLE_CODE_SET.add('WINDSURF_ACCOUNT_CREDENTIAL_MISSING');
 UNRECOVERABLE_CODE_SET.add('WINDSURF_NO_PASSWORD_SET');
@@ -77,11 +75,7 @@ function isWindsurfCanceledMessageLike(value: unknown): boolean {
   }
   const reason = value.trim().toLowerCase();
   return reason.includes('pending stream has been canceled')
-    || reason.includes('err_http2_stream_cancel')
-    || reason.includes('initializecascadepanelstate: the pending stream has been canceled')
-    || reason.includes('addtrackedworkspace: the pending stream has been canceled')
-    || reason.includes('updateworkspacetrust: the pending stream has been canceled')
-    || reason.includes('heartbeat: the pending stream has been canceled');
+    || reason.includes('err_http2_stream_cancel');
 }
 
 function isHostFailureStage(stage?: string): boolean {
@@ -297,16 +291,6 @@ export function resolveProviderFailureClassification(args: {
   ) {
     return 'unrecoverable';
   }
-
-  if (
-    errorCode === 'WINDSURF_CLOUD_CHAT_NOT_IMPLEMENTED'
-    || upstreamCode === 'WINDSURF_CLOUD_CHAT_NOT_IMPLEMENTED'
-    || nestedCode === 'WINDSURF_CLOUD_CHAT_NOT_IMPLEMENTED'
-    || reason.includes('windsurf_cloud_chat_not_implemented')
-  ) {
-    return 'unrecoverable';
-  }
-
   if (errorCode === 'CONTEXT_LENGTH_EXCEEDED' || upstreamCode === 'CONTEXT_LENGTH_EXCEEDED') {
     return 'special_400';
   }

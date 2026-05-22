@@ -6,6 +6,7 @@ use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use uuid::Uuid;
+use crate::resp_process_stage1_tool_governance::try_parse_json_value_lenient;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -1606,7 +1607,7 @@ fn extract_structured_apply_patch_payloads(text: &str) -> Vec<Value> {
     let fence_re = Regex::new(r"```(?:json|apply_patch|toon)?\s*([\s\S]*?)\s*```").unwrap();
     for caps in fence_re.captures_iter(text) {
         if let Some(body) = caps.get(1) {
-            if let Ok(parsed) = serde_json::from_str::<Value>(body.as_str()) {
+            if let Some(parsed) = try_parse_json_value_lenient(body.as_str()) {
                 if is_structured_apply_patch_payload(&parsed) {
                     payloads.push(parsed);
                 }
@@ -1614,7 +1615,7 @@ fn extract_structured_apply_patch_payloads(text: &str) -> Vec<Value> {
         }
     }
     if payloads.is_empty() && text.contains("\"changes\"") {
-        if let Ok(parsed) = serde_json::from_str::<Value>(text) {
+        if let Some(parsed) = try_parse_json_value_lenient(text) {
             if is_structured_apply_patch_payload(&parsed) {
                 payloads.push(parsed);
             }

@@ -30,7 +30,6 @@ mod chat_node_result_semantics;
 mod chat_post_governed_normalization_semantics;
 mod chat_process_media_semantics;
 mod chat_servertool_orchestration;
-mod chat_tool_normalization;
 mod chat_web_search_tool_schema;
 mod compat_field_mapping;
 mod compat_harvest_tool_calls_from_text;

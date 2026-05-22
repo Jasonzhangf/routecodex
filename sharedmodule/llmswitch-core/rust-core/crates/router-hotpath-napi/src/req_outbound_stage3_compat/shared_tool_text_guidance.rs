@@ -118,17 +118,8 @@ pub fn build_tool_text_instruction(tools: Option<&Value>, _require_tool_call: bo
             .map(|name| name.eq_ignore_ascii_case("exec_command"))
             .unwrap_or(false)
     });
-    let has_apply_patch = rows.iter().any(|item| {
-        item.as_object()
-            .and_then(read_tool_name)
-            .map(|name| name.eq_ignore_ascii_case("apply_patch"))
-            .unwrap_or(false)
-    });
-
     let example_line = if has_exec_command {
         r#"{"tool_calls":[{"name":"exec_command","input":{"cmd":"pwd"}}]}"#.to_string()
-    } else if has_apply_patch {
-        r#"{"tool_calls":[{"name":"apply_patch","input":{"patch":"*** Begin Patch\n*** Add File: path/to/file\n+content\n*** End Patch"}}]}"#.to_string()
     } else {
         r#"{"tool_calls":[{"name":"<allowed tool name>","input":{}}]}"#.to_string()
     };
@@ -151,12 +142,6 @@ pub fn build_tool_text_instruction(tools: Option<&Value>, _require_tool_call: bo
         rule_lines.push("- FORBIDDEN FIRST: never call `apply_patch` through `exec_command`, `shell`, `bash -lc`, command substitution, or heredoc wrappers like `apply_patch <<PATCH`; file edits must use a direct `apply_patch` tool call.".to_string());
         rule_lines.push("- For `exec_command`, use only `input.cmd` as one string; prefer a direct single-line command like `pwd`. Use `bash -lc '...'` only when shell features are truly required, and then the final single quote must be present.".to_string());
         rule_lines.push("- For `exec_command`, keep normal shell commands on one physical line unless an actual heredoc is required; do not insert raw newlines inside operators or redirects like `|`, `&&`, `||`, `;`, `2>/dev/null`, or `-exec ... \\;`".to_string());
-    }
-
-    if has_apply_patch {
-        rule_lines.push("- For `apply_patch`, file edits must be a DIRECT tool call. Author exactly one canonical patch body in `patch`.".to_string());
-        rule_lines.push("- For `apply_patch`, use the canonical internal patch grammar only.".to_string());
-        rule_lines.push("- If an `apply_patch` attempt failed, read the file first, then rebuild the patch from the latest content before retrying.".to_string());
     }
 
     rule_lines.push("- If no tool is needed, reply with plain text (no heredoc)".to_string());

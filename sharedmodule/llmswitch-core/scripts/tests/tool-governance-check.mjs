@@ -183,14 +183,13 @@ try {
     );
   }
 
-  // Regression: tolerate <arg_key>/<arg_value> artifacts injected into JSON key positions.
+  // Regression: arg_key artifacts injected into JSON key positions must fail closed.
   {
     const injectedJson =
       '{"file":"a.ts","changes":[{"kind":"create_file","lines":["x"],"file</arg_key><arg_value>a.ts"}]}';
     const validation = validateToolCall('apply_patch', injectedJson);
-    assert.ok(validation.ok, 'apply_patch should validate JSON with arg_key artifacts in keys');
-    const normalized = JSON.parse(validation.normalizedArgs);
-    assert.ok(typeof normalized.patch === 'string', 'normalized apply_patch should contain patch text');
+    assert.equal(validation.ok, false, 'apply_patch must fail closed when arg_key artifacts corrupt JSON key positions');
+    assert.equal(validation.reason, 'empty_patch');
   }
 
 
@@ -231,16 +230,12 @@ try {
     assert.ok(normalized.patch.endsWith('*** End Patch'), 'normalized escaped-newline diff should include end marker');
   }
 
-  // Regression: command-envelope string should recover embedded apply_patch payload.
+  // Regression: command-envelope string without canonical patch field must fail closed.
   {
     const commandEnvelope = '["apply_patch", "*** Begin Patch\n*** Add File: cmd-envelope-regression.txt\n+hello\n*** End Patch\n"]]';
     const validation = validateToolCall('apply_patch', JSON.stringify({ command: commandEnvelope }));
-    assert.equal(validation.ok, true, 'command-envelope missing_changes shape should validate');
-    const normalized = JSON.parse(validation.normalizedArgs);
-    assert.ok(
-      normalized.patch.includes('*** Add File: cmd-envelope-regression.txt'),
-      'normalized patch should include recovered file header from command envelope'
-    );
+    assert.equal(validation.ok, false, 'command-envelope without canonical patch field must fail closed');
+    assert.equal(validation.reason, 'empty_patch');
   }
 
   // Regression: malformed "Create File" header with trailing stars should be repaired.
@@ -256,7 +251,7 @@ import sys`;
     assert.ok(normalized.patch.includes('+import sys'), 'normalized add file content should keep all lines');
   }
 
-  // Regression: top-level 'target' should be treated as file path alias when changes exist.
+  // Regression: top-level target+changes without canonical patch field must fail closed.
   {
     const args = JSON.stringify({
       target: 'scripts/xiaohongshu/tests/phase1-4-full-collect.mjs',
@@ -269,15 +264,11 @@ import sys`;
       ]
     });
     const validation = validateToolCall('apply_patch', args);
-    assert.equal(validation.ok, true, 'top-level target should be mapped to file path');
-    const normalized = JSON.parse(validation.normalizedArgs);
-    assert.ok(
-      normalized.patch.includes('*** Update File: scripts/xiaohongshu/tests/phase1-4-full-collect.mjs'),
-      'normalized patch should include update file header from top-level target'
-    );
+    assert.equal(validation.ok, false, 'top-level target+changes without canonical patch field must fail closed');
+    assert.equal(validation.reason, 'empty_patch');
   }
 
-  // Regression: conflict-marker payload with top-level path should be coerced into replace patch.
+  // Regression: conflict-marker payload with top-level path must stay invalid.
   {
     const args = JSON.stringify({
       path: 'src/providers/core/runtime/gemini-cli-http-provider.ts',
@@ -290,14 +281,8 @@ import sys`;
       ].join('\n')
     });
     const validation = validateToolCall('apply_patch', args);
-    assert.equal(validation.ok, true, 'conflict-marker payload with path should validate');
-    const normalized = JSON.parse(validation.normalizedArgs);
-    assert.ok(
-      normalized.patch.includes('*** Update File: src/providers/core/runtime/gemini-cli-http-provider.ts'),
-      'conflict-marker payload should map to update file header'
-    );
-    assert.ok(normalized.patch.includes("-console.log('old')"), 'conflict-marker payload should keep original line');
-    assert.ok(normalized.patch.includes("+console.log('new')"), 'conflict-marker payload should keep updated line');
+    assert.equal(validation.ok, false, 'conflict-marker payload must stay invalid');
+    assert.equal(validation.reason, 'conflict_markers');
   }
 
   {
@@ -396,6 +381,11 @@ import sys`;
         ['json_escaped_newlines', JSON.stringify({ patch: escapeNewlines(patchText), input: escapeNewlines(patchText) })]
       ]) {
         const validation = validateToolCall('apply_patch', argsString);
+        if (variant === 'text') {
+          assert.equal(validation.ok, false, `${label}:${variant} must fail closed for non-JSON raw patch text`);
+          assert.equal(validation.reason, 'empty_patch');
+          continue;
+        }
         assert.ok(validation.ok, `${label}:${variant} should validate`);
         const normalized = JSON.parse(validation.normalizedArgs);
         assert.equal(normalized.patch, normalized.input, `${label}:${variant} patch/input should match`);

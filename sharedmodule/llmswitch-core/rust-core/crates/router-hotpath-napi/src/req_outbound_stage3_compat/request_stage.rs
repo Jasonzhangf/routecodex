@@ -210,8 +210,9 @@ pub fn run_req_outbound_stage3_compat(
                 adapter_context.provider_protocol.as_ref(),
                 "openai-chat",
             ) {
+                let payload = apply_glm_request_compat(payload);
                 return Ok(CompatResult {
-                    payload: apply_glm_request_compat(payload),
+                    payload,
                     applied_profile: Some(profile_id.to_string()),
                     native_applied: true,
                     rate_limit_detected: None,

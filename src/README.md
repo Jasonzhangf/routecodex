@@ -45,7 +45,7 @@ routecodex start --config ~/.rcc/config.json
 
 ## 调试
 - CLI：`npm run snapshot:inspect -- --rid <RID>` 查看各阶段快照。
-- 快照目录：`~/.routecodex/codex-samples/`。
+- 快照目录：`~/.rcc/codex-samples/`。
 - Provider Harness：`src/debug/harnesses/provider-harness.ts` 支持干跑。
 
 ## 文档

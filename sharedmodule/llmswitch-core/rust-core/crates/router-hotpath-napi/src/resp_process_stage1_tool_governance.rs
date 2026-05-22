@@ -2,6 +2,7 @@ use crate::hub_bridge_actions::utils::{
     can_servertool_own_tool_call_id, create_harvested_tool_call_id, create_servertool_tool_call_id,
     is_synthetic_routecodex_tool_call_id,
 };
+use crate::hashline::{self, HashlineNativeEditInput};
 use napi_derive::napi;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -611,6 +612,38 @@ fn escape_newlines_inside_json_strings(raw: &str) -> String {
     out
 }
 
+fn strip_arg_key_artifacts(raw: &str) -> String {
+    let mut out = raw.to_string();
+    let patterns = [
+        r"(?is)</?\s*tool_call[^>]*>",
+        r"(?is)</?\s*arg_key\s*>",
+        r"(?is)</?\s*arg_value\s*>",
+    ];
+    for pattern in patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            out = re.replace_all(out.as_str(), "").to_string();
+        }
+    }
+    out
+}
+
+fn repair_arg_key_artifacts_in_raw_json(raw: &str) -> String {
+    let mut out = raw.to_string();
+    if !out.contains("<arg_key")
+        && !out.contains("<arg_value")
+        && !out.contains("</arg_key")
+        && !out.contains("</arg_value")
+    {
+        return out;
+    }
+    if let Ok(re) = Regex::new(
+        r#""([^"]+?)\s*</?\s*arg_key\s*>\s*</?\s*arg_value\s*>([^"]*?)""#,
+    ) {
+        out = re.replace_all(out.as_str(), r#""$1":"$2""#).to_string();
+    }
+    strip_arg_key_artifacts(out.as_str())
+}
+
 fn escape_unescaped_quotes_inside_json_strings(raw: &str) -> String {
     let chars: Vec<char> = raw.chars().collect();
     let mut out = String::with_capacity(raw.len() + 8);
@@ -713,7 +746,7 @@ fn escape_invalid_backslashes_inside_json_strings(raw: &str) -> String {
     out
 }
 
-fn try_parse_json_value_lenient(raw: &str) -> Option<Value> {
+pub(crate) fn try_parse_json_value_lenient(raw: &str) -> Option<Value> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
@@ -721,6 +754,13 @@ fn try_parse_json_value_lenient(raw: &str) -> Option<Value> {
 
     if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
         return Some(parsed);
+    }
+
+    let repaired_arg_key = repair_arg_key_artifacts_in_raw_json(trimmed);
+    if repaired_arg_key != trimmed {
+        if let Ok(parsed) = serde_json::from_str::<Value>(&repaired_arg_key) {
+            return Some(parsed);
+        }
     }
 
     let escaped_newlines = escape_newlines_inside_json_strings(trimmed);
@@ -780,6 +820,7 @@ fn try_parse_json_value_lenient(raw: &str) -> Option<Value> {
     candidate = line_comment_pattern
         .replace_all(candidate.as_str(), "")
         .to_string();
+    candidate = repair_arg_key_artifacts_in_raw_json(candidate.as_str());
     candidate = block_comment_pattern
         .replace_all(candidate.as_str(), "")
         .to_string();
@@ -1521,6 +1562,16 @@ fn looks_like_shell_wrapped_apply_patch(raw: &str) -> bool {
     starts_with_shell && trimmed.contains("apply_patch <<")
 }
 
+fn extract_shell_wrapped_apply_patch_body(raw: &str) -> Option<String> {
+    if !looks_like_shell_wrapped_apply_patch(raw) {
+        return None;
+    }
+    let begin = raw.find("*** Begin Patch")?;
+    let end_marker = "*** End Patch";
+    let end = raw[begin..].find(end_marker)? + begin + end_marker.len();
+    Some(raw[begin..end].to_string())
+}
+
 fn extract_apply_patch_text_from_object(row: &Map<String, Value>) -> Option<String> {
     row.get("patch")
         .and_then(|value| extract_apply_patch_text(Some(value)))
@@ -1545,11 +1596,11 @@ pub(crate) fn extract_apply_patch_text(raw_args: Option<&Value>) -> Option<Strin
             if trimmed.is_empty() {
                 return None;
             }
-            if looks_like_shell_wrapped_apply_patch(trimmed) {
-                return None;
-            }
             if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
                 return extract_apply_patch_text(Some(&parsed));
+            }
+            if let Some(patch) = extract_shell_wrapped_apply_patch_body(trimmed) {
+                return Some(patch);
             }
             Some(
                 decode_escaped_newlines_if_needed(trimmed)
@@ -2117,6 +2168,560 @@ fn detect_apply_patch_invalid_reason(patch: &str) -> Option<&'static str> {
     None
 }
 
+fn looks_like_hashline_patch(raw: &str) -> bool {
+    let first = raw
+        .lines()
+        .map(str::trim_start)
+        .find(|line| !line.is_empty())
+        .unwrap_or("");
+    let mut chars = first.chars();
+    let Some(lead) = chars.next() else {
+        return false;
+    };
+    matches!(lead, '<' | '+' | '-' | '=')
+        && chars.next().map(|ch| ch.is_whitespace()).unwrap_or(true)
+}
+
+fn read_hashline_file_path_from_apply_patch_args(args: &Map<String, Value>) -> Option<String> {
+    read_trimmed_string(args.get("filePath"))
+        .or_else(|| read_trimmed_string(args.get("file_path")))
+        .or_else(|| {
+            args.get("input")
+                .and_then(Value::as_object)
+                .and_then(|row| read_trimmed_string(row.get("filePath")))
+        })
+        .or_else(|| {
+            args.get("input")
+                .and_then(Value::as_object)
+                .and_then(|row| read_trimmed_string(row.get("file_path")))
+        })
+}
+
+fn read_hashline_file_content_from_apply_patch_args(args: &Map<String, Value>) -> Option<String> {
+    read_trimmed_string(args.get("fileContent"))
+        .or_else(|| read_trimmed_string(args.get("file_content")))
+        .or_else(|| {
+            args.get("input")
+                .and_then(Value::as_object)
+                .and_then(|row| read_trimmed_string(row.get("fileContent")))
+        })
+        .or_else(|| {
+            args.get("input")
+                .and_then(Value::as_object)
+                .and_then(|row| read_trimmed_string(row.get("file_content")))
+        })
+}
+
+enum HashlineApplyPatchNormalization {
+    NotHashline,
+    Normalized((String, bool)),
+    Guarded {
+        normalized: (String, bool),
+        reason: &'static str,
+    },
+}
+
+fn normalize_hashline_apply_patch_schema_args(
+    args: &Map<String, Value>,
+) -> HashlineApplyPatchNormalization {
+    let patch_source = args
+        .get("patch")
+        .or_else(|| args.get("input"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let Some(patch_source) = patch_source else {
+        return HashlineApplyPatchNormalization::NotHashline;
+    };
+    if !looks_like_hashline_patch(patch_source) {
+        return HashlineApplyPatchNormalization::NotHashline;
+    }
+    let Some(file_path) = read_hashline_file_path_from_apply_patch_args(args) else {
+        return HashlineApplyPatchNormalization::Guarded {
+            normalized: (make_apply_patch_guard_args("missing_patch"), true),
+            reason: "hashline_missing_file_path",
+        };
+    };
+    let Some(file_content) = read_hashline_file_content_from_apply_patch_args(args) else {
+        return HashlineApplyPatchNormalization::Guarded {
+            normalized: (make_apply_patch_guard_args("missing_patch"), true),
+            reason: "hashline_missing_file_content",
+        };
+    };
+    let result = hashline::run_hashline_native_edit(HashlineNativeEditInput {
+        patch: patch_source.to_string(),
+        file_path,
+        file_content,
+    });
+    if !result.ok {
+        return HashlineApplyPatchNormalization::Guarded {
+            normalized: (make_apply_patch_guard_args("unsupported_patch_format"), true),
+            reason: "hashline_native_edit_failed",
+        };
+    }
+    let Some(normalized_patch) = result.normalized_patch else {
+        return HashlineApplyPatchNormalization::Guarded {
+            normalized: (make_apply_patch_guard_args("unsupported_patch_format"), true),
+            reason: "hashline_missing_normalized_patch",
+        };
+    };
+    let mut out = Map::new();
+    out.insert("patch".to_string(), Value::String(normalized_patch.clone()));
+    out.insert("input".to_string(), Value::String(normalized_patch));
+    HashlineApplyPatchNormalization::Normalized((
+        serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
+        true,
+    ))
+}
+
+fn detect_hashline_apply_patch_guard_reason(
+    raw_args: Option<&Value>,
+) -> Option<&'static str> {
+    let args = parse_json_record(raw_args).unwrap_or_default();
+    match normalize_hashline_apply_patch_schema_args(&args) {
+        HashlineApplyPatchNormalization::Guarded { reason, .. } => Some(reason),
+        _ => None,
+    }
+}
+
+fn looks_like_unparseable_apply_patch_json_args(raw_args: Option<&Value>) -> bool {
+    let Some(Value::String(raw)) = raw_args else {
+        return false;
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let first = trimmed.chars().next().unwrap_or_default();
+    let last = trimmed.chars().last().unwrap_or_default();
+    let looks_json_container =
+        (first == '{' && last == '}') || (first == '[' && last == ']');
+    looks_json_container && try_parse_json_value_lenient(trimmed).is_none()
+}
+
+fn split_apply_patch_text_lines(raw: &str) -> Vec<String> {
+    let decoded = decode_escaped_newlines_if_needed(raw).replace("\r\n", "\n");
+    let normalized = decoded.replace('\r', "\n");
+    let mut parts: Vec<String> = normalized.split('\n').map(|line| line.to_string()).collect();
+    if parts.last().map(|line| line.is_empty()).unwrap_or(false) {
+        parts.pop();
+    }
+    if parts.is_empty() {
+        vec![String::new()]
+    } else {
+        parts
+    }
+}
+
+fn normalize_apply_patch_path(raw: &str) -> Option<String> {
+    let mut trimmed = raw.trim().to_string();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.contains('\n') || trimmed.contains('\r') {
+        trimmed = trimmed
+            .split(|ch| ch == '\n' || ch == '\r')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+    }
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.replace('\\', "/"))
+}
+
+fn read_apply_patch_stringish(value: Option<&Value>) -> Option<String> {
+    let value = value?;
+    match value {
+        Value::String(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        Value::Array(items) if items.len() == 1 => {
+            items.first().and_then(|item| read_apply_patch_stringish(Some(item)))
+        }
+        Value::Object(row) => {
+            for key in ["path", "file", "filename", "filepath", "file_path"] {
+                if let Some(found) = read_apply_patch_stringish(row.get(key)) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn extract_apply_patch_change_file(
+    change: &Map<String, Value>,
+    top_level_file: Option<&str>,
+) -> Option<String> {
+    for key in ["file", "path", "filepath", "filename", "file_path"] {
+        if let Some(found) = read_apply_patch_stringish(change.get(key)) {
+            if let Some(normalized) = normalize_apply_patch_path(found.as_str()) {
+                return Some(normalized);
+            }
+        }
+    }
+    top_level_file.and_then(normalize_apply_patch_path)
+}
+
+fn resolve_apply_patch_top_level_file(args: &Map<String, Value>) -> Option<String> {
+    for key in ["file", "path", "filepath", "filename"] {
+        if let Some(found) = read_apply_patch_stringish(args.get(key)) {
+            if let Some(normalized) = normalize_apply_patch_path(found.as_str()) {
+                return Some(normalized);
+            }
+        }
+    }
+    if let Some(target) = read_apply_patch_stringish(args.get("target")) {
+        if args
+            .get("changes")
+            .and_then(Value::as_array)
+            .map(|rows| !rows.is_empty())
+            .unwrap_or(false)
+        {
+            if let Some(normalized) = normalize_apply_patch_path(target.as_str()) {
+                if !normalized.contains('/') && !normalized.contains('.') {
+                    return None;
+                }
+                return Some(normalized);
+            }
+        }
+    }
+    None
+}
+
+fn looks_like_patch_instructions(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .map(|raw| {
+            let trimmed = raw.trim_start();
+            trimmed.starts_with("*** ") || trimmed.starts_with("--- ") || trimmed.starts_with("+++ ")
+        })
+        .unwrap_or(false)
+}
+
+fn build_structured_apply_patch_from_record(
+    args: &Map<String, Value>,
+) -> Option<(String, bool)> {
+    let changes = args.get("changes").and_then(Value::as_array)?;
+    if changes.is_empty() {
+        return None;
+    }
+    let top_level_file = resolve_apply_patch_top_level_file(args);
+    let mut out: Vec<String> = vec!["*** Begin Patch".to_string()];
+    let mut emitted = false;
+
+    for (index, change_value) in changes.iter().enumerate() {
+        let change = change_value.as_object()?;
+        let kind = change
+            .get("kind")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?
+            .to_ascii_lowercase();
+        let file = extract_apply_patch_change_file(change, top_level_file.as_deref())?;
+
+        match kind.as_str() {
+            "create_file" => {
+                let lines_source = change
+                    .get("lines")
+                    .or_else(|| change.get("text"))
+                    .or_else(|| change.get("content"))
+                    .or_else(|| change.get("body"))
+                    .or_else(|| change.get("replacement"));
+                let lines = match lines_source {
+                    Some(Value::Array(items)) => items
+                        .iter()
+                        .map(|item| match item {
+                            Value::String(raw) => raw.replace('\r', ""),
+                            Value::Null => String::new(),
+                            other => other.to_string(),
+                        })
+                        .collect::<Vec<String>>(),
+                    Some(Value::String(raw)) => split_apply_patch_text_lines(raw),
+                    Some(other) => vec![other.to_string()],
+                    None => return None,
+                };
+                out.push(format!("*** Add File: {}", file));
+                for line in lines {
+                    out.push(format!("+{}", line));
+                }
+                emitted = true;
+            }
+            "delete_file" => {
+                out.push(format!("*** Delete File: {}", file));
+                emitted = true;
+            }
+            "replace" => {
+                let target_source = change
+                    .get("target")
+                    .or_else(|| change.get("anchor"))
+                    .or_else(|| change.get("context"))
+                    .or_else(|| change.get("from"))
+                    .or_else(|| change.get("old"))
+                    .or_else(|| change.get("oldText"))
+                    .or_else(|| change.get("old_text"))
+                    .or_else(|| change.get("beforeText"))
+                    .or_else(|| change.get("before_text"));
+                let replacement_source = change
+                    .get("lines")
+                    .or_else(|| change.get("text"))
+                    .or_else(|| change.get("content"))
+                    .or_else(|| change.get("body"))
+                    .or_else(|| change.get("replacement"))
+                    .or_else(|| change.get("newText"))
+                    .or_else(|| change.get("new_text"))
+                    .or_else(|| change.get("afterText"))
+                    .or_else(|| change.get("after_text"));
+                let target = read_apply_patch_stringish(target_source)?;
+                let replacements = match replacement_source {
+                    Some(Value::Array(items)) => items
+                        .iter()
+                        .map(|item| match item {
+                            Value::String(raw) => raw.replace('\r', ""),
+                            Value::Null => String::new(),
+                            other => other.to_string(),
+                        })
+                        .collect::<Vec<String>>(),
+                    Some(Value::String(raw)) => split_apply_patch_text_lines(raw),
+                    Some(other) => vec![other.to_string()],
+                    None => return None,
+                };
+                out.push(format!("*** Update File: {}", file));
+                for line in split_apply_patch_text_lines(target.as_str()) {
+                    out.push(format!("-{}", line));
+                }
+                for line in replacements {
+                    out.push(format!("+{}", line));
+                }
+                emitted = true;
+            }
+            "insert_after" | "insert_before" => {
+                let anchor_source = change
+                    .get("anchor")
+                    .or_else(|| change.get("target"))
+                    .or_else(|| change.get("context"))
+                    .or_else(|| change.get("from"))
+                    .or_else(|| change.get("old"))
+                    .or_else(|| change.get("oldText"))
+                    .or_else(|| change.get("old_text"))
+                    .or_else(|| change.get("beforeText"))
+                    .or_else(|| change.get("before_text"));
+                let additions_source = change
+                    .get("lines")
+                    .or_else(|| change.get("text"))
+                    .or_else(|| change.get("content"))
+                    .or_else(|| change.get("body"))
+                    .or_else(|| change.get("replacement"))
+                    .or_else(|| change.get("newText"))
+                    .or_else(|| change.get("new_text"))
+                    .or_else(|| change.get("afterText"))
+                    .or_else(|| change.get("after_text"));
+                let anchor = read_apply_patch_stringish(anchor_source)?;
+                let additions = match additions_source {
+                    Some(Value::Array(items)) => items
+                        .iter()
+                        .map(|item| match item {
+                            Value::String(raw) => raw.replace('\r', ""),
+                            Value::Null => String::new(),
+                            other => other.to_string(),
+                        })
+                        .collect::<Vec<String>>(),
+                    Some(Value::String(raw)) => split_apply_patch_text_lines(raw),
+                    Some(other) => vec![other.to_string()],
+                    None => return None,
+                };
+                out.push(format!("*** Update File: {}", file));
+                if kind == "insert_before" {
+                    for line in additions.iter() {
+                        out.push(format!("+{}", line));
+                    }
+                    for line in split_apply_patch_text_lines(anchor.as_str()) {
+                        out.push(format!(" {}", line));
+                    }
+                } else {
+                    for line in split_apply_patch_text_lines(anchor.as_str()) {
+                        out.push(format!(" {}", line));
+                    }
+                    for line in additions.iter() {
+                        out.push(format!("+{}", line));
+                    }
+                }
+                emitted = true;
+            }
+            "delete" => {
+                let target_source = change
+                    .get("target")
+                    .or_else(|| change.get("anchor"))
+                    .or_else(|| change.get("context"))
+                    .or_else(|| change.get("from"))
+                    .or_else(|| change.get("old"))
+                    .or_else(|| change.get("oldText"))
+                    .or_else(|| change.get("old_text"))
+                    .or_else(|| change.get("beforeText"))
+                    .or_else(|| change.get("before_text"));
+                let target = read_apply_patch_stringish(target_source)?;
+                out.push(format!("*** Update File: {}", file));
+                for line in split_apply_patch_text_lines(target.as_str()) {
+                    out.push(format!("-{}", line));
+                }
+                emitted = true;
+            }
+            _ => {
+                let _ = index;
+                return None;
+            }
+        }
+    }
+
+    if !emitted {
+        return None;
+    }
+    out.push("*** End Patch".to_string());
+    Some((out.join("\n"), true))
+}
+
+fn read_structured_lines_source<'a>(change: &'a Map<String, Value>) -> Option<&'a Value> {
+    change
+        .get("lines")
+        .or_else(|| change.get("text"))
+        .or_else(|| change.get("content"))
+        .or_else(|| change.get("body"))
+        .or_else(|| change.get("replacement"))
+        .or_else(|| change.get("newText"))
+        .or_else(|| change.get("new_text"))
+        .or_else(|| change.get("afterText"))
+        .or_else(|| change.get("after_text"))
+}
+
+fn structured_lines_source_is_valid(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::String(raw)) => !raw.trim().is_empty(),
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(Value::Null) | None => false,
+        Some(_) => true,
+    }
+}
+
+fn structured_stringish_is_non_empty(value: Option<&Value>) -> bool {
+    read_apply_patch_stringish(value)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn detect_structured_apply_patch_invalid_reason(args: &Map<String, Value>) -> Option<&'static str> {
+    if args.is_empty() {
+        return Some("invalid_json");
+    }
+    if args.contains_key("cmd") || args.contains_key("command") || args.contains_key("shell") {
+        return None;
+    }
+    let has_structured_shape = args.contains_key("changes")
+        || args.contains_key("instructions")
+        || args.contains_key("file")
+        || args.contains_key("path")
+        || args.contains_key("filepath")
+        || args.contains_key("filename")
+        || args.contains_key("style")
+        || args.contains_key("onClick");
+    if !has_structured_shape {
+        return None;
+    }
+    if args.contains_key("patch") || args.contains_key("input") {
+        return None;
+    }
+    let Some(changes) = args.get("changes") else {
+        if looks_like_patch_instructions(args.get("instructions")) {
+            return Some("unsupported_patch_format");
+        }
+        return Some("missing_changes");
+    };
+    let Some(changes) = changes.as_array() else {
+        return Some("missing_changes");
+    };
+    if changes.is_empty() {
+        return Some("missing_changes");
+    }
+
+    let top_level_file = resolve_apply_patch_top_level_file(args);
+    for change_value in changes {
+        let Some(change) = change_value.as_object() else {
+            return Some("invalid_change_sequence");
+        };
+        let Some(kind) = change
+            .get("kind")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_ascii_lowercase)
+        else {
+            return Some("missing_field");
+        };
+        if args.contains_key("target") && !args.contains_key("file") {
+            return Some("invalid_file");
+        }
+        let file = extract_apply_patch_change_file(change, top_level_file.as_deref());
+        if file.is_none() {
+            return Some("invalid_file");
+        }
+        match kind.as_str() {
+            "create_file" => {
+                if !structured_lines_source_is_valid(read_structured_lines_source(change)) {
+                    return Some("invalid_lines");
+                }
+            }
+            "replace" | "insert_after" | "insert_before" => {
+                let has_anchor = structured_stringish_is_non_empty(
+                    change
+                        .get("target")
+                        .or_else(|| change.get("anchor"))
+                        .or_else(|| change.get("context"))
+                        .or_else(|| change.get("from"))
+                        .or_else(|| change.get("old"))
+                        .or_else(|| change.get("oldText"))
+                        .or_else(|| change.get("old_text"))
+                        .or_else(|| change.get("beforeText"))
+                        .or_else(|| change.get("before_text")),
+                );
+                if !has_anchor {
+                    return Some("missing_field");
+                }
+                if !structured_lines_source_is_valid(read_structured_lines_source(change)) {
+                    return Some("invalid_lines");
+                }
+            }
+            "delete" => {
+                let has_target = structured_stringish_is_non_empty(
+                    change
+                        .get("target")
+                        .or_else(|| change.get("anchor"))
+                        .or_else(|| change.get("context"))
+                        .or_else(|| change.get("from"))
+                        .or_else(|| change.get("old"))
+                        .or_else(|| change.get("oldText"))
+                        .or_else(|| change.get("old_text"))
+                        .or_else(|| change.get("beforeText"))
+                        .or_else(|| change.get("before_text")),
+                );
+                if !has_target {
+                    return Some("missing_field");
+                }
+            }
+            "delete_file" => {}
+            _ => return Some("unsupported_patch_format"),
+        }
+    }
+    None
+}
+
 pub(crate) fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (String, bool) {
     let Some(raw_args) = raw_args else {
         let mut out = Map::new();
@@ -2128,6 +2733,23 @@ pub(crate) fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (St
         );
     };
     let args = parse_json_record(Some(raw_args)).unwrap_or_default();
+    match normalize_hashline_apply_patch_schema_args(&args) {
+        HashlineApplyPatchNormalization::Normalized(normalized) => return normalized,
+        HashlineApplyPatchNormalization::Guarded { normalized, .. } => return normalized,
+        HashlineApplyPatchNormalization::NotHashline => {}
+    }
+    if let Some((structured_patch, structured_repaired)) =
+        build_structured_apply_patch_from_record(&args)
+    {
+        let patch = normalize_apply_patch_text(structured_patch.trim());
+        let mut out = Map::new();
+        out.insert("patch".to_string(), Value::String(patch.clone()));
+        out.insert("input".to_string(), Value::String(patch));
+        return (
+            serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
+            structured_repaired,
+        );
+    }
     let patch_source = args
         .get("patch")
         .or_else(|| args.get("input"))
@@ -6294,6 +6916,159 @@ mod tests {
     }
 
     #[test]
+    fn test_govern_response_apply_patch_hashline_shape_is_converted_to_canonical_patch() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "tool_calls": [{
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": serde_json::to_string(&serde_json::json!({
+                                    "patch": "+ 2 deadbeef\nhello",
+                                    "filePath": "note.txt",
+                                    "fileContent": "hello"
+                                })).unwrap()
+                            }
+                        }]
+                    }
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat".to_string(),
+            request_id: "req_hashline_response_apply_patch".to_string(),
+        };
+        let result = govern_response(input).unwrap();
+        let args = result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]
+            ["arguments"]
+            .as_str()
+            .unwrap_or("");
+        let parsed: Value = serde_json::from_str(args).unwrap();
+        let patch = parsed["patch"].as_str().unwrap_or("");
+        assert!(patch.contains("*** Begin Patch"));
+        assert!(patch.contains("*** Update File: note.txt"));
+        assert!(patch.contains("@@"));
+        assert!(patch.contains("+hello"));
+        assert_eq!(parsed["input"], parsed["patch"]);
+        assert!(parsed.get("filePath").is_none());
+        assert!(parsed.get("file_path").is_none());
+    }
+
+    #[test]
+    fn test_govern_response_apply_patch_new_file_plain_text_with_hashline_shape_repairs_to_add_file_patch() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "tool_calls": [{
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": serde_json::to_string(&serde_json::json!({
+                                    "patch": "hello from 10000",
+                                    "filePath": "hello_apply_patch_10000.txt",
+                                    "fileContent": ""
+                                })).unwrap()
+                            }
+                        }]
+                    }
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat".to_string(),
+            request_id: "req_hashline_response_apply_patch_new_file_plain_text".to_string(),
+        };
+        let result = govern_response(input).unwrap();
+        let args = result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]
+            ["arguments"]
+            .as_str()
+            .unwrap_or("");
+        let parsed: Value = serde_json::from_str(args).unwrap();
+        let patch = parsed["patch"].as_str().unwrap_or("");
+        assert!(patch.contains("*** Begin Patch"));
+        assert!(patch.contains("*** Add File: hello_apply_patch_10000.txt"));
+        assert!(patch.contains("+hello from 10000"));
+        assert_eq!(parsed["input"], parsed["patch"]);
+        assert!(parsed.get("filePath").is_none());
+        assert!(parsed.get("file_path").is_none());
+        assert!(parsed.get("fileContent").is_none());
+        assert!(parsed.get("file_content").is_none());
+    }
+
+    #[test]
+    fn test_govern_response_apply_patch_hashline_missing_file_content_fails_closed_with_guard_patch() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "tool_calls": [{
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": serde_json::to_string(&serde_json::json!({
+                                    "patch": "+ 2 deadbeef\nhello",
+                                    "filePath": "note.txt"
+                                })).unwrap()
+                            }
+                        }]
+                    }
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat".to_string(),
+            request_id: "req_hashline_response_apply_patch_missing_file_content".to_string(),
+        };
+        let result = govern_response(input).unwrap();
+        let args = result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]
+            ["arguments"]
+            .as_str()
+            .unwrap_or("");
+        let parsed: Value = serde_json::from_str(args).unwrap();
+        let patch = parsed["patch"].as_str().unwrap_or("");
+        assert!(patch.contains("APPLY_PATCH_ERROR:"));
+        assert!(patch.contains("__APPLY_PATCH_ERROR__/"));
+        assert!(!patch.contains("\"filePath\""));
+        assert!(!patch.contains("+ 2 deadbeef"));
+        assert_eq!(parsed["input"], parsed["patch"]);
+    }
+
+    #[test]
+    fn test_govern_response_apply_patch_canonical_patch_with_stray_filepath_stays_canonical() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "tool_calls": [{
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": serde_json::to_string(&serde_json::json!({
+                                    "filePath": "test_apply_patch/sample.txt",
+                                    "input": "*** Begin Patch\n*** Update File: test_apply_patch/sample.txt\n@@ -1,3 +1,3 @@\n Original line 1\n-Original line 2\n+Modified line 2: UPDATED!\n Original line 3\n*** End Patch",
+                                    "patch": "*** Begin Patch\n*** Update File: test_apply_patch/sample.txt\n@@ -1,3 +1,3 @@\n Original line 1\n-Original line 2\n+Modified line 2: UPDATED!\n Original line 3\n*** End Patch"
+                                })).unwrap()
+                            }
+                        }]
+                    }
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/chat".to_string(),
+            request_id: "req_apply_patch_canonical_with_stray_filepath".to_string(),
+        };
+        let result = govern_response(input).unwrap();
+        let args = result.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]
+            ["arguments"]
+            .as_str()
+            .unwrap_or("");
+        let parsed: Value = serde_json::from_str(args).unwrap();
+        let patch = parsed["patch"].as_str().unwrap_or("");
+        assert!(patch.contains("*** Begin Patch"));
+        assert!(patch.contains("*** Update File: test_apply_patch/sample.txt"));
+        assert!(patch.contains("+Modified line 2: UPDATED!"));
+        assert_eq!(parsed["input"], parsed["patch"]);
+        assert!(parsed.get("filePath").is_none());
+        assert!(parsed.get("file_path").is_none());
+    }
+
+    #[test]
     fn test_govern_response_apply_patch_strips_quoted_paths() {
         let input = ToolGovernanceInput {
             payload: serde_json::json!({
@@ -7540,7 +8315,10 @@ console.log('ok')"#;
             "bash -lc \"echo hi && apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/nope.ts\n+console.log('nope');\n*** End Patch\nPATCH\""
                 .to_string(),
         );
-        assert!(extract_apply_patch_text(Some(&shell_wrapped)).is_none());
+        assert_eq!(
+            extract_apply_patch_text(Some(&shell_wrapped)).unwrap(),
+            "bash -lc \"echo hi && apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: src/nope.ts\n+console.log('nope');\n*** End Patch\nPATCH\""
+        );
     }
 
     #[test]
@@ -7635,6 +8413,21 @@ console.log('ok')"#;
     }
 
     #[test]
+    fn test_normalize_tool_args_apply_patch_repairs_add_file_lines_without_plus_prefix() {
+        let raw_args = json!({
+            "patch": "*** Begin Patch\n*** Add File: test_patch.txt\nLine 1\nLine 2\nLine 3\n*** End Patch"
+        });
+        let out = normalize_tool_args("apply_patch", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        let patch = parsed["patch"].as_str().unwrap_or("");
+        let input = parsed["input"].as_str().unwrap_or("");
+        assert!(patch.contains("*** Add File: test_patch.txt"));
+        assert!(patch.contains("+Line 1\n+Line 2\n+Line 3"));
+        assert!(!patch.contains("\nLine 1\nLine 2\nLine 3\n"));
+        assert_eq!(input, patch);
+    }
+
+    #[test]
     fn test_normalize_tool_args_apply_patch_relativizes_absolute_update_path() {
         let cwd = std::env::current_dir().expect("cwd");
         let abs = cwd.join("AGENTS.md").to_string_lossy().to_string();
@@ -7711,8 +8504,17 @@ console.log('ok')"#;
         });
         let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
         let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
-        assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(false));
-        assert_eq!(parsed.get("reason").and_then(Value::as_str), Some("empty_update_hunk"));
+        assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(true));
+        let normalized = parsed
+            .get("normalizedArguments")
+            .and_then(Value::as_str)
+            .expect("normalizedArguments");
+        let normalized_value: Value = serde_json::from_str(normalized).unwrap();
+        let patch = normalized_value
+            .get("patch")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert!(patch.contains("*** Update File: README.md"));
     }
 
     #[test]
@@ -7724,8 +8526,16 @@ console.log('ok')"#;
         });
         let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
         let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
-        assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(false));
-        assert_eq!(parsed.get("reason").and_then(Value::as_str), Some("empty_add_file_block"));
+        assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(true));
+        let normalized = parsed
+            .get("normalizedArguments")
+            .and_then(Value::as_str)
+            .expect("normalizedArguments");
+        let normalized_value: Value = serde_json::from_str(normalized).unwrap();
+        assert_eq!(
+            normalized_value.get("patch").and_then(Value::as_str),
+            Some("*** Begin Patch\n*** Add File: demo.txt\n+hello\n*** End Patch")
+        );
     }
 
     #[test]
@@ -7738,6 +8548,148 @@ console.log('ok')"#;
         let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
         let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
         assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(true));
+    }
+
+    #[test]
+    fn test_validate_apply_patch_arguments_rejects_hashline_missing_file_content() {
+        let raw = json!({
+            "arguments": {
+                "patch": "+ 2 deadbeef\nhello",
+                "filePath": "note.txt"
+            }
+        });
+        let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
+        assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            parsed.get("reason").and_then(Value::as_str),
+            Some("hashline_missing_file_content")
+        );
+    }
+
+    #[test]
+    fn test_validate_apply_patch_arguments_rejects_hashline_missing_file_path() {
+        let raw = json!({
+            "arguments": {
+                "patch": "+ 2 deadbeef\nhello",
+                "fileContent": "hello"
+            }
+        });
+        let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
+        assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            parsed.get("reason").and_then(Value::as_str),
+            Some("hashline_missing_file_path")
+        );
+    }
+
+    #[test]
+    fn test_validate_apply_patch_arguments_accepts_newline_escaped_raw_patch_string() {
+        let raw = json!({
+            "arguments": "*** Begin Patch\\n*** Add File: escaped.txt\\n+hello\\n*** End Patch"
+        });
+        let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
+        assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(true));
+        let normalized = parsed
+            .get("normalizedArguments")
+            .and_then(Value::as_str)
+            .expect("normalizedArguments");
+        let normalized_value: Value = serde_json::from_str(normalized).unwrap();
+        let patch = normalized_value
+            .get("patch")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert!(patch.contains("*** Begin Patch"));
+        assert!(patch.contains("*** Add File: escaped.txt"));
+        assert!(patch.contains("\n*** End Patch"));
+    }
+
+    #[test]
+    fn test_validate_apply_patch_arguments_classifies_structured_missing_changes() {
+        let raw = json!({
+            "arguments": {
+                "background": "getStatusColor(agent.status)",
+                "onClick": "{() => onSelectAgent?.(agent.id)}"
+            }
+        });
+        let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
+        assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            parsed.get("reason").and_then(Value::as_str),
+            Some("missing_changes")
+        );
+    }
+
+    #[test]
+    fn test_validate_apply_patch_arguments_classifies_structured_missing_field() {
+        let raw = json!({
+            "arguments": {
+                "file": "sample.txt",
+                "changes": [{"kind": "replace", "lines": ["new"]}]
+            }
+        });
+        let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
+        assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            parsed.get("reason").and_then(Value::as_str),
+            Some("missing_field")
+        );
+    }
+
+    #[test]
+    fn test_validate_apply_patch_arguments_classifies_structured_invalid_lines() {
+        let raw = json!({
+            "arguments": {
+                "file": "sample.txt",
+                "changes": [{"kind": "replace", "target": "old"}]
+            }
+        });
+        let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
+        assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            parsed.get("reason").and_then(Value::as_str),
+            Some("invalid_lines")
+        );
+    }
+
+    #[test]
+    fn test_validate_apply_patch_arguments_repairs_arg_key_invalid_json_artifact() {
+        let raw = json!({
+            "arguments": "{\"file\":\"a.ts\",\"changes\":[{\"kind\":\"create_file\",\"lines\":[\"x\"],\"file</arg_key><arg_value>a.ts\"}]}"
+        });
+        let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
+        assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(true));
+        let normalized = parsed
+            .get("normalizedArguments")
+            .and_then(Value::as_str)
+            .expect("normalizedArguments");
+        let normalized_value: Value = serde_json::from_str(normalized).unwrap();
+        let patch = normalized_value
+            .get("patch")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert!(patch.contains("*** Add File: a.ts"));
+        assert!(patch.contains("+x"));
+    }
+
+    #[test]
+    fn test_validate_apply_patch_arguments_unrecoverable_arg_key_invalid_json_stays_invalid_json() {
+        let raw = json!({
+            "arguments": "{\"file\":\"a.ts\",\"changes\":[{\"kind\":\"create_file\",\"lines\":[\"x\"],\"file</arg_key><arg_value>a.ts}]}"
+        });
+        let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
+        assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            parsed.get("reason").and_then(Value::as_str),
+            Some("invalid_json")
+        );
     }
 
     #[test]
@@ -9435,6 +10387,7 @@ pub fn validate_apply_patch_arguments_json(input_json: String) -> napi::Result<S
     let input: serde_json::Value = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::new(napi::Status::InvalidArg, e.to_string()))?;
     let raw_args = input.get("arguments");
+    let raw_args_invalid_json = looks_like_unparseable_apply_patch_json_args(raw_args);
     let parsed_args = parse_json_record(raw_args).unwrap_or_default();
     let raw_source = parsed_args
         .get("patch")
@@ -9459,7 +10412,15 @@ pub fn validate_apply_patch_arguments_json(input_json: String) -> napi::Result<S
         .unwrap_or("")
         .trim()
         .to_string();
-    let invalid_reason = if normalized.1 {
+    let invalid_reason = if let Some(hashline_reason) = detect_hashline_apply_patch_guard_reason(raw_args) {
+        Some(hashline_reason)
+    } else if raw_args_invalid_json {
+        Some("invalid_json")
+    } else if matches!(raw_args, Some(Value::Object(obj)) if obj.is_empty()) {
+        Some("invalid_json")
+    } else if matches!(raw_args, Some(Value::Object(_))) {
+        detect_structured_apply_patch_invalid_reason(&parsed_args)
+    } else if normalized.1 {
         detect_apply_patch_invalid_reason(patch.as_str())
     } else {
         detect_apply_patch_authoring_invalid_reason(raw_source.as_str())

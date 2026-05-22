@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.2014",
+  "version": "0.90.2141",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
@@ -75,7 +75,7 @@
     "prebuild": "npm run verify:repo-sanity && echo skip-lint",
     "prepare": "",
     "postinstall": "node scripts/ensure-cli-executable.mjs && node scripts/ensure-cli-command-shim.mjs",
-    "verify:apply-patch": "node scripts/verify-apply-patch.mjs",
+    "verify:apply-patch": "node scripts/verify-apply-patch.mjs && node scripts/tests/apply-patch-standard-scenarios.mjs",
     "verify:apply-patch-regressions": "node scripts/verify-apply-patch-regressions.mjs",
     "verify:exec-command": "node scripts/tests/exec-command-loop.mjs",
     "verify:provider-failure-ban-blackbox": "node scripts/tests/provider-failure-ban-blackbox.mjs",

@@ -284,6 +284,52 @@ describe('errorsample writer safeguards', () => {
     }
   });
 
+  it('keeps transient 429/502 errorsamples when snapshot mode is enabled', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-errorsamples-keep-transient-snap-'));
+    const envBackup = new Map<string, string | undefined>();
+    for (const key of ENV_KEYS) {
+      envBackup.set(key, process.env[key]);
+    }
+    try {
+      process.env.RCC_ERRORSAMPLES_DIR = tmp;
+      process.env.ROUTECODEX_ERRORSAMPLE_PRUNE_INTERVAL_MS = '0';
+      process.env.ROUTECODEX_SNAPSHOT = '1';
+
+      const first = await writeErrorsampleJson({
+        group: 'provider-error',
+        kind: 'provider-error.429',
+        payload: {
+          statusCode: 429,
+          error: { message: 'rate limited' }
+        }
+      });
+      const second = await writeErrorsampleJson({
+        group: 'provider-error',
+        kind: 'provider-error.502',
+        payload: {
+          error: { status: 502, message: 'bad gateway' }
+        }
+      });
+
+      await __flushErrorsampleQueueForTests();
+      expect(first).not.toBeNull();
+      expect(second).not.toBeNull();
+      const files = await listFiles(path.join(tmp, 'provider-error'));
+      expect(files.length).toBe(2);
+    } finally {
+      for (const key of ENV_KEYS) {
+        const value = envBackup.get(key);
+        if (value == null) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+      __resetErrorsampleQueueForTests();
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('drops oldest pending errorsamples when the queue is full', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-errorsamples-queue-'));
     const envBackup = new Map<string, string | undefined>();

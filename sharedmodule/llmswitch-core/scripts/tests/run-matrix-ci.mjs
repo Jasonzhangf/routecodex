@@ -177,7 +177,6 @@ async function main() {
   );
   results.push(await run('matrix:coverage-recursive-detection-guard', 'scripts/tests/coverage-recursive-detection-guard.mjs'));
   results.push(await run('matrix:coverage-tool-surface-engine', 'scripts/tests/coverage-tool-surface-engine.mjs'));
-  results.push(await run('matrix:coverage-structured-apply-patch', 'scripts/tests/coverage-structured-apply-patch.mjs'));
   results.push(await run('matrix:coverage-engine-health', 'scripts/tests/coverage-engine-health.mjs'));
   results.push(await run('matrix:coverage-bridge-protocol-blackbox', 'scripts/tests/coverage-bridge-protocol-blackbox.mjs'));
   // 1c.2) glm /v1/responses compat + tool governance

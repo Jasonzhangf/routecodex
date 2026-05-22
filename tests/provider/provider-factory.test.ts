@@ -215,11 +215,6 @@ describe('ProviderFactory no fallback', () => {
         rawType: 'windsurf-account',
         value: 'devin-session-token$windsurf-account-token'
       },
-      extensions: {
-        windsurf: {
-          apiBaseUrl: 'https://server.self-serve.windsurf.com'
-        }
-      }
     };
 
     const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
@@ -227,7 +222,45 @@ describe('ProviderFactory no fallback', () => {
     expect(provider?.config?.type).toBe('windsurf-chat-provider');
     expect(provider?.config?.config?.baseUrl).toBe('');
     expect(provider?.config?.config?.auth?.apiKey).toBe('devin-session-token$windsurf-account-token');
-    expect(provider?.config?.config?.extensions?.windsurf?.apiBaseUrl).toBe('https://server.self-serve.windsurf.com');
+    expect(provider?.config?.config?.extensions?.windsurf).toEqual({});
+  });
+
+  test('windsurf runtime carries local cascade runtime prerequisites through extensions.windsurf', () => {
+    ProviderFactory.clearInstanceCache();
+    const runtime: any = {
+      runtimeKey: 'windsurf.ws-pro-local-ls',
+      providerId: 'windsurf',
+      providerType: 'openai',
+      providerModule: 'openai',
+      compatibilityProfile: 'chat:windsurf',
+      auth: {
+        type: 'apikey',
+        rawType: 'windsurf-devin-token',
+        value: 'devin-session-token$windsurf-account-token'
+      },
+      extensions: {
+        windsurf: {
+          lsPort: 42101,
+          csrfToken: 'windsurf-api-csrf-fixed-token',
+          sessionId: 'session-1',
+          workspacePath: '/tmp/ws-1',
+          workspaceUri: 'file:///tmp/ws-1',
+          pollIntervalMs: 500,
+          pollMaxWaitMs: 120000
+        }
+      }
+    };
+
+    const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
+    expect(provider?.config?.config?.extensions?.windsurf).toEqual({
+      lsPort: 42101,
+      csrfToken: 'windsurf-api-csrf-fixed-token',
+      sessionId: 'session-1',
+      workspacePath: '/tmp/ws-1',
+      workspaceUri: 'file:///tmp/ws-1',
+      pollIntervalMs: 500,
+      pollMaxWaitMs: 120000
+    });
   });
 
 
@@ -294,11 +327,6 @@ describe('ProviderFactory no fallback', () => {
         account: '2094423@qq.com',
         password: 'welcome4zcam#'
       },
-      extensions: {
-        windsurf: {
-          apiBaseUrl: 'https://server.self-serve.windsurf.com'
-        }
-      }
     };
 
     const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;

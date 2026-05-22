@@ -32,7 +32,7 @@ export class GeminiSemanticMapper implements SemanticMapper {
       direction: 'response',
       payload: envelopePayload,
       meta: {
-        context: ctx
+        context: ctx as any
       }
     };
   }

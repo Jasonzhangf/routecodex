@@ -116,19 +116,6 @@ function parseGovernanceContextPayload(raw: string): NativeGovernanceContextPayl
     ...(rawRequestBody ? { rawRequestBody } : {})
   };
 }
-function parseCastToolsPayload(raw: string): unknown | null {
-  const parsed = parseJson('parseCastToolsPayload', raw);
-  if (parsed === JSON_PARSE_FAILED) {
-    return null;
-  }
-  if (parsed === null) {
-    return undefined;
-  }
-  if (!Array.isArray(parsed)) {
-    return null;
-  }
-  return parsed;
-}
 function parseWebSearchOperationsPayload(raw: string): unknown[] | null {
   const parsed = parseJson('parseWebSearchOperationsPayload', raw);
   if (parsed === JSON_PARSE_FAILED || !Array.isArray(parsed)) {
@@ -314,20 +301,6 @@ export function resolveGovernanceContextWithNative(
     const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [request ?? null, context ?? null]);
     const parsed = parseGovernanceContextPayload(raw);
     return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-export function castGovernedToolsWithNative(
-  tools: unknown
-): unknown {
-  const capability = 'castGovernedToolsJson';
-  const fail = (reason?: string): unknown => failNativeRequired<unknown>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [tools ?? null]);
-    const parsed = parseCastToolsPayload(raw);
-    return parsed === null ? fail('invalid payload') : parsed;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
@@ -547,11 +520,11 @@ export function resolveRequestedToolNamesWithNative(
 export function normalizeApplyPatchArgumentsWithNative(
   argumentsValue: unknown
 ): { normalizedArguments: string; repaired: boolean } {
-  const capability = 'normalizeApplyPatchArgumentsJson';
-  const fail = (reason?: string): { normalizedArguments: string; repaired: boolean } =>
+  const schemaCapability = 'normalizeApplyPatchArgumentsJson';
+  const fail = (capability: string, reason?: string): { normalizedArguments: string; repaired: boolean } =>
     failNativeRequired<{ normalizedArguments: string; repaired: boolean }>(capability, reason);
   try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [{ arguments: argumentsValue ?? null }]);
+    const raw = invokeNativeStringCapabilityWithJsonArgs(schemaCapability, [{ arguments: argumentsValue ?? null }]);
     const parsed = parseRecord(raw);
     const normalizedArguments =
       typeof parsed?.normalizedArguments === 'string'
@@ -565,12 +538,12 @@ export function normalizeApplyPatchArgumentsWithNative(
         ? Boolean(parsed?.repaired)
         : parsed?.repaired === 'true';
     if (typeof normalizedArguments !== 'string') {
-      return fail('invalid payload');
+      return fail(schemaCapability, 'invalid payload');
     }
     return { normalizedArguments, repaired };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
+    return fail(schemaCapability, reason);
   }
 }
 
