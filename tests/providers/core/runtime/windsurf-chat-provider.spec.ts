@@ -5893,6 +5893,33 @@ print('{"ok":true}')
     expect((provider as any).getAllProtoFields(top, 9)).toHaveLength(1);
   });
 
+  test('RED: native cascade history must strip assistant tool-call-only and tool result turns like WindsurfAPI native bridge', async () => {
+    const provider = createProvider({ type: 'apikey', apiKey: 'devin-session-token$history-native-strip', rawType: 'windsurf-devin-token' });
+    const messages = [
+      { role: 'system', content: 'You are RouteCodex system.' },
+      { role: 'user', content: 'where am I?' },
+      { role: 'assistant', content: '', tool_calls: [{ id: 'call_pwd', type: 'function', function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' } }] },
+      { role: 'tool', tool_call_id: 'call_pwd', content: '/Users/fanzhang/Documents/github/routecodex\n' },
+      { role: 'assistant', content: 'You are in /Users/fanzhang/Documents/github/routecodex.' },
+      { role: 'user', content: 'continue from that result' },
+    ];
+    const mapped = await (provider as any).preprocessRequest({ body: { model: 'gpt-5.4-none', messages, tools: [
+      { type: 'function', function: { name: 'exec_command', description: 'shell', parameters: { type: 'object' } } },
+    ] } });
+    const semantic = (provider as any).parseCascadeSemanticRoundtripSync(mapped.body.messages);
+    const text = (provider as any).buildCascadePromptText(
+      mapped.body.messages,
+      semantic,
+      'gpt-5-4-none',
+      mapped.body.windsurf_unsupported_text_tools,
+    );
+    expect(text).toContain('<human>\nwhere am I?\n</human>');
+    expect(text).toContain('<assistant>\nYou are in /Users/fanzhang/Documents/github/routecodex.\n</assistant>');
+    expect(text).not.toContain('<assistant>\n\n</assistant>');
+    expect(text).not.toContain('<assistant>\nTool result for exec_command:');
+    expect(text).not.toContain('/Users/fanzhang/Documents/github/routecodex\n\n</assistant>');
+  });
+
   test('RED: startup/request blackbox must project system + history into cascade text like WindsurfAPI cascadeChat instead of only last user message', async () => {
     const provider = new WindsurfChatProvider({
       type: 'openai-standard',

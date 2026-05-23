@@ -7971,3 +7971,9 @@ Protocol target:
 - Runtime/code side: startup probe now hard-fails `checkHealth() === false`, so unusable Windsurf account runtimes are not registered; expired weekly blacklist is reset by quota maintenance/reload after local 00:00.
 - Config side found a separate blocker: 5520 route pools were still `mode = "priority"`, which intentionally locks to the first available target and cannot prove multi-account simultaneous use. Updated `/Volumes/extension/.rcc/config.toml` gateway_priority_5520 pools to `mode = "round-robin"` while keeping `maxInFlight = 1` per runtime.
 - Cleaned `/Volumes/extension/.rcc/provider/windsurf/config.v2.toml` duplicate `ws-pro-4` auth entry; final aliases are ws-pro-1..ws-pro-5.
+
+## 2026-05-23 Windsurf Cascade history alignment
+- Jason reported Windsurf provider history still looked wrong after tool-call fixes. Compared RouteCodex `buildCascadePromptText()` with `/Volumes/extension/code/WindsurfAPI/src/client.js` and native bridge prep in `/Volumes/extension/code/WindsurfAPI/src/handlers/chat.js`.
+- Evidence: WindsurfAPI native bridge strips `role=tool` turns and assistant tool-call-only turns before Cascade prompt construction; RouteCodex semantic history kept those turns as empty `function_call_output` / assistant tool-call rows, producing empty `<assistant>\n\n</assistant>` history blocks.
+- Red→green evidence: added `native cascade history must strip assistant tool-call-only and tool result turns like WindsurfAPI native bridge`; it failed with empty assistant tags, then passed after skipping blank Cascade history turns.
+- Fix: `buildCascadePromptText()` now omits history turns whose rendered text is blank, matching WindsurfAPI native bridge prompt semantics while preserving native tool results through `additional_steps`.

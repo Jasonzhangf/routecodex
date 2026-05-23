@@ -2716,8 +2716,12 @@ export class WindsurfChatProvider extends HttpTransportProvider {
     let firstIncluded = 0;
     for (let index = convo.length - 2; index >= 0; index -= 1) {
       const turn = convo[index]!;
+      const turnText = this.buildCascadeHistoryTurnText(turn);
+      if (!turnText.trim()) {
+        continue;
+      }
       const tag = turn.type === 'user' ? 'human' : 'assistant';
-      const line = `<${tag}>\n${escapeHistoryTag(this.buildCascadeHistoryTurnText(turn), tag)}\n</${tag}>`;
+      const line = `<${tag}>\n${escapeHistoryTag(turnText, tag)}\n</${tag}>`;
       if (historyBytes + line.length > maxHistoryBytes && lines.length > 0) {
         firstIncluded = index + 1;
         break;
