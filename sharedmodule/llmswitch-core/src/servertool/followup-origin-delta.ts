@@ -130,12 +130,58 @@ function appendAssistantMessage(messages: JsonObject[], finalChatResponse: JsonO
   return true;
 }
 
-function appendToolMessagesFromToolOutputs(messages: JsonObject[], adapterContext: AdapterContext, required?: boolean): boolean {
+function extractChatToolOutputs(finalChatResponse: JsonObject): Array<{ tool_call_id?: string; name?: string; arguments?: string; output: unknown }> {
+  const outputs = Array.isArray((finalChatResponse as Record<string, unknown>).tool_outputs)
+    ? ((finalChatResponse as Record<string, unknown>).tool_outputs as unknown[])
+    : [];
+  const out: Array<{ tool_call_id?: string; name?: string; arguments?: string; output: unknown }> = [];
+  for (const entry of outputs) {
+    const record = asRecord(entry);
+    if (!record) continue;
+    const toolCallId = typeof record.tool_call_id === 'string' && record.tool_call_id.trim()
+      ? record.tool_call_id.trim()
+      : undefined;
+    const content = Object.prototype.hasOwnProperty.call(record, 'content') ? record.content : record.output;
+    const name = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : undefined;
+    const argumentsText = typeof record.arguments === 'string' ? record.arguments : undefined;
+    out.push({
+      ...(toolCallId ? { tool_call_id: toolCallId } : {}),
+      ...(name ? { name } : {}),
+      ...(argumentsText !== undefined ? { arguments: argumentsText } : {}),
+      output: content
+    });
+  }
+  return out;
+}
+
+function appendToolMessagesFromToolOutputs(messages: JsonObject[], adapterContext: AdapterContext, finalChatResponse: JsonObject, required?: boolean): boolean {
   const record = asRecord(adapterContext);
   const responsesContext = asRecord(record?.responsesContext) as any;
-  const outputs = extractCapturedToolOutputs(responsesContext);
+  const outputsFromResponses = extractCapturedToolOutputs(responsesContext);
+  const chatOutputs = outputsFromResponses.length ? [] : extractChatToolOutputs(finalChatResponse);
+  const outputs = outputsFromResponses.length ? outputsFromResponses : chatOutputs;
   if (!outputs.length) {
     return required !== true;
+  }
+  if (chatOutputs.length) {
+    const toolCalls = chatOutputs
+      .map((entry) => {
+        const toolCallId = typeof entry.tool_call_id === 'string' && entry.tool_call_id.trim() ? entry.tool_call_id.trim() : '';
+        const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : 'tool';
+        if (!toolCallId) return null;
+        return {
+          id: toolCallId,
+          type: 'function',
+          function: {
+            name,
+            arguments: typeof entry.arguments === 'string' ? entry.arguments : '{}'
+          }
+        } as JsonObject;
+      })
+      .filter((entry): entry is JsonObject => Boolean(entry));
+    if (toolCalls.length) {
+      messages.push({ role: 'assistant', content: null, tool_calls: toolCalls } as JsonObject);
+    }
   }
   for (const entry of outputs) {
     const toolCallId = typeof entry.tool_call_id === 'string' && entry.tool_call_id.trim() ? entry.tool_call_id.trim() : undefined;
@@ -206,7 +252,7 @@ function applySingleDeltaOp(args: {
     case 'append_assistant_message':
       return appendAssistantMessage(messages, args.finalChatResponse, args.op.required);
     case 'append_tool_messages_from_tool_outputs':
-      return appendToolMessagesFromToolOutputs(messages, args.adapterContext, args.op.required);
+      return appendToolMessagesFromToolOutputs(messages, args.adapterContext, args.finalChatResponse, args.op.required);
     case 'append_user_text':
       appendUserText(messages, args.op.text);
       return true;

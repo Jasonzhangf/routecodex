@@ -1,7 +1,7 @@
 import { processChatRequestTools } from '../../sharedmodule/llmswitch-core/src/conversion/shared/tool-governor-request.js';
 
 describe('request tool governor apply_patch guidance shape', () => {
-  it('does not let TS relay request governor own hashline-first apply_patch guidance anymore', () => {
+  it('does not let TS relay request governor own internal line-edit apply_patch guidance anymore', () => {
     const request = {
       tools: [
         {
@@ -34,7 +34,7 @@ describe('request tool governor apply_patch guidance shape', () => {
     expect(inputDesc).toBe('');
   });
 
-  it('does not inject hashline helper fields at TS relay request governor anymore', () => {
+  it('does not inject internal line-edit helper fields at TS relay request governor anymore', () => {
     const request = {
       tools: [
         {
@@ -49,11 +49,11 @@ describe('request tool governor apply_patch guidance shape', () => {
                 input: { type: 'string' },
                 filePath: {
                   type: 'string',
-                  description: 'Required for hashline patch syntax.'
+                  description: 'target file path.'
                 },
                 file_path: {
                   type: 'string',
-                  description: 'Required for hashline patch syntax.'
+                  description: 'target file path.'
                 }
               },
               required: ['patch']
@@ -114,11 +114,11 @@ describe('request tool governor apply_patch guidance shape', () => {
                 input: { type: 'string' },
                 filePath: {
                   type: 'string',
-                  description: 'Required for hashline patch syntax.'
+                  description: 'target file path.'
                 },
                 fileContent: {
                   type: 'string',
-                  description: 'Required for hashline patch syntax current file content.'
+                  description: 'current file content.'
                 }
               },
               required: ['patch']
@@ -138,7 +138,7 @@ describe('request tool governor apply_patch guidance shape', () => {
     expect(properties.input).toBeDefined();
   });
 
-  it('does not inject canonical apply_patch grammar at TS relay request governor anymore', () => {
+  it('does not inject client canonical apply_patch grammar at TS relay request governor anymore', () => {
     const request = {
       tools: [
         {

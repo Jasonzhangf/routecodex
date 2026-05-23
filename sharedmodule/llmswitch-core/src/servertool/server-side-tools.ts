@@ -16,6 +16,7 @@ import './handlers/clock.js';
 import './handlers/clock-auto.js';
 import './handlers/exec-command-guard.js';
 import './handlers/continue-execution.js';
+import './handlers/apply-patch.js';
 import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import { loadRoutingInstructionStateSync } from '../router/virtual-router/sticky-session-store.js';
 import {
@@ -135,7 +136,8 @@ export async function runServerSideToolEngine(
       toolCalls,
       disableToolCallHandlers: options.disableToolCallHandlers === true,
       ...(includeToolCallNames ? { includeToolCallHandlerNames: [...includeToolCallNames] } : {}),
-      ...(excludeToolCallNames ? { excludeToolCallHandlerNames: [...excludeToolCallNames] } : {})
+      ...(excludeToolCallNames ? { excludeToolCallHandlerNames: [...excludeToolCallNames] } : {}),
+      runtimeMetadata
     })
   );
 

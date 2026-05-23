@@ -258,6 +258,28 @@ describe('server-side-tools native dispatch planner', () => {
     expect(result.pendingInjection).toBeUndefined();
   });
 
+  test('materializes generic followup injection when multiple servertools are all executed', async () => {
+    const result = await runServerSideToolEngine({
+      chatResponse: makeResponse([DISPATCH_TOOL_A, DISPATCH_TOOL_B]),
+      adapterContext: makeAdapterContext(),
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-servertool-dispatch-native-multi-followup',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('servertool_multi');
+    expect((result.execution as any)?.followup).toMatchObject({
+      requestIdSuffix: ':servertool_followup',
+      injection: {
+        ops: [
+          { op: 'append_assistant_message', required: true },
+          { op: 'append_tool_messages_from_tool_outputs', required: true }
+        ]
+      }
+    });
+  });
+
   test('keeps tool_calls untouched when tool_call handlers are disabled', async () => {
     const result = await runServerSideToolEngine({
       chatResponse: makeResponse([DISPATCH_TOOL_A]),

@@ -598,6 +598,7 @@ export function planServertoolToolCallDispatchWithNative(input: {
     executionMode: string;
     stripAfterExecute: boolean;
   }>;
+  runtimeMetadata?: Record<string, unknown>;
 }): NativeServertoolDispatchPlan {
   const capability = 'planServertoolToolCallDispatchJson';
   const fail = (reason?: string) => failNativeRequired<NativeServertoolDispatchPlan>(capability, reason);

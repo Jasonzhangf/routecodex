@@ -58,7 +58,10 @@ fn strip_from_choices(payload: &mut Value, executed_ids: &std::collections::Hash
         let Some(choice_obj) = choice.as_object_mut() else {
             continue;
         };
-        let Some(message) = choice_obj.get_mut("message").and_then(|v| v.as_object_mut()) else {
+        let Some(message) = choice_obj
+            .get_mut("message")
+            .and_then(|v| v.as_object_mut())
+        else {
             continue;
         };
         strip_tool_calls_in_message(message, executed_ids);
@@ -74,7 +77,10 @@ fn strip_from_choices(payload: &mut Value, executed_ids: &std::collections::Hash
                 .map(|v| v == "tool_calls")
                 .unwrap_or(false)
         {
-            choice_obj.insert("finish_reason".to_string(), Value::String("stop".to_string()));
+            choice_obj.insert(
+                "finish_reason".to_string(),
+                Value::String("stop".to_string()),
+            );
         }
     }
 }

@@ -8,10 +8,10 @@ use crate::chat_web_search_intent::analyze_chat_web_search_intent;
 use crate::hub_bridge_actions::utils::{
     can_servertool_own_tool_call_id, is_synthetic_routecodex_tool_call_id,
 };
-use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecutionMode};
 use crate::virtual_router_engine::routing::{
     resolve_session_scope, resolve_sticky_key, resolve_stop_message_scope,
 };
+use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecutionMode};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,6 +73,7 @@ struct ServertoolDispatchPlannerInput {
     include_tool_call_handler_names: Option<Vec<String>>,
     exclude_tool_call_handler_names: Option<Vec<String>>,
     registered_tool_call_handlers: Vec<ServertoolRegisteredToolCallHandlerInput>,
+    runtime_metadata: Option<Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -238,8 +239,9 @@ fn build_pending_injection_messages_resolved(
                     .unwrap_or("tool");
                 let content = match record.get("content") {
                     Some(Value::String(value)) => value.clone(),
-                    Some(value) => serde_json::to_string(value)
-                        .map_err(|error| format!("toolOutputs content serialization failed: {}", error))?,
+                    Some(value) => serde_json::to_string(value).map_err(|error| {
+                        format!("toolOutputs content serialization failed: {}", error)
+                    })?,
                     None => "null".to_string(),
                 };
                 out.push(serde_json::json!({
@@ -367,7 +369,11 @@ fn normalize_filter_token_set(values: Option<&Vec<String>>) -> Option<Vec<String
     }
 }
 
-fn is_name_included(name: &str, include: Option<&Vec<String>>, exclude: Option<&Vec<String>>) -> bool {
+fn is_name_included(
+    name: &str,
+    include: Option<&Vec<String>>,
+    exclude: Option<&Vec<String>>,
+) -> bool {
     let normalized = normalize_servertool_call_name(name);
     if let Some(allow) = include {
         if !allow.iter().any(|entry| entry == &normalized) {
@@ -486,8 +492,16 @@ fn extract_tool_calls_from_message_mut(
         let function_obj = tool_call_obj
             .get("function")
             .and_then(|v| v.as_object())
-            .or_else(|| tool_call_obj.get("functionCall").and_then(|v| v.as_object()))
-            .or_else(|| tool_call_obj.get("function_call").and_then(|v| v.as_object()));
+            .or_else(|| {
+                tool_call_obj
+                    .get("functionCall")
+                    .and_then(|v| v.as_object())
+            })
+            .or_else(|| {
+                tool_call_obj
+                    .get("function_call")
+                    .and_then(|v| v.as_object())
+            });
         let raw_name = function_obj
             .map(|row| read_trimmed_string(row.get("name")))
             .unwrap_or_default();
@@ -497,7 +511,11 @@ fn extract_tool_calls_from_message_mut(
         let name = normalize_servertool_call_name(raw_name.as_str());
         let args = stringify_tool_args(
             function_obj
-                .and_then(|row| row.get("arguments").or_else(|| row.get("args")).or_else(|| row.get("input")))
+                .and_then(|row| {
+                    row.get("arguments")
+                        .or_else(|| row.get("args"))
+                        .or_else(|| row.get("input"))
+                })
                 .or_else(|| tool_call_obj.get("arguments"))
                 .or_else(|| tool_call_obj.get("args"))
                 .or_else(|| tool_call_obj.get("input")),
@@ -534,7 +552,10 @@ fn extract_tool_calls_from_chat_payload_mut(
             Some(v) => v,
             None => continue,
         };
-        let message = match choice_obj.get_mut("message").and_then(|v| v.as_object_mut()) {
+        let message = match choice_obj
+            .get_mut("message")
+            .and_then(|v| v.as_object_mut())
+        {
             Some(v) => v,
             None => continue,
         };
@@ -780,15 +801,20 @@ fn collect_stop_message_persisted_candidate_keys(
     resolver_metadata: &Value,
 ) -> (Option<String>, Option<String>, Vec<String>) {
     let strict_session_scope = resolve_stop_message_session_scope(resolver_metadata);
-    let sticky_key = Some(resolve_servertool_sticky_key(resolver_metadata)).filter(|v| !v.trim().is_empty());
+    let sticky_key =
+        Some(resolve_servertool_sticky_key(resolver_metadata)).filter(|v| !v.trim().is_empty());
     let row = direct_record.as_object();
     let mut candidate_keys: Vec<String> = Vec::new();
 
     let direct_tmux_keys = [
-        row.and_then(|obj| obj.get("tmuxSessionId")).and_then(|v| v.as_str()),
-        row.and_then(|obj| obj.get("clientTmuxSessionId")).and_then(|v| v.as_str()),
-        row.and_then(|obj| obj.get("tmux_session_id")).and_then(|v| v.as_str()),
-        row.and_then(|obj| obj.get("client_tmux_session_id")).and_then(|v| v.as_str()),
+        row.and_then(|obj| obj.get("tmuxSessionId"))
+            .and_then(|v| v.as_str()),
+        row.and_then(|obj| obj.get("clientTmuxSessionId"))
+            .and_then(|v| v.as_str()),
+        row.and_then(|obj| obj.get("tmux_session_id"))
+            .and_then(|v| v.as_str()),
+        row.and_then(|obj| obj.get("client_tmux_session_id"))
+            .and_then(|v| v.as_str()),
     ];
     for value in direct_tmux_keys.into_iter().flatten() {
         let trimmed = value.trim();
@@ -797,7 +823,10 @@ fn collect_stop_message_persisted_candidate_keys(
         }
     }
 
-    if let Some(session_id) = row.and_then(|obj| obj.get("sessionId")).and_then(|v| v.as_str()) {
+    if let Some(session_id) = row
+        .and_then(|obj| obj.get("sessionId"))
+        .and_then(|v| v.as_str())
+    {
         let trimmed = session_id.trim();
         if !trimmed.is_empty() {
             push_unique_scope_key(&mut candidate_keys, Some(format!("tmux:{}", trimmed)));
@@ -805,10 +834,16 @@ fn collect_stop_message_persisted_candidate_keys(
         }
     }
 
-    if let Some(conversation_id) = row.and_then(|obj| obj.get("conversationId")).and_then(|v| v.as_str()) {
+    if let Some(conversation_id) = row
+        .and_then(|obj| obj.get("conversationId"))
+        .and_then(|v| v.as_str())
+    {
         let trimmed = conversation_id.trim();
         if !trimmed.is_empty() {
-            push_unique_scope_key(&mut candidate_keys, Some(format!("conversation:{}", trimmed)));
+            push_unique_scope_key(
+                &mut candidate_keys,
+                Some(format!("conversation:{}", trimmed)),
+            );
         }
     }
 
@@ -820,7 +855,9 @@ fn collect_stop_message_persisted_candidate_keys(
     (strict_session_scope, sticky_key, candidate_keys)
 }
 
-fn plan_stop_message_persisted_lookup(input: &StopMessagePersistedLookupPlannerInput) -> StopMessagePersistedLookupPlanOutput {
+fn plan_stop_message_persisted_lookup(
+    input: &StopMessagePersistedLookupPlannerInput,
+) -> StopMessagePersistedLookupPlanOutput {
     let merged_metadata = match (&input.record, &input.runtime_metadata) {
         (Value::Object(record), Some(Value::Object(runtime))) => {
             let mut out = runtime.clone();
@@ -840,8 +877,12 @@ fn plan_stop_message_persisted_lookup(input: &StopMessagePersistedLookupPlannerI
         sticky_key,
         candidate_keys,
         lookup_policy: "strict_then_sticky_then_session_family".to_string(),
-        read_stop_message_snapshot: options.and_then(|o| o.include_snapshot_lookup).unwrap_or(true),
-        read_stop_message_tombstone: options.and_then(|o| o.include_tombstone_lookup).unwrap_or(true),
+        read_stop_message_snapshot: options
+            .and_then(|o| o.include_snapshot_lookup)
+            .unwrap_or(true),
+        read_stop_message_tombstone: options
+            .and_then(|o| o.include_tombstone_lookup)
+            .unwrap_or(true),
     }
 }
 
@@ -1095,8 +1136,7 @@ fn resolve_chat_web_search_plan(
                 let id = read_trimmed_string(engine.get("id")).to_ascii_lowercase();
                 let provider_key =
                     read_trimmed_string(engine.get("providerKey")).to_ascii_lowercase();
-                if id.contains("google")
-                {
+                if id.contains("google") {
                     return Some(*idx);
                 }
                 None
@@ -1322,8 +1362,8 @@ pub fn resolve_servertool_sticky_key_json(metadata_json: String) -> NapiResult<S
 
 #[napi]
 pub fn plan_stop_message_persisted_lookup_json(input_json: String) -> NapiResult<String> {
-    let input: StopMessagePersistedLookupPlannerInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let input: StopMessagePersistedLookupPlannerInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = plan_stop_message_persisted_lookup(&input);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -1347,10 +1387,33 @@ pub fn run_servertool_response_stage_json(
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+
+fn resolve_apply_patch_dispatch_mode(runtime_metadata: Option<&Value>) -> String {
+    let mode = runtime_metadata
+        .and_then(|v| v.as_object())
+        .and_then(|row| row.get("__rt").or(runtime_metadata))
+        .and_then(|v| v.as_object())
+        .and_then(|rt| rt.get("applyPatch"))
+        .and_then(|v| v.as_object())
+        .and_then(|ap| ap.get("mode"))
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| "client".to_string());
+    if mode == "servertool" {
+        "servertool".to_string()
+    } else {
+        "client".to_string()
+    }
+}
+
+fn can_dispatch_apply_patch_servertool(normalized_name: &str, runtime_metadata: Option<&Value>) -> bool {
+    normalized_name != "apply_patch" || resolve_apply_patch_dispatch_mode(runtime_metadata) == "servertool"
+}
+
 #[napi]
 pub fn plan_servertool_tool_call_dispatch_json(input_json: String) -> NapiResult<String> {
-    let input: ServertoolDispatchPlannerInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let input: ServertoolDispatchPlannerInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let include = normalize_filter_token_set(input.include_tool_call_handler_names.as_ref());
     let exclude = normalize_filter_token_set(input.exclude_tool_call_handler_names.as_ref());
     let mut registered = input
@@ -1390,6 +1453,14 @@ pub fn plan_servertool_tool_call_dispatch_json(input_json: String) -> NapiResult
             });
             continue;
         }
+        if !can_dispatch_apply_patch_servertool(normalized_name.as_str(), input.runtime_metadata.as_ref()) {
+            skipped_tool_calls.push(ServertoolDispatchSkippedOutput {
+                id: tool_call.id,
+                name: normalized_name,
+                reason: "apply_patch_client_mode".to_string(),
+            });
+            continue;
+        }
         let Some(registered_entry) = registered.get(normalized_name.as_str()) else {
             skipped_tool_calls.push(ServertoolDispatchSkippedOutput {
                 id: tool_call.id,
@@ -1416,8 +1487,8 @@ pub fn plan_servertool_tool_call_dispatch_json(input_json: String) -> NapiResult
 
 #[napi]
 pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
-    let input: ServertoolOutcomePlannerInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let input: ServertoolOutcomePlannerInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let configured_pending_injection_message_kinds =
         normalize_nonempty_string_vec(input.pending_injection_message_kinds.as_ref());
     let executed_ids: Vec<String> = input
@@ -1470,14 +1541,19 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
         } else {
             None
         };
-        let session_id = input.session_id.map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
+        let session_id = input
+            .session_id
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
         let conversation_id = input
             .conversation_id
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
         let pending_session_id = session_id.clone().or_else(|| conversation_id.clone());
         let alias_session_ids = match (&session_id, &conversation_id) {
-            (Some(session), Some(conversation)) if session != conversation => vec![conversation.clone()],
+            (Some(session), Some(conversation)) if session != conversation => {
+                vec![conversation.clone()]
+            }
             _ => Vec::new(),
         };
         let pending_injection_message_kinds =
@@ -1533,7 +1609,8 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
     } else {
         Some("servertool_multi".to_string())
     };
-    let use_last_execution_followup = input.executed_tool_calls.len() == 1 && input.has_last_execution_followup;
+    let use_last_execution_followup =
+        input.executed_tool_calls.len() == 1 && input.has_last_execution_followup;
     let primary_execution_mode = if input.executed_tool_calls.len() == 1 {
         input.executed_tool_calls.first().and_then(|entry| {
             let mode = entry.execution_mode.trim();
@@ -1567,11 +1644,10 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-
 #[napi]
 pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<String> {
-    let input: ServertoolAutoHookPlannerInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let input: ServertoolAutoHookPlannerInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let include = normalize_filter_token_set(input.include_auto_hook_ids.as_ref());
     let exclude = normalize_filter_token_set(input.exclude_auto_hook_ids.as_ref());
 
@@ -1777,7 +1853,8 @@ mod tests {
                 }
             ]
         });
-        let tool_calls = extract_tool_calls_from_chat_payload_mut(&mut payload, "req_exec").unwrap();
+        let tool_calls =
+            extract_tool_calls_from_chat_payload_mut(&mut payload, "req_exec").unwrap();
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0].id, "good_exec_call");
     }
@@ -1821,13 +1898,18 @@ mod tests {
             .cloned()
             .unwrap_or_default();
         assert_eq!(executable.len(), 1);
-        assert_eq!(executable[0].get("name").and_then(|v| v.as_str()), Some("clock"));
+        assert_eq!(
+            executable[0].get("name").and_then(|v| v.as_str()),
+            Some("clock")
+        );
         assert_eq!(
             executable[0].get("executionMode").and_then(|v| v.as_str()),
             Some("client_inject_only")
         );
         assert_eq!(
-            executable[0].get("stripAfterExecute").and_then(|v| v.as_bool()),
+            executable[0]
+                .get("stripAfterExecute")
+                .and_then(|v| v.as_bool()),
             Some(true)
         );
         assert_eq!(skipped.len(), 2);
@@ -1838,6 +1920,60 @@ mod tests {
         assert_eq!(
             skipped[1].get("reason").and_then(|v| v.as_str()),
             Some("no_registered_tool_call_handler")
+        );
+    }
+
+
+    #[test]
+    fn test_plan_servertool_dispatch_apply_patch_gated_by_runtime_mode() {
+        let base = serde_json::json!({
+            "toolCalls": [
+                { "id": "call_patch", "name": "apply_patch", "arguments": "{}" }
+            ],
+            "disableToolCallHandlers": false,
+            "registeredToolCallHandlers": [
+                {
+                    "name": "apply_patch",
+                    "trigger": "tool_call",
+                    "executionMode": "reenter",
+                    "stripAfterExecute": true
+                }
+            ]
+        });
+
+        let client_output = plan_servertool_tool_call_dispatch_json(base.to_string()).unwrap();
+        let client_parsed: serde_json::Value = serde_json::from_str(client_output.as_str()).unwrap();
+        assert_eq!(
+            client_parsed
+                .get("executableToolCalls")
+                .and_then(|v| v.as_array())
+                .map(|v| v.len()),
+            Some(0)
+        );
+        assert_eq!(
+            client_parsed
+                .get("skippedToolCalls")
+                .and_then(|v| v.as_array())
+                .and_then(|rows| rows.first())
+                .and_then(|row| row.get("reason"))
+                .and_then(|v| v.as_str()),
+            Some("apply_patch_client_mode")
+        );
+
+        let mut servertool = base;
+        servertool["runtimeMetadata"] = serde_json::json!({
+            "__rt": { "applyPatch": { "mode": "servertool" } }
+        });
+        let servertool_output = plan_servertool_tool_call_dispatch_json(servertool.to_string()).unwrap();
+        let servertool_parsed: serde_json::Value = serde_json::from_str(servertool_output.as_str()).unwrap();
+        assert_eq!(
+            servertool_parsed
+                .get("executableToolCalls")
+                .and_then(|v| v.as_array())
+                .and_then(|rows| rows.first())
+                .and_then(|row| row.get("name"))
+                .and_then(|v| v.as_str()),
+            Some("apply_patch")
         );
     }
 
@@ -1878,7 +2014,9 @@ mod tests {
             Some("pending_injection")
         );
         assert_eq!(
-            parsed.get("requiresPendingInjection").and_then(|v| v.as_bool()),
+            parsed
+                .get("requiresPendingInjection")
+                .and_then(|v| v.as_bool()),
             Some(true)
         );
         assert_eq!(
@@ -1889,7 +2027,10 @@ mod tests {
             parsed
                 .get("pendingInjectionMessageKinds")
                 .and_then(|v| v.as_array())
-                .map(|entries| entries.iter().filter_map(|entry| entry.as_str()).collect::<Vec<_>>()),
+                .map(|entries| entries
+                    .iter()
+                    .filter_map(|entry| entry.as_str())
+                    .collect::<Vec<_>>()),
             Some(vec!["assistant_tool_calls", "tool_outputs"])
         );
         assert_eq!(
@@ -1926,9 +2067,14 @@ mod tests {
             parsed.get("outcomeMode").and_then(|v| v.as_str()),
             Some("servertool_only")
         );
-        assert_eq!(parsed.get("flowId").and_then(|v| v.as_str()), Some("clock_done"));
         assert_eq!(
-            parsed.get("useLastExecutionFollowup").and_then(|v| v.as_bool()),
+            parsed.get("flowId").and_then(|v| v.as_str()),
+            Some("clock_done")
+        );
+        assert_eq!(
+            parsed
+                .get("useLastExecutionFollowup")
+                .and_then(|v| v.as_bool()),
             Some(true)
         );
         assert_eq!(
@@ -1940,7 +2086,9 @@ mod tests {
             Some("reuse_last_execution")
         );
         assert_eq!(
-            parsed.get("requiresPendingInjection").and_then(|v| v.as_bool()),
+            parsed
+                .get("requiresPendingInjection")
+                .and_then(|v| v.as_bool()),
             Some(false)
         );
         assert_eq!(
@@ -2001,10 +2149,19 @@ mod tests {
         });
         let output = plan_servertool_auto_hook_queues_json(raw.to_string()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
-        let optional = parsed.get("optionalQueue").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let optional = parsed
+            .get("optionalQueue")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
         let ids: Vec<String> = optional
             .iter()
-            .filter_map(|entry| entry.get("id").and_then(|v| v.as_str()).map(|v| v.to_string()))
+            .filter_map(|entry| {
+                entry
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string())
+            })
             .collect();
         assert_eq!(
             ids,
@@ -2032,15 +2189,29 @@ mod tests {
         });
         let output = plan_servertool_auto_hook_queues_json(raw.to_string()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
-        let optional = parsed.get("optionalQueue").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let optional = parsed
+            .get("optionalQueue")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
         assert_eq!(optional.len(), 1);
-        assert_eq!(optional[0].get("id").and_then(|v| v.as_str()), Some("clock_auto"));
-        assert_eq!(optional[0].get("queueIndex").and_then(|v| v.as_i64()), Some(1));
-        assert_eq!(optional[0].get("queueTotal").and_then(|v| v.as_i64()), Some(1));
+        assert_eq!(
+            optional[0].get("id").and_then(|v| v.as_str()),
+            Some("clock_auto")
+        );
+        assert_eq!(
+            optional[0].get("queueIndex").and_then(|v| v.as_i64()),
+            Some(1)
+        );
+        assert_eq!(
+            optional[0].get("queueTotal").and_then(|v| v.as_i64()),
+            Some(1)
+        );
     }
 
     #[test]
-    fn test_plan_chat_web_search_operations_user_intent_prefers_direct_route_and_skips_servertool() {
+    fn test_plan_chat_web_search_operations_user_intent_prefers_direct_route_and_skips_servertool()
+    {
         let request = serde_json::json!({
             "messages": [
                 { "role": "user", "content": "please web search latest routecodex updates" }
@@ -2064,11 +2235,9 @@ mod tests {
                 ]
             }
         });
-        let output = plan_chat_web_search_operations_json(
-            request.to_string(),
-            runtime_metadata.to_string(),
-        )
-        .unwrap();
+        let output =
+            plan_chat_web_search_operations_json(request.to_string(), runtime_metadata.to_string())
+                .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
         assert_eq!(
             parsed.get("shouldInject").and_then(|v| v.as_bool()),
@@ -2101,11 +2270,9 @@ mod tests {
                 ]
             }
         });
-        let output = plan_chat_web_search_operations_json(
-            request.to_string(),
-            runtime_metadata.to_string(),
-        )
-        .unwrap();
+        let output =
+            plan_chat_web_search_operations_json(request.to_string(), runtime_metadata.to_string())
+                .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
         assert_eq!(
             parsed.get("shouldInject").and_then(|v| v.as_bool()),
@@ -2121,7 +2288,8 @@ mod tests {
     }
 
     #[test]
-    fn test_plan_chat_web_search_operations_tool_intent_servertool_mode_injects_via_semantics_force() {
+    fn test_plan_chat_web_search_operations_tool_intent_servertool_mode_injects_via_semantics_force(
+    ) {
         let request = serde_json::json!({
             "semantics": {
                 "providerExtras": {
@@ -2145,11 +2313,9 @@ mod tests {
                 ]
             }
         });
-        let output = plan_chat_web_search_operations_json(
-            request.to_string(),
-            runtime_metadata.to_string(),
-        )
-        .unwrap();
+        let output =
+            plan_chat_web_search_operations_json(request.to_string(), runtime_metadata.to_string())
+                .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
         assert_eq!(
             parsed.get("shouldInject").and_then(|v| v.as_bool()),
@@ -2167,7 +2333,9 @@ mod tests {
 
 /// Read followup client inject source from adapter context.
 #[napi]
-pub fn read_followup_client_inject_source_json(adapter_context_json: String) -> napi::Result<String> {
+pub fn read_followup_client_inject_source_json(
+    adapter_context_json: String,
+) -> napi::Result<String> {
     let ctx: serde_json::Value = serde_json::from_str(&adapter_context_json)
         .map_err(|e| napi::Error::new(napi::Status::InvalidArg, e.to_string()))?;
 

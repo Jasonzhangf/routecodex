@@ -197,6 +197,7 @@ export function buildServertoolDispatchPlanInput(args: {
   disableToolCallHandlers: boolean;
   includeToolCallHandlerNames?: string[];
   excludeToolCallHandlerNames?: string[];
+  runtimeMetadata?: JsonObject;
 }) {
   return {
     toolCalls: args.toolCalls,
@@ -214,7 +215,8 @@ export function buildServertoolDispatchPlanInput(args: {
         trigger: entry.registration.trigger,
         executionMode: entry.registration.executionMode,
         stripAfterExecute: entry.registration.stripAfterExecute
-      }))
+      })),
+    runtimeMetadata: args.runtimeMetadata
   };
 }
 
@@ -309,8 +311,14 @@ export function resolveToolCallExecutionOutcome(args: {
     };
   }
 
+  const followupConfig = buildServertoolFollowupConfig();
+  const genericOps = followupConfig.genericInjectionOps
+    .map((op) => (typeof op === 'string' ? op.trim() : ''))
+    .filter(Boolean)
+    .map((op) => ({ op, required: true }));
   const genericFollowup = {
-    requestIdSuffix: ':servertool_followup'
+    requestIdSuffix: ':servertool_followup',
+    ...(genericOps.length ? { injection: { ops: genericOps } } : {})
   } as any;
   const followup =
     outcomePlan.followupStrategy === 'reuse_last_execution' &&

@@ -71,7 +71,13 @@ jest.unstable_mockModule(
     ),
     readRuntimeMetadataWithNative: jest.fn(() => undefined),
     ensureRuntimeMetadataCarrierWithNative: jest.fn((value: unknown) => value),
-    cloneRuntimeMetadataWithNative: jest.fn(() => undefined)
+    cloneRuntimeMetadataWithNative: jest.fn(() => undefined),
+    chunkStringWithNative: jest.fn((value: string) => [value]),
+    deriveToolCallKeyWithNative: jest.fn((value: unknown) => String(value ?? '')),
+    flattenByCommaWithNative: jest.fn((value: string[]) => value.join(',')),
+    packShellArgsWithNative: jest.fn((value: string[]) => value.join(' ')),
+    repairFindMetaWithNative: jest.fn((value: unknown) => value),
+    splitCommandStringWithNative: jest.fn((value: string) => value.split(/\s+/).filter(Boolean))
   })
 );
 

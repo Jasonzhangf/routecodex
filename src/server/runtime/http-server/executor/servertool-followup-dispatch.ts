@@ -3,6 +3,7 @@ import { asRecord } from '../provider-utils.js';
 import { isClientDisconnectAbortError } from '../executor-provider.js';
 import { runClientInjectionFlowBeforeReenter } from './client-injection-flow.js';
 import { buildServerToolNestedRequestMetadata } from './servertool-followup-metadata.js';
+import { importCoreDist } from '../../../../modules/llmswitch/bridge/module-loader.js';
 import {
   awaitNestedExecutionWithFailFast,
   getNestedFollowupAbortSignal,
@@ -17,8 +18,128 @@ type BuildNestedMetadataLogger = (error: unknown, details: {
   mode: 'reenter' | 'client_inject';
 }) => void;
 
+function toResponsesInputTextItem(text: string): Record<string, unknown> {
+  return { type: 'input_text', text };
+}
+
+function parseToolCallArguments(raw: unknown): string {
+  if (typeof raw === 'string') return raw;
+  if (raw === undefined || raw === null) return '{}';
+  try { return JSON.stringify(raw); } catch { return '{}'; }
+}
+
+function coerceMessageToResponsesInputItems(message: Record<string, unknown>): Record<string, unknown>[] {
+  const role = typeof message.role === 'string' ? message.role.trim().toLowerCase() : '';
+  const content = message.content;
+  if (role === 'tool') {
+    const callId = typeof message.tool_call_id === 'string' && message.tool_call_id.trim()
+      ? message.tool_call_id.trim()
+      : undefined;
+    const output = typeof content === 'string' ? content : content === undefined ? '' : JSON.stringify(content);
+    return callId
+      ? [{ type: 'function_call_output', call_id: callId, output }]
+      : [{ role: 'user', content: [toResponsesInputTextItem(output)] }];
+  }
+  if (role === 'assistant') {
+    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+    const out: Record<string, unknown>[] = [];
+    for (const entry of toolCalls) {
+      const record = entry && typeof entry === 'object' && !Array.isArray(entry) ? (entry as Record<string, unknown>) : undefined;
+      const fn = record?.function && typeof record.function === 'object' && !Array.isArray(record.function)
+        ? (record.function as Record<string, unknown>)
+        : undefined;
+      const id = typeof record?.id === 'string' && record.id.trim() ? record.id.trim() : '';
+      const name = typeof fn?.name === 'string' && fn.name.trim()
+        ? fn.name.trim()
+        : (typeof record?.name === 'string' && record.name.trim() ? record.name.trim() : '');
+      if (id && name) {
+        out.push({ type: 'function_call', call_id: id, name, arguments: parseToolCallArguments(fn?.arguments) });
+      }
+    }
+    if (out.length) return out;
+  }
+  if (Array.isArray(content)) return [{ role: role || 'user', content }];
+  const text = typeof content === 'string' ? content : content === undefined ? '' : JSON.stringify(content);
+  return [{ role: role || 'user', content: [toResponsesInputTextItem(text)] }];
+}
+
+function normalizeResponsesFollowupPayloadShape(entryEndpoint: string, payload: Record<string, unknown>): Record<string, unknown> {
+  if (!String(entryEndpoint || '').toLowerCase().includes('/v1/responses')) return payload;
+  if (Array.isArray(payload.input) || !Array.isArray(payload.messages)) return payload;
+  const seenToolOutputs = new Set<string>();
+  const input = payload.messages
+    .flatMap((entry) => entry && typeof entry === 'object' && !Array.isArray(entry)
+      ? coerceMessageToResponsesInputItems(entry as Record<string, unknown>)
+      : [])
+    .filter((entry) => {
+      if (entry.type !== 'function_call_output') return true;
+      const callId = typeof entry.call_id === 'string' ? entry.call_id.trim() : '';
+      if (!callId || seenToolOutputs.has(callId)) return false;
+      seenToolOutputs.add(callId);
+      return true;
+    });
+  const next: Record<string, unknown> = { ...payload, input };
+  delete next.messages;
+  return next;
+}
+
 const SAME_PROVIDER_FOLLOWUP_MAX_ATTEMPTS = 3;
 const SAME_PROVIDER_FOLLOWUP_BACKOFF_BASE_MS = 200;
+
+
+type ResponsesConversationModule = {
+  captureResponsesRequestContext?: (args: {
+    requestId: string;
+    payload: Record<string, unknown>;
+    context: Record<string, unknown>;
+    sessionId?: string;
+    conversationId?: string;
+    routeHint?: string;
+  }) => void;
+};
+
+let cachedResponsesConversationModule: ResponsesConversationModule | null = null;
+
+async function getResponsesConversationModule(): Promise<ResponsesConversationModule> {
+  if (!cachedResponsesConversationModule) {
+    cachedResponsesConversationModule = await importCoreDist<ResponsesConversationModule>('conversion/shared/responses-conversation-store');
+  }
+  return cachedResponsesConversationModule;
+}
+
+async function captureNestedResponsesRequestContext(input: PipelineExecutionInput): Promise<void> {
+  const entryEndpoint = typeof input.entryEndpoint === 'string' ? input.entryEndpoint.toLowerCase() : '';
+  if (!entryEndpoint.includes('/v1/responses')) {
+    return;
+  }
+  const body = asObjectBody(input.body);
+  if (!body) {
+    return;
+  }
+  const mod = await getResponsesConversationModule();
+  if (typeof mod.captureResponsesRequestContext !== 'function') {
+    throw new Error('[servertool] responses followup context capture helper unavailable');
+  }
+  const metadata = asRecord(input.metadata) ?? {};
+  const context = {
+    requestId: input.requestId,
+    isResponsesPayload: true,
+    input: Array.isArray(body.input) ? body.input : [],
+    toolsRaw: Array.isArray(body.tools) ? body.tools : undefined,
+    toolsNormalized: Array.isArray(body.tools) ? body.tools : undefined,
+    parameters: body.parameters && typeof body.parameters === 'object' && !Array.isArray(body.parameters)
+      ? body.parameters as Record<string, unknown>
+      : undefined
+  };
+  mod.captureResponsesRequestContext({
+    requestId: input.requestId,
+    payload: body,
+    context,
+    sessionId: typeof metadata.sessionId === 'string' ? metadata.sessionId : undefined,
+    conversationId: typeof metadata.conversationId === 'string' ? metadata.conversationId : undefined,
+    routeHint: typeof metadata.routeHint === 'string' ? metadata.routeHint : undefined
+  });
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
@@ -434,7 +555,20 @@ function stripResponsesOnlyRequestSettings(
   return out;
 }
 
+function stripResponsesOnlyRequestSemantics(
+  requestSemantics: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!requestSemantics || !isServerToolFollowup(requestSemantics)) {
+    return requestSemantics;
+  }
+  const wrapped = stripResponsesOnlyRequestSettings({ semantics: requestSemantics }, requestSemantics);
+  return wrapped.semantics && typeof wrapped.semantics === 'object' && !Array.isArray(wrapped.semantics)
+    ? (wrapped.semantics as Record<string, unknown>)
+    : requestSemantics;
+}
+
 function cloneNestedBodyWithSemantics(
+  entryEndpoint: string,
   body: Record<string, unknown> | undefined,
   requestSemantics: Record<string, unknown> | undefined
 ): Record<string, unknown> {
@@ -447,6 +581,8 @@ function cloneNestedBodyWithSemantics(
   ) {
     out.semantics = requestSemantics;
   }
+  out = stripResponsesOnlyRequestSettings(out, requestSemantics);
+  out = normalizeResponsesFollowupPayloadShape(entryEndpoint, out);
   out = stripResponsesOnlyRequestSettings(out, requestSemantics);
   return out;
 }
@@ -533,11 +669,12 @@ function buildServerToolNestedInput(args: {
 } {
   const nestedEntry = args.entryEndpoint || args.fallbackEntryEndpoint;
   const nestedExtra = asRecord(args.metadata) ?? {};
-  const materializedRequestSemantics = materializeFollowupRequestSemantics({
+  let materializedRequestSemantics = materializeFollowupRequestSemantics({
     requestSemantics: args.requestSemantics,
     metadata: nestedExtra,
     baseMetadata: args.baseMetadata
   });
+  materializedRequestSemantics = stripResponsesOnlyRequestSemantics(materializedRequestSemantics);
   const nestedMetadata = buildServerToolNestedRequestMetadata({
     baseMetadata: args.baseMetadata,
     extraMetadata: nestedExtra,
@@ -624,7 +761,21 @@ function buildServerToolNestedInput(args: {
     };
   }
 
-  const body = cloneNestedBodyWithSemantics(args.body, materializedRequestSemantics);
+  const body = cloneNestedBodyWithSemantics(nestedEntry, args.body, materializedRequestSemantics);
+  if (materializedRequestSemantics && Array.isArray(body.input)) {
+    const hasFunctionCallOutput = body.input.some((entry) => {
+      const row = entry && typeof entry === 'object' && !Array.isArray(entry) ? (entry as Record<string, unknown>) : undefined;
+      return typeof row?.type === 'string' && row.type.trim().toLowerCase() === 'function_call_output';
+    });
+    if (hasFunctionCallOutput) {
+      materializedRequestSemantics.toolOutputs = body.input.filter((entry) => {
+        const row = entry && typeof entry === 'object' && !Array.isArray(entry) ? (entry as Record<string, unknown>) : undefined;
+        return typeof row?.type === 'string' && row.type.trim().toLowerCase() === 'function_call_output';
+      });
+      body.semantics = materializedRequestSemantics;
+      nestedMetadata.requestSemantics = materializedRequestSemantics;
+    }
+  }
   const headers = stripSseRequestHeadersForNonStreamingFollowup(
     cloneStringHeaders(nestedMetadata.clientHeaders),
     body
@@ -696,6 +847,7 @@ export async function executeServerToolReenterPipeline(args: {
     // Reusing the same object would accumulate history drift across retries.
     const nestedInputAttempt = clonePipelineInputForRetry(nestedInput);
     try {
+      await captureNestedResponsesRequestContext(nestedInputAttempt);
       const attemptResult = await awaitNestedExecutionWithFailFast({
         promise: args.executeNested(nestedInputAttempt),
         abortSignal: getNestedFollowupAbortSignal(

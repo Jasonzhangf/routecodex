@@ -59,7 +59,7 @@ describe('tool-registry apply_patch validation', () => {
     ].join('\n'));
   });
 
-  it('rejects hashline payloads missing fileContent through the native apply_patch verdict', () => {
+  it('rejects line-edit payloads missing fileContent through the native apply_patch verdict', () => {
     const result = validateToolCall(
       'apply_patch',
       JSON.stringify({
@@ -71,7 +71,7 @@ describe('tool-registry apply_patch validation', () => {
     expect(result.reason).toBe('hashline_missing_file_content');
   });
 
-  it('rejects hashline payloads missing filePath through the native apply_patch verdict', () => {
+  it('rejects line-edit payloads missing filePath through the native apply_patch verdict', () => {
     const result = validateToolCall(
       'apply_patch',
       JSON.stringify({

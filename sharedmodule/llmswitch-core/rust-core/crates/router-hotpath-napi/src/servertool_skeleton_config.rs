@@ -75,6 +75,14 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                     "execution": { "mode": "guarded", "stripAfterExecute": true }
                 },
 
+                "apply_patch": {
+                    "name": "apply_patch",
+                    "enabled": true,
+                    "kind": "internal",
+                    "trigger": { "type": "tool_call", "canonicalName": "apply_patch" },
+                    "execution": { "mode": "reenter", "stripAfterExecute": true }
+                },
+
             },
             "skeleton": {
                 "requestPrepare": { "enabled": true },
@@ -130,9 +138,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
 
                             "stop_message_flow": {
                                 "stickyProvider": true,
-                                "clientInjectOnly": true,
-                                "clearStateOnFollowupFailure": true,
-                                "clientInjectSource": "servertool.stop_message",
                                 "seedLoopPayload": true,
                                 "retryEmptyFollowupOnce": true
                             },
@@ -257,12 +262,11 @@ mod tests {
         assert!(parsed
             .get("servertool")
             .and_then(|v| v.get("internalTools"))
-
             .is_some());
     }
 
     #[test]
-    fn skeleton_no_longer_registers_apply_patch_servertool() {
+    fn skeleton_registers_apply_patch_servertool_for_runtime_gated_dispatch() {
         let raw = get_default_servertool_skeleton_document_json().expect("skeleton json");
         let parsed: Value = serde_json::from_str(&raw).expect("parse skeleton");
         let internal_tools = parsed
@@ -270,7 +274,7 @@ mod tests {
             .and_then(|v| v.get("internalTools"))
             .and_then(|v| v.as_object())
             .expect("internal tools object");
-        assert!(!internal_tools.contains_key("apply_patch"));
+        assert!(internal_tools.contains_key("apply_patch"));
 
         let progress = parsed
             .get("servertool")
@@ -303,9 +307,7 @@ mod tests {
             Some(true)
         );
         assert_eq!(
-            parsed
-                .get("clientInjectSource")
-                .and_then(|v| v.as_str()),
+            parsed.get("clientInjectSource").and_then(|v| v.as_str()),
             Some("servertool.clock")
         );
     }

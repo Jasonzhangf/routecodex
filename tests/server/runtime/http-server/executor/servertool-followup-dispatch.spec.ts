@@ -63,6 +63,13 @@ describe('servertool followup dispatch helper', () => {
             kind: 'internal',
             trigger: { type: 'tool_call', canonicalName: 'exec_command' },
             execution: { mode: 'guarded', stripAfterExecute: true }
+          },
+          apply_patch: {
+            name: 'apply_patch',
+            enabled: true,
+            kind: 'internal',
+            trigger: { type: 'tool_call', canonicalName: 'apply_patch' },
+            execution: { mode: 'reenter', stripAfterExecute: true }
           }
         },
         skeleton: {
@@ -86,12 +93,15 @@ describe('servertool followup dispatch helper', () => {
     });
   });
 
-  it('servertool bootstrap no longer registers apply_patch followup guard', async () => {
-    const { listRegisteredServerToolHandlerNames } = await import(
-      '../../../../../sharedmodule/llmswitch-core/src/servertool/registry.js'
+  it('servertool skeleton declares apply_patch as the unified internal reenter servertool', async () => {
+    const { getServertoolToolSpec } = await import(
+      '../../../../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js'
     );
-    await import('../../../../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');
-    expect(listRegisteredServerToolHandlerNames()).not.toContain('apply_patch');
+    expect(getServertoolToolSpec('apply_patch')).toMatchObject({
+      name: 'apply_patch',
+      trigger: { type: 'tool_call', canonicalName: 'apply_patch' },
+      execution: { mode: 'reenter', stripAfterExecute: true }
+    });
   });
 
   it('reenter path reuses normalized nested metadata and executes nested request once', async () => {
@@ -927,6 +937,54 @@ describe('servertool followup dispatch helper', () => {
     expect(nestedInput?.metadata?.inboundStream).toBeUndefined();
     expect(nestedInput?.metadata?.clientAcceptsSse).toBeUndefined();
     expect(nestedInput?.metadata?.stream).toBeUndefined();
+  });
+
+  it('reenter responses followup marks function_call_output input as tool-result turn after messages are normalized', async () => {
+    mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
+    const executeNested = jest.fn(async (input: any) => ({
+      status: 200,
+      body: { body: input.body, metadata: input.metadata }
+    }));
+
+    const { executeServerToolReenterPipeline } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-followup-dispatch.js'
+    );
+
+    await executeServerToolReenterPipeline({
+      entryEndpoint: '/v1/responses',
+      fallbackEntryEndpoint: '/v1/responses',
+      requestId: 'req_followup_dispatch_apply_patch_tool_result_semantics',
+      body: {
+        model: 'MiniMax-M2.7',
+        messages: [
+          { role: 'user', content: 'edit sample' },
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [{
+              id: 'call_apply_patch_1',
+              type: 'function',
+              function: { name: 'apply_patch', arguments: '{"filePath":"sample.txt"}' }
+            }]
+          },
+          { role: 'tool', tool_call_id: 'call_apply_patch_1', content: '{"status":"APPLY_PATCH_APPLIED","ok":true}' }
+        ]
+      },
+      metadata: {
+        __rt: { serverToolFollowup: true, clientInjectSource: 'servertool.apply_patch_flow' }
+      },
+      requestSemantics: {
+        tools: { clientToolsRaw: [{ type: 'function', function: { name: 'apply_patch' } }] },
+        responses: { requestParameters: { tool_choice: 'required' } }
+      },
+      executeNested
+    });
+
+    const nestedInput = executeNested.mock.calls[0]?.[0] as Record<string, any>;
+    expect(nestedInput?.body?.messages).toBeUndefined();
+    expect(nestedInput?.body?.input?.some((entry: any) => entry?.type === 'function_call_output')).toBe(true);
+    expect(nestedInput?.body?.semantics?.toolOutputs?.length).toBe(1);
+    expect(nestedInput?.metadata?.requestSemantics?.toolOutputs?.length).toBe(1);
   });
 
 

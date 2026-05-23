@@ -51,6 +51,29 @@ fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
     Some(raw)
 }
 
+
+fn resolve_apply_patch_mode(metadata: &Value) -> String {
+    let mode = metadata
+        .as_object()
+        .and_then(|row| row.get("__rt"))
+        .and_then(|v| v.as_object())
+        .and_then(|rt| rt.get("applyPatch"))
+        .and_then(|v| v.as_object())
+        .and_then(|ap| ap.get("mode"))
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| "client".to_string());
+    if mode == "servertool" {
+        "servertool".to_string()
+    } else {
+        "client".to_string()
+    }
+}
+
+fn is_apply_patch_servertool_mode(metadata: &Value) -> bool {
+    resolve_apply_patch_mode(metadata) == "servertool"
+}
+
 fn normalize_record(value: Value) -> Map<String, Value> {
     match value {
         Value::Object(row) => row,
@@ -65,7 +88,10 @@ fn normalize_record_ref(value: &Value) -> Map<String, Value> {
     }
 }
 
-fn ensure_apply_patch_chat_process_contract(request: &mut Map<String, Value>) {
+fn ensure_apply_patch_chat_process_contract(request: &mut Map<String, Value>, metadata: &Value) {
+    if !is_apply_patch_servertool_mode(metadata) {
+        return;
+    }
     let Some(tools) = request.get_mut("tools").and_then(|v| v.as_array_mut()) else {
         return;
     };
@@ -79,9 +105,7 @@ fn ensure_apply_patch_chat_process_contract(request: &mut Map<String, Value>) {
             .and_then(|v| v.as_object())
             .is_some()
         {
-            tool_obj
-                .get_mut("function")
-                .and_then(|v| v.as_object_mut())
+            tool_obj.get_mut("function").and_then(|v| v.as_object_mut())
         } else {
             Some(tool_obj)
         };
@@ -116,65 +140,31 @@ fn ensure_apply_patch_chat_process_contract(request: &mut Map<String, Value>) {
             continue;
         };
 
-        let file_path_schema = properties
-            .get("filePath")
-            .cloned()
-            .or_else(|| properties.get("file_path").cloned())
-            .unwrap_or_else(|| {
-                json!({
-                    "type": "string",
-                    "description": "Required for hashline patch syntax. Provide the target file path for the edit."
-                })
-            });
-        let file_content_schema = properties
-            .get("fileContent")
-            .cloned()
-            .or_else(|| properties.get("file_content").cloned())
-            .unwrap_or_else(|| {
-                json!({
-                    "type": "string",
-                    "description": "Required for hashline patch syntax. Provide the current file content; use empty string for a new file."
-                })
-            });
-        properties.insert("filePath".to_string(), file_path_schema.clone());
-        properties.insert("file_path".to_string(), file_path_schema);
-        properties.insert("fileContent".to_string(), file_content_schema.clone());
-        properties.insert("file_content".to_string(), file_content_schema);
-
+        let file_path_schema = json!({
+            "type": "string",
+            "description": "Required. Workspace-relative target path only, for example `src/main.ts` or `tmp/example.txt`."
+        });
+        properties.clear();
+        properties.insert("filePath".to_string(), file_path_schema);
         properties.insert(
             "patch".to_string(),
             json!({
                 "type": "string",
-                "description": "Hashline patch text only. Upstream authoring mode is always hashline-first: provide `filePath`/`file_path`, provide current file content in `fileContent`/`file_content`, and write the edit in hashline syntax. Do not author canonical apply_patch blocks in this mode. Rust will transparently bridge hashline back into canonical apply_patch for the client."
-            }),
-        );
-        properties.insert(
-            "input".to_string(),
-            json!({
-                "type": "string",
-                "description": "Compatibility alias of patch. Prefer patch. Do not use input to switch syntax families."
+                "description": "Required. Line-edit operations only. Correct examples: create or append `+ first line`; replace `- old line\n+ new line`; multi-line create `+ first line\n+ second line`."
             }),
         );
 
-        let mut required = parameters
-            .get("required")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-        let has_patch_required = required
-            .iter()
-            .any(|entry| entry.as_str().map(|v| v == "patch").unwrap_or(false));
-        if !has_patch_required {
-            required.push(Value::String("patch".to_string()));
-        }
-        parameters.insert("required".to_string(), Value::Array(required));
+        parameters.insert(
+            "required".to_string(),
+            Value::Array(vec![Value::String("filePath".to_string()), Value::String("patch".to_string())]),
+        );
         parameters.insert("type".to_string(), Value::String("object".to_string()));
         parameters.insert("additionalProperties".to_string(), Value::Bool(false));
         function_obj.insert("strict".to_string(), Value::Bool(false));
         function_obj.insert(
             "description".to_string(),
             Value::String(
-                "Edit files through apply_patch. The upstream authoring contract is hashline-first: provide `filePath`/`file_path`, provide `fileContent`/`file_content`, and write `patch` in hashline syntax. Rust transparently bridges hashline back into canonical apply_patch for the client.".to_string(),
+                r#"Call apply_patch to edit files. Provide only workspace-relative `filePath` and line-edit `patch`. Correct examples: `{ "filePath": "tmp/example.txt", "patch": "+ hello" }`; `{ "filePath": "src/main.ts", "patch": "- old line\n+ new line" }`."#.to_string(),
             ),
         );
     }
@@ -895,6 +885,7 @@ pub fn apply_req_process_tool_governance(
 
     let ctx = resolve_governance_context(&input.metadata, &input.entry_endpoint);
 
+    let request_metadata = input.metadata.clone();
     let mut request = normalize_record(input.request);
     let metadata = normalize_record(input.metadata);
 
@@ -902,7 +893,7 @@ pub fn apply_req_process_tool_governance(
 
     let governed = build_governed_filter_payload(&Value::Object(request));
     let mut governed_request = normalize_record(governed);
-    ensure_apply_patch_chat_process_contract(&mut governed_request);
+    ensure_apply_patch_chat_process_contract(&mut governed_request, &request_metadata);
     maybe_apply_servertool_orchestration(
         &mut governed_request,
         &metadata,
@@ -1402,8 +1393,7 @@ mod tests {
     }
 
     #[test]
-    fn test_chat_process_apply_patch_declared_hashline_fields_rewrites_to_hashline_first_contract()
-    {
+    fn test_chat_process_apply_patch_declared_legacy_fields_rewrites_to_line_edit_contract_in_servertool_mode() {
         let input = ToolGovernanceInput {
             request: serde_json::json!({
               "model": "MiniMax-M2.7",
@@ -1442,37 +1432,38 @@ mod tests {
             }),
             raw_payload: serde_json::json!({}),
             metadata: serde_json::json!({
-              "entryEndpoint": "/v1/responses"
+              "entryEndpoint": "/v1/responses",
+              "__rt": { "applyPatch": { "mode": "servertool" } }
             }),
             entry_endpoint: "/v1/responses".to_string(),
-            request_id: "req_apply_patch_hashline_contract".to_string(),
+            request_id: "req_apply_patch_line_edit_contract".to_string(),
             has_active_stop_message_for_continue_execution: None,
         };
 
         let result = apply_req_process_tool_governance(input).unwrap();
-        let tool = result.processed_request["tools"][0]["function"].as_object().unwrap();
+        let tool = result.processed_request["tools"][0]["function"]
+            .as_object()
+            .unwrap();
         let description = tool["description"].as_str().unwrap_or("");
-        assert!(description.contains("hashline-first"));
-        assert!(description.contains("fileContent"));
+        assert!(description.contains("- old"));
+        assert!(!description.contains("fileContent"));
+        assert!(!description.contains("*** Begin Patch"));
         let properties = tool["parameters"]["properties"].as_object().unwrap();
         let patch_desc = properties["patch"]["description"].as_str().unwrap_or("");
-        let input_desc = properties["input"]["description"].as_str().unwrap_or("");
-        assert!(patch_desc.contains("Hashline patch text only."));
-        assert!(patch_desc.contains("Do not author canonical apply_patch blocks in this mode."));
-        assert!(patch_desc.contains("Rust will transparently bridge hashline back into canonical apply_patch for the client."));
-        assert!(input_desc.contains("Do not use input to switch syntax families."));
+        assert!(patch_desc.contains("- old"));
+        assert!(!patch_desc.contains("*** Begin Patch"));
+        assert!(!patch_desc.to_ascii_lowercase().contains("do not"));
         assert!(properties.contains_key("filePath"));
-        assert!(properties.contains_key("file_path"));
-        assert!(properties.contains_key("fileContent"));
-        assert!(properties.contains_key("file_content"));
-        assert_eq!(
-            tool["strict"].as_bool(),
-            Some(false)
-        );
+        assert!(!properties.contains_key("file_path"));
+        assert!(!properties.contains_key("fileContent"));
+        assert!(!properties.contains_key("file_content"));
+        let required = tool["parameters"]["required"].as_array().unwrap();
+        assert_eq!(required, &vec![serde_json::json!("filePath"), serde_json::json!("patch")]);
+        assert_eq!(tool["strict"].as_bool(), Some(false));
     }
 
     #[test]
-    fn test_chat_process_apply_patch_without_hashline_fields_upgrades_to_hashline_contract() {
+    fn test_chat_process_apply_patch_without_internal_fields_keeps_client_contract_by_default() {
         let input = ToolGovernanceInput {
             request: serde_json::json!({
               "model": "MiniMax-M2.7",
@@ -1485,8 +1476,13 @@ mod tests {
                     "description": "Edit files by patch",
                     "parameters": {
                       "type": "object",
-                      "properties": {},
-                      "required": []
+                      "properties": {
+                        "patch": {
+                          "type": "string",
+                          "description": "Patch text using *** Begin Patch / *** End Patch grammar."
+                        }
+                      },
+                      "required": ["patch"]
                     }
                   }
                 }
@@ -1502,23 +1498,19 @@ mod tests {
         };
 
         let result = apply_req_process_tool_governance(input).unwrap();
-        let tool = result.processed_request["tools"][0]["function"].as_object().unwrap();
-        let description = tool["description"].as_str().unwrap_or("");
-        assert!(description.contains("hashline-first"));
+        let tool = result.processed_request["tools"][0]["function"]
+            .as_object()
+            .unwrap();
         let properties = tool["parameters"]["properties"].as_object().unwrap();
+        assert!(properties.contains_key("patch"));
+        assert!(!properties.contains_key("filePath"));
+        assert!(!properties.contains_key("fileContent"));
         let patch_desc = properties["patch"]["description"].as_str().unwrap_or("");
-        assert!(patch_desc.contains("Hashline patch text only."));
-        assert!(patch_desc.contains("provide `filePath`/`file_path`"));
-        assert!(patch_desc.contains("current file content in `fileContent`/`file_content`"));
-        assert!(patch_desc.contains("Do not author canonical apply_patch blocks in this mode."));
-        assert!(properties.contains_key("filePath"));
-        assert!(properties.contains_key("file_path"));
-        assert!(properties.contains_key("fileContent"));
-        assert!(properties.contains_key("file_content"));
+        assert!(patch_desc.contains("*** Begin Patch"));
     }
 
     #[test]
-    fn test_chat_process_apply_patch_direct_responses_tool_shape_rewrites_hashline_contract() {
+    fn test_chat_process_apply_patch_direct_responses_tool_shape_rewrites_line_edit_contract_in_servertool_mode() {
         let input = ToolGovernanceInput {
             request: serde_json::json!({
               "model": "glm-4.7",
@@ -1556,7 +1548,8 @@ mod tests {
             }),
             raw_payload: serde_json::json!({}),
             metadata: serde_json::json!({
-              "entryEndpoint": "/v1/responses"
+              "entryEndpoint": "/v1/responses",
+              "__rt": { "applyPatch": { "mode": "servertool" } }
             }),
             entry_endpoint: "/v1/responses".to_string(),
             request_id: "req_apply_patch_direct_shape".to_string(),
@@ -1566,12 +1559,12 @@ mod tests {
         let result = apply_req_process_tool_governance(input).unwrap();
         let tool = result.processed_request["tools"][0].as_object().unwrap();
         let description = tool["description"].as_str().unwrap_or("");
-        assert!(description.contains("hashline-first"));
+        assert!(description.contains("- old"));
         assert!(!description.contains("selected by schema"));
         let properties = tool["parameters"]["properties"].as_object().unwrap();
         let patch_desc = properties["patch"]["description"].as_str().unwrap_or("");
-        assert!(patch_desc.contains("Hashline patch text only."));
-        assert!(properties.contains_key("file_path"));
-        assert!(properties.contains_key("file_content"));
+        assert!(patch_desc.contains("- old"));
+        assert!(!properties.contains_key("file_path"));
+        assert!(!properties.contains_key("file_content"));
     }
 }
