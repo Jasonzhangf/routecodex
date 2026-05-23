@@ -225,6 +225,7 @@ describe('responses conversation store plain continuation restore', () => {
 
     expect(restored).not.toBeNull();
     expect(restored?.payload.previous_response_id).toBe('resp-store-release-1');
+    expect(restored?.payload.tools).toEqual([{ type: 'function', function: { name: 'exec_command' } }]);
   });
 
   it('materializes full input by session scope for local continuation when incoming payload only carries delta', () => {

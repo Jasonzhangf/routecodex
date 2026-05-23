@@ -1594,5 +1594,9 @@ Tags: windsurf, startup-probe, weekly-quota, runtime-init, 2026-05-23
 ## 2026-05-23 Windsurf Cascade history projection
 - WindsurfAPI native bridge strips `role=tool` turns and assistant tool-call-only turns before building Cascade conversation text; completed native tool results belong in `additional_steps`, not visible `<assistant>` history blocks. RouteCodex must skip blank rendered Cascade history turns in `buildCascadePromptText()` to avoid empty `<assistant>\n\n</assistant>` fragments that confuse history continuity.
 Tags: windsurf, cascade, history, native-bridge, WindsurfAPI, 2026-05-23
+
+## 2026-05-23 Responses continuation tool retention
+- Scoped Responses continuation must retain tool definitions after request payload release. It is valid to drop bulky `input` / base payload for memory, but `entry.tools` is small semantic state required for `resumeLatestResponsesContinuationByScope()`; clearing it makes the next turn lose tool capability while still carrying `previous_response_id`.
+Tags: responses, continuation, tools, memory-retention, windsurf, 2026-05-23
 - 2026-05-23: Windsurf 5520 multi-account requires both code and config truth: code must reject unusable runtimes at startup probe (`checkHealth() === false` => no handle), and routing pools must use round-robin/weighted multi-target selection; `mode="priority"` intentionally sticks to first available account and is not a multi-account concurrency configuration. Current 5520 config uses ws-pro-1..ws-pro-5 `gpt-5.4-none`, per-runtime `maxInFlight=1`, and no duplicate auth aliases.
 Tags: windsurf, multi-account, routing, round-robin, startup-probe, quota, 2026-05-23

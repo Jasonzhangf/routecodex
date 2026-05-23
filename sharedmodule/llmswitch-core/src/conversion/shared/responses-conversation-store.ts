@@ -273,7 +273,6 @@ class ResponsesConversationStore {
       ...(entry.routeHint ? { routeHint: entry.routeHint } : {}),
       ...(entry.lastResponseId ? { previous_response_id: entry.lastResponseId } : {})
     };
-    entry.tools = undefined;
     entry.updatedAt = Date.now();
     this.attachEntryScopes(entry);
   }

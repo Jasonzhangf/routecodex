@@ -7977,3 +7977,9 @@ Protocol target:
 - Evidence: WindsurfAPI native bridge strips `role=tool` turns and assistant tool-call-only turns before Cascade prompt construction; RouteCodex semantic history kept those turns as empty `function_call_output` / assistant tool-call rows, producing empty `<assistant>\n\n</assistant>` history blocks.
 - Red→green evidence: added `native cascade history must strip assistant tool-call-only and tool result turns like WindsurfAPI native bridge`; it failed with empty assistant tags, then passed after skipping blank Cascade history turns.
 - Fix: `buildCascadePromptText()` now omits history turns whose rendered text is blank, matching WindsurfAPI native bridge prompt semantics while preserving native tool results through `additional_steps`.
+
+## 2026-05-23 Responses scoped continuation tools retention
+- Jason reported Windsurf loses tool ability after a tool call. Server log showed first turn routed with `tools:tool-request-detected`, but the next scoped continuation only had `search:last-tool-search|longcontext:token-threshold` and finished `stop`.
+- Root cause: Responses conversation retention released large base payload and also cleared `entry.tools`; `resumeLatestResponsesContinuationByScope()` then restored `previous_response_id` + delta input without `tools`, so downstream Windsurf prompt/tool governance saw no callable tools.
+- Red→green evidence: added assertion to `releasing request payload preserves scope-based continuation lookup`; before fix `restored.payload.tools` was `undefined`, after fix the original tool definitions are preserved.
+- Fix: keep slim retained tool definitions while releasing bulky input/base payload; this preserves tool capability without retaining full historical payload.
