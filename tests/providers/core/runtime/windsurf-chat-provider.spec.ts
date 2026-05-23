@@ -5116,6 +5116,45 @@ print(__import__('json').dumps(checks))
     expect(String(parsed.tool_calls[0].id)).toMatch(/^call_/);
   });
 
+  test('RED: malformed legacy tool_call text must not be returned as visible assistant content', async () => {
+    const provider = createProvider();
+    expect(() => (provider as any).parseCascadeAssistantTurnSync({
+      role: 'assistant',
+      content: '<tool_call>{"name":"echo","arguments":{"text":"ping"',
+    })).toThrow(expect.objectContaining({
+      code: 'WINDSURF_TOOL_PROTOCOL_CONFLICT',
+      status: 502,
+      retryable: false,
+    }));
+  });
+
+  test('pollCascadeTrajectorySteps keeps polling while final text has an unclosed tool_call marker', async () => {
+    const provider = createProvider();
+    const calls: string[] = [];
+    const encodeSteps = (text: string) => encodeProtoFieldMessage(1, Buffer.concat([
+      encodeProtoFieldVarint(1, 20),
+      encodeProtoFieldVarint(4, 3),
+      encodeProtoFieldMessage(20, encodeProtoFieldString(1, text)),
+    ]));
+    jest.spyOn(provider as any, 'grpcUnaryLocal').mockImplementation(async (pathName: string) => {
+      if (String(pathName).includes('GetCascadeTrajectorySteps')) {
+        calls.push('steps');
+        const n = calls.filter((x) => x === 'steps').length;
+        return n < 4
+          ? encodeSteps('<tool_call>{"name":"echo","arguments":{"text":"ping"')
+          : encodeSteps('final answer after malformed draft');
+      }
+      if (String(pathName).includes('GetCascadeTrajectory')) {
+        calls.push('status');
+        return encodeProtoFieldVarint(2, 1);
+      }
+      throw new Error(`unexpected ${pathName}`);
+    });
+    const result = await (provider as any).pollCascadeTrajectorySteps({ cascadeId: 'cid-toolcall-tail', model: 'gpt-5.4-medium' });
+    expect(result.candidate.content).toBe('final answer after malformed draft');
+    expect(calls.filter((x) => x === 'steps').length).toBeGreaterThanOrEqual(4);
+  });
+
   test('RED: duplicate RCC text tool blocks from repeated upstream text are deduped within RCC source only', async () => {
     const provider = createProvider();
     const rccBlock = '<|RCC|tool_calls>\n<|RCC|invoke name="echo_tool">\n<|RCC|parameter name="text"><![CDATA[hello-rcc]]></|RCC|parameter>\n</|RCC|invoke>\n</|RCC|tool_calls>';
@@ -6508,6 +6547,33 @@ print('{"ok":true}')
     const result = await (provider as any).pollCascadeTrajectorySteps({ cascadeId: 'cid-1', model: 'gpt-5.4-medium' });
     expect(calls.filter((c) => c.path === 'steps').map((c) => c.offset).slice(0, 2)).toEqual([0, 0]);
     expect(result.candidate.content).toBe('complete answer, not truncated');
+  });
+
+
+  test('pollCascadeTrajectorySteps waits for stable final text after IDLE so tail is not truncated', async () => {
+    const provider = createProvider();
+    const calls: string[] = [];
+    const encodeSteps = (text: string) => encodeProtoFieldMessage(1, Buffer.concat([
+      encodeProtoFieldVarint(1, 20),
+      encodeProtoFieldVarint(4, 3),
+      encodeProtoFieldMessage(20, encodeProtoFieldString(1, text)),
+    ]));
+    jest.spyOn(provider as any, 'grpcUnaryLocal').mockImplementation(async (pathName: string) => {
+      if (String(pathName).includes('GetCascadeTrajectorySteps')) {
+        calls.push('steps');
+        const n = calls.filter((x) => x === 'steps').length;
+        if (n <= 3) return encodeSteps('partial answer');
+        return encodeSteps('partial answer with final tail');
+      }
+      if (String(pathName).includes('GetCascadeTrajectory')) {
+        calls.push('status');
+        return encodeProtoFieldVarint(2, 1);
+      }
+      throw new Error(`unexpected ${pathName}`);
+    });
+    const result = await (provider as any).pollCascadeTrajectorySteps({ cascadeId: 'cid-idle-tail', model: 'gpt-5.4-medium' });
+    expect(result.candidate.content).toBe('partial answer with final tail');
+    expect(calls.filter((x) => x === 'steps').length).toBeGreaterThanOrEqual(4);
   });
 
   test('RED: pollCascadeTrajectorySteps must not finish on first IDLE before cascade had active progress', async () => {

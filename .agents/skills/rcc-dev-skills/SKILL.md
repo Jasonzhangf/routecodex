@@ -1153,3 +1153,8 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - Windsurf fence 命名（2026-05-23）：Windsurf unsupported-tool fence 只能写 `RCC`，不得借用其他 provider 的历史协议名；若参考 DeepSeek/Qwen 文本 harvest 经验，只能迁移“容器边界/harvest 思路”，不能迁移协议名。
 
 - Windsurf multi-account / quota / stopMessage 事实（2026-05-23）：配置账号必须是“多 key -> 多 runtime”生效，形如 `windsurf.ws-pro-N.<model>`；runtime auth 若缺 `accountAlias`，必须从 `windsurf.ws-pro-N` 派生，避免 token/session 落到 default。Windsurf 每个 runtime 启动时默认做一次 `checkHealth()` auth/model-config probe；失败即该 runtime init 失败并按 provider-init error/quota 路径移出池，不允许继续伪装可用。weekly quota 是 alias-family 级别：命中一个 model 要回收同 alias 下所有 Windsurf target，默认冷却到本地 00:00 自动恢复；显式 upstream cooldown 才能覆盖。5520 这种纯 HTTP 测试端口若 `[[httpserver.ports]].stopMessage.enabled=false`，stopMessage 必须被端口元数据关闭，不能触发 tmux followup。
+
+## Windsurf truncation / legacy marker rule（2026-05-23）
+- If Windsurf output appears truncated, first inspect `~/.rcc/codex-samples/**/provider-response-contract.json` for visible legacy `<tool_call>` / `<function_call>` fragments.
+- Legacy tool markers in Cascade assistant text are not a fallback protocol; they are malformed/truncated output and must fail-fast as `WINDSURF_TOOL_PROTOCOL_CONFLICT`. Only RCC text protocol is valid for unsupported text tools.
+- Windsurf 启动探测铁律补充（2026-05-23）：`checkHealth()` 返回 `false` 等同 startup probe 失败，必须抛 `WINDSURF_STARTUP_PROBE_FAILED` 并阻止 runtime handle 注册；不能把 false 当“非阻塞健康差”。weekly quota 到本地 00:00 后，quota maintenance/reload 必须清掉 expired weekly blacklist，随后由启动 probe 重新确认账号可用再入池。

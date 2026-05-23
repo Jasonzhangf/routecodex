@@ -186,6 +186,42 @@ describe('provider-quota-daemon weekly windsurf quota', () => {
     expect(rootAliasState.blacklistUntil).toBe(nextMidnight);
   });
 
+
+  it('recovers expired windsurf weekly blacklist on maintenance tick after local 00:00', async () => {
+    const { ProviderQuotaDaemonModule } = await import('../../../../src/manager/modules/quota/provider-quota-daemon.js');
+    const { createInitialQuotaState } = await import('../../../../src/manager/quota/provider-quota-center.js');
+
+    jest.useFakeTimers();
+    const beforeMidnight = new Date('2026-05-23T23:59:00+08:00').getTime();
+    const afterMidnight = new Date('2026-05-24T00:00:01+08:00').getTime();
+    jest.setSystemTime(beforeMidnight);
+
+    const providerKey = 'windsurf.ws-pro-9.gpt-5.4-none';
+    const mod = new ProviderQuotaDaemonModule() as any;
+    await mod.init({ serverId: 'test', quotaRoutingEnabled: true } as any);
+    mod.registerProviderStaticConfig(providerKey, { authType: 'apikey' });
+    mod.quotaStates.set(providerKey, {
+      ...createInitialQuotaState(providerKey, { authType: 'apikey' }, beforeMidnight),
+      inPool: false,
+      reason: 'blacklist',
+      blacklistUntil: new Date('2026-05-24T00:00:00+08:00').getTime(),
+      lastErrorCode: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+      lastErrorSeries: 'E429',
+      lastErrorAtMs: beforeMidnight,
+      consecutiveErrorCount: 1
+    });
+
+    jest.setSystemTime(afterMidnight);
+    await mod.runMaintenanceTick();
+
+    const state = mod.getAdminSnapshot()[providerKey];
+    expect(state.inPool).toBe(true);
+    expect(state.reason).toBe('ok');
+    expect(state.blacklistUntil).toBeNull();
+    expect(state.lastErrorCode).toBeNull();
+    jest.useRealTimers();
+  });
+
   it('RED: detects windsurf IP-level rate-limit burst after 3 same-model 429s and cools down sibling accounts too', async () => {
     const { handleProviderQuotaErrorEvent } = await import('../../../../src/manager/modules/quota/provider-quota-daemon.events.js');
     const { createInitialQuotaState } = await import('../../../../src/manager/quota/provider-quota-center.js');

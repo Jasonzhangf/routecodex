@@ -7953,3 +7953,17 @@ Protocol target:
 - Weekly quota recycle: quota daemon now blacklists Windsurf alias family until next local 00:00 when upstream omits explicit cooldown, while explicit cooldownOverrideMs still wins. This matches current “0 点恢复” rule.
 - PostAuth dual path preserved/fixed: backend `_backend` post auth timeout retries legacy `server.self-serve.windsurf.com` endpoint.
 - Verification: targeted Jest `windsurf-chat-provider.spec.ts`, `provider-quota-daemon.events.windsurf-weekly.spec.ts`, `port-config-validator-sameprotocol.spec.ts` passed (223 tests); `npx tsc --noEmit --pretty false` passed.
+
+## 2026-05-23 Windsurf truncation inspection/fix
+- Jason reported Windsurf provider output seems truncated. Checked `~/.rcc/config.toml`, `~/.rcc/codex-samples`, and `~/.rcc/logs/server-5520.log` first per rcc-dev-skills.
+- Evidence: recent sample `~/.rcc/codex-samples/openai-responses/windsurf.ws-pro-4.gpt-5.4-medium/openai-responses-windsurf.ws-pro-4-gpt-5.4-medium-20260522T222745991-221951-635/provider-response-contract.json` exposed visible truncated legacy text: `<tool_call>{"name":"echo","arguments":{"text":"ping"` with `finish_reason=stop`.
+- Root cause: `parseCascadeAssistantTurnSync` rejected RCC malformed wrappers but did not reject legacy `<tool_call>` / `<function_call>` marker text, so truncated tool protocol could leak as normal assistant content.
+- Fix: Windsurf assistant parse now fail-fast with `WINDSURF_TOOL_PROTOCOL_CONFLICT` if legacy tool markers appear in visible content; the direct malformed legacy marker test is the red→green regression anchor. Poll unclosed-marker / stable-tail tests are supporting coverage only, not separate red-regression claims.
+- Red→green evidence: temporarily removing the parser guard made `malformed legacy tool_call text must not be returned as visible assistant content` fail with `Received function did not throw`; restoring the guard made the same targeted test pass.
+- Verification: full `tests/providers/core/runtime/windsurf-chat-provider.spec.ts` passed 211/211; `npx tsc --noEmit --pretty false` passed.
+
+## 2026-05-23 Windsurf startup probe hardening
+- Corrected startup probe semantics: `checkHealth() === false` now throws `WINDSURF_STARTUP_PROBE_FAILED`, so an unusable Windsurf account/runtime is not registered as a provider handle. Previously only thrown probe errors failed init; boolean false was ignored.
+- Added a side-effect-light probe helper `windsurf-startup-probe.ts` and regression test.
+- Added quota maintenance recovery for expired Windsurf weekly blacklist: after local 00:00, expired weekly alias-family blacklist states are reset to initial ok state, so next maintenance tick/startup can re-probe/re-admit.
+- Verification: targeted startup/quota tests passed; tsc passed; build/install/restart to 0.90.2192 passed; 5520 live smoke x3 all HTTP 200 on `windsurf.ws-pro-2.gpt-5.4-none` with no retries.

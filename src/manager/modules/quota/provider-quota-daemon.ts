@@ -66,7 +66,32 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
 
   async reloadFromDisk(): Promise<{ loadedAt: number; providerCount: number }> {
     await this.loadSnapshotIntoMemory();
+    await this.recoverExpiredWindsurfWeeklyBlacklists();
     return { loadedAt: Date.now(), providerCount: this.quotaStates.size };
+  }
+
+
+  private isWindsurfWeeklyBlacklist(state: QuotaState): boolean {
+    return state.providerKey.startsWith('windsurf.')
+      && state.reason === 'blacklist'
+      && state.lastErrorCode === 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED';
+  }
+
+  private async recoverExpiredWindsurfWeeklyBlacklists(nowMs = Date.now()): Promise<void> {
+    let changed = false;
+    for (const [providerKey, state] of this.quotaStates.entries()) {
+      if (!this.isWindsurfWeeklyBlacklist(state)) {
+        continue;
+      }
+      if (state.blacklistUntil !== null && state.blacklistUntil > nowMs) {
+        continue;
+      }
+      this.quotaStates.set(providerKey, createInitialQuotaState(providerKey, this.staticConfigs.get(providerKey), nowMs));
+      changed = true;
+    }
+    if (changed) {
+      await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date(nowMs));
+    }
   }
 
   async reset(options: { persist?: boolean } = {}): Promise<{ resetAt: number; persisted: boolean }> {
@@ -373,6 +398,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   }
 
   private async runMaintenanceTick(): Promise<void> {
+    await this.recoverExpiredWindsurfWeeklyBlacklists();
     if (!this.quotaStates.size) {
       return;
     }

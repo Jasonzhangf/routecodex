@@ -1582,3 +1582,11 @@ Tags: windsurf, cascade, request-path, blackbox-verified, getchatcompletions-inv
 
 - 2026-05-23: Windsurf 多账号/回收当前真相：多账号必须表现为多 runtime（`windsurf.ws-pro-N`）+ 多 provider target（`windsurf.ws-pro-N.<model>`），token/session alias 以 runtime key 派生，禁止共享 default。启动时每个 Windsurf runtime 默认 `checkHealth()` probe 一次；失败 runtime 直接不入池。weekly quota 按 account alias family 黑名单回收到本地 00:00 自动恢复；`[[httpserver.ports]].stopMessage.enabled=false` 是端口级 stopMessage 关闭入口，用于 5520 smoke 避免 tmux followup 污染。
 Tags: windsurf, multi-account, runtime, quota, stopMessage, startup-probe, 2026-05-23
+
+## 2026-05-23 Windsurf truncation / legacy tool marker leak
+- Verified sample evidence: `~/.rcc/codex-samples/openai-responses/windsurf.ws-pro-4.gpt-5.4-medium/openai-responses-windsurf.ws-pro-4-gpt-5.4-medium-20260522T222745991-221951-635/provider-response-contract.json` showed visible truncated legacy `<tool_call>{"name":"echo","arguments":{"text":"ping"` with `finish_reason=stop`.
+- Root cause truth: Windsurf Cascade assistant visible content must never pass through legacy `<tool_call>` / `<function_call>` markers. The only accepted text-tool protocol is RCC; legacy markers indicate malformed/truncated protocol text and must fail-fast as `WINDSURF_TOOL_PROTOCOL_CONFLICT` instead of being returned to clients.
+- Regression anchor: `tests/providers/core/runtime/windsurf-chat-provider.spec.ts` direct malformed legacy marker rejection was verified red-without-fix then green-with-fix; poll tests are supporting coverage for unclosed marker / stable-tail behavior, not claimed as separate red regressions.
+
+- 2026-05-23: Windsurf startup probe hardening: `checkHealth() === false` must fail runtime init with `WINDSURF_STARTUP_PROBE_FAILED`; false is not a soft pass. Expired weekly quota blacklists are reset on quota maintenance/reload after local 00:00, then startup probe can re-admit usable accounts. Verified with targeted tests + live 5520 smoke on `gpt-5.4-none`.
+Tags: windsurf, startup-probe, weekly-quota, runtime-init, 2026-05-23

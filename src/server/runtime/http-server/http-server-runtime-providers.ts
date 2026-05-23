@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import { emitProviderError } from '../../../providers/core/utils/provider-error-reporter.js';
+import { enforceWindsurfStartupProbeForHandle } from './windsurf-startup-probe.js';
 import type { ProviderHandle, ProviderProtocol, VirtualRouterArtifacts } from './types.js';
 import { ProviderFactory } from '../../../providers/core/runtime/provider-factory.js';
 import { mapProviderProtocol, normalizeProviderType, resolveProviderIdentity } from './provider-utils.js';
@@ -407,6 +408,7 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
   }
 }
 
+
 export async function createProviderHandle(
   server: any,
   runtimeKey: string,
@@ -428,9 +430,7 @@ export async function createProviderHandle(
         : undefined) ?? mapProviderProtocol(protocolType, providerFamily));
   const instance = ProviderFactory.createProviderFromRuntime(runtime, server.getModuleDependencies());
   await instance.initialize();
-  if (providerFamily === 'windsurf' && process.env.ROUTECODEX_WINDSURF_STARTUP_PROBE !== '0') {
-    await instance.checkHealth();
-  }
+  await enforceWindsurfStartupProbeForHandle({ providerFamily, runtimeKey, instance });
   const providerId = runtime.providerId || runtimeKey.split('.')[0];
   return {
     runtimeKey,

@@ -4401,6 +4401,13 @@ ${stderr}` : '');
     }
 
     let rawText = textParts.join('');
+    if (/<\/?\s*(?:tool_call|function_call)\b/i.test(rawText)) {
+      throw createWindsurfProviderError('[windsurf] legacy tool_call text protocol is not allowed in cascade assistant content', {
+        code: 'WINDSURF_TOOL_PROTOCOL_CONFLICT',
+        status: 502,
+        retryable: false,
+      });
+    }
     const rccHarvest = this.harvestWindsurfRccToolCalls(rawText, unsupportedTextTools);
     if (rccHarvest.toolCalls.length > 0) {
       if (toolCalls.length > 0) {
